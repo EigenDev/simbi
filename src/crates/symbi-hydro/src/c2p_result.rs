@@ -120,7 +120,7 @@ pub const C2P_FAILURE_FLOOR: f64 = 1e-12;
 // thresholds are dimensionally clean:
 //   * NON_FINITE       : rho or pressure is NaN.
 //   * NEGATIVE_PRESSURE: pressure < 0 (strict). a near-zero
-//                        positive pressure is the valid cold limit, not an error — so no
+//                        positive pressure is the valid cold limit — so no
 //                        arbitrary `1e-12` / `1e-12*rho` floor.
 //   * SUPERLUMINAL     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
 //                        is NaN. no luminal margin.
@@ -134,7 +134,7 @@ pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::Order
     code
 }
 
-// shared input-density guard for relativistic c2p (a host-only early-out, NOT in the kernel
+// shared input-density guard for relativistic c2p (a host-only early-out before the kernel
 // path). returns the failure code for a non-positive or non-finite conserved density, else
 // None. the NaN branch was present in RHD but missing in RMHD before the unification.
 pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
@@ -154,7 +154,7 @@ pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::
 /// does), yet non-positive so the FOFC probe's `finite_pos(pre)` and the post-hoc
 /// `relativistic_c2p_code` both flag it, and a downstream sound speed `sqrt(gamma p / rho h)`
 /// turns non-finite — the fail-loud that survives even where FOFC is inactive. shared by RHD + RMHD
-/// (feedback_no_silent_floors: a flagged non-physical state, NOT a floored spurious-physical one).
+/// (the failing state is flagged as non-physical and never floored into a spurious-physical one).
 pub const C2P_CONE_FAIL_PRESSURE: f64 = -1e-30;
 
 /// the shared relativistic-c2p velocity ceiling, squared: `v_limit^2 = r^2 / (1 + r^2)` with

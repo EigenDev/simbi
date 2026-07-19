@@ -13,7 +13,7 @@
 // hand-spelled field names in two places. typed `Attr` + `Metadata::with(..)`
 // fluent builder keeps examples free of `to_string()` boilerplate.
 // `field_layout` exposes the canonical on-disk naming so it
-// derives from `RegimeSpec.fields` instead of being duplicated in the writer.
+// derives from `RegimeSpec.fields`, spelled in one place for the writer.
 //
 // design references:
 //   - error.rs       : `IoError` (proper enum, replaces `Result<(), String>`)

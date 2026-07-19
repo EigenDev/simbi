@@ -53,7 +53,7 @@ def ProblemParam(
         pydantic FieldInfo with embedded ParamMetadata
 
     examples:
-        # required field, not cli-configurable, must match checkpoint
+        # required field, checkpoint-locked, must match checkpoint
         bounds: Annotated[Sequence[Sequence[float]], ProblemParam(..., description="domain bounds")]
 
         # optional with default, cli-configurable, safe to override on restart

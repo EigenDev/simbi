@@ -5,7 +5,7 @@
 // and conservative state types, the conversion between them, the physical
 // flux, and wave speed estimates.
 //
-// all methods use nhat (unit normal vector) for direction, NOT dir: usize.
+// all methods use nhat (unit normal vector) for direction; no dir: usize index is passed.
 // this means ONE riemann solver works for ALL directions in ALL dimensions.
 // dot(vel, nhat) projects velocity onto the face normal.
 //
@@ -112,7 +112,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// which is `wave_speeds` with `nhat = unit(axis)`. regimes whose speed depends only on the
     /// NORMAL velocity OVERRIDE this to read `prim.vel[axis]` directly — avoiding the
     /// unit-vector dot, so a CFL kernel traced from this reads only the velocity components it
-    /// actually uses (the cyl r-z swirl reads v_r and v_z, not the folded v_phi). the default
+    /// actually uses (the cyl r-z swirl reads only v_r and v_z, leaving the folded v_phi untouched). the default
     /// is the dot form, correct for every regime.
     fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
         self.wave_speeds(eos, prim, &Tensor::<S, D>::unit(axis))
@@ -121,13 +121,13 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// whether `extremal_speeds` clamps the HLL fan to include the stationary state
     /// (`sl <= 0 <= sr`). the RELATIVISTIC regimes (rhd/rmhd) set this `true` for HLLE
     /// stability; the newtonian/iso davis estimate leaves the fan unclamped. a compile-time
-    /// const (monomorphized per regime), NOT a carrier branch — it never traces a Select.
+    /// const (monomorphized per regime); it never traces a Select.
     const CLAMP_EXTREMAL_TO_ZERO: bool = false;
 
     /// extremal wave speeds for a riemann problem along nhat — the davis estimate (min/max of
     /// per-side speeds), optionally clamped to include the stationary state (see
     /// `CLAMP_EXTREMAL_TO_ZERO`). ONE implementation for every regime; the clamp is the only
-    /// per-regime difference, so it is a const, not a copy-pasted override.
+    /// per-regime difference, so it is expressed as a single const.
     fn extremal_speeds(
         &self,
         eos: &impl Eos<S>,
@@ -190,5 +190,5 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     // `crate::riemann::hllc_rmhd`. a trait default would silently fall back to
     // HLLE, masking that a regime lacks a three-wave star solver. callers that
     // want HLLE invoke `crate::riemann::hlle` directly (regime-generic; resolves
-    // shock + rarefaction, not contact).
+    // shock + rarefaction only, no contact).
 }

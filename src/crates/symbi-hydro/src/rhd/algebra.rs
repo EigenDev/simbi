@@ -43,7 +43,7 @@ pub fn sound_speed_sq<S: Scalar>(eos: &impl Eos<S>, rho: S, pre: S) -> S {
 
 /// the relativistic INERTIAL DENSITY: rho * h * W^2 (the `wgam2` of the literature).
 /// appears in mom = rho h W^2 v, nrg = rho h W^2 - p - D, the c2p Newton residual,
-/// and the curvilinear geometric source. one named quantity instead of three inline copies.
+/// and the curvilinear geometric source. factored into one named quantity used at three call sites.
 #[inline]
 pub fn enthalpy_density<S: Scalar>(eos: &impl Eos<S>, rho: S, pre: S, v_sq: S) -> S {
     rho * enthalpy(eos, rho, pre) * lorentz_factor_sq(v_sq)

@@ -64,7 +64,7 @@ impl Eq for Symbol {}
 
 impl Hash for Symbol {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // hash on the string, not the Arc pointer, so cross-interner
+        // hash the string contents, so cross-interner
         // symbols still hash to the same bucket as their string-equal
         // siblings.
         self.0.as_ref().hash(state);

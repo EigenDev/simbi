@@ -228,8 +228,8 @@ class FigureFormatter:
         # determine axis labels
         if xlabel is None or ylabel is None:
             try:
-                # no derived label in a 1D plot means a legend is shown
-                # instead of a y-label
+                # with no derived label a 1D plot shows a legend and leaves the
+                # y-axis unlabeled
                 # prefer explicit axis names from data when present
                 axis_names = getattr(first_data, "axis_names", None)
                 if axis_names and isinstance(axis_names, (list, tuple)):
@@ -343,7 +343,7 @@ class FigureFormatter:
         except Exception:
             pass
 
-        # remove top/right spines only for 1D plots (not 2D/3D spatial plots)
+        # remove top/right spines only for 1D plots
         if main_ax.name != "polar" and ndim == 1:
             try:
                 remove_spines(main_ax)

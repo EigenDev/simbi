@@ -100,7 +100,7 @@ class K99(SimbiProblem):
         ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
     ]
     regime: Annotated[
-        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+        Regime, ProblemParam(Regime.RMHD, description="physics regime")
     ]
 
     # numerics

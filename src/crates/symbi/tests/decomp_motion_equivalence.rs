@@ -188,6 +188,6 @@ fn uniform_translation_two_tiles() {
 #[test]
 fn homologous_single_tile_matches_raw_evolve() {
     // discriminator: a 1x1 "decomposition" runs the decomposed pipeline on the whole grid —
-    // divergence here is a pipeline difference under motion, not a cross-tile bug.
+    // with no tile cuts present, any divergence here isolates a pipeline difference under motion.
     assert_motion_matches([1, 1], MotionState::homologous(1.0, ADOT));
 }

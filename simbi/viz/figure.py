@@ -751,7 +751,7 @@ class Figure:
             file_path = files[i]
             sim_data = load_data(file_path)
 
-            # use coordinate profile pipeline instead of standard plot data
+            # build frame data through the coordinate profile pipeline
             frame_plot_data = create_coordinate_profile_data(
                 sim_data, fields, config
             )

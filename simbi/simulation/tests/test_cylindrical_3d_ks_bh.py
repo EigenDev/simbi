@@ -5,7 +5,7 @@
 # gridded. the metric is AXISYMMETRIC (phi-independent), so a phi-uniform initial state
 # must stay phi-uniform to roundoff even with the azimuth FULLY RESOLVED — the correctness
 # gate that the 3D path handles the gridded phi axis right (the radial + vertical infall
-# develops along R and z, NOT phi). also a stability check: horizon-penetrating, no floors.
+# develops along R and z). also a stability check: horizon-penetrating, no floors.
 # requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob

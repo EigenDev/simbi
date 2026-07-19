@@ -50,7 +50,7 @@ fn push_cap(q: &mut VecDeque<f64>, v: f64, cap: usize) {
 }
 
 /// the dummy run state — a stand-in for the per-cadence DiagnosticSnapshot. tab +
-/// pause are now render-thread state (owned by the LiveDashboard), not here.
+/// pause are render-thread state owned by the LiveDashboard.
 struct App {
     frame: u64,
     field_kind: usize,

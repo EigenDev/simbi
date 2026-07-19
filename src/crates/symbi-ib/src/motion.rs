@@ -243,8 +243,8 @@ mod tests {
 
     #[test]
     fn two_way_force_accelerates_by_the_impulse_over_mass() {
-        // force_delta is the drag FORCE; the body gains the impulse over the step, dv = F dt / mass,
-        // NOT F / mass -- a large force over a tiny step is a small velocity kick, not a huge one.
+        // force_delta is the drag FORCE; the body gains the impulse over the step, dv = F dt / mass.
+        // a large force over a tiny step is a small velocity kick.
         let mut coll = BodyCollection::new().add(
             crate::Body::<f64, 3>::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 4.0, 0.1, 1.0, true)
                 .with_two_way_coupling(true),
@@ -252,7 +252,7 @@ mod tests {
         let mut delta = crate::BodyDelta::<f64, 3>::new(0);
         delta.force_delta = Tensor::new([8.0, 0.0, 0.0]); // F = 8, mass = 4, dt = 1e-3
         apply_body_deltas(&mut coll, &[delta], 1e-3);
-        // dv = F dt / m = 8 * 1e-3 / 4 = 2e-3 (NOT F/m = 2).
+        // dv = F dt / m = 8 * 1e-3 / 4 = 2e-3.
         assert!(approx(coll.get(0).velocity[0], 2e-3), "{:?}", coll.get(0).velocity);
     }
 

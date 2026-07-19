@@ -8,10 +8,10 @@
 //
 // the prescription is a POSITION-DEPENDENT inflow on x_lo: rho = 2 + 0.2*y (VARIABLE_X2 -> the
 // cell's global y). this is the decisive cross-tile test: with the domain cut ALONG the driven
-// face ([1, N] tiling), a tile that evaluated the prescription at its local y instead of its
-// global one would inject the wrong density on every non-origin tile. a constant inflow could
-// not catch that bug. the [N, 1] tiling drives the inflow ACROSS the cut instead, exercising the
-// halo exchange downstream of the driven fill.
+// face ([1, N] tiling), a tile that evaluated the prescription at its tile-local y would inject
+// the wrong density on every non-origin tile. a constant inflow could not catch that bug. the
+// [N, 1] tiling drives the inflow ACROSS the cut, exercising the halo exchange downstream of the
+// driven fill.
 // =============================================================================
 
 use symbi::prelude::SimSubstrate;

@@ -17,7 +17,7 @@
 # even in z, v_z ODD, v_R / v_phi even. the symmetry itself is the correctness gate for the
 # cylindrical chart — the analog of the cartesian x <-> y test — catching any
 # coordinate-role or one-axis-shift bug (e.g. the densitization lapse using R as the
-# radius instead of sqrt(R^2 + z^2)). horizon-penetrating, no floors.
+# radius where the metric radius sqrt(R^2 + z^2) is required). horizon-penetrating, no floors.
 #
 # usage:
 #   simbi run gr_cylindrical_ks_bh.py --resolution 48 --end-time 2.0

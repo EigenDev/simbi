@@ -284,7 +284,7 @@ def sphere_flux(
     r = np.sqrt(np.sum(pos**2, axis=1))
     vr = np.sum(pos * vel, axis=1) / np.maximum(r, 1e-300)
     # the z angular momentum needs a plane: 1d data carries mass flux only
-    # (Ldot stays 0 rather than an IndexError on the missing column).
+    # (Ldot stays 0 when the second position column is absent).
     if pos.shape[1] >= 2:
         lz = rho * (pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0])
     else:

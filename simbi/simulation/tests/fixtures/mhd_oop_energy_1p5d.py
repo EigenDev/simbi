@@ -46,7 +46,7 @@ class MhdOopEnergy1p5d(SimbiProblem):
     coord_system: Annotated[
         CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="coordinate system")
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLD, description="numerical solver")]
     boundary_conditions: Annotated[
         list[BoundaryCondition],

@@ -4,8 +4,8 @@
 # a schwarzschild black hole in the FULL 3D cylindrical kerr-schild chart —
 # (R, phi, z) all gridded, the non-axisymmetric case. same metric as the
 # 2.5D (R, z) view (gamma_RR = 1 + 2H R^2/r^2, gamma_zz = 1 + 2H z^2/r^2, gamma_Rz =
-# 2H Rz/r^2, gamma_phi-phi = R^2, r = sqrt(R^2 + z^2)); here phi is a resolved grid axis
-# rather than the swirl DOF. an off-axis (R > 0), z-symmetric, phi-periodic patch;
+# 2H Rz/r^2, gamma_phi-phi = R^2, r = sqrt(R^2 + z^2)); here phi is a resolved grid axis.
+# an off-axis (R > 0), z-symmetric, phi-periodic patch;
 # uniform gas at rest free-falls radially + vertically under the covariant geodesic source.
 #
 # the metric is AXISYMMETRIC (phi-independent), so a phi-uniform initial state must stay

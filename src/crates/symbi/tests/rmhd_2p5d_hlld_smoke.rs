@@ -7,9 +7,10 @@
 // 2D RMHD HLLD fluxes (cartesian; r-phi reuses them; cyl r-z has its own "_cyl_rz" variants). also
 // a compact showcase of the ergonomics surface.
 //
-// hllc is no longer a valid RMHD solver: the (solver, regime) matrix is enforced at bind time in
-// `with_solver` (`Solver::valid_for`), and HLLC carries no magnetic wave structure, so it is
-// MHD-invalid. the hllc case below pins that rejection (a `SolverRegimeMismatch` config error).
+// hllc IS valid for rmhd (hllc-mhd = the contact-resolving hllc flux + the hll edge emf); hllc-lm
+// is rejected because the low-mach correction is a non-relativistic gas closure. the (solver,
+// regime) matrix is enforced at bind time in `with_solver` (`Solver::valid_for`). the hllc-lm case
+// below pins that rejection (a `SolverRegimeMismatch` config error).
 // =============================================================================
 
 use symbi::prelude::*;
@@ -53,7 +54,7 @@ fn rmhd_2p5d_runs_with_hlld() {
 fn rmhd_2p5d_solver_matrix() {
     let sim = build_sim();
     assert!(sim.substrate().with_solver(Solver::Hllc).is_ok(), "hllc is valid for rmhd");
-    // the substrate kernel set is not Debug, so match the Result directly rather than expect_err.
+    // the substrate kernel set is not Debug, so match the Result directly.
     match sim.substrate().with_solver(Solver::HllcLm) {
         Err(ConfigError::SolverRegimeMismatch { .. }) => {}
         Err(e) => panic!("expected SolverRegimeMismatch, got {e:?}"),

@@ -140,7 +140,7 @@ fn sod_1d_two_level_conserves_composite_totals() {
     // outflow boundary leaks the pressure flux (p_l - p_r)*t into momentum).
     // the coverage edge at x=0.6 sits in the shock's path — by t=0.1 the
     // shock (speed ~1.75) has CROSSED the coarse-fine interface, so the
-    // conservation check exercises the refluxed interface, not quiescence.
+    // conservation check exercises the refluxed interface.
     let n = 200usize;
     let dx = 1.0 / n as f64;
     let ic = |x: [f64; 1]| {

@@ -32,8 +32,8 @@ pub fn check_dt_or_panic(dt: f64, iter: u64, time: f64) {
 }
 
 /// fallible form of [`check_dt_or_panic`]: returns `Err` (same diagnostic text) on a
-/// NaN/Inf/non-positive dt instead of panicking. used at the `evolve` loop site as `check_dt(..)?`
-/// so a NaN cascade surfaces as a `Result::Err` to the caller rather than a process abort.
+/// NaN/Inf/non-positive dt. used at the `evolve` loop site as `check_dt(..)?`
+/// so a NaN cascade surfaces as a `Result::Err` to the caller.
 pub fn check_dt(dt: f64, iter: u64, time: f64) -> symbi_xpu::Result<()> {
     if !dt.is_finite() || dt <= 0.0 {
         return Err(symbi_xpu::XpuError {
@@ -124,8 +124,8 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
 
     // record feedback as DIAGNOSTICS + advance the prescribed binary orbit (the body's GRAVITATING
     // mass is held FIXED -- a fixed-potential sink: the fluid is removed + accretion measured, but
-    // the central potential does not drift; force/torque are recorded for output, not consumed by
-    // the prescribed motion). the SAME apply the decomposed body step uses with its cross-tile sum.
+    // the central potential does not drift; force/torque are recorded for output only; the
+    // prescribed motion does not consume them). the SAME apply the decomposed body step uses with its cross-tile sum.
     symbi_ib::apply_body_deltas(&mut im.bodies, &step_deltas, dt);
 
     // the per-step exchange series: Mdot(t) and F_acc(t) as functionals of the

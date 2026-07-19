@@ -41,7 +41,7 @@ impl Geometry {
 }
 
 /// spacetime identifier — the background a regime evolves on. ORTHOGONAL to BOTH the spatial
-/// [`Geometry`] and the physics regime: GR is not a regime, it is a curved spacetime, so a single
+/// [`Geometry`] and the physics regime: GR is a curved spacetime, so a single
 /// SR regime (Rhd / Rmhd) composes with any spacetime here without duplication. flat `Minkowski`
 /// (lapse = 1, shift = 0, gamma = identity in physical components) is the default — every realized
 /// run. drives the lapse / sqrt(gamma) densitization selector in the kernel. integer
@@ -52,8 +52,8 @@ pub enum Spacetime {
     #[default]
     Minkowski = 0,
     /// static spherically-symmetric vacuum (standard coords). DIAGONAL spatial metric, shift = 0,
-    /// non-trivial lapse alpha = sqrt(1 - 2M/r). the mass M is a kernel parameter, NOT part of the
-    /// tag — the tag selects the kernel STRUCTURE, M rides as a value (the `Schwarzschild` Metric
+    /// non-trivial lapse alpha = sqrt(1 - 2M/r). the mass M is a kernel parameter — the tag
+    /// selects the kernel STRUCTURE and M rides as a value (the `Schwarzschild` Metric
     /// impl's field at host, a scalar in the trace).
     Schwarzschild = 1,
     /// schwarzschild in ingoing kerr-schild (eddington-finkelstein) coords — the SAME physical
@@ -92,7 +92,7 @@ impl Spacetime {
 /// `vector_to_cartesian` — is NOT here: it only exists for a DIAGONAL metric, so it lives on the
 /// [`DiagonalMetric`] subtrait. a non-diagonal (Kerr-class) metric impls `Metric` but NOT
 /// `DiagonalMetric`, so the compiler forbids orthogonal quadrature on it until the non-diagonal
-/// forms are written — the "GRMHD-forward" claim is type-enforced, not asserted. (the realized
+/// forms are written — the "GRMHD-forward" claim is type-enforced. (the realized
 /// physics is all diagonal: flat + orthogonal-curvilinear.)
 ///
 /// implementations: Cartesian, Spherical, Cylindrical (all `DiagonalMetric`),
@@ -148,9 +148,9 @@ pub trait Metric<S: Scalar, const D: usize> {
     fn sqrt_det_gamma(&self, x: Tensor<S, D>) -> S;
 
     /// scale factors h_i where \gamma_{ii} = h_i^2. ONLY well-defined for a diagonal metric — the
-    /// `where Self: DiagonalMetric` bound makes this a COMPILE ERROR on a non-diagonal metric
-    /// rather than silently dropping the off-diagonal terms (the former "panics for non-diagonal"
-    /// behavior was a silent sqrt-of-diagonal). the default reads the diagonal directly.
+    /// `where Self: DiagonalMetric` bound makes this a COMPILE ERROR on a non-diagonal metric;
+    /// without it the off-diagonal terms would be silently dropped (a bare sqrt-of-diagonal).
+    /// the default reads the diagonal directly.
     fn scale_factors(&self, x: Tensor<S, D>) -> Tensor<S, D>
     where
         Self: DiagonalMetric<S, D>,
@@ -167,14 +167,14 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// needs for face areas and cell volumes.
     ///
     /// examples:
-    ///   spherical 1D: r^2  (not 1 = sqrt_det_gamma of the 1x1 metric)
-    ///   spherical 2D: r^2 sin(theta)  (not r = sqrt_det_gamma of 2x2 metric)
-    ///   cylindrical 1D: r  (not 1)
-    ///   cylindrical 2D: r  (not 1)
+    ///   spherical 1D: r^2  (the naive sqrt_det_gamma of the 1x1 metric would give 1)
+    ///   spherical 2D: r^2 sin(theta)  (naive sqrt_det_gamma of the 2x2 metric gives r)
+    ///   cylindrical 1D: r  (naive gives 1)
+    ///   cylindrical 2D: r  (naive gives 1)
     ///
     /// REQUIRED, no default: the natural default `= sqrt_det_gamma` is WRONG for every
     /// REDUCED-dimension metric — it drops the jacobian of the suppressed angular directions (a
-    /// spherical-1D cell volume is r^2 dr, not the 1x1 `sqrt_det_gamma = 1`). a silent default there
+    /// spherical-1D cell volume is r^2 dr, while the 1x1 `sqrt_det_gamma` is 1). a silent default there
     /// bakes the wrong face area / cell volume with no error. forcing it means a full-rank metric
     /// spells the (trivial) `self.sqrt_det_gamma(x)` delegation and a reduced-D metric CANNOT forget
     /// the proper measure: it fails to COMPILE instead.
@@ -304,7 +304,7 @@ pub trait Metric<S: Scalar, const D: usize> {
 /// }
 /// let _ = h(&Spherical, Tensor::new([1.0, 0.5]));
 /// ```
-/// a `Metric`-only generic MAY NOT — it is a type error, not a silent wrong answer:
+/// a `Metric`-only generic MAY NOT — it is a compile-time type error at the call site:
 /// ```compile_fail
 /// use symbi_geometry::Metric;
 /// use symbi_algebra::Tensor;
@@ -670,7 +670,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 //
 //   the SPATIAL coordinate geometry is spherical (geometry() = Spherical); the CURVATURE lives in
 //   the radial stretch 1/f and the lapse. this coordinate gamma feeds densitization / lower-raise /
-//   the christoffel gravity source — NOT the hydro's physical-frame metric, which stays
+//   the christoffel gravity source; the hydro's physical-frame metric stays
 //   identity in the orthonormal convention (the lapse enters the kernel via `gv_lapse_weight`).
 //
 //   reduced dims mirror Spherical: 1D (r) radial, 2D (r, theta). valid OUTSIDE the horizon r > 2M
@@ -1465,7 +1465,7 @@ pub struct SchwarzschildKSCylindrical<S> {
 }
 
 impl<S: Scalar> SchwarzschildKSCylindrical<S> {
-    /// (r, 2H) at (R, z): r = sqrt(R^2 + z^2) the SPHERICAL (BH) radius — NOT the cylindrical R —
+    /// (r, 2H) at (R, z): r = sqrt(R^2 + z^2) is the SPHERICAL (BH) radius built from cylindrical R and z,
     /// and 2H = 2M/r.
     #[inline]
     fn radius_two_h(&self, big_r: S, z: S) -> (S, S) {
@@ -3020,7 +3020,7 @@ mod tests {
         // tangent IS d/dr. this is the SINGLE source of metric derivatives (the hand-written analytic
         // forms are retired) — so it must equal a central finite difference of the metric's OWN
         // lapse/shift/spatial_metric. checked for schwarzschild + KS, INCLUDING inside the KS horizon
-        // (r < 2M). the mass is a CONSTANT dual (differentiation is w.r.t. r, not M).
+        // (r < 2M). the mass is a CONSTANT dual (differentiation is w.r.t. r; M is held constant).
         use symbi_ir::dual::Dual;
         // dr balances central-diff truncation (O(dr^2)) against subtractive roundoff (O(eps/dr)):
         // 1e-4 keeps both ~1e-8, so an FD-appropriate relative tolerance of 1e-5 is safe.
@@ -3046,15 +3046,15 @@ mod tests {
 
     #[test]
     fn test_lapse_sq_is_exact_closed_form_not_sqrt_roundtrip() {
-        // alpha^2 must be the EXACT closed form (schwarzschild f = 1 - 2M/r, KS 1/(1 + 2M/r)), not
-        // lapse().powi(2) = sqrt(f)^2 which rounds differently. the GR CFL radial factor depends on
+        // alpha^2 must be the EXACT closed form (schwarzschild f = 1 - 2M/r, KS 1/(1 + 2M/r));
+        // lapse().powi(2) = sqrt(f)^2 rounds differently. the GR CFL radial factor depends on
         // this being bitwise f, so the genericized wave-speed map bit-diffs the pre-refactor kernel.
         let schw = Schwarzschild { mass: 1.0_f64 };
         let ks = SchwarzschildKS { mass: 1.0_f64 };
         for &r in &[2.3_f64, 5.0, 11.7] {
             let x = Tensor::new([r]);
             let f = 1.0 - 2.0 / r;
-            assert_eq!(schw.lapse_sq(x), f); // BITWISE equal, not just approx
+            assert_eq!(schw.lapse_sq(x), f); // BITWISE equal to the closed form
             assert_eq!(ks.lapse_sq(x), 1.0 / (1.0 + 2.0 / r));
             // and it genuinely differs from the sqrt round-trip at some radius (the trap this avoids).
             let _ = schw.lapse(x) * schw.lapse(x); // = sqrt(f)^2, may != f in the last bit
@@ -3320,11 +3320,11 @@ mod tests {
     fn cylindrical_ks_det_g_flat_is_the_cylindrical_measure() {
         // alpha sqrt(gamma) = R = the flat cylindrical volume element (sqrt(-g) chart-independent);
         // the densitization path relies on this. also checks the TWO-radii structure: the lapse
-        // depends on the SPHERICAL radius sqrt(R^2 + z^2), not R alone.
+        // depends on the SPHERICAL radius sqrt(R^2 + z^2), combining R and z.
         let bh = SchwarzschildKSCylindrical { mass: 0.8_f64 };
         let x = Tensor::new([3.0_f64, 1.1, 4.0]); // r_sph = 5
         assert!(approx(bh.lapse(x) * bh.volume_factor(x), 3.0)); // alpha sqrt(gamma) = R = 3
-        assert!(approx(bh.lapse(x), 1.0 / (1.0_f64 + 2.0 * 0.8 / 5.0).sqrt())); // alpha(r_sph = 5), not R = 3
+        assert!(approx(bh.lapse(x), 1.0 / (1.0_f64 + 2.0 * 0.8 / 5.0).sqrt())); // alpha uses r_sph = 5 (built from R = 3, z = 4)
     }
 
     #[test]

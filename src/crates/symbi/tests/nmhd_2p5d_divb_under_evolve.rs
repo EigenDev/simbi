@@ -10,7 +10,7 @@
 //   (b) the state stays PHYSICAL (rho>0, p>0, finite), and
 //   (c) the out-of-plane Bz (carried CELL-CENTERED, NO face, evolved by the ordinary
 //       induction-flux divergence — no CT) actually EVOLVES from its IC (so the 2.5D
-//       out-of-plane path is genuinely exercised, not a dressed-up 2D-with-Bz=0 run).
+//       out-of-plane path is genuinely exercised).
 //
 // IC: Orszag-Tang vortex with an added non-uniform out-of-plane Bz. in 2.5D d/dz=0,
 // so div B only constrains the in-plane field (Bz is divergence-free for free) — the

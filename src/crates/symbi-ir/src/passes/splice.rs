@@ -103,8 +103,8 @@ pub fn splice_graph(
         // cloning) — handle them specially. every OTHER variant is "pure":
         // clone the op, remap its NodeId fields ONCE via the canonical
         // `Op::try_map_inputs`, then dispatch to the matching builder. the
-        // remap+dispatch reads like the IR shape, not duplicated per
-        // variant.
+        // remap+dispatch reads like the IR shape with no per-variant
+        // duplication.
         let new_id = match &node.op {
             Op::Param(sym) => {
                 let target_id = param_subst.get(sym).copied().ok_or_else(|| {
@@ -199,7 +199,7 @@ mod tests {
 
         assert!(!target.has_errors(), "target errors: {:?}", target.errors());
         // target now contains a, b, sum, (cloned const 2.0), result (mul).
-        // result must depend on sum (the substituted node), not on a fresh param.
+        // result must depend on sum (the substituted node).
         let result_node = target.node(result);
         match &result_node.op {
             Op::ElementWise(ElementWiseOp::Mul, inputs) => {
@@ -328,7 +328,7 @@ mod tests {
     fn splice_multi_output_shares_intermediate_nodes() {
         // source: inv = 1.0 / x; (a = inv * y, b = inv * z). two outputs
         // share `inv`. splicing both in one call must produce ONE inv
-        // node in target, not two.
+        // node in target.
         let mut src = Graph::new();
         let x = src.add_scalar_param("x", ElementTy::F64);
         let y = src.add_scalar_param("y", ElementTy::F64);

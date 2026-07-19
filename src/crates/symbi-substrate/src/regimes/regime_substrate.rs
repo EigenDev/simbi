@@ -40,7 +40,7 @@ use crate::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi_sim::state::SimStateGeneric;
 
 /// map a regime to its substrate `KernelSet`, constructed from the run scalars (EOS param, CFL,
-/// theta) + the allocated domain. lives in the substrate layer (this crate), not the sim seam:
+/// theta) + the allocated domain. lives in the substrate layer (this crate):
 /// the per-regime impls below name concrete kernelsets, and the orphan rule requires the trait
 /// that maps the foreign `Regime` types to be local here. `SimSubstrate::substrate()` is the
 /// ergonomic front door.

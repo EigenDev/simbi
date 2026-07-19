@@ -4,7 +4,7 @@
 # a LOCALLY isothermal 2d run on a refined mesh. rho is uniform and the gas is at
 # rest, but the frozen temperature cs^2(x) varies — so the pressure p = cs^2(x)*rho
 # has a gradient that drives motion. the test of the AMR path: the per-cell cs^2(x)
-# (which lives in the iso kernel-set, not the SimState) must be prolongated to the
+# (which lives in the iso kernel-set) must be prolongated to the
 # fine level, or the fine box would fall back to a uniform cs^2 and NOT move.
 # =============================================================================
 import math

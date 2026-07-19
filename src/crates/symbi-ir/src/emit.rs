@@ -75,7 +75,7 @@ pub struct KernelDescriptor {
     /// only for the C-family (CUDA) smem path; the dispatch reads it to size the
     /// per-block dynamic `__shared__` allocation (`smem_bytes_per_block`). `None`
     /// for flat kernels and every non-CUDA backend (the CPU descriptor carries it
-    /// as `None` — CPU cache-tiles via loop structure, not smem).
+    /// as `None` — CPU cache-tiles via loop structure).
     pub tile_spec: Option<crate::gv::TileSpec>,
 }
 
@@ -100,7 +100,7 @@ pub(crate) fn global_qualifier(target: Target) -> &'static str {
 // SINGLE SOURCE OF TRUTH for index arithmetic. every kernel emitter — CPU, CUDA,
 // the reduction kernel — derives its `__idx_cell_buf{N}` declaration and its
 // per-load flat index from these two functions. the formula lives ONCE; any new
-// backend gets a new arm of the inner `match` instead of a third copy.
+// backend gets a new arm of the inner `match`, reusing the one formula.
 //
 // the per-buffer ABI here is FIXED:
 //   * `ii`, `jj`, `kk` are the absolute cell coords (i32 / int)
@@ -119,15 +119,15 @@ pub enum IndexLang {
     Cuda,
 }
 
-/// drop the `* strides[CONTIGUOUS_AXIS]` factor from the cell index. this is an IDENTITY, not an
-/// optimization: `strides_from_extent` sets that stride to exactly 1 for every buffer, so the emitted
+/// drop the `* strides[CONTIGUOUS_AXIS]` factor from the cell index. this is an IDENTITY:
+/// `strides_from_extent` sets that stride to exactly 1 for every buffer, so the emitted
 /// address is unchanged. what changes is what the compiler can PROVE — with the multiply present the
 /// index advances by an opaque runtime `i32` per iteration of the innermost loop, so LLVM cannot show
 /// the access is unit-stride and will not vectorize the load. with it gone the index is affine in the
 /// inner coord with coefficient 1.
 ///
 /// the axis is DERIVED from the layout (`CONTIGUOUS_AXIS`), never assumed: the physical-x-fastest
-/// convention makes axis 0 contiguous, not the last axis. Rust (CPU) only — the CUDA arm is SIMT and
+/// convention makes axis 0 the contiguous one (column-major, unlike C row-major's last axis). Rust (CPU) only — the CUDA arm is SIMT and
 /// maps `threadIdx.x` onto the same axis, so it needs no index rewrite.
 const fn unit_stride_contiguous(lang: IndexLang) -> bool {
     matches!(lang, IndexLang::Rust)
@@ -146,8 +146,8 @@ pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool)
     };
     let f = buf;
     // view collapse: when the kernel guarantees all buffers share buffer 0's
-    // layout, every buffer's cell index is identical — alias it instead of
-    // recomputing the full strided offset. buffer 0 still computes the real
+    // layout, every buffer's cell index is identical — alias it, skipping the
+    // full strided offset recompute. buffer 0 still computes the real
     // index; the alias is a no-op binding the compiler folds away. this is the
     // measured 1.45x -> 1.08x lever on index-bound kernels.
     if coalesce && buf != 0 {

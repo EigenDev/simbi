@@ -199,8 +199,8 @@ where
 {
     // before READING fields here, sync the device so the host sees the
     // committed state from the last RK2 stage (removing the per-launch `ctx_sync()`
-    // was a production pipelining win). gate on `IS_DEVICE_ACCESSIBLE`, NOT just the
-    // cuda feature: a HOST-memory sim in a cuda-feature build has no CUDA context, so
+    // was a production pipelining win). gate on `IS_DEVICE_ACCESSIBLE`; the cuda
+    // feature alone is insufficient: a HOST-memory sim in a cuda-feature build has no CUDA context, so
     // an unconditional `cuCtxSynchronize` panics (CUDA_ERROR_INVALID_CONTEXT). only
     // device-resident memory needs the sync; host memory is already coherent.
     #[cfg(feature = "gpu")]
@@ -463,9 +463,9 @@ where
 {
     // ---- mesh — frozen v2.0 reader schema: global_cells + geometry ----
     // the reader rebuilds cell centers from (global_cells, per-dim start/end, type),
-    // so the mesh carries the geometry description, not the precomputed coordinate
-    // arrays. symbi's own `load_checkpoint` reconstructs geometry from config, not
-    // from this group, so this layout serves the reader without breaking restart.
+    // so the mesh carries the geometry description and no precomputed coordinate
+    // arrays. symbi's own `load_checkpoint` reconstructs geometry from config,
+    // so this layout serves external readers without breaking restart.
     let mut geometry =
         Tree::new("geometry").with_attr("metric", coord_name(sim.physics.metric.geometry()));
     // mesh metadata (global_cells + per-dim geometry) is written in STORAGE
@@ -735,8 +735,8 @@ where
 // public API: write_checkpoint / load_checkpoint / read_checkpoint_meta
 // =============================================================================
 
-/// write a checkpoint. typed `Metadata` carries naked typed values
-/// rather than a `&[(&str, &str)]` slice — no `to_string()` boilerplate at call sites:
+/// write a checkpoint. typed `Metadata` carries naked typed values,
+/// so there is no `to_string()` boilerplate at call sites:
 ///
 /// ```ignore
 /// let extras = Metadata::new()
@@ -868,7 +868,7 @@ fn read_meta_from(tree: &TreeBuf) -> Result<CheckpointMeta> {
             .find_attr("dimensions")
             .ok_or_else(|| IoError::MissingPath("metadata/dimensions".into()))?
             .as_u64("metadata/dimensions")?,
-        // strings live as byte-array datasets, not as attrs (on-disk convention)
+        // strings live as byte-array datasets (on-disk convention)
         regime: read_str_dataset(m, "regime").unwrap_or_else(|_| "unknown".into()),
         coord_system: read_str_dataset(m, "coord_system").unwrap_or_else(|_| "unknown".into()),
     })
@@ -1263,7 +1263,7 @@ mod tests {
     #[test]
     fn checkpoint_saves_full_allocated_field_including_ghosts() {
         // **truncation gate**: a cell-centered dataset must carry the FULL allocated extent
-        // (interior + 2*ng), NOT just the interior — otherwise a restart loses the halo the
+        // (interior + 2*ng) — otherwise a restart loses the halo the
         // next stencil reads before the first ghost-fill, and the reader's `halo_width` trim
         // would over-cut interior-only data. seed EVERY allocated cell (ghosts included) with a
         // coord-unique value; assert (a) the on-disk dataset volume is the padded volume, and
@@ -1302,7 +1302,7 @@ mod tests {
         let path = path.to_str().unwrap();
         write_checkpoint(&sim, path, &Metadata::new()).unwrap();
 
-        // (a) the den dataset must hold the PADDED volume (5+2*ng)x(3+2*ng), not 5x3.
+        // (a) the den dataset must hold the PADDED volume (5+2*ng)x(3+2*ng).
         let tree = Hdf5Backend.read(std::path::Path::new(path)).unwrap();
         let den_ds = tree
             .find_group("level_0")

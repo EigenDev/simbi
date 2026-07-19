@@ -52,8 +52,8 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
     let rhohat = dd / g;
     let eps = g * (qbar - mu * rbar_sq) + gbsq / (S::ONE + g);
     // NO pressure floor: the RAW specific internal energy. a cold or unphysical (eps < 0) state
-    // recovers a small or negative pressure that the post-hoc c2p diagnostic flags (fail-loud),
-    // rather than being silently warmed to eps_min = pfloor/(rho (gamma-1)) into a spurious-physical
+    // recovers a small or negative pressure that the post-hoc c2p diagnostic flags (fail-loud);
+    // a floor would silently warm it to eps_min = pfloor/(rho (gamma-1)), a spurious-physical
     // state that masks the failure. nu_hat is the enthalpy branch max unconditionally.
     let phat = (gamma - S::ONE) * rhohat * eps;
     let ahat = phat / (rhohat * (S::ONE + eps));
@@ -72,7 +72,7 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// cutoff in `kkc_fmu44` (the `v_limit` clamp) induces a "strong kink" that can produce a SECOND,
 /// spurious root corresponding to a superluminal, negative-pressure state.
 ///
-/// bracketing with the loose `1/h0 = 1` instead of `mu_+` is valid ONLY when `r < h0` (KKC:
+/// bracketing with the loose upper bound `1/h0 = 1` is valid ONLY when `r < h0` (KKC:
 /// then `f_a(1/h0) > 0`, so `[0, 1]` still straddles the single root). for `r >= h0` the interval
 /// `[0, 1]` spans BOTH the physical root and the spurious one, `f(1) < 0`, and the false-position
 /// converges to the spurious superluminal root. this manifests whenever `r.b != 0` (a shock-normal
@@ -189,13 +189,13 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // bracketing guarantee (KKC Sec. II F, Eqs. 49-54): the false-position needs f_lower0 = kkc(0)
     // and f_upper0 = kkc(muu0 = mu_+) to straddle zero, where mu_+ = find_mu_plus is the root of
     // the auxiliary f_a. f_lower0 = -muhat(0) < 0 always (muhat > 0). f_upper0 = f(mu_+) >= 0 by
-    // KKC Eq. 54. crucially the interval is [0, mu_+], NOT [0, 1]: on (0, mu_+] the velocity stays
+    // KKC Eq. 54. crucially the interval is [0, mu_+]: on (0, mu_+] the velocity stays
     // below v0 < 1 (kkc_fmu49 root definition) so the v_limit cutoff in kkc_fmu44 never binds and
     // the master function has a UNIQUE root (KKC Sec. II G); beyond mu_+ the cutoff kink can create
     // a SECOND, spurious superluminal root that the [0, 1] bracket would wrongly select whenever
     // r >= h0 (a shock-normal field, r.b != 0). a cold/unphysical state whose true root sits at the
     // ceiling recovers p <= 0, which the post-hoc c2p diagnostic (`relativistic_c2p_code`) flags as
-    // a FAILURE, routing the zone through first-order correction rather than a silent floor.
+    // a FAILURE, routing the zone through first-order correction; no silent floor is applied.
 
     // recovery (Eqs. 26/38/39/32/41/42/43/68); use_four_velocity = false.
     let x = S::ONE / (S::ONE + mu * bee_sq);
@@ -205,7 +205,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // MIRROR the root-finder's velocity ceiling (the shared c2p ceiling v_limit^2 = r^2/(1+r^2)). the
     // recovery must apply the SAME cap: a strong-field root sits at the ceiling, so the uncapped
     // vsq = mu^2 rbar_sq can reach >= 1, giving gbsq < -1 and ww = sqrt(1+gbsq) = NaN — a NaN rho/p
-    // that poisons neighbours instead of the intended clean fail-loud (p <= 0 flagged below). capped,
+    // that poisons neighbours; the intended behaviour is a clean fail-loud (p <= 0 flagged below). capped,
     // ww/rho/p stay finite and the q(U) verdict routes the zone through first-order correction.
     let vsq = (mu2 * rbar_sq).min(crate::c2p_result::relativistic_velocity_ceiling_sq(r_sq));
     let gbsq = vsq / (S::ONE - vsq);
@@ -214,7 +214,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let eps_e = ww * (qbar - mu * rbar_sq) + gbsq / (S::ONE + ww);
     let rho_gm1 = rho * (gamma - S::ONE);
     // NO pressure floor: raw p = (gamma-1) rho eps. an unphysical negative eps yields a negative
-    // pressure the post-hoc diagnostic flags, not a silently-floored spurious-physical state.
+    // pressure the post-hoc diagnostic flags; no silently-floored spurious-physical state is produced.
     let pre = rho_gm1 * eps_e;
     // EXACT admissibility (wu 2017 cone) folded into the pressure verdict. the velocity-ceiling
     // clamp (mu -> muu0, v -> v_limit) recovers a cold near-light-speed state that IS superluminal:
@@ -240,14 +240,14 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
 /// native `<` / `<=` / `==` on a host scalar. the kernel path is `rmhd_recover` above
-/// (carrier-generic over `S: Scalar`), not this wrapper.
+/// (carrier-generic over `S: Scalar`); this wrapper is host-only.
 pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     eos: &impl Eos<S>,
     cons: &MhdCons<S, D>,
 ) -> C2pResult<MhdPrim<S, D>> {
     let dd = cons.den;
 
-    // input guard: clearly-invalid conserved density (host-only early-out, NOT in the
+    // input guard: clearly-invalid conserved density (host-only early-out, absent from the
     // kernel path). B passes through. shared RHD/RMHD guard (now NaN-checked too; tier-1 #5).
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = MhdPrim {
@@ -399,8 +399,8 @@ mod tests {
     // c2p iter-distribution probe — 2026-06-07
     //
     // measures actual iter counts for `find_mu_plus` (bisection) and the main
-    // false-position loop on orszag_tang IC states, with `break` instead of
-    // fixed-iter freeze. answers: which of the two loops actually dominates?
+    // false-position loop on orszag_tang IC states, with a `break` on convergence
+    // (the fixed-iter freeze removed). answers: which of the two loops actually dominates?
     // can mu-cache (lever 5) help, or does find_mu_plus eat the budget anyway?
     //
     // run: `cargo test --release -p symbi-hydro c2p_iter_distribution -- --nocapture`
@@ -666,7 +666,7 @@ mod tests {
             // density case (r_mag ~ 2900, root sits ON the ceiling where mu ~ mu_+) within the
             // 100-iter cap (realistic W ~ a few recover to ~1e-9). the exact root gives p to ~4e-12;
             // the residual is bracket-trajectory-dependent iteration precision at this extreme corner,
-            // not a physics error. the bracket (the real robustness invariant) still straddles.
+            // it is not a physics error. the bracket (the real robustness invariant) still straddles.
             assert!(
                 (got.hydro.pre - pre).abs() < 2e-5 * pre.abs().max(1.0),
                 "evolved-state c2p pressure mismatch (rho={rho}, v={v}, pre={pre}, b={b}): {} vs {pre}",

@@ -57,7 +57,7 @@ pub struct KernelEmitInputs<'a> {
     /// `FieldBinding::field` for the dispatch side (no re-parse).
     pub field_inputs:  &'a [(String, FieldBind)],
     /// IR-side param names that stay as scalar __global__ args (user
-    /// scalars: dt, gamma, etc.) — not loaded from buffers.
+    /// scalars: dt, gamma, etc.), passed by value.
     pub scalar_params: &'a [String],
     /// (write key, runtime path, RHS NodeId). each entry produces one
     /// buffer store; if a write's runtime path matches an input, the
@@ -88,7 +88,7 @@ pub struct KernelEmitInputs<'a> {
 /// `<precision>*` buffers (the per-cell view ABI shape); the header + global qualifier
 /// vary by `target.target` (`emit::header` / `global_qualifier`), so HIP is a
 /// pure token-map with zero physics edits. Metal (MSL: buffer-index ABI, no
-/// `double`) needs its OWN renderer, not this one.
+/// `double`) needs its OWN renderer.
 pub struct CRenderer {
     pub target: TargetConfig,
 }
@@ -268,7 +268,7 @@ fn smem_flat_index(locals: &[String]) -> String {
 /// cooperative (block + per-axis halo) prefetch from gmem, ending in
 /// `__syncthreads()`. each gmem read is CLAMPED to the field's allocated bounds
 /// `[lo, lo+extent-1]` (a thin ternary, NVRTC-safe — no `min`/`max`/<math.h>), so
-/// a boundary/padding tile cell re-reads a ghost edge instead of going OOB. the
+/// a boundary/padding tile cell re-reads a ghost edge, staying in bounds. the
 /// tiled fields are assumed CELL-CENTERED with shared `lo`/`extent` (true for the
 /// rmhd flux prim + wave-speed inputs); the clamp uses the first field's geometry.
 fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]) -> Vec<String> {
@@ -359,12 +359,12 @@ pub fn prepared_from_ir(ir: &str) -> Prepared {
 }
 
 /// the RUNTIME render path: deserialize a `Prepared` IR blob and
-/// render it to `target` source at `precision`. `target` is a PARAMETER, not baked
-/// into the name — adding HIP/Metal is a new match arm here, never a new `*_cuda`
+/// render it to `target` source at `precision`. `target` is a PARAMETER threaded
+/// through the render call — adding HIP/Metal is a new match arm here, never a new `*_cuda`
 /// function. one blob renders every backend AND both
 /// precisions (precision is a render-algebra parameter); the source then
 /// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal). the
-/// accelerator renders source at runtime rather than shipping pre-rendered text.
+/// accelerator renders source at runtime.
 pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelDescriptor {
     let prepared = prepared_from_ir(ir);
     let tcfg = TargetConfig { target, precision };
@@ -383,7 +383,7 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
 }
 
 // the NVRTC-safe identity + combine for a grid reduction at `precision`. min/max
-// use the INLINE TERNARY (not fmin/fmax) — fmin/fmax come from <math.h> which
+// use the INLINE TERNARY — fmin/fmax come from <math.h> which
 // NVRTC does not include (same class of bug the flux INFINITY fix caught), and the
 // ternary matches the CPU carrier's min/max semantics. the identities are plain
 // finite literals (no INFINITY macro).
@@ -505,7 +505,7 @@ pub fn render_field_reduction(
         source: out,
         kernel_name: kernel_name.to_string(),
         field_bindings: vec![crate::emit::FieldBinding {
-            // the reduction scratch buffer is hand-built, not closed cell-centered
+            // the reduction scratch buffer is hand-built, outside the closed cell-centered
             // vocab — held verbatim as Raw.
             field: symbi_abi::FieldBind::Raw("buf0".into()),
             buffer_index: 0,
@@ -704,7 +704,7 @@ mod tests {
         assert!(s.contains("double* partials"));
         assert!(s.contains("__shared__ double sdata[256];"));
         assert!(s.contains("partials[blockIdx.x] = sdata[0];"));
-        // max via INLINE TERNARY, not fmax (NVRTC has no <math.h>); finite identity,
+        // max via INLINE TERNARY (NVRTC has no <math.h> for fmax); finite identity,
         // no INFINITY macro.
         assert!(s.contains("sdata[tid] > sdata[tid + s] ? sdata[tid] : sdata[tid + s]"), "src:\n{s}");
         assert!(s.contains("double val = -1.0e308;"));

@@ -54,7 +54,7 @@ fn cmp<MH: MemorySpace, MD: MemorySpace>(
 // a rotating disk (r in [0.5,1.5], phi in [0,2*pi)) with an azimuthal density/pressure
 // gaussian + a sheared rotation profile and a small v_r — so the phi-flux, the
 // area-weighted r-phi divergence, and the centrifugal/coriolis source are all exercised
-// non-trivially (no exact equilibrium; diffs CPU vs GPU, not against a steady state).
+// non-trivially (no exact equilibrium; diffs CPU vs GPU).
 fn build_disk<S: ExecutionSpace, Mem: MemorySpace>(
 ) -> SimStateGeneric<Newtonian, 2, 2, Cylindrical, IdealGas<f64>, S, Mem> {
     let (r_lo, r_hi) = (0.5_f64, 1.5_f64);

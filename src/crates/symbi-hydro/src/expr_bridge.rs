@@ -8,7 +8,7 @@
 // `splice_built_source_into` fuses it into a godunov / ghost-fill kernel, which then
 // codegens (CPU + CUDA) or interprets. this collapses the two parallel expression
 // engines (`symbi-expr`'s register-VM and `symbi-ir`'s codegen substrate) into one IR
-// that codegens instead of interpreting a separate VM per cell.
+// that codegens directly, with no per-cell VM interpreter.
 //
 // the leaf convention matches the source vocabulary so a user expression fuses like any
 // other source: VariableX{1,2,3} -> `x_0/x_1/x_2` (the cell position, bound to the
@@ -17,7 +17,7 @@
 // the typed IR enforces carrier-traceability: a user `IF_THEN_ELSE` lowers to `Select` (no
 // native branch — the carrier dialect), comparisons produce a Bool consumed only by a
 // conditional, and ops with no carrier-traceable equivalent (`Sgn`, `Mod`) are REJECTED
-// rather than silently miscompiled.
+// at bridge time, so they cannot silently miscompile.
 //
 // usage:
 //   let nodes = dag.nodes().to_vec();
@@ -37,7 +37,7 @@ use crate::source_spec::BuiltSource;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeError {
     /// op carries no carrier-traceable `symbi-ir` primitive (`Sgn`, `Mod`). rejected
-    /// rather than miscompiled — the user gets a loud error, not a wrong kernel.
+    /// at bridge time — the user gets a loud error, and a silently wrong kernel is never emitted.
     UnsupportedOp(Op),
     /// a node references a child index not yet defined (forward ref / out of range).
     /// well-formed DAGs are topologically ordered, so this means malformed input.
@@ -221,7 +221,7 @@ pub fn lower_dag_to_builtsource(
 ///   relativistic regime (whose conserved momentum is `rho h W^2 v`, a different law). a
 ///   relativistic regime must use `raw` (the user supplies conserved components).
 /// - `cooling` (and `force`/`relax`'s energy overlay) require `has_energy`; cooling on an
-///   energy-free (isothermal) regime is rejected, not silently dropped.
+///   energy-free (isothermal) regime is rejected loudly at bridge time.
 /// - `raw` targets must be a substrate conserved slot (`den | mom | nrg`), and `nrg` requires
 ///   `has_energy`.
 /// - arity: `force` declares one acceleration per dim (`outputs.len() == dim`); `cooling` a single
@@ -245,7 +245,7 @@ pub fn build_user_source(
         lower_outputs.push(r);
     }
     // constant-power strength reduction (symbi_expr::strength): `x ** (-2.0)` in a
-    // user config becomes a multiply/divide chain instead of a per-cell libm pow.
+    // user config becomes a multiply/divide chain, avoiding a per-cell libm pow.
     let (nodes, lower_outputs) = symbi_expr::strength_reduce(&nodes, &lower_outputs);
     let mut field =
         lower_dag_to_builtsource(&nodes, &lower_outputs).map_err(|e| format!("bridge: {e:?}"))?;
@@ -429,7 +429,7 @@ pub fn build_user_source(
 /// multiply the named `field` outputs by the region mask `chi` (in the field's own graph), if a
 /// region is present. the lifts are linear in these outputs, so this masks the final conserved
 /// contribution. `idxs` selects WHICH outputs carry the maskable quantity (e.g., relax masks only
-/// the rate `kappa`, not the reference velocity).
+/// the rate `kappa`, leaving the reference velocity unmasked).
 fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Range<usize>) {
     let Some(chi) = chi else { return };
     for i in idxs {
@@ -449,8 +449,8 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
 /// - **regime-agnostic across hydro AND mhd.** a prim prescription sets `prim` (no conservation
 ///   law), valid for RHD too (`is_relativistic` ALLOWED). MHD additionally prescribes the CELL-B
 ///   vector (`bcell` slot -> `prim.mag`): the OUT-OF-PLANE component (B_phi in a 2.5D axisymmetric
-///   grid) is cell-centered + flux-evolved, so prescribing it is a plain Dirichlet, NOT the CT
-///   tangential-EMF sub-problem that a prescribed POLOIDAL/in-plane FACE field needs.
+///   grid) is cell-centered + flux-evolved, so prescribing it is a plain Dirichlet; the CT
+///   tangential-EMF sub-problem arises only for a prescribed POLOIDAL/in-plane FACE field.
 ///   the in-plane cell-B components are the user's responsibility to keep div-compatible (=0 for a
 ///   purely toroidal field) — `raw`-style: garbage in, garbage out.
 /// - **complete prim state.** the DAG must output exactly the regime's primitive components:
@@ -818,8 +818,8 @@ mod tests {
 
     #[test]
     fn relax_clamps_negative_rate_to_zero() {
-        // the stability invariant: a NEGATIVE kappa (anti-damping) is clamped to 0 -> no-op, NOT an
-        // energy-injecting instability. unexpressible by construction.
+        // the stability invariant: a NEGATIVE kappa (anti-damping) is clamped to 0 -> no-op, so no
+        // energy-injecting instability arises. unexpressible by construction.
         let cfg = cfg_from(
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[-5.0, 0.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
@@ -837,7 +837,7 @@ mod tests {
     #[test]
     fn sponge_relaxes_full_state_toward_reference() {
         // outputs = [kappa, den_ref, mom_ref_0, mom_ref_1, nrg_ref] as CONSTANT nodes (the reference
-        // is a pure function of position, not a runtime param — params carries only inv_gm1). the
+        // is a pure function of position — params carries only inv_gm1). the
         // three channels each relax toward the reference conserved value.
         //   kappa=2, den_ref=1, mom_ref=[0.5,0], nrg_ref=10, inv_gm1=2.5 (gamma=1.4).
         let cfg = cfg_from(

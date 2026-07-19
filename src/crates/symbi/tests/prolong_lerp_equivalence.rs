@@ -8,14 +8,14 @@
 //     prolong kernel bit-for-bit on every fine cell, every order, at a
 //     nontrivial alpha. the lerp expression and its consumption are unchanged
 //     — only where the intermediate lives moves (register -> coarse cell) —
-//     so any difference is a wiring bug, not rounding.
+//     so any difference is a wiring bug.
 //
 //   - LINEAR EXACTNESS: a field linear in the coarse index with dyadic
 //     coefficients prolongs to the exact linear value at each fine sub-cell
 //     position (plm: the van-leer slope of equal one-sided differences is the
 //     difference itself; ppm: the parabola of linear data is the line, the
 //     monotonizer is a no-op, the sub-cell average is the midpoint value).
-//     every operation is dyadic-exact, so the assert is ==, not a tolerance.
+//     every operation is dyadic-exact, so the assert is ==.
 //
 //   - PPM CONSERVATION: the ratio^D children of a parent average back to the
 //     parent value (the sub-cell averages partition the parent integral).

@@ -6,8 +6,8 @@
 # checked finite and positive. this exercises the full config -> exec dict ->
 # rust build -> kernel dispatch -> checkpoint path per regime/chart/dimension
 # combination, so a dropped config field, an unbaked kernel, a DOF-mismatched
-# write, or a dead dial surfaces as a NaN, a panic, or a crash checkpoint here
-# rather than in a user's science run. unit tests cannot catch this class:
+# write, or a dead dial surfaces as a NaN, a panic, or a crash checkpoint in
+# this gate before a user's science run. unit tests cannot catch this class:
 # every historical wiring bug lived between components that were each
 # individually correct.
 # =============================================================================

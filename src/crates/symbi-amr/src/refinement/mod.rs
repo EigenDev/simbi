@@ -7,9 +7,9 @@
 // modifies the single-level engine.
 //
 // single-coverage cap: ONE refined box per level, ONE FluxRegister per
-// coarse-fine level-pair, no patch graph, no clustering. this is SMR, not
-// multi-patch adaptive AMR (deferred). the `amr` module
-// spelling is a code-symbol naming debt, not an adaptivity claim.
+// coarse-fine level-pair, no patch graph, no clustering. this is SMR;
+// multi-patch adaptive AMR is deferred. the `amr` module
+// spelling is a code-symbol naming debt and makes no adaptivity claim.
 //
 //   hierarchy     — Hierarchy + LevelData + the berger-oliger subcycle driver
 //   transfer      — cf ghost slabs + prolong/restrict kernel dispatch

@@ -72,7 +72,7 @@ fn set_prim(sim: &Sim, c: [isize; 3], prim: &Prim<f64, 3>) {
 }
 
 /// a smooth non-trivial state (off-center gaussian pulse in a shear) so the
-/// equivalence test exercises real flux arithmetic, not a fixed point.
+/// equivalence test exercises real flux arithmetic on a non-equilibrium state.
 fn fill_pulse(sim: &Sim) {
     for c in sim.geom.interior.iter() {
         let x = sim.geom.centroid(c);

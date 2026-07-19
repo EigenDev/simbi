@@ -21,7 +21,7 @@
 #   coordinate swirl is chart-dependent (ingoing-KS phi differs from the
 #   boyer-lindquist azimuth by a radial offset, so infalling S_phi = 0 gas
 #   has v^phi_KS = omega + (dphi_KS/dr) v^r with the infall term dominant
-#   near the hole) — only the antisymmetry in a is gated, not the sign.
+#   near the hole) — only the antisymmetry in a is gated.
 # =============================================================================
 import glob
 import os

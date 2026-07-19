@@ -11,7 +11,7 @@
 // only. the closure p = cs^2*rho is materialized as a SUBSTRATE-OWNED pressure
 // primitive (`self.pre`) — kept off the global iso field ABI, which does not allocate
 // prim.pre on CPU — so the flux + cfl read a per-cell sound speed sqrt(gamma*p/rho)
-// (gamma = ISO_GAMMA = 1) rather than a global cs constant. c2p writes self.pre, the
+// (gamma = ISO_GAMMA = 1), letting a locally-varying sound speed hold. c2p writes self.pre, the
 // ghost fill pulls it back, flux + cfl read it.
 //
 // the godunov / snapshot / rk2 are the EOS-generic `iso_*` kernels (no energy law);
@@ -90,7 +90,7 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// `cooling` or `nrg`-targeted source was already rejected at `build_user_source`.
     pub runtime_source: Option<Arc<RuntimeSource>>,
     /// when true AND a `runtime_source` is attached, the runtime user source is
-    /// FUSED into the godunov stage as ONE Cranelift-JIT'd host kernel instead of the two-pass.
+    /// FUSED into the godunov stage as ONE Cranelift-JIT'd host kernel, replacing the two-pass.
     /// opt-in + gated (host + f64); falls back to the two-pass otherwise. bit-for-bit identical
     /// to the two-pass path.
     pub fuse_runtime: bool,
@@ -244,7 +244,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 
     /// bind the SAME source as a NON-fused additive pass (plain godunov +
-    /// per-stage `source_apply`) instead of fusing it into the godunov kernel.
+    /// per-stage `source_apply`).
     /// the general execution path; bit-for-bit equal to `with_fused_source` for a
     /// baked family (the dispatch prefers fused-when-baked, falls back
     /// here). fluent builder; chain off `new(..)`.
@@ -314,7 +314,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // speed, so a locally isothermal cs2(x) flows through naturally. gamma = ISO_GAMMA = 1;
         // no flux.nrg (the energy U/F is dead-code-eliminated). + the theta-MC limiter.
         // iso is HLLE-only by physics (no contact wave); the substrate enforces it
-        // here by hardcoding the solver rather than exposing a per-set knob.
+        // here by hardcoding the solver.
         dispatch_flux(
             sim,
             &self.pre,
@@ -329,8 +329,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
     fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {
         // inputs (manifest order): cons den, mom_0.., then the prescribed cs2 field.
-        // outputs: prim rho, vel_0.., self.pre (= cs2*rho). cs2 is a FIELD (read-only),
-        // not a scalar — so the run can be locally isothermal. no scalar params.
+        // outputs: prim rho, vel_0.., self.pre (= cs2*rho). cs2 is a read-only FIELD,
+        // so the run can be locally isothermal. no scalar params.
         let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
         for k in 0..D {
             inputs.push(&sim.fields.cons.mom[k]);
@@ -627,8 +627,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
         // the Navier-Stokes shear; inert when inviscid. baked
-        // for 2D and 3D cartesian — fail loud otherwise rather than silently drop
-        // the transport a viscous run declared. alpha (spatially varying nu)
+        // for 2D and 3D cartesian — fail loud otherwise (a silent drop would discard
+        // the transport a viscous run declared). alpha (spatially varying nu)
         // takes precedence over the constant-nu viscosity.
         if self.alpha <= 0.0 && self.viscosity <= 0.0 {
             return;

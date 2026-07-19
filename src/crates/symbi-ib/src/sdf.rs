@@ -184,7 +184,7 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
         for a in 0..D {
             sq = sq + g[a] * g[a];
         }
-        // a degenerate gradient (the exact center) divides by the guard, not zero.
+        // a degenerate gradient (the exact center) divides by the guard, keeping the result finite.
         let inv = S::ONE / sq.sqrt().max(S::from_f64(1e-300));
         std::array::from_fn(|a| g[a] * inv)
     }

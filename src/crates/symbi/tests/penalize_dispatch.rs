@@ -79,7 +79,7 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
         lost_mass += (before[i] - after) * dv;
         lost_nrg += (nrg_before[i] - *sim.fields.cons.nrg_field().unwrap().view().at(c)) * dv;
         // far outside the support ball (r_cut = 0.12 + 20 dx ~ 0.95): the
-        // dispatch never touches the cell — bit-identical, not just close.
+        // dispatch never touches the cell — bit-identical.
         let x = -L + (c[0] as f64 + 0.5) * dx;
         let y = -L + (c[1] as f64 + 0.5) * dx;
         let r = ((x - 0.1f64).powi(2) + (y + 0.05).powi(2)).sqrt();
@@ -362,7 +362,7 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
     );
 }
 
-// an ARBITRARY-SHAPE rigid body: a box, not a sphere. its penalization kernel is runtime-built +
+// an ARBITRARY-SHAPE rigid body: a box. its penalization kernel is runtime-built +
 // cranelift-JIT'd (the box geometry baked as constants, the body position a runtime scalar), then
 // executed over the shape's bounding box through the standalone `run_parallel_raw`. it must
 // penalize (the wall pushes back) while removing exactly zero mass — the full host runtime-JIT path
@@ -391,7 +391,7 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
                 .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
         ));
     // attach the arbitrary shape: a box in the body-local frame (a 0.3 x 0.3 square in the z=0
-    // plane), NOT the sphere the AOT kernel would use.
+    // plane).
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.15, 0.15, 1.0]));
 
@@ -450,8 +450,8 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
 
 // TWO-WAY rotational coupling: a free (two_way) spinner in STILL fluid is dragged toward rest —
 // the reaction torque of the gas it spins up decelerates it. one evolve step (dispatch fills the
-// torque diagnostic, apply_body_deltas integrates I domega = torque dt) must reduce omega, not
-// reverse it. this also pins the sign of the coupling.
+// torque diagnostic, apply_body_deltas integrates I domega = torque dt) must reduce omega.
+// this also pins the sign of the coupling.
 #[test]
 fn two_way_spin_is_dragged_to_a_stop() {
     use symbi_ib::sdf::SdfExpr;
@@ -525,9 +525,9 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
     assert!(b.velocity[1].abs() < b.velocity[0], "the drift is predominantly downstream");
 }
 
-// ARBITRARY-AXIS 3D spin: a box spinning about the X axis (not the default z) in still 3D fluid
+// ARBITRARY-AXIS 3D spin: a box spinning about the X axis in still 3D fluid
 // must book its reaction torque about X — proving the mask uses Rodrigues(axis, angle) and the wall
-// velocity is omega x r about the config axis, not hardwired to z.
+// velocity is omega x r about the config axis.
 #[test]
 fn spinning_box_about_x_axis_imparts_torque_3d() {
     use symbi_ib::sdf::SdfExpr;
@@ -558,7 +558,7 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
     assert_eq!(d[0].mass_delta, 0.0, "a sealed spinning wall removes no mass");
     let tau = d[0].torque_delta;
     assert!(tau[0].abs() > 1e-6, "spin about x should book a torque about x: {tau:?}");
-    // the reaction is about the spin axis (x), NOT z — the default axis is not hardwired.
+    // the reaction is about the spin axis (x) — the default axis is not hardwired.
     assert!(
         tau[0].abs() > 10.0 * tau[2].abs(),
         "the x-axis spin torque must dominate the z component: {tau:?}"
@@ -645,7 +645,7 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
     let tau = d[0].torque_delta[2];
     assert!(tau.abs() > 1e-6, "the spinning wall imparted no torque to the still fluid: {tau}");
 
-    // baseline: the SAME wall, not spinning, leaves still fluid still — negligible torque.
+    // baseline: the SAME wall with no spin leaves still fluid still — negligible torque.
     let still = build(0.0);
     dispatch_penalize(&still, 1e-3, GAMMA, 1.0);
     let d0 = still.immersed.as_ref().unwrap().diagnostics.consolidate();

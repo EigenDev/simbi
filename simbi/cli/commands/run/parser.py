@@ -57,7 +57,7 @@ def _validate_config_script(param: str) -> str:
     ext = path.suffix
 
     # an explicit .py path bypasses discovery, but a typo'd path must fail HERE
-    # with a clear message, not later inside the loader with an import error.
+    # with a clear message at parse time.
     if ext.lower() == ".py":
         if not path.is_file():
             raise ArgumentTypeError(f"config script '{param}' does not exist")
@@ -99,8 +99,8 @@ def setup_parser(subparsers) -> None:
         help="run a simulation from a config file",
         formatter_class=HelpFormatter,
         usage="simbi run <config> [options]",
-        # -h/--help is handled here rather than by argparse so that `simbi run <config> --help`
-        # can load the config and show ITS flags, not just the generic run options.
+        # -h/--help is handled here so that `simbi run <config> --help`
+        # can load the config and show ITS flags.
         add_help=False,
     )
 

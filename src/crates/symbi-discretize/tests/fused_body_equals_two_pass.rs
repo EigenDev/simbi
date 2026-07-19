@@ -4,7 +4,7 @@
 // proves the immersed-body fold into `godunov_stage_gv_with_fused_built` (n_bodies > 0)
 // is bit-for-bit identical to the standalone two-pass execution: plain `godunov_stage_gv`
 // followed by the `body_source_gv` pass. this is the correctness gate that lets the body
-// ride INSIDE the single fused update sweep (one launch) instead of a separate full-grid
+// ride INSIDE the single fused update sweep (one launch), sparing a separate full-grid
 // CONS read+write.
 //
 // the body is a POST-combine operator `(cons_g + ac_dt*S_grav) * exp(-drain*ac_dt)`, so the

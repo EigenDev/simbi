@@ -533,7 +533,7 @@ impl Table {
         let mut widest: [&str; 3] = headers;
         for r in rows {
             for i in 0..3 {
-                // compare DISPLAY width (chars), not utf-8 byte length.
+                // compare DISPLAY width in chars; utf-8 byte length would overcount multibyte glyphs.
                 if r[i].chars().count() > widest[i].chars().count() {
                     widest[i] = r[i].as_str();
                 }
@@ -604,7 +604,7 @@ impl Table {
                 msg.text,
             );
 
-            // measure DISPLAY columns (char count), not bytes — messages carry
+            // measure DISPLAY columns (char count); messages carry
             // em-dashes / arrows whose utf-8 byte length exceeds their width,
             // which would otherwise under-pad and drift the right border left.
             let mut cols = line.chars().count();

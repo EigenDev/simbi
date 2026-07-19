@@ -61,7 +61,7 @@ macro_rules! carrier_law_suite {
                     for &y in &grid() {
                         exact(x + y == y + x, "additive commutativity");
                         exact(x * y == y * x, "multiplicative commutativity");
-                        // Sub IS Add-of-Neg by definition — must be bit-exact, not approximate.
+                        // Sub IS Add-of-Neg by definition — must be bit-exact.
                         exact(x - y == x + (-y), "sub-via-neg x-y==x+(-y)");
                         exact(x.min(y) == y.min(x), "min commutative");
                         exact(x.max(y) == y.max(x), "max commutative");

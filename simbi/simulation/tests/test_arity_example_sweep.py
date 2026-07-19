@@ -7,7 +7,7 @@
 # first-tuple contract check the runner applies. a config whose actual yield
 # the guard rejects is either a broken config (the guard caught real rot) or a
 # mis-scoped guard (an exact width enforced on a regime that does not fix it) —
-# both must fail loudly here rather than at a user's run.
+# both must fail loudly here, at discovery time.
 # =============================================================================
 import importlib
 import inspect

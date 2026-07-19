@@ -243,7 +243,7 @@ def install_command(args) -> None:
     # backends coexist after one command. the fresh cpu_ext.so is picked up by the stash below
     # and restored beside gpu_ext. no effect on a cpu-only build (cpu_ext is already the target).
     # note: this recompiles the shared `symbi` crate under a second feature-set — full build cost,
-    # not incremental — so it is opt-in rather than default.
+    # not incremental — so it is opt-in.
     if gpu and getattr(args, "with_cpu", False):
         print("companion cpu build (--with-cpu): building cpu_ext first...")
         cpu_cmd = [*maturin(), "develop", "--release"]
@@ -252,7 +252,7 @@ def install_command(args) -> None:
         run(cpu_cmd, env=venv_env(), verbose=args.verbose)
     # the cuda build writes to the cpu_ext filename before it is renamed to gpu_ext,
     # so stash an existing cpu_ext first and restore it after. this lets the cpu and
-    # gpu extensions live side by side instead of the gpu build clobbering the cpu one.
+    # gpu extensions live side by side.
     stashed = _stash_cpu_ext() if gpu else []
     try:
         run(cmd, env=venv_env(), verbose=args.verbose)

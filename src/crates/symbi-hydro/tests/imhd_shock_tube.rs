@@ -147,12 +147,12 @@ fn imhd_hlld_is_clean_shock_capturing() {
     assert!(tv_rd < 1.3 * tv_re, "HLLD rho OSCILLATES: TV {tv_rd:.4} vs hlle {tv_re:.4}");
     assert!(tv_bd < 1.3 * tv_be, "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}");
 
-    // 4) SAME solution as HLLE (sharper, not different): small L1 distance.
+    // 4) SAME solution as HLLE, only sharper: small L1 distance.
     let l1 = l1_diff(&rho_d, &rho_e);
     eprintln!("[imhd] L1(rho_hlld - rho_hlle) = {l1:.4}");
     assert!(l1 < 0.05, "HLLD rho diverges from HLLE: L1 {l1}");
 
-    // 5) HLLD actually SHARPENS (not silently falling back to HLLE).
+    // 5) HLLD actually SHARPENS the discontinuity, confirming the HLLD path is active.
     let max_grad = |f: &[f64]| f.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f64, f64::max);
     assert!(
         max_grad(&rho_d) >= max_grad(&rho_e) * 0.95,

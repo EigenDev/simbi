@@ -10,11 +10,11 @@
 # per-cell state replacement applied two different fluxes to the two sides of a
 # flag-boundary face and created/destroyed conserved quantities there.
 #
-# the metric is the CONSERVED buffer (level_0/conserved), NOT the checkpoint's
-# primitives: reconstructing D = rho*W from the stored (rho, v) amplifies the
+# the metric is the CONSERVED buffer (level_0/conserved): reconstructing the
+# primitives' D = rho*W from the stored (rho, v) amplifies the
 # c2p round-trip error by dW/dv ~ W^3*v, which for the W ~ 7 collision here is
-# ~1e-3 even for a perfectly conservative scheme — it measures c2p accuracy, not
-# conservation. the conserved buffer is the quantity the finite-volume update
+# ~1e-3 even for a perfectly conservative scheme — it measures c2p accuracy. the
+# conserved buffer is the quantity the finite-volume update
 # actually telescopes.
 #
 # the fixture is tuned so FOFC fires on a few hundred substages but the

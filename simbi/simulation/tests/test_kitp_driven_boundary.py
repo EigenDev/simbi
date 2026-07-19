@@ -11,8 +11,8 @@
 #   included (an interior-clamped driven band left corner ghosts at rho = 0,
 #   which a viscous 3x3 stencil reads as gas);
 # - the ghost temperature must be the clamped continuation of the initial
-#   p/rho, not the constructor's uniform cs^2 = 1 (which books a ~1000x
-#   spurious wall pressure into every boundary flux on a cold disk edge);
+#   p/rho; the constructor's uniform cs^2 = 1 would book a ~1000x
+#   spurious wall pressure into every boundary flux on a cold disk edge;
 # - the evolved state stays finite and positive.
 # =============================================================================
 import glob

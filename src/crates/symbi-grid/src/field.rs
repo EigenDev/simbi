@@ -143,7 +143,7 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     /// the single audited write path for pointwise per-cell ops (`op` computes `delta` purely,
     /// this performs the only field mutation). unlike `set`/`ViewMut::set` (which guard with
     /// `debug_assert!`, compiled out in release) the assert here is ALWAYS on, so a bad index is a
-    /// LOUD PANIC rather than silent heap corruption. sound to call concurrently from many threads
+    /// LOUD PANIC; a bad index would otherwise silently corrupt the heap. sound to call concurrently from many threads
     /// PROVIDED each `coord` is written by exactly one thread (disjoint cells) — `T` is a Copy
     /// scalar so the read-modify-write touches only this cell.
     #[inline]

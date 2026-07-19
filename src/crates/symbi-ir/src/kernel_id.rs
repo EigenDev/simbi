@@ -19,7 +19,7 @@
 //
 // scope: the AMR-transfer + field-op family (the hot, drift-prone path). other
 // kernel families (flux, c2p, godunov, ...) stay stringly — they mint
-// once per step, not in a tight inner loop.
+// once per step, well outside any tight inner loop.
 //
 // usage:
 //  // producer (build.rs): emit_gv(out, KernelId::RefineRestrict { ndim }.name(), ..)
@@ -37,7 +37,7 @@ pub enum ProlongTag {
 }
 
 /// a kernel in the AMR-transfer / field-op family, addressed by its typed
-/// components instead of a formatted string. `ndim` is 1..=3; `axis` is the
+/// components (no formatted-string key). `ndim` is 1..=3; `axis` is the
 /// face/edge normal, 0..ndim.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KernelId {

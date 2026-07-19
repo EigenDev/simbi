@@ -3,13 +3,13 @@
 #
 # the per-cell primitive tuple is read POSITIONALLY by the backend, so a
 # too-long tuple silently shifts a trailing field (e.g. pressure) into an
-# ignored slot rather than erroring. these tests pin the width where the regime
+# ignored slot with no error. these tests pin the width where the regime
 # determines it exactly (cartesian hydro, energy mhd) and confirm the ambiguous
 # regimes (isothermal's optional pressure, curvilinear/relativistic velocity
 # dof) are left to a lower-bound check so a legitimate config is never rejected.
 #
 # the reproduced defect: a 2d cartesian newtonian config that yields the mhd
-# 5-tuple (rho, vx, vy, vz, p) instead of the hydro 4-tuple (rho, vx, vy, p) —
+# 5-tuple (rho, vx, vy, vz, p) where the hydro 4-tuple (rho, vx, vy, p) is expected —
 # the reader takes p from the vz slot and drops the real pressure, so the gas
 # runs pressureless (cold, wildly supersonic) with no error.
 # =============================================================================
@@ -64,7 +64,7 @@ def test_correct_tuple_passes_and_replays() -> None:
 
 def test_undetermined_regime_tolerates_a_longer_tuple() -> None:
     # isothermal returns None -> the exact check is skipped and a longer tuple
-    # (rho, vx, vy, p) is accepted rather than falsely rejected.
+    # (rho, vx, vy, p) is accepted.
     prob = KeplerianRingTest()
     out = _check_first_tuple(prob, iter([(1.0, 0.0, 0.0, 1.0)]))
     assert next(out) == (1.0, 0.0, 0.0, 1.0)

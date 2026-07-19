@@ -55,7 +55,7 @@ fn make_sim(n: usize) -> Sim {
     let dx = 1.0 / n as f64;
     // Kelvin-Helmholtz: a central band (|y - 0.5| < 0.25) shears against the outer
     // fluid, tanh-smoothed so the layer is resolved; a small vy seed grows the roll-up.
-    // uniform pressure. this is a benchmark IC — throughput, not a physics reference.
+    // uniform pressure. this is a benchmark IC for throughput measurement.
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n, n])
         .spacing([dx, dx])

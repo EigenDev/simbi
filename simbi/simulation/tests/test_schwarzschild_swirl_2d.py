@@ -47,9 +47,9 @@ _L1_TOL = 1.5e-4
 # uniform specific angular momentum for the advection gate: small enough that the
 # rotating background stays near the michel profile (l^2/r^2 << 1 centrifugal shift),
 # large enough that a lost metric factor (gamma_{phi phi} ~ r^2 sin^2 theta ~ 10-1e4)
-# is orders of magnitude, not noise. the drift is l0-INDEPENDENT in relative terms
+# is orders of magnitude. the drift is l0-INDEPENDENT in relative terms
 # (measured 3.814e-3 at l0 = 0.05 vs 3.811e-3 at 0.01): it is the truncation of the
-# S_phi transport through the steep transonic infall, NOT a stir effect — and it
+# S_phi transport through the steep transonic infall — and it
 # CONVERGES (128x8 -> 256x16 ratio 2.2), which the second assertion pins. tolerance
 # = measured 3.8e-3 with ~3x margin; a metric-factor transport bug is orders of
 # magnitude and resolution-INDEPENDENT, failing both assertions.

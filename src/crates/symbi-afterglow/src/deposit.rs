@@ -1,8 +1,8 @@
 // =============================================================================
 // deposit.rs
 //
-// DETERMINISTIC sky-map deposition (Zrake, Xie & MacFadyen 2018): instead of sampling
-// photon packets, each fluid patch deposits its lab-frame monochromatic synchrotron
+// DETERMINISTIC sky-map deposition (Zrake, Xie & MacFadyen 2018): each fluid patch
+// deposits its lab-frame monochromatic synchrotron
 // emissivity directly onto the sky-plane pixel it projects to, gated by the
 // equal-arrival-time surface. no shot noise -> a continuous gradient at any resolution.
 //

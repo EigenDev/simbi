@@ -4,7 +4,7 @@
 // host machine + process resource sampling for the dashboard's machine card:
 // hostname, logical cpu count, and this process's resident memory against the
 // node's physical ram. sampled on the SOLVER side (the compute node), so an
-// attach client sees the node running the job, not the machine rendering the ui.
+// attach client sees the compute node running the job even when the ui renders elsewhere.
 //
 // stdlib + libc only; every value is best-effort (0 / "?" on an unsupported
 // platform or a failed syscall) so a sample never fails a run.

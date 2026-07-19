@@ -4,8 +4,8 @@
 // the run's final summary frame. after the live screen is left, one bounded,
 // state-colored `Block` is rendered OFF-SCREEN into a buffer, serialized to ansi,
 // and printed onto the primary buffer so it persists in scrollback. rendering
-// off-screen (rather than through a live terminal) avoids any cursor-position
-// query, which could block once ScreenGuard has restored the canonical termios.
+// off-screen avoids any cursor-position query, which could block once
+// ScreenGuard has restored the canonical termios.
 //
 // usage:
 //   print!("{}", exit::render_exit_frame(ExitKind::Success, &summary, width));
@@ -143,7 +143,7 @@ mod tests {
     use super::*;
 
     /// the exit frame is bounded (clamped width), carries the heading + summary,
-    /// and wraps a long summary onto extra rows rather than overflowing.
+    /// and wraps a long summary onto extra rows.
     #[test]
     fn exit_frame_is_bounded_and_wraps() {
         let summary = "interrupted — 12000 steps, t = 4.3100 — restart checkpoint michel.interrupted.h5 written to disk for resume";

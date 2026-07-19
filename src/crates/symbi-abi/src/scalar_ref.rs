@@ -129,8 +129,8 @@ pub enum ScalarRef {
     Dx(u8),
     /// the per-axis SPACING KIND `map_kind_{ax}` — the runtime selector the in-kernel face-position
     /// map branches on: 0 = uniform (`face = x_lo + i*dx`), 1 = log (`face = x_lo * 10^(i*dx)`).
-    /// makes spacing a per-axis runtime value (log-r, log-theta, ...) instead of a baked codegen
-    /// axis, so one kernel per (regime, geometry) serves every spacing; a moving mesh updates the
+    /// makes spacing a per-axis runtime value (log-r, log-theta, ...),
+    /// so one kernel per (regime, geometry) serves every spacing; a moving mesh updates the
     /// `x_lo`/`dx` scalars on the fly while `map_kind` stays fixed.
     MapKind(u8),
     /// a moving-mesh rate (`mesh_hdil`, `mesh_adot_{ax}`, `mesh_vtrans_{ax}`).
@@ -340,7 +340,7 @@ mod tests {
 
     // OPEN spec/user-source knobs are NOT in the closed vocabulary: parse must
     // return None so the caller falls through to the spec string map. this is the
-    // documented boundary, not a bug.
+    // documented boundary.
     #[test]
     fn rejects_open_spec_scalars() {
         for n in ["gm", "g_ext_0", "xm_1", "body_radius", "value", "scale", "alpha", "cs2"] {

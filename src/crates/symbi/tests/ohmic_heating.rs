@@ -78,7 +78,7 @@ fn resistive_mhd_conserves_energy_and_heats_the_gas() {
     let ie_gain = ie1 - ie0;
     assert!(me_loss > 0.05 * me0, "resistivity should have dissipated substantial magnetic energy: {me0} -> {me1}");
     // TOTAL energy conserved to round-off (the conservative total-energy flux form). the Ohmic
-    // dissipation is a redistribution WITHIN the conserved total, not a loss.
+    // dissipation redistributes energy within the conserved total, so the sum is unchanged.
     let rel_drift = (e1 - e0).abs() / e0;
     assert!(rel_drift < 1e-10, "resistive MHD did not conserve total energy: relative drift {rel_drift:.3e}");
     // the dissipated magnetic energy became gas internal energy: the gas heated by ~the magnetic loss.

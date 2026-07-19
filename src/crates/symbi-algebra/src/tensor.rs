@@ -81,8 +81,8 @@ impl<S: crate::algebra::Numeric, const N: usize> Tensor<S, N> {
     }
 
     /// scalar multiply: v * s. generic over S: Scalar.
-    /// use this instead of the `*` operator when S is a generic type parameter,
-    /// since `Tensor * S` operator is only implemented for concrete f64/f32.
+    /// use this when S is a generic type parameter,
+    /// since the `Tensor * S` operator is only implemented for concrete f64/f32.
     #[inline]
     pub fn scale(self, s: S) -> Self {
         self.map(|v| v * s)

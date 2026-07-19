@@ -199,7 +199,7 @@ def prepare_field_level(
 
     # Get the domain, in data-storage order (e.g., nz, ny, nx)
     # if crop_to_owned=True, mesh already has cropped coordinates
-    # use vertices (edges) for the domain, not cell centers
+    # use vertices (edges) for the domain
     # polygon plots need edges; other plots will extract centers if needed
     full_domain = [getattr(mesh, f"x{i}v") for i in range(values.ndim, 0, -1)]
 
@@ -413,8 +413,8 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     # iterate from finest level (end of list) to coarsest (start)
     for field in reversed(fields_2d):
         # field.domain is in DATA-STORAGE order (slow..fast = [y, x] for 2D), matching the
-        # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, NOT as
-        # (x, y): otherwise the y-edges drive the x-loop and `values[j, i]` runs off axis 0 on a
+        # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, as
+        # [y, x]: unpacking as (x, y) makes the y-edges drive the x-loop and `values[j, i]` run off axis 0 on a
         # non-square (refined) patch. a square level hides the swap (both edge arrays are equal).
         y_edges, x_edges = field.domain
         values = field.values

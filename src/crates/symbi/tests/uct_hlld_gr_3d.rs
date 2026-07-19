@@ -180,11 +180,12 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
     // factors evaluate to exact 1.0 / 0.0), so the GR UCT-HLLD chain must
     // reproduce the flat chain on identical initial data. the two kernels
     // assemble algebraically identical arithmetic through different f64
-    // operation orders, so the comparison is roundoff-tight, not bitwise.
+    // operation orders, so the comparison is roundoff-tight; the differing
+    // operation orders rule out a bitwise match.
     // ONE step: t_final sits below both charts' CFL estimates, so the loop's
     // dt = min(cfl, t_final - t) clamp pins the SAME dt on both chains (the
     // GR and flat wave-speed maps are different, both valid, bounds — free
-    // stepping would diverge in step count, not physics).
+    // stepping would diverge in step count while agreeing on physics).
     const T_ONE: f64 = 0.005;
     let sim_gr = gr_divb_gate!(SchwarzschildKSCartesian { mass: 0.0 }, SchwarzschildKSCartesian<f64>, 1.2, T_ONE, 1, "ks M=0");
 

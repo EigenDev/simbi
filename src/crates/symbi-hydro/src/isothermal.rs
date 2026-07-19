@@ -4,7 +4,7 @@
 // zero-overhead isothermal hydrodynamics via the energy model type system.
 // uses ConsG<S, D, IsoModel> and PrimG<S, D, IsoModel> — the energy/pressure
 // slots are Zero<S> (ZST). no wasted memory, no wasted FLOPS, no wasted
-// bandwidth. accessing .nrg on isothermal cons returns Zero<S>, not a scalar.
+// bandwidth. accessing .nrg on isothermal cons returns Zero<S>, a ZST placeholder.
 //
 // IsoNewtonian implements Regime<S, D> with isothermal types. HLLE works
 // automatically (regime-generic). HLLC is not applicable (contact wave
@@ -303,8 +303,8 @@ mod tests {
 
     #[test]
     fn iso_zero_density_yields_non_finite_velocity() {
-        // divide-by-zero is IEEE, not a panic. it surfaces as +inf so callers
-        // upstream can detect and act (e.g., dt reduction).
+        // divide-by-zero follows IEEE semantics and surfaces as +inf so callers
+        // can detect and act (e.g., dt reduction).
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let cons = IsoCons { den: 0.0, mom: Tensor::new([1.0]), nrg: Zero::default() };

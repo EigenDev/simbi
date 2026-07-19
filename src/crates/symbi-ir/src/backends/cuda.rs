@@ -337,7 +337,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
         }
         ScalarExpr::Cast { to, value } => {
             // numeric promotion: `(<float-ty>)(value)` — explicit cast (matches the
-            // IR; handles f32 kernels rather than relying on C's int*double promote).
+            // IR; the explicit type keeps f32 kernels off C's int*double promotion).
             out.push('(');
             out.push_str(cuda_type_name(*to));
             out.push_str(")(");
@@ -345,7 +345,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             out.push(')');
         }
         ScalarExpr::MethodCall { receiver, method, args } => {
-            // emit `min`/`max`/`abs` as INLINE TERNARIES, not fmin/fmax/fabs. the
+            // emit `min`/`max`/`abs` as INLINE TERNARIES (`a<b?a:b`). the
             // libdevice functions follow IEEE 754-2008 NaN / signed-zero semantics
             // that differ from the plain `a<b?a:b` ternary; at shock cells the
             // divergent semantics produced different fluxes CPU vs GPU -> macroscopic
@@ -459,7 +459,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
         ScalarExpr::FieldLoadAt { .. } => {
             // emit_kernel.rs MUST rewrite every FieldLoadAt to a Var
             // form before invoking the cuda emitter. seeing one here is
-            // a bug in the rewrite pass — fail loudly rather than emit
+            // a bug in the rewrite pass — fail loudly; a silent path would emit
             // an undefined identifier.
             panic!(
                 "emit_cuda::emit_expr: encountered un-rewritten FieldLoadAt — \
@@ -485,9 +485,9 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
 
 fn emit_const(out: &mut String, v: &ConstValue) {
     match v {
-        // non-finite consts spell the IEEE bit pattern via device intrinsics, NOT the
-        // <math.h> macros (INFINITY) / functions (nan): nvcc includes math.h
-        // implicitly but NVRTC does NOT, so `INFINITY` is undefined under runtime
+        // non-finite consts spell the IEEE bit pattern via device intrinsics; the
+        // <math.h> macros (INFINITY) / functions (nan) are unavailable, since nvcc includes
+        // math.h implicitly but NVRTC does NOT, so `INFINITY` is undefined under runtime
         // compilation. __longlong_as_double / __int_as_float are
         // CUDA+HIP device builtins needing no header, and reinterpret the exact bits
         // — bit-identical to the macros, no numerical change.
@@ -691,7 +691,7 @@ mod tests {
 
     #[test]
     fn abs_emits_ternary_matching_my_abs() {
-        // emit `(x < 0.0 ? -x : x)` not `fabs(x)` so semantics match
+        // emit `(x < 0.0 ? -x : x)` so semantics match
         // the CPU carrier's ternary abs.
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn min_emits_ternary_matching_my_min() {
-        // emit `(a < b ? a : b)` not `fmin(a, b)`.
+        // emit the ternary `(a < b ? a : b)`.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let b = g.add_scalar_param("b", ElementTy::F64);
@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn max_emits_ternary_matching_my_max() {
-        // emit `(a > b ? a : b)` not `fmax(a, b)`.
+        // emit the ternary `(a > b ? a : b)`.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let b = g.add_scalar_param("b", ElementTy::F64);
@@ -898,7 +898,7 @@ mod tests {
         assert!(src.contains("auto a = param_0[i];"));
         assert!(src.contains("auto b = param_1[i];"));
         assert!(src.contains("auto d = param_2[i];"));
-        // component scope + the actual arithmetic (sqrt via libdevice, not method).
+        // component scope + the actual arithmetic (sqrt via libdevice).
         assert!(src.contains("{ /* component 0 */"));
         assert!(src.contains("sqrt(d)"), "{src}");
         assert!(!src.contains(".sqrt()"), "cuda must not use carrier-generic method form");

@@ -57,7 +57,7 @@ pub(crate) fn exec_layout<const D: usize>(dom: &Domain<D>) -> ([u32; D], [i32; D
 }
 
 // per-field layout (lo / extent / volume) from the field's OWN domain — bface
-// and efield live on STAGGERED domains (face / edge), NOT the cell-centered
+// and efield live on STAGGERED domains (face / edge), off the cell-centered
 // allocated domain, so their descriptor lo/extent must come from the field itself.
 pub(crate) fn field_layout<const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
     f: &Field<Sc, D, Mem>,
@@ -232,7 +232,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // the geometry / spacing / spacetime slugs ALL ride the name — a log-radial grid selects the
     // geometric-mean cell geometry (`_logr`), exactly like the GR and hydro stages. uniform grids
     // get sp = "" so the name is unchanged; a log-radial FLAT MHD run selects the `_logr` kernel
-    // (baked for the curvilinear charts) instead of silently reusing the uniform-geometry one.
+    // (baked for the curvilinear charts); silently reusing the uniform-geometry one would mis-weight it.
     let sfx = format!("{base_sfx}{st}");
 
     // the gas + bcell stages all bind BY MANIFEST (dispatch_named) — no hand-built buffer list.
@@ -298,7 +298,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     let pre_bind = if has_energy {
         sim.fields.prim.pre_field().expect("prim.pre")
     } else {
-        &sim.fields.cons.den // iso geo-source reads cs^2*rho, not prim.pre; pass a dummy.
+        &sim.fields.cons.den // iso geo-source reads cs^2*rho (there is no prim.pre); pass a dummy.
     };
     dispatch_named(sim, pre_bind, None, 0, &gname, &sim.geom.interior, &[], &gscalars);
 
@@ -1017,7 +1017,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 /// staggered difference; a curvilinear chart carries the metric into C so its adjoint carries the
 /// TRANSPOSED metric weights — a distinct kernel PER CHART. built: cartesian 2.5D/3D and cylindrical
 /// r-z (axisymmetric poloidal field). EXPLICIT LIMITATION, fail-loud (never a hidden floor): any other
-/// chart has no adjoint-verified resistive curl, so refuse rather than silently run as if ideal.
+/// chart has no adjoint-verified resistive curl, so refuse; silently running as if ideal would drop the resistive term.
 pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     eta: f64,
@@ -1092,7 +1092,7 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
 /// same edge EMF the curl consumes (div-B-clean, dissipation-only). the field threading the body is
 /// dissipated; the exterior flux (where `chi = 0`) is untouched. EXPLICIT LIMITATION, fail-loud: the
 /// masked adjoint J + body-mask SDF are the cartesian 2.5D pair only; a resistive body on any other
-/// chart/dimension panics rather than silently ignoring the coupling.
+/// chart/dimension panics; silently ignoring the coupling would drop the body term.
 pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) where
@@ -1317,7 +1317,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         let scalars: Vec<Sc> = if !st.is_empty() || curvilinear {
             // by MANIFEST (dt + the log-aware grid scalars incl. the per-axis map_kind + the metric
             // mass/spin on GR). manifest-driven so a curvilinear kernel that grew the `map_kind`
-            // spacing selector is resolved by name, not a fixed hand-built order; the mass/spin arms
+            // spacing selector is resolved by name from the manifest; the mass/spin arms
             // are simply never requested by a flat curvilinear kernel's manifest.
             scalars_for(&ct_name, |bind| {
                 let ScalarBind::Ref(sref) = bind else {
@@ -1382,7 +1382,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
 /// -> cons.nrg. IDEMPOTENT: once `bcell == interp(bface)` a second call adds a zero energy patch, so
 /// the gas-only FOFC redo re-runs it to re-attach the consistent cell B + patch onto the FOFC'd gas
 /// (the redo feeds the cell-B predictor the HIGH-ORDER induction flux, so `bcell_old` is the HO
-/// predictor and the patch is the small HO reconciliation, not a shock).
+/// predictor and the patch is the small HO reconciliation (no shock).
 pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,

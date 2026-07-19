@@ -3,7 +3,7 @@
 //
 // configuring the substrate kernel-set with a
 // `FusedSourceBinding` causes the production `evolve()` loop to use the
-// AOT-baked fused godunov INSTEAD of the unfused kernel — one launch per RK
+// AOT-baked fused godunov in place of the unfused kernel — one launch per RK
 // stage covers `div(F) + spec source + integrator`, fully driven from the
 // kernel-set's declarative state.
 //
@@ -121,7 +121,7 @@ fn adiabatic_evolve_without_binding_stays_at_rest() {
     // **negative control + backwards-compat**: the SAME setup but with NO
     // `with_fused_source` binding. evolve() runs the unfused path; gas stays
     // at rest (mean v = 0 to floating-point noise). proves the binding is
-    // what causes the acceleration, not anything else in the loop.
+    // what causes the acceleration.
     let n = 32usize;
     let dx = 1.0 / n as f64;
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)

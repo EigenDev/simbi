@@ -35,8 +35,8 @@ pub struct NodeId(pub u32);
 
 /// payload of a `Const` node. one variant per supported `ElementTy`.
 ///
-/// F2.A: Hash + Eq are implemented over the *bit pattern* of floats,
-/// not their IEEE comparison. two F64(NaN) values with identical bit
+/// F2.A: Hash + Eq are implemented over the *bit pattern* of floats.
+/// two F64(NaN) values with identical bit
 /// patterns are considered equal; two NaNs with different bit patterns
 /// are not. this is what hash-cons needs (structural identity).
 #[derive(Clone, Debug)]
@@ -103,7 +103,7 @@ impl ConstValue {
     }
 }
 
-// serde via the float BIT PATTERN, not the decimal value. kernels carry
+// serde via the float BIT PATTERN. kernels carry
 // `ConstValue::F64(f64::NAN)` / `INFINITY` (c2p sentinels); serde_json maps a
 // raw non-finite f64 to `null`, which would not round-trip. serializing the bits
 // (u64/u32) is exact for every value and matches this enum's bit-pattern Hash/Eq.
@@ -346,7 +346,7 @@ impl ElementWiseOp {
 /// deliberately NARROW: float-width mismatch (f32 vs f64) and int-width mismatch
 /// stay strict errors. the substrate's precision is uniform per kernel (the graph
 /// is f64; f32 is a render-time choice), so a genuine f32+f64 in one graph is an
-/// anomaly worth catching, not silently widening. Bool never promotes.
+/// anomaly worth catching. Bool never promotes.
 fn numeric_promote(a: ElementTy, b: ElementTy) -> Option<ElementTy> {
     match (a.is_float(), b.is_float(), a.is_integer(), b.is_integer()) {
         // one float, one int -> the float type (the index promotes up to it).
@@ -503,8 +503,8 @@ pub enum Op {
     /// stored in the graph's `lambdas` table by FnId. the lambda's
     /// signature lives in FnDef.params; the body is a sub-Graph with
     /// `FnDef.output` as its result NodeId. Lambda nodes carry a
-    /// placeholder tensor type (rank-0 F64) — they're callable, not
-    /// values, so they should only be consumed by `Op::Apply`.
+    /// placeholder tensor type (rank-0 F64) — they're callable handles,
+    /// so they should only be consumed by `Op::Apply`.
     Lambda(FnId),
     /// F2.C: apply a Lambda value to arguments. `lambda` must be a
     /// NodeId pointing at an `Op::Lambda` in the same graph. `args`
@@ -604,8 +604,8 @@ pub enum Op {
     /// NodeIds CREATED inside that arm's `S::cond` closure (insertion order);
     /// they are lowered INSIDE the arm's brace so the codegen evaluates them
     /// only on the taken path. this is what lets carrier-generic physics get
-    /// the early-out cost (skip the whole quartic on a fast path)
-    /// instead of paying compute-all-paths via `Op::Select`.
+    /// the early-out cost (skip the whole quartic on a fast path),
+    /// avoiding the compute-all-paths cost of `Op::Select`.
     ///
     /// `*_results` are vectors so the vector form (`cond_vec`, the dual of
     /// `iterate_vec`) lands as a thin addition; scalar `S::cond` uses length-1
@@ -731,7 +731,7 @@ impl Op {
             }
 
             // the IfElse dual: cond + both arm bodies + both result vecs are
-            // all NodeId edges. listing the bodies (not just the results) keeps
+            // all NodeId edges. listing the bodies alongside the results keeps
             // arm-internal nodes reachable for DCE — same rule as Op::Scope.
             Op::IfElse {
                 cond,
@@ -1347,7 +1347,7 @@ impl Graph {
     ///
     /// the absorbing pattern `x * 0 -> 0` is DELIBERATELY ABSENT — IEEE-754
     /// `inf * 0 = NaN` and the project's `feedback_no_silent_floors` policy
-    /// requires NaN to propagate, not be masked. the sibling fold in
+    /// requires NaN to propagate. the sibling fold in
     /// `passes/scalarize.rs::fold_arith_identity` MUST match this set
     /// exactly (`{ Add[0], Sub[0], Mul[1], Div[1] }`); changes to either
     /// layer require a matching change to the other.
@@ -1674,11 +1674,11 @@ impl Graph {
         let name = fn_def.name.clone();
         self.lambdas.push(fn_def);
         // Lambda carries a placeholder rank-0 F64 type. it is a callable
-        // value, not a tensor; only Op::Apply consumes it directly.
+        // value; only Op::Apply consumes it directly.
         let nid = self.push(Op::Lambda(fn_id), TensorTy::scalar(ElementTy::F64), span);
         // F2.E: register the by-name index so subsequent
-        // `get_or_register_lambda` calls return THIS NodeId rather than
-        // allocating another Lambda for the same function.
+        // `get_or_register_lambda` calls return THIS NodeId, reusing the
+        // single Lambda for the same function.
         self.lambda_index.entry(name).or_insert(nid);
         nid
     }
@@ -2120,7 +2120,7 @@ impl Graph {
             }),
             // an implicit promotion Cast is re-inserted by the destination builders as needed;
             // importing one standalone would mis-type the result. it never appears in float-only
-            // pointwise physics — reject loudly rather than produce a wrong type.
+            // pointwise physics — reject loudly to avoid a mis-typed result.
             Op::ElementWise(ElementWiseOp::Cast(_), _) => {
                 panic!("import_subgraph: implicit Cast node is not importable")
             }
@@ -2379,7 +2379,7 @@ mod tests {
     #[test]
     fn floor_div_rejects_float_inputs() {
         // a float operand means physical-space data leaked into an index
-        // expression — must be a trace-time error, not a silent cast.
+        // expression — must be a trace-time error.
         let mut g = Graph::new();
         let a = g.add_param(Symbol::intern("a"), TensorTy::scalar(ElementTy::F64), None);
         let b = g.add_param(Symbol::intern("b"), TensorTy::scalar(ElementTy::F64), None);
@@ -2967,7 +2967,7 @@ mod tests {
     #[test]
     fn select_non_bool_cond_errors() {
         let mut g = Graph::new();
-        let c = scalar_f64(&mut g, "c"); // wrong: not Bool
+        let c = scalar_f64(&mut g, "c"); // f64 condition; select requires Bool
         let t = scalar_f64(&mut g, "t");
         let e = scalar_f64(&mut g, "e");
         let _ = g.select(c, t, e, None);
@@ -3432,7 +3432,7 @@ mod tests {
     #[test]
     fn import_subgraph_recreates_unmapped_leaf_as_param() {
         // a leaf the resolver does not know (returns None) is recreated as a fresh param of
-        // the same type — the graceful default, not a panic.
+        // the same type — the graceful default.
         let mut src = Graph::new();
         let a = src.add_scalar_param("free", ElementTy::F64);
         let root = src.element_wise(ElementWiseOp::Neg, vec![a], None);

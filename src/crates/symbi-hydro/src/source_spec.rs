@@ -15,7 +15,7 @@
 //   4. provenance preserved through composition — each `SourceSpec` carries a
 //      `NodeAnnotation`; the homomorphism (A7) requires every target preserve
 //      it under `RenderPolicy::Audit`.
-//   5. geometric sources are DERIVED, not declared — `Spherical` produces its
+//   5. geometric sources are DERIVED from the metric — `Spherical` produces its
 //      momentum source automatically from its scale factors / Christoffels;
 //      a regime that "forgot" its centrifugal term cannot exist.
 //
@@ -67,7 +67,7 @@ pub struct BuiltSource {
 /// declarative description of one additive RHS contribution. analogous to
 /// `LawSpec` but for the source half of the evolution equation.
 ///
-/// **identity by physics, not syntax**: two sources
+/// **identity by physics**: two sources
 /// are equal iff they declare the same `(kind, target_field)` pair —
 /// matching `LawSpec`'s identity discipline. the build_source fn pointer
 /// is implementation detail and excluded from the equality check.
@@ -114,7 +114,7 @@ pub mod source_params {
 // the source builders produce a self-contained `BuiltSource { graph, params,
 // outputs }`. but a downstream codegen path (the substrate's godunov kernel
 // builders, traced at `S = Gv` in `symbi-discretize`) needs to FUSE the
-// source's expression INTO the active kernel's graph — not run it as a
+// source's expression INTO the active kernel's graph, avoiding a
 // separate kernel pass. fusion at the IR level means the godunov RHS and the
 // source contribution share registers, share CSE, share one launch.
 //
@@ -431,7 +431,7 @@ pub fn cylindrical_geometric_sources(d: usize) -> Vec<SourceSpec> {
 /// cartesian's geometric sources — **deliberately empty**. this is the
 /// canary that proves clause 5 of the discipline: a flat-space metric
 /// has NO geometric sources to declare, and the system models that
-/// honestly rather than emitting a no-op overlay.
+/// honestly by emitting no overlay at all.
 pub fn cartesian_geometric_sources(_d: usize) -> Vec<SourceSpec> {
     Vec::new()
 }
@@ -480,7 +480,7 @@ pub mod gravity_params {
 
 /// declare the point-mass gravity leaves at compile-time dimension `D` and build the
 /// Plummer-softened carrier source [`PointMassGravity`]. `x` is the cell position (bound to
-/// the in-kernel CENTROID at splice, NOT a runtime scalar); `xm`/`gm`/`eps` are runtime
+/// the in-kernel CENTROID at splice, a compile-time position); `xm`/`gm`/`eps` are runtime
 /// scalars. shared by the momentum + energy builders so the softened `accel` field is defined
 /// in ONE place — the `1/(|x-xm|^2 + eps^2)^{3/2}` scaffolding hash-conses across both when the
 /// fused family bakes them into one kernel. MUST be called inside an open trace ([`lift_to_built`]).
@@ -548,7 +548,7 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 //
 // (energy entrainment, torque-controlled sink velocity, mach-aware boundary
 // layers are surface physics: they belong to the property algebra
-// (`symbi_ib::penalize`), not to this spec layer. the spec
+// (`symbi_ib::penalize`). the spec
 // layer encodes the canonical analytical source forms only.)
 // =============================================================================
 
@@ -682,7 +682,7 @@ pub fn rigid_body_penalty_sources(_d: usize) -> Vec<SourceSpec> {
 //   clause 3 (branchless conditionals) — compile-enforced (the distinct
 //             Numeric / OrderedNumeric bounds).
 //   clause 4 (provenance) — preserved via `NodeAnnotation`.
-//   clause 5 (geometric derived, not declared) — not applicable to user
+//   clause 5 (geometric sources derived from the metric) — not applicable to user
 //             sources (they're external physics by definition).
 //
 // any user source obeying the algebra::Op vocabulary slots in. no
@@ -940,7 +940,7 @@ pub fn user_sponge_energy_source(field: &BuiltSource, d: usize, inv_gm1: f64) ->
 
 /// identity passthrough of a contiguous OUTPUT SUBRANGE of a lowered user `field` as a standalone
 /// source: the selected outputs are written STRAIGHT to their conserved slot with no
-/// conservation-law wrap (like `raw`, but for a slice of the outputs rather than the whole field).
+/// conservation-law wrap (like `raw`, but scoped to a slice of the outputs).
 /// this is the mechanism that splits ONE multi-output injection field across the den/mom/nrg slots,
 /// so a single config additively deposits mass, momentum, and energy at once. `outputs` selects
 /// which of `field`'s outputs feed this slot (den: `0..1`; mom: `1..1+D`; nrg: `1+D..2+D`).
@@ -1361,7 +1361,7 @@ mod tests {
     // ----- gravity overlay -----------------------------------------------
     //
     // the cross-validation here goes against the analytical formula
-    // directly (not against a `Metric` method — gravity is non-metric).
+    // directly (gravity is non-metric, so no `Metric` method applies).
     // this proves the data captures the physics independently of any
     // existing helper, which is what makes the abstraction load-bearing
     // for the "no-metric" overlays (gravity / IB / user).
@@ -1482,7 +1482,7 @@ mod tests {
     #[test]
     fn point_mass_at_nonzero_position_uses_displacement_not_field_point() {
         // place the mass AWAY from origin and verify the source uses
-        // (x - xm), not x alone. catches a hardcoded-origin bug class.
+        // (x - xm), the displacement. catches a hardcoded-origin bug class.
         // mass at (1, 0, 0); field point at (3, 0, 0) — displacement is
         // (2, 0, 0), so the force points back along -x.
         let x = [3.0_f64, 0.0, 0.0];
@@ -1519,7 +1519,7 @@ mod tests {
     fn gravity_in_2d_collapses_cleanly() {
         // the gravity builder is D-generic — D=2 should produce the same
         // analytical formula projected to 2D. this proves the compile-time
-        // dispatch in `point_mass_momentum_source` covers every D, not just 3.
+        // dispatch in `point_mass_momentum_source` covers every D, D=2 included.
         let x = [3.0_f64, 4.0];
         let xm = [0.0_f64, 0.0];
         let gm = 1.0;
@@ -1556,7 +1556,7 @@ mod tests {
     // these are the load-bearing clause-3 tests. each builder is exercised
     // both INSIDE the body (where the mask fires, full source emitted) AND
     // OUTSIDE (where the mask gates to exactly zero). the boundary radius
-    // test proves the strict-inequality discipline (`<`, not `<=`).
+    // test proves the strict-inequality discipline (`<`, where `<=` would admit the boundary).
 
     /// helper: build the standard IB parameter vec at D=3, plus optional
     /// extras (vbody, penalty_strength, sink_rate) appended in declared order.
@@ -1652,7 +1652,7 @@ mod tests {
         // catches an inadvertent `<=` regression.
         let body_xm = [0.0_f64, 0.0, 0.0];
         let body_radius = 1.0;
-        // d = exactly 1.0 = body_radius. d^2 = 1 = R^2, NOT strictly less.
+        // d = exactly 1.0 = body_radius. d^2 = 1 = R^2, equal so the strict `<` fails.
         let x = [1.0_f64, 0.0, 0.0];
         let vel = [1.0_f64, 0.0, 0.0];
 
@@ -1837,7 +1837,7 @@ mod tests {
     #[test]
     fn user_defined_kind_is_distinct_from_every_other_kind() {
         // diagnostic axis check — UserDefined is its own discriminator,
-        // not silently routed into another kind for "convenience".
+        // kept distinct from every other kind.
         let user = uniform_acceleration_sources(3, true);
         let geom = spherical_geometric_sources(3);
         let grav = point_mass_gravity_sources(3, true);
@@ -1873,7 +1873,7 @@ mod tests {
         assert_ne!(g_sources[0].kind, grav_sources[0].kind);
     }
 
-    // ----- identity by physics, not syntax -----
+    // ----- identity by physics -----
 
     #[test]
     fn source_spec_equality_ignores_fn_pointer() {

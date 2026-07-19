@@ -1,7 +1,7 @@
 // =============================================================================
 // device_view_abi.rs
 //
-// **the View-struct ABI canary** (T4): a one-thread CUDA kernel that takes a
+// **the View-struct ABI canary**: a one-thread CUDA kernel that takes a
 // `__symbi_View` by value and writes back its `lo[0..4]`, `strides[0..4]` and
 // `extent[0..4]` into the buffer pointed to by `data`. the host then asserts the
 // 12 written values match the values originally placed in the View.
@@ -17,10 +17,9 @@
 // — eyeball + comment. a one-byte field reorder on either side would
 // otherwise show up only as garbled physics deep inside a hydro run.
 //
-// the kernel source duplicates the `__symbi_View` definition locally rather
-// than depending on the substrate's emitter preamble — the point of the
-// test is to verify both sides independently agree on the layout, not to
-// regression-test the emitter.
+// the kernel source declares its own `__symbi_View` locally; it does not reuse
+// the substrate's emitter preamble. the test verifies both sides independently
+// agree on the layout.
 //
 // run: cargo test --release -p symbi-xpu --features cuda --test device_view_abi
 // =============================================================================
@@ -33,7 +32,7 @@ use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
 // host-side mirror of the CUDA `__symbi_View` struct. MUST match the
 // substrate's `DeviceView` (substrate_gpu.rs) in layout. redeclared
-// here rather than imported because `DeviceView` is private to the symbi
+// here because `DeviceView` is private to the symbi
 // crate; the static asserts on that side + this round-trip lock both ends.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -87,8 +86,7 @@ fn device_view_abi_roundtrip() {
     };
 
     // JIT-compile + launch the one-thread probe — same path substrate_gpu.rs
-    // uses for every kernel, just with a hand-written source instead of one
-    // rendered from a substrate IR blob.
+    // uses for every kernel, here driving a hand-written source.
     let kernel = current_dispatcher().jit_kernel(ABI_PROBE_SRC, "abi_probe");
     let mut args = KernelArgs::new();
     args.push(&view);

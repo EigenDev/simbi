@@ -18,7 +18,7 @@ def test_level_context_supports_membership():
 
     class _Meta:
         dimensions = 2
-        regime = "srmhd"
+        regime = "rmhd"
         gamma = 2.0
         sound_speed = None
         is_mhd = True
@@ -35,8 +35,8 @@ def test_mhd_vector_dof_is_three_regardless_of_spatial_ndim():
     # setup still evolves the out-of-plane v_phi / b_phi. reading only ndim components dropped it.
     from simbi.reader.computation import _vector_dof
 
-    assert _vector_dof("srmhd", 2) == 3
-    assert _vector_dof("srmhd", 1) == 3
+    assert _vector_dof("rmhd", 2) == 3
+    assert _vector_dof("rmhd", 1) == 3
     assert _vector_dof("nmhd", 2) == 3
     assert _vector_dof("imhd", 1) == 3
     # hydro velocity has one component per spatial axis.
@@ -47,7 +47,7 @@ def test_mhd_vector_dof_is_three_regardless_of_spatial_ndim():
 
 def test_purely_toroidal_field_has_nonzero_magnetic_pressure():
     # a 2.5D toroidal wind carries only b3 = b_phi (b_r = b_theta = 0). the magnetic pressure must
-    # be 0.5 * b_phi^2, not zero — the reader was summing only the ndim in-plane components.
+    # be 0.5 * b_phi^2; summing only the ndim in-plane components drops b_phi and yields zero.
     from simbi.reader.computation import magnetic_pressure
 
     zero = np.zeros((4, 4))
@@ -55,13 +55,13 @@ def test_purely_toroidal_field_has_nonzero_magnetic_pressure():
     bfields = [zero, zero, b_phi]  # b1, b2, b3 = b_r, b_theta, b_phi
     velocity = [zero, zero, zero]  # static: no relativistic v.B / lorentz correction
 
-    pmag = magnetic_pressure(bfields, velocity, "srmhd")
+    pmag = magnetic_pressure(bfields, velocity, "rmhd")
     assert np.allclose(pmag, 0.5 * 4.0)
     assert np.all(pmag > 0.0)
 
 
 def test_relativistic_magnetic_pressure_uses_comoving_field():
-    # srmhd magnetic pressure is b^2/2 in the FLUID frame: b^2 = B^2/W^2 + (v.B)^2. a radial flow
+    # rmhd magnetic pressure is b^2/2 in the FLUID frame: b^2 = B^2/W^2 + (v.B)^2. a radial flow
     # with a toroidal field (v perpendicular to B, so v.B = 0) reduces to B_phi^2 / (2 W^2).
     from simbi.reader.computation import magnetic_pressure
 
@@ -72,7 +72,7 @@ def test_relativistic_magnetic_pressure_uses_comoving_field():
     velocity = [v_r, zero, zero]  # v.B = v_r*b_r = 0
 
     w_sq = 1.0 / (1.0 - 0.36)
-    pmag = magnetic_pressure(bfields, velocity, "srmhd")
+    pmag = magnetic_pressure(bfields, velocity, "rmhd")
     assert np.allclose(pmag, 0.5 * 4.0 / w_sq)
 
 
@@ -150,7 +150,7 @@ def test_first_tuple_validation_names_the_contract():
     with pytest.raises(ValueError, match="non-finite"):
         it = iter([(float("nan"), 0.1, 1.0)])
         _check_first_tuple(_P(), it)
-    # a good tuple is REPLAYED, not consumed.
+    # a good tuple is REPLAYED.
     it = _check_first_tuple(_P(), iter([(1.0, 0.1, 1.0), (2.0, 0.2, 2.0)]))
     assert next(it) == (1.0, 0.1, 1.0)
     assert next(it) == (2.0, 0.2, 2.0)
@@ -166,7 +166,7 @@ def test_steady_state_time_tolerates_nan_samples():
         t0 = steady_state_time(t, series, window=5.0)
     assert t0 is not None
 
-    # and a too-short series returns None instead of a gradient crash.
+    # and a too-short series returns None; a gradient on a single sample would crash.
     assert steady_state_time(np.array([1.0]), np.array([1.0])) is None
 
 

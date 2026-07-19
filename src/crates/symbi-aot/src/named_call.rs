@@ -124,7 +124,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
         let mut ordered: Vec<(BufHandle<'a, S>, Option<(&'a [i32], &'a [u32])>)> =
             Vec::with_capacity(want.len());
         for (field, is_out) in &want {
-            // match by canonical field identity, not the raw spelling: the typed manifest
+            // match by canonical field identity: the typed manifest
             // canonicalizes a buffer to one wire name (`prim.vel[0]`), but a caller may bind it
             // under the producer's secondary spelling (`prim.vel_0`). both parse to the same
             // FieldBind, so normalize both sides through it before comparing.
@@ -229,7 +229,7 @@ mod tests {
         let (mut rho, mut vel, mut pre) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
         let grid = [n as u32];
         let dom = [0i32];
-        // deliberately bind in a SCRAMBLED order to prove name-keying, not position.
+        // deliberately bind in a SCRAMBLED order to prove binding keys on field name; positional order is ignored.
         NamedKernel::new("rhd_c2p_1d")
             .output("prim.pre", &mut pre)
             .input("cons.nrg", &nrg)

@@ -43,7 +43,7 @@ where
 
 /// THE contiguous axis: the one `strides_from_extent` gives a stride of 1. every consumer that needs
 /// to know "which axis is adjacent in memory" — the CPU loop nest, the unit-stride index term, the
-/// vectorized inner loop, the GPU warp axis — must read it from HERE rather than assume a rank.
+/// vectorized inner loop, the GPU warp axis — must read it from HERE and not assume a fixed rank.
 /// assuming the wrong axis is silent: the code stays correct (the offset formula is still affine) and
 /// only the memory-access pattern degrades, which no correctness test can see.
 pub const CONTIGUOUS_AXIS: usize = 0;
@@ -235,7 +235,7 @@ mod laws {
     /// `unflatten` is the exact inverse of the layout's flat index. a driver that unflattens the
     /// OTHER way round (slowest axis fastest) still visits every cell exactly once — so no
     /// correctness test catches it — but it strides the hot loop by `extent[0]*extent[1]`. this law
-    /// is what makes that a compile-time-visible bug instead of a silent 2x.
+    /// is what surfaces that as a compile-time-visible bug; without it the mistake is a silent 2x.
     #[test]
     fn unflatten_inverts_the_flat_offset() {
         for extent in [vec![7usize], vec![7, 5], vec![4, 3, 2], vec![2, 128, 1]] {

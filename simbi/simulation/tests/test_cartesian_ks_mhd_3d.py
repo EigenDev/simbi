@@ -50,7 +50,7 @@ class _CartesianKsMhd3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
     spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_SCHILD)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD)]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD)]
     resolution: Annotated[tuple[int, int, int], ProblemParam((RES, RES, RES))]
     bounds: Annotated[
         list[tuple[float, float]],

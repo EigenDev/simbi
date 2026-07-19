@@ -22,8 +22,8 @@ def test_discovers_config_subclassing_an_imported_base(tmp_path: Path) -> None:
         "from base_cfg import BaseCfg\nclass DerivedCfg(BaseCfg):\n    pass\n"
     )
     found = _discover_problem_classes(str(tmp_path / "derived_cfg.py"))
-    # the derived config is runnable; the imported base belongs to base_cfg, not
-    # this script, so it is NOT surfaced.
+    # the derived config is runnable; the imported base is defined in base_cfg,
+    # so it is NOT surfaced.
     assert [name for name, _ in found] == ["DerivedCfg"]
 
 
@@ -40,7 +40,7 @@ def test_excludes_non_problem_helpers(tmp_path: Path) -> None:
 
 def test_multiple_runnable_classes_in_source_order(tmp_path: Path) -> None:
     # names deliberately reverse-alphabetical to prove the ordering is by source
-    # line, not by name.
+    # line.
     (tmp_path / "multi_cfg.py").write_text(
         "from simbi import SimbiProblem\n"
         "class Second(SimbiProblem):\n    pass\n"

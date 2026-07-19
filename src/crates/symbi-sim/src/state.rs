@@ -5,7 +5,7 @@
 // Executor, with types that work on both CPU and GPU via the xpu layer.
 //
 // SoA layout: conserved state is stored as separate fields per component
-// (den, mom[D], nrg) rather than one Field<Cons>. this is optimal for GPU
+// (den, mom[D], nrg). this is optimal for GPU
 // coalesced access. the gather/scatter bridge provides AoS access for
 // pointwise physics.
 //
@@ -87,7 +87,7 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
     type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> = FieldZero;
 }
 
-// the energy/pressure field storage stays `Option<Field>`, not a type-level `E::Slot`. the
+// the energy/pressure field storage stays `Option<Field>`. the
 // additive foundation above (`FieldEnergy`/`EnergyFieldSlot`/`FieldZero` + `Regime::Energy`) is
 // the type-level slot resolver; the field containers do not route their `nrg`/`pre` storage
 // through it (routing them would touch ~180 access sites across ~55 files plus the foreign-`Field`
@@ -170,8 +170,8 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 
     /// **the energy-slot accessor**: the ONE
     /// accessor for the `nrg` field. ALL readers route through this, so swapping the representation
-    /// (`Option<Field>` -> a type-level `E::Slot`) is a one-place change behind this method, not a
-    /// 180-site sweep. returns the backing field, or `None` when energy is absent (isothermal).
+    /// (`Option<Field>` -> a type-level `E::Slot`) is a one-place change behind this method; without
+    /// the accessor it would be a 180-site sweep. returns the backing field, or `None` when energy is absent (isothermal).
     #[inline]
     pub fn nrg_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.nrg.as_ref() }
 
@@ -227,7 +227,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 }
 
 /// primitive state in SoA layout. pre is None for isothermal regimes
-/// (pressure derived from eos, not stored). `NDIM` = grid dim, `DOF` = velocity-component
+/// (pressure is derived from the eos and never stored). `NDIM` = grid dim, `DOF` = velocity-component
 /// dim (decoupled — the `PrimFields<D>` alias fills `DOF = NDIM = D`).
 pub struct PrimFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
     pub rho: Field<Sc, NDIM, M>,
@@ -827,7 +827,7 @@ where
         self
     }
     /// the physical box `[lo, hi]` per axis — `dx` is derived as `(hi - lo) / cells` at `finish`
-    /// (so call `cells` too). the ergonomic common case: the domain is known, not the spacing.
+    /// (so call `cells` too). the ergonomic common case: the domain is known and the spacing is derived.
     pub fn bounds(mut self, lo: [f64; D], hi: [f64; D]) -> Self {
         self.x_lo = lo;
         self.bounds_hi = Some(hi);
@@ -1156,8 +1156,8 @@ impl<const D: usize> PartitionGeometry<D> {
 
     /// physical position of a STAGGERED quantity: per axis, [`Loc::Face`] samples the
     /// lower cell face and [`Loc::Center`] the cell center. this is the SINGLE source
-    /// of the half-cell offset — every staggered IC reads its coordinates here instead
-    /// of hand-writing `coord*dx` vs `(coord+0.5)*dx` (the Orszag-Tang point-symmetry
+    /// of the half-cell offset — every staggered IC reads its coordinates here, with no
+    /// hand-written `coord*dx` vs `(coord+0.5)*dx` (the Orszag-Tang point-symmetry
     /// bug class). honors non-uniform maps (Face -> map.face, Center -> map.center).
     #[inline]
     pub fn stagger_coord(&self, coord: [isize; D], loc: [Loc; D]) -> [f64; D] {
@@ -1221,7 +1221,7 @@ pub enum BoundaryType {
     /// standard ghost fill skips these faces.
     CoarseFine,
     /// a DRIVEN boundary: the ghost state is PRESCRIBED by a user DAG
-    /// (`build_boundary_dag`), not pulled from the interior. the `u16` indexes the kernel-set's
+    /// (`build_boundary_dag`). the `u16` indexes the kernel-set's
     /// boundary-DAG side table. standard ghost fill SKIPS these faces (like `CoarseFine`); the
     /// driven-boundary pass fills them by evaluating the DAG over the face's ghost band. enum stays
     /// `Copy`/`Eq` — the DAG lives in the side table, only its id rides here.
@@ -1278,8 +1278,8 @@ impl<const D: usize> From<BoundaryType> for Boundaries<D> {
 }
 
 /// the configuration errors `SimBuilder::allocate` surfaces BEFORE allocating fields (and the
-/// solver/regime mismatch the phase-2 wiring will check). a typed result rather than an
-/// `expect`/`panic` config seam.
+/// solver/regime mismatch the phase-2 wiring will check). a typed-result config
+/// seam.
 #[derive(Debug)]
 pub enum ConfigError {
     /// `.cells([..])` was never set.
@@ -1452,8 +1452,8 @@ where
 /// or writes. parametrized ONLY by storage shape — grid dim `NDIM`,
 /// vector dim `DOF`, memory space `Mem`, scalar `Sc` — NOT by the physics tags (`R`/`M`/`E`)
 /// or the executor (`S`). this is the keystone decoupling: a `KernelSet`
-/// takes `&FieldStore` and so carries 4 params instead of 8, and the energy/schema bounds
-/// that ripple off `R` become LOCAL to this one struct instead of an 80-site sweep.
+/// takes `&FieldStore` and so carries 4 params, and the energy/schema bounds
+/// that ripple off `R` become LOCAL to this one struct; without it they would be an 80-site sweep.
 pub struct FieldStore<
     const NDIM: usize,
     const DOF: usize,
@@ -1482,7 +1482,7 @@ pub struct FieldStore<
     // ---- mesh motion (ALE) ----
     pub motion: MotionState<f64>,
     // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it EXACTLY each
-    // (sub)stage instead of linearly extrapolating `motion.a`. None = static / linear.
+    // (sub)stage. None = static / linear.
     pub motion_law: Option<symbi_hydro::motion_law::MotionLaw>,
 
     // ---- immersed bodies (optional side-car) ----
@@ -1546,7 +1546,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
 }
 
 /// **the storage seam:** `SimStateGeneric` `Deref`s to its `FieldStore`. this is a
-/// DELIBERATE seam, not accidental `Deref`-as-inheritance: the `FieldStore` IS the sim's
+/// DELIBERATE seam; the `Deref` is not inheritance: the `FieldStore` IS the sim's
 /// substance (1300+ `sim.fields` / `sim.geom` / `sim.time` accesses), while `physics` /
 /// `ctx` are rare type-level side-cars reached explicitly (`sim.physics.regime`,
 /// `sim.ctx.exec`). routing the substance through ONE target keeps every storage access —
@@ -1686,8 +1686,8 @@ where
             // (`cell_geometry_gv`), so the covariant storage <-> metric-aware c2p round-trip
             // is exact per cell. the spelling is CHART-dependent:
             //   cartesian  — the face midpoint (lo + hi)/2 on every gridded axis; slot 0 is
-            //                a plain length coordinate, NOT a radius (the spherical
-            //                volume-weighted formula applied to x mislocates the metric by
+            //                a plain length coordinate (treating it as a radius and applying the
+            //                spherical volume-weighted formula to x mislocates the metric by
             //                O(dx^2/x), and degenerates on a sign-straddling cell of an
             //                origin-containing box).
             //   spherical  — the volume-weighted radial centroid r_vw = (3/4)(rh^4 - rl^4)/
@@ -2076,9 +2076,9 @@ where
 {
     /// reduce total mass / energy and max|div B| over this level's interior. cell
     /// volumes come from the block geometry so the sums are correct on curvilinear
-    /// grids (r^2 sin(theta) etc.), not just cartesian. returns `None` when the
+    /// grids (r^2 sin(theta) etc.) as well as cartesian. returns `None` when the
     /// fields are not host-accessible (a device-resident gpu run), so the caller
-    /// simply omits the diagnostics rather than reading device memory on the host.
+    /// simply omits the diagnostics.
     pub fn conservation_diag(&self) -> Option<ConservationDiag> {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
@@ -2086,8 +2086,8 @@ where
         let bg = self.geom.block_geometry(self.physics.metric);
         // lab-frame (physical) cell volumes: on a homologously expanding (ALE) mesh
         // the conserved density multiplies the PHYSICAL volume = comoving * a^n (n
-        // per geometry), so total mass/energy stay constant instead of drifting with
-        // a(t). a static mesh (a = 1) leaves the comoving volume unchanged.
+        // per geometry), so total mass/energy stay constant as
+        // a(t) evolves. a static mesh (a = 1) leaves the comoving volume unchanged.
         let a = self.motion.a;
         let den = self.fields.cons.den.view();
         let nrg = self.fields.cons.nrg.as_ref().map(|f| f.view());
@@ -2218,8 +2218,8 @@ where
 
     /// decimate the selected field (by cycle `index`) to a screen-sized slice for
     /// the live heatmap: block-average the interior (mid-plane in axes >= 2 for the
-    /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the SCREEN, not
-    /// the grid. a 1D grid yields a 1-row line profile. `None` off host memory.
+    /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the SCREEN size.
+    /// a 1D grid yields a 1-row line profile. `None` off host memory.
     pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
         self.field_slice_oriented(max_dim, index, 0, 0)
     }
@@ -2409,7 +2409,7 @@ where
         let s0 = if self.geom.x_lo[0] > 0.0 { 0.08 } else { 0.0 };
 
         // the TIGHT display bounding box of the annular sector, so a wedge fills
-        // its panel instead of floating in a mostly-NaN full-circle box: evaluate
+        // its panel (a full-circle box would leave it floating in mostly-NaN space): evaluate
         // the sector's (x, y) at both radii for the angular endpoints and every
         // quarter-turn extremum inside the span. meridional (x, y) = rho (sin, cos)
         // with theta from the +y pole; disk (x, y) = rho (cos, sin).
@@ -2565,8 +2565,8 @@ pub struct FieldDecimation {
     pub vmax: f64,
     pub name: String,
     /// true for a physical-shape (polar) slice: the renderer must letterbox to the
-    /// slice's aspect ratio instead of stretching to the panel — a circle drawn as
-    /// an ellipse defeats the projection. index-space rectangles stretch as before.
+    /// slice's aspect ratio; stretching to the panel would draw a circle as
+    /// an ellipse and defeat the projection. index-space rectangles stretch as before.
     pub preserve_aspect: bool,
 }
 

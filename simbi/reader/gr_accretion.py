@@ -10,8 +10,9 @@
 #   Mdot(r_ex) = - oint rho u^r sqrt(-g) dtheta dphi,   sqrt(-g) = r^2 sin(theta)
 #
 # velocity convention: the substrate stores the valencia CONTRAVARIANT 3-velocity
-# v^i (the eulerian-observer velocity, = u^i/W + beta^i/alpha), not the physical
-# orthonormal V^ihat. the lorentz factor and coordinate 4-velocity are then
+# v^i (the eulerian-observer velocity, = u^i/W + beta^i/alpha); the physical
+# orthonormal V^ihat differs by the spatial-metric scale factors. the lorentz
+# factor and coordinate 4-velocity are then
 #   W   = 1/sqrt(1 - gamma_ij v^i v^j),   u^r = W (v^r - beta^r/alpha).
 # getting this conversion wrong (e.g. treating v^r as orthonormal) produces a flux
 # that looks right at large r, where the metric flattens, and is garbage near the

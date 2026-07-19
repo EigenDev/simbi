@@ -72,7 +72,7 @@ def test_cartesian_ks_bh_preserves_x_y_symmetry() -> None:
     # the cartesian KS metric is EXACTLY symmetric under the x <-> y coordinate + index swap, so a
     # symmetric initial state on a square patch must evolve symmetrically under transpose to roundoff:
     # rho / pre transpose-symmetric, v_x at (i, j) == v_y at (j, i). the tolerance is roundoff
-    # accumulated over the run, NOT physics — any coordinate-role bug (an axis treated as radial, as
+    # accumulated over the run and reflects no physics — any coordinate-role bug (an axis treated as radial, as
     # the densitization lapse once did with r = x-coordinate) breaks it far above this.
     with tempfile.TemporaryDirectory() as d:
         rho, pre, v1, v2 = _run(64, d + "/")

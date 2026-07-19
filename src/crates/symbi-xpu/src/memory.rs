@@ -6,7 +6,7 @@
 // of an allocation in a given space.
 //
 // design:
-//   - memory spaces are types, not values. compile-time dispatch.
+//   - memory spaces are encoded as types, so the space is fixed at compile time (compile-time dispatch).
 //   - memory blocks are move-only. drop frees the allocation.
 //   - no layout knowledge here — strides, shapes, multi-dim indexing
 //     belong in the grid/field layer.

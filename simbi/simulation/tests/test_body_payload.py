@@ -5,8 +5,8 @@
 # `GravitationalSystemConfig.to_backend` / `body_payload` emit exactly the dict
 # tree the rust `BodyParams` reader consumes. the backend reads every key with an
 # unwrap_or default, so a silently dropped or renamed key becomes a wrong-physics
-# default rather than an error -- these tests pin the key set so that drift fails
-# loudly here instead.
+# default with no error raised -- these tests pin the key set so that such drift
+# fails loudly here.
 # =============================================================================
 import math
 
@@ -56,7 +56,7 @@ _ACCRETION_KEYS = {
 
 
 def _rigid_body() -> ImmersedBodyConfig:
-    # a spinning shaped wall (omega != 0 requires a shape); not two-way.
+    # a spinning rigid shaped wall (omega != 0 requires a shape).
     return ImmersedBodyConfig(
         capability=BodyCapability.RIGID,
         mass=1.0,

@@ -476,9 +476,9 @@ def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
 | `RHD` | Relativistic hydrodynamics | Gamma-ray bursts, relativistic shocks, stellar explosions |
 | `NMHD` | Newtonian magnetohydrodynamics | Classical MHD turbulence, blast waves |
 | `IMHD` | Isothermal MHD | Magnetized disks |
-| `SRMHD` | Relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
+| `RMHD` | Relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
 
-(`SRHD` still works as an alias for `RHD` — old configs keep running.)
+The `Spacetime` axis sets a run's relativity: `RHD`/`RMHD` on Minkowski are special-relativistic, on a curved spacetime general-relativistic. Checkpoints and configs written under the legacy `srhd`/`srmhd` slugs still load (mapped to `rhd`/`rmhd`).
 
 ### Spacetimes
 
@@ -731,4 +731,4 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 ---
 
 > Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool.
-The speed boost was just undeniable versus if I had taken the time to do it myself (during my finite postdoc). Sigh, drinking the koolaid sparingly...
+The developmental speed boost was just undeniable versus if I had taken the time to do it myself (during my finite postdoc). Sigh, drinking the koolaid sparingly...

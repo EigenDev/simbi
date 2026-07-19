@@ -4,8 +4,7 @@
 // flux correction (refluxing) for static mesh refinement
 // (SMR). single-coverage cap: ONE register per coarse-fine level-pair, sized to
 // the level's single refined box (`coverage`) — there is no per-patch register
-// fan-out, because a level refines exactly one box (this is SMR, not multi-patch
-// adaptive AMR). accumulates the
+// fan-out, because a level refines exactly one box (this is SMR). accumulates the
 // mismatch between coarse- and fine-level face fluxes at coarse-fine
 // boundaries, then applies a conservative correction to the coarse state:
 //   accumulate_coarse:  R -= F_coarse * A_coarse * w

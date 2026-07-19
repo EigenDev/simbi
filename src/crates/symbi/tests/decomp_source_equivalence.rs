@@ -6,8 +6,8 @@
 // `evolve_decomposed`, must reproduce the monolithic run to round-off.
 //
 // the source is a POSITION-DEPENDENT force `a = [x, 0]` (the expr DAG's VARIABLE_X1 -> the cell's
-// global x). this is the decisive cross-tile test: a tile that evaluated the source at its LOCAL
-// coordinate instead of its global one would diverge from the monolithic run at every cut. a
+// global x). this is the decisive cross-tile test: a tile that evaluated the source at its tile-LOCAL
+// coordinate would diverge from the monolithic run at every cut. a
 // constant force could not catch that bug. the source also exercises the energy work overlay
 // (S_nrg = mom . a) since Newtonian carries energy, so both overlays go through `source_apply`.
 //

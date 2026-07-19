@@ -5,7 +5,7 @@
 // invariant of the UCT master edge-EMF (`uct_master_emf`, ct_emf.rs). a prior bug
 // paired the advective weight a^L with the DOWNWIND face (anti-upwind):
 //   adv_x = -vbar_x (a^L by_E + a^R by_W)   [WRONG: a^L -> East/downwind]
-// instead of the correct upwind pairing:
+// the correct upwind pairing is:
 //   adv_x = -vbar_x (a^L by_W + a^R by_E)   [a^L -> West/upwind]
 // for SYMMETRIC edge speeds (a^L == a^R, e.g. subsonic orszag-tang) the two are
 // identical -> the bug is INVISIBLE. supersonically (a^L >> a^R), the wrong form

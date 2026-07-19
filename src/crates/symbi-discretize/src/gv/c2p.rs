@@ -105,8 +105,9 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// `Op::IterateInline` (body traced once); `max_iters` bakes the fixed loop count. this
 /// is the FIRST iterative gv kernel — replaces the hand-written `rhd_c2p` Expr builder.
 ///
-/// numerically equivalent within ULP, NOT bit-identical (the builder hand-cancels rho in
-/// `c2`/`h`; the EOS-generic form keeps `eos.pressure`/`sound_speed_sq`/explicit `h`).
+/// numerically equivalent within ULP; the values differ in the last bits because the builder
+/// hand-cancels rho in `c2`/`h` while the EOS-generic form keeps
+/// `eos.pressure`/`sound_speed_sq`/explicit `h`.
 /// the host wrapper's input guard + post-hoc diagnostics are host-only — the kernel
 /// computes the raw recovery, exactly as the substrate already does.
 pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -240,7 +241,7 @@ where
 /// RMHD vectors are ALWAYS 3-component (the physics is 3D; grid symmetry handles the
 /// 1D/2D cases), so this always traces `rmhd_recover::<Gv, 3>` — `ndim` only selects
 /// the emit grid loop. reads the 8-field conserved (den, mom_{0,1,2}, nrg, mag_{0,1,2})
-/// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through (CT-evolved, not recovered).
+/// + gamma; writes (rho, vel_{0,1,2}, pre). B passes through (CT-evolved, so c2p does not recover it).
 pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding, in the substrate's field-read order: den, mom, nrg (tau), mag, gamma.
@@ -367,7 +368,7 @@ pub fn rmhd_c2p_gr_gv(
 // wave speeds (cheap enough to compute inline in the flux from the reconstructed
 // face states; NO per-cell materialization needed, unlike the RMHD quartic). all
 // three builders trace the SAME `NewtonianMhd` carrier-generic physics validated
-// at f64 in symbi-hydro. B passes through c2p unchanged (CT-evolved, not recovered).
+// at f64 in symbi-hydro. B passes through c2p unchanged (CT-evolved, so c2p does not recover it).
 // =============================================================================
 
 /// trace the newtonian-MHD c2p — the carrier-safe algebraic `nmhd_recover` at

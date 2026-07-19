@@ -2,8 +2,8 @@
 // dispatch_kernel_coverage.rs
 //
 // every CLI-reachable (regime x dimension x geometry) must have EVERY kernel family its substrate
-// requests emitted in the AOT registry — not just the face-flux family that `solver_coverage_gate.rs`
-// covers. per step the substrate builds, on a FLAT (Minkowski) metric:
+// requests emitted in the AOT registry, spanning past the face-flux family alone. per step the
+// substrate builds, on a FLAT (Minkowski) metric:
 //   - `{prefix}_godunov_stage{geom}_{D}d`   (the conserved update)
 //   - `{prefix}_wave_speed_map{geom}_{D}d`  (the CFL bound)
 //   - `rmhd_bcell_godunov_{euler,rk2}{geom}_{D}d`   (mhd out-of-plane B predictor, D < DOF)
@@ -11,14 +11,14 @@
 // a `(dims, coords)` whose dispatch arm exists but whose kernel was never baked panics MID-RUN at
 // `expect_kernel` (symbi-exec/layout.rs). this asserts each name the flat dispatch can request either
 // resolves in the registry OR is a KNOWN_UNBAKED gap with a recorded reason — so a NEW gap (a chart
-// that regresses out of the bake) fails here instead of at a user's first step.
+// that regresses out of the bake) fails at this gate ahead of a user's first step.
 //
 // SPACING IS NOT IN THE NAME: it is a per-axis RUNTIME kernel scalar (`map_kind_{ax}`: 0 uniform,
 // 1 log), so ONE kernel per (regime, geometry) serves uniform, log-radial, log-theta, ... — there is
 // no `_logr` name axis to enumerate. the log paths are exercised by physics gates (gr_bondi,
-// mhd_cyl_rz_logr, michel-logr), not by name here.
+// mhd_cyl_rz_logr, michel-logr).
 //
-// PREFIX MAP (the name protocol is per-family, not one slug per regime): the godunov + c2p families
+// PREFIX MAP (the name protocol is per-family, each family picking its own prefix): the godunov + c2p families
 // use the regime prefix; the wave-speed family uses rhd->"rhd" but adiabatic->"iso" (Newtonian
 // shares the isothermal cs map) and iso->"iso"; the mhd families use the regime prefix; the bcell
 // predictor + ct curl are always "rmhd_" (faraday induction is regime-agnostic).
@@ -32,9 +32,9 @@ use symbi::regimes::substrate_kernels::{geom_suffix, kernel_exists, mhd_geom_suf
 use symbi_geometry::Geometry;
 
 // known-unbaked flat combos the dispatch can request that are DELIBERATELY not baked (they fail
-// loud at dispatch rather than running silently). empty: every flat gap this gate surfaced — 1D
+// loud at dispatch). empty: every flat gap this gate surfaced — 1D
 // curvilinear MHD (spherical + cylindrical), the 2D spherical nmhd/imhd wave-speed slug bug, and
-// (formerly) the log-radial charts — is now baked / covered (spacing is runtime, not a name). a NEW
+// (formerly) the log-radial charts — is baked / covered (spacing is a runtime scalar). a NEW
 // gap fails the test until it is baked or listed here.
 const KNOWN_UNBAKED: &[&str] = &[];
 

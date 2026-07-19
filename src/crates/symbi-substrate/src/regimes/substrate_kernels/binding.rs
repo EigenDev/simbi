@@ -24,13 +24,12 @@ use super::params::ScalarBind;
 
 // ---- metadata-driven dispatch -------------------------------------
 //
-// instead of each method hand-reconstructing a kernel's buffer order (which depends on
-// ncomp / axis-roles / curvilinearity — the source/wave-speed/ghost ordering quirks), the
-// runtime reads the buffer manifest straight off the serialized artifact: `kernel_bindings`
-// returns each `(runtime_path, is_output)` in canonical buffer order, and `resolve_path`
-// maps a path ("prim.vel[2]", "mom_flux_1[0]", "cons.mom_2", ..) to the sim field. one
-// resolver serves every regime + every geometry; the axis-role velocity reorderings fall
-// out of the recorded paths, not hand code.
+// the runtime reads a kernel's buffer order straight off the serialized manifest. buffer
+// order depends on ncomp / axis-roles / curvilinearity (the source/wave-speed/ghost ordering
+// quirks); `kernel_bindings` returns each `(runtime_path, is_output)` in canonical buffer
+// order, and `resolve_path` maps a path ("prim.vel[2]", "mom_flux_1[0]", "cons.mom_2", ..) to
+// the sim field. one resolver serves every regime + every geometry; the axis-role velocity
+// reorderings fall out of the recorded paths.
 
 /// parsed buffer manifest per kernel name (path, is_output), cached — the IR is a const
 /// `&str`; parse it once.
@@ -41,7 +40,7 @@ type FieldVec<'a, Sc, const D: usize, Mem> = smallvec::SmallVec<[&'a Field<Sc, D
 // bind a kernel's manifest paths to sim fields via `resolve`, split into (inputs, outputs).
 // replaces the prior `[Option<&Field>; 48]` + `from_raw_parts` niche transmute (duplicated at
 // both call sites) with the SAME zero-copy intent and ZERO unsafe — this binding split is a
-// per-launch step, not per-cell, so the SmallVec collection cost is irrelevant. the resolver
+// per-launch step amortized over every cell, so the SmallVec collection cost is irrelevant. the resolver
 // closure carries the per-site context (the pressure / scratch overrides + flux direction).
 pub(crate) fn bind_manifest<'a, Sc, const D: usize, Mem>(
     bindings: &[(FieldRef, bool)],
@@ -144,7 +143,7 @@ pub(crate) fn kernel_scalar_kinds(name: &str) -> Arc<[(ScalarBind, bool)]> {
 /// region outside which every output is exactly zero, as serialized in the
 /// neutral IR blob. `None` = the artifact declares nothing (= Everywhere).
 /// dispatch evaluates a Ball's center/radius against its own scalar table to
-/// derive reduction / launch regions instead of hand-deriving boxes.
+/// derive reduction / launch regions directly from the ball geometry.
 pub(crate) fn kernel_output_support(name: &str) -> Option<Arc<symbi_ir::Support>> {
     static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<symbi_ir::Support>>>>> =
         OnceLock::new();
@@ -227,14 +226,14 @@ where
     let mhd = || f.mhd.as_ref().expect("mhd path requires MHD fields");
 
     // the path was parsed to a typed `FieldRef` ONCE at manifest load (kernel_bindings /
-    // dispatch_runtime_ir), not here — the dispatch hot path is string-free. this is an
+    // dispatch_runtime_ir); the dispatch hot path is string-free. this is an
     // exhaustive match: adding a `FieldRef` variant is a compile error until bound.
     match fref {
         FieldRef::PrimRho => &f.prim.rho,
         // pressure is supplied by the CALLER as `pre` — energy regimes pass `sim.fields.prim.pre`,
-        // iso passes the kernel-set's substrate-owned pressure (`cs^2*rho`). it MUST be the override,
-        // NOT `sim.fields.prim.pre`: iso ALSO allocates `sim.fields.prim.pre` for GPU (an empty
-        // field), so deriving it from the sim binds the wrong buffer (the iso-GPU dt bug).
+        // iso passes the kernel-set's substrate-owned pressure (`cs^2*rho`). the override is
+        // authoritative: iso ALSO allocates `sim.fields.prim.pre` for GPU as an empty field, so
+        // deriving pressure from the sim binds the wrong, unfilled buffer.
         FieldRef::PrimPre => pre.expect("resolve_path: 'prim.pre' bound but no pressure override provided"),
         FieldRef::PrimVel(k) => &f.prim.vel[k as usize],
         // the cell-centered B (bcell) is the MHD primitive `mag`; the curvilinear MHD geo-source
@@ -243,7 +242,7 @@ where
         FieldRef::PrimMag(k) => &mhd().bcell[k as usize],
         FieldRef::State { slot, comp } => state(slot, comp),
         // the flux-divergence aliases: the per-direction flux buffers under the `*_flux`
-        // spelling (the axis rides in the ref, not in `dir`).
+        // spelling (the axis rides in the ref itself).
         FieldRef::MassFlux(ax) => &f.flux[ax as usize].den,
         FieldRef::NrgFlux(ax) => f.flux[ax as usize].nrg_field().expect("flux.nrg"),
         FieldRef::MomFlux { comp, axis } => &f.flux[axis as usize].mom[comp as usize],

@@ -39,7 +39,7 @@ fn close(a: f64, b: f64, ctx: &str) {
 fn neumann_ghost_extrapolates_the_prescribed_gradient() {
     let (q_rho, q_vel, q_pre) = (0.5, -0.3, 1.0);
     // NON-uniform density: only the EDGE cell holds RHO; the ghosts hold a decoy. this pins that the
-    // fill reads the EDGE (outflow source), not the ghost's own (stale) value.
+    // fill reads the EDGE (outflow source); a read of the ghost's own value would return the stale decoy.
     let out = KernelRun::new(neumann_ghost_fill_gv(1, 1, true, &[Spacing::Uniform]))
         .grid([NX])
         .compute_window([0], [2]) // the two lo ghosts

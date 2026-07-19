@@ -202,7 +202,7 @@ pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, Vec<(String, 
 
 /// the SPINNING-KERR lattice-map ghost fill — `iso_ghost_fill_gv` (2D grid, swirl DOF = 3)
 /// with the azimuthal ghost copied through the ANGULAR-MOMENTUM variable
-/// w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r instead of raw v^phi. a frame-dragging
+/// w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r. a frame-dragging
 /// state (S_phi = 0) satisfies w = 0 at every radius; a raw v^phi copy plants the source
 /// cell's dragging velocity at the ghost's DIFFERENT (r, theta), violating the dragging
 /// relation there and generating boundary S_phi at truncation scale. the w copy keeps the

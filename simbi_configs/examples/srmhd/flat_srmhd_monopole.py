@@ -67,7 +67,7 @@ class FlatSrmhdMonopole(SimbiProblem):
     coord_system: Annotated[
         CoordSystem, ProblemParam(CoordSystem.SPHERICAL, description="coordinate system")
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, cli=True, description="solver")]
     ct_method: Annotated[
         CtMethod, ProblemParam(CtMethod.UCT, cli=True, description="CT edge-EMF method")

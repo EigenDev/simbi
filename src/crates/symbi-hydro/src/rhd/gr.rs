@@ -8,7 +8,7 @@
 // gamma/gamma^{-1} (via `SpatialMetric`) + the lapse `alpha`.
 //
 // the GR flux kernel (the `_schw`/`_ks` bake) uses this via `riemann::hlle_with_speeds`, so GR is a
-// DIVERGENT KERNEL, not a change to the shared flat `Rhd` — the same principle the densitization +
+// DIVERGENT KERNEL that leaves the shared flat `Rhd` untouched — the same principle the densitization +
 // shift-flux kernels already follow. `prim.vel` is the CONTRAVARIANT velocity `v^i` (the valencia
 // velocity; = the physical V under identity gamma).
 // =============================================================================
@@ -74,7 +74,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
             return C2pResult::err(floored, code);
         }
         // the metric-aware recovery: |S|^2 = gamma^{ij} S_i S_j, then the raised v^i (`rhd_recover`
-        // already contracts with `self.metric`). the SR->GR difference is the metric VALUE, not new code.
+        // already contracts with `self.metric`). the SR->GR difference lives entirely in the metric VALUE; the code path is shared.
         let prim = rhd_recover(eos, cons, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);

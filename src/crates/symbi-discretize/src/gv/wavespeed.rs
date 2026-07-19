@@ -12,7 +12,7 @@ use symbi_ir::dual::Dual;
 
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
-/// EXACT closed-form fast magnetosonic, not a bound; it is already cheap) folded
+/// EXACT closed-form fast magnetosonic; it is already cheap) folded
 /// with the geometry inverse-width into `lambda = max_d (max(|sl|,|sr|) inv_w_d)`.
 /// the SAME speed the flux's HLLE consumes (one physics, two consumers).
 pub fn nmhd_wave_speed_map_gv(
@@ -154,7 +154,7 @@ where
     // never enter the graph — `wave_speeds_axis` reads only the normal velocity `vel[axes[d]]`.
     // the cell-CENTER coordinate on the grid axis carrying COORDINATE `target` (radial = 0, polar =
     // 1), for the physical-velocity scale factors below. spacing-aware (log grids evaluate the metric
-    // scale factors at the geometric-mean radius, not ~r_min). `None` if `target` is not a grid axis.
+    // scale factors at the geometric-mean radius). `None` if `target` is not a grid axis.
     let coord_at = |target: usize| -> Option<Gv> {
         axes.iter().position(|&c| c == target).map(|d| gv_cell_center(d, spacing))
     };
@@ -200,7 +200,7 @@ where
     // characteristic root BEFORE the max|.|, which the multiplicative form cannot express. the lapse /
     // shift are radial-only, evaluated at the uniform-centroid cell radius (coord slot 0); flat ->
     // None -> the SR CFL untouched (bit-identical). the factors come from the `Metric` trait (the
-    // single ADM seam), not per-spacetime formulas inlined here.
+    // single ADM seam).
     let gr_radius: Option<Gv> = match spacetime {
         Spacetime::Minkowski => None,
         _ => {
@@ -369,8 +369,8 @@ pub fn kerr_wave_speed_map_gv(
     begin_trace();
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
     // spacing-aware cell centers: the radial axis may be LOG (kerr log-radial is baked), so the
-    // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius, not the uniform
-    // ~r_min. theta is uniform -> bit-identical to the old midpoint.
+    // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
+    // uniform -> bit-identical to the old midpoint.
     let r = gv_cell_center(0, spacing);
     let th = gv_cell_center(1, spacing);
     let mass = Gv::scalar("schwarzschild_mass");
@@ -419,7 +419,7 @@ pub fn rhd_wave_speed_map_gv(
 
 
 /// trace the RMHD CFL wave-speed map at `S = Gv` — the MAGNETOSONIC UPPER BOUND
-/// (`rmhd_magnetosonic_cfl_speeds`), NOT the full Mignone & Del Zanna quartic. the CFL needs
+/// (`rmhd_magnetosonic_cfl_speeds`). the CFL needs
 /// only a stable upper bound on the signal speed, and the bound is ~25x cheaper than the
 /// quartic (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, ALL of which trace into the
 /// kernel because `S::select` evaluates every arm). the quartic stays on the Riemann/flux
@@ -982,7 +982,7 @@ mod m1_log_radius_tests {
         let node = gv_cell_center(0, &[Spacing::Log]).node();
         let (r_min, slope, i) = (3.0_f64, 0.02_f64, 10.0_f64);
         // spacing is now a runtime scalar: select the log map (map_kind_0 = 1); the `Spacing::Log`
-        // builder arg is vestigial (the face map reads `map_kind`, not the codegen enum).
+        // builder arg is vestigial (the face map reads `map_kind`).
         let got = eval(node, &[("x_lo_0", r_min), ("dx_0", slope), ("_coord_0", i), ("map_kind_0", 1.0)]);
         end_trace();
         let geomean = r_min * 10f64.powf((i + 0.5) * slope); // sqrt(face_i * face_{i+1})

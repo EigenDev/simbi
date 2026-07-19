@@ -149,7 +149,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     /// `let built = build_user_source(&cfg, has_energy)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
     pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
-        // has_energy = true is the AUTHORITY here (Newtonian's RegimeSpec), not caller-supplied —
+        // has_energy = true is the AUTHORITY here (Newtonian's RegimeSpec) —
         // the set IS the regime. validation of the source vs the regime happened at
         // `build_user_source(cfg, &NEWTONIAN_SPEC)`.
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
@@ -157,7 +157,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     }
 
     /// attach a runtime user source AND route it through the FUSED host path — the
-    /// source rides INSIDE the Cranelift-JIT'd godunov stage (one launch), not as a separate pass.
+    /// source rides INSIDE the Cranelift-JIT'd godunov stage (one launch).
     /// same source, faster execution; bit-for-bit identical to `with_runtime_source` (the two-pass).
     /// host + f64 only; otherwise it transparently falls back
     /// to the two-pass.
@@ -168,7 +168,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     }
 
     /// enable source fusion WITHOUT a user source: an immersed body (gravity + accretion) folds into
-    /// the godunov stage on host+f64 instead of a separate `body_source` pass. the body-only twin of
+    /// the godunov stage on host+f64, sparing a separate `body_source` pass. the body-only twin of
     /// `with_fused_runtime_source`; bit-identical to the two-pass, falls back off-host / non-f64 /
     /// JIT-miss. the production (py) path sets this so a pure-gravity run fuses; the direct-construction
     /// test path leaves it off (the two-pass body reference).

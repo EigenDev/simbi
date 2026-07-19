@@ -12,7 +12,7 @@
 // own cells from the body's GLOBAL position. body motion is prescribed (here: fixed) and the
 // backward force/accreted-mass feedback is DIAGNOSTICS-only (it never re-enters the fluid or the
 // body's gravitating mass), so the per-tile fluid is correct with no cross-tile reduction. the
-// accreted-mass DIAGNOSTIC sum across tiles is a separate concern, not fluid correctness.
+// accreted-mass DIAGNOSTIC sum across tiles is a separate concern from the fluid correctness this test checks.
 //
 // cpu-only + 2d: same exchange index math as the gpu path; the fast iteration loop. a tile that
 // applied the body at a wrong (local) coordinate, or that failed to remove sink mass at the cut,

@@ -253,8 +253,8 @@ fn select_broadcasts_scalar_cond_to_vector_branches() {
 
 #[test]
 fn cuda_abs_emits_ternary_not_fabs() {
-    // emit `(x < 0.0 ? -x : x)` (the carrier's ternary abs), not the
-    // libdevice fabs() whose IEEE 754-2008 NaN/signed-zero semantics
+    // emit `(x < 0.0 ? -x : x)` (the carrier's ternary abs); libdevice
+    // fabs() would apply IEEE 754-2008 NaN/signed-zero semantics that
     // differ at shock-edge primitives.
     let mut g = Graph::new();
     let x = g.add_scalar_param("x", ElementTy::F64);

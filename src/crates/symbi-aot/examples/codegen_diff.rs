@@ -46,7 +46,7 @@ fn parse_arg<T: std::str::FromStr>(flag: &str, default: T) -> T {
 
 // generate a million-cell field of physically-realistic RMHD prims. uses a
 // deterministic LCG so both paths see EXACTLY the same input — any disagreement
-// is then pure floating-point pattern, not initial-condition skew.
+// is then pure floating-point pattern from the shared input.
 fn make_fields(
     n: usize,
 ) -> (

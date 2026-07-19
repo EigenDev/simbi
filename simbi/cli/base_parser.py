@@ -68,7 +68,7 @@ class BaseParser(ArgumentParser):
             args = sys.argv[1:]
 
         # no try/except: a real parse error must surface through error() with its
-        # own message, not be swallowed into a generic help screen.
+        # own message.
         parsed_args, argv = super().parse_known_args(args, namespace)
         self.command = getattr(parsed_args, "command", "") or ""
         setattr(parsed_args, "main_parser", self)

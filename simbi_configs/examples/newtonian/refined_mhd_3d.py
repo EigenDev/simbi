@@ -44,7 +44,7 @@ class RefinedMhd3D(SimbiProblem):
         ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
     ]
     regime: Annotated[
-        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+        Regime, ProblemParam(Regime.RMHD, description="physics regime")
     ]
     solver: Annotated[
         Solver, ProblemParam(Solver.HLLD, description="numerical solver")

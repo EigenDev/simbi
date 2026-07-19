@@ -35,7 +35,7 @@ use super::types::Solver;
 /// speed), reduce by max, form `dt = cfl / lambda_max`. the scalar tail is the SHARED
 /// `[gamma, <widths>]` (Cartesian inv_dx, else interleaved x_lo,dx — matching the kernel's
 /// cfl_inv_widths dispatch). the field buffers (rho, the per-axis velocities — for the
-/// axis-role grids the GRIDDED `vel[axes[d]]`, not vel_0..D — and pre) are bound by the
+/// axis-role grids the GRIDDED `vel[axes[d]]` — and pre) are bound by the
 /// kernel's recorded manifest via `dispatch_named`; `pre` overrides "prim.pre" (iso's
 /// substrate-owned pressure). `prefix` is "iso" (iso + adiabatic share the map) or "rhd".
 pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
@@ -676,7 +676,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     // the combined kernel wrote MAX_BODIES*(D+5) full-domain scratch fields per step
     // (~800 MB of traffic at 128^3) to integrate quantities supported on the sink.
     // curvilinear grids keep the combined kernel: the support box is a coordinate
-    // ball, not an index-aligned box, so the restriction does not apply directly.
+    // ball spanning a non-rectangular index region, so the restriction does not apply directly.
     if sim.geom.coords == symbi_geometry::Geometry::Cartesian {
         dispatch_body_feedback_split(sim, dt, gamma);
         return;
@@ -996,7 +996,7 @@ fn shaped_penalize_gv(
 
 /// build (or fetch from the process cache) the device IR for a shaped porous wall. mirrors
 /// `shaped_penalize_kernel` but emits the backend-neutral blob (`prepare` + `prepared_to_ir`, the
-/// same lowering the AOT registry bakes in build.rs) instead of cranelift-compiling. keyed by the
+/// same lowering the AOT registry bakes in build.rs) for a device backend. keyed by the
 /// shape's structural repr + dimension, so a moving body reuses the one blob. the kernel name
 /// embeds a per-shape id so the engine's render cache (keyed by name) never returns another shape's
 /// descriptor; the module cache is content-addressed, so it is safe regardless.
@@ -1146,8 +1146,9 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     // the bbox. on a CARTESIAN grid the shape's bounding ball floors/ceils to an index box: a
     // STATIC body uses the tight ball at the body position (center pos+lc, radius lr); a SPINNING
     // body sweeps its shape through every orientation, so the mask reaches |lc| + lr from the
-    // position (center pos). OFF-Cartesian the support is a COORDINATE ball, not index-aligned (a
-    // centered body masks a full theta/phi ring), so dispatch over the whole interior — the mask is
+    // position (center pos). OFF-Cartesian the support is a COORDINATE ball spanning a
+    // non-rectangular index region (a centered body masks a full theta/phi ring), so dispatch over
+    // the whole interior — the mask is
     // an exact zero outside the physical ball by tanh saturation, so this is correct, just
     // unoptimized (the same choice the AOT sphere path makes off-Cartesian).
     let bbox = if cartesian {
@@ -1401,9 +1402,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let name: &str = &name_owned;
         // the reduction/dispatch box. on a Cartesian grid the kernel's declared
         // support ball clamps to an index box (identical to the feedback
-        // drain). off Cartesian the support ball is a COORDINATE ball,
-        // not an index-aligned box (a centered accretor masks a full phi-ring, whose
-        // index extent is every phi cell, NOT `center_phi +- r_cut`), so dispatch
+        // drain). off Cartesian the support ball is a COORDINATE ball
+        // spanning a non-rectangular index region (a centered accretor masks a full
+        // phi-ring, whose index extent spans every phi cell), so dispatch
         // over the full interior — the mask is an exact zero outside the physical
         // ball by tanh saturation, so this is correct, just unoptimized.
         let names = super::binding::kernel_scalar_names(name);
@@ -1499,7 +1500,7 @@ pub fn dispatch_body_source_iso<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// ISOTHERMAL backward feedback: like `dispatch_body_feedback` but reads `prim.pre`
-/// instead of `cons.nrg` (manifest order: cons.den, mom_0.., prim.pre).
+/// for the energy slot (manifest order: cons.den, mom_0.., prim.pre).
 pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
@@ -1705,7 +1706,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         }
     });
     // PoC: drive the flux dispatch over a `BlockGrid` cover of the face domain
-    // (env `SYMBI_FLUX_BLOCK`) instead of one whole-domain launch. the blocks
+    // (env `SYMBI_FLUX_BLOCK`), one launch per block. the blocks
     // PARTITION `face` (the proven law), and the flux is a pure function of the
     // prim stencil per face cell, so every face flux is computed exactly once with
     // identical inputs -> bit-identical to the single dispatch. this validates the
@@ -1855,7 +1856,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
 /// gen_godunov_euler_fused` for this regime/ndim (e.g., `"uniform_accel"`). `scalars`
 /// covers every spec-declared scalar param the spec's `BuiltSource` declares
 /// (`g_ext_k`, `gm`, `xm_k`, `body_radius`, ...) — anything missing surfaces as a
-/// panic at `dispatch_godunov_with_sources`'s resolver, not silent zero-fill.
+/// panic at `dispatch_godunov_with_sources`'s resolver (never a silent zero-fill).
 #[derive(Clone, Debug)]
 pub struct FusedSourceBinding {
     pub source_id: String,

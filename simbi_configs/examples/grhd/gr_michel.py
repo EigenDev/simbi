@@ -8,7 +8,7 @@
 # shrinking at the truncation order under grid refinement. this makes the config
 # the accuracy benchmark for the schwarzschild valencia path (flux densitization,
 # geodesic sources, banyuls-font wave speeds), complementing the uniform-gas
-# transient in gr_bondi.py which tests development, not accuracy.
+# transient in gr_bondi.py which tests development.
 #
 # the solution (shapiro & teukolsky ch. 14, G = c = 1): two flow invariants,
 #   baryon flux      r^2 rho u = jm            (u = |u^r|, proper radial velocity)

@@ -3,7 +3,7 @@
 //
 // the SYMBOLIC keystone proof that the cartesian 3D constrained-transport curl
 // preserves div(B) = 0 — by polynomial-coefficient cancellation on the traced IR
-// DAG, NOT a numerical 1e-12 evolve test (rmhd_ct_curl3d_divb.rs is that one).
+// DAG at graph-build time; the numerical 1e-12 evolve test lives in rmhd_ct_curl3d_divb.rs.
 //
 // for each face axis `dir`, `rmhd_ct_curl_3d_dir_gv` traces `b_new = b + dt*curl`
 // whose leaves are edge-emf field reads at KNOWN integer stencil offsets.

@@ -15,8 +15,8 @@ use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarz
 /// primitive (rho, v_{0,1,2}, pre, B_{0,1,2}) to the face, then the canonical
 /// `riemann::hlle(&NewtonianMhd, ...)`. unlike `rmhd_flux_gv`, the Davis fan
 /// speeds are computed INLINE by `hlle` from the reconstructed L/R states (the
-/// closed-form magnetosonic is cheap) rather than read from a materialized
-/// per-cell field — one fewer kernel. `ndim` is the reconstruction grid; `dir`
+/// closed-form magnetosonic is cheap), avoiding a materialized
+/// per-cell field and its kernel. `ndim` is the reconstruction grid; `dir`
 /// the sweep axis (RMHD/NMHD are fixed 3D in the velocity/field components).
 // shared NMHD face-flux reconstruction: bind gamma + theta, PLM-reconstruct the
 // 8-component MHD primitive (rho, v_{0..2}, pre, B_{0..2}) to the face. assumes
@@ -184,7 +184,7 @@ pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(S
 // =============================================================================
 // face flux — PLM reconstruction (Gv stencil) composed with the carrier-generic
 // `riemann::hlle` (symbi-hydro). the reconstruction is codegen-only (the host uses
-// the compiled kernel, not a DomainForEach); the HLLE physics is the SINGLE source.
+// the compiled kernel in place of a DomainForEach); the HLLE physics is the SINGLE source.
 // =============================================================================
 
 /// the moving-mesh grid velocity at the face this thread owns:
@@ -711,7 +711,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     // the smem tile: reconstruction is 1D ALONG `dir`, so the
     // tile is a thin SLAB — halo on axis `dir` only, transverse axes unextended.
     // the tiled set is derived from the graph (the shifted `LoadAt` fields: the 8
-    // reconstructed prim + the 2 per-cell wave speeds), NOT a hand-kept list.
+    // reconstructed prim + the 2 per-cell wave speeds), computed automatically without a hand-kept list.
     let k = end_trace();
     let stencil_keys = k.stencil_read_field_keys();
     if stencil_keys.is_empty() {
@@ -1027,7 +1027,7 @@ pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, Fiel
 
 /// RMHD HLLC face flux — Mignone-Bodo (2006), null vs non-null normal B-field
 /// branch. mirrors `rmhd_flux_gv` (8-component MHD primitive) but routes the
-/// reconstructed L/R state through `riemann::hllc_rmhd` instead of `hlle`.
+/// reconstructed L/R state through `riemann::hllc_rmhd`; `rmhd_flux_gv` routes through `hlle`.
 pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);

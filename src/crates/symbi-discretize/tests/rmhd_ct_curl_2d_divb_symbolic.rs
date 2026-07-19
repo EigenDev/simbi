@@ -2,8 +2,8 @@
 // rmhd_ct_curl_2d_divb_symbolic.rs
 //
 // the SYMBOLIC proof that the 2D CARTESIAN constrained-transport curl (rmhd_ct_curl_2d_dir_gv)
-// preserves div(B) = 0 — by polynomial-coefficient cancellation on the traced IR DAG, NOT a numeric
-// evolve test. closes the M10 gap "the 2D cartesian curl is numeric-only" (the 3D cartesian curl was
+// preserves div(B) = 0 — by polynomial-coefficient cancellation on the traced IR DAG at graph-build
+// time; no numeric evolve loop is run. closes the M10 gap "the 2D cartesian curl is numeric-only" (the 3D cartesian curl was
 // already proven by rmhd_ct_curl3d_divb_symbolic; the 2D builder is a distinct kernel and was not).
 //
 // the 2D curl from the single out-of-plane corner EMF E_z (`ez`), inverse-width form:

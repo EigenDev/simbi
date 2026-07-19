@@ -223,11 +223,10 @@ impl Poly {
 //
 // the spherical CT curl multiplies edge EMFs by scale-factor weights h_p (= r,
 // r*sin(theta)) and divides by the face-center prefactor 1/(h_p1c h_p2c) and the
-// transverse widths. so its coefficients are RATIONAL FUNCTIONS, not integer
-// polynomials. the variable set is:
+// transverse widths. so its coefficients are RATIONAL FUNCTIONS. the variable set is:
 //   - x_lo_0, dx_0, c_0   : `r` at any offset is AFFINE x_lo_0 + (c_0 + off)*dx_0,
 //                           a real polynomial (r^2 in an area equals r*r in an
-//                           h-product — r must be a true symbol, not opaque).
+//                           h-product — r must be a true symbol; an opaque r blocks that equality).
 //   - x_lo_1, dx_1, c_1   : the theta argument is likewise affine, but enters ONLY
 //                           through sin(.) — see below.
 //   - x_lo_2, dx_2, c_2   : phi; appears only in widths (sin has no phi dep).

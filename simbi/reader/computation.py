@@ -123,7 +123,7 @@ def labframe_energy_density(
     if regime == "rhd":
         return np.asarray(rho * W**2 * h - pre - rho * W)
 
-    if regime == "srmhd":
+    if regime == "rmhd":
         bsq = sum(b**2 for b in bfield)
         vdb = _dot_product(vel, bfield)
         return np.asarray(
@@ -158,7 +158,7 @@ def labframe_momentum(
 
         magnetic_part: Array | float = 0.0
         vel = [v.squeeze() for v in vel]
-        if regime == "srmhd":
+        if regime == "rmhd":
             bsq = np.array(sum(b**2 for b in bfield), dtype=float)
             vdb = _dot_product(vel, bfield)
             magnetic_part = np.array(
@@ -182,7 +182,7 @@ def magnetic_pressure(
 ) -> Array:
     """compute magnetic pressure."""
     bsq: Array = np.sum([b**2 for b in bfields], axis=0)
-    if regime == "srmhd":
+    if regime == "rmhd":
         W = 1.0 / np.sqrt(1.0 - _dot_product(velocity, velocity))
         vdb = _dot_product(velocity, bfields)
         bsq = bsq / W**2 + vdb**2
@@ -211,7 +211,7 @@ def enthalpy_density(
         return rho
     elif regime == "rhd":
         return rho * _enthalpy(rho, pre, adiabatic_index, regime)
-    elif regime == "srmhd":
+    elif regime == "rmhd":
         return rho * _enthalpy(
             rho, pre, adiabatic_index, regime
         ) + 2.0 * magnetic_pressure(bfields, velocity, regime)
@@ -372,9 +372,9 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             return np.asarray(result)
 
     def get_velocities(fields: dict[str, Array]) -> list[Array]:
-        # gather the full vector DOF (3 for mhd), not just the ndim in-plane components: the
-        # out-of-plane v_phi is a stored, evolved field in 2.5D / 1.75D runs and enters the lorentz
-        # factor and v.B. callers that need a fixed 3-vector zero-pad the (genuinely absent) tail.
+        # gather the full 3-component vector DOF for mhd: the out-of-plane v_phi is a stored,
+        # evolved field in 2.5D / 1.75D runs and enters the lorentz factor and v.B. callers that
+        # need a fixed 3-vector zero-pad the (genuinely absent) tail.
         return [fields[f"v{ii}"] for ii in range(1, _vector_dof(regime, ndim) + 1)]
 
     def get_b_fields(fields: dict[str, Array]) -> list[Array]:
@@ -393,9 +393,9 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
           the field is a 3-vector: in a 2.5D / 1.75D run the out-of-plane component (the toroidal
           b_phi) is cell-centered (no face in the missing axis) and is accepted as-is below.
         """
-        # gather the full magnetic vector DOF (3 for mhd), not just the ndim in-plane components:
-        # missing entries resolve to zeros. reading only b1..b_ndim drops the out-of-plane b_phi,
-        # which zeros the magnetic pressure of a purely toroidal field.
+        # gather the full 3-component magnetic vector DOF for mhd: missing entries resolve to
+        # zeros. reading only b1..b_ndim drops the out-of-plane b_phi, which zeros the magnetic
+        # pressure of a purely toroidal field.
         raw = [fields.get(f"b{ii}", None) for ii in range(1, _vector_dof(regime, ndim) + 1)]
         rho_shape = tuple(np.asarray(fields["rho"]).shape)
 
@@ -571,7 +571,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def compute_magnetic_energy(fields: dict[str, Array]) -> Array:
         """lab-frame magnetic energy density 1/2 |B|^2 (cell-centered B). distinct from `pmag`,
-        which carries the relativistic (comoving) magnetic pressure for srmhd."""
+        which carries the relativistic (comoving) magnetic pressure for rmhd."""
         b = get_b_fields(fields)
         return np.asarray(0.5 * _dot_product(b, b))
 
@@ -707,8 +707,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         """
         mesh = getattr(level_data, "mesh")
         # get_velocities returns ndim entries: pad the out-of-plane components
-        # with zeros so the 2d (and 1d) branches below see a full 3-vector
-        # instead of a bare unpack ValueError.
+        # with zeros so the 2d (and 1d) branches below unpack a full 3-vector;
+        # unpacking fewer than three would raise a bare ValueError.
         vels = get_velocities(level_data)
         while len(vels) < 3:
             vels.append(np.zeros_like(vels[0]))
@@ -774,8 +774,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         """
         mesh = getattr(level_data, "mesh")
         # get_velocities returns ndim entries: pad the out-of-plane components
-        # with zeros so the 2d (and 1d) branches below see a full 3-vector
-        # instead of a bare unpack ValueError.
+        # with zeros so the 2d (and 1d) branches below unpack a full 3-vector;
+        # unpacking fewer than three would raise a bare ValueError.
         vels = get_velocities(level_data)
         while len(vels) < 3:
             vels.append(np.zeros_like(vels[0]))

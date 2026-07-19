@@ -64,7 +64,7 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
     // an evacuated interior dilutes by pixel phase — the cartesian path decimates
     // identically); the gate is the VISIBLE structure: every ray must cross the
     // dark evacuated band continuously, and no ray may show a spurious bright gap
-    // ABOVE ambient (which would mean dropped samples, not honest dilution).
+    // ABOVE ambient (a spurious bright gap signals dropped samples, a rendering bug distinct from honest dilution).
     assert!(hi <= 2.0 + 1e-6, "averaging can never exceed the shell peak: hi={hi}");
     for (k, m) in ray_min.iter().enumerate() {
         assert!(*m < 0.5, "ray {k} lost the dark band: min={m}");

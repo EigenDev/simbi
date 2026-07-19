@@ -5,7 +5,7 @@
 // still gas decays as `exp(-eta k^2 t)` under the resistive induction diffusion `dB/dt = eta lap(B)`
 // (the resistive edge EMF `eta J` riding the CT curl). `B0` is tiny so the ideal
 // Alfven/magnetic-pressure dynamics are negligible over the run. `eta = 0` must NOT decay -- the
-// bug-injection that proves the resistive term is what does it, not the ideal scheme's diffusion.
+// bug-injection that proves the resistive term is what does it.
 // =============================================================================
 
 use std::f64::consts::PI;
@@ -141,8 +141,8 @@ fn resistive_field_decays_at_eta_k_squared_3d() {
 fn resistivity_dominates_the_ideal_numerical_diffusion() {
     // bug-injection: eta = 0 (ideal MHD) still loses a little field to the scheme's own
     // finite-resolution numerical diffusion. the resistive term must cause SUBSTANTIALLY more loss
-    // than that floor -- otherwise the decay in the companion test could be a numerical artifact
-    // rather than the eta*lap(B) physics. eta=0.05 decays to ~0.37, the ideal floor only to ~0.90.
+    // than that floor -- otherwise the decay in the companion test could be a numerical artifact.
+    // eta=0.05 decays to ~0.37, the ideal floor only to ~0.90.
     let ideal = evolve(0.0);
     let resistive = evolve(0.05);
     assert!(

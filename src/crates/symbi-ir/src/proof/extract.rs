@@ -101,7 +101,7 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
         // the spacing map's runtime `map_kind` cond (`map_kind > 0.5 ? log-face : uniform-face`) — a
         // LEAF reparametrization of the cell/face position. the discrete curl telescopes to
         // div(curl) = 0 INDEPENDENTLY of the face-position map: the two cells sharing a face use the
-        // SAME position (whichever arm), so the cancellation is structural, not positional. both arms
+        // SAME position (whichever arm), so the cancellation is structural. both arms
         // carry the identical curl stencil; extract the uniform (else) arm — the canonical
         // instantiation, and the exact DAG this proof verified before spacing became a runtime scalar.
         Op::IfElse { else_results, .. } => eval_rat(graph, else_results[0], fields, scalars),
@@ -208,8 +208,8 @@ fn eval_rat_elementwise(
             // clamp: max(sqrt(x^2 + ...), M/2)) -> ONE opaque atom keyed by BOTH
             // operands' canonical forms. the div(curl) telescope is STRUCTURAL — each
             // face weight must merely be THE SAME expression in the two adjacent cell
-            // divergences — so the proof needs max as a shared atom, not its
-            // semantics. atomization is conservative: it can only fail to prove a
+            // divergences — so the proof needs max only as a shared atom and can
+            // ignore its semantics. atomization is conservative: it can only fail to prove a
             // true zero, never prove a false one. max of a field-dependent argument
             // would be nonlinear in the fields and stays rejected.
             let a = match eval_rat(graph, ins[0], fields, scalars) {

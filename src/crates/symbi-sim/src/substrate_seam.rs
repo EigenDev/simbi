@@ -46,7 +46,7 @@ use crate::state::FieldStore;
 // the kernel-set sees ONLY the `FieldStore`: its 4 storage params, never
 // the physics tags `R`/`M`/`E` or the executor `S` (the concrete set bakes `R::SPEC` /
 // `eos_param` at construction — it does not read them off the sim). this is the keystone
-// decoupling: 4 params instead of 8, and the energy/schema bounds off `R` stay LOCAL to
+// decoupling: 4 params, and the energy/schema bounds off `R` stay LOCAL to
 // `FieldStore`. impls name the `&FieldStore` argument `sim`.
 pub trait KernelSet<const NDIM: usize, const DOF: usize, Mem, Sc>
 where
@@ -67,7 +67,7 @@ where
     /// went unphysical (p <= 0, rho <= 0, NaN) is redone with first-order (PCM + HLLE) fluxes
     /// reconstructed from the PHYSICAL stage-input state (`u_stage`), and the sharp high-order state
     /// is kept everywhere else. a floor-free robustness layer: cells the sharp scheme cannot recover
-    /// fall back to the diffusive-but-robust first-order update, not to a pressure floor. host-gated
+    /// fall back to the diffusive-but-robust first-order update with no pressure floor. host-gated
     /// on a failure reduction, so a clean substage pays only the scan. default: no-op.
     fn fofc(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _a0: f64, _ac: f64, _stage: u8) {}
 
@@ -85,7 +85,7 @@ where
     fn efield(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
     /// materialize per-cell wave speeds BEFORE the flux reads them (RMHD: the exact quartic
-    /// into wave_speed_l/r, so the flux does a cheap Davis fan instead of re-solving the
+    /// into wave_speed_l/r, so the flux does a cheap Davis fan without re-solving the
     /// quartic per face). runs each stage after the prim is current (post c2p+ghost). default:
     /// no-op — regimes with cheap algebraic wave speeds keep computing them inline in the flux.
     fn wave_speeds(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}

@@ -169,8 +169,8 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
 // driver (cfl -> flux -> efield -> godunov -> CT -> c2p -> ghost, multiple steps)
 // on host + unified sims with identical init; the substrate KernelSet routes every
 // kernel to the GPU for unified memory. assert the run completes NaN-free and the
-// conserved + magnetic state matches CPU. SHORT smoke (a handful of steps on an 8^3
-// smooth box) — not a physics run. tolerance is loose: FMA drift compounds per step.
+// conserved + magnetic state matches CPU. SHORT smoke: a handful of steps on an 8^3
+// smooth box, well short of a physics run. tolerance is loose: FMA drift compounds per step.
 #[test]
 fn substrate_rmhd_evolve_gpu_matches_cpu() {
     use symbi::sim::evolve::evolve;
@@ -298,7 +298,7 @@ fn field_reduce_device_all_ops_match_host() {
 // keystone: a single NaN cell must survive the ON-DEVICE block reduction (the
 // in-block ternary `a > b ? a : b` drops NaN unless guarded with `x != x`). this
 // validates the CUDA combine matches the host NaN-propagation so a poisoned cell
-// reaches the dt guard instead of being silently averaged away on the GPU.
+// propagates through to the dt guard on the GPU.
 #[test]
 fn device_reduction_propagates_single_nan_cell() {
     use symbi::regimes::substrate_gpu::field_reduce;

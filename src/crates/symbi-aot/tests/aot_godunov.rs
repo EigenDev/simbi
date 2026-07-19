@@ -91,7 +91,7 @@ fn aot_mass_godunov_conserves_over_many_steps() {
     // many steps. total mass telescopes to the net boundary flux; the bump stays
     // interior so both edge cells hold the background (rho = 1) throughout and
     // the net boundary flux is zero -> mass conserved. proves the AOT kernel
-    // iterates correctly, not just one step.
+    // iterates correctly across many steps.
     let n = 64usize;
     let dx = 1.0 / n as f64;
     let a = 1.0_f64; // advection speed (> 0, so upwind takes the left cell)
@@ -127,7 +127,7 @@ fn aot_mass_godunov_conserves_over_many_steps() {
         (mass1 - mass0).abs() < 1e-9 * mass0,
         "mass drift over {steps} steps: {} (rel {:e})", mass1 - mass0, (mass1 - mass0) / mass0,
     );
-    // and the bump actually moved right (advection happened, not a no-op).
+    // and the bump actually moved right (advection happened).
     let peak = rho.iter().cloned().fold(f64::MIN, f64::max);
     let peak_idx = rho.iter().position(|&r| r == peak).unwrap();
     assert!(peak_idx as f64 * dx > 0.45, "bump did not advect right: peak at x={}", peak_idx as f64 * dx);

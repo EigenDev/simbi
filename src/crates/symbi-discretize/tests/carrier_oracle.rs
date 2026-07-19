@@ -89,7 +89,7 @@ fn adiabatic_c2p_round_trips_against_native_physics() {
 #[test]
 fn adiabatic_c2p_matches_native_carrier() {
     // reference = native f64 c2p of an arbitrary admissible cons; impl = the Gv kernel. the
-    // expected prim is the physics fn ITSELF at S = f64, not a re-derivation of its algebra.
+    // expected prim is the physics fn ITSELF at S = f64.
     fn cons_raw(i: usize) -> Cons<f64, NCOMP> {
         let x = i as f64;
         let mut mom = Tensor::zeros();
@@ -131,7 +131,7 @@ fn adiabatic_c2p_matches_native_carrier() {
 // =============================================================================
 
 const ISO_NCOMP: usize = 2;
-// the iso eos's `cs` is irrelevant — `recover_pressure` reads cs^2 from nrg, not self.cs.
+// the iso eos's `cs` is irrelevant — `recover_pressure` reads cs^2 from nrg.
 const ISO_EOS: Isothermal<f64> = Isothermal { cs: 0.0 };
 
 // a smooth family of admissible iso primitives + their prescribed per-cell sound speed.
@@ -222,7 +222,7 @@ fn iso_c2p_matches_native_carrier() {
 // on the pressure root). round-trip ONLY (it guarantees admissibility): a KNOWN admissible
 // prim (subluminal velocity, positive pressure) -> cons via `Rhd::to_conserved::<f64>` ->
 // the Gv kernel (IterateInline, count=20 == build.rs) -> the input prim. tolerance ~1e-9
-// (iterative, not ULP-exact). the native reference is the INPUT prim — the round-trip
+// (iterative). the native reference is the INPUT prim — the round-trip
 // closes through the SAME `rhd_recover` the builder traces at S=Gv.
 // =============================================================================
 
@@ -277,7 +277,7 @@ fn rhd_c2p_round_trips_against_native_physics() {
 // iterate over the magnetosonic master function). round-trip ONLY: a KNOWN admissible prim
 // (incl. a B field) -> cons via `Rmhd::to_conserved::<f64>` -> the Gv kernel (multi-acc
 // IterateInline, count=100 == build.rs) -> the input prim. B passes through unchanged (it is
-// CT-evolved, not recovered). tolerance ~1e-9 (iterative). RMHD vectors are always 3-comp.
+// CT-evolved). tolerance ~1e-9 (iterative). RMHD vectors are always 3-comp.
 // =============================================================================
 
 const RMHD_GAMMA: f64 = 5.0 / 3.0;
@@ -566,9 +566,9 @@ fn rhd_wave_speed_map_matches_native_physics() {
 #[test]
 fn rmhd_wave_speed_map_matches_native_physics() {
     // the CFL map traces `rmhd_magnetosonic_cfl_speeds` (the cheap c_f^2 = c_s^2 + c_A^2 upper
-    // bound), NOT the full Mignone & Del Zanna quartic — the quartic stays on the Riemann/flux
-    // path only. so the reference MUST be the same magnetosonic bound at native f64, not
-    // `wave_speeds_axis` (which over-tightens to the exact characteristic and disagrees by ~2%).
+    // bound); the full Mignone & Del Zanna quartic stays on the Riemann/flux
+    // path only. so the reference MUST be the same magnetosonic bound at native f64; the
+    // `wave_speeds_axis` characteristic over-tightens to the exact value and disagrees by ~2%.
     // dx=1 -> the map IS `max(|sl|,|sr|)`; the bound reads the full 3-velocity + 3-B-field.
     let prim = MhdPrim::<f64, 3> {
         hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: 1.0 },
@@ -600,7 +600,7 @@ fn rmhd_wave_speed_map_matches_native_physics() {
 // iteration), closed-form fast-magnetosonic speeds. these oracle the SAME
 // `NewtonianMhd` carrier-generic physics validated at f64 in symbi-hydro:
 //   - c2p round-trip: prim --p2c (f64)--> cons --nmhd_c2p_gv kernel--> prim'  (1e-12,
-//     algebraic, NOT iterative -> ULP-tight, unlike RMHD's 1e-9).
+//     algebraic and ULP-tight; RMHD's 1e-9 tolerance is the iterative case).
 //   - flux: uniform state -> HLLE returns the physical `NewtonianMhd::to_flux`.
 //   - wave-speed map: dx=1 -> lambda == max(|sl|,|sr|) from the exact magnetosonic.
 // proves the regime traces, lowers, CPU-interprets, and bit-matches f64.

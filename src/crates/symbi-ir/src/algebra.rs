@@ -187,7 +187,7 @@ pub trait Scalar:
         <Self as symbi_algebra::algebra::Numeric>::ONE
     }
 
-    /// HOST-BOUNDARY ESCAPE — NOT for carrier-generic physics.
+    /// HOST-BOUNDARY ESCAPE — for the host/emitter boundary only.
     ///
     /// on `f64`/`f32` this is the identity. on tracing Carriers (Gv) this
     /// PANICS for a non-literal node — extracting a concrete value from a
@@ -218,12 +218,12 @@ pub trait Scalar:
     fn recip(self) -> Self;
 
     // ── carrier-safe clamp idioms ────────────────────────
-    // these make the prescribed `safe_sqrt` / `g_clamp` idioms CALLABLE rather than
-    // hand-rolled per site. the Gv carrier evaluates BOTH arms of a `select`, so a
+    // these make the prescribed `safe_sqrt` / `g_clamp` idioms CALLABLE as shared
+    // helpers reused at every site. the Gv carrier evaluates BOTH arms of a `select`, so a
     // maybe-NaN op (sqrt of a negative, an out-of-domain transcendental) must be clamped
-    // BEFORE the select or it traces a NaN into the kernel. these are for guarding the
-    // UNSELECTED arm / roundoff on a provably-physical quantity — NOT for masking a
-    // genuinely unphysical state, which must surface NaN ([[feedback_no_silent_floors]]).
+    // BEFORE the select or it traces a NaN into the kernel. these guard the
+    // UNSELECTED arm / roundoff on a provably-physical quantity; a genuinely
+    // unphysical state must still surface NaN ([[feedback_no_silent_floors]]).
 
     /// `sqrt(max(self, 0))` — the canonical clamp-before-sqrt. use when the radicand is
     /// non-negative for physical inputs and the clamp only guards the unselected arm /
@@ -316,7 +316,7 @@ pub trait Scalar:
     /// runtime — unlike `select` / `branch`, which evaluate BOTH. this is the
     /// carrier-portable form of an early-out `if`: it lets carrier-generic
     /// physics skip a whole expensive arm (e.g., the RMHD quartic on a
-    /// fast-path cell) instead of paying compute-all-paths.
+    /// fast-path cell), avoiding the compute-all-paths cost.
     ///
     /// use `cond` where the arms have a LARGE cost asymmetry. for cheap,
     /// symmetric arms prefer `select` — a real branch adds CPU branch cost and
@@ -345,8 +345,8 @@ pub trait Scalar:
     /// results: the SHARED arm computation runs once and both outputs come from
     /// the SAME taken arm. this is what lets a `(sl, sr)` wave-speed fast-path
     /// skip the WHOLE quartic when `vsq ~ 0` / `bn ~ 0` (computing the quartic
-    /// once in the else arm, not twice as two scalar `cond`s would, and not at
-    /// all on the fast path). DEFAULT is eager componentwise `select`;
+    /// once in the else arm — two scalar `cond`s would compute it twice — and
+    /// skipped entirely on the fast path). DEFAULT is eager componentwise `select`;
     /// `f64`/`f32` take a real branch; `Gv` traces ONE `Op::IfElse` with N
     /// results and returns N `Op::Proj` outputs. carrier-equivalent: every
     /// carrier takes the SAME arm for the same input.
@@ -401,7 +401,7 @@ pub trait Scalar:
     // ── HIGHER-ORDER: bounded iteration, FREEZE LAW ───────────────────────
     /// fixed-count iteration with the FREEZE LAW (see `mod laws` and
     /// `Op::IterateInline`). `converged` returns `Self::Mask`, never `bool`.
-    /// the body MUST be pure (`Fn`, not `FnMut`).
+    /// the body MUST be pure: a `Fn` closure that captures no mutable state.
     ///
     /// **freeze law** — after the first step where `converged(acc, body(acc))`
     /// holds, the accumulator stays at the OLD acc for all remaining steps.
@@ -439,7 +439,7 @@ pub trait Selectable<S: Scalar>: Sized + Copy {
     fn select(m: S::Mask, t: Self, f: Self) -> Self;
 
     /// compatibility alias. takes a Self-typed condition (encoded 0/1 in the
-    /// 0.0/1.0 convention) instead of an explicit Mask. defaults to
+    /// 0.0/1.0 convention) as the branch selector. defaults to
     /// `select(cond.cmp_gt(ZERO), ...)` — i.e., "non-zero is true". prefer
     /// `select` with an explicit Mask in new code.
     #[inline]
@@ -551,7 +551,7 @@ pub enum RenderPolicy {
     /// downstream compile, smallest binary. the default for `cargo build --release`.
     Minified,
     /// debug / audit — preserves names, source-loc comments, section headers.
-    /// for inspection; not the build path.
+    /// for inspection only.
     Audit,
     /// RESERVED — not implemented. graph -> LaTeX is a non-trivial pretty-
     /// printer with no documentation-pipeline consumer. emit returns
@@ -953,7 +953,7 @@ impl Scalar for f32 {
 //   `Scalar for f32`         — this file, §7 (sibling impl). single-precision.
 //   `Scalar for Gv`          — crates/symbi-discretize/src/gv.rs. IR-tracing.
 //                              lives there because the graph it builds is part
-//                              of the IR substrate, not the Carrier interface.
+//                              of the IR substrate.
 //   `Scalar for Sym`         — future, crates/symbi-core/src/sym.rs.
 //   `Scalar for Dual<C>`     — future, crates/symbi-core/src/dual.rs.
 //

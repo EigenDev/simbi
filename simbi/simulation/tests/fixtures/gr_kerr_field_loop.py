@@ -82,7 +82,7 @@ class GrKerrFieldLoop(SimbiProblem):
     coord_system: Annotated[
         CoordSystem, ProblemParam(CoordSystem.SPHERICAL, description="coordinate system")
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLD, cli=True, description="solver")]
     ct_method: Annotated[
         CtMethod, ProblemParam(CtMethod.CONTACT, cli=True, description="CT edge-EMF method")

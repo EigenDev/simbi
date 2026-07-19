@@ -407,8 +407,8 @@ fn read_dataset(src: &FileOrGroupRead<'_>, name: &str) -> Result<DatasetBuf> {
 }
 
 /// read only rows `[start, start + count)` of a 1D root dataset via an HDF5 hyperslab,
-/// clamped to the dataset length. mirrors `read_dataset`'s dtype dispatch but slices
-/// instead of `read_raw`, so memory is O(count) not O(dataset). 2D+ datasets are rejected
+/// clamped to the dataset length. mirrors `read_dataset`'s dtype dispatch but reads a
+/// hyperslab slice, so memory is O(count) in the requested rows. 2D+ datasets are rejected
 /// (the catalog columns are all 1D).
 fn read_dataset_slice(
     src: &FileOrGroupRead<'_>,

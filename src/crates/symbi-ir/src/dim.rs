@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn broadcast_shape_mismatch_returns_none() {
-        // [3] vs [4] — neither is 1, not equal: incompatible.
+        // [3] vs [4] — neither dim is 1 and they are unequal: incompatible.
         assert!(broadcast_shape(&[lit(3)], &[lit(4)]).is_none());
     }
 

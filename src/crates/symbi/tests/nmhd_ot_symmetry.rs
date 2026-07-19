@@ -108,7 +108,7 @@ fn nmhd_ot_reflection_symmetry_t03_vs_t10() {
     // the scheme MUST preserve the OT point symmetry: with a correctly-sampled (face-midpoint)
     // IC, any asymmetry at t=0.3 is roundoff. a directional bias in the Riemann solver / CT EMF
     // / the bface coupling would show up here as a finite (>> roundoff) value. late growth to
-    // ~1e-10 is the physical tearing/KH instability amplifying roundoff — expected, not a bug.
+    // ~1e-10 is the physical tearing/KH instability amplifying roundoff — expected.
     assert!(
         s03 < 1e-10,
         "scheme broke OT point symmetry at t=0.3: rel-L1 {s03:.3e} >> roundoff -> directional bias",

@@ -4,7 +4,7 @@
 // non-blocking keyboard reader for the live dashboard. relies on the terminal
 // being in non-canonical mode — `ScreenGuard` disables ICANON + ECHO but LEAVES
 // ISIG set — so bytes arrive per keystroke while Ctrl-C still raises SIGINT for
-// the graceful-interrupt path instead of surfacing here as a key. the reader
+// the graceful-interrupt path and never surfaces here as a key. the reader
 // never enables crossterm raw mode and never changes termios; it only reads. it
 // is a no-op off a tty, and never blocks beyond an explicit poll timeout.
 //

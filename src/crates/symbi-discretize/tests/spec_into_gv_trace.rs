@@ -24,7 +24,7 @@
 //      Gv-trace NodeIds that are valid `Gv::of(node)` values;
 //   2. the spliced outputs evaluate to the SAME f64 values as the standalone
 //      BuiltSource at the same parameter state — proving the splice
-//      preserves semantics, not just structure;
+//      preserves semantics: the evaluated values match, beyond structural validity;
 //   3. the trace's resulting Graph is well-formed (can be ended cleanly via
 //      `end_trace`).
 //
@@ -123,8 +123,8 @@ fn splice_produces_valid_gv_node_ids() {
 
 #[test]
 fn spliced_outputs_match_standalone_at_same_param_state() {
-    // **the load-bearing claim**: splicing preserves SEMANTICS, not just
-    // structure. for a known parameter state, the spliced source evaluated
+    // **the load-bearing claim**: splicing preserves SEMANTICS — the
+    // evaluated values match, beyond structural validity. for a known parameter state, the spliced source evaluated
     // inside the trace equals the standalone BuiltSource evaluated via
     // scalarize+interp directly. proves the spliced graph computes the
     // same function as the original.
@@ -173,7 +173,7 @@ fn spliced_outputs_match_standalone_at_same_param_state() {
 fn splice_panics_loudly_on_missing_param_substitute() {
     // the discipline at the splice site: a Param in BuiltSource that has no
     // substitute in `name_to_node` is a programmer bug — surface it loudly
-    // with a clear panic, not a silent wrong-value computation.
+    // with a clear panic; silently continuing would compute a wrong value undetected.
     begin_trace();
     let mut sparse_leaves: HashMap<String, NodeId> = HashMap::new();
     // only declare `rho` — the rest of gravity's params are missing.

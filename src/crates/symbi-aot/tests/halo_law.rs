@@ -5,7 +5,7 @@
 // stencil reach — read off its FieldLoadAt index expressions in the serialized
 // neutral IR — must fit inside the allocated ghost halo. a stencil widened
 // without widening the halo fails here at test time, naming the kernel, the
-// field, and the axis, instead of reading garbage at run time.
+// field, and the axis at test time, before a widened stencil reads garbage at run time.
 //
 // three kernel families index in ways that are not fixed-offset stencils BY
 // DESIGN, and are exempted as families:
@@ -27,7 +27,7 @@ use symbi_ir::{stencil_reach, AxisReach};
 const NG: u32 = 2;
 
 // kernel-name families whose index expressions are runtime-directed rather
-// than fixed-offset stencils; unbounded reach is their design, not a defect.
+// than fixed-offset stencils; unbounded reach is their design.
 const UNBOUNDED_BY_DESIGN: &[&str] = &["ghost_fill", "refine_", "field_axpy_shift"];
 
 // diagnostic census of the whole registry: reach per kernel/field/axis.
@@ -77,7 +77,7 @@ fn every_registered_kernel_fits_the_ghost_halo() {
 
 // the positive control: the law is not passing vacuously. plm reconstruction's
 // -2..+1 fan on the flux axis is a pinned fact of the discretization — if the
-// analysis stops seeing it, the law above has gone blind, not clean.
+// analysis stops seeing it, the law above has gone blind while still reporting clean.
 #[test]
 fn plm_face_flux_reach_is_two_on_the_flux_axis() {
     let report = stencil_reach(&prepared_from_ir(flux_blob()).scalarized);
@@ -92,7 +92,7 @@ fn plm_face_flux_reach_is_two_on_the_flux_axis() {
 // bug injection through the serialized artifact: widen the real blob's -2
 // stencil offset to -3 and assert the analysis reports the violation with the
 // field and axis attached. this exercises the whole audit path — serde, the
-// let-environment resolution, the reach join — not just the classifier.
+// let-environment resolution, the reach join, and the classifier.
 #[test]
 fn widened_stencil_in_a_real_blob_breaks_the_law() {
     let widened = flux_blob().replace("\"I32\":-2", "\"I32\":-3");

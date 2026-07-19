@@ -21,7 +21,7 @@
 // (B is contravariant). the lapse witness is measure-free: the det-g-flat covariant measure is
 // M-independent, so update(M)/update(0) must equal alpha(centroid) exactly.
 //
-// the IN-PLANE components (CT-evolved, not written by the predictor) and the r-phi disk (out-of-plane
+// the IN-PLANE components (CT-evolved; the predictor does not write them) and the r-phi disk (out-of-plane
 // z, where the area-weighting IS the correct z-curl) are exercised by the rotor + GPU gates in the
 // symbi crate.
 // =============================================================================

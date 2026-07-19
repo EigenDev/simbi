@@ -299,8 +299,8 @@ mod tests {
         // the load-bearing run: a Kepler-disk overlay stack (cylindrical
         // geometric source + point-mass gravity) evaluated at one cell
         // returns the SUM of the two contributions. proves that the
-        // runtime hook delivers the composed result, not just one
-        // overlay's value.
+        // runtime hook delivers the composed result of both
+        // overlays.
         use crate::source_spec::cylindrical_geometric_sources;
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
@@ -337,8 +337,9 @@ mod tests {
         //                 but gravity uses cartesian-style distance — the
         //                 spec treats `x` as the field-point components in
         //                 the regime's coord system. the evaluator agrees
-        //                 with the data; this test asserts CONSISTENCY,
-        //                 not physical meaningfulness in a curvilinear mix.)
+        //                 with the data; this test asserts CONSISTENCY
+        //                 between evaluator and data, making no claim about
+        //                 physical meaningfulness in a curvilinear mix.)
         let dx_sq: f64 = r * r + phi * phi + z * z;
         let dx_cubed = dx_sq.sqrt().powi(3);
         let geom_sr = (rho * vp * vp + p) / r;

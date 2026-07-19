@@ -73,7 +73,7 @@ fn wave_properties<S: Scalar>(
 
     // pvrs if the pressure ratio is mild AND pvrs is bounded, else rarefaction
     // (if pvrs <= p_min) or shock. mask AND uses `&` on `S::Mask` (the carrier's
-    // bitwise BitAnd; not native `&&`, which would lock to a host carrier).
+    // bitwise BitAnd; native `&&` would lock to a host carrier).
     //
     // the estimates live in LAZY `S::cond` arms — a smooth-flow face pays only
     // the pvrs arithmetic; the two-rarefaction arm's three `powf` calls and the
@@ -808,10 +808,10 @@ mod tests {
     #[test]
     fn hllc_quirk_strong_shock_2d_falls_back_to_hlle() {
         // a strong pressure jump in 2D triggers the Quirk detector — the flux
-        // MUST equal the HLLE flux on that face (not HLLC). this is the actual
+        // MUST equal the HLLE flux on that face. this is the actual
         // safety guarantee Quirk provides: carbuncle-prone shocks take the
-        // dissipative two-wave solver instead of the contact-resolving three-
-        // wave one.
+        // dissipative two-wave solver; the contact-resolving three-wave
+        // solver is bypassed.
         let eos = IdealGas { gamma: 1.4 };
         let prim_l = Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 };
         let prim_r = Prim { rho: 0.125, vel: Tensor::new([0.0, 0.0]), pre: 0.1 };

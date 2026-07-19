@@ -190,7 +190,7 @@ impl<'a> Tree<'a> {
 // ---- TreeBuf — the OWNED tree the read side materializes into ------------
 
 /// owned counterpart of `Tree` — what the read side returns. groups carry
-/// owned attrs + owned datasets (Vec<f64> etc.) instead of borrowed slices.
+/// owned attrs + owned datasets (Vec<f64> etc.).
 #[derive(Debug)]
 pub struct DatasetBuf {
     pub name:  String,

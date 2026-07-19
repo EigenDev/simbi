@@ -3,18 +3,18 @@
 //
 // the SYMBOLIC proof of the HLLD wave-sum EMF DISSIPATION-SIGN PAIRING (M8) — the invariant the
 // upwind proof (nmhd_uct_emf_upwind_symbolic) explicitly does NOT cover, because the HLLD edge EMF
-// kernels (`rmhd_edge_emf_uct_hlld_gv` + `_gr_gv`) build a wave-sum dissipative flux Phi (M&DZ Eq. 39)
-// rather than the `uct_master_emf` coefficient form.
+// kernels (`rmhd_edge_emf_uct_hlld_gv` + `_gr_gv`) build a wave-sum dissipative flux Phi (M&DZ Eq. 39),
+// an assembly outside the `uct_master_emf` coefficient form.
 //
 // the wave-sum dissipation for one transverse B across the 4-wave fan is
 //   Phi = 1/2 [ |lam_L|(bstar_L - bt_L) + |alf_L|(bc - bstar_L)
 //             + |alf_R|(bstar_R - bc)  + |lam_R|(bt_R - bstar_R) ]
 // `hlld_wave_sum_terms` (the un-halved form both HLLD kernels compose through) is LINEAR in the five
 // staggered/star transverse fields, so `LinForm` reads each field's coefficient in the four opaque
-// wave speeds. the load-bearing invariant — correct (diffusive, not anti-diffusive) dissipation — is
+// wave speeds. the load-bearing invariant — correct (diffusive) dissipation — is
 // a coefficient PAIRING check:
-//   - the LEFT endpoint bt_L is diffused by the LEFT fast wave |lam_L| ONLY  (coeff -1, NOT on |lam_R|)
-//   - the RIGHT endpoint bt_R by the RIGHT fast wave |lam_R| ONLY            (coeff +1, NOT on |lam_L|)
+//   - the LEFT endpoint bt_L is diffused by the LEFT fast wave |lam_L| ONLY  (coeff -1 on |lam_L|, coeff 0 on |lam_R|)
+//   - the RIGHT endpoint bt_R by the RIGHT fast wave |lam_R| ONLY            (coeff +1 on |lam_R|, coeff 0 on |lam_L|)
 //   - the star / central states telescope (each between its two bracketing waves)
 // mispairing an endpoint with the opposite fast wave flips the dissipation sign — the anti-diffusive
 // bug that is invisible subsonically (|lam_L| == |lam_R|) and to every div(B) test (the curl

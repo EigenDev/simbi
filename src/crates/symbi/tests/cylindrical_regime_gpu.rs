@@ -6,7 +6,7 @@
 // EOS regimes (iso / newton-adiabatic / rhd). builds host (AOT CPU) + unified (NVRTC)
 // sims, runs godunov_euler + cfl on each, diffs < 1e-9. (cyl-2D r-phi is already
 // covered by cylindrical_disk_gpu for newton; iso/rhd 2D share the same IR builders.)
-// proves the matrix fill compiles to PTX + runs on device, not just CPU.
+// proves the matrix fill compiles to PTX + runs on device.
 //
 // run on the host (CUDA 13.2 + g++-15): cargo test -p symbi --features cuda \
 //     --test cylindrical_regime_gpu

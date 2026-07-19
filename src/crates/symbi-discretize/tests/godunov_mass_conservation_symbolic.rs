@@ -73,7 +73,7 @@ fn godunov_mass_conservation_symbolic() {
 }
 
 // negative control: a non-telescoping pair (a flux that enters two cells with the
-// SAME sign, not equal-and-opposite) does not vanish — the checker is not vacuous.
+// SAME sign) does not vanish — the checker is not vacuous.
 #[test]
 fn conservation_symbolic_detects_nonconservative() {
     let mut lf = LinFormR::default();

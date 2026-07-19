@@ -174,7 +174,7 @@ def _is_config_file(path: Path) -> bool:
             # classifying a candidate must stay silent: the scan inspects structure,
             # it does not import or execute. a config tree's own latent warnings
             # (invalid string escapes, deprecations) are surfaced when that config is
-            # actually run, not when every `simbi run` lists the available configs.
+            # actually run.
             warnings.simplefilter("ignore")
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
     except (OSError, SyntaxError, ValueError):
@@ -212,7 +212,7 @@ def get_available_configs():
     # symlinked), deduplicated by resolved path so the same file isn't listed
     # twice when invoked from the repo root. the repo-home marker is written at
     # install time; an install without it (or an unreadable marker) degrades to
-    # cwd-local discovery instead of killing every command with a traceback.
+    # cwd-local discovery so no command dies with a traceback.
     roots = [Path("simbi_configs")]
     try:
         marker = Path(__file__).resolve().parent.parent / "gitrepo_home.txt"

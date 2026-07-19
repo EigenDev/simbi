@@ -72,5 +72,5 @@ def test_ks_bondi_crosses_horizon_stable_and_positive() -> None:
         # accretion: the gas compresses toward the hole — inner density well above ambient (1.0).
         # rho[0] is the innermost interior cell (inside the horizon).
         assert rho[0] > 3.0, f"no inward compression: rho_inner = {rho[0]:.3f}"
-        # and it rises monotonically inward across the whole profile (accretion, not depletion).
+        # and it rises monotonically inward across the whole profile (accretion).
         assert rho[0] >= rho[-1], f"density does not rise inward: {rho[0]:.3f} vs {rho[-1]:.3f}"

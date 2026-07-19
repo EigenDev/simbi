@@ -3,7 +3,7 @@
 //
 // the AMR composite display slice through a NON-Z orientation: the coverage
 // descent resolves each root cell to the finest level covering it for every
-// display plane, not just the z mid-plane. the fine level is painted with a
+// display plane at any orientation. the fine level is painted with a
 // sentinel value far outside the coarse range, so its appearance in the slice
 // is unambiguous; the y-mid-plane picture must show the sentinel inside the
 // refined region's (x, z) footprint and the coarse value outside it.

@@ -7,9 +7,9 @@
 // time-interpolated coarse-fine ghost prolongation, conservative restriction,
 // and flux-register refluxing. the single-level engine is untouched —
 //
-// SINGLE-COVERAGE CAP (this is SMR, not adaptive AMR): each level refines exactly
+// SINGLE-COVERAGE CAP (this is SMR): each level refines exactly
 // ONE box (`coverage: Option<Domain>`), with ONE FluxRegister per coarse-fine
-// level-pair. the refined region is fixed at setup, not re-flagged from the
+// level-pair. the refined region is fixed at setup and is not re-flagged from the
 // solution; there is no patch graph and no berger-rigoutsos clustering.
 // multi-patch adaptive refinement (a level as a disjoint cover of Domains) is
 // not implemented.
@@ -114,8 +114,8 @@ where
     pub prolong_sweep: std::sync::OnceLock<Vec<ProlongSweepScratch<NDIM, DOF, Mem>>>,
     /// the region of THIS level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: exactly
-    /// ONE refined box per level (this is static refinement / SMR, not multi-patch
-    /// adaptive AMR — no disjoint-cover `Vec<Domain>`, no clustering).
+    /// ONE refined box per level (this is static refinement / SMR — no disjoint-cover
+    /// `Vec<Domain>`, no clustering).
     pub coverage: Option<Domain<NDIM>>,
 }
 
@@ -127,7 +127,7 @@ where
 /// a fatal CFL crash: the wave speed went NaN or collapsed (an unphysical c2p — e.g. V -> 1 near a
 /// boundary), so the next dt is NaN / non-positive / blown up. the evolve loop stops at the LAST
 /// computed state (no further advance) and the driver snapshots a `.crashed` checkpoint + reports
-/// it, instead of masking the crash by clamping dt to t_final and "finishing" on garbage.
+/// it, so the crash is never masked by clamping dt to t_final and "finishing" on garbage.
 #[derive(Clone, Copy, Debug)]
 pub struct CrashReport {
     pub iter: u64,
@@ -155,7 +155,7 @@ where
     pub emf_registers: Vec<Option<EmfRegister<NDIM, Mem>>>,
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive / a sudden blowup from a
     /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
-    /// `.crashed` checkpoint and reports it instead of advancing past t_final on garbage.
+    /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
     pub crash: Option<CrashReport>,
 }
 
@@ -861,7 +861,7 @@ where
             }
             dt
         });
-        // a crashed state must HALT the run, not get masked by the `t_final` clamp below. the clamp
+        // a crashed state must HALT the run and must not be masked by the `t_final` clamp below. the clamp
         // `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the remaining time (f64::min
         // returns the non-NaN operand) AND clamps a collapsed-wave-speed BLOWUP (an unphysical c2p
         // cell — e.g. V->1 at the inner boundary — drives the cfl speed -> 0, so dt -> huge) down to
@@ -878,7 +878,7 @@ where
             || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
         if crashed {
             // record the crash + STOP without advancing: the evolve loop reports it and the driver
-            // snapshots `.crashed.h5` from this (last computed) state, instead of panicking or
+            // snapshots `.crashed.h5` from this (last computed) state and stops, without panicking or
             // marching past t_final on garbage.
             self.crash = Some(CrashReport { iter, time, dt_cfl, dt_prev });
             return;
@@ -910,7 +910,7 @@ where
         }
         root.state.time += dt;
         // expression motion: set a / a_dot EXACTLY at the new time (for output and the next root
-        // step's cfl + stages), instead of a constant-rate extrapolation that overshoots a
+        // step's cfl + stages); a constant-rate extrapolation would overshoot a
         // decelerating mesh.
         let tnew = root.state.time;
         if let Some((a, ad)) = root
@@ -942,7 +942,7 @@ where
             if needs_fb {
                 // the backward reduction sweeps the full domain (~11 outputs per
                 // body: force/torque/mass/energy) — a real per-step cost that must
-                // appear in the profile, not hide in the wall-vs-instrumented gap.
+                // appear in the profile, so it does not hide in the wall-vs-instrumented gap.
                 prof("body_feedback", || finest.kernels.body_feedback(&finest.state, dt));
             }
             finest.state.dt = dt;

@@ -6,7 +6,7 @@
 // B in gauss, frequencies in Hz, energy density in erg/cm^3, number density in cm^-3.
 // every dimensionful argument and result is a typed `Quantity` (src/units.rs), so the
 // algebra here is checked at compile time — multiplying the wrong quantities together
-// is a type error, not a silently wrong number.
+// is a compile-time type error, caught before it becomes a silently wrong number.
 //
 // the model: behind the shock the field is set by equipartition (`shock_bfield`), the
 // non-thermal electrons follow a power law N(gamma) ~ gamma^-p above `minimum_lorentz`,

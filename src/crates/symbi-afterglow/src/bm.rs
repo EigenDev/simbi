@@ -95,7 +95,7 @@ pub fn bm_profile(e_iso: f64, n0: f64, t: f64, chi_max: f64, n_cells: usize) -> 
 /// must reach beyond `t_obs`); each lab-time snapshot is a BM profile generated over a synthesized
 /// equal-solid-angle cone (sector) of half-angle `theta_sector` about the +z axis (use PI for a
 /// full sphere, a smaller angle for a collimated jet OR any angularly-bounded relativistic outflow
-/// — a ring/partial shell, not necessarily a canonical jet), weighted by its lab-time bin width.
+/// — a ring/partial shell), weighted by its lab-time bin width.
 /// the returned events
 /// are reduced into an image by `compute_skymap` for a chosen observer direction (which applies the
 /// observer-direction delta^k beaming) — pass an off-axis direction for off-axis jet imaging.

@@ -29,7 +29,7 @@ use symbi_ir::emit::ReductionOp;
 
 // FOFC observability counters — the running totals of DELIBERATE fallback events over a run, so a
 // run can surface how often/where the first-order flux correction and the last-resort freeze fired
-// (a limiter is fine as long as it is visible, not silent). `FALLBACK_CELLS` counts flagged-cell x
+// (a limiter is fine as long as it is visible). `FALLBACK_CELLS` counts flagged-cell x
 // substage events (a cell whose high-order c2p was unphysical and took the first-order redo);
 // `FREEZE_CELLS` counts the frozen-cell x substage events (neither order recovered it -> held at the
 // stage input). read + reset by the driver at its benchmark cadence to show a per-window delta.
@@ -85,7 +85,7 @@ pub fn fofc_reset_stats() {
 
 /// count the flagged cells (flag > 0.5) whose cell center |x| lies inside `r_h`, on a
 /// uniform cartesian grid with origin `x_lo` and spacing `dx`. the boundary test is a
-/// diagnostic split, not a physics operation — half-cell classification error at the
+/// diagnostic split with no physics dependence — half-cell classification error at the
 /// horizon is irrelevant (the interior fire sits deep inside, the exterior gate cares
 /// about cells well outside).
 pub fn horizon_flagged_count<const D: usize, Mem, Sc>(
@@ -239,7 +239,7 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
 /// the FREEZE-tier select with the immersed-body source composed INLINE: the `has_bodies` twin of
 /// `fofc_select`. dispatches `{prefix}_fofc_select_with_body{coords}_{D}d`, whose freeze parachute is
 /// the stage input EVOLVED by the body source (gravity + accretion) over `dt`, guarded to a physical
-/// state — so a frozen cell near a body keeps its gravity instead of the pre-body `u_stage`. field
+/// state — so a frozen cell near a body keeps its body-evolved gravity (the raw pre-body `u_stage` would lose it). field
 /// binding is identical to `fofc_select` (us_* stage input, x_* live cons/prim); the body + grid
 /// scalars are resolved by the kernel manifest exactly as for the standalone body source.
 pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
@@ -421,7 +421,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // HOST GATE + FLAG: write the per-cell fallback flag (1 where the high-order c2p is unphysical)
     // over the interior. FOFC only corrects a flagged cell (a physical one keeps its high-order flux
     // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean substage
-    // costs one pointwise probe + a reduction, not the flux sweep + two extra c2p passes.
+    // costs one pointwise probe + a reduction, skipping the flux sweep + two extra c2p passes.
     let probe = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
     dispatch_named(sim, pre_bind, Some(flag), 0, &probe, &sim.geom.interior, &[], &[]);
     // SUM (not max): the flag is 0/1, so the reduction is the COUNT of flagged cells — it doubles as

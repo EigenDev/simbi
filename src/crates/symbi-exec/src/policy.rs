@@ -71,7 +71,7 @@ fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
 
 /// the runtime-IR twin of `dispatch_fields`: identical buffer binding + launch, but the
 /// neutral IR blob + kernel name are supplied by the CALLER (a runtime-built kernel)
-/// instead of resolved from the generated registry. device-only — the host path of a
+/// bypassing the generated registry that `dispatch_fields` resolves against. device-only — the host path of a
 /// runtime kernel has its own JIT, so the CPU fallback is unreachable.
 ///
 /// `inputs`/`outputs` follow the same contract as `dispatch_fields`: input-binding order
@@ -112,7 +112,7 @@ pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace,
 ///
 /// SAFETY: the caller guarantees every `inputs`/`outputs` field outlives `'a` (the dispatch
 /// scope) and that the kernel reads inputs immutably + writes only its own outputs; the
-/// distinctness check above makes the no-aliasing precondition release-enforced, not convention.
+/// distinctness check above makes the no-aliasing precondition release-enforced.
 pub fn disjoint_host_buffers<'a, Sc, const D: usize, Mem>(
     name: &str,
     inputs: &[&Field<Sc, D, Mem>],
@@ -157,7 +157,7 @@ where
 /// THE EXECUTOR INVERSION (cpu). dispatch `name` over a DISJOINT COVER of the exec
 /// window in ONE rayon fork-join: the parallelism moves OUT of the kernel (which
 /// runs serially per block) and INTO the executor, which fans the cover out. this
-/// is what makes a block decomposition pay off — N blocks cost one launch, not N.
+/// is what makes a block decomposition pay off — N blocks share a single launch.
 ///
 /// SOUNDNESS rests entirely on `cover` being a PARTITION of the exec window (the
 /// proven `BlockGrid` / `guillotine_difference` law): the blocks write DISJOINT
@@ -201,7 +201,7 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     // INPUTS are sound (shared `&[T]` reads alias nothing) and intentional — the
     // prolong binds the same coarse buffer as src_old/src_new. the whole-window paths
     // assert this in debug; the cover path is the production CPU parallelism, so it
-    // asserts ALWAYS, not just in test builds.
+    // asserts in every build.
     assert!(
         {
             let mut out_ptrs = std::collections::HashSet::new();
@@ -218,8 +218,8 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     );
     // per-field allocation layouts — coarse INPUTS and fine OUTPUTS may live in
     // DIFFERENT allocated domains (the prolong case), so each buffer carries its
-    // own (lo, extent, vol). the block only restricts the exec WINDOW, not the
-    // buffers. computed once; stack-resident up to 16 buffers.
+    // own (lo, extent, vol). the block restricts only the exec WINDOW. computed
+    // once; stack-resident up to 16 buffers.
     let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = inputs
         .iter()
         .chain(outputs.iter())
@@ -235,8 +235,8 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
     unsafe impl<T> Sync for CoverPtrs<T> {}
     impl<T> CoverPtrs<T> {
         // accessed through methods so the closure captures the whole (Send+Sync)
-        // wrapper, not the inner raw-ptr Vecs (Rust 2021 disjoint capture would
-        // otherwise grab `*const T`/`*mut T`, which are not Sync).
+        // wrapper; Rust 2021 disjoint capture would otherwise grab the inner
+        // `*const T`/`*mut T` Vecs, which are not Sync.
         fn ins(&self) -> &[*const T] { &self.0 }
         fn outs(&self) -> &[*mut T] { &self.1 }
     }

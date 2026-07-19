@@ -15,13 +15,12 @@
 # signal was contaminated by boundary wrap and the loop's own edge + center
 # artifacts. here the interesting physics sits DEEP in the interior around the
 # accretor while the outer boundary is a plain outflow far away, so real physics
-# is cleanly separable from boundary effects, and the flow reaches a steady state
-# instead of a one-shot decay.
+# is cleanly separable from boundary effects, and the flow reaches a steady state.
 #
 # the field is kept weak (high plasma beta = 2 p / B^2 >> 1) so it is essentially
 # passive: the gas follows the ordinary gamma = 5/3 bondi inflow and the field is
 # a tracer of the flow the resistive sink acts on. 3D cartesian (a genuine point
-# mass, not the infinite current-carrying cylinder a 2d sink would be).
+# mass; a 2d sink would represent an infinite current-carrying cylinder).
 #
 # stability note: the resistivity REGULATES the field pileup, so the run is stable
 # only once eta is large enough to diffuse flux out of the sink faster than the
@@ -57,8 +56,8 @@ from simbi.types.typing import (
 
 # the drain rate is pinned to the saturated regime: any value large enough that the
 # backend's sound-crossing cap min(rate, cs/dx) selects cs/dx. there, the removed mass
-# is set by the flow reaching the sink, not by the drain -- the physical plateau. it is
-# a fixed numerical boundary condition, deliberately NOT a config-facing dial.
+# is set by the flow reaching the sink -- the physical plateau. it is
+# a fixed numerical boundary condition, deliberately kept out of the config surface.
 _SATURATED_DRAIN = 1.0e6
 
 
@@ -110,7 +109,7 @@ class MagnetizedBondiSink(SimbiProblem):
         tuple[int, int, int],
         ProblemParam((64, 64, 64), cli=True, description="grid resolution"),
     ]
-    # filled by setup() from the bondi scales (base-class fields, not computed).
+    # filled by setup() from the bondi scales (base-class fields).
     bounds: Annotated[
         list[tuple[float, float]] | None,
         ProblemParam(
@@ -154,9 +153,9 @@ class MagnetizedBondiSink(SimbiProblem):
 
     # accretion sink: only the mask RADIUS is a config knob. the drain RATE is not
     # exposed -- it is pinned to the saturated (sound-crossing) value so the removed
-    # mass is flow-limited, not rate-limited. thin-disk / point-mass accretion has no
+    # mass is flow-limited. thin-disk / point-mass accretion has no
     # analytic attractor (unlike bondi), so a tunable rate would be a numerical
-    # boundary condition posing as a physical parameter; the sink is a hole, not a dial.
+    # boundary condition posing as a physical parameter; the sink is a hole.
     r_acc_scale: Annotated[
         float,
         ProblemParam(

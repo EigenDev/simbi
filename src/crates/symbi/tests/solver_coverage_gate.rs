@@ -5,7 +5,7 @@
 // kernel emitted. the dispatch builds the name `{prefix}_face_flux{geom}{solver}_{D}d_{dir}`
 // (substrate_{rmhd,newtonian_mhd,isothermal_mhd}.rs flux()); this asserts each such name resolves
 // in the AOT registry, catching the "valid flag, missing kernel" class (e.g., the 2D RMHD HLLD gap)
-// at test time instead of mid-run. solver applicability mirrors the physics: iso MHD has no contact
+// at test time, before a run requests the kernel. solver applicability mirrors the physics: iso MHD has no contact
 // wave -> no HLLC.
 // =============================================================================
 

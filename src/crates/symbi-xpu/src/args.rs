@@ -4,8 +4,8 @@
 // kernel argument builder. type-safe construction of the void** arg array
 // that cuLaunchKernel / hipModuleLaunchKernel expect.
 //
-// implementation: ONE flat byte arena (`storage: Vec<u8>`), not one Box<[u8]>
-// per pushed arg. push appends the value's bytes (properly aligned for `T`) and
+// implementation: ONE flat byte arena (`storage: Vec<u8>`) holding every pushed
+// arg. push appends the value's bytes (properly aligned for `T`) and
 // records the byte offset; `as_mut_slice` rebuilds the void* pointer table by
 // offsetting the arena's base pointer. on reuse (`clear`) the arena retains
 // capacity — after the first launch hits steady-state size, subsequent launches

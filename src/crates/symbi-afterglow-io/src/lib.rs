@@ -104,7 +104,7 @@ fn usize_dataset(g: &TreeBuf, name: &str) -> Result<Vec<usize>> {
 }
 
 // string metadata (regime / coord_system / ..) rides as an HDF5 string ATTRIBUTE
-// (the v2.0 convention symbi-io writes and the python reader reads), not a byte
+// (the v2.0 convention symbi-io writes and the python reader reads); it is not a byte
 // dataset.
 fn str_attr(g: &TreeBuf, name: &str) -> Result<String> {
     g.find_attr(name)
@@ -149,7 +149,7 @@ fn read_raw(path: &Path) -> Result<Raw> {
         .ok_or_else(|| IoError::MissingPath("level_0/mesh".into()))?;
 
     // v2.0 mesh: cell centers are REBUILT from the geometry description
-    // (global_cells + per-dim start/end attrs), not stored coordinate arrays.
+    // (global_cells + per-dim start/end attrs); no coordinate arrays are stored.
     let geometry = mesh
         .find_group("geometry")
         .ok_or_else(|| IoError::MissingPath("level_0/mesh/geometry".into()))?;
@@ -505,8 +505,8 @@ mod tests {
         }
     }
 
-    // an unsupported combination (cartesian 2D slab) errors clearly rather than silently
-    // producing a degenerate image.
+    // an unsupported combination (cartesian 2D slab) errors clearly and does not silently
+    // produce a degenerate image.
     #[test]
     fn unsupported_geometry_errors() {
         let raw = Raw {

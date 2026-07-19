@@ -36,7 +36,7 @@
 # the problem is RANK-GENERIC: `dim` follows len(resolution), and the wave always
 # travels along x1, so 1d / 2d / 3d run the IDENTICAL physics and solver. that makes
 # throughput comparable ACROSS ranks -- comparing a 3d wave against a 2d shear
-# instability measures the problem, not the dimension. at equal cell counts:
+# instability measures the choice of problem, with the dimension confounded. at equal cell counts:
 #
 #   1d: --resolution 262144
 #   2d: --resolution 512 512
@@ -44,8 +44,8 @@
 #
 # all three are 262144 cells, all above the host cover's WHOLE_BELOW_CELLS cutoff.
 # per-cell work should rise with rank (flux directions D, conserved fields 2 + D),
-# so MZCS should FALL from 1d -> 3d. if it does not, the bottleneck is a fixed
-# per-cell cost rather than memory traffic.
+# so MZCS should FALL from 1d -> 3d. if it stays flat, a fixed per-cell cost
+# dominates and memory traffic is not the bottleneck.
 #
 # usage:
 #   simbi run linear_wave                       # 128^3, hllc -- the athenak comparison

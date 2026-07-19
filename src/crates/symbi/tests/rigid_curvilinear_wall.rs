@@ -17,7 +17,7 @@
 // - TARGET FRAME: a wall translating through still gas drags the gas along its
 //   own (cartesian) velocity. at phi = pi/2 an unrotated velocity target would
 //   read the x-velocity as a RADIAL (locally y-directed) target and push the
-//   gas outward instead of along x.
+//   gas outward.
 // =============================================================================
 
 use std::f64::consts::PI;
@@ -91,7 +91,7 @@ fn build(vel_x: f64, with_body: bool, body_vel: [f64; 2], surface: SurfaceSpec) 
         .with_surface(surface),
     ));
     // the CSG shape (a sphere expressed as a shape, body-local) routes the
-    // runtime-JIT shaped kernel instead of the AOT sphere path.
+    // runtime-JIT shaped kernel.
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
     sim

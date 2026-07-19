@@ -35,7 +35,7 @@ const DIVERGENCE_GUARD: f64 = 1e30;
 /// initial secant perturbation off the pressure guess.
 const SECANT_PERTURBATION: f64 = 1e-6;
 /// low-B regime threshold: below `bn^2/p < this`, use the low-B quadratic
-/// pressure estimate instead of the HLL recovered pressure.
+/// pressure estimate replaces the HLL recovered pressure.
 const LOW_B_PRESSURE_RATIO: f64 = 0.01;
 /// secant iteration count (`max_iter = 15`).
 const SECANT_STEPS: usize = 15;
@@ -470,7 +470,7 @@ where
     let _lc = S::select(on_left, a_l, a_r); // fast-wave speed picked per-side; consumed by make_fast above
     let la = S::select(on_left, alf[0], alf[1]);
 
-    // "between fast and Alfven" (not at contact): flux is fa - ua * vface.
+    // "between fast and Alfven" (upstream of the contact): flux is fa - ua * vface.
     // "between Alfven and contact": include the contact-wave correction.
     let at_contact_l = vface.cmp_ge(alf[0]);
     let at_contact_r = vface.cmp_le(alf[1]);
@@ -752,7 +752,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
 /// the UCT-HLLD edge-EMF coefficients `(a^L, d^L, d^R)` from L/R primitives (M&DZ 2020 Eq. 44-46).
 /// it runs the SAME classical Miyoshi-Kusano fan as `hlld_newtonian` — single normal field, Davis
 /// `wave_speeds`, contact `lambda*`, star densities `rho^{*s}`, rotational `lambda^{*s}` — and
-/// extracts the master-form coefficients instead of the flux. so when the EMF feeds it the SAME
+/// extracts the master-form coefficients from that fan. so when the EMF feeds it the SAME
 /// reconstructed face states the gas flux uses, the EMF's fan is identical to the flux's (the
 /// CT-consistency M&DZ require). carrier-generic; NO clamp (verbatim Eq. 44).
 pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
@@ -822,10 +822,10 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
 
 /// the UCT-HLLD edge-EMF coefficients `(a^L, d^L, d^R)` for ISOTHERMAL MHD (M&DZ 2020 Appendix A).
 /// the isothermal fan has NO contact/entropy mode, so the appendix states the a/d/nu formulas (Eq.
-/// 44-46) are UNCHANGED but chi~^s uses the HLL central state instead of the MK contact:
+/// 44-46) are UNCHANGED but chi~^s is built from the HLL central state:
 ///   rho* = rho^hll,  u* = F_rho^hll/rho^hll,  lambda^{*s} = u* -/+ |Bx|/sqrt(rho*),
 ///   chi~^s = (v_x^s - u*)(lambda^s - u*)/(lambda^{*s} + lambda^s - 2u*).
-/// mirrors the `hlld_isothermal` flux's fan exactly (single rho*, u* = mass-flux/rho — NOT m_x/rho),
+/// mirrors the `hlld_isothermal` flux's fan exactly (single rho*, u* = mass-flux/rho — the advective mass flux, where m_x/rho would give the wrong star velocity),
 /// so the EMF fan == the flux fan at the same reconstructed face state. carrier-generic; NO clamp.
 pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -953,7 +953,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let f_hll = (f_l * s_r - f_r * s_l + (u_r - u_l) * (s_l * s_r)) * inv_dwave;
 
     // rho* = HLL density (eq 20); m_x* = HLL normal momentum (eq 21, constant in fan);
-    // u* = F_rho^hll / rho^hll (eq 23 advective choice — NOT m_x/rho).
+    // u* = F_rho^hll / rho^hll (eq 23 advective choice; m_x/rho would give the wrong star velocity).
     let rho_s = u_hll.den;
     let rho_s_safe = S::select(rho_s.abs().cmp_lt(eps), eps, rho_s);
     let mx_hll = u_hll.mom.dot(nhat);
@@ -1223,8 +1223,8 @@ mod tests {
     }
 
     // a MILD NON-DIAGONAL SPD spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
-    // couplings), exercising the FULL tetrad path in the orthonormal-frame HLLD (not just the
-    // diagonal sqrt(g) scaling). the inverse is computed exactly from the closed-form 3x3 inv.
+    // couplings), exercising the FULL tetrad path in the orthonormal-frame HLLD (including the
+    // off-diagonal couplings beyond the diagonal sqrt(g) scaling). the inverse is computed exactly from the closed-form 3x3 inv.
     fn mild_nondiag_metric() -> SpatialMetric<f64, 3> {
         let gamma = symbi_algebra::Matrix::new([
             [1.3, 0.2, 0.05],
@@ -1388,7 +1388,7 @@ mod tests {
     fn hlld_rmhd_gr_ortho_nondiagonal_smooth_equals_flux() {
         // the TETRAD smooth-limit gate: on a NON-DIAGONAL (kerr-class) metric the orthonormal-frame
         // HLLD must STILL equal F(U) exactly for L = R. this exercises the full Gram-Schmidt tetrad
-        // (off-diagonal gamma), not just the diagonal sqrt(g) scaling. all three coordinate normals.
+        // (off-diagonal gamma), beyond the diagonal sqrt(g) scaling. all three coordinate normals.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_nondiag_metric();
         let gr = RmhdGr { metric: m, alpha: 0.9 };
@@ -1686,10 +1686,10 @@ mod tests {
         // energy-bearing star state goes singular -> negative pressure at the Orszag-Tang
         // resonance), the isothermal degeneracy is empirically BENIGN — the fast speed brackets
         // the Alfven speed so den >= 0 with the zero removable (0/0), and the HLL-average density
-        // is always positive. so this is a robustness/regression pin, not a reproduction of a
+        // is always positive. so this is a robustness/regression pin reproducing no
         // catastrophic blow-up; the relative guard's value is regularizing den near-zero to the
         // physically-correct no-rotation limit (and matching the newtonian guard for the
-        // identical den structure), not rescuing an Inf.
+        // identical den structure); no Inf is being rescued.
         let eos = Isothermal { cs: 0.5 };
         let nhat = Tensor::<f64, 3>::unit(0);
         for k in 0..12 {

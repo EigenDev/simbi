@@ -198,7 +198,7 @@ mod tests {
             let a = 30.0_f64.to_radians();
             [a.sin(), 0.0, a.cos()]
         };
-        let t_emit = 1.0e6; // lab emission time [s] (>0: a real checkpoint, not the explosion)
+        let t_emit = 1.0e6; // lab emission time [s] (>0: a real checkpoint past the explosion)
         // arrival = t_emit - r.n/c; depends only on position (same for both) -> same window.
         let t_arr_day = (t_emit - pos[2] * obs[2] / C_LIGHT.value()) / 86400.0;
 

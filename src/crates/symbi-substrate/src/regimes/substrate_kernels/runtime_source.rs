@@ -70,7 +70,8 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
     let outputs_slice: &[&Field<Sc, D, Mem>] = &outputs;
 
     // resolve scalars by the IR's declared order. the source kernel is FLOAT-only (dt, geom
-    // x_lo/dx, t, p{i}); an unexpected int param is a loud bug, not a silent mis-route.
+    // x_lo/dx, t, p{i}); an unexpected int param is a loud bug (a silent mis-route would corrupt
+    // the scalar order).
     let mut scalars: Vec<Sc> = Vec::with_capacity(kinds.len());
     for (bind, is_int) in kinds.iter() {
         assert!(!*is_int, "dispatch_runtime_ir('{name}'): unexpected int scalar param {bind:?}");
@@ -96,7 +97,7 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
 // RUNTIME user sources, REGIME-AGNOSTIC.
 //
 // ONE mechanism for every regime. the regime supplies only `has_energy` (from its static
-// `RegimeSpec`, stamped at attach by the kernel-set — the authority, not the caller); the
+// `RegimeSpec`, stamped at attach by the kernel-set, which is the authority); the
 // splice / per-cell interpreter / runtime IR build / dispatch are carrier- AND regime-generic.
 // each kernel-set holds an `Option<Arc<RuntimeSource>>`, validates the config against its own
 // spec at attach via `expr_bridge::build_user_source(cfg, &SPEC)` (rejecting relativistic
@@ -147,7 +148,7 @@ pub(crate) struct FusedCpuKernel {
 impl RuntimeSource {
     /// build from spec-validated `(target, BuiltSource)` pairs. `has_energy` comes from the
     /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
-    /// `ISO_NEWTONIAN_SPEC.has_energy`), NOT the caller — the set IS the regime.
+    /// `ISO_NEWTONIAN_SPEC.has_energy`) — the set IS the regime.
     pub fn new(built: Vec<(String, BuiltSource)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);
         Arc::new(Self {
@@ -213,8 +214,9 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     // an iso source can't reference `pre` (the carrier only binds it when has_energy).
     let pre_field = sim.fields.prim.pre_field();
     let fields: Vec<String> = rs.eval.fields().map(|s| s.to_string()).collect();
-    // capture only the `Sync` sub-fields, NOT `&rs`: `RuntimeSource` is `!Sync` (it transitively
-    // holds the IR `Graph`, which carries `proc_macro2::Span`/`Rc` provenance). the `SourceEvaluator`
+    // capture only the `Sync` sub-fields; `&rs` cannot be captured because `RuntimeSource` is
+    // `!Sync` (it transitively holds the IR `Graph`, which carries `proc_macro2::Span`/`Rc`
+    // provenance). the `SourceEvaluator`
     // is graph-free (scalarized `LoweredFn`s only) and thread-safe, so the per-cell eval is sound.
     let eval = &rs.eval;
     let rs_params = &rs.params;
@@ -225,7 +227,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     // never writes a field directly, so there is exactly one place writes happen and they are
     // checked. parallelism is a flat `par_iter` over the interior coords: each coord is handled by
     // exactly ONE thread (disjoint cells), so the read-modify-write is race-free BY CONSTRUCTION,
-    // and a bad index PANICS loudly instead of corrupting the heap.
+    // and a bad index PANICS loudly (a silent out-of-bounds would corrupt the heap).
     let coords: Vec<[isize; D]> = sim.geom.interior.iter().collect();
     coords.par_iter().for_each(|&c| {
         let rho = (*u.den.at(c)).to_f64();
@@ -268,7 +270,8 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
                     // components (an in-plane force on a 2.5D MHD grid where DOF=3 > D — the
                     // out-of-plane momentum is left untouched) or the full regime DOF (raw, or
                     // hydro where D == DOF). any other count is a config `dim` mismatch and fails
-                    // HERE, loudly, not as a silent mis-index. (D/DOF are known only at dispatch.)
+                    // HERE, loudly (a silent mis-index would scatter momentum into the wrong
+                    // components). (D/DOF are known only at dispatch.)
                     assert!(
                         n_out == D || n_out == DOF,
                         "runtime source 'mom' emits {n_out} components; expected the spatial dim \
@@ -646,7 +649,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     let (grid, dlo) = exec_layout(&sim.geom.interior);
     // the SAME cache-tiling policy the AOT kernels get through `dispatch_fields_each`: a big window
     // is fanned over a disjoint block cover so the godunov flux-divergence stencil's neighbour reads
-    // (which run along the SLOW memory axes) stay L1-resident instead of streaming RAM. without this
+    // (which run along the SLOW memory axes) stay L1-resident, avoiding a stream from main memory. without this
     // the fused stage is the one kernel in the step that never tiles. bit-identical: the cover
     // partitions the window, so each cell is computed once by the same kernel on the same inputs.
     //
@@ -714,7 +717,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
     let t = sim.time;
     // resolve each kernel scalar BY NAME (the IR's declared order): dt = the SSP stage weight, the
     // lazily-declared geom centroid params (x_lo_k / dx_k), sim time t, and the user knobs p{i}.
-    // (rho / vel_k / x_k are per-cell FIELD reads inside the kernel, not scalars.)
+    // (rho / vel_k / x_k are per-cell FIELD reads inside the kernel.)
     dispatch_runtime_ir(sim, name, ir, &sim.geom.interior, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("runtime source gpu: unexpected spec scalar {bind:?}");

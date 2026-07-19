@@ -3,8 +3,8 @@
 #
 # regression gates for the silent-config-loss hardening: a typo'd kwarg, an
 # out-of-range assignment, a restart flag conflict, and the van leer limiter
-# spelling must all fail loudly (or round-trip correctly) instead of silently
-# running with a default.
+# spelling must all fail loudly or round-trip correctly, so a silent run with a
+# default value cannot swallow the config.
 # =============================================================================
 
 import pytest
@@ -28,7 +28,7 @@ def test_typoed_cli_flag_is_rejected():
 
 
 def test_out_of_range_assignment_is_rejected():
-    # field constraints hold on ASSIGNMENT, not just construction: a setup() or
+    # field constraints re-validate on ASSIGNMENT: a setup() or
     # user-code mutation cannot smuggle an invalid value to the backend.
     p = GrBondiKS.from_cli([])
     with pytest.raises(ValueError, match="cfl_number"):
@@ -53,8 +53,8 @@ def test_vanleer_limiter_keeps_the_model_theta_positive():
 
 def test_negative_checkpoint_theta_maps_back_to_vanleer():
     # a checkpoint written by a van leer run stores the kernel spelling
-    # plm_theta = -1; the restore path must recover the limiter selection
-    # instead of feeding -1 into the gt=0 field (which fails revalidation).
+    # plm_theta = -1; the restore path must recover the limiter selection.
+    # feeding -1 into the gt=0 field would fail revalidation.
     class _Meta:
         time = 1.0
         gamma = 4.0 / 3.0
@@ -142,7 +142,7 @@ def test_restart_conflict_on_explicit_immutable_flag(monkeypatch, tmp_path):
 
 
 def test_restart_continues_checkpoint_index_not_reset_to_zero(monkeypatch, tmp_path):
-    # restarting from chkpt.030 must number the next dump 031, not restart from 0. the checkpoint
+    # restarting from chkpt.030 must number the next dump 031. the checkpoint
     # index is checkpoint_safe (serializable), so the generic field merge preferred the config
     # default (0) and every restart silently renumbered from zero, overwriting earlier files —
     # while start_time (force-restored) looked correct. the merge must force the index too.

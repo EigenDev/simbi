@@ -153,7 +153,7 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
 
     /// pressure from nrg = cs^2: p = nrg * rho.
     /// works for both globally and locally isothermal since it reads cs^2
-    /// from the stored nrg, not from self.cs.
+    /// from the stored nrg.
     #[inline]
     fn recover_pressure(&self, rho: S, _v_sq: S, nrg: S) -> S {
         nrg * rho
@@ -162,7 +162,7 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
     /// isothermal kernels use gamma as cs^2 for c2p (pre = cs^2 * rho),
     /// flux (HLLE wave speeds), and max_wave_speed (cs = sqrt(gamma)).
     fn gamma_for_ops(&self) -> f64 { (self.cs * self.cs).to_f64() }
-    /// the isothermal KernelSet constructors take the sound speed `cs` (not cs^2).
+    /// the isothermal KernelSet constructors take the sound speed `cs` directly (cs^2 is what `gamma_for_ops` supplies).
     fn substrate_param(&self) -> f64 { self.cs.to_f64() }
 }
 

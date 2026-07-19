@@ -52,7 +52,7 @@ from .types.typing import (
 # the afterglow light curve, STREAMED over checkpoints via the single cpu_ext catalog path
 # (afterglow/lightcurve.py). this replaces the former symbi-rad-py `rad_hydro.lightcurve`
 # (a parallel self-contained binding) so there is ONE afterglow code path with all the fixes.
-# images use the `simbi afterglow skymap` cli (cpu_ext), not a top-level export.
+# images are produced through the `simbi afterglow skymap` cli (cpu_ext).
 try:
     from .afterglow.lightcurve import afterglow_lightcurve
 except ImportError:
@@ -65,8 +65,8 @@ except ImportError:
 try:
     from .libs.cpu_ext import bondi_profile, bondi_sonic_radius, mdot_bondi
 except ImportError:
-    # a wheel built before these bindings existed: bind stubs that NAME the fix
-    # instead of None (calling None produces a bare TypeError far from the cause).
+    # a wheel built before these bindings existed: bind stubs that NAME the fix;
+    # a bound None would raise a bare TypeError far from the cause.
     def _stale_wheel_stub(name):
         def _stub(*_a, **_k):
             raise RuntimeError(

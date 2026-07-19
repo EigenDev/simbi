@@ -314,7 +314,7 @@ def test_ring_accretion_from_checkpoint_wrapper():
 
 
 def test_superluminal_velocity_is_rejected():
-    # gamma_rr (v^r)^2 >= 1 must fail loud, not silently produce a NaN flux.
+    # gamma_rr (v^r)^2 >= 1 must fail loud; a silent NaN flux would otherwise slip through.
     mass = 1.0
     r = np.array([3.0])
     v_r = np.array([0.85])  # h (v^r)^2 = (1 + 2/3) 0.7225 > 1 at r = 3

@@ -69,7 +69,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
             .finish()
             .unwrap();
         // non-uniform density (live flux divergence) + nonzero velocity (live v.a energy term), so a
-        // stale or wrong stage-input buffer diverges immediately rather than cancelling.
+        // stale or wrong stage-input buffer diverges immediately, where a uniform state might let the error cancel.
         sim.seed_cells(|p| {
             let (x, y) = (p[0], p[1]);
             let rho = 1.0 + 0.3 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
@@ -96,7 +96,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
     evolve(&mut sim_elide, &sub_elide, t_final).expect("elided evolve");
 
     // GUARD: the alias really engaged. RK2 leaves the flag set from its LAST stage, which is the
-    // corrector (ii = 1) -> false. so assert on the invariant that makes the elision legal instead:
+    // corrector (ii = 1) -> false. so the assertion targets the invariant that makes the elision legal:
     // multi-stage, and the reference genuinely took the other branch.
     assert!(sim_elide.timestepping.stages().len() > 1, "the elision only applies to multi-stage schemes");
     assert!(

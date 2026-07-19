@@ -4,7 +4,7 @@
 // empirical confirmation of the compute-all-paths carrier tax. renders each
 // regime's CFL wave_speed_map kernel to CPU (Rust) source and counts the
 // expensive ops every cell executes per launch (post-scalarize, post-CSE — i.e.
-// ground truth, not an estimate). the rmhd quartic's select-blended cubic
+// exact ground truth). the rmhd quartic's select-blended cubic
 // resolvent computes ALL transcendental branches; the count is the proof.
 //
 // usage: cargo run -p symbi-discretize --release --example wave_speed_op_census

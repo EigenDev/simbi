@@ -3,7 +3,7 @@
 //
 // region + relax axes, END-TO-END through the live evolve loop (the runtime user-source path:
 // json -> build_user_source -> SourceEvaluator -> source_apply). proves the region and relax
-// axes are real physics, not just graph construction:
+// axes change the physics of the solution:
 //
 //   region: a force masked to chi(x) = [x_0 < 0.5] accelerates ONLY the left half of the box; the
 //           right half stays at rest. the mask is a property of the source, applied per cell.
@@ -53,8 +53,9 @@ fn region_masked_force_acts_only_in_the_left_half() {
     evolve(&mut sim, &sub, 0.05).expect("evolve");
 
     // the SOURCE acts only in the left half. the hydro then leaks a little momentum across the
-    // x=0.5 interface (a real pressure/advection response), so the test is the ASYMMETRY, not a
-    // hard right-half zero: every left cell is accelerated, and the total right-half momentum is a
+    // x=0.5 interface (a real pressure/advection response), so the test asserts the ASYMMETRY
+    // between the halves; the right half is not required to be exactly zero: every left cell is
+    // accelerated, and the total right-half momentum is a
     // small fraction of the left's. without the mask the two halves would be identical.
     let mut left_total = 0.0;
     let mut right_total = 0.0;

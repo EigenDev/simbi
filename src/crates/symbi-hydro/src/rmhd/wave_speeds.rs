@@ -46,7 +46,7 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     // resolvent cubic + ~10 transcendentals via `solve_quartic_minmax`) lives
     // in the innermost else arm, so it is SKIPPED entirely when `vsq ~ 0`
     // (Eq. 57) or `bn ~ 0` (Eq. 58) — the `wave_speeds` early-`return` chain
-    // instead of paying compute-all-paths via `S::select`. the
+    // skips compute-all-paths via `S::select`. the
     // cheap shared prefix above (rho, hh, w2, cssq, bmu*) stays unconditional.
     let cond_vsq = vsq.cmp_lt(eps);
     let cond_bn = (bn * bn).cmp_lt(eps);
@@ -122,7 +122,7 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
 ///
 /// `c_f^2 = c_s^2 + c_A^2 - c_s^2 c_A^2` (textbook no-rotation magnetosonic bound), a STRICT
 /// upper bound on the Mignone & Del Zanna quartic fast speed (`rmhd_wave_speeds`). the CFL
-/// needs only a stable UPPER bound, not the exact characteristic — this is ~25x cheaper
+/// needs only a stable UPPER bound — this is ~25x cheaper
 /// (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, all of which trace into the kernel
 /// because `S::select` evaluates every arm). it stays CFL-safe because it never UNDER-
 /// estimates the true signal speed. do NOT route the Riemann/flux path (`extremal_speeds`)
@@ -132,8 +132,8 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
 /// `cf_sq` uses the product form `1 - (1-cs^2)(1-cA^2)` (manifestly < 1 for physical inputs,
 /// so `denom = 1 - vsq*cf_sq > 0` with NO clamp) and the outputs are UNCLAMPED — a NaN prim
 /// from an unphysical c2p propagates straight to the CFL max-reduction + dt guard
-/// ([[feedback_no_silent_floors]]) instead of being masked by a light-cone `.min`/`.max`
-/// (which would drop the NaN). over-estimating a speed only shrinks dt, which is safe.
+/// ([[feedback_no_silent_floors]]); a light-cone `.min`/`.max` would mask it by
+/// dropping the NaN. over-estimating a speed only shrinks dt, which is safe.
 pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim: &MhdPrim<S, D>,
@@ -156,7 +156,7 @@ pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
 
     // magnetosonic c_f^2 via the PRODUCT form: 1 - (1-cs^2)(1-cA^2). strictly < 1 for
     // physical cs^2, cA^2 in [0,1) (so denom below stays positive without a clamp), and it
-    // preserves NaN (1 - (1-NaN)(.) = NaN) so an unphysical prim surfaces, not masked.
+    // preserves NaN (1 - (1-NaN)(.) = NaN) so an unphysical prim surfaces unmasked.
     let cf_sq = S::ONE - (S::ONE - cssq) * (S::ONE - va_sq);
 
     // SR relativistic addition of the normal flow velocity and the magnetosonic speed.
@@ -255,7 +255,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 /// solve resolvent cubic x^3 + bx^2 + cx + d = 0 for one real root.
 /// GPU-traceable via `S::cond` (the DUAL of iterate): ONLY the taken case's
 /// transcendental pair is evaluated — the carrier-portable form of the
-/// `solve_cubic` early-`return`, NOT compute-all-paths. cheap, symmetric
+/// `solve_cubic` early-`return`. cheap, symmetric
 /// sub-choices (the cube-root sign) stay branch-free `S::select`. clamps are
 /// kept for bit-equivalence with the host f64 path (they are identity when the
 /// owning arm is taken).
@@ -382,7 +382,7 @@ mod tests {
     /// (cubic resolvent -> nested `S::cond`) -> 239 (Eq.57/58/quartic path
     /// selection -> nested `S::cond_vec`, this change).
     ///
-    /// the jump is a STATIC over-count, NOT a real register regression. the
+    /// the jump is a STATIC over-count; no real register regression occurs. the
     /// walker "counts every ancestor-scope Let as live, ignoring true
     /// liveness" (see its own doc) — so when the FULL quartic (~200 ops) moved
     /// INTO path 3's `if/else` arm (skipped entirely when `vsq~0` / `bn~0`),
@@ -392,8 +392,8 @@ mod tests {
     /// live ranges) cost what they cost whether at function scope or in a
     /// branch; the lazy branch only DELETES work on the fast paths. the REAL
     /// evidence of the win is the emitted kernel (quartic inside the else arm)
-    /// + the `cubic_resolvent_select_tax_wallclock` bench (2.16x -> 0.97x), not
-    /// this number. a liveness-aware metric would
+    /// + the `cubic_resolvent_select_tax_wallclock` bench (2.16x -> 0.97x);
+    /// this number carries none of it. a liveness-aware metric would
     /// report a value near the old ~90; the bound just catches a
     /// gross >2x blow-up.
     #[test]
@@ -456,13 +456,13 @@ mod tests {
                 }
             }
         }
-        // sanity: the bound is genuinely an over-estimate (not accidentally equal everywhere).
+        // sanity: the bound is genuinely an over-estimate (a strict margin everywhere).
         assert!(worst_margin >= -1e-9, "worst margin {worst_margin}");
     }
 
     // item 4: the CFL upper bound must PRESERVE NaN — an unphysical prim (NaN from a failed
     // c2p) must yield NaN speeds so it reaches the NaN-propagating CFL reduction + dt guard,
-    // NOT a clamped finite speed that silently masks it ([[feedback_no_silent_floors]]).
+    // a clamped finite speed would silently mask it ([[feedback_no_silent_floors]]).
     #[test]
     fn magnetosonic_bound_propagates_nan() {
         let eos = IdealGas { gamma: 4.0 / 3.0 };

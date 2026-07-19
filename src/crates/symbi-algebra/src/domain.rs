@@ -247,7 +247,7 @@ impl<const R: usize> Domain<R> {
     ///
     /// like [`difference`](Self::difference) it returns disjoint boxes whose
     /// union is exactly the set difference, but it cuts the shell with `2*R`
-    /// half-open guillotine slabs instead of the `3^R - 1` product cells. axis
+    /// half-open guillotine slabs, fewer pieces than the `3^R - 1` product cells. axis
     /// `ax` owns the two slabs lying outside the overlap on axis `ax`, taken at
     /// FULL extent on the higher axes (`aa > ax`) and CLIPPED to the overlap on
     /// the lower axes (`aa < ax`); a cell outside the overlap on several axes is
@@ -974,9 +974,9 @@ mod tests {
 //   * `expand` / `contract_axis` are inverse on a single axis
 //   * `flat_index` / `unflatten` are mutually inverse coordinate <-> offset maps
 //
-// NOTE on `hull`: it is the box-lattice join, NOT set union (boxes are not closed
-// under union). so the law is the bounding-box law `A,B ⊆ hull(A,B)`, and hull is
-// the LEAST box with that property — not `cells(hull) == cells(A) ∪ cells(B)`.
+// NOTE on `hull`: it is the box-lattice join; it is not a set union, since boxes are not
+// closed under union. so the law is the bounding-box law `A,B subseteq hull(A,B)`, and hull is
+// the LEAST box with that property; hull(A,B) is not the cell set `cells(A) union cells(B)`.
 // =============================================================================
 #[cfg(test)]
 mod laws {

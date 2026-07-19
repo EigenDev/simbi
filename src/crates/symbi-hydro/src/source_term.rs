@@ -12,7 +12,7 @@
 // conservation law. the lift functions (`force_momentum` / `force_energy` /
 // `cooling` / `relax_*`) ARE that wrapping. because the wrapping is one carrier-
 // generic definition:
-//   - f64 == Gv by construction for the LAW itself, not just the field — the
+//   - f64 == Gv by construction across the whole LAW computation, field values included — the
 //     graph-divergence bug class (a hand-built `Op` graph that traces a different
 //     computation than the f64 reference) cannot occur.
 //   - the energy source is DERIVED from the same field the momentum source uses
@@ -35,7 +35,7 @@ use crate::Scalar;
 // instantiated at S=f64 (reference) and S=Gv (kernel). runs at BUILD/TRACE time
 // (building IR or evaluating the analytical reference), never per-cell in the hot
 // path — the rendered kernel / scalarized graph carries the per-cell work — so the
-// `Vec` returns are free (they allocate once per kernel build, not per cell).
+// `Vec` returns are free (they allocate once per kernel build).
 // =============================================================================
 
 /// force-MOMENTUM lift: `S_mom_k = rho * a_k`, for an acceleration field `a` (D
@@ -118,7 +118,7 @@ pub fn sponge_energy<S: Scalar>(rho: S, vel: &[S], pre: S, kappa: S, nrg_ref: S,
 /// the `kappa >= 0` stability clamp. a relaxation adds `kappa*(U_ref - U)`; a
 /// negative rate would anti-damp (inject energy / destabilize). clamping in the
 /// lift makes the unstable form UNEXPRESSIBLE — the stability invariant enforced
-/// by construction, not by a runtime check. carrier-safe (`max`, no branch).
+/// by construction. carrier-safe (`max`, no branch).
 fn clamp_rate<S: Scalar>(kappa: S) -> S {
     kappa.max(S::ZERO)
 }
@@ -182,7 +182,7 @@ pub struct PointMassGravity<S, const D: usize> {
 
 impl<S: Scalar, const D: usize> PointMassGravity<S, D> {
     /// the softened acceleration field `a_k = -GM (x-xm)_k / (|x-xm|^2 + eps^2)^{3/2}`.
-    /// `rho` is NOT folded in — the lift multiplies it. the radicand `|x-xm|^2 + eps^2`
+    /// `rho` is applied by the caller's lift, so this acceleration field excludes it. the radicand `|x-xm|^2 + eps^2`
     /// is strictly positive for `eps > 0`, so the `sqrt` + division never hit zero.
     pub fn accel(&self, x: &[S; D]) -> [S; D] {
         let dx: [S; D] = std::array::from_fn(|k| x[k] - self.xm[k]);

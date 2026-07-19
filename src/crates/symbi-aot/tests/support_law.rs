@@ -3,7 +3,7 @@
 //
 // the support-validation law: a kernel's DECLARED
 // output support must hold on the COMPILED kernel — every output exactly zero
-// (in f64, not approximately) at every cell outside the declared region, for
+// in f64 at every cell outside the declared region, for
 // nontrivial field inputs. the declaration drives dispatch decisions (the
 // body-feedback reduction box), so a support declared wider than reality is
 // harmless and a support declared narrower is a silent physics loss — exactly

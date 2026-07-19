@@ -8,8 +8,8 @@
 //     external acceleration overlay (mom only; iso has no energy law).
 //   - `adiabatic_godunov_stage_with_uniform_accel_1d` — adiabatic + uniform
 //     accel overlays for BOTH momentum (S_mom = ρ·g_ext) AND energy
-//     (S_nrg = ρ·v·g_ext). proves the multi-source fusion baked at
-//     build time, not just at trace time.
+//     (S_nrg = ρ·v·g_ext). proves the multi-source fusion is baked into
+//     the compiled kernel at build time.
 //
 // **what's validated**:
 //   1. each fused kernel resolves through the AOT registry (`kernel_by_name`)
@@ -109,7 +109,7 @@ fn iso_aot_fused_step_matches_analytical_source_update() {
     //     mom_new[i] = mom[i] + dt * rho[i] * g_ext_0 (uniform_accel mom overlay)
     //
     // bit-exact at f64. proves the spec source's contribution is fused at the
-    // right point in the AOT kernel — not lost, not double-applied.
+    // right point in the AOT kernel and applied exactly once.
     let n = 8usize;
     let dt = 0.01_f64;
     let dx = 0.5_f64;
@@ -219,7 +219,7 @@ fn iso_aot_fused_runs_at_f32() {
     // `pub fn iso_godunov_stage_with_uniform_accel_1d__raw<S>` instantiated at
     // S=f32 by the input buffer type. proves that AOT-baking a spec-driven
     // source preserves Scalar-genericity through the splice + integrator —
-    // f32 lanes pick up the fused source, not just the divergence.
+    // f32 lanes pick up both the fused source and the divergence.
     let n = 8usize;
     let dt = 0.01_f32;
     let dx = 0.5_f32;

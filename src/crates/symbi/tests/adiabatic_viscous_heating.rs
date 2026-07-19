@@ -1,7 +1,7 @@
 // =============================================================================
 // adiabatic_viscous_heating.rs
 //
-// the ADIABATIC viscous operator books the viscous HEATING, not just the shear force. a decaying
+// the ADIABATIC viscous operator books the viscous HEATING in addition to the shear force. a decaying
 // shear layer v_x = V sin(k y) in a periodic box must, under viscosity:
 //   - CONSERVE total energy (the viscous energy flux div(tau.v) is conservative, like the ideal
 //     godunov flux) -- Sum nrg is invariant to round-off,

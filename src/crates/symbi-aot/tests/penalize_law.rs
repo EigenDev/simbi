@@ -165,7 +165,8 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
                 nrg: host_in.3[c],
             };
             // the kernel's centroid is the arithmetic mid of the FACE
-            // positions, not x_lo + (i+0.5)dx — mirror it to the bit.
+            // positions; the algebraically equal x_lo + (i+0.5)dx differs in the last
+            // bit, so mirror the face-mid form.
             let mid = |i: usize| {
                 ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5
             };
@@ -1062,7 +1063,7 @@ fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
 
 // OFF-CENTER body: with the body position given in Cartesian (the convention on
 // any grid), the cylindrical drain masks a physical ball around that Cartesian
-// point — a curved region in (R, phi), NOT the axis ring. bit-identical to the
+// point — a curved region in (R, phi) enclosing the off-axis Cartesian point. bit-identical to the
 // f64 chain, proving the general (non-e_r) off-center case.
 #[test]
 fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {

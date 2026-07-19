@@ -58,7 +58,7 @@ class GrKerrDragging(SimbiProblem):
         ProblemParam([(0.0, 0.0), (0.0, 0.0)], description="computed"),
     ]
     coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.SPHERICAL, description="coords")]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, cli=True, description="solver")]
     ct_method: Annotated[CtMethod, ProblemParam(CtMethod.CONTACT, cli=True, description="CT method")]
     x1_spacing: Annotated[CellSpacing, ProblemParam(CellSpacing.LINEAR, description="radial spacing")]

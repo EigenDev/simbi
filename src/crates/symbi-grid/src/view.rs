@@ -4,8 +4,8 @@
 // non-owning, strided, multi-dimensional view into contiguous memory.
 // the functor interface: view.at(coord) -> &T.
 //
-// a view is Copy — it's a pointer + strides, not an owner. the field
-// guarantees the pointer is valid for the view's lifetime. a view IS a
+// a view is Copy — a borrowed pointer + strides. the field owns the
+// storage and guarantees the pointer is valid for the view's lifetime. a view IS a
 // function from coordinates to values: view.at(coord) -> &T.
 //
 // usage:

@@ -34,7 +34,7 @@ use symbi_discretize::{
 
 // MAX_BODIES is owned by the runtime (symbi_ib::collection::MAX_BODIES = 2); mirrored
 // here as a literal since symbi-discretize does not depend on symbi-ib. the lowering
-// only cares that the per-body-unrolled graph builds + renders, not the exact count.
+// only cares that the per-body-unrolled graph builds + renders, regardless of the exact count.
 const MAX_BODIES: usize = 2;
 
 // the curvilinear momentum source the godunov binds, by regime prefix — mirrors

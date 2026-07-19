@@ -101,7 +101,7 @@ fn is_comparison(kind: BinaryKind) -> bool {
     )
 }
 
-// methods on a float receiver that return a boolean, not the receiver type.
+// methods on a float receiver that return a boolean.
 fn method_returns_bool(name: &str) -> bool {
     matches!(name, "is_finite" | "is_nan" | "is_infinite")
 }
@@ -225,7 +225,7 @@ fn expr_eligible(e: &ScalarExpr, env: &HashMap<String, ElementTy>) -> bool {
             // whose INLINE cost is heavy — a division, an expensive method, a
             // free call — makes the trade a measured loss (the hllc star-state
             // fan runs 2.6x slower mask-formed). cse-hoisted lets referenced by
-            // the arm are shared straight-line work, not arm cost, so the walk
+            // the arm are shared straight-line work outside the arm cost, so the walk
             // sees only what the arm computes inline.
             if arm_is_expensive(then) || arm_is_expensive(else_) {
                 return false;
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn division_outside_select_arms_stays_eligible() {
         // a cse-hoisted division feeding cheap select arms by name is shared
-        // straight-line work, not arm cost — the kernel is rewritten.
+        // straight-line work outside the arm cost — the kernel is rewritten.
         let div = ScalarExpr::BinOp(BinaryKind::Div, Box::new(f(1.0)), Box::new(var("x")));
         let sel = ScalarExpr::Select {
             cond: Box::new(ScalarExpr::BinOp(

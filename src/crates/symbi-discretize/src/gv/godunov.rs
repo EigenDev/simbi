@@ -126,7 +126,7 @@ pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(S
     };
     // the freeze count mirrors the select's physicality: each spliced velocity must be FINITE too
     // (sign is physical), so a non-finite momentum the density/pressure test misses is still counted
-    // (and, in the select, frozen to the stage input) rather than propagated.
+    // (and, in the select, frozen to the stage input).
     for k in 0..ncomp {
         let p = format!("x_vel_{k}");
         physical = physical & finite(Gv::field(&p, &p));
@@ -141,7 +141,7 @@ pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(S
 /// state `u_stage` (`us_*`) — the pre-godunov conserved, admissible from stage entry, so the final
 /// c2p converges on it. the face-based splice already made every kept cell conservative (one flux per
 /// face); this handles only the rare cell that no flux can update admissibly, holding its stage input
-/// rather than propagating a NaN. that single-cell hold is the documented conservation waiver — it
+/// so no NaN propagates. that single-cell hold is the documented conservation waiver — it
 /// discards the cell's flux exchange, bounded by the persistent-freeze fail-loud. only the conserved
 /// is chosen; the primitive is re-derived by the c2p that follows.
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -188,8 +188,7 @@ pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String,
 /// the FREEZE-tier select WITH the immersed-body source composed INLINE — the LAZY, buffer-free
 /// answer to "a frozen cell must not lose its body gravity/accretion". identical to `fofc_select_gv`
 /// except the freeze parachute is the stage input EVOLVED by the body source in registers,
-/// `u_stage + dt*body(u_stage)` (via `body_evolved_gv` / `body_evolved_iso_gv`), rather than the bare
-/// `u_stage`. no buffer is materialized: the body delta AND the c2p pressure used to GUARD it are
+/// `u_stage + dt*body(u_stage)` (via `body_evolved_gv` / `body_evolved_iso_gv`). no buffer is materialized: the body delta AND the c2p pressure used to GUARD it are
 /// closed forms of `us_*`. the guard preserves the freeze tier's physical-parachute invariant — a body
 /// kick that would drive the parachute unphysical (a strong pull on a low-internal-energy cell) falls
 /// back to the bare stage input. `has_energy` selects the adiabatic (evolves nrg, eos param = gamma,
@@ -207,8 +206,8 @@ pub fn fofc_select_with_body_gv(
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
     let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
     // the spliced first-order result's physicality, IDENTICAL to `fofc_select_gv`: density always,
-    // pressure only when the energy is modelled (iso keeps p in a separate cs^2 buffer, not in the
-    // sim prim, so its select gates on the density alone), plus finiteness of every velocity component.
+    // pressure only when the energy is modelled (iso keeps p in a separate cs^2 buffer, so its
+    // select gates on the density alone), plus finiteness of every velocity component.
     let x_rho = Gv::field("x_rho", "x_rho");
     let mut physical_fo = if has_energy {
         finite_pos(x_rho) & finite_pos(Gv::field("x_pre", "x_pre"))
@@ -393,8 +392,8 @@ pub fn godunov_stage_gv(
 /// forward-Euler stage.
 ///
 /// **structural shape contract**: spliced outputs MUST have the expected per-target
-/// arity (1 for den/nrg, D for mom); spec authors that violate this get a panic, not a
-/// silent wrong-component write.
+/// arity (1 for den/nrg, D for mom); spec authors that violate this get a panic that prevents
+/// a silent wrong-component write.
 struct FusedContribs {
     /// each entry is a `S_den` NodeId to add to `rho_new`.
     den: Vec<NodeId>,
@@ -425,8 +424,8 @@ fn splice_fused_sources_to_contribs(
     geo: &Option<CellGeometryGv>,
     // the STATE vocabulary the DAG reads `rho`/`vel_k` from (`StateEnv`). `Some((rho,
     // mom))` binds them (sources read the stage/conserved state); `None` binds NOTHING from state — a
-    // pure coordinate prescription (a driven boundary, whose DAG outputs the state rather than reading
-    // it). `x_k` (centroid) + scalar params are bound regardless.
+    // pure coordinate prescription (a driven boundary, whose DAG outputs the state it does not read).
+    // `x_k` (centroid) + scalar params are bound regardless.
     state: Option<(Gv, &[Gv])>,
     // (target_field, built) pairs — the BuiltSource VALUES, so this serves both the AOT path
     // (SourceSpec.build_source(ndim)) and the RUNTIME path (build_user_source's loaded values).
@@ -607,8 +606,8 @@ pub fn godunov_stage_gv_with_fused_built(
     let ac = Gv::scalar("ac");
     // the SSP source weight. computed as `ac*dt` so it is BIT-IDENTICAL to the standalone
     // `source_apply_gv` pass's `dt` scalar (the driver fills that with `ac*sim.dt` — the same IEEE
-    // f64 product). this is what makes `fused == plain godunov + source_apply` exact, not just
-    // ULP-close: the user source is added as a SEPARATE post-combine term with this weight, never
+    // f64 product). this is what makes `fused == plain godunov + source_apply` bit-exact: the
+    // user source is added as a SEPARATE post-combine term with this weight, never
     // folded into the `ac*fe` multiply (which would distribute the rounding differently).
     let ac_dt = ac * dt;
     // flat spacetime: the physical (orthonormal) finite-volume geometry. curved (GR): the
@@ -662,8 +661,8 @@ pub fn godunov_stage_gv_with_fused_built(
     let h_dil = Gv::scalar("mesh_hdil");
     // GR densitization (Valencia 3+1, static diagonal background): the spatial RHS — the flux
     // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. NOT the
-    // `u` snapshot or the mesh-dilution term (those are the time / comoving parts, not the
-    // densitized flux). flat spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
+    // `u` snapshot or the mesh-dilution term (those are the time / comoving parts). flat
+    // spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
     // the coordinate-indexed cell centroid (r at slot 0) for the lapse alpha(x); only the
     // curvilinear path carries one (cartesian-uniform geo = None is always Minkowski -> unused).
     let coord_centroid: Vec<Gv> = match &geo {
@@ -848,7 +847,7 @@ pub fn godunov_stage_gv_with_fused_built(
         // covariant S_i, so d_t S_i = -alpha div(F) + alpha S — a SINGLE, uniform lapse on every
         // conserved law, supplied by the `fe` weight. no orthonormal alpha^2 asymmetry: the flux
         // kernel already carries the contravariant v^n (no V_rhat), and the metric coefficient
-        // gamma_ij rides inside S_i, not the densitization.
+        // gamma_ij rides inside S_i, above the densitization.
         mom_g.push(with_sources(
             combine(u_n_mom, fe(mom[k], div, mom_src)),
             &contribs.mom[k],
@@ -1008,7 +1007,7 @@ fn apply_dag_core_gv(
             }
             // the godunov-source (accumulate) path never targets B — the safe conservation-law
             // lifts touch only den/mom/nrg, and `raw` is gated to those slots. a bcell contrib
-            // here means a mis-routed source; fail loud rather than silently drop it.
+            // here means a mis-routed source; fail loud so it is never silently dropped.
             debug_assert!(
                 contribs.mag.iter().all(|m| m.is_empty()),
                 "accumulate (godunov source) path does not support a `bcell` target",

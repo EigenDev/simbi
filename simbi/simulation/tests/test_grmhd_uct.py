@@ -6,10 +6,11 @@
 # curved background — the densitized corner EMF `Etilde_phi` built from the
 # transport velocity `vtilde = alpha v - beta` and the SHIFTED Banyuls-Font bound
 # speeds (materialized per cell, quartic-free), consumed by the same GR curl the
-# contact EMF uses. UCT-HLL coefficients (not the sharper UCT-HLLD wave-sum).
+# contact EMF uses. UCT-HLL coefficients; the sharper UCT-HLLD wave-sum is
+# unimplemented.
 #
-# the gates are CORRECTNESS, not a quantitative checkerboard win (that needs the
-# sharp UCT-HLLD solver — the HLLE gas flux here is already diffusive):
+# the gates are CORRECTNESS; a quantitative checkerboard win needs the
+# sharp UCT-HLLD solver — the HLLE gas flux here is already diffusive:
 #
 #   smooth-limit: the theta-uniform magnetized-michel monopole holds IDENTICALLY
 #   under UCT and contact (E_phi = 0 pointwise, so the upwind master form and the
