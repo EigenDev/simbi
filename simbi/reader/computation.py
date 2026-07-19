@@ -145,7 +145,7 @@ def labframe_momentum(
     """compute lab-frame momentum."""
     if regime == "newtonian":
         mom_vec = np.asarray(rho) * np.asarray(vel)
-    elif "sr" in regime:
+    elif regime in ("rhd", "rmhd"):
         h = _enthalpy(rho, pre, gamma, regime)
         D = labframe_density(rho, vel, regime).squeeze()
         W = lorentz_factor(vel, regime)
@@ -514,22 +514,32 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
         return _compute
 
-    def compute_b_mean_component(
+    def compute_b_labframe_component(
         component: int,
     ) -> Callable[[dict[str, Array]], Array]:
-        def _compute(fields: dict[str, Array]) -> Array:
-            field_name = f"b{component}"
-            if field_name not in fields:
-                return np.zeros_like(fields["rho"])
+        """cell-centered lab-frame magnetic field component b_i. face-centered values are
+        averaged to the cell center by get_b_fields, which also accepts the out-of-plane
+        component of a 2.5d / 1.75d run as-is (it carries no face in the missing axis)."""
 
-            view = fields[field_name]
-            if field_name == "b1":
-                return 0.5 * (view[..., 1:] + view[..., :-1])
-            elif field_name == "b2":
-                return 0.5 * (view[:, 1:, :] + view[:, :-1, :])
-            elif field_name == "b3":
-                return 0.5 * (view[1:, :, :] + view[:-1, :, :])
-            raise ValueError(f"invalid b-field component: {field_name}")
+        def _compute(fields: dict[str, Array]) -> Array:
+            return np.asarray(get_b_fields(fields)[component])
+
+        return _compute
+
+    def compute_b_four_component(
+        component: int,
+    ) -> Callable[[dict[str, Array]], Array]:
+        """spatial component of the comoving magnetic four-vector,
+        b^i = B^i / W + W (v.B) v^i, with B the cell-centered lab-frame field, v the
+        three-velocity, and W the lorentz factor. its norm b_mu b^mu = |B|^2 / W^2 +
+        (v.B)^2 equals twice the relativistic magnetic pressure."""
+
+        def _compute(fields: dict[str, Array]) -> Array:
+            vel = get_velocities(fields)
+            b = get_b_fields(fields)
+            W = lorentz_factor(vel, regime)
+            vdb = _dot_product(vel, b)
+            return np.asarray(b[component] / W + W * vdb * vel[component])
 
         return _compute
 
@@ -959,14 +969,25 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "schlieren": compute_schlieren,
     }
 
-    # add component fields
-    for ii in range(1, ndim + 1):
+    # add component fields. an mhd velocity / momentum is a 3-vector regardless of the spatial
+    # dimensionality (a 2.5d / 1.75d run still evolves the out-of-plane component), so the
+    # component count follows the stored vector dof: 3 for mhd, ndim for hydro.
+    vector_dof = _vector_dof(regime, ndim)
+    for ii in range(1, vector_dof + 1):
         base_pipeline[f"u{ii}"] = compute_u_component(ii - 1)
         base_pipeline[f"m{ii}"] = compute_momentum_component(ii - 1)
 
     if data.metadata.is_mhd:
-        for ii in range(1, ndim + 1):
-            base_pipeline[f"b{ii}_mean"] = compute_b_mean_component(ii)
+        # cell-centered lab-frame magnetic field b1_mean / b2_mean / b3_mean (the plain b1/b2/b3
+        # names resolve to the raw face-centered fields, so the cell-centered form carries the
+        # _mean suffix).
+        for ii in range(1, vector_dof + 1):
+            base_pipeline[f"b{ii}_mean"] = compute_b_labframe_component(ii - 1)
+        # spatial components of the comoving magnetic four-vector, defined only for the
+        # relativistic mhd regime.
+        if regime == "rmhd":
+            for ii in range(1, vector_dof + 1):
+                base_pipeline[f"bmu{ii}"] = compute_b_four_component(ii - 1)
 
     # fields requiring composite/base-level computation
     # these involve spatial integration or coordinate transformations that are
