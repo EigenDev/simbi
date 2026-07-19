@@ -66,7 +66,7 @@ def _source_numeric(r, big_v, rho, p, th=np.pi / 2, dr=1e-6):
 
 
 def _source_closed(r, big_v, rho, p):
-    # the closed forms wired in gv/godunov.rs (KerrSchild arms of radial_gravity + nrg_gravity).
+    # the closed forms implemented in gv/godunov.rs (KerrSchild arms of radial_gravity + nrg_gravity).
     b = 2 * M / r
     h = 1 + b
     w = 1 / np.sqrt(1 - big_v * big_v)

@@ -76,7 +76,7 @@ pub struct KernelEmitInputs<'a> {
     pub device_preamble: &'a [String],
     /// the kernel's shared-memory tile intent for STENCIL
     /// kernels (halo + stencil-read field keys). `None` = no smem tiling.
-    /// the CUDA emitter (Gate 3) cooperatively prefetches the (block + halo)
+    /// the CUDA emitter cooperatively prefetches the (block + halo)
     /// region for these fields into `__shared__`; the CPU emitter ignores it
     /// (it cache-tiles every kernel unconditionally). inferred for stencil
     /// kernels via `infer_tile_spec`; threaded here from the `GvKernel`.

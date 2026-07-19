@@ -1400,8 +1400,8 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let name_owned = if DOF != D { format!("{name_owned}_dof{DOF}") } else { name_owned };
         let name: &str = &name_owned;
         // the reduction/dispatch box. on a Cartesian grid the kernel's declared
-        // support ball clamps to an index box (the design-48 consumer, identical to
-        // the feedback drain). off Cartesian the support ball is a COORDINATE ball,
+        // support ball clamps to an index box (identical to the feedback
+        // drain). off Cartesian the support ball is a COORDINATE ball,
         // not an index-aligned box (a centered accretor masks a full phi-ring, whose
         // index extent is every phi cell, NOT `center_phi +- r_cut`), so dispatch
         // over the full interior — the mask is an exact zero outside the physical

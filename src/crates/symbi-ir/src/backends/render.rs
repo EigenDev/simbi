@@ -416,7 +416,7 @@ pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescrip
         .map(|(key, runtime)| (key.clone(), buf_idx_by_field[runtime]))
         .collect();
 
-    // Gate 3: build the tile context from the spec, restricted to keys that are
+    // build the tile context from the spec, restricted to keys that are
     // real field inputs. `fields` follows field_inputs order so the smem slab
     // layout is deterministic. an empty/None spec => no tiling (flat path).
     let tile: Option<TileCtx> = prepared.tile_spec.as_ref().map(|spec| {
@@ -522,7 +522,7 @@ fn render_source<R: KernelRenderer>(
     out.push_str(&params.join(",\n"));
     out.push_str(r.params_close());
 
-    // ---- Gate 3 smem prelude (cooperative prefetch + __syncthreads) ----
+    // ---- smem prelude (cooperative prefetch + __syncthreads) ----
     // emitted BEFORE the cell prelude so EVERY thread — including the padding
     // threads the bounds check will drop — participates in the block-wide load
     // and reaches the barrier (a thread returning early before __syncthreads
