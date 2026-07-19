@@ -145,8 +145,8 @@ struct Config {
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
-    // number of gpus to decompose the domain across, intra-node (docs/design/37, 38). 1 =
-    // single device (the only path wired today). >1 is validated here but the decomposed run
+    // number of gpus to decompose the domain across, intra-node. 1 =
+    // single device (the only implemented path). >1 is validated here but the decomposed run
     // loop (M4) is not yet wired, so it errors -- the runtime knob, not the build backend.
     n_gpus: usize,
 }
@@ -164,7 +164,7 @@ struct BodyParams {
     softening: f64,
     accretion_radius: f64,
     sink_rate: f64,
-    /// the porous-surface dial (docs/design/50): None keeps the pure drain.
+    /// the porous-surface dial: None keeps the pure drain.
     porosity: Option<f64>,
     k_eta_n: f64,
     k_eta_t: f64,
@@ -347,7 +347,7 @@ where
 /// enable pointwise-source fusion on a source-FREE substrate — a run with immersed bodies but no user
 /// source, so `attach_runtime_source` (which sets the fusion flag) is never called. real only for the
 /// adiabatic set (its energy-regime body folds into godunov); a no-op elsewhere (iso folds its body via
-/// its own baked kernel; rhd/mhd have no host fused seam yet). the fused path self-gates on host+f64.
+/// its own baked kernel; rhd/mhd have no host fused source path). the fused path self-gates on host+f64.
 trait EnableSourceFusion: Sized {
     fn enable_source_fusion(self) -> Self;
 }
@@ -1181,9 +1181,9 @@ where
     let cp_idx_width: usize = if cp_log {
         // size the zero-pad TIGHTLY to the projected highest index (count + any restart offset).
         // `ceil(log10(max_index + 1))` is the digit count and is robust at the power-of-10 boundary
-        // (a projection of 99.99 still yields 2, and exactly 1000 yields 4) so the seam never lands
+        // (a projection of 99.99 still yields 2, and exactly 1000 yields 4) so the digit-count boundary never lands
         // on the run's own last checkpoint. an overshoot extends the width gracefully (format! never
-        // truncates: width is a MINIMUM, so 99 -> 100); only a raw `ls` sees a cosmetic seam there,
+        // truncates: width is a MINIMUM, so 99 -> 100); only a raw `ls` sees a cosmetic width jump there,
         // since every reader sorts numerically (metadata/time, viz extract_timestep).
         let projected = (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
         ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1)
@@ -1286,7 +1286,7 @@ where
     // leaves no scrollback trail; on exit the primary buffer is restored and
     // re-render one static final frame so the result persists.
     let mut screen = ScreenGuard::enter();
-    // tier 2a: a render thread owns the terminal + input and draws at ~30 fps, so
+    // a render thread owns the terminal + input and draws at ~30 fps, so
     // tab / pause respond instantly regardless of step rate. `None` off a tty (the
     // static string path renders headless). the solver publishes snapshots + reads
     // its control flags rather than polling keys inline.
@@ -1355,7 +1355,7 @@ where
             return std::ops::ControlFlow::Break(());
         }
 
-        // live-dashboard input (tier 2a): the render thread owns the keys + sets
+        // live-dashboard input: the render thread owns the keys + sets
         // control flags; the solver only READS them. space parks the integrator
         // here (the render thread keeps drawing); q -> graceful quit; s -> single
         // step; w -> force checkpoint. Ctrl-C is still a SIGINT to the guard.
@@ -1807,7 +1807,7 @@ fn set_row(table: &mut Table, iteration: u64, time: f64, dt: f64, t_final: f64, 
     table.set_progress((frac * 100.0) as usize);
 }
 
-/// draw one frame: publish a snapshot to the render thread (live tty, tier 2a) or
+/// draw one frame: publish a snapshot to the render thread (live tty) or
 /// render the static string frame (headless, no render thread).
 fn publish_or_refresh(dash: Option<&LiveDashboard>, table: &mut Table) {
     match dash {
@@ -2787,7 +2787,7 @@ macro_rules! build_and_run_hydro {
         };
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]` — the complete prim prescription [rho, vel_0..DOF-1, pre]
-        // as coordinate DAGs (docs/design/33). a theta-stratified rotating equilibrium REQUIRES
+        // as coordinate DAGs. a theta-stratified rotating equilibrium REQUIRES
         // this: no local ghost rule can represent the state beyond a wedge wall.
         let mut sub = sub;
         for json in &cfg.driven_exprs {
@@ -2877,7 +2877,7 @@ macro_rules! build_and_run_hydro {
     }};
 }
 
-/// the REGIME-AGNOSTIC decomposed run loop (docs/design/37 M4): evolve N pre-built tiles in
+/// the REGIME-AGNOSTIC decomposed run loop: evolve N pre-built tiles in
 /// lockstep with the UNIVERSAL `PeerCopy` transport (real peer where a link exists, staged over
 /// managed memory otherwise -- so the SAME code runs on one card with `--gpus 2` and on a node
 /// with `--gpus 8`, no machine-specific branch), gathering into `global` for output through the
@@ -3363,7 +3363,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
     }};
 }
 
-/// the multi-gpu (gpus>1) hydro path (docs/design/37 M4, design/38). decompose the domain into
+/// the multi-gpu (gpus>1) hydro path. decompose the domain into
 /// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
 /// (the oracle-proven `decomp::evolve_decomposed`), and for output gather the tiles into one
 /// full-size sim written by the EXISTING single-grid checkpoint path. v1 is single-level hydro:
@@ -3576,7 +3576,7 @@ macro_rules! hydro_dispatch {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Cartesian, Cartesian)
             }
             // GR (kerr-schild) CARTESIAN: the (x, y) equatorial slice of the horizon-penetrating
-            // chart (design 45) — SchwarzschildKSCartesian selects the `_cart` metric-aware c2p +
+            // chart — SchwarzschildKSCartesian selects the `_cart` metric-aware c2p +
             // per-sweep flux + light-cone CFL (non-diagonal gamma, shift on every axis, no polar
             // axis). guarded BEFORE the flat cartesian arm; 2D equatorial slice, DOF = 2 (no swirl).
             (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
@@ -4552,12 +4552,12 @@ macro_rules! mhd_dispatch {
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
             // the 2D (r, theta) GRMHD row: the curved-CT machinery (densitized corner EMF +
-            // curl + metric-contracted interpolation; contact EMF only — design 44).
+            // curl + metric-contracted interpolation; contact EMF only).
             (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
             ),
-            // the 2D (r, theta) SPINNING-KERR GRMHD row (design 44): the non-diagonal
+            // the 2D (r, theta) SPINNING-KERR GRMHD row: the non-diagonal
             // gamma_{r phi} rides the tetrad HLLD, the radial shift the moving-interface fan, and
             // the azimuthal (swirl) momentum the frame dragging. requires the 5-tuple swirl gas rows.
             (2, "spherical") if $cfg.spacetime == "kerr" => {
@@ -4572,7 +4572,7 @@ macro_rules! mhd_dispatch {
                     KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
                 )
             }
-            // the 2D cartesian (x, y) GRMHD row (design 45): the NON-DIAGONAL kerr-schild spatial
+            // the 2D cartesian (x, y) GRMHD row: the NON-DIAGONAL kerr-schild spatial
             // metric selects the fast-magnetosonic HLLE gas flux + the contact / UCT-HLL densitized
             // CT. the tetrad HLLD wrapper — which the kerr (r, theta) row above already rides on its
             // non-diagonal gamma_{r phi} — is not yet wired for this chart; HLLE here is a follow-on
@@ -4632,7 +4632,7 @@ macro_rules! mhd_dispatch {
                 Cylindrical,
                 Cylindrical
             ),
-            // GR (kerr-schild) CYLINDRICAL 2D GRMHD (design 45): the cyl_plane selector (threaded
+            // GR (kerr-schild) CYLINDRICAL 2D GRMHD: the cyl_plane selector (threaded
             // into the geom axes by the builder) splits the two charts — the (R, z) 2.5D poloidal
             // plane (axes [0, 2], non-diagonal gamma_Rz, toroidal E_phi CT) and the (R, phi)
             // equatorial DISK (axes [0, 1], diagonal on the equator, vertical E_z CT). MHD momentum
@@ -5171,8 +5171,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             .to_string());
     }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
-    // single-level MHD (srmhd/nmhd/imhd, the oracle-proven staggered-CT halo exchange + face
-    // gather, docs/design/37 M4). reject every other case HERE so a multi-gpu request never
+    // single-level MHD (srmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face
+    // gather). reject every other case HERE so a multi-gpu request never
     // silently runs on one device.
     if cfg.n_gpus > 1 {
         if !matches!(
@@ -5348,8 +5348,8 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 // the pybind11-compatible entry point
 // =============================================================================
 
-// validate a multi-gpu request (`Config.n_gpus`) before any heavy work. phase A (docs/design/
-// 37, 38): gpus==1 is the only wired path; gpus>1 is validated and rejected with the PRECISE
+// validate a multi-gpu request (`Config.n_gpus`) before any heavy work.
+// gpus==1 is the only implemented path; gpus>1 is validated and rejected with the PRECISE
 // reason -- a cpu build, too few visible devices, or the decomposed run loop (M4) not yet
 // wired -- so the user gets an actionable message instead of a silent single-device run.
 /// the outer horizon r_+ containment gate for a GR accretion run. a well-posed
@@ -5640,7 +5640,7 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
     {
         let avail = symbi::symbi_xpu::device_count().unwrap_or(0) as usize;
         if n_gpus > avail {
-            // OVERSUBSCRIBE escape hatch (docs/design/37 M2): fold N logical devices onto the
+            // OVERSUBSCRIBE escape hatch: fold N logical devices onto the
             // available physical ones (distinct contexts via the modulo map in cuda.rs/hip.rs).
             // no real parallelism, but it lets the WHOLE decomposed path (build + scatter +
             // evolve + gather + checkpoint) be validated on a single card -- run the same problem
@@ -5659,7 +5659,7 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
                  device(s) (SYMBI_GPU_OVERSUBSCRIBE) -- correctness check only, no speedup."
             );
         }
-        // the decomposed run loop is wired for hydro (docs/design/37 M4); per-regime support is
+        // the decomposed run loop supports hydro; per-regime support is
         // enforced in `dispatch_and_run` so non-hydro regimes error instead of silently falling
         // back to one device.
         Ok(())

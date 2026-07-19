@@ -22,7 +22,8 @@ import pytest
 
 from simbi_configs.examples.grmhd.gr_fishbone_moncrief import FishboneMoncrief
 
-# extreme kerr: the paper's disks sit AT a = M; the oracle guards |a| < M, so the
+# extreme kerr: the fishbone-moncrief solution sits AT a = M but is defined only for
+# |a| < M, so the
 # vectors evaluate in the limit (the printed 3-4 digit values are insensitive).
 _A_EXTREME = 1.0 - 1e-9
 

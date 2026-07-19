@@ -71,7 +71,7 @@ pub struct KernelDescriptor {
     /// `int` and float params as the precision type, in declared order (the CPU
     /// descriptor wrapper routes the same way).
     pub scalar_is_int: Vec<bool>,
-    /// the shared-memory tile spec this kernel was rendered with (Gate 3). `Some`
+    /// the shared-memory tile spec this kernel was rendered with. `Some`
     /// only for the C-family (CUDA) smem path; the dispatch reads it to size the
     /// per-block dynamic `__shared__` allocation (`smem_bytes_per_block`). `None`
     /// for flat kernels and every non-CUDA backend (the CPU descriptor carries it

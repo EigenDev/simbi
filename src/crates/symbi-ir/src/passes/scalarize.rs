@@ -2199,7 +2199,7 @@ mod tests {
 
     #[test]
     fn vector_iterate_updates_simultaneously() {
-        // P1 (RMHD c2p): a 2-component accumulator — the Fibonacci recurrence
+        // RMHD c2p: a 2-component accumulator — the Fibonacci recurrence
         // (a, b) -> (b, a+b). this is the cleanest probe of SIMULTANEOUS update:
         // sequential (`a = b; b = a + b`) would read the NEW `a` and corrupt it.
         // the substrate must emit BOTH assigns AFTER the step body, reading the OLD

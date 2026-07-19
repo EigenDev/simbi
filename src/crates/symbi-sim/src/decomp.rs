@@ -2,7 +2,7 @@
 // decomp.rs
 //
 // same-level domain decomposition: halo exchange between neighboring subdomains on a
-// grid, behind a transport seam.
+// grid, behind a transport interface.
 //
 // the exchange LOGIC (which cells move where) is fixed and proven by the in-process
 // equivalence test `symbi/tests/decomp_equivalence.rs`. the TRANSPORT (how the bytes move) varies

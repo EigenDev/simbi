@@ -312,9 +312,9 @@ impl GvKernel {
     /// inferred-with-override policy (decision 1).
     ///
     /// the CPU emit cache-tiles EVERY kernel regardless (a runtime knob); this
-    /// drives only the GPU smem path (Gate 3).
+    /// drives only the GPU smem path.
     ///
-    /// **policy (Gate 3 bring-up):** OPT-IN. only kernels that explicitly declare
+    /// **policy:** OPT-IN. only kernels that explicitly declare
     /// a `tile_spec` via `with_tile_spec` are tiled — the builder KNOWS the
     /// stencil structure (which axis reconstructs, how wide) and declares the
     /// correct per-axis SLAB. the previous auto-inference returned a fat halo-2
