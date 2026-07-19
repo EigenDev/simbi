@@ -88,6 +88,18 @@ def extract_timestep(filename: str | Path) -> float:
     return 0.0
 
 
+def _checkpoint_sort_key(filename: str | Path) -> tuple[int, float]:
+    """
+    ordering key for a checkpoint series: a 'final' checkpoint sorts after every
+    timestepped one so it lands last, regardless of any digits in its name.
+
+    the first tuple element is the final-marker flag (0 before 1); the second is
+    the extracted timestep, which orders multiple finals among themselves.
+    """
+    is_final = 1 if "final" in Path(filename).name.lower() else 0
+    return (is_final, extract_timestep(filename))
+
+
 def glob_checkpoints(
     path: str | Path, pattern: str = "*.chkpt.*.h5", filter_invalid: bool = True
 ) -> list[Path]:
@@ -98,7 +110,7 @@ def glob_checkpoints(
     - directory: globs all checkpoints in dir
     - single file: returns as list
     - glob pattern: expands pattern
-    - auto-sorts by timestep
+    - auto-sorts by timestep, with any 'final' checkpoint placed last
     - optionally filters interrupted/crashed
 
     args:
@@ -124,13 +136,13 @@ def glob_checkpoints(
     # handle directory
     if input_path.is_dir():
         checkpoint_files = sorted(
-            input_path.glob(pattern), key=lambda f: extract_timestep(f.name)
+            input_path.glob(pattern), key=lambda f: _checkpoint_sort_key(f.name)
         )
 
     # handle glob pattern (has wildcard)
     elif "*" in str(path):
         checkpoint_files = sorted(
-            Path(".").glob(str(path)), key=lambda f: extract_timestep(f.name)
+            Path(".").glob(str(path)), key=lambda f: _checkpoint_sort_key(f.name)
         )
 
     # handle single file
