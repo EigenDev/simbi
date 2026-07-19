@@ -77,7 +77,7 @@ impl KernelRun {
         self
     }
 
-    /// anchor all buffers at `lo` instead of the origin — fields then resolve ABSOLUTE
+    /// anchor all buffers at `lo`, overriding the default origin anchor — fields then resolve ABSOLUTE
     /// coordinates against it (negative ghost indices included). `field_with` closures
     /// and `Out::get` keep buffer-local coords (subtract `lo` at the call site). the
     /// amr transfer kernels need this: a fine ghost slab lives at negative absolute
@@ -185,7 +185,7 @@ impl KernelRun {
         Out { names, data: out_data, extent: ext }
     }
 
-    /// emit the kernel as CPU (rust) source instead of running it — for the BUILD+EMIT tests
+    /// emit the kernel as CPU (rust) source without running it — for the BUILD+EMIT tests
     /// that inspect the generated text (the masked-Newton unroll is too costly to interpret).
     /// no field/scalar bindings are needed; `.grid(...)` (or its len via the writes) fixes ndim.
     pub fn emit_cpu(self) -> Emit {

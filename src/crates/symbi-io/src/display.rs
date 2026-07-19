@@ -80,8 +80,8 @@ fn shape_str(shape: &[usize]) -> String {
 }
 
 // =============================================================================
-// TreeBuf side — same rendering, owned `Vec<f64>` payloads instead of borrowed
-// slices. lets a checkpoint reader pretty-print the file in one line:
+// TreeBuf side — same rendering over owned `Vec<f64>` payloads. lets a
+// checkpoint reader pretty-print the file in one line:
 //
 //     println!("{}", display_tree_buf(&backend.read(path)?, ""));
 // =============================================================================

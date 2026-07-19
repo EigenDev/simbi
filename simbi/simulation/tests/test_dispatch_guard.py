@@ -9,7 +9,7 @@
 # strategy: take a baked GR config (GrMichel: 1D spherical Schwarzschild) and
 # flip its spacetime to one that is UNBAKED for that (dims, coords). the IC stays
 # valid (still spherical, r-based), so the run reaches the dispatch and must raise
-# rather than run flat.
+# the dispatch guard.
 #
 # ALSO covers the sibling loud-rejection guard the review flagged as test-asserted
 # nowhere: a curved spacetime on a NON-relativistic regime (the non-relativistic
@@ -62,7 +62,7 @@ def test_baked_gr_spacetime_still_dispatches():
 class _NewtonianOnSchwarzschild(SodProblem):
     # a NON-relativistic regime (newtonian) with a curved spacetime: the non-relativistic kernel rows
     # are never baked with a spacetime slug, so the regime-vs-spacetime guard must reject this before
-    # dispatch rather than run flat gravity-free physics. the mass is positive so the earlier
+    # dispatch. the mass is positive so the earlier
     # GR-parameter gate (a curved spacetime with M = 0 is rejected first) does not mask the
     # regime-vs-spacetime rejection this test exercises.
     spacetime: Spacetime = Spacetime.SCHWARZSCHILD

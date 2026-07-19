@@ -110,7 +110,7 @@ pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
 /// the spacetime background tag: flat `Minkowski` is unsuffixed (the
 /// densitization is a no-op -> bit-identical to the SR kernel); each curved
 /// chart carries its slug. ORTHOGONAL to the spatial suffix and the physics
-/// regime (GR is a spacetime, not a regime).
+/// regime (GR is a spacetime).
 pub fn spacetime_slug(spacetime: Spacetime) -> &'static str {
     match spacetime {
         Spacetime::Minkowski => "",

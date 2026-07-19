@@ -152,8 +152,8 @@ pub enum ScalarExpr {
 impl ScalarExpr {
     /// the immediate sub-expressions this node owns, in evaluation order. THE single source for
     /// "which children do I have" — every WALK / TRANSFORM pass (cse var
-    /// collect, free-call scan, var-use test, FieldLoadAt rewrite) recurses through this instead
-    /// of re-matching all 10 variants inline. the EMIT backends (cpu/cuda/interp/jit) still match
+    /// collect, free-call scan, var-use test, FieldLoadAt rewrite) recurses through this uniform
+    /// accessor, with no per-variant re-matching. the EMIT backends (cpu/cuda/interp/jit) still match
     /// per-variant — producing target source/IR is the irreducible part — exactly the split the
     /// `ScalarStmt` SSOT (above) documents. adding a variant => update this once; the walks follow.
     pub fn children(&self) -> Vec<&ScalarExpr> {
@@ -323,7 +323,7 @@ impl ScalarStmt {
     /// the scalar expression this statement HOLDS directly (not nested inside a
     /// child body). every variant has at most one — Let's `value`, LetMut's
     /// `init`, Assign / CompoundAssign's `value`, If's `cond`. For / Break have
-    /// no immediate expression (For's bound is a `DimExpr`, not a ScalarExpr).
+    /// no immediate expression (For's bound is a `DimExpr`).
     pub fn child_expr(&self) -> Option<&ScalarExpr> {
         match self {
             ScalarStmt::Let { value, .. } => Some(value),
@@ -577,7 +577,7 @@ impl Scalarizer {
     /// that's non-trivial AND has in-degree >= 2, hoist the expression
     /// to a Let with a fresh `__cse_<n>` name and replace the binding
     /// with `Var(name)`. subsequent consumers then clone a cheap Var
-    /// instead of the full sub-tree.
+    /// standing in for the full sub-tree.
     fn maybe_hoist_to_let(&mut self, id: NodeId, in_degrees: &HashMap<NodeId, u32>, ty: &TensorTy) {
         if in_degrees.get(&id).copied().unwrap_or(0) < 2 {
             return;
@@ -648,11 +648,11 @@ impl Scalarizer {
                 Binding::Concrete(self.lower_select(*cond, *then_id, *else_id, ty, graph))
             }
             Op::LoadAt(sym, comps) => Binding::Concrete(self.lower_load_at(sym, comps)),
-            // F2.C: Lambda is a callable value, not a tensor. it's only
+            // Lambda is a callable value. it's only
             // consumed by Op::Apply, which extracts the FnDef name and
             // emits a FreeCall referencing the device function. lower
             // Lambda to a placeholder zero so any accidental reads
-            // surface as obvious zeros rather than panics.
+            // surface as obvious zeros.
             Op::Lambda(_) => {
                 Binding::Concrete(vec![ScalarExpr::Const(crate::ConstValue::F64(0.0))])
             }
@@ -1397,17 +1397,17 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     // DCEs the SASS but pays the parse + register-pressure cost. closing the
     // dead path here removes them from the emitted CUDA source up front.
     //
-    // IterateInline cone nodes (lowered INSIDE the loop body, not the main pass)
+    // IterateInline cone nodes (lowered INSIDE the loop body)
     // are reached via the IterateInline node's `steps` field through `Op::inputs`
     // — so a reachable IterateInline pulls its cone in automatically.
     let reachable = reachable_from_outputs(graph, outputs);
     // an IterateInline emits its body ONCE as a `for`. its `step`
-    // sub-DAG's acc-dependent cone must be lowered INSIDE the loop, not in the
-    // main pass — collect those nodes to skip, and the cone per iterate node.
+    // sub-DAG's acc-dependent cone must be lowered INSIDE the loop
+    // — collect those nodes to skip, and the cone per iterate node.
     //
     // Op::Scope body NodeIds are similarly partitioned —
     // they belong to the Scope's lexical region and are lowered INSIDE a
-    // `ScalarStmt::Scope` brace block, not at function root.
+    // `ScalarStmt::Scope` brace block.
     //
     // for NESTED scopes (an Op::Scope inside another Op::Scope's body), a
     // single NodeId may appear in multiple scopes' body lists. `scope_owner`
@@ -1748,8 +1748,8 @@ fn iterate_cone(
 ) -> Vec<NodeId> {
     // union backward-reachable set from all `steps` (transitive inputs). also
     // seed from `break_when` so its acc-dependent expression is part of the
-    // cone (lowered INSIDE the for-loop, not hoisted as a loop invariant —
-    // hoisting would constant-fold `0.5 < initial_done` into a dead `false`).
+    // cone (lowered INSIDE the for-loop; hoisting it as a loop invariant
+    // would constant-fold `0.5 < initial_done` into a dead `false`).
     let mut back: HashSet<NodeId> = HashSet::new();
     let mut stack: Vec<NodeId> = steps.to_vec();
     if let Some(bw) = break_when {
@@ -1929,7 +1929,7 @@ fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
 /// (so `inf` could not in practice reach the zero arm), any future builder
 /// that drops a syntactic 0 into a flux-limiter / floor-clamp position could
 /// pick up an `inf * x` upstream — and the absorbing fold would mask it
-/// silently. removed pre-emptively rather than left as a tripwire.
+/// silently. removed pre-emptively.
 ///
 /// the safe set MUST stay in sync with `Graph::fold_arith_identity` in
 /// `graph.rs` (the graph-layer fold) — both layers fold exactly
@@ -2130,7 +2130,7 @@ mod tests {
     fn iterate_inline_lowers_to_one_loop_body_emitted_once() {
         // a fixed-iteration sqrt-Newton: acc <- 0.5*(acc + a/acc). `a` is
         // loop-INVARIANT (must stay outside the loop); the acc-dependent step
-        // (a/acc, acc+.., 0.5*..) goes INSIDE — emitted ONCE, not unrolled.
+        // (a/acc, acc+.., 0.5*..) goes INSIDE — emitted ONCE.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let acc = g.iter_acc(0, None);
@@ -2144,7 +2144,7 @@ mod tests {
 
         let k = scalarize_kernel(&g, &[it]);
 
-        // exactly ONE loop (the body emitted once, not 8x unrolled).
+        // exactly ONE loop (the body emitted once).
         let fors: Vec<&ScalarStmt> = k
             .body
             .iter()

@@ -159,7 +159,7 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// applied two-pass via the regime-agnostic `dispatch_runtime_source`. nmhd/imhd
     /// take the newtonian force/cooling/relax lifts; rmhd is relativistic so only
     /// `kind="raw"` reaches here. targets the hydro conserved slots (den/mom/nrg);
-    /// B is evolved by CT, not a cell source. None for source-free runs.
+    /// B is evolved by CT. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
     /// driven (DYNAMIC) boundary prescriptions, indexed by `BoundaryType::Driven(id)`. each is a
     /// complete prim DAG `[rho, vel.., pre, B..]`; the standard ghost-fill skips the driven face,
@@ -701,7 +701,7 @@ where
         });
         let eta_eff = self.resistivity.max(body_eta_max);
         if eta_eff > 0.0 {
-            // the diffusion crosses PHYSICAL cell widths h*dx, not coordinate dx; on a curvilinear grid
+            // the diffusion crosses PHYSICAL cell widths h*dx (the coordinate dx alone omits the metric factor h); on a curvilinear grid
             // the smallest physical cell (min r / near the poles) sets the tightest bound. inv_w =
             // 1/min_physical_width, so 2 D eta / width_min^2 = 2 D eta * inv_w^2.
             let inv_w = max_inv_physical_width(geom);

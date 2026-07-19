@@ -53,24 +53,26 @@ class Spacetime(str, ExtendedEnum):
 
 class Regime(str, ExtendedEnum):
     NEWTONIAN = "newtonian"
-    # relativistic hydro: the fluid regime is relativistic, agnostic to the spacetime (Minkowski ->
-    # SR, curved -> GR). named `rhd` to match `rmhd` (relativistic MHD) — "special vs general" is a
-    # property of the orthogonal `Spacetime`, not the fluid regime.
+    # the fluid regime names the physics of the fluid alone. the `Spacetime` axis is orthogonal and
+    # carries the special-vs-general relativity distinction: a relativistic regime on Minkowski is
+    # special-relativistic, on a curved spacetime it is general-relativistic.
     RHD = "rhd"
-    SRMHD = "srmhd"
+    RMHD = "rmhd"
     NMHD = "nmhd"
     IMHD = "imhd"
     ISOTHERMAL = "isothermal"
-    # deprecated alias: the historical `srhd` name (baked "special" into the fluid regime). same value
-    # as RHD, so `Regime.SRHD is Regime.RHD` and existing configs keep working. `normalize_regime`
-    # maps the legacy checkpoint/string "srhd" -> "rhd".
-    SRHD = "rhd"
+
+
+# legacy regime slugs (the historical names carried "special" in the fluid regime itself). a
+# relativity-agnostic slug replaces each. `normalize_regime` remaps them so checkpoints and
+# config strings written under the old names still load.
+_LEGACY_REGIME_SLUGS = {"srhd": "rhd", "srmhd": "rmhd"}
 
 
 def normalize_regime(regime: str) -> str:
-    """map a legacy regime string to the current slug (srhd -> rhd) so old checkpoints / configs
-    load. a no-op for every current name."""
-    return "rhd" if regime == "srhd" else regime
+    """map a legacy regime slug to its current name (srhd -> rhd, srmhd -> rmhd) so old checkpoints
+    and configs load. a no-op for every current name."""
+    return _LEGACY_REGIME_SLUGS.get(regime, regime)
 
 
 class BoundaryCondition(str, ExtendedEnum):

@@ -1,7 +1,7 @@
 # =============================================================================
 # test_props_validation.py
 #
-# component props reject unknown keys by name instead of ignoring them.
+# component props reject unknown keys by name.
 # a mistyped prop (cma for cmap) previously validated cleanly and the
 # style silently never applied.
 # =============================================================================

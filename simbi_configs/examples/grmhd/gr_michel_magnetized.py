@@ -83,7 +83,7 @@ class GrMichelMagnetized(SimbiProblem):
         ProblemParam(CoordSystem.SPHERICAL, description="coordinate system"),
     ]
     regime: Annotated[
-        Regime, ProblemParam(Regime.SRMHD, description="physics regime")
+        Regime, ProblemParam(Regime.RMHD, description="physics regime")
     ]
     x1_spacing: Annotated[
         CellSpacing,

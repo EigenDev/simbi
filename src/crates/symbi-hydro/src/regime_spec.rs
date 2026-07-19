@@ -138,9 +138,9 @@ pub enum C2pKind {
 //
 // each conservation law evolves one conserved field U by
 //   \partial_t U = -div(F(U)) + S(U)
-// the flux F(U) is NOT encoded here as data — it is the carrier-generic
-// `Regime::to_flux` (the single source of truth, run at `S = f64` and traced
-// at `S = Gv` by the carrier gate). a `LawSpec` records only which field a
+// the flux F(U) is the carrier-generic `Regime::to_flux` (the single source of
+// truth, run at `S = f64` and traced at `S = Gv` by the carrier gate); it is not
+// encoded here as data. a `LawSpec` records only which field a
 // regime evolves and the archetypal kind of that law.
 // =============================================================================
 
@@ -179,8 +179,8 @@ pub enum LawKind {
 /// struct is pure metadata, consumed by `simulation_laws::validate` (clause 2 —
 /// every overlay/law targets a field the regime declares).
 ///
-/// **identity by physics, not syntax**: `(field, kind)`
-/// IS the physical declaration.
+/// **identity by physics**: the `(field, kind)` pair
+/// IS the physical declaration; textual form carries no identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LawSpec {
     /// the conserved field this law evolves. matches a `FieldSpec.name`
@@ -212,7 +212,7 @@ pub(crate) fn build_dot(g: &mut Graph, a: &[NodeId], b: &[NodeId]) -> NodeId {
 // section 1.6 — the per-regime law manifests (metadata only).
 //
 // each `*_LAWS` array declares WHICH conserved fields a regime evolves and
-// the archetypal kind of each. the flux EQUATIONS are not here — they are the
+// the archetypal kind of each. the flux EQUATIONS live in the
 // carrier-generic `Regime::to_flux` (single source of truth, traced at
 // `S = Gv` by the carrier gate). `simulation_laws::validate` consumes these
 // arrays to check that every law/overlay targets a declared field.
@@ -428,7 +428,7 @@ pub const RMHD_SPEC: RegimeSpec = RegimeSpec {
 };
 
 /// newtonian ideal MHD. collapses to `RMHD_SPEC` EXCEPT `name`,
-/// `is_relativistic` (false), and `c2p_kind` (algebraic, not iterative) — the
+/// `is_relativistic` (false), and `c2p_kind` (algebraic, a closed-form inversion where RMHD iterates) — the
 /// conserved/primitive layout and the conservation laws are identical (MHD is
 /// MHD; only the c2p inversion and the lorentz factors differ).
 pub const NEWTONIAN_MHD_SPEC: RegimeSpec = RegimeSpec {
@@ -530,8 +530,8 @@ mod tests {
     }
 
     /// the newtonian-MHD vs RMHD collapse: every spec field MUST match EXCEPT
-    /// `name`, `is_relativistic` (false), and `c2p_kind` (algebraic, not
-    /// iterative). proves "newtonian MHD is RMHD minus relativity minus the
+    /// `name`, `is_relativistic` (false), and `c2p_kind` (algebraic, a
+    /// closed-form inversion). proves "newtonian MHD is RMHD minus relativity minus the
     /// iterative inversion" — identical layout and laws, simpler physics.
     #[test]
     fn newtonian_mhd_collapses_to_rmhd_minus_relativistic_minus_c2p() {
@@ -654,7 +654,7 @@ mod tests {
             assert_eq!(r.is_mhd(), spec.is_mhd);
             assert_eq!(r.has_energy(), spec.has_energy);
             // value equality: `pub const` synthesizes a fresh `&` per use site
-            // (no stable memory location), so test by VALUE not pointer.
+            // (no stable memory location), so compare by VALUE.
             assert_eq!(<R as Regime<S, D>>::SPEC, spec);
             assert_eq!(<R as Regime<S, D>>::SPEC.name, spec.name);
         }
@@ -672,7 +672,7 @@ mod tests {
         // structural check: one law per conserved field, in the same order,
         // each with the expected kind. proves the laws table is a
         // STRUCTURAL declaration of "which physical quantities this regime
-        // evolves," not a free-form bag.
+        // evolves," fixed in order and kind.
         let spec = &NEWTONIAN_SPEC;
         assert_eq!(spec.laws.len(), spec.fields.len());
         assert_eq!(spec.laws[0].field, "den");

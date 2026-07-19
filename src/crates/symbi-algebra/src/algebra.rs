@@ -82,7 +82,7 @@ impl Numeric for f32 {
     #[inline(always)] fn from_f64(v: f64) -> Self { v as f32 }
     #[inline(always)] fn sqrt(self) -> Self { f32::sqrt(self) }
     // ternary form (see the f64 impl) — matches the traced IR's Min/Max/Abs
-    // select lowering, not the NaN-symmetric f32::abs/min/max.
+    // select lowering, whose NaN behavior differs from f32::abs/min/max.
     #[inline(always)] fn abs (self) -> Self { if self < 0.0 { -self } else { self } }
     #[inline(always)] fn min (self, other: Self) -> Self { if self < other { self } else { other } }
     #[inline(always)] fn max (self, other: Self) -> Self { if self > other { self } else { other } }

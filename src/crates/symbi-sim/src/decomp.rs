@@ -93,8 +93,8 @@ extern "C" __global__ void halo_copy(
 "#;
 
 // reusable unified index buffers for `DeviceCopy`, grown to the largest strip seen. the
-// strip geometry is fixed across steps, so this reuses the same device allocations instead
-// of a `cuMemAllocManaged` per `copy_region` (the dominant per-exchange cost). thread-local
+// strip geometry is fixed across steps, so this reuses the same device allocations and
+// avoids a `cuMemAllocManaged` per `copy_region` (the dominant per-exchange cost). thread-local
 // so it needs no Send/Sync on the raw device pointers; the parallel test threads each pool
 // their own. the per-cell index WRITE still happens each call (cheap host memory writes).
 #[cfg(feature = "gpu")]
@@ -277,7 +277,7 @@ pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
 
 /// gather the STAGGERED face-normal B `bface[d]` from every tile into `global` (MHD only). the
 /// cell gather (`gather_interiors`) cannot carry `bface`: each axis-`d` face field lives on the
-/// interior face domain (cells extended +1 on `d`), not the cell domain. for each tile and axis,
+/// interior face domain (cells extended +1 on `d`). for each tile and axis,
 /// copy the tile's interior face box into the matching sub-box of the global face domain. the
 /// shared internal face (a tile's hi-`d` face == its neighbor's lo-`d` face) is written by both
 /// neighbors from CT-consistent (bit-identical) values, so the overwrite is harmless. no-op when
@@ -334,7 +334,7 @@ fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
 }
 
 /// the ghost strip on a STAGGERED face field's own allocated domain (for MHD `bface`). mirrors
-/// `ghost_strip` but takes the field's `alloc` domain instead of the cell `geom.allocated`, and
+/// `ghost_strip` but takes the field's own `alloc` domain, and
 /// extends the interior by one on the field's NORMAL axis `d` (a face field has one extra face
 /// past the last cell on its normal axis). used only for `d != axis`, where `axis` is transverse
 /// to the face and indexes like cells.
@@ -521,7 +521,7 @@ pub fn unflatten<const D: usize>(mut flat: usize, dims: [usize; D]) -> [usize; D
 /// cells), so pair order within an axis is free.
 /// `devices[flatten(tile_coord, counts)]` is the logical device each tile lives on, parallel
 /// to `tiles`. device identity lives here, in the decomposition's tile->device map (the way a
-/// real spmd driver keeps it), not on the field -- the exchange is the one cross-device step.
+/// real spmd driver keeps it); the field carries none -- the exchange is the one cross-device step.
 pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
     counts: [usize; D],
@@ -578,7 +578,7 @@ pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 /// - `stores[i]` / `kernels[i]`: tile i's field store + kernel set, in flat tile order
 ///   (matching `flatten(tile_coord, counts)`).
 /// - `counts`: the per-axis tile grid; `devices[i]`: tile i's logical device (device identity
-///   lives in the decomposition, not the field).
+///   lives in the decomposition).
 /// - `transport`: moves halos (`LocalCopy` host, `DeviceCopy`/`StagedCopy` single-gpu,
 ///   `PeerCopy` cross-gpu).
 /// - `on_checkpoint(iteration, time)`: fires every `interval` steps (and once at the end);
@@ -852,8 +852,8 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the
         // halo exchange is unaffected). the tile time feeds time-dependent driven-boundary
         // prescriptions and the checkpoint metadata. the homologous linear advance matches the
-        // single-grid step; a traced motion law is then sampled EXACTLY at the new time instead
-        // of the constant-rate extrapolation (which overshoots a decelerating mesh).
+        // single-grid step; a traced motion law is then sampled EXACTLY at the new time
+        // (a constant-rate extrapolation would overshoot a decelerating mesh).
         for s in stores.iter_mut() {
             if s.motion_law.is_none() && s.motion.homologous {
                 s.motion.a += s.motion.a_dot * dt;
@@ -1085,7 +1085,7 @@ fn peer_ok(src: i32, dst: i32) -> bool {
 
 /// enable bidirectional peer access for every directly-peerable pair among `devices`, once at
 /// setup. pairs that cannot peer (same card / no link) are skipped -- `PeerCopy` stages those.
-/// idempotent and best-effort: a failure to enable just means that pair stages instead of peers.
+/// idempotent and best-effort: a failure to enable just means that pair stages its copies.
 #[cfg(feature = "gpu")]
 pub fn enable_peer_mesh(devices: &[i32]) {
     let mut uniq: Vec<i32> = Vec::new();

@@ -95,7 +95,7 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
         )
         .with_surface(surface),
     ));
-    // the CSG shape routes the runtime-JIT / NVRTC shaped kernel instead of the AOT sphere.
+    // the CSG shape routes the runtime-JIT / NVRTC shaped kernel.
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
     sim
@@ -142,8 +142,7 @@ fn penalize_once(vel_x: f64, body_vel: [f64; 2], surface: SurfaceSpec) -> ([f64;
 // rel+abs tolerance against the force MAGNITUDE. the transverse component is a
 // numerical zero (mirror cancellation about phi = pi/2), where the host slab-order
 // fold and the device block-order fold differ at round-off — bounded by the absolute
-// floor, not a mismatch (the fixed-order fold is reproducible per backend, not bitwise
-// across backends).
+// floor (the fixed-order fold is reproducible per backend).
 fn receipts_close(hf: [f64; 2], df: [f64; 2], tag: &str) {
     let scale = hf[0].abs().max(hf[1].abs());
     for k in 0..2 {

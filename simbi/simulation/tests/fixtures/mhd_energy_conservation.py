@@ -10,7 +10,7 @@
 # this is the base-scheme energy-conservation instrument (spec §6). before the canonical
 # fix, the magnetic-energy PATCH (`nrg += 1/2 d|bcell|^2`, applied outside the flux)
 # made tau drift ~2e-4 at nx=256 and GROW with resolution (6e-4 at nx=512) — a genuine
-# non-conservation, not truncation. after the fix (cell B is derived from the CT face
+# non-conservation; truncation error would shrink with resolution. after the fix (cell B is derived from the CT face
 # field, no patch; tau is conserved by the Poynting-carrying Godunov flux), the drift is
 # roundoff and does NOT grow with resolution.
 # =============================================================================
@@ -38,7 +38,7 @@ class MhdEnergyConservation(SimbiProblem):
     coord_system: Annotated[
         CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="coordinate system")
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLD, description="numerical solver")]
     boundary_conditions: Annotated[
         list[BoundaryCondition],

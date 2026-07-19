@@ -37,7 +37,8 @@ def has_capability(
 # capability bits the rust binding actually honors: GRAVITATIONAL builds a
 # fixed-potential mass, ACCRETION a black-hole sink, RIGID a drain-off wall
 # (the porous surface with porosity 0). ELASTIC / DEFORMABLE have no backend
-# path, so a config declaring them is rejected rather than run as a silent lie.
+# path, so a config declaring them is rejected at load. running them would
+# silently do nothing while the config claimed the capability was active.
 _WIRED_CAPABILITIES = (
     BodyCapability.GRAVITATIONAL | BodyCapability.ACCRETION | BodyCapability.RIGID
 )

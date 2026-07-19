@@ -11,7 +11,7 @@
 //   - else fall back to the standalone ADDITIVE pass — proven bit-for-bit equal
 //     to fused (godunov_with_fused_source + additive_source_equals_fused_evolve).
 //
-// so the execution strategy is a property of what's BAKED, not a user choice;
+// so the execution strategy is a property of what's BAKED;
 // the same Overlay runs fused on a baked family and additive on an unbaked one,
 // with identical numerics either way.
 //

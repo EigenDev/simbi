@@ -3,8 +3,8 @@
 //
 // the SYMBOLIC proof that the 2D SPHERICAL GR constrained-transport curl
 // (rmhd_ct_curl_2d_sph_gr_gv) preserves the AREA-WEIGHTED div(B) = 0 EXACTLY — by
-// rational-function cancellation on the traced IR DAG, NOT the numeric 1e-12 evolve gate
-// (rmhd_ct_curl_2d_sph_gr_divb.rs). closes the M10 gap for the spherical GR charts: the curls had NO
+// rational-function cancellation on the traced IR DAG at graph-build time; the numeric 1e-12 evolve
+// gate lives in rmhd_ct_curl_2d_sph_gr_divb.rs. closes the M10 gap for the spherical GR charts: the curls had NO
 // symbolic proof because the extractor could not represent the lapse `sqrt(f)` / `sqrt(h)`.
 //
 // the GR densitized weight is the flat spherical area times the lapse factor:
@@ -157,7 +157,7 @@ fn divb_2d_sph_gr_symbolic_detects_wrong_lapse_offset() {
         Poly::constant(1),
     )
     .mul(&lapse(2, false));
-    // INJECTED BUG: the low r-face weight uses the lapse at the WRONG radial offset (2 instead of 0).
+    // INJECTED BUG: the low r-face weight uses the lapse at radial offset 2; the correct low r-face offset is 0.
     let w_r_lo_bug = RatFun::new(
         r_at(0).times(&r_at(0)).times(&sin_center()).times(&dx(1)),
         Poly::constant(1),

@@ -8,7 +8,7 @@
 // source-only fusion; GR backgrounds keep the two-pass (the fused builder traces the flat geo).
 //
 // the godunov combine is regime-agnostic on a cartesian flat grid (pure flux divergence — the
-// relativistic physics lives in the flux + c2p, not the SSP combine), so the fused stage matches the
+// relativistic physics lives in the flux + c2p), so the fused stage matches the
 // `rhd` AOT godunov exactly and the raw source rides additively, bit-for-bit.
 //
 // run: cargo test -p symbi --test jit_fused_rhd_equals_two_pass

@@ -8,8 +8,8 @@
 //   1. produce den/mom updates BITWISE-IDENTICAL to the adiabatic kernels when
 //      the sound speed matches (the key invariant: the shared `body_contribution`
 //      is the single source of truth);
-//   2. match the analytic accretion spec with cs from prim.pre (= cs^2*rho)
-//      instead of from the energy equation;
+//   2. match the analytic accretion spec with cs from prim.pre (= cs^2*rho),
+//      the isothermal closure for the sound speed;
 //   3. emit NO energy write.
 // =============================================================================
 
@@ -36,7 +36,7 @@ const SINK0: f64 = 5.0;
 const DELTA0: f64 = 0.3;
 
 // iso scalar binding: dt + grid + per-body params. NO gamma (the iso kernel reads
-// cs from the prim.pre field, not a scalar).
+// cs from the prim.pre field).
 fn iso_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
     vec![
         ("dt", DT),
@@ -50,7 +50,7 @@ fn iso_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
     ]
 }
 
-// the adiabatic binding adds gamma; `nrg` is supplied as a field instead of `pre`.
+// the adiabatic binding adds gamma and supplies `nrg` as a field.
 fn adiabatic_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
     let mut s = iso_scalars(sink0);
     s.push(("gamma", 1.4));

@@ -96,7 +96,7 @@ fn user_expression_codegens_through_the_source_path() {
     // config-driven user would pass. parse-shaped here as a symbi-expr Dag, bridged into the
     // symbi-ir Graph, then spliced into a Gv kernel and RENDERED (the harness emits CUDA +
     // evaluates on the CPU interp). proves a user expression compiles through the SAME path a
-    // built-in source uses — compiled kernel code, not a per-cell interpreted VM.
+    // built-in source uses, producing compiled kernel code; there is no per-cell interpreted VM.
     use symbi_expr::dag::Dag;
     use symbi_hydro::expr_bridge::lower_dag_to_builtsource;
 

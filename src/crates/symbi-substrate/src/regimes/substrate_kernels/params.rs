@@ -47,7 +47,7 @@ pub(crate) fn resolve_params<Sc: Scalar + OrderedNumeric>(
 
 /// build a FLOAT-only kernel's scalar argument vector by ref (the common case: cfl / flux /
 /// godunov / c2p / body — no int params). `resolve_params` with a loud-rejecting int resolver,
-/// so a kernel that unexpectedly grew an int param surfaces here instead of mis-routing.
+/// so a kernel that unexpectedly grew an int param is caught here as a loud rejection.
 pub(crate) fn scalars_for<Sc: Scalar + OrderedNumeric>(
     name: &str,
     resolve: impl Fn(&ScalarBind) -> Sc,
@@ -128,7 +128,8 @@ pub(crate) fn physical_geom<const D: usize>(
 /// the per-axis (x_lo, dx) the CURVILINEAR kernel reads as its `x_lo_{ax}` / `dx_{ax}` geom scalars.
 /// uniform axes pass the face-0 position + the linear cell width; log axes pass the face-0 position
 /// + the log decade-slope, since the kernel's face map is `face(i) = start * 10^(i * dx_{ax})` (the
-/// `gv_axis_face_at` Log branch) — the slope IS the per-axis `dx` parameter, not a width. homologous
+/// `gv_axis_face_at` Log branch) — the decade-slope IS the per-axis `dx` parameter for a log axis; a
+/// uniform axis's `dx` is its linear cell width. homologous
 /// mesh motion scales the radial face-0 start by a (the slope/width are comoving). without maps the
 /// grid is uniform and this is bit-identical to `physical_geom`.
 pub(crate) fn kernel_geom<const D: usize>(
@@ -214,8 +215,8 @@ pub(crate) fn body_scalar<const D: usize>(
         BodyScalar::Delta => body.sink_delta().unwrap_or(1.0),
         // the spin state a shaped wall's mask rotates with: the angular-velocity vector
         // `omega` (component k) driving `omega x r`, and the row-major orientation matrix
-        // `orientation` (entry k) rotating the mask. an arbitrary evolving axis, not a single
-        // angle. omega is zero for every non-spinning body.
+        // `orientation` (entry k) rotating the mask. an arbitrary evolving axis carried as a
+        // full orientation matrix. omega is zero for every non-spinning body.
         BodyScalar::Omega(k) => body.omega[k as usize],
         BodyScalar::Rot(k) => {
             let k = k as usize;

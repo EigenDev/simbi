@@ -201,7 +201,7 @@ fn make_evolve_sim(magnetic: MagneticSpec) -> Sim {
 fn resistive_body_localizes_under_full_evolution() {
     // the full production path (godunov -> post_godunov body resistive EMF + curl -> penalize): the
     // resistive body preferentially decays the near-body field while leaving the far field identical
-    // to the non-magnetic run. exercises the whole substrate, not just the isolated kernel.
+    // to the non-magnetic run. exercises the whole substrate.
     let run = |magnetic: MagneticSpec| -> (f64, f64) {
         let mut sim = make_evolve_sim(magnetic);
         let near0 = mag_energy_shell(&sim, 0.0, 0.30);
@@ -226,7 +226,7 @@ fn resistive_body_localizes_under_full_evolution() {
 
 // =============================================================================
 // 3D cartesian: the same localization + dissipation properties for the full 3D
-// body-mask resistive EMF (all three edge EMFs, not just the 2.5D out-of-plane E_z).
+// body-mask resistive EMF (all three edge EMFs).
 // =============================================================================
 type Sim3 = SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 

@@ -4,7 +4,7 @@
 // the I/O layer's structured error type. replaces the `Result<(), String>`
 // pattern that pervaded `sim::checkpoint` with a proper enum, so callers can
 // match on the failure mode (missing path? type mismatch? backend specific?)
-// instead of grep-string-comparing.
+// by variant.
 // =============================================================================
 
 use std::fmt;

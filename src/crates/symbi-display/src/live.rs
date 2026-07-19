@@ -44,7 +44,7 @@ const BADGE_BG: Color = Color::Indexed(29);
 const BADGE_FG: Color = Color::Indexed(235);
 
 /// the visible tab strip. the grid (regrid) tab is amr-only, so a uniform-grid
-/// run (one level) drops it rather than showing a dead panel.
+/// run (one level) drops it so no dead panel shows.
 pub fn tab_names(has_amr: bool) -> &'static [&'static str] {
     if has_amr {
         &["overview", "diagnostics", "grid", "log", "config"]
@@ -112,8 +112,8 @@ pub enum Colormap {
 
 /// a 2D field slice, already decimated toward display resolution. `data` is
 /// row-major `width * height`; the renderer samples it to the panel's pixel grid
-/// and colormaps `[vmin, vmax]`. keeping this small (screen-sized, not grid-sized)
-/// is the whole point — a 4096^2 grid and a 256^2 grid cost the same to draw.
+/// and colormaps `[vmin, vmax]`. keeping this small (screen-sized) is the whole
+/// point — a 4096^2 grid and a 256^2 grid cost the same to draw.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FieldSlice {
     pub label: String, // "density · inferno · slice z=0"
@@ -227,7 +227,7 @@ fn render_header(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
             cols[1],
         );
     } else {
-        // the unfilled track is DIM (visible), not BORDER (near-background) — at low
+        // the unfilled track is DIM so it stays visible (BORDER would read as near-background) — at low
         // progress the bar is almost all track, so an invisible track reads as just
         // a stray percentage. a leading label marks it unambiguously as progress.
         let gauge = LineGauge::default()
@@ -459,7 +459,7 @@ fn cmap_name(c: Colormap) -> &'static str {
 
 fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
     // log10 colormap normalization needs a positive range; non-positive data falls
-    // back to linear rather than lying with a clamped scale.
+    // back to linear; clamping a log scale onto non-positive data would misrepresent it.
     let log_active = field.log_scale && field.vmax > 0.0;
     let block = Block::new()
         .borders(Borders::ALL)
@@ -480,7 +480,7 @@ fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
         return;
     }
 
-    // a 1-row slice (1D run, or a 3D line-out) is a line profile, not a heatmap.
+    // a 1-row slice (1D run, or a 3D line-out) is a line profile.
     if field.height <= 1 {
         render_field_line(frame, inner, field);
         return;
@@ -767,7 +767,7 @@ fn drift_row(frame: &mut Frame, area: Rect, label: &str, color: Color, hist: &[f
 fn render_maxw_dt(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     // the max-W card applies only to relativistic regimes (the Lorentz factor is
     // undefined for a non-relativistic gas, so `max_w` is None there). when absent,
-    // dt history takes the full row rather than a "—" placeholder holding half of it.
+    // dt history takes the full row.
     let dt_area = if let Some(w) = view.max_w {
         let cols =
             Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(area);
@@ -905,7 +905,7 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     frame.render_widget(block, area);
     // render each section under a full-width divider header (`SECTION ────────`), blank line between.
     // sections are taken in first-seen order, CASE-INSENSITIVELY merged — so a config's `physics`
-    // group folds into the core `Physics` section instead of printing a duplicate header. rows within
+    // group folds into the core `Physics` section under one header. rows within
     // a section keep input order.
     let width = inner.width as usize;
     let mut sections: Vec<&str> = Vec::new();
@@ -1027,8 +1027,8 @@ mod tests {
         let d = dump(&v);
         assert!(!d.contains("div·B"));
         assert!(d.contains("conservation & constraints"));
-        // max W is relativistic-only: OMITTED (not a "—" placeholder) when max_w is
-        // None, so dt history takes the full row instead of squatting on half of it.
+        // max W is relativistic-only: OMITTED when max_w is None, so dt history
+        // takes the full row.
         assert!(!d.contains("max W"));
         assert!(d.contains("dt history"));
         // present again once the run is relativistic.

@@ -2,8 +2,8 @@
 // rigid_no_penetration_gpu.rs
 //
 // the cartesian device twin of the rigid-wall gate: a runtime-JIT shaped rigid
-// sphere (a CSG shape, routing the shaped kernel rather than the AOT analytic
-// sphere) on the cartesian chart, run on device memory and asserted BIT-CLOSE to
+// sphere (a CSG shape, routing the shaped kernel) on the cartesian chart, run on
+// device memory and asserted BIT-CLOSE to
 // the CPU run. this exercises the CARTESIAN bounding-ball bbox branch of the
 // shaped-wall dispatch on device — the index-aligned support box the cylindrical
 // twin (whole-interior dispatch) never takes. the per-body force receipt (a

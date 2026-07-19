@@ -89,7 +89,7 @@ pub fn cf_ghost_slabs<const D: usize>(
 ) -> Vec<Domain<D>> {
     // POLICY: which ghosts come from the coarser level. `cf_region` is the
     // interior grown out to `allocated` ONLY on coarse-fine sides — physical
-    // boundary ghosts are filled by the bc kernel, not prolonged, so those sides
+    // boundary ghosts are filled by the bc kernel, so those sides
     // stay clamped to `interior`. the cells to prolong are then exactly
     // `cf_region \ interior`.
     //
@@ -97,7 +97,7 @@ pub fn cf_ghost_slabs<const D: usize>(
     // minimal disjoint cover — `2*D` boxes, no overlap. this is union-equivalent
     // to overlapping per-face slabs (identical cell set; prolongation is a pure
     // function of (coarse state, fine coord), so the 2-3x edge/corner
-    // double-writes of an overlapping cover are redundant, not wrong) but writes each cell ONCE: the
+    // double-writes of an overlapping cover are redundant yet still correct) but writes each cell ONCE: the
     // ~19% cell reduction on binary_disk, in the same `2*D` dispatches (not the
     // `3^D-1` of a maximal split, whose tiny corner boxes drown in launch cost).
     // the disjointness also makes the cover safe to fan out in one parallel pass.
@@ -146,7 +146,7 @@ pub fn prolong_prims<const D: usize, const DOF: usize, Mem: MemorySpace>(
     let has_pre = old.pre_field().is_some();
     let ncomp = 1 + DOF + has_pre as usize;
     // multi-field BATCH: one dispatch (one rayon launch) over the whole prim set
-    // instead of `ncomp` separate launches — the per-dispatch fork-join was the
+    // collapsing `ncomp` separate launches — the per-dispatch fork-join was the
     // dominant prolong cost. generated for the 3D hot path (ncomp 4 = isothermal,
     // 5 = adiabatic/rhd); anything else falls back to the single-field path.
     if D == 3 && (ncomp == 4 || ncomp == 5) {
@@ -665,8 +665,8 @@ mod tests {
 
         let new = cf_ghost_slabs(&allocated, &interior, &b);
         assert_disjoint(&new);
-        // minimal partition: one box per coarse-fine face (2*D), NOT the 3^D-1
-        // maximal split — fewest dispatches for the same disjoint shell.
+        // minimal partition: one box per coarse-fine face (2*D), fewer dispatches than
+        // the 3^D-1 maximal split for the same disjoint shell.
         assert_eq!(new.len(), 2 * 3, "shell should tile into 2*D = 6 boxes");
 
         let new_vol: usize = new.iter().map(|d| d.volume()).sum();

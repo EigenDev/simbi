@@ -102,8 +102,8 @@ class _RefinedDrivenAdiabatic(_RefinedDrivenBase):
 class _RefinedDrivenIso(_RefinedDrivenBase):
     regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL)]
 
-    # the base declares ambient_sound_speed as a computed field; override the
-    # property, not the field.
+    # the base declares ambient_sound_speed as a computed field; override its
+    # property. assigning a plain data field would leave the base computed_field in place.
     @computed_field
     @property
     def ambient_sound_speed(self) -> float:

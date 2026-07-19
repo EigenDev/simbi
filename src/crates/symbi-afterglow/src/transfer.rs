@@ -19,9 +19,9 @@
 // design properties:
 //   - the proper energy/frequency model above (separate nu_emit and energy_weight),
 //   - seeded deterministic RNG (src/rng.rs) for reproducibility,
-//   - correct relativistic-aberration beaming (a rotation, not a magnitude scale),
-//   - per-photon absorption path length (0.1 * emission radius), not 0.1 * x1[0],
-//   - SSA / pair-production keyed on the photon energy h*nu_emit, not the packet weight.
+//   - correct relativistic-aberration beaming (a direction rotation),
+//   - per-photon absorption path length (0.1 * emission radius),
+//   - SSA / pair-production keyed on the photon energy h*nu_emit, which sets the spectral band.
 //
 // usage:
 //  let mut ev = generate_photon_events(&cond, &scales, &fields, &mesh, seed, 1_000_000, 0);
@@ -355,7 +355,7 @@ pub fn generate_photon_events(
     // a 2d (r, theta) sim is AXISYMMETRIC — the physical 3d blast is the slice swept around the
     // jet axis. when phi is NOT a resolved data axis, REVOLVE each (r, theta) cell over this many
     // azimuths to fill the ring (else everything collapses onto the phi=0 plane and the sky image
-    // is a flat cross-section, not the 3d blast).
+    // is a flat cross-section).
     const AXISYM_N_PHI: usize = 64;
     let resolved_phi = x3.is_some() && mesh.data_dim > 2;
     let n_azimuth = if resolved_phi { nk } else { AXISYM_N_PHI };
@@ -642,7 +642,7 @@ pub fn monte_carlo_radiative_transfer(
         let n_e: NumberDensity = fields.rho[idx] * scales.rho / M_P;
         let photon_energy = Energy::new(H_PLANCK.value() * photon.nu_emit);
 
-        // path length ~ 10% of the photon's emission radius (per-photon, not a global scale).
+        // path length ~ 10% of the photon's emission radius (per-photon).
         let path_length = Length::new(0.1 * photon.radius());
 
         let tau_ssa = ssa_optical_depth(photon_energy, n_e, bfield, path_length, p);
@@ -960,8 +960,8 @@ mod tests {
     }
 
     // packet positions are sampled CONTINUOUSLY within their (r, mu, phi) cells, so EATS
-    // arrival times t_obs = t_em - r.n/c fill their span instead of sitting on the angular
-    // lattice. cell-centered positions quantize the arrivals into n_mu discrete rings ~span/n_mu
+    // arrival times t_obs = t_em - r.n/c fill their span continuously.
+    // cell-centered positions quantize the arrivals into n_mu discrete rings ~span/n_mu
     // apart; an observer window narrower than that spacing then catches either one full ring or
     // nothing — a 200x flux bias and a hollow image. the gate: windows much narrower than the
     // old lattice spacing must each catch a packet share proportional to their width.
@@ -1003,7 +1003,7 @@ mod tests {
             );
         }
 
-        // the packet radii fill the shells rather than sitting at the cell centers.
+        // the packet radii fill the shells continuously.
         let radii: Vec<f64> = ev.iter().map(|e| e.radius()).collect();
         let distinct = {
             let mut r = radii.clone();

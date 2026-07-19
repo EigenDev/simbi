@@ -21,7 +21,7 @@
 //   run through the CPU interpreter. assert IDENTICAL bits.
 //
 // the IR is built through the low-level Graph API (`with_trace |t| t.graph()…`)
-// instead of `Gv::iterate` because the production path always passes
+// because `Gv::iterate` always passes
 // Some(conv) — only the direct builder can flip the knob. lowering uses
 // scalarize_kernel (NOT plain scalarize) because IterAcc only resolves inside
 // the loop body context that scalarize_kernel sets up via lower_iterate_inline.

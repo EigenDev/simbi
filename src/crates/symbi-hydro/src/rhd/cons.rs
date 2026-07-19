@@ -17,7 +17,7 @@ use crate::rhd::lorentz_factor;
 
 /// maximum newton-raphson iterations for RHD cons2prim on the HOST (early-break).
 /// the substrate kernel bakes its own fixed count (build.rs passes 20 to the gv
-/// builder) — both share the `rhd_recover` body; the count is a knob, not physics.
+/// builder) — both share the `rhd_recover` body; the count is a tunable knob.
 const MAX_ITER: usize = 100;
 
 /// the branch-free RHD cons->prim recovery — THE single-source physics: the pressure
@@ -26,7 +26,7 @@ const MAX_ITER: usize = 100;
 /// what the substrate c2p kernel computes (the `rhd_to_primitive` wrapper adds the
 /// host C2pResult diagnostics post-hoc, matching `Newtonian::to_primitive`).
 ///
-/// EOS-generic: uses `eos.pressure()` / `eos.sound_speed_sq()`, not gamma. traced at
+/// EOS-generic: works through `eos.pressure()` / `eos.sound_speed_sq()`, so no gamma is hardcoded. traced at
 /// `S = Gv` (`symbi_discretize::rhd_c2p_gv`) it lowers to the IterateInline c2p kernel;
 /// at `S = f64/f32` it runs as a plain early-breaking loop. `max_iter` caps the Newton.
 pub fn rhd_recover<S: Scalar, const D: usize>(
@@ -89,13 +89,13 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     let et = tau + dd + p_eq;
     let vel = metric.raise(&cons.mom).map(|s| s / et);
     // density from the CEILING-clamped Lorentz factor: an out-of-cone state recovers a finite (if
-    // flagged) rho instead of a NaN. the velocity VECTOR is left exact (finite, possibly
+    // flagged) rho; the clamp keeps it off NaN. the velocity VECTOR is left exact (finite, possibly
     // superluminal — the post-hoc diagnostic flags it); the clamp only sanitizes rho.
     let ww = lorentz_factor(metric.norm_sq_contra(&vel).min(v_ceiling_sq));
     let rho = dd / ww;
     // Wu-2017 cone test: q(U)/D <= 0 means no physical subluminal p > 0 solution exists. drive the
     // pressure to the shared non-positive sentinel so the FOFC probe and the c2p diagnostic flag
-    // the zone (fail-loud) rather than accepting a spurious recovered pressure. identical contract
+    // the zone (fail-loud); no spurious recovered pressure is accepted. identical contract
     // and math to rmhd_recover.
     let qq = tau / dd;
     let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
@@ -109,14 +109,14 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
 /// native `<` / `<=` / `==` on a host scalar. the kernel path is `rhd_recover` above
-/// (carrier-generic over `S: Scalar`), not this wrapper.
+/// (carrier-generic over `S: Scalar`); this wrapper is host-only.
 pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     eos: &impl Eos<S>,
     cons: &Cons<S, D>,
 ) -> C2pResult<Prim<S, D>> {
     let dd = cons.den;
 
-    // input guard: clearly-invalid conserved density. a host-only early-out (NOT in the
+    // input guard: clearly-invalid conserved density. a host-only early-out (absent from the
     // kernel path) that keeps the recovery's `dd/ww`, `tau+dd+p` finite for callers.
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = Prim {
@@ -246,7 +246,7 @@ mod tests {
     // the unified relativistic-c2p contract (shared with rmhd_recover): the branch-free kernel body
     // recovers a FINITE state for an out-of-cone conserved input — density from the ceiling-clamped
     // Lorentz factor, pressure driven to the shared non-positive `C2P_CONE_FAIL_PRESSURE` sentinel
-    // by the Wu-2017 cone test — NOT a NaN. rationale for the change from the old NaN convention:
+    // by the Wu-2017 cone test — a finite sentinel. rationale for the change from the old NaN convention:
     // the FOFC probe's `finite_pos(pre)` rejects the non-positive sentinel IDENTICALLY to a NaN (so
     // the fail-loud is preserved), while a finite sentinel cannot poison a neighbour's
     // reconstruction the way an absorbing NaN does (the demonstrated FM-torus / RMHD failure mode).

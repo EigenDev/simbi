@@ -9,7 +9,7 @@
 // iso_wave_speed_map_sph_1d) — the area-weighted divergence + the well-balanced
 // geometric pressure source (2p/r in the radial continuum limit) + per-cell CFL.
 //
-// proof the geometry is ACTIVE (not silently Cartesian): run the IDENTICAL grid +
+// proof the spherical geometric source actually engages: run the IDENTICAL grid +
 // initial state under M=Spherical and M=Cartesian; the spherical geometric source
 // changes the solution, so the radial density profiles must DIFFER measurably. a
 // missing _sph kernel would panic in kernel_by_name, so a clean run also proves the
@@ -68,10 +68,9 @@ where
 }
 
 // rhd sharp Sod (rho,p) = (1,1) | (0.125,0.1), v=0: D=rho, S=0, tau=p/(gamma-1) (W=1).
-// the relativistic HLLE keeps the flow subluminal; with the CORRECT per-cell physical CFL
-// width (rhd_wave_speed_map's curvilinear dispatch — the earlier NaN was a wildly wrong
-// dt from misreading x_lo as inv_dx, NOT a geometric-source or c2p flaw) the spherical
-// shock tube runs clean.
+// the relativistic HLLE keeps the flow subluminal; the spherical shock tube runs clean
+// once rhd_wave_speed_map's curvilinear dispatch supplies the correct per-cell physical
+// CFL width (misreading the x_lo argument as inv_dx there yields a wildly wrong dt and NaNs).
 fn set_rhd_ic<M>(sim: &mut SimState<Rhd, 1, M, IdealGas<f64>, CpuSpace, HostMemory>)
 where
     M: symbi_geometry::Metric<f64, 1> + Copy,

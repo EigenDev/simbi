@@ -19,7 +19,7 @@
 
 // the CPU field descriptor the generated kernels take. carries the buffer
 // pointer plus its pre-multiplied row-major strides, so per-cell index arithmetic is ONE method
-// call (`at_Nd`) reading struct fields, not a dozen scattered scalar args. the
+// call (`at_Nd`) reading struct fields from a single descriptor. the
 // strides are computed ONCE at construction (host-side, per kernel launch).
 //
 // SINGLE SOURCE OF TRUTH for index arithmetic: `at_1d` / `at_2d` / `at_3d` are
@@ -210,10 +210,10 @@ impl<'a, T> CpuFieldMut<'a, T> {
 
 // ---- the structured binding ABI ----
 //
-// the backend-NEUTRAL kernel invocation. instead of the call site building the
-// CPU-specific `&[CpuField]` / `&mut [CpuFieldMut]` host slices directly (a host-
-// memory-ism), it builds ONE `KernelInvocation`: an ordered buffer list (each a
-// data HANDLE + its layout) + the packed params. the same invocation maps to a CPU
+// the backend-NEUTRAL kernel invocation. the call site builds ONE
+// `KernelInvocation`: an ordered buffer list (each a data HANDLE + its layout) +
+// the packed params, keeping the CPU-specific `&[CpuField]` / `&mut [CpuFieldMut]`
+// host slices (a host-memory-ism) out of the call site. the same invocation maps to a CPU
 // call (`run_cpu`, below) or a GPU launch, by interpreting the handle. the
 // device-pointer handle variant for the runtime GPU render is not yet present.
 
@@ -283,7 +283,7 @@ impl<'a, T> KernelInvocation<'a, T> {
 // the OrderedNumeric bound is the Tier-1.7 closure: the CPU emitter writes native
 // `if cond { x } else { y }` for graph Branch nodes, so the body needs host
 // ordering. f64/f32 both impl OrderedNumeric; the carrier-generic Gv path uses
-// the GpuRenderer (CUDA C codegen), not this CPU rendering.
+// the GpuRenderer (CUDA C codegen) for its rendering.
 pub use symbi_algebra::OrderedNumeric;
 pub use symbi_ir::algebra::Scalar;
 
@@ -291,8 +291,8 @@ pub use symbi_ir::algebra::Scalar;
 /// ints, scalars)`. every generated `pub fn k<S: Scalar + OrderedNumeric>(..)` has
 /// this shape, so the generic fn item `k::<S>` coerces to `KernelFn<S>`. `kernel_by_name`
 /// (generated in the registry below) returns one of these, so the D-generic
-/// SubstrateKernelSet picks a kernel instance by name rather than a hand-maintained
-/// per-regime match. CpuField / CpuFieldMut / Scalar / OrderedNumeric
+/// SubstrateKernelSet picks a kernel instance by name through a single lookup
+/// covering every regime. CpuField / CpuFieldMut / Scalar / OrderedNumeric
 /// are in scope above.
 pub type KernelFn<S> =
     fn(&[CpuField<'_, S>], &mut [CpuFieldMut<'_, S>], &[u32], &[i32], &[i32], &[S]);

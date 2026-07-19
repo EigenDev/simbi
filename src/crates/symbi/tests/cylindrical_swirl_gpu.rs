@@ -8,7 +8,7 @@
 // DOF-generic AdiabaticSubstrateKernelSet on each, and diffs EVERY _cyl kernel
 // (snapshot / c2p / ghost_fill / cfl / flux per dir / godunov_euler / rk2) GPU == CPU
 // to rel < 1e-9 (modulo nvcc FMA fusion). proves the metadata-driven dispatch +
-// the _cyl ncomp=3 kernels run correctly on device, not just on CPU.
+// the _cyl ncomp=3 kernels run correctly on device.
 //
 // run on the host (CUDA 13.2 + g++-15): cargo test -p symbi --features cuda \
 //     --test cylindrical_swirl_gpu

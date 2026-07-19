@@ -75,7 +75,7 @@ class StreamPlotComponent(Component):
         if u_field.ndim != 2 or v_field.ndim != 2:
             raise ValueError("StreamPlotComponent fields must be 2D.")
 
-        # streamplot needs 1D coordinate arrays, not 2D meshgrids.
+        # streamplot needs 1D coordinate arrays.
         # the pipeline provides pcolormesh-style "edge" coordinates
         x, y = u_field.domain
         u_values, v_values = u_field.values, v_field.values

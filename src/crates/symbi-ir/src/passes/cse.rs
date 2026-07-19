@@ -161,8 +161,8 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
 
 /// collect every variable NAME read by `e` into `out`.
 fn mark_expr_vars(e: &ScalarExpr, out: &mut HashSet<String>) {
-    // the var NAMES this node reads directly: a `Var`, or an `IndexInto`'s `container` (a name,
-    // not a child expr — `children()` only yields the index sub-expr). then recurse the SSOT
+    // the var NAMES this node reads directly: a `Var`, or an `IndexInto`'s `container` (a bare name;
+    // `children()` only yields the index sub-expr). then recurse the SSOT
     // children for every sub-expression.
     match e {
         ScalarExpr::Var(name) => {
@@ -714,8 +714,8 @@ struct RewriteState {
     /// hash -> raw share count (computed in
     /// pass 1). the cost-model threshold check at the rewrite site uses
     /// `cost_class(expr)` to pick the per-class minimum (cheap=4,
-    /// medium/expensive/memory=2, trivial=never). storing counts (not a
-    /// pre-bucketed set) lets the policy stay at the rewrite site, where
+    /// medium/expensive/memory=2, trivial=never). storing raw counts
+    /// lets the policy stay at the rewrite site, where
     /// the full ScalarExpr is still in hand.
     counts: HashMap<u64, usize>,
     /// hash -> temp name, once a Let has been physically emitted.
@@ -1280,7 +1280,7 @@ mod tests {
     }
 
     /// **the load-bearing law**: a duplicated subexpression INSIDE a Scope is
-    /// hoisted to that Scope's body (NOT to the outer function root). this is
+    /// hoisted to that Scope's body, staying inside the scope's brace. this is
     /// exactly the structural property needed for `wave_speed_map` — the
     /// quartic-coefficient phase's shared subexpressions should live INSIDE
     /// the phase's `{ }`, dying at the closing brace.
@@ -1357,7 +1357,7 @@ mod tests {
     /// **scope sealing**: a duplicate that appears in TWO sibling scopes is NOT
     /// shared across them. each scope gets its own independent CSE pass. this
     /// is the per-scope isolation property — fancy LCA is a separate refinement,
-    /// not required for the wave-speed win.
+    /// unnecessary for the wave-speed win.
     #[test]
     fn duplicate_across_sibling_scopes_stays_local() {
         // outer body:
@@ -1537,8 +1537,8 @@ mod tests {
         );
     }
 
-    /// expensive (exp) at single use: must NOT hoist. the policy is
-    /// "always hoist when SHARED", not "always hoist".
+    /// expensive (exp) at single use: must NOT hoist. the policy
+    /// hoists only when a value is SHARED.
     #[test]
     fn expensive_single_use_stays_inline() {
         let exp = ScalarExpr::MethodCall {

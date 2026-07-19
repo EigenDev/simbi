@@ -83,7 +83,7 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// `dispatch_runtime_source`. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
     /// when true AND a `runtime_source` is attached on a FLAT (Minkowski) background, the raw user
-    /// source is FUSED into the godunov stage as one Cranelift-JIT'd host kernel instead of the
+    /// source is FUSED into the godunov stage as one Cranelift-JIT'd host kernel, replacing the
     /// two-pass. host+f64 only; falls back to the two-pass off-host / non-f64 / JIT-miss / GR (the
     /// fused builder traces the flat geo, so it cannot match a curved godunov kernel).
     pub fuse_runtime: bool,

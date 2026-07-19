@@ -6,7 +6,7 @@
 # carries a diffusive emf eta*J. resistivity is the physical control on the
 # central current sheet: as the two field null-lines are driven together the
 # sheet thins to the grid scale, and eta sets the reconnection rate + caps the
-# peak current density instead of letting numerical dissipation decide it.
+# peak current density; with eta=0 that cap is set by numerical dissipation.
 #
 # the diagnostic is the magnetic energy: ideal mhd (eta=0) conserves it up to the
 # scheme's numerical diffusion; eta>0 makes it decay monotonically as the sheets

@@ -4,12 +4,12 @@
 // the SYMBOLIC keystone proof that the 3D SPHERICAL constrained-transport curl
 // (rmhd_ct_curl_3d_dir_gv under Coords::Spherical) preserves the AREA-WEIGHTED
 // div(B) = 0 EXACTLY — by RATIONAL-FUNCTION coefficient cancellation on the traced
-// IR DAG, NOT a numerical 1e-10 evolve test (rmhd_ct_curl_sph_divb.rs is that one).
+// IR DAG at graph-build time; the numerical 1e-10 evolve test lives in rmhd_ct_curl_sph_divb.rs.
 //
 // the curvilinear curl multiplies edge EMFs by scale-factor weights h_p (= r,
 // r sin(theta)) and divides by the face-center prefactor 1/(h_p1c h_p2c) and the
-// transverse widths, so its coefficients are RATIONAL FUNCTIONS, not integer
-// polynomials. `symbi_ir::proof::LinFormR` carries those: r-values are AFFINE in
+// transverse widths, so its coefficients are RATIONAL FUNCTIONS carrying the metric
+// denominators. `symbi_ir::proof::LinFormR` carries those: r-values are AFFINE in
 // {x_lo_0, dx_0, c_0} (a true polynomial — r^2 in an area must algebraically equal
 // r*r in an h-product); sin(theta at offset m) is an OPAQUE symbol keyed by the
 // resolved offset (sin at distinct offsets have NO polynomial relation). the cell
@@ -46,7 +46,7 @@ fn curl_only(mut lf: LinFormR) -> LinFormR {
 
 // map the per-dir generic emf keys to physical-axis identities. for face axis dir,
 // p1=(dir+1)%3 and p2=(dir+2)%3. (the geometry coefficients are built from the
-// ABSOLUTE axis scalars x_lo_N/dx_N, not per-dir id_pN — so ONLY the field keys
+// ABSOLUTE axis scalars x_lo_N/dx_N (no per-dir id_pN) — so ONLY the field keys
 // need canonicalizing, unlike the cartesian proof.)
 fn physical_rename(dir: usize) -> HashMap<String, String> {
     let p1 = (dir + 1) % 3;

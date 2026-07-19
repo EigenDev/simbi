@@ -9,10 +9,10 @@
 #
 # a grb afterglow observation integrates emission over the EQUAL-ARRIVAL-TIME surface,
 # which draws from a RANGE of emission epochs -- so the catalog must span an ARRAY of
-# snapshots, NOT one. each snapshot emits over the lab-time interval it REPRESENTS (its
-# trapezoidal share of the snapshot-time axis), not the tiny CFL timestep; weighting by
+# snapshots. each snapshot emits over the lab-time interval it REPRESENTS (its
+# trapezoidal share of the snapshot-time axis); weighting by
 # the represented interval is what makes the stacked snapshots tile the blast's history.
-# a single snapshot has no interval to tile with -- it is one t_em slice, not an afterglow.
+# a single snapshot has no interval to tile with -- it is one t_em slice.
 # usage:
 #  generate_from_files(["s0.h5", "s1.h5", ...], "events.h5", scale_model="blandford-mckee")
 # =============================================================================

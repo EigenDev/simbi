@@ -89,8 +89,8 @@ class DittmannSingleDisk(SimbiProblem):
     ]
 
     # buffer zone: a sponge that relaxes the outer annulus toward the initial
-    # disk equilibrium, so the flow reaches a steady state instead of draining
-    # out through the outflow boundary (dittmann uses a dirichlet outer BC).
+    # disk equilibrium, so the flow reaches a steady state
+    # (dittmann uses a dirichlet outer BC).
     use_buffer: Annotated[
         bool,
         ProblemParam(

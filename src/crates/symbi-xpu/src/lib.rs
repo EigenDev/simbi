@@ -10,7 +10,7 @@
 //
 // seven rules:
 //   1. backend-agnostic plumbing (compile-time dispatch, no dyn)
-//   2. manages memory lifetime, not layout
+//   2. manages memory lifetime, leaving layout to callers
 //   3. stream-ordered execution (executor owns a stream)
 //   4. does not generate code (loads pre-compiled kernels)
 //   5. explicit transfers
@@ -69,7 +69,7 @@ use cuda as gpu_backend;
 use hip as gpu_backend;
 
 // neutral device api (gpu = cuda || hip): downstream calls `symbi_xpu::ctx_sync`,
-// `symbi_xpu::memcpy_peer`, etc. instead of naming a backend module.
+// `symbi_xpu::memcpy_peer`, etc. without naming a backend module.
 #[cfg(feature = "gpu")]
 pub use gpu_backend::{
     can_access_peer, ctx_sync, current_device, device_count, device_info, enable_peer_access,

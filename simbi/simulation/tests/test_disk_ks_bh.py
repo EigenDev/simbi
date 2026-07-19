@@ -69,7 +69,7 @@ def test_disk_ks_bh_runs_stably_and_is_axisymmetric() -> None:
     assert rho.min() > 0.0, f"density went non-positive: {rho.min():.3e}"
 
     # axisymmetry: the metric never reads phi, so a phi-uniform state stays phi-uniform (each
-    # R-ring constant along phi = axis 0). the radial infall varies with R (axis 1), NOT phi.
+    # R-ring constant along phi = axis 0). the radial infall varies with R (axis 1).
     def phi_var(a: np.ndarray) -> float:
         return float(np.abs(a - a.mean(axis=0, keepdims=True)).max() / (np.abs(a).max() + 1e-300))
 

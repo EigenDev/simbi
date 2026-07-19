@@ -3,7 +3,7 @@
 //
 // adaptive numerical dissipation for the HLLC riemann solver.
 // fleischmann et al. (2020) low-mach fix: adaptive phi in [0,1].
-// all detectors use nhat (unit normal vector), not dir: usize.
+// all detectors take nhat (the unit normal vector) as the direction argument.
 //
 // usage:
 //   let nhat = Tensor::unit(0);
@@ -50,7 +50,7 @@ pub const QUIRK_THRESHOLD: f64 = 1e-4;
 ///   }
 /// ```
 ///
-/// returns `Self::Mask` (NOT bool / NOT Self) so the carrier-generic
+/// returns `Self::Mask` so the carrier-generic
 /// dispatch via `S::branch` works uniformly at S = f64 (host bool) and
 /// S = Gv (graph mask). callers gate the HLLC -> HLLE fallback on this
 /// mask; the gate is meaningful only in `D > 1` (1D doesn't carbuncle).

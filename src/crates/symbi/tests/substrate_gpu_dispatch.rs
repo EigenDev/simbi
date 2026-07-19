@@ -31,8 +31,8 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     let n = 6usize;
     let den: Vec<S> = [1.0, 2.0, 0.5, 1.5, 0.8, 1.2].iter().map(|&x| S::from_f64(x)).collect();
     let mom: Vec<S> = [0.3, -0.4, 0.1, 0.6, -0.2, 0.05].iter().map(|&x| S::from_f64(x)).collect();
-    // cs2 is now a per-cell FIELD (the prescribed sound-speed-squared). a varying cs2 here
-    // exercises the LOCALLY isothermal path: p = cs2(x)*rho, not a global constant.
+    // cs2 is a per-cell FIELD (the prescribed sound-speed-squared). a varying cs2 here
+    // exercises the LOCALLY isothermal path: p = cs2(x)*rho with a distinct sound speed per cell.
     let cs2: Vec<S> = [0.49, 0.6, 0.4, 0.55, 0.5, 0.45].iter().map(|&x| S::from_f64(x)).collect();
 
     // CPU reference (the AOT-compiled kernel via the descriptor ABI), at S

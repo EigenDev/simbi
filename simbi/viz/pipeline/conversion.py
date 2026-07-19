@@ -3,7 +3,7 @@
 #
 # converts cli arguments to typed configuration objects.
 # clean separation: figure config is separate from component props.
-# component styling is handled entirely by config_loader, not here.
+# component styling is handled entirely by config_loader.
 # =============================================================================
 from argparse import Namespace
 from typing import Literal, Optional

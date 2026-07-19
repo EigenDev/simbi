@@ -145,7 +145,7 @@ fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
     assert_eq!(magnetic_energy(&sim), mag_e0);
 
     // the real sandwich property: in every drained cell the SPECIFIC INTERNAL energy is
-    // preserved -- the drain removed gas energy in proportion to mass, not the field energy.
+    // preserved -- the drain removed gas energy in proportion to mass.
     let after = cell_state(&sim);
     let mut drained = 0;
     for ((d0, e0, b0), (d1, e1, b1)) in before.iter().zip(&after) {

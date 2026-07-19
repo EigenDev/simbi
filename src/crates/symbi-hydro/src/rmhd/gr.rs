@@ -9,7 +9,7 @@
 // gamma/gamma^{-1} (via `SpatialMetric`) + the lapse `alpha`, exactly like `RhdGr`.
 //
 // the GR flux kernel uses this via `riemann::hlle_with_speeds` + the shift-in-the-fan,
-// so GRMHD is a DIVERGENT KERNEL, not a change to the shared flat `Rmhd`. `prim.vel` is
+// so GRMHD is a DIVERGENT KERNEL that leaves the shared flat `Rmhd` untouched. `prim.vel` is
 // the CONTRAVARIANT valencia velocity `v^i`; `prim.mag`/`cons.mag` the CONTRAVARIANT
 // eulerian field `B^i`.
 //

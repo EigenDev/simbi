@@ -42,10 +42,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     {
         // raw IEEE math; no silent floors (feedback_no_silent_floors).
         // the diagnostic ErrorCode is preserved (it's an explicit
-        // signal, not a silent modification of the math). callers can
+        // signal that leaves the math untouched). callers can
         // detect a pathology via `result.is_err()` and react; the
-        // `value` is the raw unfloored computation rather than a
-        // recovered floor, so any downstream NaN propagation is
+        // `value` is the raw unfloored computation with no
+        // recovered floor substituted, so any downstream NaN propagation is
         // visible and can be caught at the dt reduction.
         let prim = cons.to_primitive(eos);
         let mut code = ErrorCode::NONE;
@@ -224,7 +224,7 @@ mod tests {
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.error.contains(crate::c2p_result::ErrorCode::NEGATIVE_PRESSURE));
         // raw pressure is negative; downstream callers / dt reduction
-        // are responsible for catching this rather than masking it.
+        // are responsible for catching this.
         assert!(result.value.pre < 0.0);
     }
 

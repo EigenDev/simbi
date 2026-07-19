@@ -103,7 +103,7 @@ def test_stack_blend_smooths_the_seam() -> None:
 def test_stack_cmaps_registers_and_tiles_segments() -> None:
     cmap = stack_cmaps([("Greys_r", 0.0, 0.5), ("inferno", 0.5, 1.0)], "test_stack", n=256)
     # registered under its name -> usable as a string anywhere a cmap name is accepted.
-    # (the registry returns a copy on lookup, so compare by name, not identity.)
+    # (the registry returns a copy on lookup, so compare by name.)
     assert "test_stack" in matplotlib.colormaps
     assert matplotlib.colormaps["test_stack"].name == "test_stack"
     # low end comes from Greys_r, high end from inferno; the two differ.

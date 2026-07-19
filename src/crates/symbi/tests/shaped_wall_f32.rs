@@ -6,7 +6,7 @@
 // to the f64 reference. builds the SAME sealed shaped-sphere wall in a uniform
 // stream at f64 and f32, runs one penalization on each, and asserts the f32 cons
 // + force receipt track the f64 run at f32 tolerance (the physics is correct at
-// reduced precision, not merely non-crashing). this exercises the f32 field
+// reduced precision). this exercises the f32 field
 // loads/stores/strides, f32 consts, and the f32 transcendental (tanh) shim.
 // =============================================================================
 
@@ -64,7 +64,7 @@ fn f32_shaped_wall_tracks_f64() {
     dispatch_penalize(&h64, 1e-3, GAMMA, 1.0);
     dispatch_penalize(&h32, 1e-3, GAMMA, 1.0);
 
-    // cons agree at f32 tolerance (the f32 codegen is physically correct, not just finite).
+    // cons agree at f32 tolerance (the f32 codegen is physically correct).
     let mut gap = 0.0_f64;
     for c in h64.geom.interior.iter() {
         let a = (*h64.fields.cons.den.view().at(c)).to_f64();

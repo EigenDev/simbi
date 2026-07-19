@@ -138,7 +138,7 @@ impl<S: Scalar, const D: usize> SpatialMetric<S, D> {
 
     /// decompose a CONTRAVARIANT vector v^i into its part along a COORDINATE-unit normal n^i
     /// (n^i = delta^i_dir) and the remainder: `v^i - n^i (v.n)` with the CONTRAVARIANT normal
-    /// component `v.n = v^dir` (`.dot(nhat)`), NOT the gamma-lowered `v_dir`. this is the
+    /// component `v.n = v^dir` (`.dot(nhat)`); the gamma-lowered covariant `v_dir` would be wrong here. this is the
     /// decomposition the coordinate induction/MHD flux uses (F(B^i) = B^i v^n - v^i B^n with
     /// v^n = v^dir, B^n = B^dir), so the transverse remainder is flux-consistent on ANY spatial
     /// metric — the HLLD fan's transverse fields telescope to the flux exactly. flat / orthonormal

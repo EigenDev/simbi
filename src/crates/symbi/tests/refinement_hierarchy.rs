@@ -5,7 +5,7 @@
 // BIT-FOR-BIT. the hierarchy's advance_level re-sequences the single-level SSP
 // stage loop so flux registers can hook into it; this test pins
 // the two loops in lockstep — any drift (a reordered kernel call, a missed
-// stage hook) shows up as a bit mismatch, not a subtle conservation leak.
+// stage hook) shows up as a bit mismatch.
 //
 // covers: 1D sod (rk2) + 3D smooth pulse (rk3), adiabatic newtonian, every
 // field compared by bit pattern over the full allocated domain.

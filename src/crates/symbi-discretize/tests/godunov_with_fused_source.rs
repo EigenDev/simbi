@@ -400,7 +400,7 @@ fn ssp_combine_applies_runtime_coefficients() {
 fn unsupported_target_field_panics_loudly() {
     // **discipline**: target_field that godunov doesn't know how to route
     // (a typo, or a field name the substrate doesn't wire) is a programmer
-    // bug — surface a panic with the offending value, not a silent drop.
+    // bug — surface a panic with the offending value so it is never silently dropped.
     // (the godunov vocabulary is den/mom/nrg/bcell; use a bogus name here.)
     const D: usize = 1;
     let coords = Coords::Cartesian;

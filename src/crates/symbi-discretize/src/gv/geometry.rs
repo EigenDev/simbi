@@ -89,8 +89,8 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
             Some(SchwarzschildKSCartesian { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
         }
         // cylindrical kerr-schild: alpha = 1/sqrt(1 + 2M/r), r = sqrt(R^2 + z^2) the SPHERICAL radius
-        // at the FULL (R, phi, z) position — the metric reads slots 0 and 2, not the cylindrical R
-        // alone. same radial-shortcut trap the cartesian arm avoids.
+        // at the FULL (R, phi, z) position — the metric reads both slots 0 and 2 (the cylindrical
+        // R and z). same radial-shortcut trap the cartesian arm avoids.
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
@@ -130,7 +130,7 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
 /// the analytic lapse alpha(r) as a traced Gv, dispatched `Spacetime -> concrete Metric ->
 /// Metric::lapse` — the SINGLE codegen seam for the GR lapse. every consumer (the densitization cell
 /// weight `gv_lapse_weight`, the CFL/shift kernels) reads the lapse HERE, so a new analytic background
-/// is a new `Metric` impl + one arm, not a lapse formula re-inlined per consumer. `M` rides as the
+/// is a new `Metric` impl + one arm. `M` rides as the
 /// host-filled scalar `schwarzschild_mass` so the kernel stays M-agnostic. flat spacetime never
 /// reaches this (its weight is elided by the caller); calling it is a bug.
 /// `theta` is required by the spinning-kerr arm (Sigma depends on the polar angle) and ignored
@@ -200,7 +200,7 @@ pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool 
 // in-kernel GEOMETRY — the substrate metric expressed in Gv. `Gv::coord` is the
 // index->physical bridge; the coordinate-system formulas are a BUILD-TIME `match` on
 // `Coords` (the kernel is generated per geometry, so the branch is resolved at trace
-// time, not a runtime select). this is the foundation every curvilinear operator (CFL
+// time). this is the foundation every curvilinear operator (CFL
 // widths, godunov divergence, geometric sources, CT curl) traces through.
 // =============================================================================
 
@@ -217,17 +217,17 @@ pub(crate) fn gv_axis_face_at(ax: usize, spacing: Spacing, offset: i64) -> Gv {
 /// the lower face position of the cell at an ARBITRARY integer index expression `i` along
 /// grid axis `ax` — the index-general form of [`gv_axis_face_at`] (which passes the thread
 /// coord). the lattice-map ghost fill evaluates metric coefficients at the SOURCE cell,
-/// whose index is a runtime map expression, not a thread-relative constant offset.
+/// whose index is a runtime map expression.
 pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     let start = Gv::scalar(&format!("x_lo_{ax}"));
     let param = Gv::scalar(&format!("dx_{ax}"));
-    // spacing is a RUNTIME per-axis value, not a codegen axis: `map_kind_{ax}` selects the face-
+    // spacing is a RUNTIME per-axis value: `map_kind_{ax}` selects the face-
     // position map (0 = uniform `start + i*dx`, 1 = log `start * 10^(i*slope)`), so ONE kernel per
     // (regime, geometry) serves every spacing (log-r, log-theta, ...) and a moving mesh updates
     // `x_lo`/`dx` on the fly while the map kind stays fixed. the bake-time `spacing` enum is no
     // longer read here (kept in the signature during the transition).
     //
-    // this is a REAL branch (`cond` -> `Op::IfElse`), NOT a `select`: the log `pow` is emitted
+    // this is a REAL branch (`cond` -> `Op::IfElse`): the log `pow` is emitted
     // inside the `if` arm and runs ONLY on a log axis — a uniform grid pays nothing for it.
     // `map_kind` is per-launch-uniform (same for every cell/lane), so the branch never diverges.
     let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
@@ -257,7 +257,7 @@ pub(crate) fn gv_scale_factor(coords: Coords, dir: usize, pos: &[Gv]) -> Gv {
 /// a coordinate the grid does not resolve. spherical: the polar angle defaults to the equator
 /// (theta = pi/2, sin theta = 1); the azimuth and every cartesian / cylindrical suppressed axis
 /// default to 0. this is the SINGLE chart authority for ungridded fills — the GR flux / c2p /
-/// wave-speed / godunov position builders read it instead of inlining `None if c == 1 => pi/2`, so
+/// wave-speed / godunov position builders all read it, so
 /// spherical stays bit-identical (same values) and cartesian / cylindrical fall out (all zero).
 pub(crate) fn gv_ungridded_slot(coords: Coords, c: usize) -> Gv {
     match (coords, c) {
@@ -268,8 +268,8 @@ pub(crate) fn gv_ungridded_slot(coords: Coords, c: usize) -> Gv {
 
 
 /// per-cell PHYSICAL inverse widths `1 / (h_d * width_d)` per gridded axis — the metric-
-/// correct CFL length scale (the wave crosses the physical extent `h_d * Δcoord_d`, not the
-/// coordinate width), computed in-kernel from the cell index.
+/// correct CFL length scale (the wave crosses the physical extent `h_d * \Delta coord_d`, the
+/// coordinate width scaled by the lame factor `h_d`), computed in-kernel from the cell index.
 /// `axes[d]` is the coordinate gridded axis `d` maps to.
 /// (the cartesian-UNIFORM CFL still uses the host's precomputed `inv_dx_d` scalar — this is
 /// the curvilinear / non-uniform path.)
@@ -372,8 +372,8 @@ pub fn cell_geometry_covariant_gv(
         // there is no distinguished angular direction, so the covariant geometry IS the flat
         // cartesian geometry (the spherical int r^2 dr angular correction has no analog).
         Coords::Cartesian => cartesian_geometry_gv(&lo, &hi, &width, ndim),
-        // the angular (theta) face carries the covariant int r^2 dr measure, not the flat arc-length
-        // int r dr — the sole flat-vs-covariant difference (see the type doc).
+        // the angular (theta) face carries the covariant int r^2 dr measure where the flat geometry
+        // carries the arc-length int r dr — the sole flat-vs-covariant difference (see the type doc).
         Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim, Some(kerr_spin)),
         // cylindrical: the flat cylindrical geometry ALREADY uses the coordinate R-measure (volume
         // int R dR, face areas with sqrt(gamma_phi-phi) = R), so physical == coordinate == covariant
@@ -437,9 +437,9 @@ fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> Cel
 
 
 // spherical (r, theta, phi): analytic exact-integral factors, volume-weighted centroids
-// (the radial centroid is volume-weighted, not the coordinate center). `covariant` selects
-// the coordinate-form (alpha sqrt(gamma)) angular face weights instead of the physical
-// (arc-length) areas — see `cell_geometry_covariant_gv`.
+// (the radial centroid is volume-weighted). `covariant` selects
+// the coordinate-form (alpha sqrt(gamma)) angular face weights for the GR path; `None` keeps the
+// physical (arc-length) areas — see `cell_geometry_covariant_gv`.
 // `covariant`: `None` = the physical (orthonormal) geometry; `Some(None)` = the coordinate-form
 // r^2 sin(theta) measure (det-g-flat GR); `Some(Some(a))` = the kerr Sigma sin(theta) measure.
 fn spherical_geometry_gv(

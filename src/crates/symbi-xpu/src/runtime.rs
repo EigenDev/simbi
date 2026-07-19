@@ -22,14 +22,14 @@ use crate::config::LaunchConfig;
 
 /// backend-specific GPU runtime. one impl per target (CUDA, HIP, Metal).
 /// all methods are stateless — the runtime itself carries no mutable state.
-/// caching is handled by KernelDispatcher, not by the runtime.
+/// caching lives in KernelDispatcher; the runtime holds none.
 pub trait GpuRuntime: 'static + Send + Sync {
     type Module: Send + Sync;
     type Kernel: Send + Sync + Copy;
 
     /// compile kernel source to a loadable binary (PTX, HSACO) with the backend's
-    /// OWN runtime compiler — NVRTC for CUDA, hiprtc for HIP — not a shelled-out
-    /// toolchain binary. default: the backend has no in-process
+    /// OWN in-process runtime compiler — NVRTC for CUDA, hiprtc for HIP — shelling
+    /// out to no external toolchain binary. default: the backend has no in-process
     /// compiler, so source dispatch is unsupported (override to enable JIT).
     fn compile(&self, source: &str, name: &str) -> crate::Result<Vec<u8>> {
         let _ = (source, name);

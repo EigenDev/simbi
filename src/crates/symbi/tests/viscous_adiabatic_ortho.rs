@@ -49,8 +49,9 @@ const DT: f64 = 1.0e-4;
 // application on the physical profile v_phi = Omega r, measured as the max
 // change over BOTH momentum components on the interior with the two rings
 // nearest each radial boundary excluded (the zero-gradient outflow ghosts hold
-// the edge value, not the extended profile, so the boundary-adjacent stencils
-// see genuine shear). the AZIMUTHAL component is the discriminating one: for
+// the constant edge value; because that departs from the smooth v_phi = Omega r
+// continuation, the boundary-adjacent stencils see genuine shear). the AZIMUTHAL
+// component is the discriminating one: for
 // any axisymmetric v_phi(r) the radial force vanishes identically (t11 = t22 =
 // 0 and t12 only enters the radial force through phi-differences), so a
 // radial-only probe is vacuous — the shear signal lives in the angular-momentum

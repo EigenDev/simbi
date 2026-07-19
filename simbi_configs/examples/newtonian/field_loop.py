@@ -22,7 +22,7 @@
 # retains ~27% more field than UCT-HLL (less diffusive). all stable, gas uniform.
 #
 # NOTE the velocity MUST be supersonic (default |v|=sqrt5, M&DZ v=(2,1)) — the test
-# is designed so numerical diffusion is set by cell-crossing, not acoustic waves;
+# is designed so numerical diffusion is set by cell-crossing;
 # subsonic advection smears the loop. caveat: the RELATIVISTIC gas HLLD flux is
 # fragile on this beta>>1 passive loop (use --regime nmhd, or --solver hllc for srmhd).
 # =============================================================================

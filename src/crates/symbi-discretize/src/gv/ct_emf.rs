@@ -57,7 +57,7 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
 
 
 /// the chart-generic spatial metric (gamma + gamma^{-1}) at a world position — the tetrad-frame
-/// HLLD fan needs the full metric, not just the ADM scalars. same (spacetime, coords) selection as
+/// HLLD fan needs the full metric beyond the ADM scalars. same (spacetime, coords) selection as
 /// [`gr_adm_at`]; the orthonormal_basis(dir) Gram-Schmidt of this gamma is the tetrad.
 fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> SpatialMetric<Gv, 3> {
     use symbi_geometry::{
@@ -806,7 +806,7 @@ pub fn rmhd_bcell_from_bface_gr_gv(
     };
     let bf: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bf_{c}"), &format!("bf_{c}"))).collect();
     // interpolate each in-plane cell component from its two bounding faces (arithmetic average;
-    // metric-free — the cell field is a derived reconstruction / c2p quantity, not conserved). NO
+    // metric-free — the cell field is a derived reconstruction / c2p quantity holding no conserved status). NO
     // energy patch: tau carries the magnetic energy and is conserved by the Godunov flux;
     // the old metric-weighted `nrg += 1/2 d(gamma_ij B^i B^j)` double-accounted it non-conservatively.
     let writes: Vec<(String, FieldBind, NodeId)> = axes
@@ -849,7 +849,7 @@ fn uct_hll_coeffs(ap: Gv, am: Gv) -> UctDir {
 /// gives a^L = a^R = 1/2 and the contact-aware diffusion
 ///   chi^s = -(vx^s - lambda^s)/(lambda^s - lstar),   d^s = ((|lstar|-|lambda^s|)/2) chi^s + |lambda^s|/2
 /// (s = L,R). less dissipative than HLL because the transverse-field jump is resolved across the
-/// contact, not the fast wave. `vxl`/`vxr` are the L/R normal velocities. classical & relativistic
+/// contact wave. `vxl`/`vxr` are the L/R normal velocities. classical & relativistic
 /// share this algebra; only `lstar` (the contact speed) is regime-specific (computed upstream).
 fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
     let half = Gv::from_f64(0.5);
@@ -862,8 +862,8 @@ fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
     let chi_l = (Gv::ZERO - (vxl - ll)) / den_l;
     let chi_r = (Gv::ZERO - (vxr - lr)) / den_r;
     // Eq. 38: d^s = ((|lstar| - |lambda^s|)/2) chi^s + |lstar|/2  (the LAST term is |lstar|, the
-    // contact speed, NOT |lambda^s|). this is the B_x = 0 DEGENERATE case (for B_x != 0 HLLC == HLL);
-    // it is the building block for the HLLD singular limit (Eq. 46, v* = 0), not a standalone solver.
+    // contact speed; a common transcription slip writes |lambda^s| here). this is the B_x = 0 DEGENERATE case (for B_x != 0 HLLC == HLL);
+    // it is the building block for the HLLD singular limit (Eq. 46, v* = 0), used only within that composition.
     let dl = ((lstar.abs() - ll.abs()) * half) * chi_l + lstar.abs() * half;
     let dr = ((lstar.abs() - lr.abs()) * half) * chi_r + lstar.abs() * half;
     // clamp to [0, d_HLL]: the HLL diffusion is the stable upper bound (so HLLC is never MORE
@@ -1699,9 +1699,9 @@ pub fn imhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 
 
 /// the RELATIVISTIC UCT-HLLD edge EMF (RMHD). built from the WAVE-SUM dissipative flux (Mignone &
-/// Del Zanna 2020 Eq. 39 + MUB09 star states), NOT the classical coefficient form (Eq. 44) — that
-/// bakes in a CLASSICAL velocity-chi that is invalid relativistically and fails the
-/// energy-telescoping property.
+/// Del Zanna 2020 Eq. 39 + MUB09 star states). the classical coefficient form (Eq. 44) bakes in a
+/// CLASSICAL velocity-chi that is invalid relativistically and fails the
+/// energy-telescoping property, so it is unusable here.
 ///
 /// the EMF is the centered advection minus the per-direction dissipative flux Phi:
 /// ```text
@@ -1750,7 +1750,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let sw = cm(&[g1, g2]);
     // PLM-reconstruct a CELL field to a face (same theta + limiter as the gas flux). the Mignone &
     // Del Zanna exact recipe: the wave-sum's per-face Riemann must use the SAME reconstructed L/R states
-    // the gas flux solves, NOT a 2-cell-averaged single edge Riemann — cell states make the EMF fan
+    // the gas flux solves; a 2-cell-averaged single edge Riemann uses cell states that make the EMF fan
     // inconsistent with the flux at sharp reconstruction (the plm=2 checkerboard, the relativistic D1).
     let theta = Gv::scalar("theta");
     let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {

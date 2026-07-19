@@ -5,7 +5,7 @@
 // first ITERATIVE substrate kernel (a fixed-bound masked Newton-Raphson for the
 // relativistic pressure, `operators::iterate`, lowered + emitted to compiled Rust
 // via the DAG-preserving lowering). this is the proof the deep
-// iterate produces CORRECT numbers, not just compilable code.
+// iterate produces CORRECT numbers at run time.
 //
 // two independent checks on the same compiled kernel `rhd_c2p_1d`:
 //   1. ROUND-TRIP: pick analytic primitives (rho, v, p), forward-map to the

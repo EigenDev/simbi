@@ -147,7 +147,7 @@ struct Config {
     diagnostic_interval: f64,
     // number of gpus to decompose the domain across, intra-node. 1 =
     // single device (the only implemented path). >1 is validated here but the decomposed run
-    // loop (M4) is not yet wired, so it errors -- the runtime knob, not the build backend.
+    // loop (M4) is not yet wired, so it errors -- this is a runtime-decomposition knob.
     n_gpus: usize,
 }
 
@@ -275,7 +275,7 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
 /// covers (newtonian/adiabatic AND rhd), but `with_runtime_source` is inherent
 /// only on the substrates that carry a source slot — so the call must go through
 /// a trait that ALL of them implement. the relativistic set has no slot yet and
-/// reports a clear error rather than failing to compile.
+/// reports a clear runtime error.
 trait AttachRuntimeSource: Sized {
     fn attach_runtime_source(
         self,
@@ -1104,8 +1104,8 @@ mod checkpoint_schedule_tests {
         assert_eq!(checkpoints_at_or_before(false, 1_000.0, cp_at), 0);
     }
 
-    // a disabled cadence returns a non-finite sentinel; the skip loop must terminate at once rather
-    // than spin forever.
+    // a disabled cadence returns a non-finite sentinel; the skip loop must terminate at once
+    // on that sentinel.
     #[test]
     fn disabled_cadence_terminates() {
         let cp_at = |_fired: u64| f64::INFINITY;
@@ -1146,8 +1146,8 @@ where
     // tiny inner radius out to a huge one). otherwise the cadence is LINEAR at
     // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
     // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g., the inner
-    // light-crossing), NOT start_time — so the schedule is identical across a fresh run and a
-    // restart whose clock resumes at the checkpoint time. unset (0) -> start_time (they coincide).
+    // light-crossing) so the schedule is identical across a fresh run and a restart whose clock
+    // resumes at the checkpoint time; anchoring on start_time would shift it. unset (0) -> start_time (they coincide).
     let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 {
         cfg.checkpoint_log_anchor
     } else {
@@ -1173,7 +1173,7 @@ where
     let mut cp_fired: u64 = checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, &cp_at);
     let mut next_cp = cp_at(cp_fired);
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
-    // LOG-spaced runs are named by the monotonic INDEX, not the time: the fixed-3-decimal
+    // LOG-spaced runs are named by the monotonic INDEX: the fixed-3-decimal
     // time name (`000_790`) collides at small times (0.0001 and 0.0002 both round to
     // `000_000`, silently overwriting the dense early dumps a log run produces). the physical
     // time lives in metadata/time, which every reader uses. size the zero-pad width to the
@@ -1289,13 +1289,13 @@ where
     // a render thread owns the terminal + input and draws at ~30 fps, so
     // tab / pause respond instantly regardless of step rate. `None` off a tty (the
     // static string path renders headless). the solver publishes snapshots + reads
-    // its control flags rather than polling keys inline.
+    // its control flags without polling keys inline.
     let mut dash = LiveDashboard::spawn();
 
     // prime the IC: derive primitives (c2p) + cell-centered B (bcell-from-bface)
     // from the seeded conserved/face state BEFORE snapshotting, so the t=0
-    // checkpoint carries real primitives instead of the zeroed scratch buffers
-    // (the reader reads primitives — an unprimed IC plots as all zeros). idempotent
+    // checkpoint carries real primitives (the reader reads primitives — an
+    // unprimed IC's zeroed scratch buffers plot as all zeros). idempotent
     // with the prime the evolve driver runs at its own start.
     hier.prime();
 
@@ -1433,7 +1433,7 @@ where
         // fatal cfl crash (set by the evolve loop when the wave speed went NaN / collapsed — an
         // unphysical c2p, e.g. V -> 1 at the inner boundary): snapshot the LAST computed state as a
         // `.crashed` checkpoint (+ the `.final` snapshot) so it can be inspected, then stop. mirrors the interrupt
-        // path; the post-loop renders it as a crash, not a success.
+        // path; the post-loop renders it as a crash.
         if let Some(c) = h.crash {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
@@ -1481,7 +1481,7 @@ where
             cp_fired += 1;
             next_cp = cp_at(cp_fired);
             // advance past every boundary this step crossed (log or linear) so a
-            // single large dt yields ONE write, not N identical-named dumps.
+            // single large dt yields ONE write covering all of them.
             while time + 1e-12 >= next_cp && next_cp.is_finite() {
                 cp_fired += 1;
                 next_cp = cp_at(cp_fired);
@@ -1532,14 +1532,14 @@ where
             // amr hierarchy may have regridded since the last update).
             table.push_metrics(iter, time, dt, rate);
             // FOFC observable: surface the deliberate fallbacks that fired since the last window so a
-            // limiter is visible rather than silent (a bounded, high-order-preserving first-order
+            // limiter is visible (a bounded, high-order-preserving first-order
             // correction is expected; a freeze — where neither order recovered a cell — is rarer and
             // worth flagging). only posts when something fired, so a clean run stays quiet.
             let (fb_total, fz_total) = symbi::regimes::fofc::fofc_stats();
             let (fb_h, fz_h) = symbi::regimes::fofc::fofc_horizon_stats();
             // the exterior deltas are the meaningful signal: fire inside the horizon
             // (the excised interior, the metric-guard ring) is expected and steady,
-            // so it gets ONE note per run, not a line per window.
+            // so it gets ONE note per run.
             let (d_fb_ext, d_fz_ext) = (
                 (fb_total - fb_h) - (last_fofc.0 - last_fofc_h.0),
                 (fz_total - fz_h) - (last_fofc.1 - last_fofc_h.1),
@@ -1578,12 +1578,12 @@ where
             }
             // machine card: this (compute) node's hostname / cores and the run's
             // resident memory vs the node's physical ram. rss grows, so re-sample
-            // each cadence; an attach client reads the compute node, not its own.
+            // each cadence; an attach client reads the compute node's stats, never the client's own host.
             table.set_host(Some(symbi_display::hostinfo::HostStats::sample()));
             // live field heatmap: a screen-sized decimated density slice (2D/3D-mid;
             // None for 1D or device runs), compositing the nested refinement levels
             // so the refined region shows its fine detail. cost bounded by the
-            // ~200-cell cap, not the grid size.
+            // ~200-cell cap.
             // the `f`-key selects which field to decimate (density / pressure / W /
             // |B|); composite for amr, single-grid fallback for 1D. the render thread
             // owns the colormap, so Inferno here is just a default it overrides.
@@ -1681,7 +1681,7 @@ where
     }
 
     // crashed: the observer already snapshotted the `.crashed` + `.final` state. surface the halt as
-    // the red crash exit frame, not a success.
+    // the red crash exit frame.
     if let Some(c) = hier.crash {
         screen.leave();
         table.set_dynamic(false);
@@ -2150,8 +2150,8 @@ fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg
     for (idx, b) in params.iter().enumerate() {
         // the body position is CARTESIAN on every grid: the immersed-body kernels
         // map the cell centroid to Cartesian and take |x_cart - position|, so a
-        // spherical/cylindrical run gives the body's (x, y, z), not a coordinate
-        // tuple. a centered accretor is the origin (0, 0, 0) either way.
+        // spherical/cylindrical run gives the body's (x, y, z); the position is
+        // never the native (r, theta, phi) tuple. a centered accretor is the origin (0, 0, 0) either way.
         let pos = Tensor::new(std::array::from_fn(|ax| {
             b.position.get(ax).copied().unwrap_or(0.0)
         }));
@@ -2376,8 +2376,8 @@ mod diagnostics_tests {
     }
 
     // the two-way-coupling flag reaches the built body: build_bodies must carry
-    // it from config rather than hardcode coupling = false (feedback onto a
-    // non-accreting gravitating mass is opt-in via this flag).
+    // it from config (feedback onto a non-accreting gravitating mass is opt-in
+    // via this flag; a hardcoded coupling = false would drop it).
     #[test]
     fn build_bodies_carries_two_way_coupling() {
         let params = vec![BodyParams {
@@ -2646,7 +2646,7 @@ macro_rules! into_hierarchy {
         // estimators differ (kernel cross-validation, temporal convergence studies).
         sim.max_dt = $cfg.max_dt;
         // the physical clock starts at start_time (t0): the IC is the state AT t0, and a moving-mesh
-        // a(t) must be sampled at the physical time, not an elapsed-from-0 clock. (default 0 -> no
+        // a(t) must be sampled at the physical time; an elapsed-from-0 clock would mis-phase it. (default 0 -> no
         // change for the common case.)
         sim.time = $cfg.start_time;
         // mesh motion lives on the (coarse) state — set before wrapping. static
@@ -2654,7 +2654,7 @@ macro_rules! into_hierarchy {
         sim.motion = motion_state($cfg);
         // expression-driven mesh motion: build the traced a(t)/a_dot(t) law (autodiff'd a_dot, FD
         // cross-checked) and seed the homologous motion from it at t0 = sim.time. the time loop then
-        // evaluates a(t) EXACTLY each (sub)stage instead of the linear scale_a0/scale_adot.
+        // evaluates a(t) EXACTLY each (sub)stage.
         if let Some(ref mj) = $cfg.motion_json {
             let t0 = sim.time;
             let law = symbi_hydro::motion_law::MotionLaw::from_json(mj, t0, $cfg.t_final)
@@ -2689,7 +2689,7 @@ macro_rules! build_and_run_hydro {
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
-        // the DOF-lifted (swirl) tile decomposition is not wired; refuse rather than mis-run.
+        // the DOF-lifted (swirl) tile decomposition is not wired; refuse until it is.
         if cfg.n_gpus > 1 {
             if $dof != $d {
                 return Err("DOF-lifted (swirl) runs do not yet support gpus > 1".to_string());
@@ -2882,7 +2882,7 @@ macro_rules! build_and_run_hydro {
 /// managed memory otherwise -- so the SAME code runs on one card with `--gpus 2` and on a node
 /// with `--gpus 8`, no machine-specific branch), gathering into `global` for output through the
 /// existing single-grid checkpoint writer. every regime's decomposed build feeds this one loop;
-/// adding a regime is just a tile-build, not a new loop. v1 cadence is linear `checkpoint_interval`.
+/// adding a regime is just a tile-build. v1 cadence is linear `checkpoint_interval`.
 fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
@@ -3168,7 +3168,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         >;
 
         // refined decomposition v1 = plain hydro. these combinations each need their own cross-level
-        // multi-tile handling; refuse rather than silently ignore.
+        // multi-tile handling; refuse until that handling exists.
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -3647,7 +3647,7 @@ macro_rules! hydro_dispatch {
             ),
             // spinning kerr (ingoing kerr-schild coords): the frame-dragging gamma_{r phi}
             // needs the azimuthal momentum DOF, so the 5-tuple (swirl) generator row is
-            // REQUIRED — a 4-tuple config is a setup error, not a fallback.
+            // REQUIRED — a 4-tuple config is a setup error with no fallback.
             (2, "spherical") if $cfg.spacetime == "kerr" => {
                 if !$prims.first().map_or(false, |row| row.len() == 5) {
                     return Err(
@@ -3923,7 +3923,7 @@ macro_rules! build_and_run_mhd {
             .with_excision(cfg.excision_radius);
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
         // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
-        // B is CT-evolved, not a cell source. single-grid only.
+        // B is CT-evolved, so it takes no cell source. single-grid only.
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
@@ -4155,8 +4155,8 @@ macro_rules! build_and_run_mhd_decomposed {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, IdealGas<f64>>;
 
-        // v1 multi-gpu = single-level. these interactions are deferred; refuse rather than silently
-        // ignore (each needs its own multi-tile handling).
+        // v1 multi-gpu = single-level. these interactions are deferred; refuse
+        // (each needs its own multi-tile handling).
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
         }
@@ -4251,7 +4251,7 @@ macro_rules! build_and_run_mhd_decomposed {
                     .with_resistivity(cfg.resistivity)
                     .with_excision(cfg.excision_radius);
                 // attach the user source per tile (two-pass). targets the mhd hydro slots
-                // (den/mom/nrg); B is CT-evolved, not a cell source. each tile evaluates S at its
+                // (den/mom/nrg); B is CT-evolved, so it takes no cell source. each tile evaluates S at its
                 // own global coords. rmhd is relativistic -> raw only (enforced in build_user_source).
                 let sub = match &cfg.source_json {
                     Some(json) => {
@@ -4513,8 +4513,8 @@ macro_rules! build_and_run_imhd_decomposed {
 macro_rules! mhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            // C4/M9 fail-loud guard (see hydro_dispatch): reject a non-minkowski spacetime that is
-            // not a baked GR-MHD arm rather than silently running it on Minkowski. the matches! set
+            // C4/M9 fail-loud guard (see hydro_dispatch): reject a non-minkowski spacetime with
+            // no baked GR-MHD arm; silently running it on Minkowski applies the wrong metric. the matches! set
             // mirrors the baked GR-MHD arms; test_dispatch_rejects_unbaked_gr keeps them in lockstep.
             (d, c)
                 if $cfg.spacetime != "minkowski"
@@ -4576,7 +4576,7 @@ macro_rules! mhd_dispatch {
             // metric selects the fast-magnetosonic HLLE gas flux + the contact / UCT-HLL densitized
             // CT. the tetrad HLLD wrapper — which the kerr (r, theta) row above already rides on its
             // non-diagonal gamma_{r phi} — is not yet wired for this chart; HLLE here is a follow-on
-            // gap, not a metric-diagonality limitation (the Gram-Schmidt tetrad handles non-diagonal
+            // gap; the metric's non-diagonality is not the cause (the Gram-Schmidt tetrad handles non-diagonal
             // spatial metrics). the covariant geodesic + EM-stress source carries the gravity.
             (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
@@ -4673,7 +4673,7 @@ macro_rules! imhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
             // C4/M9 fail-loud guard: isothermal MHD has NO baked GR kernels, so any non-minkowski
-            // spacetime must fail loud rather than silently run flat.
+            // spacetime must fail loud; silently running it flat would drop the curvature.
             (d, c) if $cfg.spacetime != "minkowski" => Err(format!(
                 "isothermal MHD has no GR kernels; (dims={d}, coords={c}, spacetime={}) is unsupported \
                  — refusing to run silently on a flat Minkowski metric. use spacetime=minkowski.",
@@ -5115,7 +5115,7 @@ macro_rules! iso_dispatch {
     ($cfg:expr, $prims:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
             // C4/M9 fail-loud guard: isothermal hydro has NO baked GR kernels, so any non-minkowski
-            // spacetime must fail loud rather than silently run flat.
+            // spacetime must fail loud; silently running it flat would drop the curvature.
             (d, c) if $cfg.spacetime != "minkowski" => Err(format!(
                 "isothermal hydro has no GR kernels; (dims={d}, coords={c}, spacetime={}) is unsupported \
                  — refusing to run silently on a flat Minkowski metric. use spacetime=minkowski.",
@@ -5139,7 +5139,7 @@ macro_rules! iso_dispatch {
 
 /// runtime dispatch on the config tags → a monomorphized sim. hydro regimes
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
-/// the mhd regimes (srmhd/nmhd/imhd) x cartesian x 1/2/3d.
+/// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
 fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> Result<(), String> {
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the
     // two cases still pending need extra fine-level prolongation:
@@ -5171,16 +5171,16 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             .to_string());
     }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
-    // single-level MHD (srmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face
+    // single-level MHD (rmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face
     // gather). reject every other case HERE so a multi-gpu request never
     // silently runs on one device.
     if cfg.n_gpus > 1 {
         if !matches!(
             cfg.regime.as_str(),
-            "newtonian" | "rhd" | "isothermal" | "srmhd" | "nmhd" | "imhd"
+            "newtonian" | "rhd" | "isothermal" | "rmhd" | "nmhd" | "imhd"
         ) {
             return Err(format!(
-                "gpus>1 is wired for hydro (newtonian, rhd, isothermal) and mhd (srmhd, nmhd, \
+                "gpus>1 is wired for hydro (newtonian, rhd, isothermal) and mhd (rmhd, nmhd, \
                  imhd); regime '{}' runs single-gpu for now (set gpus=1)",
                 cfg.regime
             ));
@@ -5193,10 +5193,10 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // a curved spacetime is a RELATIVISTIC construct: only the relativistic regimes compose
     // with it (the non-relativistic kernel rows are never baked with a spacetime slug).
     if cfg.spacetime != "minkowski"
-        && !matches!(cfg.regime.as_str(), "rhd" | "srmhd")
+        && !matches!(cfg.regime.as_str(), "rhd" | "rmhd")
     {
         return Err(format!(
-            "spacetime '{}' requires a relativistic regime (rhd or srmhd); got '{}'",
+            "spacetime '{}' requires a relativistic regime (rhd or rmhd); got '{}'",
             cfg.spacetime, cfg.regime
         ));
     }
@@ -5204,7 +5204,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
         "rhd" => hydro_dispatch!(cfg, prims, Rhd, Rhd),
         "isothermal" => iso_dispatch!(cfg, prims),
-        "srmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
+        "rmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
         "nmhd" => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
         "imhd" => imhd_dispatch!(cfg, prims, bfields),
         other => Err(format!("regime '{other}' not wired yet")),
@@ -5351,7 +5351,7 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 // validate a multi-gpu request (`Config.n_gpus`) before any heavy work.
 // gpus==1 is the only implemented path; gpus>1 is validated and rejected with the PRECISE
 // reason -- a cpu build, too few visible devices, or the decomposed run loop (M4) not yet
-// wired -- so the user gets an actionable message instead of a silent single-device run.
+// wired -- so the user gets an actionable message and the request never silently degrades to one device.
 /// the outer horizon r_+ containment gate for a GR accretion run. a well-posed
 /// accretion-rate certificate needs the innermost flux surface to be causally one-way;
 /// the domain's inner radius must sit on the correct side of the horizon for the chart:
@@ -5359,8 +5359,8 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 ///   kerr_schild    horizon-penetrating, r_+ = 2M      -> r_min < r_+   (swallow it)
 ///   kerr           horizon-penetrating, r_+ = M + sqrt(M^2 - a^2)  -> r_min < r_+
 /// the gate is a radial (spherical/cylindrical) condition; the cartesian equatorial
-/// slice places the origin inside the box, a containment condition on the box bounds
-/// rather than on r_min, so it is left to those bounds. flat minkowski has no horizon.
+/// slice places the origin inside the box, a containment condition on the box bounds,
+/// so it is left to those bounds. flat minkowski has no horizon.
 fn check_horizon_containment(
     spacetime: &str,
     mass: f64,
@@ -5601,7 +5601,7 @@ mod horizon_gate_tests {
         // its own request gate enforces that.
         assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 1.5).is_ok());
         assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 3.0).is_ok());
-        // the cylindrical chart's slot 0 is R, not a spherical radius: exempt.
+        // the cylindrical chart's slot 0 is a cylindrical R, so the spherical-radius gate is exempt.
         assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "cylindrical", 4.0).is_ok());
     }
 
@@ -5660,7 +5660,7 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
             );
         }
         // the decomposed run loop supports hydro; per-regime support is
-        // enforced in `dispatch_and_run` so non-hydro regimes error instead of silently falling
+        // enforced in `dispatch_and_run` so non-hydro regimes error and never silently fall
         // back to one device.
         Ok(())
     }
@@ -5727,7 +5727,7 @@ fn run_simulation(
     }
     // multi-gpu domain decomposition splits the SAME grid across tiles; a log axis needs each
     // tile's local origin offset to the global log position (start*10^(global_lo*slope)), which is
-    // not yet wired. reject rather than evolve tiles on a mismatched uniform geometry.
+    // not yet wired. reject; evolving tiles on the mismatched uniform geometry would misplace them.
     if cfg.n_gpus > 1 && !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
         return Err(PyValueError::new_err(format!(
             "multi-gpu decomposition does not yet support non-linear ('{}') cell spacing (the \
@@ -5767,7 +5767,7 @@ fn attach_dashboard(py: Python<'_>, rundir: String, poll_ms: u64) -> PyResult<()
 /// G*M = c_inf = rho_inf = 1): `(rho, u, pre)` with `u` the INFLOW speed
 /// magnitude (the radial velocity is `-u * rhat`). the config-side initial
 /// condition and validation target of docs/ideas/accretor.md — seed the
-/// transonic profile instead of relaxing from uniform.
+/// transonic profile directly.
 #[pyfunction]
 fn bondi_profile(r: f64, gamma: f64) -> (f64, f64, f64) {
     let s = symbi_ib::bondi_profile(r, gamma);
@@ -5813,7 +5813,7 @@ fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
 // from the crate `[lib] name` (`cpu_ext`), so it warns that `PyInit_cpu_ext` is missing and
 // writes the dylib under the `cpu_ext` filename. dev.py's `_finalize_gpu_ext` renames the file
 // to `gpu_ext.<suffix>.so` afterward so name and `PyInit_gpu_ext` symbol agree, letting the cpu
-// and gpu backends coexist instead of overwriting the same `cpu_ext` dylib.
+// and gpu backends coexist; a shared `cpu_ext` dylib would overwrite one with the other.
 #[cfg(feature = "gpu")]
 #[pymodule]
 fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {

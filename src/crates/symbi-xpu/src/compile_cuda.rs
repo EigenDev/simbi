@@ -3,7 +3,7 @@
 //
 // ahead-of-time CUDA compilation: take a CUDA C source string, invoke nvcc
 // --ptx, return the PTX bytes. lives in symbi-xpu because this is execution-side
-// orchestration (a sibling of nvrtc.rs's runtime JIT) — not an IR concern.
+// orchestration (a sibling of nvrtc.rs's runtime JIT).
 //
 // AOT-compiles a kernel when a caller prefers nvcc PTX over NVRTC. if nvcc is
 // unavailable or can't compile here, returns None and the caller falls back to
@@ -36,8 +36,8 @@ pub fn try_compile_cuda_with_includes(cuda_source: &str, kernel_name: &str, incl
     // new for the toolkit, or nvcc hard-wired to a g++ version absent in a
     // distrobox). probe ONCE: determine the working host-compiler args (possibly
     // `-ccbin <PATH g++>`), or None if nvcc can't compile here at all — then warn
-    // once and fall back to NVRTC quietly, instead of every kernel spamming the
-    // same environment failure. real per-kernel codegen errors still surface below.
+    // once and fall back to NVRTC quietly, so a single environment failure is not
+    // re-reported per kernel. real per-kernel codegen errors still surface below.
     let host_args = nvcc_host_ccbin(&nvcc)?;
 
     // write source to temp file
@@ -51,9 +51,9 @@ pub fn try_compile_cuda_with_includes(cuda_source: &str, kernel_name: &str, incl
     f.write_all(cuda_source.as_bytes()).ok()?;
     drop(f);
 
-    // FMA fusion: nvcc's default `a*b + c -> fma(a,b,c)` stays ON
-    // ([[project_fma_discipline]]): trust the compiler, accept ULP-bounded drift
-    // vs the CPU (which doesn't auto-fuse). do NOT re-introduce `--fmad=false`.
+    // FMA fusion: nvcc's default `a*b + c -> fma(a,b,c)` stays ON: trust the
+    // compiler, accept ULP-bounded drift vs the CPU (which doesn't auto-fuse).
+    // do NOT re-introduce `--fmad=false`.
     let mut args = vec![
         "-ptx".to_string(),
         "-O3".to_string(),
@@ -95,8 +95,8 @@ pub fn try_compile_cuda_with_includes(cuda_source: &str, kernel_name: &str, incl
 }
 
 /// determine the host-compiler args nvcc needs to compile here, cached per
-/// process (one rustc per crate -> at most one probe/warning per crate, not one
-/// per kernel). returns Some(extra args) — empty if the default host compiler
+/// process (one rustc per crate, so at most one probe/warning per crate).
+/// returns Some(extra args) — empty if the default host compiler
 /// works, or `-ccbin <PATH g++>` if the default failed but a PATH g++ works
 /// (the common distrobox case) — or None if nvcc can't compile at all (warns
 /// once; caller falls back to NVRTC).

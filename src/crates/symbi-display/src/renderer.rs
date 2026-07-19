@@ -119,7 +119,7 @@ impl Renderer {
         self.layout.widths = vec![0; n_cols];
 
         // minimum widths = max(header_len, data_len). measure DISPLAY
-        // columns (char count), not bytes — cells may carry multibyte glyphs
+        // columns (char count); cells may carry multibyte glyphs
         // (em-dash, unicode paths) and a byte count would over-reserve width.
         for ii in 0..n_cols {
             let header_len = headers[ii].chars().count();

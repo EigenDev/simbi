@@ -61,12 +61,12 @@ pub use symbi_algebra::{contract, Contravariant, Covariant, Indexed, Lower, Uppe
 // → Local, trivial — every rank already agrees).
 //
 // dormant: no multi-rank consumer; retained for the MPI lift as a
-// non-breaking type-discipline addition rather than a refactor.
+// non-breaking type-discipline addition.
 // =============================================================================
 
 pub trait Scope: 'static + Copy + Default {}
 
-/// "this rank only" — value computed from local data, not yet reconciled.
+/// "this rank only" — value computed from local data, still awaiting cross-rank reconciliation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Local;
 impl Scope for Local {}
@@ -89,7 +89,7 @@ pub struct Scoped<Sc: Scope, T> {
 
 impl<Sc: Scope, T> Scoped<Sc, T> {
     /// wrap a value at the given scope. caller asserts the value genuinely
-    /// lives in this scope; this is a TYPE assertion, not a runtime check.
+    /// lives in this scope; this is a compile-time TYPE assertion and performs no runtime check.
     pub const fn new(value: T) -> Self {
         Self { value, _scope: PhantomData }
     }

@@ -30,7 +30,7 @@ class GrRotatingEquilibriumMhd(GrRotatingEquilibrium):
     """the RMHD (B=0) rotating-equilibrium gate — the frame-dragging accuracy oracle."""
 
     regime: Annotated[
-        Regime, ProblemParam(Regime.SRMHD, description="physics regime (RMHD; B = 0)")
+        Regime, ProblemParam(Regime.RMHD, description="physics regime (RMHD; B = 0)")
     ]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, cli=True, description="solver")]
     ct_method: Annotated[

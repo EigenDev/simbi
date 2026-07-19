@@ -64,13 +64,13 @@ pub fn block_for(ndim: usize, extent: &[u32]) -> [u32; 3] {
 /// derive a block shape from the ACTUAL domain extents, WARP-FIRST on the contiguous axis.
 /// the 3D base is `[32,8,1]` — axis 0 (stride-1, `compute_strides[0]=1`) gets a FULL WARP so
 /// a warp coalesces into one segment, and the (often thin, CT-transverse-expanded) z axis
-/// tiles across GRID blocks rather than being crammed into the block. ncu showed the old
+/// tiles across GRID blocks. ncu showed the old
 /// `[8,8,4]` base starved x: a flux face domain with `nz_face=3` got block.x = 256/(8*3) = 10
-/// (not even a warp) → 59% SM throughput, vs the `nz_face=2` direction at block.x=16 → 78%.
+/// (below a full warp) -> 59% SM throughput, vs the `nz_face=2` direction at block.x=16 -> 78%.
 /// native 2D (Iso/Newtonian) keeps `[16,16,1]` and 1D keeps `[256,1,1]` — only 3D changes.
 ///   - CLAMP every block dim to its extent (no lanes launched past a thin axis).
 ///   - REDISTRIBUTE any unspent budget x-FIRST (coalescing), then y, then z; when x is the
-///     thin axis (a 2-wide ghost layer) the budget flows to y instead of a half-warp block.
+///     thin axis (a 2-wide ghost layer) the budget flows to y, filling the block past a half-warp.
 pub fn extent_aware_block(ndim: usize, extent: &[u32]) -> [u32; 3] {
     const WARP: u32 = 32;
     let base = [[256u32, 1, 1], [16, 16, 1], [32, 8, 1]][ndim.clamp(1, 3) - 1];
@@ -88,8 +88,8 @@ pub fn extent_aware_block(ndim: usize, extent: &[u32]) -> [u32; 3] {
 
     // a thin axis leaves the budget unspent — redistribute it to the axes that DO have
     // room, contiguous-axis-FIRST for coalescing (x), then y, then z. when x is the thin
-    // one (e.g., a 2-wide ghost layer) the budget flows to y/z instead of leaving a
-    // degenerate half-warp block. each grow is clamped to its extent + the running budget;
+    // one (e.g., a 2-wide ghost layer) the budget flows to y/z, so the block never
+    // degenerates to a half-warp. each grow is clamped to its extent + the running budget;
     // x is warp-aligned when it reaches a warp. a FAT domain has no unspent budget, so it
     // keeps its validated base shape (no regression).
     let grow_axis = |b: &mut [u32; 3], axis: usize, g: u32, warp: bool| {
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn extent_aware_shapes() {
-        // 3D is WARP-FIRST: x gets a full warp, z tiles across the grid (NOT crammed in-block).
+        // 3D is WARP-FIRST: x gets a full warp, z tiles across the grid.
         // this is THE fix for the flux face domains (transverse-expanded -> nz=3).
         assert_eq!(check(3, &[1030, 1032, 3]), [32, 8, 1]); // flux_0/1: was [10,8,3] @ 59% -> warp x
         assert_eq!(check(3, &[256, 256, 1]), [32, 8, 1]); // quasi-2D nz=1
@@ -213,8 +213,8 @@ mod tests {
         assert_eq!(check(3, &[256, 1, 1]), [256, 1, 1]); // quasi-1D
         assert_eq!(check(3, &[1024, 4, 1]), [64, 4, 1]);
 
-        // THIN AXIS-0 (a 2-wide ghost layer): x can't grow, budget flows to y — NOT a
-        // degenerate 16-thread [2,8,1] block (the ghost_fill pathology in the profile).
+        // THIN AXIS-0 (a 2-wide ghost layer): x can't grow, so the budget flows to y and
+        // the block stays full (a degenerate 16-thread [2,8,1] block would waste most lanes).
         assert_eq!(check(3, &[2, 128, 1]), [2, 128, 1]);
         assert_eq!(check(3, &[2, 1024, 1]), [2, 128, 1]);
         assert_eq!(check(3, &[256, 2, 1]), [128, 2, 1]);

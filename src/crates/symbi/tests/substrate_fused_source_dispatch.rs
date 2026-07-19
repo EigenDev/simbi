@@ -5,8 +5,8 @@
 // `dispatch_godunov_with_sources` selects the AOT-baked FUSED kernel
 // (`{prefix}_godunov_euler_with_{source_id}_{ndim}d`) by composing the
 // runtime name + packing the spec source's scalar params alongside `dt` + the
-// per-axis grid scalars. one substrate call now runs `div(F) + spec source +
-// integrator` in ONE kernel launch — replacing the prior two-kernel (godunov +
+// per-axis grid scalars. one substrate call runs `div(F) + spec source +
+// integrator` in ONE kernel launch — replacing the two-kernel (godunov +
 // body_source) pattern.
 //
 // **what this validates**:
@@ -49,7 +49,7 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
     let n = 8usize;
     let dx = 1.0 / n as f64;
     // trivial seed to reach a Ready sim; the EXACT conserved literals this test asserts are
-    // written raw below (the source step is applied to these gauge values, not a physical prim).
+    // written raw below (the source step is applied to these raw gauge values, which need not form a physical prim).
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n])
         .spacing([dx])
@@ -229,8 +229,8 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
 fn missing_source_scalar_panics_loudly() {
     // **discipline**: a `source_scalars` map missing a param the AOT kernel
     // declares (e.g., forgetting `g_ext_0` for uniform_accel) must panic at the
-    // dispatch's resolver — not silently fill with 0.0 or whatever. surface
-    // vocabulary mismatches up at the call site.
+    // dispatch's resolver; silently defaulting the missing scalar to 0.0 would
+    // corrupt the source term. surface vocabulary mismatches at the call site.
     let n = 8usize;
     let dx = 1.0 / n as f64;
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)

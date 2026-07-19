@@ -41,7 +41,7 @@ def test_steady_detector_rejects_a_secular_drift() -> None:
 
 def test_averaged_rate_weights_by_dt() -> None:
     # two constant segments with different step sizes: the mean is the
-    # time-weighted value, not the sample average.
+    # time-weighted value.
     time = np.array([1.0, 2.0, 2.5, 3.0])
     dt = np.array([1.0, 1.0, 0.5, 0.5])
     series = np.array([4.0, 4.0, 1.0, 1.0])
@@ -116,7 +116,7 @@ def test_dat_loader_reads_the_legacy_2d_schema(tmp_path) -> None:
     assert d.time.shape == (3,)
     assert d.accreted_mass.shape == (3, 2)
     assert d.force[1, 0, 0] == pytest.approx(0.2)
-    # the legacy row never recorded fz: absent, not zero.
+    # the legacy row never recorded fz: the field is absent here; a stored 0.0 would read as a real measurement.
     assert np.isnan(d.force[1, 0, 2])
     # the cumulative diff gives the exact mean rate regardless of cadence.
     assert mdot_from_cumulative(d.time, d.accreted_mass[:, 0], t_start=1.0) == pytest.approx(0.5)

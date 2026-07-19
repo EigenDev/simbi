@@ -131,7 +131,7 @@ use symbi_hydro::state::{Cons, Prim};
 const GAMMA: f64 = 5.0 / 3.0;
 // the iteration counts build.rs bakes into each compiled c2p kernel — the host
 // must run the SAME count for the carriers to be comparable (the production host
-// MAX_ITER differs; that's a separate count-adequacy question, not equivalence).
+// MAX_ITER differs; that is a separate count-adequacy question, while this test checks carrier equivalence).
 const RHD_ITERS: usize = 20;
 const RMHD_ITERS: usize = 100;
 

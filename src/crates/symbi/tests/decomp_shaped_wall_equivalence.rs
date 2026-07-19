@@ -61,7 +61,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
             Body::rigid_sphere(0, Tensor::new([0.0, 0.0]), Tensor::zeros(), 1.0, R_BODY, 0.1, false)
                 .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 }),
         ));
-    // the CSG shape routes the runtime shaped kernel instead of the AOT analytic sphere.
+    // the CSG shape routes dispatch to the runtime shaped kernel.
     sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
     (sim, k)

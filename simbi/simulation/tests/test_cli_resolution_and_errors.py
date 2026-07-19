@@ -4,7 +4,7 @@
 # regressions for two cli ergonomics fixes:
 #  - a SHORT resolution input is padded to the field's declared tuple arity with
 #    singleton trailing axes, so a 2d run on a 3-component (mhd) config needs
-#    only `--resolution nx,ny` instead of spelling out the unused nz=1.
+#    only `--resolution nx,ny`; the unused nz=1 is filled in.
 #  - bad cli input surfaces as a clean, traceback-free `ConfigError` (a bad enum
 #    used to escape as a raw KeyError; a bad int dumped the whole model dict).
 # =============================================================================
@@ -20,7 +20,7 @@ from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang
 
 def test_short_resolution_pads_to_field_arity() -> None:
     # OrszagTang declares resolution as tuple[int, int, int]; a 2-value cli input
-    # must pad to (nx, ny, 1), NOT raise "field required".
+    # must pad to (nx, ny, 1); an unpadded 2-value input would fail the required 3-tuple field.
     prob = OrszagTang.from_cli(["--resolution", "128,256"])
     assert prob.resolution == (128, 256, 1)
     assert prob.dimensionality == 2
@@ -34,7 +34,7 @@ def test_full_resolution_is_unchanged() -> None:
 
 
 def test_overlong_resolution_raises_config_error() -> None:
-    # too MANY axes is a real error — surfaced clean, not padded/truncated.
+    # too MANY axes is a real error — surfaced clean, with no padding or truncation.
     with pytest.raises(ConfigError) as exc:
         OrszagTang.from_cli(["--resolution", "64,64,64,64"])
     assert "resolution" in str(exc.value)

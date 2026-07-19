@@ -47,8 +47,7 @@ const BLOCK_SIZE: u32 = 64;
 /// **panics** if `field` is not in the kernel's table, if `input_buffers`
 /// don't match the declared param count, or if any input buffer's length
 /// doesn't equal `n_cells`. these are programmer errors caught early —
-/// the runtime contract is precise; a mismatch is a bug, not a
-/// recoverable condition.
+/// the runtime contract is precise; a mismatch is an unrecoverable bug.
 ///
 /// # Safety
 ///

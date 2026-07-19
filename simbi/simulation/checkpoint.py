@@ -25,6 +25,7 @@ from simbi.types.input import (
     Regime,
     Solver,
     TimeStepping,
+    normalize_regime,
 )
 
 if TYPE_CHECKING:
@@ -67,10 +68,9 @@ def metadata_to_config_dict(
     resolution = tuple(int(n) for n in reversed(tuple(mesh_shape)))
     resolution = resolution + (1,) * (3 - len(resolution))
 
-    # the rust backend tags relativistic MHD by its kernel prefix "rmhd"; the frontend Regime enum
-    # names it "srmhd". normalize so a checkpoint written by the backend restarts cleanly.
-    _regime_aliases = {"rmhd": "srmhd"}
-    regime_str = _regime_aliases.get(str(metadata.regime), str(metadata.regime))
+    # a checkpoint may carry a legacy regime slug (srhd, srmhd); map it to the current name so the
+    # run restarts cleanly.
+    regime_str = normalize_regime(str(metadata.regime))
 
     config = {
         "resolution": resolution,
@@ -87,7 +87,7 @@ def metadata_to_config_dict(
 
     # the backend stores the KERNEL spelling of the limiter choice: plm_theta < 0
     # means van leer (the model field itself is constrained to (0, 2], so the raw
-    # -1 must map back to the limiter selection, not into the field).
+    # -1 must map back to the limiter selection).
     if float(metadata.plm_theta) < 0.0:
         config["limiter"] = Limiter.VAN_LEER
     else:
@@ -261,8 +261,8 @@ def merge_with_checkpoint(
                 # must use checkpoint value, but coerce to field's expected type
                 coerced = coerce_to_field_type(checkpoint_value, field_info)
                 # an EXPLICIT user demand for a different value on an immutable
-                # field cannot be honored — refuse loudly instead of silently
-                # running the checkpoint's setting under the user's flag.
+                # field cannot be honored — refuse loudly; silently running the
+                # checkpoint's setting under the user's flag would hide the conflict.
                 if field_name in explicit and not _values_agree(user_value, coerced):
                     from .problem import ConfigError
 
@@ -280,14 +280,14 @@ def merge_with_checkpoint(
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
 
-    # RESUME at the checkpoint's physical time, not the config's start_time. start_time is the
+    # RESUME at the checkpoint's physical time. start_time is the
     # sim clock (sim.time): a restart must continue from where the checkpoint left off, regardless
     # of what the config (or its validators) set start_time to. the LOG-checkpoint anchor is a
     # SEPARATE field (checkpoint_log_anchor) so the cadence stays fixed across the restart.
     if "start_time" in checkpoint_config:
         merged_data["start_time"] = checkpoint_config["start_time"]
 
-    # the checkpoint INDEX is resume state, not a physics choice: the next dump must continue the
+    # the checkpoint INDEX is resume state: the next dump must continue the
     # monotonic numbering from where the run stopped (chkpt.030 -> chkpt.031), so force it from the
     # checkpoint like start_time. it is checkpoint_safe (serializable, user-visible), so the generic
     # merge above would otherwise reset it to the config default 0 and re-number every restart from

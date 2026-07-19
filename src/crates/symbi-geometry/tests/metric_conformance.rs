@@ -44,7 +44,7 @@ fn assert_flat<const D: usize, M: Metric<f64, D>>(m: &M, x: Tensor<f64, D>, name
 }
 
 /// a curved metric: the background must be internally consistent — non-Minkowski tag, a lapse that
-/// actually differs from 1 (proof the gravity is wired, not the default), `lapse_sq == lapse^2`,
+/// actually differs from 1 (proof the gravity is wired), `lapse_sq == lapse^2`,
 /// scalar params present, and a radial shift matching the chart (`static_chart` = zero shift).
 fn assert_curved<const D: usize, M: Metric<f64, D>>(
     m: &M,
@@ -126,8 +126,9 @@ fn curved_metrics_have_consistent_background() {
 #[test]
 fn reduced_dimension_volume_factor_is_the_proper_measure() {
     // the required `volume_factor` must be the PROPER measure including suppressed angular
-    // directions — NOT the naive `sqrt_det_gamma` of the reduced spatial block (the M6 default bug).
-    // spherical 1D: r^2 (not 1); spherical 2D: r^2 sin(theta) (not r); cylindrical 1D/2D: r (not 1).
+    // directions. the naive `sqrt_det_gamma` of the reduced spatial block drops those directions
+    // and is wrong. spherical 1D: r^2 (naive would give 1); spherical 2D: r^2 sin(theta) (naive: r);
+    // cylindrical 1D/2D: r (naive: 1).
     let x1 = Tensor::new([5.0]);
     assert_eq!(<Spherical as Metric<f64, 1>>::volume_factor(&Spherical, x1), 25.0);
     assert_ne!(

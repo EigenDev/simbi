@@ -52,7 +52,7 @@ const T_FINAL: f64 = 0.04;
 // the rotor primitive at physical (r, z): a dense core in solid-body POLOIDAL rotation
 // v = OMEGA * (e_phi x displacement) = (-OMEGA*(z-zc), OMEGA*(r-rc)) in the (r, z) plane,
 // tapered to the ambient over [R0, R1]. v_phi (the swirl) stays zero — this test exercises
-// the IN-PLANE CT (E_phi edge), not the out-of-plane induction-flux path. returns (rho, v_r, v_z).
+// the IN-PLANE CT (E_phi edge). returns (rho, v_r, v_z).
 fn rotor_state(r: f64, z: f64) -> (f64, f64, f64) {
     let (dr, dz) = (r - RC, z - ZC);
     let rad = (dr * dr + dz * dz).sqrt();

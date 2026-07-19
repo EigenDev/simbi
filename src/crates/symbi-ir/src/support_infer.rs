@@ -2,8 +2,8 @@
 // support_infer.rs
 //
 // support PROPAGATION over the traced graph: derive a kernel's output support
-// from builder-tagged mask nodes instead of a hand declaration at the write
-// site. a tag asserts "this node's value is exactly zero (f64) outside this
+// automatically from builder-tagged mask nodes. a tag asserts "this node's
+// value is exactly zero (f64) outside this
 // ball, for every field input" — the saturation lemma lives where the mask is
 // built. propagation classifies every node reachable from a write root:
 // - Zero(b):  exactly zero outside b (None = zero everywhere)
@@ -16,7 +16,7 @@
 // is Eq to its own field's offset-0 read is unchanged-valued outside the ball
 // and contributes it too; anything else widens the kernel to Everywhere —
 // a structural change that breaks the mask chain degrades the support
-// FAIL-SAFE (a too-wide region) instead of keeping a stale narrow ball.
+// FAIL-SAFE to a too-wide region; a stale narrow ball would be unsound.
 //
 // usage:
 //   tag_support_ball(&chi, center_exprs, radius_expr);   // at the mask seam
@@ -414,7 +414,7 @@ mod tests {
         begin_trace();
         let den = Gv::field("den", FieldRef::cons_den());
         // the stand-in mask: a field-dependent value the builder ASSERTS is
-        // ball-supported (the lemma is the tag, not the algebra here).
+        // ball-supported (the lemma is the tag here; the algebra carries no support fact).
         let chi = Gv::field("mask", FieldRef::PrimRho);
         tag_support_ball(&chi, ball().center, ball().radius);
         let _ = den;
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn unmasked_contribution_widens_to_everywhere_fail_safe() {
         // a write mixing a masked term with a bare field term has no ball —
-        // the derivation must refuse, not keep a stale narrow region.
+        // the derivation must refuse; keeping a stale narrow region would be unsound.
         let s = derive(|chi| {
             let den = Gv::field("den2", FieldRef::cons_den());
             let masked = chi * Gv::scalar("dt");

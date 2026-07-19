@@ -6,7 +6,7 @@
 // restrict/prolong, staggered-grid shifts, and MPI halos all reduce to one. it
 // pairs with a field PULLBACK — read the source cell, then transform the value by
 // a rule the field's grade fixes (a density copies; a velocity flips its
-// wall-normal component at a mirror). that makes `ghost_fill` data, not a kernel.
+// wall-normal component at a mirror). that makes `ghost_fill` a pure data map.
 //
 // this module is the map itself: pure integer arithmetic on cell indices, with
 // no float and no IR. because the source coordinate is an integer function of the
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn coarsen_reads_the_parent_with_floor_semantics() {
         // fine cells 6 and 7 share coarse parent 3; the negative ghost pair
-        // -1, -2 maps to parent -1 (floor division, not truncation).
+        // -1, -2 maps to parent -1 (floor division; truncation would wrongly give 0).
         let m = LatticeMap::Coarsen { axis: 0, ratio: 2 };
         assert_eq!(m.source(&[6]), vec![3]);
         assert_eq!(m.source(&[7]), vec![3]);

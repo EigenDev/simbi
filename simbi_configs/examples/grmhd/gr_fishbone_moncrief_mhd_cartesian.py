@@ -33,7 +33,7 @@ class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
     """the magnetized FM torus on the pole-free 3d cartesian kerr-schild grid."""
 
     regime: Annotated[
-        Regime, ProblemParam(Regime.SRMHD, description="physics regime (GRMHD)")
+        Regime, ProblemParam(Regime.RMHD, description="physics regime (GRMHD)")
     ]
     resolution: Annotated[
         tuple[int, int, int],

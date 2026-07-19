@@ -33,7 +33,7 @@ use crate::Tensor;
 // the four inhabited (variance x frame) states. variance (Upper/Lower) is a
 // COORDINATE-frame concept (the metric gamma != delta there); the orthonormal (Ortho) and global
 // Cartesian (Cart) frames are Euclidean (gamma = delta), so variance collapses and they need no
-// up/down tag. so the product collapses to four markers, not six.
+// up/down tag. so the product collapses to four markers.
 
 /// coordinate-frame contravariant index (upper, v^i along d/dx^i).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

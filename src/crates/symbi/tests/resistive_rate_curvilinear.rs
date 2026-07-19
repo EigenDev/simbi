@@ -15,7 +15,7 @@
 //     (spherical Bessel j_1 -- ELEMENTARY -- times the Legendre P_1^1 = sin theta), eigenvalue k^2
 //     of the l=1 radial operator d_rr + (2/r) d_r - 2/r^2. this is the textbook magnetic-dipole decay.
 // the discrete Rayleigh quotient matches k^2 to the O(dx^2) truncation error -- the metric is handled
-// correctly (it lives in the induction curl + the weights, not the metric-free J).
+// correctly (it lives in the induction curl + the weights).
 // =============================================================================
 
 use symbi::sim::state::*;

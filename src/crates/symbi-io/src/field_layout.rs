@@ -4,11 +4,11 @@
 // regimespec-driven field naming. `RegimeSpec.fields` declares every
 // conservation law (`den`, `mom`, `nrg`, `mag`) with its
 // `FieldKind::{Scalar, DimVector, FixedVector}`, so the i/o layer walks
-// THAT to spell the on-disk names rather than hardcoding `rho`, `v1..vD`,
+// THAT to spell the on-disk names such as `rho`, `v1..vD`,
 // `den`, `m1..mD`, `nrg`, `b1..bD`.
 //
 // this module exposes the canonical naming convention as DATA — one match
-// per (FieldKind × per-component index) instead of fan-out across writer and
+// per (FieldKind, per-component index), shared by writer and
 // reader. callers ask `cons_field_names(D, regime_spec)` and get the exact
 // list of strings the on-disk layout uses.
 // =============================================================================

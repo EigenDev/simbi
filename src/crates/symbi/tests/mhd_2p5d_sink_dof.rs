@@ -3,7 +3,7 @@
 //
 // the DOF-aware immersed-body drain under 2.5D MHD (D=2 grid, DOF=3 momentum). the penalize kernel
 // drains ALL momentum components -- including the OUT-OF-PLANE one (mom[2], the v_z the 2.5D plane
-// carries) -- not just the two in-plane components. without this the out-of-plane momentum survives
+// carries). without this the out-of-plane momentum survives
 // while the density is evacuated, so its velocity v_z = mom[2]/den runs away at the sink. the sink is
 // selected via the `_dof3` kernel (the dispatch appends `_dof{DOF}` when DOF != D).
 // =============================================================================
@@ -94,7 +94,7 @@ fn drain_removes_out_of_plane_momentum() {
         "the 2.5D MHD drain did not remove the out-of-plane momentum: inside {in0:.5} -> {in1:.5}"
     );
     // ...while OUTSIDE the mask it is untouched (the drain is local, and mom[2] is a real conserved
-    // channel now, not corrupted).
+    // channel).
     assert!(
         (out1 - out0).abs() < 1e-4 * out0,
         "the drain perturbed the out-of-plane momentum far from the mask: {out0:.5} -> {out1:.5}"

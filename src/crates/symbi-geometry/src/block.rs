@@ -213,7 +213,7 @@ where
 
     /// face area in direction `dir`.
     /// area = volume_factor_on_face * product of dx_perp.
-    /// uses the full volume factor (not divided by scale_factor[dir]) to
+    /// uses the full volume factor, undivided by scale_factor[dir], to
     /// maintain discrete compatibility with the CT curl formulas.
     #[inline]
     pub fn face_area(&self, idx: [isize; D], dir: usize) -> S {
@@ -275,7 +275,7 @@ where
 
     /// scale factors at cell center. requires a [`DiagonalMetric`] — `h_i` is only defined for a
     /// diagonal metric (the method-level bound keeps this localized: only callers of `scale_factors`
-    /// inherit it, not all of `BlockGeometry`).
+    /// inherit it).
     #[inline]
     pub fn scale_factors(&self, idx: [isize; D]) -> Tensor<S, D>
     where

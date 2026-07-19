@@ -17,7 +17,7 @@
 //
 // the trapped set covers interactive quits (INT/QUIT), terminations
 // (TERM/HUP), and cluster pre-emption warnings (USR1/USR2 — slurm `--signal`,
-// pbs, lsf), so a scheduler eviction saves state instead of losing the run.
+// pbs, lsf), so a scheduler eviction saves state, preserving the run.
 //
 // usage:
 //   let guard = symbi_display::SignalGuard::install();   // before the loop
@@ -55,7 +55,7 @@ const LEAVE_ALT_STR: &str = "\x1b[?1006l\x1b[?1002l\x1b[?7h\x1b[?25h\x1b[?1049l"
 const LEAVE_ALT_BYTES: &[u8] = b"\x1b[?1006l\x1b[?1002l\x1b[?7h\x1b[?25h\x1b[?1049l";
 
 // whether the alternate screen is active, so the signal handler knows
-// to leave it (not merely show the cursor) on an interrupt.
+// to leave the alternate screen on an interrupt.
 static IN_ALT: AtomicBool = AtomicBool::new(false);
 
 // terminal line-discipline control. the alternate screen + mouse tracking PIN

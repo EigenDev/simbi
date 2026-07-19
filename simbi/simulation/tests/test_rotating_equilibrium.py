@@ -14,8 +14,8 @@
 # time derivative is pure truncation — smooth and second-order — so every conserved
 # component's one-step residual must CONVERGE under refinement. a wrong term shows
 # up as a resolution-independent residual in its component: the covariant S_theta
-# law once carried orthonormal (arc-length) angular face weights instead of the
-# coordinate alpha sqrt(gamma) measure (an O(1e-2) non-converging m2 residual),
+# law's correct angular face weight is the coordinate alpha sqrt(gamma) measure;
+# an orthonormal (arc-length) weight gives an O(1e-2) non-converging m2 residual,
 # and the kerr-schild charts once dropped the shift-advection `-beta^r U` from the
 # face flux entirely (an O(1e-1) non-converging residual in every transported
 # component; the exact stationary state has zero transport velocity

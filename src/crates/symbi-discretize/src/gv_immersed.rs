@@ -319,7 +319,7 @@ pub fn body_source_gv(
 /// force the gas exerts on the body, `f_grav[ax] = -(den * g_cart[ax]) * dv`. genuinely
 /// GLOBAL support — every gas cell pulls on the body — so the runtime reduces it over
 /// the full interior. reads only `cons.den` (no velocity / energy / sound speed), so
-/// the pass streams one field instead of five. slot-0 scalar names (`body_0_*`); the
+/// the pass streams a single field. slot-0 scalar names (`body_0_*`); the
 /// dispatch rebinds them per ACTIVE body.
 pub fn body_feedback_grav_gv(
     coords: Coords,
@@ -620,7 +620,7 @@ pub(crate) fn body_evolved_iso_gv(
 }
 
 /// BACKWARD iso feedback: identical force/torque/mass writes as the adiabatic
-/// kernel; cs comes from prim.pre rather than nrg. 2D+ only.
+/// kernel; cs comes from prim.pre. 2D+ only.
 pub fn body_feedback_iso_gv(
     n_bodies: usize,
     coords: Coords,

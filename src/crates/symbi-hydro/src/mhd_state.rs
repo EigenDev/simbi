@@ -8,8 +8,8 @@
 // so isothermal MHD carries NO energy at zero memory/FLOP cost).
 //
 // the magnetic field B appears in BOTH primitive and conserved states because B
-// is NOT evolved via conservation laws — it's evolved via the induction equation
-// (constrained transport). B is the same physical field in both representations.
+// is evolved by the induction equation (constrained transport), independent of the
+// conservation-law update. B is the same physical field in both representations.
 //
 // MhdPrimG derefs to PrimG, MhdConsG derefs to ConsG — all hydro field accesses
 // (.rho, .vel, .pre, .den, .mom, .nrg) work transparently. arithmetic delegates
@@ -40,7 +40,7 @@ pub struct MhdPrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
 }
 
 /// MHD conservative variables: hydro conservatives + magnetic field.
-/// nrg (Adiabatic) = total energy; mag = B (evolved by induction, not flux).
+/// nrg (Adiabatic) = total energy; mag = B (evolved by induction; the conservation-law flux never updates it).
 #[derive(Clone, Copy, Debug)]
 pub struct MhdConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub hydro: ConsG<S, D, E>,

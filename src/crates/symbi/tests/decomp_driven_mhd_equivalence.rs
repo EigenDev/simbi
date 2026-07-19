@@ -10,7 +10,7 @@
 // the inflow is POSITION-DEPENDENT (rho = 2 + 0.2*y, the cell's GLOBAL y) and carries an
 // out-of-plane B_z (cell-centered, div-free by construction — no CT face sub-problem). the
 // cut-along-the-face tiling is the decisive case: a tile evaluating the prescription at its
-// local y instead of its global one injects the wrong profile on every non-origin tile.
+// tile-local y injects the wrong profile on every non-origin tile.
 // =============================================================================
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;

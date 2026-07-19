@@ -577,9 +577,9 @@ fn translate_expr(
                 // abs/min/max as a TERNARY (fcmp + select), NOT
                 // libdevice fabs/fmin/fmax — bit-matches the cuda emit, the interp,
                 // and the f64/f32 `Numeric` carrier at NaN / signed-zero.
-                // CLIF select is a value, not a lexical scope, so there is no
+                // CLIF select is a value with no lexical scope, so there is no
                 // debuginfo blow-up (the reason the CPU emit keeps these as method
-                // calls rather than lowering to scoped `if`-selects in scalarize).
+                // calls in scalarize; scoped `if`-selects would blow debuginfo up).
                 "abs" => {
                     let zero = fconst(b, fty, 0.0);
                     let neg = b.ins().fneg(recv);
@@ -736,8 +736,8 @@ fn translate_stmts(
                 // used ONLY inside `FieldLoadAt` components — which the index translator resolves
                 // separately via `let_defs` in the integer domain. translating them here as f64 body
                 // statements would emit `fadd(f64_coord, i32_const)` (a verifier type error). skip
-                // them; a (hypothetical) float use elsewhere hits `UnboundVar` -> a clean reject, not
-                // a miscompile.
+                // them; a (hypothetical) float use elsewhere hits `UnboundVar`, a clean reject that
+                // rules out a silent miscompile.
                 if matches!(element, ElementTy::I32 | ElementTy::U32) {
                     continue;
                 }
@@ -1409,7 +1409,7 @@ pub fn compile_kernel_prec(
 /// JIT a traced `GvKernel` (e.g., the combined godunov+source stage) via `compile_kernel`, mapping
 /// the kernel's ABI manifest. `writes` are the trace's `(key, runtime, node)` outputs. THE BRIDGE
 /// for v2 fusion: build the godunov+source `GvKernel` (`splice_fused_sources_to_contribs` /
-/// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch it instead of the two-pass.
+/// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch the fused single-pass kernel.
 pub fn compile_gv_kernel(
     kernel: &symbi_ir::GvKernel,
     writes: &[(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)],

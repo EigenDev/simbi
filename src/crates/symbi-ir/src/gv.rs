@@ -3,14 +3,14 @@
 //
 // the `Gv` ("graph value") carrier + the thread-local trace it records into.
 // `Gv` is a `symbi_algebra::Scalar` whose operations RECORD into this crate's
-// tensor graph instead of computing; instantiating carrier-generic physics
+// tensor graph, evaluating nothing; instantiating carrier-generic physics
 // (written over `S: Scalar`) at `S = Gv` traces it into the stencil IR — the
 // foundational "code -> graph" boundary. graph and carrier live in the SAME
-// crate so the IR machine is one layer, not two.
+// crate so the IR machine is one layer.
 //
 // arena pattern: a thread-local graph holds the active trace; `Gv` is a Copy
 // handle. `begin_trace()` opens it, ops push nodes, `end_trace()` takes the
-// graph out. build-time only — NOT the proc-macro cross-invocation footgun.
+// graph out. build-time only, sidestepping the proc-macro cross-invocation footgun.
 //
 // the trace (`GvTrace`/`with_trace`/`coord_node`) is `pub` so the discretization
 // builders in symbi-discretize can construct raw index/stencil IR (integer coord
@@ -77,7 +77,7 @@ pub struct GvKernel {
 ///     one entry is `> 0` (an all-zero halo means no smem benefit — declare
 ///     `tile_spec = None`). a PER-AXIS halo lets a direction-`dir` flux kernel,
 ///     which reconstructs along ONE axis only, prefetch a thin SLAB (halo on
-///     `dir`, 0 transverse) instead of a fat cube — the cube would load ~7.5x
+///     `dir`, 0 transverse); a fat cube would load ~7.5x
 ///     more cells than the physics reads and likely null the perf win.
 ///   - every `tiled_field_keys[i]` MUST appear in `GvKernel::field_inputs` —
 ///     fields not in the manifest can't be tiled because the dispatch has no
@@ -91,7 +91,7 @@ pub struct TileSpec {
     /// halo cells PER AXIS (length = kernel ndim). a reconstruction along axis
     /// `dir` with PLM radius 2 sets `halo[dir] = 2`, the transverse axes `0`.
     /// the cooperative load extends the block by `halo[d]` on each side of axis
-    /// `d`; an axis with `halo[d] == 0` is not extended (a slab, not a cube).
+    /// `d`; an axis with `halo[d] == 0` is not extended (yielding a slab).
     pub halo: Vec<u8>,
     /// fields to prefetch into smem, by IR key (matching `field_inputs[i].0`).
     /// stencil `LoadAt` reads for these keys are routed through smem; pointwise
@@ -329,7 +329,7 @@ impl GvKernel {
     /// the field-input keys this kernel reads at a SHIFTED coord — the
     /// `Op::LoadAt` field symbols, in first-seen order, restricted to keys that
     /// are actual `field_inputs` (a LoadAt always names a registered field, so
-    /// the restriction is a safety net, not a filter). this is the smem-tile
+    /// the restriction is a safety net). this is the smem-tile
     /// candidate set: only stencil-read fields have reusable neighbor data worth
     /// prefetching; a field read pointwise stays on gmem.
     pub fn stencil_read_field_keys(&self) -> Vec<String> {
@@ -470,7 +470,7 @@ fn collect_support_params(e: &crate::support::ParamExpr, f: &mut impl FnMut(&str
 ///    semantics: in the two-launch baseline the second launch sees the first
 ///    launch's updates globally; in a fused launch a stencil read in the
 ///    second body would see the first body's writes only at the SAME thread
-///    index, not at neighbour indices.
+///    index.
 ///
 /// returns `Ok((fused_kernel, fused_writes))` on success. the fused writes
 /// preserve the original ordering: all of a's writes (with NodeIds unchanged,
@@ -519,7 +519,7 @@ pub fn try_fuse(
 
     // law: no inter-dependency. one's write ∩ the other's read set — a TRUE pipeline hazard
     // where the reader would need the writer's fresh OUTPUT. EXCEPTION: a field the writer holds
-    // IN-PLACE (it reads AND writes it) is a shared PRE-STATE, not a fresh output — both kernels
+    // IN-PLACE (it reads AND writes it) is a shared PRE-STATE — both kernels
     // read the same old value as a leaf, and the fused dataflow writes the new value as a root
     // (the field is read pointwise, so the in-place write is hazard-free). this is exactly the
     // god+bcell co-stage composition: the curvilinear gas geo source reads cell-B (bc_k) for the
@@ -666,7 +666,7 @@ impl GvTrace {
     }
 
     /// a deduped I32 scalar param (an integer index / lattice-map arg), returning its node —
-    /// the integer analog of `Gv::scalar` (index math, not carrier-generic).
+    /// the integer analog of `Gv::scalar` (index math).
     pub fn scalar_int(&mut self, name: &str) -> NodeId {
         let id = self.graph.add_scalar_param(name, ElementTy::I32);
         if self.scalar_keys.insert(name.to_string()) {
@@ -695,7 +695,7 @@ enum GvVal {
 /// a traced graph value has no physical order or equality — `Scalar` does not
 /// require `PartialOrd`/`PartialEq`, which are deliberately NOT implemented.
 /// physics decides with the traceable `cmp_lt` / `cmp_gt` / `select`, never with
-/// native `<` / `==` (which would silently compare node indices, not values).
+/// native `<` / `==` (which would silently compare node indices).
 /// the type system enforces this — native ordering does not compile:
 ///
 /// ```compile_fail
@@ -708,7 +708,7 @@ enum GvVal {
 pub struct Gv(GvVal);
 
 impl Gv {
-    /// a fresh scalar param node named `name`, NOT recorded in the ABI manifest
+    /// a fresh scalar param node named `name`, unrecorded in the ABI manifest
     /// (a bare leaf for unit tests). production inputs use `field` / `scalar`.
     pub fn param(name: &str) -> Gv {
         Gv(GvVal::Node(with_trace(|t| t.graph.add_scalar_param(name, ElementTy::F64))))
@@ -734,7 +734,7 @@ impl Gv {
     /// is the direct cell read (`Gv::field`); nonzero builds the integer coord arithmetic
     /// (`_coord_axis + offset`) + a `LoadAt`, registering the field AND the coord axes in
     /// the manifest. codegen-only — a stencil is not a pointwise `Scalar` op, so this is a
-    /// Gv method, not a carrier-generic one (the host runtime reads neighbours from the
+    /// Gv method (the host runtime reads neighbours from the
     /// Field buffer; only the traced kernel needs the explicit `load_at`).
     pub fn field_shifted(key: &str, runtime: impl Into<FieldBind>, ndim: u8, axis: u8, offset: i32) -> Gv {
         let runtime = runtime.into();
@@ -957,8 +957,8 @@ impl crate::algebra::Scalar for Gv {
         match self.0 {
             GvVal::Lit(v) => v,
             // HOST-BOUNDARY ESCAPE — see `crate::algebra::Scalar::to_f64` doc.
-            // a `Gv` on a traced node is a graph handle, not a concrete value;
-            // extracting it inside carrier-generic physics is an A1 violation.
+            // a `Gv` on a traced node is a graph handle; extracting a concrete
+            // value inside carrier-generic physics is an A1 violation.
             GvVal::Node(_) => panic!(
                 "Gv::to_f64 on a traced node — carrier-generic physics must decide with \
                  cmp_*/select, not extract a concrete value"
@@ -966,7 +966,7 @@ impl crate::algebra::Scalar for Gv {
         }
     }
 
-    // ── comparisons return GvMask (NOT Gv) — the Mask discipline ──────────
+    // ── comparisons return GvMask — the Mask discipline ──────────
     fn cmp_lt(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Lt)) }
     fn cmp_le(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Le)) }
     fn cmp_gt(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Gt)) }
@@ -1100,7 +1100,7 @@ impl crate::algebra::Scalar for Gv {
     fn log10(self) -> Gv { self.transcendental_unop(TranscendentalOp::Log10) }
 
     fn powi(self, n: i32) -> Gv {
-        // lower to repeated multiplication (exponentiation by squaring), NOT Pow/powf:
+        // lower to repeated multiplication (exponentiation by squaring):
         // `f64::powi` raises a NEGATIVE base exactly (e.g., (-2)^2 = 4), but CUDA
         // `powf(neg, 2.0)` = NaN — a carrier-equivalence break (f64 host != Gv kernel).
         // n is a small integer constant at trace time, so the multiply chain unrolls into
@@ -1153,8 +1153,8 @@ impl crate::algebra::Scalar for Gv {
         // carrier equivalence: traced kernel must return the SAME value the host
         // loop returns for ANY input. freeze on convergence — see the FREEZE LAW
         // in `crate::algebra::Scalar::iterate` doc. ALSO pass `conv` as the IR's
-        // `break_when` so the loop EXITS once convergence fires, instead of
-        // running `max_steps` worth of dead body (the freeze nulled the writes
+        // `break_when` so the loop EXITS once convergence fires, skipping the
+        // remaining `max_steps` worth of dead body (the freeze nulled the writes
         // but the cone's arithmetic ran every iter — see RMHD c2p perf).
         let acc = with_trace(|t| t.graph.iter_acc(0, None));
         let cur = Gv::of(acc);
@@ -1247,7 +1247,7 @@ mod fusion_laws {
     // structural-equality helper: two manifests are "the same" iff their
     // field-input sets, scalar-param sets, and write-path sets coincide. node
     // counts may differ across orderings (CSE inside splice can collapse
-    // duplicates), so the comparison is over semantic sets, not raw vectors.
+    // duplicates), so the comparison is over semantic sets.
     fn manifest_sets(
         k: &GvKernel,
         w: &Writes,

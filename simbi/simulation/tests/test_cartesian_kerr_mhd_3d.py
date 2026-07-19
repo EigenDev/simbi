@@ -64,7 +64,7 @@ class _CartesianKerrMhd3D(SimbiProblem):
     spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     kerr_spin: Annotated[float, ProblemParam(SPIN)]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD)]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD)]
     resolution: Annotated[tuple[int, int, int], ProblemParam((RES, RES, RES))]
     bounds: Annotated[
         list[tuple[float, float]],

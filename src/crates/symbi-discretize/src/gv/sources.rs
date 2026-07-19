@@ -32,7 +32,7 @@ pub enum GeoSource {
     /// carries B-momentum so it can't serve the source).
     Rmhd,
     /// newtonian MHD: pressure (p + 1/2|B|^2) + gas inertial (cons.mom IS rho v — the Maxwell
-    /// stress lives in the flux, not the momentum) + magnetic tension from the LAB-FRAME B (no
+    /// stress lives in the flux) + magnetic tension from the LAB-FRAME B (no
     /// relativistic four-vector). simpler than RMHD: cons.mom serves the inertial directly.
     NewtonianMhd,
     /// isothermal MHD: identical to `NewtonianMhd` but the gas pressure is `cs^2 rho` (no
@@ -52,8 +52,8 @@ pub enum GeoSource {
 /// theta/phi at [1]). dispatch is on the number of PROVIDED momentum components `mom.len()` (the
 /// Hydro branch supplies the gridded `ndim`; the MHD branches supply the full `ncomp`); the
 /// momentum slot order is COORDINATE order, so cylindrical 2-component is the (r,phi) DISK plane
-/// (e.g. an (r,z) grid with swirl carries [r, phi]) -> `CylindricalRPhi`, NOT the (r,z)
-/// `Cylindrical<2>` axisymmetric reduction (which would zero the swirl). the result is padded to
+/// (e.g. an (r,z) grid with swirl carries [r, phi]) -> `CylindricalRPhi` (the (r,z)
+/// `Cylindrical<2>` axisymmetric reduction would zero the swirl). the result is padded to
 /// the full `ncomp` DOF — suppressed trailing components (e.g. z) carry zero inertial.
 fn inertial_momentum_sources_gv(
     ncomp: usize,
@@ -108,7 +108,7 @@ fn geometric_momentum_sources_gv(
     bmu: Option<&[Gv]>,
 ) -> Vec<Gv> {
     // COORDINATE-indexed centroid (r at [0], theta at [1]). ungridded slots take the chart symmetry
-    // default (spherical polar -> pi/2), NOT zero: a reduced-dimension spherical grid (a 1.5D radial
+    // default (spherical polar -> pi/2): a reduced-dimension spherical grid (a 1.5D radial
     // chart with ungridded theta, or a 2.5D r-phi chart) still evaluates the angular Christoffels
     // cot(theta)/sin(theta) in the inertial source, and theta = 0 diverges cot(theta) and NaNs the
     // state. `gv_ungridded_slot` is the single chart authority for these fills (spherical theta ->
@@ -281,9 +281,8 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, Field
 /// `source_spec::user_force_*` / `user_cooling_source`) into a Gv trace — binding each declared
 /// param to a runtime Gv scalar of the same name — and write its outputs `s_k`. a user expression
 /// FUSES into a kernel graph and RENDERS (CPU + CUDA) through the exact same `splice_built_source_into`
-/// path a built-in source uses: the user script becomes compiled kernel code, not a per-cell
-/// register-VM walk. carrier-equivalence + the work-energy coupling are
-/// gated by `source_term_carrier.rs`.
+/// path a built-in source uses: the user script becomes compiled kernel code.
+/// carrier-equivalence + the work-energy coupling are gated by `source_term_carrier.rs`.
 pub fn splice_user_source_gv(
     built: &symbi_hydro::source_spec::BuiltSource,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -375,7 +374,7 @@ pub fn geometric_momentum_source_probe_gv(
     // gas momentum density from prim (cons.mom carries B-momentum), so it reads no cons.mom.
     let cons_mom: Vec<Gv> = match source {
         // hydro + newtonian MHD: cons.mom IS the gas momentum density (rho v), read directly.
-        // read ALL `ncomp` (DOF) components, not just `ndim`: a 2.5D spherical (r,theta) MHD grid
+        // read ALL `ncomp` (DOF) components: a 2.5D spherical (r,theta) MHD grid
         // has DOF=3 and the geometric S_theta/S_phi need the out-of-plane phi momentum (mom[2]).
         // hydro has ncomp==ndim so this is unchanged there.
         GeoSource::Hydro { .. } | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0..ncomp)

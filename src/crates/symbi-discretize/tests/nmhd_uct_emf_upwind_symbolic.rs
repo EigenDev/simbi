@@ -3,16 +3,16 @@
 //
 // the SYMBOLIC proof of the uct edge-emf upwind-pairing invariant — the instant,
 // structural counterpart to the numerical blow-up gate
-// (nmhd_uct_supersonic_emf_upwind.rs). instead of advecting a supersonic field
-// loop for N steps and watching the magnetic energy, it reads the invariant
-// straight off the traced DAG at graph-build time.
+// (nmhd_uct_supersonic_emf_upwind.rs). it reads the invariant
+// straight off the traced DAG at graph-build time, with no supersonic field-loop
+// advection over N steps.
 //
 // the MASTER-FORM uct emf kernels — the solver-agnostic `eq:emf2D` composition (nmhd/imhd HLL +
 // HLLD, rmhd HLL, and the GR ortho path) — all compose through the SAME `uct_master_emf`; THIS proof
 // covers exactly those. it does NOT cover the wave-sum HLLD EMF kernels `rmhd_edge_emf_uct_hlld_gv` /
-// `rmhd_edge_emf_uct_hlld_gr_gv`, which assemble centered advection + a dissipative Phi (M&DZ Eq. 39)
-// rather than the master coefficient form; their dissipation-sign pairing is proven SEPARATELY in
-// `rmhd_uct_hlld_wave_sum_symbolic.rs` (M8, via `hlld_wave_sum_proof_kernel`), not here.
+// `rmhd_edge_emf_uct_hlld_gr_gv`, which assemble centered advection + a dissipative Phi (M&DZ Eq. 39);
+// this wave-sum assembly bypasses the master coefficient form, so their dissipation-sign pairing is
+// proven SEPARATELY in `rmhd_uct_hlld_wave_sum_symbolic.rs` (via `hlld_wave_sum_proof_kernel`).
 // `uct_master_emf_proof_kernel` traces the master form in isolation with symbolic param
 // leaves, so the result is LINEAR in the four staggered face reads {by_w, by_e, bx_n, bx_s} (all the
 // wave-speed nonlinearity lives upstream in cx/cy, which here are opaque scalars al/ar/dl/dr). the
@@ -21,7 +21,7 @@
 //       + vbar_y (a^L by_s + a^R by_n) - (d^R by_n - d^L by_s).
 // `LinForm` extracts each face's coefficient polynomial; the upwind invariant is
 // then a coefficient check: a^L (the alpha^+/sum weight) must multiply the UPWIND
-// face — by_w for +x, bx_s for +y — NOT the downwind one. the ct_emf.rs:577
+// face — by_w for +x, bx_s for +y. the ct_emf.rs:577
 // anti-upwind bug (a^L paired with the downwind face) is invisible to the div(B)
 // tests (the curl preserves div(B) for any emf) and invisible subsonically
 // (a^L==a^R); this proves the pairing for ALL kernels with no evolve loop.
@@ -84,7 +84,7 @@ fn uct_emf_anti_upwind_pairing_is_rejected() {
     let lf = LinForm::extract(&kernel.graph, root, FIELDS, SCALARS);
 
     // with by_w/by_e swapped, a^L now lands on the DOWNWIND face: the upwind face
-    // by_w carries a^R, not a^L. the production invariant above would fail.
+    // by_w carries a^R. the production invariant above would fail.
     let by_w = coeff(&lf, "by_w");
     assert_eq!(by_w.coefficient_of(&["vbar_x", "al_x"]), 0, "bug: a^L no longer on by_w");
     assert_eq!(by_w.coefficient_of(&["vbar_x", "ar_x"]), -1, "bug: a^R wrongly weights the upwind face");

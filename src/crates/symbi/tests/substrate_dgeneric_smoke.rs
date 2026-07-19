@@ -1,8 +1,8 @@
 // =============================================================================
 // substrate_dgeneric_smoke.rs
 //
-// proves the D-generic AdiabaticSubstrateKernelSet<Mem, Sc, const D> actually RUNS
-// (not just compiles) at D > 1 through the real `evolve()` loop — the kepler/blast
+// proves the D-generic AdiabaticSubstrateKernelSet<Mem, Sc, const D> actually
+// executes at D > 1 through the real `evolve()` loop — the kepler/blast
 // gap. one struct, instantiated at D=2 and D=3.
 //
 // the 2D test is also a CORRECTNESS proof: a centered, x<->y-symmetric pressure pulse
@@ -101,7 +101,7 @@ fn adiabatic_2d_runs_and_stays_xy_symmetric() {
 
     // both sweep axes wired correctly => symmetry held to ~machine precision.
     assert!(max_asym < 1e-12, "x<->y symmetry broken: max asymmetry {max_asym:e}");
-    // the pulse actually drove flow in the plane (a real solve, not a no-op).
+    // the pulse actually drove flow in the plane (a real solve).
     assert!(max_speed > 0.05, "no flow developed (max speed {max_speed})");
     // mass conserved on the periodic box.
     let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum();

@@ -39,7 +39,7 @@ def test_default_names_are_zones_dot_chkpt_dot_time() -> None:
 
 @needs_backend
 def test_per_axis_resolution_tag_2d() -> None:
-    # the name tag is the per-axis resolution joined by 'x', not the zone count.
+    # the name tag is the per-axis resolution joined by 'x'.
     import tempfile
 
     from simbi_configs.examples.newtonian.kh import KelvinHelmholtz

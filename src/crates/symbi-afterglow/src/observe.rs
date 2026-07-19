@@ -14,7 +14,7 @@
 // form (1+z)(t_em - r.n/c) everywhere (light curve, sky map, polarization). the light
 // curve is the sky map integrated over the sky: identical per-packet selection (EATS,
 // observer-direction doppler delta^power, observed-frequency band) binned in observer
-// TIME instead of sky position, so F_nu(t) and the image are the same physical quantity.
+// TIME (the sky map bins the same packets by sky position), so F_nu(t) and the image are the same physical quantity.
 //
 // usage:
 //  let lc = compute_lightcurve_from_events(&events, [s,0,c], &nus, z, d_l, &tbins, 3.0, 0.1);
@@ -230,7 +230,7 @@ pub fn compute_skymap(
     // collect the in-window, in-band sky-plane offsets and their beamed weights.
     let mut pts: Vec<([f64; 2], f64)> = Vec::new();
     for evt in events.iter().filter(|e| !e.absorbed) {
-        // energy band filter on the PHOTON energy h*nu_emit, not the packet weight.
+        // energy band filter on the PHOTON energy h*nu_emit, which sets the spectral band.
         let photon_energy = H_PLANCK.value() * evt.nu_emit;
         if photon_energy < energy_min || photon_energy > energy_max {
             continue;
@@ -242,7 +242,7 @@ pub fn compute_skymap(
         }
 
         // observer-direction doppler from the stored lab-frame fluid VELOCITY VECTOR — valid for
-        // any flow direction (radial or laterally spreading), not just radial:
+        // any flow direction (radial or laterally spreading):
         // delta = 1 / (gamma (1 - beta . n)).
         let b = evt.beta_vec;
         let beta_dot_n = b[0] * n[0] + b[1] * n[1] + b[2] * n[2];
@@ -319,7 +319,7 @@ pub fn compute_polarization_from_events(
     let time_bins_s: Vec<f64> = time_bins.iter().map(|t| t * SECONDS_PER_DAY.value()).collect();
 
     for evt in events.iter().filter(|e| !e.absorbed) {
-        // energy band filter on the PHOTON energy h*nu_emit, not the packet weight.
+        // energy band filter on the PHOTON energy h*nu_emit, which sets the spectral band.
         let photon_energy = H_PLANCK.value() * evt.nu_emit;
         if photon_energy < energy_min || photon_energy > energy_max {
             continue;

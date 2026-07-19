@@ -56,7 +56,7 @@ def _run(spin: float) -> np.ndarray:
     )
     # bounded: a healthy run reaches t = 5 in a few hundred steps. a dt collapse
     # (the failure mode this cap exists for: an excised-region cell throttling the
-    # source-admissibility rate) burns the cap instead of hanging, and the time
+    # source-admissibility rate) burns the cap, and the time
     # assertion below reports it as the failure it is.
     runner.run(p, compute_mode="cpu", max_steps=2000)
     finals = glob.glob(os.path.join(d, "*final*.h5"))

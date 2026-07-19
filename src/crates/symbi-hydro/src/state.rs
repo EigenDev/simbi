@@ -8,8 +8,8 @@
 // Cons<S, D> and Prim<S, D> default to Adiabatic for backward compatibility.
 //
 // for isothermal flows, use ConsG<S, D, IsoModel> — the energy/pressure slot
-// is zero-sized (Zero<S>). accessing .nrg on isothermal cons returns Zero<S>,
-// not a scalar. arithmetic with f64 on that slot does not compile.
+// is zero-sized (Zero<S>). accessing .nrg on isothermal cons returns Zero<S>, a
+// ZST; arithmetic with f64 on that slot does not compile.
 //
 // usage:
 //   let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
@@ -31,7 +31,7 @@ pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub den: S,
     /// momentum density. INVARIANT: PHYSICAL (orthonormal-frame) components, `rho*V_a` with
     /// `V_a = h_a v^a` — the frame the conservation form is written in. it is left
-    /// a bare `Tensor` (not `symbi_algebra::Physical`) on purpose: the interior physics is
+    /// a bare `Tensor` on purpose (no `symbi_algebra::Physical` wrapper): the interior physics is
     /// frame-CONSISTENT by construction (the Riemann solver / flux / wave-speeds are locally flat
     /// and never mix frames), so typing it would be a ~500-site tax that catches zero bugs. frames
     /// are crossed ONLY at boundaries, through the typed `Metric` morphisms (`to_physical` /
@@ -46,7 +46,7 @@ pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
 pub struct PrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub rho: S,
     /// velocity. INVARIANT: PHYSICAL (orthonormal-frame) components `V_a` (= `Physical` in
-    /// `symbi_algebra`), NOT coordinate `v^i` — see `ConsG::mom` for why it stays a bare `Tensor`.
+    /// `symbi_algebra`); these orthonormal-frame values are distinct from the coordinate `v^i` — see `ConsG::mom` for why it stays a bare `Tensor`.
     pub vel: Tensor<S, D>,
     pub pre: E::Slot<S>,
 }
@@ -350,7 +350,7 @@ mod tests {
         let cons = prim.to_conserved(&eos);
         assert!(approx(cons.den, 3.0));
         assert!(approx(cons.mom[0], 3.0));
-        // nrg = cs^2 = 4.0, NOT total energy
+        // nrg slot holds cs^2 = 4.0 in the isothermal model; it carries no total energy
         assert!(approx(cons.nrg, 4.0));
     }
 

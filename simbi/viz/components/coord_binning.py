@@ -93,7 +93,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
 
         if norm != 1:
             # for a negatively normalized quantity the reference horizontal
-            # line sits at -1 rather than +1
+            # line sits at -1
             norm_loc = 1.0 if np.all(values / norm > 0) else -1.0
             self.ax.axhline(
                 norm_loc, color="gray", linestyle="--", linewidth=0.5

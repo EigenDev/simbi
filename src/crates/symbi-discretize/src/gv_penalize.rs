@@ -242,7 +242,7 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
 /// out because the force acts on the offset mask). the localized changes are: (1) a body-frame
 /// `mask_offset` field on `Body` (default zero) + a `body_0_com_offset_*` scalar bound like the
 /// other body scalars; (2) HERE, translate the shape to `center + R * mask_offset` (compose the
-/// orientation matrix `body_0_rot_*` with the offset) instead of `center`; (3) widen the mask's
+/// orientation matrix `body_0_rot_*` with the offset); (3) widen the mask's
 /// support ball to cover `center + R*mask_offset +- radius`. the receipt (`cartesian_receipt`) and
 /// the spin (`solid_velocity`) need NO change — they stay about the COM `center`.
 fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> SdfExpr<Gv, 3> {
@@ -525,7 +525,7 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize
 
 /// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
 /// mask AND the surface normal come from the config CSG `shape` (body-local, translated to the
-/// runtime body position) instead of the sphere. built at sim SETUP, once the body's shape is
+/// runtime body position). built at sim SETUP, once the body's shape is
 /// known — the AOT bake cannot know a per-body CSG.
 pub fn penalize_porous_gv_shaped(
     coords: Coords,
@@ -539,7 +539,7 @@ pub fn penalize_porous_gv_shaped(
 /// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
 /// rotated by the runtime orientation matrix (the 9 scalars `body_0_rot_0..8`) and the surface
 /// velocity carries the spin `omega x r` (the vector `body_0_omega_0..2`), so the wall drags the
-/// gas around as it turns — arbitrary spin axis, not a single angle.
+/// gas around as it turns — an arbitrary spin axis.
 pub fn penalize_porous_gv_spinning(
     coords: Coords,
     ndim: usize,
@@ -1066,7 +1066,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
 }
 
 /// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
-/// sound speed is the constant `cs` param, not recovered from cons), delta
+/// sound speed is the constant `cs` param), delta
 /// outputs mass + force only. same [Drain] stack, same integrator — the iso
 /// energy slot discards the e-channel by construction.
 pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {

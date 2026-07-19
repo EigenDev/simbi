@@ -79,7 +79,7 @@ pub enum FieldRef {
     /// primitive density `prim.rho`.
     PrimRho,
     /// primitive pressure `prim.pre` (supplied as the regime pressure override at
-    /// the dispatch site, NOT bound from the sim).
+    /// the dispatch site, its value coming from the regime).
     PrimPre,
     /// primitive velocity component `prim.vel[k]`.
     PrimVel(u8),
@@ -132,8 +132,8 @@ pub enum FieldRef {
 
 impl FieldRef {
     // concise constructors for the conserved/flux slot family — the producers mint these
-    // instead of dotted strings, so a mistyped binding is a compile
-    // error, not a silent `Raw`. they wrap `State { slot, comp }` so the call sites stay readable
+    // as typed values, so a mistyped binding is a compile
+    // error caught at build time. they wrap `State { slot, comp }` so the call sites stay readable
     // and need no `StateSlot`/`StateComp` in scope.
     pub const fn cons_den() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Den } }
     pub const fn cons_nrg() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Nrg } }

@@ -16,13 +16,13 @@
 //
 // INDICES ARE INTEGERS. coord index params are `I32` in the IR, so coord and
 // index arithmetic is pure `i32` — coord vars, strides, and buffer-lo offsets are
-// all `i32`; integer stencil shifts render as integer literals (`+ 1`, not
-// `+ 1.0`); a CSE'd shared shift is an `i32` body let, so a multi-law kernel's
+// all `i32`; integer stencil shifts render as integer literals (`+ 1`); a
+// CSE'd shared shift is an `i32` body let, so a multi-law kernel's
 // indices stay integer. the ONLY conversion is the `as usize` at the slice-index
 // site, which Rust's `Index<usize>` requires. (32-bit indices match the existing
 // CUDA `(int)` flat-index ABI.) data-dependent gather indexing (a float field
-// value used as an index) is NOT supported here and panics loudly rather than
-// silently routing integers through float.
+// value used as an index) is NOT supported here and panics loudly; a silent
+// path would route integers through float.
 //
 // signature shape (1D; 2D/3D add stride extents and nested loops):
 //   pub fn <name>(
@@ -144,12 +144,12 @@ pub struct RustRenderer {
     /// on the caller's thread. the EXECUTOR owns the parallelism: it fans a
     /// disjoint cover (a BlockGrid / guillotine cover) out over rayon and calls
     /// this serial kernel per block, so the cover dispatches in ONE fork-join
-    /// instead of one-per-block. soundness rests on the cover being a PARTITION
+    /// across all blocks. soundness rests on the cover being a PARTITION
     /// (disjoint output writes) — the proven law.
     serial: bool,
     /// whether the mask-form rewrite was applied to THIS kernel (set via
     /// `note_mask_form`). in a mask-formed body every bool local holds a
-    /// `cmp_*` result, so its type is `<S as Scalar>::Mask`, not native `bool`;
+    /// `cmp_*` result, so its type is `<S as Scalar>::Mask`;
     /// fallback (control-flow) kernels keep native bools.
     mask_applied: std::cell::Cell<bool>,
 }
@@ -179,7 +179,7 @@ impl Default for RustRenderer {
 impl KernelRenderer for RustRenderer {
     fn preamble(&self, _device_preamble: &[String]) -> String {
         // the ScalarExpr renderer parenthesizes every BinOp; allow the redundant
-        // outer pair rather than emit precedence-fragile minimal-paren code.
+        // outer pair; minimal-paren code would be precedence-fragile.
         // (device_preamble is a GPU device-function concept — unused on CPU.)
         "#[allow(unused_parens)]\n".to_string()
     }
@@ -317,7 +317,8 @@ impl KernelRenderer for RustRenderer {
             // element, which is the shape LLVM's loop-vectorizer turns into whole-vector loads.
             //
             // the inner axis is DERIVED from the layout. it is axis 0 under `strides_from_extent`,
-            // NOT the last axis: pointing this loop at the last axis leaves the kernel correct and
+            // the contiguous axis under this column-major layout (C row-major would put it last):
+            // pointing this loop at the last axis leaves the kernel correct and
             // strided, so the debug_assert below is the only thing that would ever say so.
             let inner = symbi_algebra::CONTIGUOUS_AXIS;
             // outer axes, ascending, so the one adjacent to `inner` in memory varies fastest —
@@ -364,7 +365,7 @@ impl KernelRenderer for RustRenderer {
             ));
         } else if cpu_tile_size() == 0 {
             // FLAT (default): parallelize over the flattened interior (every
-            // cell), NOT just the outer axis — exposes all cells so the grid
+            // cell) — exposes all cells so the grid
             // scales like the 1D path (mirrors the GPU global thread index).
             let total_expr = (0..ndim)
                 .map(|aa| format!("(grid_size_{aa} as usize)"))
@@ -430,7 +431,7 @@ impl KernelRenderer for RustRenderer {
             push_rebind(&mut v);
             // the tile index -> tile coord map, peeled in the same canonical order as the cell map so
             // consecutive tile indices are adjacent in memory: a rayon worker that takes a contiguous
-            // slice of tile indices then sweeps adjacent rows rather than a scattered column.
+            // slice of tile indices then sweeps adjacent rows in memory.
             let peel: Vec<usize> = symbi_algebra::nest_order(ndim)
                 .rev()
                 .filter(|aa| tiled_axes.contains(aa))
@@ -478,7 +479,7 @@ impl KernelRenderer for RustRenderer {
     }
     fn coord_decl(&self, axis: u8, _element: ElementTy) -> String {
         // the cell index is always i32; physical-space reals come from promoting
-        // `index * dx` (the graph's usual arithmetic conversions), not a float coord.
+        // `index * dx` (the graph's usual arithmetic conversions).
         format!(
             "    let _coord_{axis}: i32 = {};",
             COORD_VARS[axis as usize]
@@ -542,7 +543,7 @@ impl KernelRenderer for RustRenderer {
         let mut s = String::from("    ");
         emit_stmt(&mut s, stmt, true);
         // in a mask-formed body every bool local holds a `cmp_*` result — an
-        // `S::Mask`, not a native bool. the shared emit_stmt spells the native
+        // `S::Mask`. the shared emit_stmt spells the native
         // type; retype here so the CUDA/elemental spellings stay untouched.
         if self.mask_applied.get() {
             s = s.replace(": bool = ", ": <S as Scalar>::Mask = ");
@@ -868,7 +869,7 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
         Const(ConstValue::U32(v)) => format!("{}", *v as i64),
         // integer arithmetic, and integer comparisons (the condition of a
         // data-INDEPENDENT index branch — e.g., a lattice-map `map_type == 1`).
-        // Div is excluded: division in an index is float, not integer.
+        // Div is excluded: division in an index is float.
         BinOp(kind, a, b) if !matches!(kind, BinaryKind::Div) => {
             format!(
                 "({} {} {})",
@@ -898,8 +899,8 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
 
 // does the scalarized kernel (body + outputs) reference a local named `name`?
 // used to skip a dead base cell read (see the base-load loop). runs AFTER the
-// FieldLoadAt rewrite, so a field's computed-coord reads are `buf<N>[..]` Vars,
-// not the base key — the base read is kept only when the key is genuinely used.
+// FieldLoadAt rewrite, so a field's computed-coord reads are `buf<N>[..]` Vars;
+// the base read is kept only when the key is genuinely used.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1025,8 +1026,8 @@ mod tests {
 
     #[test]
     fn cpu_kernels_are_generic_over_the_scalar() {
-        // the CPU kernel is ONE generic `fn k<S: Scalar>` — not
-        // a monomorphized f64/f32 pair. Sim<f64>/Sim<f32> pick the precision by the
+        // the CPU kernel is ONE generic `fn k<S: Scalar>` compiled once over the
+        // scalar type. Sim<f64>/Sim<f32> pick the precision by the
         // buffer type they pass (S inferred); no dispatch. every float spelling is S:
         // buffers &[S], reads `let x: S`, the f64-built ConstValue(2.0) -> S::lit(2.0),
         // the descriptor CpuField<S> + scalars: &[S]. zero f64 leaks; indices stay i32.
@@ -1076,7 +1077,7 @@ mod tests {
         assert!(desc.source.contains("outputs: &mut [CpuFieldMut<S>]"));
         // float spelling is fully S; integer index arithmetic stays i32 (never S). no
         // concrete float TYPE leaks — `: f64` annotations / `[f64]` slices. (the bare
-        // `f64` inside `Scalar::from_f64` is the constructor name, not a type.)
+        // `f64` inside `Scalar::from_f64` is the constructor name.)
         assert!(
             !desc.source.contains(": f64"),
             "no f64 type annotation:\n{}",
@@ -1134,7 +1135,7 @@ mod tests {
     #[test]
     fn i32_scalar_param_emits_an_integer_signature() {
         // a lattice-map source-coord arg (a shift / pivot / clamp) is an integer
-        // param; the emitter must type it i32 from its declared element, not f64,
+        // param; the emitter must type it i32 from its declared element,
         // so index arithmetic on it stays integer.
         let mut g = Graph::new();
         let rho = scalar_param(&mut g, "rho");

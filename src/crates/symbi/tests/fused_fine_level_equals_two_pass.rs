@@ -1,7 +1,7 @@
 // =============================================================================
 // fused_fine_level_equals_two_pass.rs
 //
-// source/body fusion must hold at REFINED levels, not just the uni-grid. a 2-level
+// source/body fusion must hold at REFINED levels as well as the uni-grid. a 2-level
 // hierarchy carrying a central accreting body is evolved two ways — every level's kernel-set FUSED
 // (`with_source_fusion`, body folded into godunov) vs every level TWO-PASS (the standalone
 // `body_source`) — and must produce a bit-for-bit identical trajectory on every level. this gates the

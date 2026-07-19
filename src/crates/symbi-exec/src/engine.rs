@@ -42,7 +42,7 @@ struct DeviceView {
 // `lo` at offset 8, 16 bytes of `strides` at offset 24, 16 bytes of `extent` at
 // offset 40 — total 56 bytes). a drift here (an added field, a reorder, an
 // alignment change from a new `#[derive]`) would silently mis-bind every kernel
-// arg. catch it at compile time rather than as garbled physics. `offset_of!` is
+// arg. catch it at compile time, before it can silently garble physics at runtime. `offset_of!` is
 // stable since 1.77.
 #[cfg(feature = "gpu")]
 const _: () = {
@@ -167,8 +167,8 @@ pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: 
 
 /// reduce `field` over `domain` by `op` (Add/Mul/Min/Max) — the substrate Reduce
 /// morphism. on HOST memory it's a plain fold; on DEVICE memory
-/// it runs a GPU block-reduction so only the per-block partials cross device->host,
-/// NOT a per-cell host scan over unified memory.
+/// it runs a GPU block-reduction so only the per-block partials cross device->host;
+/// the host never scans every cell over unified memory.
 /// the two algebras agree (max/min are exact; add/mul differ from the host's
 /// sequential fold only by reassociated rounding).
 pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
@@ -286,7 +286,7 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
 ///
 /// the closure pattern holds the slot's mutex for the entire kernel launch +
 /// host fold, so concurrent reductions from multiple threads serialize on
-/// the cache rather than racing on the buffer. uncontended in the single-
+/// the cache, so they never race on the buffer. uncontended in the single-
 /// simulation case (the common one); cheap when contested.
 #[cfg(feature = "gpu")]
 fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
@@ -374,7 +374,7 @@ fn field_reduce_device<
     let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
 
     let num_blocks = total_cells.div_ceil(REDUCTION_BLOCK_SIZE).max(1);
-    // the partials buffer is CACHED ACROSS STEPS, not allocated per call.
+    // the partials buffer is CACHED ACROSS STEPS.
     // a fresh `cuMemAllocManaged` on every reduction (every CFL step) was
     // pure smell: ~30 µs of driver-allocator time per step × 25K steps =
     // ~750 ms wasted in the alloc path of a typical Kepler run. the partials
@@ -414,7 +414,7 @@ fn field_reduce_device<
         ctx_sync();
 
         // fold the per-block partials on the host with the SAME op — num_blocks scalars,
-        // not per-cell. (the device combined each block; this combines the blocks.)
+        // one per block. (the device combined each block; this combines the blocks.)
         let (identity, combine) = host_identity_combine(op);
         let mut acc = identity;
         for i in 0..num_blocks as usize {
@@ -624,7 +624,7 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     // matches inv.buffers' Host-first-then-HostMut layout (the same order `run_cpu`
     // would re-split). MAX_BUFS_PER_KIND=48 covers the curvilinear FUSED god+bcell
     // (~36 inputs: geo-source prims + u_n + per-dir flux + bc/bcn/bf); overflow asserts
-    // loudly rather than corrupting memory. (mirrors the CPU dispatch_named MAX_FIELDS=48.)
+    // loudly before it can corrupt memory. (mirrors the CPU dispatch_named MAX_FIELDS=48.)
     const MAX_BUFS_PER_KIND: usize = 48;
     const EMPTY_I32: &[i32] = &[];
     const EMPTY_U32: &[u32] = &[];
@@ -657,8 +657,8 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
 
     // module cache keyed by precision too, so an f32 and f64 build of the same
     // kernel name don't shadow each other in one process. module_key is precomputed
-    // at cache time (see `CachedDesc`) so the dispatch path here is a slice borrow,
-    // not a `format!()`.
+    // at cache time (see `CachedDesc`) so the dispatch path here is a slice borrow
+    // with no allocation.
     let kernel =
         B::dispatcher().jit_kernel_keyed(&desc.source, &cached.module_key, &desc.kernel_name);
 
@@ -743,7 +743,7 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     //     legitimately read device-resident scalars back to the host).
     //   - the eventual checkpoint write triggers a sync via the same path.
     //
-    // unified memory: page migration is driven by access patterns, not by
-    // ctx_sync (which is a CPU-side barrier). removing this is purely a
+    // unified memory: page migration is driven by access patterns; ctx_sync
+    // is only a CPU-side barrier. removing this is purely a
     // pipelining win.
 }

@@ -3,7 +3,7 @@
 //
 // real wall-clock timing of the AOT-compiled rmhd cpu kernels (c2p + face flux)
 // over a grid. the ONLY valid perf metric available on this host (no cuda/ptxas)
-// — actual compiled native code, not the interpreter or a textual op-count.
+// — actual compiled native code exercised end to end.
 //
 // usage: cargo run -p symbi-aot --release --example cpu_kernel_bench
 //

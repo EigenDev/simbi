@@ -27,7 +27,7 @@
 //   exceeds ~745 — deep inside a fully-evacuated mask, where den -> 0 is exactly the accretion limit.
 //   so den -> den f lands in [0, den]: NONNEGATIVE (never a floor, never a negative) and non-expansive
 //   for every dt.  that is the well-posedness guarantee, and it is why the exact-exponential drain
-//   retired the KMK04 min-gate: an operator that is a contraction by construction, not a clamp.
+//   retired the KMK04 min-gate: an operator that is a contraction by construction.
 //
 // THEOREM 3 (softening regularizes the singularity — bounded, Lipschitz force).
 //     |g| = M |r| / (|r|^2 + eps^2)^{3/2}  <=  C M / eps^2,     C = 2 / (3 sqrt 3) ~ 0.3849,
@@ -166,7 +166,7 @@ fn drain_factor_is_a_contraction() {
 }
 
 // THEOREM 3 — softening bounds the force: |g| <= C M / eps^2, and the bound is TIGHT (attained at
-// |r| = eps/sqrt2), so it is the exact supremum, not a loose over-estimate.
+// |r| = eps/sqrt2), so it is the exact supremum.
 #[test]
 fn softened_gravity_is_bounded_by_softening() {
     let c = bound_const();

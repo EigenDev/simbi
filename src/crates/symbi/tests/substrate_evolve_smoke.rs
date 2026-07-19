@@ -79,7 +79,7 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
         })
         .build();
 
-    // p_IC = cs^2(x) * rho — a SEPARATE field the substrate derives cs^2 from (not a sim field).
+    // p_IC = cs^2(x) * rho — a standalone field, outside the sim's field set, that the substrate derives cs^2 from.
     let pre_ic = Field::<f64, 1, HostMemory>::zeros(&sim.geom.allocated).unwrap();
     for c in sim.geom.interior.iter() {
         let x = (c[0] as f64 + 0.5) * dx;
@@ -87,7 +87,7 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
     }
 
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(1.0, 0.4, &sim.geom.allocated);
-    // cs^2 = p/rho, the isothermal sound speed squared (per-cell, NOT a global scalar).
+    // cs^2 = p/rho, the isothermal sound speed squared, one value per cell.
     sub.compute_isothermal_cs2(&sim.fields.cons.den, &pre_ic, &sim.geom.interior);
     for c in sim.geom.interior.iter() {
         let x = (c[0] as f64 + 0.5) * dx;
@@ -171,7 +171,7 @@ fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
     assert!(ghosts > 0 && corners > 0, "expected face and corner ghosts to be checked");
 
     // integration: recover the interior prims, then fill ghosts — the ghost pressure
-    // must obey the LOCAL closure p = cs2*rho, not the constructor's uniform cs^2.
+    // must obey the LOCAL closure p = cs2*rho using the per-cell cs^2.
     sub.c2p(&sim);
     sub.ghost_fill(&sim);
     for c in sim.geom.allocated.iter() {

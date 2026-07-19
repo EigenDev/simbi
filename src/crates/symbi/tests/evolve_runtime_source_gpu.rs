@@ -152,7 +152,7 @@ where
 #[test] fn runtime_force_posdep_gpu_3d() { check_runtime_source::<3>(&force_posdep_json(3)); }
 
 // region (IF_THEN_ELSE -> Select) and relax (Max clamp) introduce carrier-dialect ops that must
-// trace + render on device, not panic at trace time. force a = [p0, 0] masked chi = (x_0 < 0.5).
+// trace + render on device without panicking at trace time. force a = [p0, 0] masked chi = (x_0 < 0.5).
 const REGION_JSON_2D: &str = r#"{
     "kind": "force", "dim": 2, "outputs": [0, 1], "region": 6, "params": [0.5],
     "nodes": [

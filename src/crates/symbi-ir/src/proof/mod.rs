@@ -1,10 +1,9 @@
 // =============================================================================
 // proof/mod.rs
 //
-// symbolic div(curl B) = 0 checker over the traced IR DAG. instead of running a
-// curl kernel and asserting div(B) is ~1e-12, this EXTRACTS the exact symbolic
-// linear combination of edge-emf field reads the curl produces and PROVES the
-// constraint by polynomial-coefficient cancellation to the zero polynomial.
+// symbolic div(curl B) = 0 checker over the traced IR DAG. it EXTRACTS the exact
+// symbolic linear combination of edge-emf field reads the curl produces and PROVES
+// the constraint by polynomial-coefficient cancellation to the zero polynomial.
 //
 // the curl-of-an-edge-emf is LINEAR in the staggered field reads: the only
 // nonlinearity is multiplication by uniform scalar params (dt, inverse widths).

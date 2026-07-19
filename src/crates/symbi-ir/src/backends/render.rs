@@ -7,8 +7,8 @@
 // sequencing — and a per-backend `KernelRenderer` supplies only the language
 // SPELLING (types, the signature/qualifier, the cell loop vs thread index, the
 // flat-index cast, statement/expression syntax). adding a backend (HIP, SYCL,
-// Metal) is one `KernelRenderer` impl; a feature is one edit here, not N across
-// parallel emitters.
+// Metal) is one `KernelRenderer` impl; a feature is one edit here, shared by
+// all parallel emitters.
 //
 // `emit_kernel_cpu` and `emit_kernel_from_lowering` are thin wrappers over
 // `emit_kernel_render` with `RustRenderer` / `CRenderer` (the CPU emitter tests +
@@ -97,7 +97,7 @@ pub trait KernelRenderer {
     }
     /// the flat buffer index from rendered component strings. ALWAYS delegates
     /// to `emit::emit_flat_index` with `index_lang()` — implementations are
-    /// one-liners. defined as a trait method (not a free function) so future
+    /// one-liners. defined as a trait method so future
     /// backends with a different ABI can override without touching the driver.
     fn flat_index(&self, ndim: u8, buf: u32, comps: &[String]) -> String;
     /// render a FieldLoadAt component (an index expression). CPU enforces integer
@@ -197,7 +197,7 @@ pub struct Prepared {
     pub device_preamble: Vec<String>,
     /// element type per scalar/coord param (resolved from the graph's Param nodes;
     /// not derivable from the other fields, so it travels with the artifact).
-    /// BTreeMap, NOT HashMap: this struct serializes into the build-time `.ir.json`
+    /// BTreeMap keeps the keys ordered: this struct serializes into the build-time `.ir.json`
     /// artifact, and a HashMap serializes in random per-process order — making the
     /// generated IR non-reproducible build-to-build (spurious diffs / cache churn).
     /// only ever read via `.get(name)`, so the ordering is otherwise irrelevant.
@@ -214,8 +214,8 @@ pub struct Prepared {
     /// flat index is computed ONCE from buffer 0 and aliased to every other
     /// buffer — the `View` collapse of N strided index computations into one.
     /// only valid for kernels whose buffers are all co-located cell-centered
-    /// fields over one grid (c2p, hydro flux, the cfl wave-speed maps); NOT for
-    /// cross-grid (amr prolong/restrict) or staggered (mhd efield/bface) kernels.
+    /// fields over one grid (c2p, hydro flux, the cfl wave-speed maps); cross-grid
+    /// (amr prolong/restrict) and staggered (mhd efield/bface) kernels are excluded.
     /// derived in `prepare` from the kernel name until real per-field layout
     /// identity lands. the carrier oracle is the correctness gate.
     #[serde(default)]
@@ -385,8 +385,8 @@ pub fn kernel_scalar_params_typed_from_ir(ir: &str) -> Vec<(ScalarBind, bool)> {
 }
 
 /// spell a `Prepared` kernel in `R`'s backend: rewrite FieldLoadAt to the backend's
-/// flat-index form (the one renderer-dependent step, so it lives HERE not in
-/// `prepare`), then emit the source. `render(deserialize(serialize(prepare(g))), r)`
+/// flat-index form (the one renderer-dependent step, so it lives in this render
+/// pass, downstream of `prepare`), then emit the source. `render(deserialize(serialize(prepare(g))), r)`
 /// equals `render(prepare(g), r)` — the round-trip is the correctness proof.
 pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescriptor {
     // branch-free spelling for backends that want it. runs BEFORE the
@@ -400,7 +400,7 @@ pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescrip
 
     // buf-index lookups, rederived from the bindings (consistent by construction):
     // field-bind -> buffer, and IR key -> buffer (via the field-input path). the join
-    // is keyed by `FieldBind`, NOT by the raw runtime string: a producer mints two
+    // is keyed by `FieldBind`: a producer mints two
     // spellings for the SAME buffer (`prim.vel_k` c2p-write vs `prim.vel[k]`
     // reconstruction-read), and both parse to the same `FieldRef` — so a string key
     // would silently miss across the dual spellings. parsing each side to `FieldBind`
@@ -600,7 +600,7 @@ fn render_source<R: KernelRenderer>(
     }
 
     // ---- diagnostic: a param the scalarizer kept but no caller declared (a
-    //      wiring bug). emit a comment rather than silently drop. emits nothing
+    //      wiring bug). emit a comment flagging it; a silent drop would hide it. emits nothing
     //      for well-formed kernels, so output is unchanged in the normal case.
     let coord_names: Vec<String> = p
         .coord_components

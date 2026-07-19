@@ -327,7 +327,7 @@ mod tests {
         // Assign writes the PRIM state (not cons), one DAG per slot.
         let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
         assert_eq!(paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
-        // Assign has NO `dt` weight (it is a prescription, not an RHS).
+        // Assign has NO `dt` weight (it is a prescription).
         assert!(
             !k.scalar_params.contains(&"dt".to_string()),
             "Assign carries no dt weight"
@@ -544,7 +544,7 @@ mod tests {
 
         // the recovered pressure is the Wu-2017 cone select over the fixed-count inline Newton
         // loop: `pre = select(q(U)/D > 0, newton_p, cone_fail_sentinel)`. the select's THEN branch
-        // is the ONE Op::IterateInline (the deep Newton stays folded, not an exponential tree); the
+        // is the ONE Op::IterateInline (the deep Newton stays folded); the
         // ELSE branch is the shared non-positive out-of-cone sentinel (see c2p_result).
         let pre_id = writes
             .iter()
@@ -707,7 +707,7 @@ mod tests {
         // the iso flux is the Newtonian flux at gamma->1 (sound speed sqrt(p/rho) from the
         // reconstructed prim.pre = cs^2(x)*rho — locally isothermal) MINUS the energy flux.
         // so it reconstructs prim.pre and writes only den + mom. it is gamma-INDEPENDENT (the
-        // sound speed comes from the reconstructed pressure, not gamma), so the only scalar is
+        // sound speed comes from the reconstructed pressure), so the only scalar is
         // the PLM limiter `theta`.
         let (k, writes) = iso_flux_gv::<1>(0);
         assert_eq!(
@@ -787,7 +787,7 @@ mod tests {
             k.graph.errors()
         );
         // THE WIN: the quartic's resolvent-cubic transcendentals are GONE from the flux —
-        // they live only in rmhd_wave_speeds_cell_gv now (computed once per cell, not per face).
+        // they live only in rmhd_wave_speeds_cell_gv (computed once per cell).
         use symbi_ir::graph::ElementWiseOp as E;
         let has_transcendental = (0..k.graph.len()).any(|i| {
             matches!(
@@ -989,7 +989,7 @@ mod tests {
 
         // converges within the count: keep-OLD freezes at the last pre-threshold value
         // (4: at prev=4, cur=5 trips `cur >= 5`, so the OLD 4 is kept). the traced loop
-        // must freeze there, NOT run to count=20.
+        // must freeze there at 4, short of the full count=20.
         let host = ramp::<f64>(0.0, 20, 5.0);
         let gv = run_gv(20, 5.0, 0.0);
         assert_eq!(
@@ -1020,7 +1020,7 @@ mod tests {
         // the DUAL of iterate: `S::cond` is a real data-dependent branch. the
         // untaken arm computes acosh(x) (NaN for x < 1); with `cond` it traces
         // INTO the `if` block and runs ONLY when x > 1 — a carrier-portable
-        // early-`if`, not compute-all-paths.
+        // early-`if`.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
         use symbi_ir::{Cpu, CpuField, CpuFieldMut, KernelEmitInputs, emit_kernel_from_lowering};
 

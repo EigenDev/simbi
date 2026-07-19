@@ -6,7 +6,7 @@
 // KernelSet method, dispatched per RK stage when has_bodies()).
 //
 //   - cpu: uniform fluid at rest around a central mass develops INWARD radial momentum,
-//     stays finite, conserves mass (gravity touches mom/nrg, not den).
+//     stays finite, conserves mass (gravity touches only mom/nrg, so den is invariant).
 //   - cuda: the body_gravity_source kernel runs on device and matches CPU < 1e-9.
 //
 // run: cargo test -p symbi --test body_gravity_evolve            (cpu)
@@ -250,7 +250,7 @@ fn fofc_freeze_preserves_body_gravity() {
 // -----------------------------------------------------------------------------
 // ISOTHERMAL freeze-tier body source (thin-disk sims): the energy-free twin of the gate above. the
 // iso freeze parachute uses the isothermal EOS (p = cs^2 * rho, always positive with the density) so
-// only the density guard applies, and the eos param is cs rather than gamma. same A/B on the two
+// only the density guard applies, and the eos param is the sound speed cs. same A/B on the two
 // select kernels: `with_body` must add the inward gravity impulse to every frozen cell.
 // -----------------------------------------------------------------------------
 #[test]
@@ -596,7 +596,7 @@ fn black_hole_records_accretion_without_changing_mass() {
             "total_accreted_mass non-finite"
         );
         // the recorded accretion ~ the fluid mass the sink removed (same sign + order; the
-        // outflow BC + 1st-order feedback timing make this approximate, not exact).
+        // outflow BC + 1st-order feedback timing make this approximate).
         let mut fluid_mass1 = 0.0;
         for c in sim.geom.interior.iter() {
             fluid_mass1 += *sim.fields.cons.den.view().at(c);

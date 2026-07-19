@@ -16,7 +16,7 @@
 //           + Σ_user S_user(U)
 //
 // composition is **purely additive** (A1's commutative + associative `Add`),
-// so the order of overlay kinds is documentation, not semantics. but the
+// so the order of overlay kinds is documentation only. but the
 // runtime exposes a stable iteration order — geometric, gravity, IB, user —
 // so audit-mode source-map entries are deterministic.
 //
@@ -123,7 +123,7 @@ impl FusedSourceFamily {
     /// the `SourceSpec` list this family expands to — feeds the additive
     /// composition validator + the AOT build-time codegen. `d` = grid
     /// dimension (each `build_source` is dimension-generic). `has_energy`
-    /// comes from the parent regime, NOT the family — the same
+    /// comes from the parent regime; the family declaration leaves it unset — the same
     /// `UniformAcceleration` declaration composes with iso (mom-only) AND
     /// adiabatic / rhd / rmhd (mom + nrg) by varying just this flag.
     pub fn to_source_specs(&self, d: usize, has_energy: bool) -> Vec<SourceSpec> {
@@ -454,8 +454,8 @@ impl<'a> SimulationLaws<'a> {
         // every overlay source targets a known field — and isothermal
         // regimes reject nrg-targeted overlays specifically. the iso check
         // fires FIRST so the diagnostic is the more specific
-        // `EnergyOverlayOnIsothermal` rather than the generic
-        // `UnknownTargetField` (iso's `nrg` is "unknown" by structure but
+        // `EnergyOverlayOnIsothermal`; the generic
+        // `UnknownTargetField` is preempted (iso's `nrg` is "unknown" by structure but
         // the user-facing reason is "iso has no energy equation").
         for source in self.overlays() {
             if !self.regime.has_energy && source.target_field == "nrg" {
@@ -980,8 +980,8 @@ mod tests {
     fn spec_data_drives_primary_cuda_emit_end_to_end() {
         // spec data → SimulationLaws → composition → primary scalarize emit →
         // concrete CUDA C. raw literals stay raw (precision-explicit via buffer
-        // ptr types); the math functions are libdevice names (`sqrt`, NOT
-        // `.sqrt()`), and there is no carrier-generic `S::from_f64` wrap.
+        // ptr types); the math functions are libdevice names (`sqrt`, the bare
+        // C name; no `.sqrt()` method call), and there is no carrier-generic `S::from_f64` wrap.
         use crate::source_spec::point_mass_gravity_sources;
 
         let sim =
@@ -1078,7 +1078,7 @@ mod tests {
             .expect("canonical newtonian disk stack must validate");
 
         // mom has gravity + cyl geometric + rigid penalty, nrg has gravity energy;
-        // den is untargeted (the accretion drain is a kernel, not a SourceSpec overlay).
+        // den is untargeted (the accretion drain is a standalone kernel, outside the SourceSpec overlay path).
         assert_eq!(sim.sources_for("den").count(), 0);
         assert_eq!(sim.sources_for("mom").count(), 3);
         assert_eq!(sim.sources_for("nrg").count(), 1);

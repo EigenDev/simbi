@@ -3,7 +3,7 @@
 #
 # the config summary hook: SimbiProblem.summary() rows (derived quantities)
 # join the declared params in the runner's custom_params collection — the
-# live dashboard's problem-setup panel — instead of printing from __del__.
+# live dashboard's problem-setup panel.
 # =============================================================================
 
 from typing import Annotated

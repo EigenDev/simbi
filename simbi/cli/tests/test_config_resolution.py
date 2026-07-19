@@ -6,8 +6,7 @@
 # - a name shared by SEVERAL configs must NOT silently run the first one the
 #   directory walk visited: non-interactive resolution fails loudly with the
 #   full candidate paths; a tty gets a numbered prompt (not exercised here)
-# - an explicit .py path that does not exist fails at parse time, not later
-#   inside the loader
+# - an explicit .py path that does not exist fails at parse time
 # - an unknown name suggests the closest known names before the full listing
 # =============================================================================
 from argparse import ArgumentTypeError

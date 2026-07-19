@@ -62,8 +62,8 @@ pub struct BodyCollection<S: Scalar, const D: usize> {
     pub binary_params: Option<BinaryParams<S>>,
 
     // explicit binary-system capability flag: selects the dittmann & ryan (2020)
-    // 2d accretion weight and enables prescribed orbital advance. NOT derived from
-    // the display `name` (renaming the collection must not silently change physics).
+    // 2d accretion weight and enables prescribed orbital advance. set explicitly by
+    // the builder, so renaming the display `name` leaves the physics untouched.
     binary: bool,
 
     // subcycle snapshot
@@ -110,7 +110,7 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
     }
 
     /// flag this collection as a binary system (accretion-weight + orbital-advance
-    /// capability). explicit, not inferred from the display name.
+    /// capability). set explicitly by this builder call, independent of the display name.
     pub fn as_binary(mut self) -> Self {
         self.binary = true;
         self

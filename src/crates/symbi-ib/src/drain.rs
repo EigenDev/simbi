@@ -45,7 +45,7 @@ pub fn drain_mask<S: Scalar>(dist: S, r_mask: S, w: S) -> S {
 /// fast enough that the mask stays evacuated and never backs up; in the
 /// well-posed regime (`r_mask` inside the sonic surface) the emergent rate is
 /// INSENSITIVE to `c_drain` once it is small enough -- the sonic surface
-/// regulates the rate, not the drain. `c_drain` is a convergence-study dial,
+/// sets the emergent rate. `c_drain` is a convergence-study dial,
 /// never tuned to hit a target rate.
 #[inline]
 pub fn drain_timescale<S: Scalar>(dx: S, c_s: S, c_drain: S) -> S {
@@ -87,7 +87,7 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
 /// so the stored primitive is stale; the drain timescale's `c_s` must come from the
 /// just-updated `cons`. `e_int = (nrg - 0.5 |mom|^2 / den) / den`, then
 /// `c_s = sqrt(gamma (gamma - 1) e_int)`. a one-line inversion (no root-find: the sound
-/// speed needs only the internal energy, not the full primitive). regime-local; the caller
+/// speed needs only the internal energy). regime-local; the caller
 /// supplies gamma. NOT used by the isothermal regime, which carries a fixed `c_s = c_iso`.
 #[inline]
 pub fn sound_speed_from_cons<S: Scalar>(den: S, mom_sq: S, nrg: S, gamma: S) -> S {
@@ -202,7 +202,7 @@ mod tests {
     }
 
     // c_s recovered from cons matches the analytic sqrt(gamma p / rho) (option 1: the drain
-    // reads the just-updated cons, not the stale prim).
+    // reads the just-updated cons).
     #[test]
     fn sound_speed_from_cons_matches_analytic() {
         let (gamma, rho, p) = (5.0f64 / 3.0, 2.5f64, 1.4f64);
@@ -262,7 +262,7 @@ mod tests {
         assert!(outer / inner < 1e-6, "drain not localized: outer/inner = {}", outer / inner);
         // Mdot = absorbed mass / dt is a positive functional of the flow.
         assert!(mdot_mass / dt > 0.0);
-        // (3) emergent, not targeted: doubling the density field doubles the absorbed mass.
+        // (3) emergent: doubling the density field doubles the absorbed mass.
         let (mdot_mass_2x, ..) = field(2.0);
         assert!((mdot_mass_2x - 2.0 * mdot_mass).abs() < 1e-13, "rate is not a linear flow-functional");
     }

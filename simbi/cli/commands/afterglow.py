@@ -111,7 +111,7 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
     from ...afterglow.generate import _read_snapshot_time, _snapshot_emission_durations
 
     n_pix = args.n_pix
-    # each checkpoint emits over its trapezoidal share of the snapshot-time axis, not the CFL dt.
+    # each checkpoint emits over its trapezoidal share of the snapshot-time axis.
     hydro = sorted((p for p in paths if not _is_event_catalog(p)), key=_read_snapshot_time)
     durations = dict(
         zip(hydro, _snapshot_emission_durations([_read_snapshot_time(p) for p in hydro]))
@@ -121,7 +121,7 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
         # accumulate over the input's event handles: a saved catalog streams in row-chunks
         # (bounded memory), a checkpoint is one handle. with a FIXED half_width the chunks
         # share the grid so summing intensities is exact; in the sizing pass (half_width=0)
-        # the per-chunk grids differ but only the max extent `hw` is used, not the sum.
+        # the per-chunk grids differ but only the max extent `hw` is used.
         total = None
         hw_max = 0.0
         for cat in _iter_event_handles(
@@ -1287,7 +1287,7 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
 
     # auto-range the sweep to where the flux is, unless the user pinned the endpoints. the
     # window is read from the MERGED handle via a throwaway catalog dump (so it spans all
-    # provided epochs, not just one input).
+    # provided epochs).
     if args.t_start is None or args.t_stop is None:
         t0, _, t1 = _handle_arrival_window(
             catalog, rad_hydro, manifest, observer, nhat, doppler_power

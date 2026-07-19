@@ -290,7 +290,7 @@ fn detect_interface_f64_truth_table() {
     // smooth density (rho jump 0 < 0.1), small pre jump -> 0.0
     assert_eq!(detect_interface(&l(1.0, 1.0), &l(1.0, 1.01)), 0.0);
 
-    // big rho jump but big pre jump too (shock, not contact: pre_jump > 0.05) -> 0.0
+    // big rho jump but big pre jump too (pre_jump > 0.05 marks a shock, so no contact) -> 0.0
     assert_eq!(detect_interface(&l(1.0, 1.0), &l(2.0, 2.0)), 0.0);
 
     // neither -> 0.0

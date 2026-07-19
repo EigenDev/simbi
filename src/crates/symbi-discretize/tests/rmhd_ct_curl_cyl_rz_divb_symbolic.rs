@@ -6,9 +6,9 @@
 // rational-function coefficient cancellation on the traced IR DAG. the structural
 // counterpart to the numerical nmhd_rotor_cyl_rz gate.
 //
-// this is the curl that carried a SIGN BUG (dir=1 / B_z had +d_r(r E) instead of
-// -d_r(r E)); div(B) blew to O(1) in one step. this proof would have caught it: the
-// telescoping leaves the E reads at 2x instead of cancelling. it is the instant,
+// this is the curl that carried a SIGN BUG: dir=1 / B_z used +d_r(r E) where the correct
+// term is -d_r(r E); div(B) blew to O(1) in one step. this proof would have caught it: the
+// telescoping leaves the E reads at 2x where they should cancel to zero. it is the instant,
 // always-true guard the numerical rotor test only approximates.
 //
 // the 2D curl from the single out-of-plane corner EMF E (`ez`):

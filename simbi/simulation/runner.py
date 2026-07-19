@@ -71,7 +71,7 @@ def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
         rows.append([group, fname.replace("_", " "), formatted])
     # the config's DERIVED quantities (the summary() hook): same panel, own
     # groups — the declared dials and the numbers computed from them side by
-    # side, rendered by the dashboard instead of printed from __del__.
+    # side, rendered by the dashboard.
     for group, label, value in problem.summary():
         rows.append([str(group), str(label), str(value)])
     return rows
@@ -87,8 +87,8 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
 
     # silence the benign pydantic serialization warnings for numpy scalar types (e.g. np.uint64
     # cell counts) crossing into the rust backend. the warning is emitted from
-    # `pydantic._internal._serializers`, NOT `pydantic.main`, so match by message across all modules
-    # and scope it to the dump so nothing else is suppressed.
+    # `pydantic._internal._serializers` (a module filter on `pydantic.main` would miss it), so
+    # match by message across all modules and scope it to the dump so nothing else is suppressed.
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -404,9 +404,9 @@ def run(
     # stochastic IC seeds gas and B from the same draw.
     prim_iterator, bfield_iterators = _get_iterators(problem)
     # first-tuple contract check, always on: one tuple costs nothing and catches
-    # the classic generator-contract violations (calling gen() instead of
-    # passing gen, wrong tuple arity, NaN or non-positive density/pressure)
-    # with a message naming the contract instead of a distant TypeError.
+    # the classic generator-contract violations (calling gen() where gen itself
+    # must be passed, wrong tuple arity, NaN or non-positive density/pressure)
+    # with a message naming the contract.
     prim_iterator = _check_first_tuple(problem, prim_iterator)
 
     # get scale factor functions
@@ -447,7 +447,7 @@ def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasState
         ) from None
     # where the regime fixes the width exactly, pin it: the reader maps the tuple
     # positionally, so a too-long tuple silently shifts a trailing field (e.g.
-    # pressure) into an ignored slot rather than erroring. regimes whose width is
+    # pressure) into an ignored slot without erroring. regimes whose width is
     # not uniquely determined (isothermal's optional p, relativistic hydro's
     # chart-dependent velocity dof) return None and get a lower-bound check.
     if not hasattr(first, "__len__"):
@@ -472,7 +472,7 @@ def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasState
     else:
         # velocities are never optional: every regime carries at least one velocity
         # per spatial dimension (curvilinear/relativistic charts may carry MORE —
-        # transverse components — which is why this is a floor, not an exact width).
+        # transverse components — which is why this is a floor).
         # only the trailing pressure is optional, and only for isothermal.
         isothermal = getattr(problem, "isothermal", False)
         ndim = getattr(problem, "dimensionality", 1)

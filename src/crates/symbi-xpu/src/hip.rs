@@ -8,7 +8,7 @@
 // api -- a device is bound per-thread with `hipSetDevice(ord)` and the primary
 // context is implicit. so there is NO context registry here; `with_device` is just
 // save / set / restore, and the per-device dispatcher registry keys on the ordinal
-// exactly as the cuda path does. peer copy takes device ORDINALS, not contexts.
+// exactly as the cuda path does. peer copy takes device ORDINALS.
 //
 // link: -lamdhip64 (set in build.rs under the hip feature).
 // =============================================================================
@@ -89,7 +89,7 @@ unsafe extern "C" {
     fn hipDeviceGetName(name: *mut c_char, len: c_int, dev: hipDevice_t) -> hipError_t;
     fn hipDeviceTotalMem(bytes: *mut usize, dev: hipDevice_t) -> hipError_t;
     // peer access + cross-device copy. hipMemcpyPeer takes device
-    // ORDINALS (not contexts), which is simpler than the cuda context-based form.
+    // ORDINALS, simpler than the cuda context-based form.
     fn hipMemcpyPeer(
         dst: *mut c_void,
         dst_device: c_int,
@@ -184,7 +184,7 @@ fn ensure_init() -> error::Result<()> {
 
 /// run `f` with device `ord` bound on this thread, restoring the previous device after. binds a
 /// tile's kernels to its gpu: launch / alloc / sync target "the current
-/// device", so the right one is made current rather than threading a device id through.
+/// device", so the target device is made current on this thread for the closure.
 pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     let prev = current_device();
     ensure_init_device(ord).expect("with_device: hipSetDevice");
@@ -206,7 +206,7 @@ pub fn ctx_sync() {
 
 // =============================================================================
 // peer access: direct device-to-device halo copy. mirrors the cuda
-// surface so `decomp::PeerCopy` is backend-agnostic; hip takes ordinals, not contexts.
+// surface so `decomp::PeerCopy` is backend-agnostic; hip keys on device ordinals.
 // =============================================================================
 
 /// can device `ord` directly read memory resident on device `peer`?
@@ -427,7 +427,7 @@ impl ExecutionSpace for HipSpace {
     fn load_module(bytes: &[u8]) -> error::Result<HipModule> {
         ensure_init()?;
         let mut handle: hipModule_t = std::ptr::null_mut();
-        // the hiprtc output is a binary code object, not nul-terminated text -- load as-is.
+        // the hiprtc output is a raw binary code object; load the bytes as-is, without nul-termination.
         unsafe {
             check(
                 hipModuleLoadData(&mut handle, bytes.as_ptr() as *const c_void),

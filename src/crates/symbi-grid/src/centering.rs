@@ -4,8 +4,7 @@
 // field-centering marker types for staggered grids.
 // the `Centering` trait + `Cell` / `Face` / `Edge` zero-sized markers let
 // the type system distinguish cell-centered, face-centered, and edge-centered
-// fields — but NOT which axis they're staggered on. axis information lives
-// in array indices.
+// fields; the staggering axis is carried by array indices.
 //
 // usage:
 //   Field<f64, D, Mem>                    -> cell-centered (default)
@@ -18,7 +17,7 @@
 // markers are zero-sized phantom tags; no runtime cost. only the type
 // signature changes — stencil offsets stay coord-arithmetic.
 //
-// rationale for axis-erased markers (rather than `Face<const AX: usize>`):
+// rationale for axis-erased markers over a per-axis `Face<const AX: usize>`:
 // chalkboard kernels need `for cc in 0..D { bface[cc][coord] }` patterns.
 // arrays require uniform element types — `[Field<.., Face<0>>, Field<..,
 // Face<1>>, ...]` won't typecheck. the resolution is one array indexed by
@@ -35,14 +34,14 @@ impl Centering for Cell {}
 
 /// face-centered field: value at the centroid of a cell face.
 /// the specific axis of staggering is carried by the array index in the
-/// owning FieldGroup, not in the type.
+/// owning FieldGroup.
 #[derive(Copy, Clone, Debug)]
 pub struct Face;
 impl Centering for Face {}
 
 /// edge-centered field: value at the midpoint of a cell edge.
 /// the specific axis the edge is parallel to is carried by the array index
-/// in the owning FieldGroup, not in the type.
+/// in the owning FieldGroup.
 #[derive(Copy, Clone, Debug)]
 pub struct Edge;
 impl Centering for Edge {}

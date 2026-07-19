@@ -4,7 +4,7 @@
 # observer light curve F_nu(t), STREAMED over checkpoints via the cpu_ext catalog
 # path. each checkpoint -> in-process synchrotron catalog -> EATS reduce into the
 # fixed time bins -> accumulate -> DISCARD the events. memory is O(time_bins x freqs),
-# NOT O(total events), so it scales to many checkpoints (fine time binning) without
+# so it scales to many checkpoints (fine time binning) without
 # holding every photon. this is the SINGLE afterglow path (replaces symbi-rad-py's
 # self-contained read_cells/rad_hydro.lightcurve), so it inherits the lab-radius,
 # 2d-revolve, and units fixes.
@@ -56,7 +56,7 @@ def stream_lightcurve(
     freqs = [float(f) for f in frequencies]
 
     # each hydro checkpoint emits over the lab-time interval it REPRESENTS (its trapezoidal
-    # share of the snapshot-time axis), not the CFL step — weighting by the CFL dt would
+    # share of the snapshot-time axis) — weighting by the CFL dt would
     # undercount the emitted energy by (checkpoint cadence) / (CFL dt), typically ~1e5.
     hydro_paths = sorted(
         (p for p in checkpoints if not _is_event_catalog(p)), key=_read_snapshot_time

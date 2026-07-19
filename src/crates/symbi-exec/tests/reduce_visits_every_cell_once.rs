@@ -3,18 +3,18 @@
 //
 // the host fold (`field_reduce`) takes a PARALLEL path above `PAR_THRESHOLD` cells and a serial one
 // below. the parallel path slabs the outermost axis across rayon and walks each slab in STORAGE order
-// (CONTIGUOUS_AXIS innermost) so the fold streams memory instead of striding by `extent[0]` per cell.
+// (CONTIGUOUS_AXIS innermost) so the fold streams memory contiguously; walking in index order would stride by `extent[0]` per cell.
 //
 // that hand-rolled slab walk is exactly the kind of index arithmetic that is correct-looking and
 // wrong: skip a cell or double-count one, and a Max reduce still returns a plausible number. so the
 // gate is an ADD over values chosen to be exactly representable — the sum pins the MULTISET of
-// visited cells, not just its maximum.
+// visited cells; dropping or double-counting a cell shifts the sum even where a max would still look plausible.
 //
 // what this CANNOT catch, by construction: a transposed or otherwise reordered walk. a reorder is a
 // permutation of the same multiset, and every reduce here is order-independent (min/max exactly;
 // add/mul over exact integers). so a walk that strides memory the wrong way is invisible to any
 // reduce test — which is precisely why the visit ORDER is derived from `symbi_algebra::nest_order`
-// and pinned by the layout laws, rather than checked here.
+// and pinned by the layout laws.
 //
 // run: cargo test -p symbi-exec --test reduce_visits_every_cell_once
 // =============================================================================

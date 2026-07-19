@@ -491,7 +491,7 @@ class SphericalBondiTest(SimbiProblem):
         # the FAR-FIELD ASYMPTOTIC Bondi reference (subsonic, OUTSIDE R_B -- where the outer buffer
         # sits). the O(1/r_norm) density (1 + 0.5/r_norm) and velocity (1 - 0.5/r_norm) corrections
         # CANCEL in rho*v, so the mass rate Mdot = 4*pi*r^2*rho*v is constant (the steady-state Bondi
-        # flux) to O(1/r_norm) -- consistent with the far-field asymptotic rate, not just Mdot_bondi.
+        # flux) to O(1/r_norm) -- consistent with the far-field asymptotic rate.
         # EoS-generic: cs_eq carries the gamma-dependent enthalpy correction and p = rho*cs^2/gamma.
         # convention: r_norm uses R_B = 2GM/cs^2 (the profile), self.bondi_radius is R_B = GM/cs^2.
         cs = self.ambient_sound_speed

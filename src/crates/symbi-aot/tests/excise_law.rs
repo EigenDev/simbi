@@ -33,7 +33,8 @@ fn face(ii: usize) -> f64 {
     X_LO + ii as f64 * DX
 }
 
-// the kernel's centroid: the face midpoint, NOT x_lo + (i + 0.5) dx (one ulp apart).
+// the kernel's centroid is the face midpoint (face(i) + face(i+1)) / 2; the algebraically
+// equal x_lo + (i + 0.5) dx lands one ulp away, so use the face midpoint form.
 fn xc(ii: usize) -> f64 {
     (face(ii) + face(ii + 1)) * 0.5
 }

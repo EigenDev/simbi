@@ -5,7 +5,7 @@
 // deepest substrate regime (a KKC vector-state bracketed false-position over
 // kkc_fmu44, find_mu_plus + Illinois half-damp, 100-step bound baked at codegen,
 // lowered + emitted to compiled Rust via the DAG-preserving lowering). this is the
-// proof the COMPILED kernel produces correct numbers, not just compilable code
+// proof the COMPILED kernel produces correct numbers at run time
 // (the IR graph itself is validated against the reference c2p in
 // symbi-discretize/tests/rmhd_c2p.rs).
 //

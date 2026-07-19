@@ -547,7 +547,7 @@ class SimbiProblem(BaseModel):
     @property
     def is_mhd(self) -> bool:
         """check if simulation involves mhd."""
-        return self.regime in [Regime.SRMHD, Regime.NMHD, Regime.IMHD]
+        return self.regime in [Regime.RMHD, Regime.NMHD, Regime.IMHD]
 
     @computed_field
     @property
@@ -604,7 +604,7 @@ class SimbiProblem(BaseModel):
     @property
     def is_relativistic(self) -> bool:
         """check if simulation is relativistic."""
-        return self.regime in [Regime.RHD, Regime.SRMHD]
+        return self.regime in [Regime.RHD, Regime.RMHD]
 
     @computed_field
     @property
@@ -1208,9 +1208,9 @@ class SimbiProblem(BaseModel):
         parser = argparse.ArgumentParser(add_help=False)
         cls.setup_cli(parser)
 
-        # parse into existing namespace (if provided). REJECT unrecognized flags instead of
-        # silently ignoring them (a typo'd or unsupported flag must fail loudly, not run with the
-        # default and mislead the user).
+        # parse into existing namespace (if provided). REJECT unrecognized flags; a typo'd
+        # or unsupported flag must fail loudly here, since silently ignoring it would run
+        # with the default and mislead the user.
         parsed, extras = parser.parse_known_args(argv, namespace)
         if extras:
             raise ConfigError(

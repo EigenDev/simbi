@@ -3,7 +3,7 @@
 #
 # the reduced-dimension OUT-OF-PLANE energy-conservation gate (spec §6 / oop_predictor_spec.md).
 # on a smooth periodic 1.5D relativistic-MHD flow whose transverse By is a cell-centered
-# conserved variable (flux-evolved by the out-of-plane predictor, NOT CT-interpolated), the
+# conserved variable (flux-evolved by the out-of-plane predictor), the
 # total energy tau must hold to machine roundoff at EVERY resolution. this is the companion to
 # test_mhd_energy_conservation (which covers the in-plane/CT energy with a zero out-of-plane
 # field): it witnesses that the Poynting gas flux F_tau conserves the out-of-plane magnetic

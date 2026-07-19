@@ -31,7 +31,7 @@ fn driven_inflow_prescribes_the_ghost_state() {
         .finish()
         .unwrap();
     // interior at rest, density 1 — DELIBERATELY different from the inflow, so the test proves the
-    // ghost state comes from the DAG, not pulled from the interior.
+    // ghost state comes from the DAG; had it been copied from the interior it would carry density 1.
     sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
 
     // prescribe [rho=2, vel_0=1, vel_1=0, pre=3] (constants).

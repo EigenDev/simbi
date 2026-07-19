@@ -12,7 +12,7 @@
 // wall absorbs the drag heat and an adiabatic wall (l_e = 0) keeps it —
 // unconditionally stable for any dt, and commuting exactly under property stack
 // reordering: the energy reconstruction reads the TOTAL velocity relaxation (for the
-// wall-work / dissipation term below), not any single property's contribution, so
+// wall-work / dissipation term below) summed across all properties, so
 // the accumulated Relax is order-independent.
 //
 // the conserved reconstruction is spelled as CONSERVED SCALING PLUS
@@ -486,11 +486,11 @@ mod tests {
     // (p = 1) removes mass at the LOCAL gas velocity, so the body absorbs the
     // gas's full momentum -- force = Mdot u -- and the accretion torque is the
     // moment of that, Mdot (r x u)_z = Mdot |r| v_orb for azimuthal motion. this
-    // is a STANDARD (angular-momentum-absorbing) sink, NOT the torque-free
-    // dittmann prescription: the booked torque is the physical angular-momentum
-    // flux of the accreted gas, exact by conservation (gas loss = body gain). a
+    // is a STANDARD (angular-momentum-absorbing) sink: the booked torque is the
+    // physical angular-momentum flux of the accreted gas, exact by conservation
+    // (gas loss = body gain). a
     // purely radial inflow (u parallel r) carries no angular momentum and books
-    // exactly zero torque -- the torque tracks the real flow, not a grid artifact.
+    // exactly zero torque -- the torque tracks the real flow.
     #[test]
     fn drain_books_the_physical_accretion_torque_in_2d() {
         type Cons2 = ConsG<f64, 2, Adiabatic>;
@@ -620,7 +620,7 @@ mod tests {
 
         // (1) full evacuation: the conserved state stays FINITE (no NaN). the cap
         // bounds the tangential factor at 1/f_floor, so `den' (du_t g_t)` is
-        // `0 * finite = 0`, not `0 * inf = NaN`.
+        // `0 * finite = 0`, avoiding the `0 * inf = NaN` pathology.
         let u = Tensor::new([0.3, 0.7]);
         let cons: Cons2 =
             ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
@@ -787,7 +787,7 @@ mod tests {
         let k = base.at(&x_rel);
         // seed the gas EXACTLY co-moving: same helper, same bits. den is a
         // power of two so the kernel's u = mom * (1/den) round trip is exact
-        // and du is a true +-0, not an ulp.
+        // and du is a true +-0.
         let den = 2.0;
         let u = base.u_solid + omega_cross(&base.omega, &x_rel);
         let e_int = 1.3;

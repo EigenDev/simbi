@@ -136,7 +136,7 @@ class _KsMhdExcised3D(SimbiProblem):
     spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_SCHILD)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     excision_radius: Annotated[float, ProblemParam(0.0, cli=True)]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD)]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD)]
     resolution: Annotated[tuple[int, int, int], ProblemParam((RES, RES, RES))]
     bounds: Annotated[
         list[tuple[float, float]],
@@ -262,7 +262,7 @@ def test_mhd_excision_runs_and_preserves_densitized_divb() -> None:
     assert near_leak < 1e-3, f"near-horizon MHD excision leakage too large: {near_leak:e}"
     # the outward-decay shape is meaningful only when the leakage is a genuine
     # causal signal; below ~1e-5 relative both bands are roundoff accumulation,
-    # which has no radial shape — bound it instead of shaping it.
+    # which has no radial shape — bound it without asserting a decay shape.
     if near_leak > 1e-5:
         assert far_leak < 0.2 * near_leak, (
             f"MHD excision leakage does not decay outward: near {near_leak:e}, far {far_leak:e}"

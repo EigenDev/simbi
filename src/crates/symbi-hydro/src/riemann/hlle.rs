@@ -37,7 +37,7 @@ pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
 
 /// the HLLE combine with the fan speeds `(s_l, s_r)` supplied by the caller — the body of
 /// `hlle` after `extremal_speeds`. lets a face flux reuse wave speeds materialized once per
-/// cell instead of re-solving the (quartic, for RMHD) speed at every face.
+/// cell, avoiding a re-solve of the (quartic, for RMHD) speed at every face.
 ///
 /// the fan is the CLAMPED closed form: with `bm = min(s_l - vface, 0)` and
 /// `bp = max(s_r - vface, 0)`, the single expression
@@ -45,7 +45,7 @@ pub fn hlle<S: Scalar, const D: usize, R: Regime<S, D>>(
 /// reduces algebraically to the upwind flux `f_l - vface*u_l` when `s_l >= vface`
 /// (bm = 0), to `f_r - vface*u_r` when `s_r <= vface` (bp = 0), and to the
 /// galilean moving-face HLL average `f_hll - vface*u_hll` in the subsonic fan —
-/// one branch-free expression instead of a three-way wave select. the guard
+/// one branch-free expression subsuming the three-way wave select. the guard
 /// covers the degenerate fan `bp == bm == 0` (both waves riding the face),
 /// where the closed form is 0/0; the upwind states coincide there.
 pub fn hlle_with_speeds<S: Scalar, const D: usize, R: Regime<S, D>>(
@@ -110,8 +110,8 @@ mod tests {
     // the clamped closed form must reduce to the pure upwind flux outside the fan:
     // s_l >= vface collapses bm to zero and the expression to f_l - vface*u_l (up to
     // the bp*(x)*(1/bp) rounding of the closed form); s_r <= vface mirrors to the
-    // right state. tolerance-level, not bitwise — the closed form multiplies and
-    // divides by the surviving wave speed.
+    // right state. the match is tolerance-level because the closed form multiplies and
+    // divides by the surviving wave speed and cannot reproduce the exact upwind bits.
     #[test]
     fn hlle_fan_reduces_to_upwind() {
         let regime = Newtonian;

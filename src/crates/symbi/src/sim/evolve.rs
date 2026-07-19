@@ -17,8 +17,8 @@ use symbi_hydro::eos::Eos;
 use symbi_geometry::Metric;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 use crate::sim::state::*;
-// the KernelSet trait lives at the sim<->substrate seam; the driver is a consumer
-// of the contract, not its home. re-exported so the `sim::evolve::KernelSet` path
+// the KernelSet trait lives at the sim<->substrate seam; the driver only consumes
+// the contract. re-exported so the `sim::evolve::KernelSet` path
 // resolves for downstream callers.
 pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
@@ -107,7 +107,7 @@ where
     // MHD setup guardrail: constrained transport evolves the STAGGERED face B (`bface`) as the
     // divergence-free ground truth. if it was never seeded, the CT integrates garbage faces — the
     // classic first-MHD-run mistake (seeding cell-centered B via seed_cell/seed_cells alone does
-    // NOT initialize the faces). fail early + actionably instead of marching to a deep c2p/dt panic.
+    // NOT initialize the faces). fail early + actionably here; otherwise the run marches to a deep c2p/dt panic.
     // one-time check at entry (zero per-step cost); every real MHD IC sets the flag via seed_face.
     if let Some(mhd) = sim.fields.mhd.as_ref() {
         assert!(
@@ -308,8 +308,8 @@ where
 // list, and a debug-only assert verifies every phase's reads were produced by an
 // earlier phase's writes (or were stage-entry-current) — the implicit ordering
 // invariant made explicit + machine-checked. a reordered or newly-inserted phase
-// that reads a stale field trips the assert instead of silently running on last
-// step's data. zero hot-path cost: the pipeline is `const`, dispatch is a `match`,
+// that reads a stale field trips the assert; silently running on last step's
+// data is the failure it prevents. zero hot-path cost: the pipeline is `const`, dispatch is a `match`,
 // the assert is debug-only, and the calls / order / gates are byte-identical to
 // a hand-written imperative sequence.
 //

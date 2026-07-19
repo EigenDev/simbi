@@ -75,7 +75,7 @@ class GrDiskFieldLoop(SimbiProblem):
         CoordSystem,
         ProblemParam(CoordSystem.PLANAR_CYLINDRICAL, description="the (R, phi) equatorial disk"),
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, cli=True, description="solver")]
     ct_method: Annotated[
         CtMethod, ProblemParam(CtMethod.UCT, cli=True, description="CT edge-EMF method")

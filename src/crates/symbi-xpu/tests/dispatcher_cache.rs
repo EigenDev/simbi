@@ -2,7 +2,8 @@
 // dispatcher_cache.rs
 //
 // **the dispatcher discipline canary**: the JIT/binary kernel cache MUST
-// dedup by SOURCE CONTENT, not just by user-supplied name. without this:
+// dedup by SOURCE CONTENT; a user-supplied name alone does not distinguish
+// two sources. without this:
 //
 //   1. two callers passing the same `kernel_name` (or `cache_key`) but
 //      distinct source strings would silently share a cache slot;
@@ -104,7 +105,7 @@ fn very_small_content_changes_produce_different_keys() {
 fn binary_content_is_hashed_same_as_source() {
     // the dispatcher uses the same content-hash helper for pre-compiled PTX
     // as for NVRTC source (`jit_kernel_keyed`). asserting the helper works on
-    // arbitrary byte slices, not just text.
+    // arbitrary byte slices, text or binary alike.
     let bin_a: &[u8] = &[0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01]; // ELF magic-ish
     let bin_b: &[u8] = &[0x7f, 0x45, 0x4c, 0x46, 0x02, 0x02]; // one byte different
     let k_a = compute_internal_cache_key("ptx_blob", bin_a);

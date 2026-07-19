@@ -41,7 +41,7 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
     kappa: Annotated[
         float, ProblemParam(1.3, cli=True, description="FM angular-momentum parameter (fat torus)")
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.SRMHD, description="physics regime (RMHD)")]
+    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime (RMHD)")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLD, cli=True, description="Riemann solver")]
     ct_method: Annotated[
         CtMethod, ProblemParam(CtMethod.UCT, cli=True, description="CT edge-EMF (UCT-HLLD)")
@@ -110,7 +110,7 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
         # beta normalization: the minimum plasma beta over the DENSE CORE (rho > 0.5 of the actual
         # grid-peak density). the cut excludes the low-pressure torus surface, where beta is small
         # for any field and would otherwise pin the amplitude to a truncation-noise edge cell (the
-        # standard FM-MRI recipe). the threshold adapts to the resolved peak, not the nominal rho_max.
+        # standard FM-MRI recipe). the threshold adapts to the resolved peak.
         rho_peak = max((cell[ii][jj] or (0.0,))[0] for jj in range(npolar) for ii in range(nr))
         beta_min = math.inf
         for jj in range(npolar):

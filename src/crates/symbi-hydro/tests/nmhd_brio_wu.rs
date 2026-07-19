@@ -165,11 +165,11 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     assert!(tv_rc < 1.3 * tv_re, "HLLC rho OSCILLATES: TV {tv_rc:.4} vs hlle {tv_re:.4}");
     assert!(tv_bd < 1.3 * tv_be, "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}");
 
-    // 4) SAME solution as HLLE (sharper, not different): small L1 distance.
+    // 4) SAME solution as HLLE, only sharper: small L1 distance.
     assert!(l1_diff(&rho_d, &rho_e) < 0.05, "HLLD rho diverges from HLLE: L1 {}", l1_diff(&rho_d, &rho_e));
     assert!(l1_diff(&rho_c, &rho_e) < 0.05, "HLLC rho diverges from HLLE: L1 {}", l1_diff(&rho_c, &rho_e));
 
-    // 5) HLLD actually SHARPENS (does its job, not silently falling back to HLLE):
+    // 5) HLLD actually SHARPENS, confirming the HLLD path is active:
     //    the steepest density gradient is larger than HLLE's.
     let max_grad = |f: &[f64]| f.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f64, f64::max);
     assert!(

@@ -33,8 +33,8 @@ fn host_3d(alloc_hi: isize, lo: isize, hi: isize) -> (Domain<3>, Domain<3>) {
     (alloc, interior)
 }
 
-// one NaN cell among finite cells must make the max-reduction NaN, not the finite
-// max. this is the exact failure the keystone fixes.
+// one NaN cell among finite cells must make the max-reduction NaN (a reduction that
+// returned the finite max would swallow it).
 #[test]
 fn single_nan_cell_propagates_through_max_reduce() {
     let (alloc, interior) = host_3d(8, 2, 6);
