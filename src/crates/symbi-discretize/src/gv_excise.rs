@@ -39,7 +39,7 @@
 
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::Tensor;
-use symbi_geometry::{KerrKSCartesian, Metric, Spacetime};
+use symbi_geometry::{KerrKSCartesian, Metric};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -50,7 +50,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_ir::gv::Writes;
 use symbi_ir::{begin_trace, end_trace, FieldRef, Gv, GvKernel};
 
-use crate::coords::{Coords, Spacing};
+use crate::coords::{Coords, Spacing, Spacetime};
 use crate::gv::cell_geometry_gv;
 
 /// the vacuum-sink floor an excised cell is frozen at (Dirichlet, every step). a cold, c2p-safe

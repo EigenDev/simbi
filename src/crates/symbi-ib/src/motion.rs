@@ -96,6 +96,17 @@ pub fn apply_body_deltas<const D: usize>(
                 *total_accreted_mass += delta.mass_delta;
                 *accretion_rate = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
             }
+            // the GR horizon books BOTH the accreted rest mass AND the covariant energy the shell-flux
+            // reduction measured this step (the energy is exactly conserved, so edot is well-defined).
+            if let BodyKind::Horizon {
+                total_accreted_mass, total_accreted_energy, mdot, edot, ..
+            } = &mut body.kind
+            {
+                *total_accreted_mass += delta.mass_delta;
+                *total_accreted_energy += delta.energy_delta;
+                *mdot = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
+                *edot = if dt > 0.0 { delta.energy_delta / dt } else { 0.0 };
+            }
         }
     }
     // a PRESCRIBED binary orbit (fixed-potential) governs position/velocity when present and takes
