@@ -1235,7 +1235,9 @@ fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
         .scalars(&[
             ("dt", 0.01), ("a0", 0.0), ("ac", 1.0), ("mesh_hdil", 0.0),
             ("dx_0", 0.125), ("dx_1", 0.125), ("x_lo_0", 4.0), ("x_lo_1", 4.0),
-            ("schwarzschild_mass", 1.0),
+            // the covariant-energy godunov reconstructs the geodesic-source inertia rho h W^2 =
+            // h D^2/rho, so the stage now binds the EOS gamma.
+            ("schwarzschild_mass", 1.0), ("gamma", 5.0 / 3.0),
         ])
         .run();
     let close = |a: f64, b: f64| (a - b).abs() < 1e-11 * (1.0 + a.abs().max(b.abs()));

@@ -862,13 +862,13 @@ pub fn godunov_stage_gv_with_fused_built(
             &contribs.mom[k],
         ));
     }
-    // relativistic-hydro on a curved background evolves the COVARIANT (killing) energy ehat, whose
-    // self-contained flux f_ehat already carries the lapse + shift and whose source vanishes on a
-    // stationary metric (HARM/AthenaK; docs/covariant_energy.md). the RMHD energy is still the
-    // Valencia tau (the magnetized-stress lift is separate), so it keeps the lapse-weighted flux +
-    // geodesic source.
-    let is_covariant_energy =
-        spacetime != Spacetime::Minkowski && matches!(source, GeoSource::Hydro { .. });
+    // relativistic hydro AND MHD on a curved background evolve the COVARIANT (killing) energy ehat,
+    // whose flux is the free-index-down `-sqrt(-g)(T^t_t + rho u^t)` current and whose source vanishes
+    // on a stationary metric (HARM/AthenaK; docs/covariant_energy.md). RHD builds f_ehat in the regime;
+    // RMHD builds it as a linear re-split of the Valencia numerical fluxes in the flux kernel (keeping
+    // the Valencia-native HLLD / CT machinery). both feed the same pure-conservation energy law here.
+    let is_covariant_energy = spacetime != Spacetime::Minkowski
+        && matches!(source, GeoSource::Hydro { .. } | GeoSource::Rmhd);
     let nrg_g = has_energy.then(|| {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
