@@ -780,6 +780,8 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
             im.diagnostics.accumulate(symbi_ib::BodyDelta {
                 idx: b,
                 force_delta: force,
+                // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
+                force_normal_delta: symbi_algebra::Tensor::zeros(),
                 torque_delta: torque,
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,
@@ -966,6 +968,8 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         im.diagnostics.accumulate(symbi_ib::BodyDelta {
             idx: b,
             force_delta: force,
+            // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
+            force_normal_delta: symbi_algebra::Tensor::zeros(),
             torque_delta: torque,
             mass_delta: mass,
             prev_mass_delta: 0.0,
@@ -1241,7 +1245,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         if let Some(n) = nrg {
             outputs.push(n);
         }
-        for s in scratch[..n_delta + n_torque].iter() {
+        for s in scratch[..n_delta + n_torque + D].iter() {
             outputs.push(s);
         }
         let scalars: Vec<Sc> =
@@ -1269,7 +1273,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         if let Some(n) = nrg {
             in_bases.push(cons_ptr(n));
         }
-        let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
+        let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque + D);
         out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
         for c in 0..DOF {
             out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
@@ -1277,7 +1281,8 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         if let Some(n) = nrg {
             out_bases.push(cons_ptr_mut(n));
         }
-        for s in scratch[..n_delta + n_torque].iter() {
+        // includes the appended D force-normal scratch slots (the kernel emits them last).
+        for s in scratch[..n_delta + n_torque + D].iter() {
             out_bases.push(cons_ptr_mut(s));
         }
         let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| bind_value(bind, b)).collect();
@@ -1307,9 +1312,15 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         let axis = if n_torque == 1 { 2 } else { k };
         torque[axis] = field_reduce(&scratch[n_delta + k], &bbox, ReductionOp::Add);
     }
+    // the appended form-drag (normal-projected) force from the shaped wall's SDF-gradient normal.
+    let mut force_normal = symbi_algebra::Tensor::<f64, D>::zeros();
+    for a in 0..D {
+        force_normal[a] = field_reduce(&scratch[n_delta + n_torque + a], &bbox, ReductionOp::Add);
+    }
     im.diagnostics.accumulate(symbi_ib::BodyDelta {
         idx: b,
         force_delta: force,
+        force_normal_delta: force_normal,
         torque_delta: torque,
         mass_delta: mass,
         prev_mass_delta: 0.0,
@@ -1401,7 +1412,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             },
         }
     };
-    let scratch = feedback_scratch(sim, n_delta + n_torque);
+    // the force-normal receipt (form-drag / pressure) is APPENDED after mass/force/energy/torque so
+    // no existing slot index shifts: D slots at [n_delta + n_torque .. + D]. the kernels write it
+    // last; the drain writes zero (no wall normal). the tangential (skin-friction) part is derived
+    // downstream as force - force_normal.
+    let scratch = feedback_scratch(sim, n_delta + n_torque + D);
     for b in 0..bodies.len() {
         // penalize every body that runs a surface stack (accretor OR rigid wall); a body
         // with no mask (passive / purely gravitational) contributes no penalization.
@@ -1492,7 +1507,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         if let Some(nrg) = nrg {
             outputs.push(nrg);
         }
-        for s in scratch[..n_delta + n_torque].iter() {
+        for s in scratch[..n_delta + n_torque + D].iter() {
             outputs.push(s);
         }
         let scalars = scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b)));
@@ -1514,9 +1529,15 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             let axis = if n_torque == 1 { 2 } else { k };
             torque[axis] = field_reduce(&scratch[n_delta + k], &bbox, ReductionOp::Add);
         }
+        // the appended form-drag (normal-projected) force: D slots after the torque block.
+        let mut force_normal = symbi_algebra::Tensor::<f64, D>::zeros();
+        for a in 0..D {
+            force_normal[a] = field_reduce(&scratch[n_delta + n_torque + a], &bbox, ReductionOp::Add);
+        }
         im.diagnostics.accumulate(symbi_ib::BodyDelta {
             idx: b,
             force_delta: force,
+            force_normal_delta: force_normal,
             torque_delta: torque,
             mass_delta: mass,
             prev_mass_delta: 0.0,
@@ -1603,6 +1624,8 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
             im.diagnostics.accumulate(symbi_ib::BodyDelta {
                 idx: b,
                 force_delta: force,
+                // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
+                force_normal_delta: symbi_algebra::Tensor::zeros(),
                 torque_delta: torque,
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,

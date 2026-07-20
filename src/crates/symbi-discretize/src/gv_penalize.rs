@@ -156,6 +156,25 @@ fn vector_to_cartesian(coords: Coords, ndim: usize, axes: &[usize], x: &[Gv], v_
     }
 }
 
+/// append the FORM-DRAG receipt: the surface force projected onto the outward SDF normal,
+/// `force_normal = (F.n_hat) n_hat`, in the cartesian frame the reduction sums (both `f_cart` and
+/// `n_cart` are already cartesian). the tangential (skin-friction) part is recovered downstream as
+/// `force - force_normal`. a bare drain passes `n_cart = 0`, so its form drag is exactly zero. this
+/// is the LAST receipt block, appended after mass/force/energy/torque so no existing slot shifts.
+fn push_force_normal(writes: &mut Writes, ndim: usize, f_cart: &Tensor<Gv, 3>, n_cart: &[Gv]) {
+    let mut f_dot_n = Gv::ZERO;
+    for a in 0..ndim {
+        f_dot_n = f_dot_n + f_cart[a] * n_cart[a];
+    }
+    for a in 0..ndim {
+        writes.push((
+            format!("pen_force_normal_{a}"),
+            format!("pen_0_force_normal_{a}").into(),
+            (f_dot_n * n_cart[a]).node(),
+        ));
+    }
+}
+
 /// the cell's force receipt in the CARTESIAN world frame plus its lab-frame
 /// moment `r_cart x F_cart` about the body center. penalization acts in the
 /// cell's physical orthonormal basis, which rotates from cell to cell on a
@@ -469,6 +488,8 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+    // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
+    let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
     // the angular-momentum receipt: the lab-frame moment r_cart x F_cart of the
     // cell's force receipt about the body center. exactly zero beyond the support
     // ball (F vanishes there). 3d books all three components; 2d only z; 1d none.
@@ -500,6 +521,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
             torque[a].node(),
         ));
     }
+    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
     // the delta outputs vanish exactly beyond the tanh saturation radius; the
     // in-place cons writes are unchanged-value there, so the ball bounds
@@ -704,6 +726,7 @@ fn penalize_porous_inner(
             torque[a].node(),
         ));
     }
+    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
@@ -814,6 +837,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
             torque[a].node(),
         ));
     }
+    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
@@ -971,6 +995,7 @@ fn penalize_porous_iso_inner(
     for a in torque_axes(ndim) {
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
+    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
@@ -1060,6 +1085,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
     for a in torque_axes(ndim) {
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
+    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
@@ -1116,6 +1142,8 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[us
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+    // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
+    let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
     // the angular-momentum receipt, identical booking to the adiabatic twin.
     let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
 
@@ -1143,6 +1171,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[us
             torque[a].node(),
         ));
     }
+    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)

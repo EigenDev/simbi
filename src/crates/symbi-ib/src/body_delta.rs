@@ -23,6 +23,11 @@ pub struct BodyDelta<S: Scalar, const D: usize> {
 
     // instantaneous quantities (last timestep value)
     pub force_delta: Tensor<S, D>,
+    /// the NORMAL (form-drag / pressure) component of the surface force, projected onto the SDF
+    /// outward normal: `force_normal = (F.n_hat) n_hat` summed over the body's cells. the tangential
+    /// (skin-friction) part is `force_delta - force_normal_delta`. zero for a bare drain (no wall
+    /// normal). instantaneous, like force.
+    pub force_normal_delta: Tensor<S, D>,
     pub torque_delta: Tensor<S, 3>,
 
     // accumulated quantities (summed across timesteps)
@@ -39,6 +44,7 @@ impl<S: Scalar, const D: usize> BodyDelta<S, D> {
         Self {
             idx,
             force_delta: Tensor::zeros(),
+            force_normal_delta: Tensor::zeros(),
             torque_delta: Tensor::zeros(),
             mass_delta: S::ZERO,
             prev_mass_delta: S::ZERO,
@@ -51,6 +57,7 @@ impl<S: Scalar, const D: usize> BodyDelta<S, D> {
     pub fn update_for_new_timestep(&mut self, timestep_totals: &Self) {
         debug_assert_eq!(self.idx, timestep_totals.idx);
         self.force_delta = timestep_totals.force_delta;
+        self.force_normal_delta = timestep_totals.force_normal_delta;
         self.torque_delta = timestep_totals.torque_delta;
         self.mass_delta = self.mass_delta + timestep_totals.mass_delta;
         self.energy_delta = self.energy_delta + timestep_totals.energy_delta;
@@ -62,6 +69,7 @@ impl<S: Scalar, const D: usize> AddAssign for BodyDelta<S, D> {
     fn add_assign(&mut self, rhs: Self) {
         debug_assert_eq!(self.idx, rhs.idx);
         self.force_delta = self.force_delta + rhs.force_delta;
+        self.force_normal_delta = self.force_normal_delta + rhs.force_normal_delta;
         self.torque_delta = self.torque_delta + rhs.torque_delta;
         self.mass_delta = self.mass_delta + rhs.mass_delta;
         self.energy_delta = self.energy_delta + rhs.energy_delta;
