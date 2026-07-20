@@ -3551,9 +3551,7 @@ macro_rules! hydro_dispatch {
                 if $cfg.spacetime != "minkowski"
                     && !matches!(
                         (d, c, $cfg.spacetime.as_str()),
-                        (2, "cartesian", "kerr_schild")
-                            | (3, "cartesian", "kerr_schild")
-                            | (2, "cartesian", "kerr")
+                        (3, "cartesian", "kerr_schild")
                             | (3, "cartesian", "kerr")
                             | (1, "spherical", "schwarzschild")
                             | (2, "spherical", "schwarzschild")
@@ -4524,9 +4522,7 @@ macro_rules! mhd_dispatch {
                             | (1, "spherical", "kerr_schild")
                             | (2, "spherical", "schwarzschild")
                             | (2, "spherical", "kerr")
-                            | (2, "cartesian", "kerr_schild")
                             | (3, "cartesian", "kerr_schild")
-                            | (2, "cartesian", "kerr")
                             | (3, "cartesian", "kerr")
                             | (2, "cylindrical", "kerr_schild")
                     ) =>
@@ -5433,12 +5429,16 @@ fn check_excision_request(
     // regimes never reach here (a curved spacetime on a newtonian/iso regime is
     // rejected upstream).
     if !matches!(spacetime, "kerr_schild" | "kerr") || coord_system != "cartesian"
-        || !matches!(dims, 2 | 3)
+        || dims != 3
     {
         return Err(format!(
-            "excision_radius = {excision_radius} requires a 2d or 3d cartesian kerr-schild \
-             chart (spacetime kerr_schild or kerr); got (dims={dims}, coords={coord_system}, \
-             spacetime={spacetime}). spherical charts hide the horizon behind r_min instead."
+            "excision_radius = {excision_radius} requires a 3d cartesian kerr-schild chart \
+             (spacetime kerr_schild or kerr); got (dims={dims}, coords={coord_system}, \
+             spacetime={spacetime}). a 2d cartesian slice is z-translation-invariant — a black \
+             string, not a point black hole: its spherical metric evaluated at z = 0 is \
+             inconsistent with the planar dynamics, and the excision circle is grid-staircased \
+             (it seeds an m = 4 mode that grows into the exterior). excise on a 3d cartesian box, \
+             or model the horizon on a spherical / cylindrical chart behind r_min."
         ));
     }
     // the excision surface is the kerr-schild-radius level set r_ks = r_exc, which
@@ -5516,23 +5516,26 @@ mod excision_gate_tests {
     }
 
     #[test]
-    fn excision_needs_a_cartesian_ks_chart() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_ok());
+    fn excision_needs_a_3d_cartesian_ks_chart() {
+        // a 2d cartesian slice is a z-translation-invariant black string, not a point hole;
+        // excision demands a genuine 3d cartesian box (or a spherical / cylindrical chart
+        // that hides the horizon behind r_min).
         assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
         assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok());
-        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "kerr", "spherical", 2, 1.0, 0.9, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 3, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr", "spherical", 3, 1.0, 0.9, false, &[], 1).is_err());
         assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, &[], 1).is_err());
     }
 
     #[test]
     fn excision_surface_must_sit_between_the_guard_and_the_horizon() {
         // a = 0, M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
-        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_ok());
-        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_ok());
+        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
+        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
     }
 
     #[test]
@@ -5548,18 +5551,18 @@ mod excision_gate_tests {
         // multi-gpu decomposed: the sweeps interleave halo exchanges (bit-equal to
         // monolithic); refined: the excise pass runs on the root level with fine
         // patches off the horizon. the combination stays unwired.
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 2).is_ok());
-        let far = vec![vec![5.0, 8.0, 5.0, 8.0]];
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &far, 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &far, 2).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2).is_ok());
+        let far = vec![vec![5.0, 8.0, 5.0, 8.0, 5.0, 8.0]];
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 1).is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 2).is_err());
     }
 
     #[test]
     fn refinement_region_on_the_horizon_is_rejected() {
         // a central fine box overlapping the excised spheroid would restrict
         // un-excised values back over the root-level fill.
-        let central = vec![vec![-2.0, 2.0, -2.0, 2.0]];
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &central, 1).is_err());
+        let central = vec![vec![-2.0, 2.0, -2.0, 2.0, -2.0, 2.0]];
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &central, 1).is_err());
         // at spin the equatorial extent widens to sqrt(r^2 + a^2): a box clear of
         // r_exc on x but inside the widened extent still overlaps.
         let graze = vec![vec![1.5, 3.0, -0.5, 0.5, -0.5, 0.5]];
@@ -5570,8 +5573,8 @@ mod excision_gate_tests {
 
     #[test]
     fn excision_rejects_multi_gpu_with_refinement_only() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 2).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &[], 2).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2).is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &[], 2).is_err());
     }
 }
 

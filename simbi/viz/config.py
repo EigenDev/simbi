@@ -38,6 +38,9 @@ class FigureConfig(BaseModel):
     # overlay each immersed body's silhouette on the field plot (cartesian only; the
     # body signed-distance is cartesian, so it does not align with a polar/spherical plot).
     draw_bodies: bool = False
+    # overlay the black-hole event horizon (and excision surface) of a curved-spacetime
+    # run, read from the checkpoint metadata; a flat (minkowski) run draws nothing.
+    draw_horizon: bool = False
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 

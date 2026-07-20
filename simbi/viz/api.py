@@ -187,6 +187,9 @@ def plot(
     if config.figure.draw_bodies:
         _overlay_bodies(figure, files[0], config, sim_data)
 
+    if config.figure.draw_horizon:
+        _overlay_horizon(figure, config, sim_data)
+
     if save_as:
         figure.save(save_as)
     if show:
@@ -203,6 +206,19 @@ def _overlay_bodies(figure, checkpoint_path, config, sim_data) -> None:
     overlay_bodies_on_slice(
         figure.axes.get("main") if figure.axes else None,
         checkpoint_path,
+        config.plot.slice,
+        sim_data.metadata.coord_system,
+    )
+
+
+def _overlay_horizon(figure, config, sim_data) -> None:
+    """draw the black-hole event horizon on the rendered field axis, read from the
+    checkpoint metadata (curved spacetimes only; flat runs draw nothing)."""
+    from .horizon import overlay_horizon_on_slice
+
+    overlay_horizon_on_slice(
+        figure.axes.get("main") if figure.axes else None,
+        sim_data.metadata,
         config.plot.slice,
         sim_data.metadata.coord_system,
     )
