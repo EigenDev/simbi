@@ -722,7 +722,22 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 ---
 
-<div align="center">
+---
+
+## Acknowledgements
+SIMBI was developed at the Center for Cosmology and Paricle Physics at New York University, and the author thanks the CCPP group for their support and feedback. The author also thanks the following people for their contributions to the project:
+- **Andrew Macfadyen** (NYU) for his mentorship and guidance on the project.
+- **Jonathan Zrake** (Clemson University) for his intellectual feedback on the endeavor.
+- **Jim Stone** (Institure for Advanced Study) for his feedback on the MHD implementation and pointing me towards the robust conserved to primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
+- **Romain Teyssier** (Princeton University) for his willingness to talk shop with me. Especially during my embarkment towards mesh refinement.
+---
+
+## Important Works For Folks Wanting to Learn More About the Physics and Numerics
+- **[Marti & Muller 1994](https://ui.adsabs.harvard.edu/abs/2003LRR.....6....7M/abstract)**: The original relativistic shock tube paper. This is the paper that started it all for me. I was a grad student at the time and I was trying to understand how to do relativistic hydrodynamics. This paper was a great starting point!
+- **[Font 2007](https://ui.adsabs.harvard.edu/abs/2008LRR....11....7F/abstract)**: A review of numerical methods for relativistic (magento)-hydrodynamics. This paper is a great resource for understanding the different numerical methods that can be used to solve the equations of GENERAL relativistic hydrodynamics.
+- **[Andersson & Comer 2021](https://link.springer.com/article/10.1007/s41114-021-00031-6)**: A modern review on the general field of relavistic fluid dynamics. Super nice stuff with a great into. Please check it out! 
+
+---
 
 **[Report a Bug](https://github.com/EigenDev/simbi/issues) · [Request a Feature](https://github.com/EigenDev/simbi/issues)**
 
