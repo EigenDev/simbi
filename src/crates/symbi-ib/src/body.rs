@@ -291,6 +291,39 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         ke
     }
 
+    /// the world-frame angular momentum `L = I omega = R (inertia_body ⊙ (R^T omega))` — the rigid-
+    /// body spin state a viz glyph draws, and the conserved quantity a torque-free sink must not gain.
+    pub fn angular_momentum(&self) -> Tensor<S, 3> {
+        let wb = matvec3(transpose3(self.orientation), [self.omega[0], self.omega[1], self.omega[2]]);
+        let lb = [
+            self.inertia_body[0] * wb[0],
+            self.inertia_body[1] * wb[1],
+            self.inertia_body[2] * wb[2],
+        ];
+        Tensor::new(matvec3(self.orientation, lb))
+    }
+
+    /// the translational kinetic energy `0.5 m |v|^2` (the rigid drift).
+    pub fn translational_ke(&self) -> S {
+        let half = S::from_f64(0.5);
+        let mut ke = S::ZERO;
+        for a in 0..D {
+            ke = ke + half * self.mass * self.velocity[a] * self.velocity[a];
+        }
+        ke
+    }
+
+    /// the rotational kinetic energy `0.5 omega . I . omega = 0.5 sum_k inertia_body[k] (R^T omega)_k^2`.
+    pub fn rotational_ke(&self) -> S {
+        let half = S::from_f64(0.5);
+        let wb = matvec3(transpose3(self.orientation), [self.omega[0], self.omega[1], self.omega[2]]);
+        let mut ke = S::ZERO;
+        for k in 0..3 {
+            ke = ke + half * self.inertia_body[k] * wb[k] * wb[k];
+        }
+        ke
+    }
+
     pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
                    mass: S, radius: S) -> Self {
         Self::base(idx, position, velocity, mass, radius, BodyKind::Passive)
