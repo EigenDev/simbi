@@ -599,6 +599,9 @@ struct BodyStateSnap {
     rate: Vec<f64>,        // [nb] instantaneous Mdot (0 for non-sinks)
     accreted_energy: Vec<f64>, // [nb] cumulative covariant (killing) energy (GR horizon only)
     energy_rate: Vec<f64>,     // [nb] instantaneous Edot (GR horizon only)
+    ang_mom: Vec<f64>,     // [nb, 3] world-frame angular momentum L = I omega
+    ke_trans: Vec<f64>,    // [nb] translational kinetic energy 0.5 m |v|^2
+    ke_rot: Vec<f64>,      // [nb] rotational kinetic energy 0.5 omega.I.omega
     orientation: Vec<f64>, // [nb, 3, 3] row-major rotation matrix (evolved spin state)
     omega: Vec<f64>,       // [nb, 3] angular-velocity vector
     shape_json: Vec<String>, // per-body CSG wire (empty = the analytic sphere), for viz
@@ -617,6 +620,9 @@ fn body_state_snap<const D: usize>(
         rate: Vec::with_capacity(nb),
         accreted_energy: Vec::with_capacity(nb),
         energy_rate: Vec::with_capacity(nb),
+        ang_mom: Vec::with_capacity(nb * 3),
+        ke_trans: Vec::with_capacity(nb),
+        ke_rot: Vec::with_capacity(nb),
         orientation: Vec::with_capacity(nb * 9),
         omega: Vec::with_capacity(nb * 3),
         shape_json: Vec::with_capacity(nb),
@@ -645,6 +651,14 @@ fn body_state_snap<const D: usize>(
         for k in 0..3 {
             snap.omega.push(body.omega[k]);
         }
+        // the rigid-body ledgers: world-frame angular momentum + the split kinetic energy, so viz can
+        // draw an L glyph and plot the translational/rotational energy budget.
+        let l = body.angular_momentum();
+        for k in 0..3 {
+            snap.ang_mom.push(l[k]);
+        }
+        snap.ke_trans.push(body.translational_ke());
+        snap.ke_rot.push(body.rotational_ke());
         snap.mass.push(body.mass);
         let (acc, rate) = match body.kind {
             symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
@@ -695,7 +709,10 @@ fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
             vec![nb, 3, 3],
             DataRef::F64(&snap.orientation),
         ))
-        .with_dataset(Dataset::new("omega", vec![nb, 3], DataRef::F64(&snap.omega)));
+        .with_dataset(Dataset::new("omega", vec![nb, 3], DataRef::F64(&snap.omega)))
+        .with_dataset(Dataset::new("angular_momentum", vec![nb, 3], DataRef::F64(&snap.ang_mom)))
+        .with_dataset(Dataset::new("ke_translational", vec![nb], DataRef::F64(&snap.ke_trans)))
+        .with_dataset(Dataset::new("ke_rotational", vec![nb], DataRef::F64(&snap.ke_rot)));
     // the per-body CSG shape wire as a string attr (empty = analytic sphere); viz reconstructs the
     // body silhouette from it + the position/orientation.
     for (b, wire) in snap.shape_json.iter().enumerate() {
@@ -748,6 +765,11 @@ where
                     "force",
                     vec![n, nb, D],
                     DataRef::F64(im.history.force()),
+                ))
+                .with_dataset(Dataset::new(
+                    "torque",
+                    vec![n, nb, 3],
+                    DataRef::F64(im.history.torque()),
                 )),
         );
     }
@@ -844,7 +866,8 @@ where
                 .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
                 .with_dataset(Dataset::new("mass_delta", vec![n, nb], DataRef::F64(im.history.mass_delta())))
                 .with_dataset(Dataset::new("energy_delta", vec![n, nb], DataRef::F64(im.history.energy_delta())))
-                .with_dataset(Dataset::new("force", vec![n, nb, D], DataRef::F64(im.history.force()))),
+                .with_dataset(Dataset::new("force", vec![n, nb, D], DataRef::F64(im.history.force())))
+                .with_dataset(Dataset::new("torque", vec![n, nb, 3], DataRef::F64(im.history.torque()))),
         );
     }
     Hdf5Backend.write(Path::new(path), &root)

@@ -33,6 +33,10 @@ pub struct BodyHistory<const D: usize> {
     energy_delta: Vec<f64>,
     /// force on the body (gravity reaction + accretion drag): [len, nb, D].
     force: Vec<f64>,
+    /// torque on the body (the r x F moment that drives the Euler rotation / precession): the
+    /// evolution consumes `torque_delta` but net force cannot reconstruct it, so record it. always
+    /// 3-component (rotation is a 3-space rank-2 object even for a 2D flow): [len, nb, 3].
+    torque: Vec<f64>,
 }
 
 impl<const D: usize> BodyHistory<D> {
@@ -44,6 +48,7 @@ impl<const D: usize> BodyHistory<D> {
             mass_delta: Vec::new(),
             energy_delta: Vec::new(),
             force: Vec::new(),
+            torque: Vec::new(),
         }
     }
 
@@ -57,6 +62,9 @@ impl<const D: usize> BodyHistory<D> {
             self.energy_delta.push(d.map_or(0.0, |d| d.energy_delta));
             for ax in 0..D {
                 self.force.push(d.map_or(0.0, |d| d.force_delta[ax]));
+            }
+            for ax in 0..3 {
+                self.torque.push(d.map_or(0.0, |d| d.torque_delta[ax]));
             }
         }
     }
@@ -92,6 +100,10 @@ impl<const D: usize> BodyHistory<D> {
     pub fn force(&self) -> &[f64] {
         &self.force
     }
+
+    pub fn torque(&self) -> &[f64] {
+        &self.torque
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +117,7 @@ mod tests {
         let mut d0 = BodyDelta::<f64, 2>::new(0);
         d0.mass_delta = 1.0;
         d0.force_delta = Tensor::new([3.0, 4.0]);
+        d0.torque_delta = Tensor::new([0.0, 0.0, 5.0]);
         let mut d1 = BodyDelta::<f64, 2>::new(1);
         d1.mass_delta = 2.0;
         h.push(0.5, 0.1, &[d0, d1]);
@@ -113,6 +126,8 @@ mod tests {
         assert_eq!(h.time(), &[0.5, 0.6]);
         assert_eq!(h.mass_delta(), &[1.0, 2.0, 2.0, 1.0]);
         assert_eq!(h.force(), &[3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 3.0, 4.0]);
+        // torque is always 3-component + body-major: row0 = [d0, d1], row1 = [d1, d0].
+        assert_eq!(h.torque(), &[0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0]);
     }
 
     #[test]
