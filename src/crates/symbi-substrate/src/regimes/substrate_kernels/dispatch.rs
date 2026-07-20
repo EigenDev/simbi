@@ -127,6 +127,52 @@ where
     cfl_from_lambda(lambda_max, cfl_number)
 }
 
+/// the GR horizon accretion diagnostic: run the shell-flux emit `shell_{quantity}_flux_{D}d` over
+/// the per-cell OUTWARD boundary flux of `Omega = { r_ks < diagnostic_radius }`, reduce by ADD (the
+/// GPU-native block reduction), and NEGATE for the accretion rate (INTO the hole). returns
+/// `(mdot, edot)`: rest mass + covariant (killing) energy per unit time crossing the diagnostic
+/// shell. the `mass_flux` / `nrg_flux` fields are the ones the godunov just consumed, so the
+/// diagnostic is divergence-theorem-consistent with the flow the scheme applied -- and with the
+/// covariant energy, `edot` is `diagnostic_radius`-invariant at steady state. cartesian kerr-schild.
+pub fn shell_accretion_rates<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    scratch: &Field<Sc, D, Mem>,
+    diagnostic_radius: f64,
+) -> (f64, f64)
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let resolve = |bind: &ScalarBind| -> Sc {
+        match bind {
+            ScalarBind::Spec(sp) if &**sp == "diagnostic_radius" => Sc::from_f64(diagnostic_radius),
+            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
+                geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin").map(|(_, v)| *v).unwrap_or(0.0),
+            ),
+            ScalarBind::Ref(sref) => Sc::from_f64(
+                motion_scalar(&sim.motion, geom.coords, D, *sref)
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
+                    .unwrap_or_else(|| panic!("shell_accretion: unexpected scalar {sref:?}")),
+            ),
+            other => panic!("shell_accretion: unexpected spec scalar {other:?}"),
+        }
+    };
+    let mut rates = [0.0f64; 2];
+    for (i, quantity) in ["mass", "nrg"].iter().enumerate() {
+        let name = format!("shell_{quantity}_flux_{D}d");
+        let scalars = scalars_for(&name, &resolve);
+        dispatch_named(sim, pre, Some(scratch), 0, &name, &geom.interior, &[], &scalars);
+        // the emit writes the OUTWARD contribution; Add telescopes to the net outward flux through
+        // the shell, and the hole accretes the INWARD flux = its negation.
+        rates[i] = -field_reduce(scratch, &geom.interior, ReductionOp::Add);
+    }
+    (rates[0], rates[1])
+}
+
 /// probe the density finiteness over the ALLOCATED domain (interior + ghosts) via the
 /// `state_finite_{D}d` kernel; returns `false` if any zone is non-finite. the fail-loud backstop that
 /// survives FOFC recovery — FOFC keeps the interior finite but never touches the ghost band.

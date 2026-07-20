@@ -1923,6 +1923,17 @@ fn main() {
         emit_gv(&out_dir, "excise_p2c_mhd_cart_ks_2d", 2, &k, &writes);
         let (k, writes) = symbi_discretize::excise_p2c_mhd_3d_gv();
         emit_gv(&out_dir, "excise_p2c_mhd_cart_ks_3d", 3, &k, &writes);
+        // the horizon shell-flux accretion diagnostic: the per-cell outward boundary flux of
+        // Omega = { r_ks < diagnostic_radius }, reduced (field_reduce Add) per quantity into the
+        // accretion ledger. cartesian kerr-schild (a = 0); the mass + covariant-energy fluxes.
+        for (base, tag) in [("mass_flux", "mass"), ("nrg_flux", "nrg")] {
+            let (k, w) = symbi_discretize::shell_flux_map_gv(
+                Coords::Cartesian, Spacetime::KerrSchild, &[Spacing::Uniform; 2], &[0, 1], 2, base);
+            emit_gv(&out_dir, &format!("shell_{tag}_flux_2d"), 2, &k, &w);
+            let (k, w) = symbi_discretize::shell_flux_map_gv(
+                Coords::Cartesian, Spacetime::KerrSchild, &[Spacing::Uniform; 3], &[0, 1, 2], 3, base);
+            emit_gv(&out_dir, &format!("shell_{tag}_flux_3d"), 3, &k, &w);
+        }
     }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.

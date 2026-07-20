@@ -71,6 +71,20 @@ pub enum BodyKind<S: Scalar> {
         accretion_rate: S,
         sink_delta: S, // 0 = torque-free, 1 = standard
     },
+    /// the GR EXCISION HORIZON as a first-class immersed boundary: NOT a Newtonian point mass
+    /// (gravity is the fixed metric, the sink is the vacuum excision), but a diagnostic-carrying
+    /// absorbing surface. its accretion ledger — `total_accreted_{mass,energy}` + the instantaneous
+    /// `mdot`/`edot` — is fed by the shell-flux reduction through a coordinate sphere at
+    /// `diagnostic_radius` (OUTSIDE the horizon, where the flux is well-posed). the covariant energy
+    /// makes `edot` a conserved, `diagnostic_radius`-invariant rate at steady state.
+    Horizon {
+        excision_radius: S,
+        diagnostic_radius: S,
+        total_accreted_mass: S,
+        total_accreted_energy: S,
+        mdot: S,
+        edot: S,
+    },
     Planet {
         softening: S,
         inertia: S,
@@ -303,6 +317,20 @@ impl<S: Scalar, const D: usize> Body<S, D> {
                    })
     }
 
+    /// the GR excision horizon: a static, massless (metric-gravity), diagnostic-only immersed
+    /// boundary at the chart origin. `radius` is set to `diagnostic_radius` (the measurement shell).
+    pub fn horizon(idx: usize, excision_radius: S, diagnostic_radius: S) -> Self {
+        Self::base(idx, Tensor::zeros(), Tensor::zeros(), S::ZERO, diagnostic_radius,
+                   BodyKind::Horizon {
+                       excision_radius,
+                       diagnostic_radius,
+                       total_accreted_mass: S::ZERO,
+                       total_accreted_energy: S::ZERO,
+                       mdot: S::ZERO,
+                       edot: S::ZERO,
+                   })
+    }
+
     pub fn planet(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
                   mass: S, radius: S, inertia: S, no_slip: bool) -> Self {
         Self::base(idx, position, velocity, mass, radius,
@@ -369,7 +397,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     }
 
     pub fn has_accretion(&self) -> bool {
-        matches!(self.kind, BodyKind::BlackHole { .. })
+        matches!(self.kind, BodyKind::BlackHole { .. } | BodyKind::Horizon { .. })
     }
 
     pub fn has_rigid(&self) -> bool {
