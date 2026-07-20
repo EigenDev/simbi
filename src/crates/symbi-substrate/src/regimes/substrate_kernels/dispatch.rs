@@ -1732,6 +1732,10 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     a0: f64,
     ac: f64,
+    // the EOS parameter (adiabatic gamma / iso cs). the GR-hydro covariant-energy godunov needs the
+    // gamma to reconstruct the effective inertia rho h W^2 = h D^2/rho for the geodesic momentum
+    // source; flat / iso kernels never declare it, so this arm is unreachable there.
+    eos_param: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -1761,6 +1765,8 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarRef::Dt => Sc::from_f64(dt),
             ScalarRef::A0 => Sc::from_f64(a0),
             ScalarRef::Ac => Sc::from_f64(ac),
+            // the EOS param, bound only by the GR-hydro covariant-energy godunov (rho h W^2 = h D^2/rho).
+            ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(eos_param),
             // the GR lapse mass M (alpha = sqrt(1-2M/r)), carried on `geom.spacetime_scalars` from
             // the metric. only a `_schw` kernel declares it; flat kernels never reach this arm.
             ScalarRef::SchwarzschildMass => Sc::from_f64(
@@ -1897,13 +1903,14 @@ pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     a0: f64,
     ac: f64,
+    eos_param: f64,
     fused_source: Option<&FusedSourceBinding>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     match fused_source {
-        None => dispatch_godunov(sim, pre, prefix, dt, a0, ac),
+        None => dispatch_godunov(sim, pre, prefix, dt, a0, ac, eos_param),
         Some(b) => {
             dispatch_godunov_with_sources(sim, pre, prefix, dt, a0, ac, &b.source_id, &b.scalars)
         }

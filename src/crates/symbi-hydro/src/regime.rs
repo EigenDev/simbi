@@ -73,13 +73,16 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// and delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
     /// regime and every flat run are unchanged; the relativistic regime OVERRIDES it so the
     /// initial-condition conserved state matches the metric-aware c2p (the storage↔recovery bijection
-    /// is per-cell in the same gamma). `gamma`/`alpha` are the spatial metric + lapse at the cell.
+    /// is per-cell in the same gamma). `gamma`/`alpha`/`shift` are the spatial metric + lapse +
+    /// contravariant shift `beta^i` at the cell (the relativistic-hydro energy slot is the covariant
+    /// `ehat = alpha tau + (alpha-1) D - beta^i S_i`, so its storage needs the full 3+1 block).
     fn to_conserved_covariant(
         &self,
         eos: &impl Eos<S>,
         prim: &Self::Prim,
         _gamma: &crate::spatial_metric::SpatialMetric<S, D>,
         _alpha: S,
+        _shift: Tensor<S, D>,
     ) -> Self::Cons {
         self.to_conserved(eos, prim)
     }

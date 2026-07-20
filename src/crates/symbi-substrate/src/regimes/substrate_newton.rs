@@ -292,7 +292,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 }
             }
         }
-        dispatch_godunov_maybe_fused(sim, pre, "adiabatic", dt, a0, ac, self.fused_source.as_ref());
+        dispatch_godunov_maybe_fused(sim, pre, "adiabatic", dt, a0, ac, self.gamma, self.fused_source.as_ref());
     }
 
     fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {

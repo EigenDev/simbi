@@ -452,7 +452,11 @@ where
     } else {
         (left, right)
     };
-    let regime = RhdGr { metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)), alpha };
+    let regime = RhdGr {
+        metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
+        alpha,
+        shift: beta,
+    };
     let coord_n = axes[dir as usize];
     // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
     // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
@@ -496,8 +500,14 @@ where
         let f_l = regime.to_flux(&left, &nhat, &eos);
         let f_r = regime.to_flux(&right, &nhat, &eos);
         let w = beta_n / alpha;
-        let g_l = f_l - u_l * w;
-        let g_r = f_r - u_r * w;
+        let mut g_l = f_l - u_l * w;
+        let mut g_r = f_r - u_r * w;
+        // the covariant energy flux f_ehat already carries the lapse AND the shift (it is the free-
+        // index-down -sqrt(-g)(T^n_t + rho u^n)/sqrt(gamma)); it does NOT take the Valencia
+        // G = F - (beta^n/alpha) U transform the mass/momentum fluxes need. only its shifted-fan
+        // dissipation (ehat_r - ehat_l) rides the HLL below.
+        g_l.nrg = f_l.nrg;
+        g_r.nrg = f_r.nrg;
         let sh_l = s_l - beta_n;
         let sh_r = s_r - beta_n;
         Gv::branch(

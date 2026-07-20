@@ -1737,8 +1737,9 @@ where
                 GammaInv::new(<M as Metric<Sc, DOF>>::spatial_metric_inv(&self.physics.metric, x_dof)),
             );
             let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
+            let shift = <M as Metric<Sc, DOF>>::shift(&self.physics.metric, x_dof);
             <R as Regime<Sc, DOF>>::to_conserved_covariant(
-                &self.physics.regime, &self.physics.eos, prim, &sm, alpha,
+                &self.physics.regime, &self.physics.eos, prim, &sm, alpha, shift,
             )
         };
         self.fields.cons.scatter_from(coord, cons.hydro_part());

@@ -161,6 +161,200 @@ where
 }
 
 
+/// the rest-mass-subtracted covariant (killing) energy from the valencia energy `tau`:
+///   E_hat = sqrt(gamma) ( alpha tau + (alpha - 1) D - beta^i S_i )   (docs/covariant_energy.md)
+/// evolving `E_hat` in the energy slot conserves the relativistic bernoulli invariant `h u_t` to
+/// roundoff on ANY stationary background (the killing energy density minus the zero-source baryon
+/// density), where the eulerian `tau` carries a geodesic source that does not vanish. reduces to
+/// `tau` at alpha = 1, beta = 0, sqrt(gamma) = 1. `shift` is the CONTRAVARIANT beta^i and `mom` the
+/// COVARIANT valencia momentum S_i, so `shift.dot(mom) = beta^i S_i`. carrier-generic (S = f64 host
+/// / S = Gv traces the kernel expression at the godunov energy assembly).
+pub fn tau_to_ehat<S: Scalar, const D: usize>(
+    tau: S,
+    den: S,
+    mom: Tensor<S, D>,
+    alpha: S,
+    shift: Tensor<S, D>,
+    sqrt_gamma: S,
+) -> S {
+    sqrt_gamma * (alpha * tau + (alpha - S::ONE) * den - shift.dot(&mom))
+}
+
+/// invert [`tau_to_ehat`]: recover `tau` from the evolved `E_hat` and the (known, fixed) background
+/// metric, so the existing c2p newton runs on an unchanged `tau` input. the `1/alpha` is bounded
+/// away from zero by the metric guard (alpha clamped for r < M/2).
+pub fn ehat_to_tau<S: Scalar, const D: usize>(
+    ehat: S,
+    den: S,
+    mom: Tensor<S, D>,
+    alpha: S,
+    shift: Tensor<S, D>,
+    sqrt_gamma: S,
+) -> S {
+    (ehat / sqrt_gamma + (S::ONE - alpha) * den + shift.dot(&mom)) / alpha
+}
+
+/// the coordinate free-index-down covariant energy conserved density and flux (HARM: Gammie et al.
+/// 2003; AthenaK: Stone et al. 2024, eq. 20), in the code's POSITIVE-energy convention:
+///   E_hat  = -sqrt(-g) ( T^t_t + rho u^t ),   F^j = -sqrt(-g) ( T^j_t + rho u^j )
+/// with `T^mu_nu = w u^mu u_nu + p delta^mu_nu` (hydro; `w = rho h` the total enthalpy density),
+/// `sqrt(-g) = alpha sqrt(det gamma)`, and the coordinate 4-velocity `u^t = W/alpha`,
+/// `u^i = W(v^i - beta^i/alpha)`. the overall minus flips AthenaK's negative-energy `T^t_t` (which
+/// is `-rho eps` at rest) to `+tau` at rest, matching the Valencia energy sign. the energy source is
+/// IDENTICALLY ZERO on a stationary metric (the t-row of `(1/2)(d_nu g_ab)T^ab`), so this evolves
+/// the killing energy current exactly. equals the ADM `E_hat = sqrt(gamma)(alpha tau + (alpha-1) D -
+/// beta^i S_i)` (docs/covariant_energy.md), but `sqrt(-g) T^j_t` is the fully-densitized covariant
+/// flux — no alpha/shift/sqrt(gamma) reassembly.
+/// `rho` = rest density, `w` = rho h, `v` = valencia contravariant v^i, `p` = pressure.
+pub fn coord_energy_cons_flux<S: Scalar, M, const D: usize>(
+    g: &M,
+    x: Tensor<S, D>,
+    rho: S,
+    w: S,
+    v: Tensor<S, D>,
+    p: S,
+) -> (S, Tensor<S, D>)
+where
+    M: Metric<Dual<S>, D>,
+{
+    let adm = adm_contraction_blocks(g, x);
+    let sqrt_neg_g = adm.alpha * adm.sqrt_gamma;
+    // W = 1 / sqrt(1 - gamma_ij v^i v^j)
+    let v_low = Tensor::<S, D>::from_fn(|ii| adm.gam.row(ii).dot(&v));
+    let ww = S::ONE / (S::ONE - v.dot(&v_low)).sqrt();
+    // coordinate 4-velocity u^t = W/alpha, u^i = W(v^i - beta^i/alpha)
+    let ut = ww / adm.alpha;
+    let u_sp = Tensor::<S, D>::from_fn(|ii| ww * (v[ii] - adm.beta[ii] / adm.alpha));
+    // u_t = g_tt u^t + beta_j u^j, with g_tt = -alpha^2 + beta^k beta_k and g_tj = beta_j
+    let beta_low = Tensor::<S, D>::from_fn(|ii| adm.gam.row(ii).dot(&adm.beta));
+    let g_tt = S::ZERO - adm.alpha * adm.alpha + adm.beta.dot(&beta_low);
+    let u_t = g_tt * ut + beta_low.dot(&u_sp);
+    // T^t_t = w u^t u_t + p; T^j_t = w u^j u_t; positive-convention E_hat = -sqrt(-g)(T^*_t + rho u^*)
+    let e_cons = S::ZERO - sqrt_neg_g * (w * ut * u_t + p + rho * ut);
+    let flux =
+        Tensor::<S, D>::from_fn(|jj| S::ZERO - sqrt_neg_g * (w * u_sp[jj] * u_t + rho * u_sp[jj]));
+    (e_cons, flux)
+}
+
+#[cfg(test)]
+mod ehat_tests {
+    use super::*;
+    use crate::metric::SchwarzschildKS;
+
+    #[test]
+    fn tau_ehat_round_trip_and_flat_limit() {
+        let mom = Tensor::<f64, 3>::new([1.7, -0.4, 0.9]);
+        let shift = Tensor::<f64, 3>::new([0.44, 0.1, 0.0]);
+        let (tau, den, alpha, sg) = (0.55_f64, 2.3, 0.83, 1.9);
+        // E_hat -> tau inverts to roundoff (the D and beta.S terms cancel algebraically; only the
+        // sqrt(gamma) multiply/divide slips), so the recovered tau feeds the newton unchanged.
+        let ehat = tau_to_ehat(tau, den, mom, alpha, shift, sg);
+        let rec = ehat_to_tau(ehat, den, mom, alpha, shift, sg);
+        assert!((rec - tau).abs() < 1e-14 * tau.abs().max(1.0), "round-trip {rec} vs {tau}");
+        // flat background: alpha = 1, beta = 0, sqrt(gamma) = 1 -> E_hat == tau exactly.
+        assert_eq!(tau_to_ehat(tau, den, mom, 1.0, Tensor::zeros(), 1.0), tau);
+    }
+
+    #[test]
+    fn ehat_flux_is_conserved_on_the_michel_solution() {
+        // on the EXACT michel transonic solution (gamma = 4/3, M = 1) in the ingoing kerr-schild
+        // chart, the re-split covariant-energy flux F_Ehat = alpha F_E - beta F_S - F_D is
+        // r-invariant to roundoff (= jm*(h_inf-1)), while the eulerian energy flux F_E is not. this
+        // is the numerical statement of "E_hat conserves the bernoulli invariant, tau needs a
+        // source". points (r, rho, u=|u^r|, p) generated from simbi_configs/.../gr_michel.py.
+        const M: f64 = 1.0;
+        const G: f64 = 4.0 / 3.0;
+        const JM: f64 = 527.9439529572;
+        const H_INF: f64 = 1.0400000000;
+        let pts: [(f64, f64, f64, f64); 4] = [
+            (3.0, 8.779950259276684e1, 6.681181269277645e-1, 3.902318750504499e0),
+            (6.0, 3.457351834737535e1, 4.241717506740386e-1, 1.126310423270443e0),
+            (10.0, 1.799067745636194e1, 2.934541816103347e-1, 4.714077194002101e-1),
+            (30.0, 5.162852963799085e0, 1.136202011344974e-1, 8.923180448359856e-2),
+        ];
+        let mut f_ehat = Vec::new();
+        let mut f_e = Vec::new();
+        for (r, rho, u, p) in pts {
+            // ingoing kerr-schild ADM for schwarzschild
+            let a2 = 2.0 * M / r;
+            let alpha = 1.0 / (1.0 + a2).sqrt();
+            let beta = 2.0 * M / (r + 2.0 * M);
+            let grr = 1.0 + a2;
+            let sqrtg = r * r * grr.sqrt();
+            // u^r infalling; solve g_tt X^2 + 2 g_tr X u^r + (g_rr u^r^2 + 1) = 0 (future-pointing)
+            let ur = -u;
+            let (gtt, gtr) = (-(1.0 - 2.0 * M / r), 2.0 * M / r);
+            let (aa, bb, cc) = (gtt, 2.0 * gtr * ur, grr * ur * ur + 1.0);
+            let disc = bb * bb - 4.0 * aa * cc;
+            let mut ut = (-bb - disc.sqrt()) / (2.0 * aa);
+            if ut <= 0.0 {
+                ut = (-bb + disc.sqrt()) / (2.0 * aa);
+            }
+            let ww = alpha * ut;
+            let vr = (ur / ut + beta) / alpha; // valencia v^r
+            let h = 1.0 + G / (G - 1.0) * (p / rho);
+            let den = rho * ww;
+            let s_cov = rho * h * ww * ww * (grr * vr); // covariant S_r
+            let s_up = rho * h * ww * ww * vr;
+            let e = rho * h * ww * ww - p; // eulerian energy
+            let tau = e - den;
+            // densitized fluxes (Andersson & Comer 2021, eqs 11.41 / 11.45 / 11.27)
+            let fe = sqrtg * (alpha * s_up - e * beta);
+            let srr = p + grr * rho * h * ww * ww * vr * vr;
+            let fs = sqrtg * (alpha * srr - s_cov * beta);
+            let fd = sqrtg * den * (alpha * vr - beta);
+            f_ehat.push(alpha * fe - beta * fs - fd);
+            f_e.push(fe);
+            // the in-crate primitive reproduces the covariant energy density and inverts.
+            let mom = Tensor::<f64, 1>::new([s_cov]);
+            let shift = Tensor::<f64, 1>::new([beta]);
+            let ehat = tau_to_ehat(tau, den, mom, alpha, shift, sqrtg);
+            let rec = ehat_to_tau(ehat, den, mom, alpha, shift, sqrtg);
+            assert!((rec - tau).abs() < 1e-12 * tau.abs().max(1.0), "round-trip at r={r}");
+            // AthenaK/HARM coordinate form (positive convention): -sqrt(-g)(T^t_t + rho u^t) and its
+            // flux, computed straight from the primitives via the SchwarzschildKS metric, must agree
+            // with the ADM E_hat / F_Ehat above — the two are the same conserved current. evaluated
+            // in the full 3d spherical chart at the equator (theta = pi/2, radial flow v^theta =
+            // v^phi = 0) so that gam.det() = r^2 sqrt(h) picks up the r^2 the reduced 1d chart drops,
+            // matching the manual sqrtg = r^2 sqrt(h).
+            let (e_coord, f_coord) = coord_energy_cons_flux(
+                &SchwarzschildKS { mass: Dual::constant(M) },
+                Tensor::<f64, 3>::new([r, std::f64::consts::FRAC_PI_2, 0.0]),
+                rho,
+                rho * h,
+                Tensor::<f64, 3>::new([vr, 0.0, 0.0]),
+                p,
+            );
+            assert!(
+                (e_coord - ehat).abs() < 1e-9 * ehat.abs().max(1.0),
+                "coord energy vs ADM E_hat at r={r}: {e_coord} vs {ehat}"
+            );
+            assert!(
+                (f_coord[0] - (alpha * fe - beta * fs - fd)).abs() < 1e-9 * fe.abs().max(1.0),
+                "coord flux vs ADM F_Ehat at r={r}: {} vs {}",
+                f_coord[0],
+                alpha * fe - beta * fs - fd
+            );
+        }
+        let mean: f64 = f_ehat.iter().sum::<f64>() / f_ehat.len() as f64;
+        let spread = (f_ehat.iter().cloned().fold(f64::MIN, f64::max)
+            - f_ehat.iter().cloned().fold(f64::MAX, f64::min))
+            / mean.abs();
+        assert!(spread < 1e-10, "F_Ehat not conserved: rel spread {spread:.2e}");
+        // sanity: the per-steradian constant equals the analytic killing-minus-baryon flux
+        // jm*(h_inf-1) (negative for infall).
+        let analytic = -JM * (H_INF - 1.0);
+        assert!((mean - analytic).abs() < 1e-6 * analytic.abs(), "F_Ehat {mean} vs {analytic}");
+        // and the eulerian flux is NOT conserved (varies O(1)).
+        let e_mean: f64 = f_e.iter().sum::<f64>() / f_e.len() as f64;
+        let e_spread = (f_e.iter().cloned().fold(f64::MIN, f64::max)
+            - f_e.iter().cloned().fold(f64::MAX, f64::min))
+            / e_mean.abs();
+        assert!(e_spread > 1e-2, "eulerian flux unexpectedly flat: {e_spread:.2e}");
+    }
+}
+
+
 /// the full GRMHD covariant valencia source — [`grhd_covariant_source`] with the ideal-MHD
 /// stress `T^{mu nu} = (rho h + b^2) u^mu u^nu + (p + b^2/2) g^{mu nu} - b^mu b^nu` in the SAME
 /// per-axis contraction — the electromagnetic stress enters only through `T`. the caller
@@ -228,6 +422,7 @@ struct AdmContractionBlocks<S: Scalar, const D: usize> {
     alpha: S,
     beta: Tensor<S, D>,
     gam: Matrix<S, D>,
+    sqrt_gamma: S,
     d_alpha: [S; D],
     dg4: [[[S; 4]; 4]; 3],
     gi4: [[S; 4]; 4],
@@ -247,6 +442,7 @@ where
     let mut alpha = S::ZERO;
     let mut beta = Tensor::<S, D>::zeros();
     let mut gam = Matrix::<S, D>::zeros();
+    let mut sqrt_gamma = S::ZERO;
     let mut gam_inv = Matrix::<S, D>::zeros();
     let mut d_alpha = [S::ZERO; D];
     let mut d_beta = [[S::ZERO; D]; D]; // d_beta[kk][ii] = d_kk beta^ii
@@ -262,6 +458,7 @@ where
             alpha = a.value;
             beta = Tensor::from_fn(|ii| b[ii].value);
             gam = Matrix::from_fn(|ii, jj| gm[(ii, jj)].value);
+            sqrt_gamma = g.sqrt_det_gamma(xd).value;
             gam_inv = g.spatial_metric_inv(xd).map(|d| d.value);
         }
         d_alpha[kk] = a.tangent;
@@ -321,7 +518,7 @@ where
         }
     }
 
-    AdmContractionBlocks { alpha, beta, gam, d_alpha, dg4, gi4 }
+    AdmContractionBlocks { alpha, beta, gam, sqrt_gamma, d_alpha, dg4, gi4 }
 }
 
 

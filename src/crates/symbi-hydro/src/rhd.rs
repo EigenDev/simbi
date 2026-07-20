@@ -63,10 +63,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
         prim: &Self::Prim,
         gamma: &crate::spatial_metric::SpatialMetric<S, D>,
         alpha: S,
+        shift: Tensor<S, D>,
     ) -> Self::Cons {
-        // the Valencia covariant storage: delegate to `RhdGr` at the cell's spatial metric so the
-        // initial conserved momentum is the covariant `S_i = rho h W^2 gamma_ij v^j` the c2p inverts.
-        RhdGr { metric: *gamma, alpha }.to_conserved(eos, prim)
+        // the covariant storage: delegate to `RhdGr` at the cell's 3+1 block so the initial conserved
+        // momentum is the covariant `S_i = rho h W^2 gamma_ij v^j` AND the energy is the covariant
+        // `ehat = alpha tau + (alpha-1) D - beta^i S_i` — both the state the metric-aware c2p inverts.
+        RhdGr { metric: *gamma, alpha, shift }.to_conserved(eos, prim)
     }
 
     #[inline]

@@ -31,11 +31,17 @@ use super::{enthalpy, lorentz_factor, sound_speed_sq, Rhd};
 const MAX_ITER: usize = 100;
 
 /// the relativistic-hydro regime on a curved spatial metric (Valencia covariant momentum + BF wave
-/// speeds). `metric` = gamma_{ij}/gamma^{ij}; `alpha` = the lapse. reduces to `Rhd` at identity/1.
+/// speeds). `metric` = gamma_{ij}/gamma^{ij}; `alpha` = the lapse; `shift` = the contravariant shift
+/// `beta^i`. the energy slot is the COVARIANT (killing) energy `ehat = alpha tau + (alpha-1) D -
+/// beta^i S_i` — the free-index-down `-sqrt(-g)(T^t_t + rho u^t)/sqrt(gamma)`, whose source vanishes
+/// on a stationary metric (HARM/AthenaK; docs/covariant_energy.md) — with the self-contained
+/// covariant energy flux `f_ehat = -alpha u^n (rho h u_t + rho)`. reduces to `Rhd` bit-for-bit at
+/// identity gamma, lapse 1, zero shift (`ehat -> tau`, `f_ehat -> (tau+p) v^n`).
 #[derive(Clone, Copy)]
 pub struct RhdGr<S: Scalar, const D: usize> {
     pub metric: SpatialMetric<S, D>,
     pub alpha: S,
+    pub shift: Tensor<S, D>,
 }
 
 impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
@@ -55,7 +61,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         let den = prim.rho * ww;
         let rhw2 = prim.rho * hh * ww * ww;
         let mom = self.metric.lower(&prim.vel).scale(rhw2);
-        let nrg = rhw2 - prim.pre - den;
+        let tau = rhw2 - prim.pre - den;
+        // the covariant (killing) energy: ehat = alpha tau + (alpha-1) D - beta^i S_i. undensitized
+        // (the sqrt(gamma) rides the finite-volume measure). alpha=1, beta=0 -> ehat = tau.
+        let nrg = self.alpha * tau + (self.alpha - S::ONE) * den - self.shift.dot(&mom);
         Cons { den, mom, nrg }
     }
 
@@ -73,9 +82,15 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
             };
             return C2pResult::err(floored, code);
         }
+        // recover the Valencia tau from the covariant energy first (invert ehat = alpha tau +
+        // (alpha-1) D - beta^i S_i): tau = (ehat + (1-alpha) D + beta^i S_i) / alpha. alpha=1,
+        // beta=0 -> tau = ehat, so the flat recovery is untouched. then the SHARED metric-aware
+        // newton on (D, S_i, tau) — the recovery physics never sees the energy re-split.
+        let tau = (cons.nrg + (S::ONE - self.alpha) * dd + self.shift.dot(&cons.mom)) / self.alpha;
+        let cons_tau = Cons { den: dd, mom: cons.mom, nrg: tau };
         // the metric-aware recovery: |S|^2 = gamma^{ij} S_i S_j, then the raised v^i (`rhd_recover`
         // already contracts with `self.metric`). the SR->GR difference lives entirely in the metric VALUE; the code path is shared.
-        let prim = rhd_recover(eos, cons, &self.metric, MAX_ITER);
+        let prim = rhd_recover(eos, &cons_tau, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
         if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
@@ -83,16 +98,31 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
-        // the Valencia SPATIAL flux (no shift; the shift-advection rides the discretize shift-flux
-        // kernel): F_D = D v^n, F_{S_j} = S_j v^n + p n_j, F_tau = (tau + p) v^n. with v^n = v^i n_i
-        // (CONTRAVARIANT normal for a coordinate-unit nhat). identity gamma + the covariant S from
-        // to_conserved -> bit-identical to `Rhd::to_flux` ((tau+p)v^n == mn - D v^n at identity).
+        // the mass/momentum SPATIAL flux (no shift; the shift-advection rides the discretize shift-
+        // flux kernel): F_D = D v^n, F_{S_j} = S_j v^n + p n_j. with v^n = v^i n_i (CONTRAVARIANT
+        // normal for a coordinate-unit nhat). identity gamma + the covariant S from to_conserved ->
+        // bit-identical to `Rhd::to_flux`.
         let cons = self.to_conserved(eos, prim);
         let vn = prim.vel.dot(nhat);
+        // the SELF-CONTAINED covariant energy flux f_ehat = -alpha u^n (rho h u_t + rho): the free-
+        // index-down -sqrt(-g)(T^n_t + rho u^n)/sqrt(gamma) (HARM/AthenaK). it carries the lapse and
+        // the shift itself, so the energy component is NOT re-weighted by the godunov lapse or the
+        // shift-flux G-transform. the coordinate 4-velocity u^t = W/alpha, u^i = W(v^i - beta^i/alpha),
+        // u_t = g_tt u^t + beta_j u^j with g_tt = -alpha^2 + beta^k beta_k. alpha=1, beta=0 -> u_t =
+        // -W and f_ehat = rho W (hW - 1) v^n = (tau + p) v^n, bit-identical to the Valencia F_tau.
+        let ww = lorentz_factor(self.metric.norm_sq_contra(&prim.vel));
+        let ut = ww / self.alpha;
+        let u_sp = prim.vel.scale(ww) - self.shift.scale(ww / self.alpha);
+        let beta_low = self.metric.lower(&self.shift);
+        let g_tt = S::ZERO - self.alpha * self.alpha + self.shift.dot(&beta_low);
+        let u_t = g_tt * ut + beta_low.dot(&u_sp);
+        let un = u_sp.dot(nhat);
+        let rho_h = prim.rho * enthalpy(eos, prim.rho, prim.pre);
+        let nrg = S::ZERO - self.alpha * un * (rho_h * u_t + prim.rho);
         Cons {
             den: cons.den * vn,
             mom: cons.mom.scale(vn) + nhat.scale(prim.pre),
-            nrg: (cons.nrg + prim.pre) * vn,
+            nrg,
         }
     }
 
@@ -135,7 +165,7 @@ mod tests {
         // component-for-component: conserved, flux, AND wave speeds. the flat path stays untouched.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let flat = Rhd;
-        let gr = RhdGr::<f64, 1> { metric: SpatialMetric::flat(), alpha: 1.0 };
+        let gr = RhdGr::<f64, 1> { metric: SpatialMetric::flat(), alpha: 1.0, shift: Tensor::zeros() };
         let nhat = Tensor::unit(0);
         for &v in &[0.0_f64, 0.3, -0.5, 0.85] {
             let prim = Prim { rho: 1.3, vel: Tensor::new([v]), pre: 0.5 };
@@ -159,7 +189,7 @@ mod tests {
             Gamma::new(Matrix::diag(Tensor::new([grr]))),
             GammaInv::new(Matrix::diag(Tensor::new([f]))),
         );
-        let gr = RhdGr { metric, alpha: f.sqrt() };
+        let gr = RhdGr { metric, alpha: f.sqrt(), shift: Tensor::new([0.0]) };
         let prim = Prim { rho: 1.0, vel: Tensor::new([vr]), pre: 0.1 };
         let c = gr.to_conserved(&eos, &prim);
         let v_sq = grr * vr * vr;
@@ -168,8 +198,49 @@ mod tests {
         let rhw2 = 1.0 * h * w * w;
         assert!(approx(c.den, w), "D = rho W");
         assert!(approx(c.mom[0], grr * vr * rhw2), "S_r covariant = gamma_rr v^r rho h W^2");
-        // and the c2p round-trips it back to the same contravariant v^r
-        let back = rhd_recover(&eos, &c, &gr.metric, MAX_ITER);
+        // and the c2p round-trips it back to the same contravariant v^r (through the ehat -> tau
+        // inversion in to_primitive; rhd_recover alone would misread the covariant energy slot).
+        let back = gr.to_primitive(&eos, &c).unwrap();
         assert!(approx(back.vel[0], vr), "c2p recovers contravariant v^r");
+    }
+
+    #[test]
+    fn rhd_gr_covariant_energy_round_trips_on_kerr_schild() {
+        // ingoing kerr-schild at r = 6, M = 1 (beta^r != 0): the covariant energy ehat = alpha tau +
+        // (alpha-1) D - beta^r S_r is stored, and to_primitive inverts it back to the primitive
+        // through the SHARED newton. also checks the covariant energy FLUX f_ehat is the free-index-
+        // down -sqrt(-g)(T^r_t + rho u^r)/sqrt(gamma), positive-tau branch.
+        let eos = IdealGas { gamma: 4.0 / 3.0 };
+        let (m, r) = (1.0_f64, 6.0_f64);
+        let a2 = 2.0 * m / r; // 1/3
+        let alpha = 1.0 / (1.0 + a2).sqrt();
+        let beta = 2.0 * m / (r + 2.0 * m); // beta^r contravariant
+        let grr = 1.0 + a2;
+        let metric = SpatialMetric::<f64, 1>::new(
+            Gamma::new(Matrix::diag(Tensor::new([grr]))),
+            GammaInv::new(Matrix::diag(Tensor::new([1.0 / grr]))),
+        );
+        let gr = RhdGr { metric, alpha, shift: Tensor::new([beta]) };
+        let prim = Prim { rho: 1.3, vel: Tensor::new([0.15]), pre: 0.4 };
+        let c = gr.to_conserved(&eos, &prim);
+        // the stored energy IS the covariant ehat, NOT the Valencia tau
+        let v_sq = grr * 0.15 * 0.15;
+        let ww = 1.0 / (1.0 - v_sq).sqrt();
+        let hh = 1.0 + (4.0 / 3.0) / (1.0 / 3.0) * 0.4 / 1.3;
+        let tau = 1.3 * hh * ww * ww - 0.4 - 1.3 * ww;
+        let ehat = alpha * tau + (alpha - 1.0) * c.den - beta * c.mom[0];
+        assert!(approx(c.nrg, ehat), "stored nrg is the covariant energy ehat");
+        // c2p inverts ehat -> tau -> primitive
+        let back = gr.to_primitive(&eos, &c).unwrap();
+        assert!(approx(back.rho, 1.3) && approx(back.vel[0], 0.15) && approx(back.pre, 0.4),
+            "covariant-energy c2p round-trips the primitive");
+        // f_ehat matches the free-index-down covariant flux: -alpha u^r (rho h u_t + rho)
+        let ut = ww / alpha;
+        let u_r = ww * (0.15 - beta / alpha);
+        let g_tt = -alpha * alpha + grr * beta * beta;
+        let u_t = g_tt * ut + grr * beta * u_r;
+        let f_expected = -alpha * u_r * (1.3 * hh * u_t + 1.3);
+        let f = gr.to_flux(&prim, &Tensor::new([1.0]), &eos);
+        assert!(approx(f.nrg, f_expected), "f_ehat = -alpha u^r (rho h u_t + rho)");
     }
 }

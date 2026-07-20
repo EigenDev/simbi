@@ -285,7 +285,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 }
             }
         }
-        dispatch_godunov(sim, pre, "rhd", dt, a0, ac);
+        dispatch_godunov(sim, pre, "rhd", dt, a0, ac, self.gamma);
     }
 
     fn has_additive_source(&self) -> bool {
