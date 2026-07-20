@@ -2232,6 +2232,23 @@ fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg
     coll
 }
 
+/// build the immersed bodies AND, for a cartesian kerr-schild excision run, auto-append the GR
+/// EXCISION HORIZON as a first-class diagnostic body. the horizon is not a user-placed body — it is
+/// the excision surface itself — so it is synthesized from the spacetime config: the shell-flux
+/// accretion ledger is measured through a coordinate sphere at `diagnostic_radius = 1.5 r_+ = 3 M`
+/// (outside the horizon, where the flux is well-posed and, with the covariant energy, radius-
+/// invariant at steady state). cartesian GR always uses the kerr-schild chart (schwarzschild is
+/// spherical), so `spacetime != minkowski && coord == cartesian && r_exc > 0` selects it.
+fn build_bodies_and_horizon<const D: usize>(cfg: &Config) -> BodyCollection<f64, D> {
+    let mut coll = build_bodies::<D>(&cfg.bodies, cfg.binary.as_ref());
+    if cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0 {
+        let diagnostic_radius = 3.0 * cfg.schwarzschild_mass; // 1.5 r_+, outside the horizon
+        let idx = coll.len();
+        coll = coll.add(symbi_ib::Body::horizon(idx, cfg.excision_radius, diagnostic_radius));
+    }
+    coll
+}
+
 /// append one diagnostics row PER BODY to a whitespace-separated table (with a
 /// `#`-commented header on first write): the instantaneous body state sampled at
 /// the diagnostic cadence — position, velocity, the gas reaction force + torque
@@ -2752,7 +2769,7 @@ macro_rules! build_and_run_hydro {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
+            let mut sim = sim.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
             sim
         };
@@ -2870,7 +2887,7 @@ macro_rules! build_and_run_hydro {
         // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
         // sink applies once). the sink sphere must lie inside the finest level (asserted there).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
-            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
+            hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
@@ -3300,7 +3317,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 // containment (sphere overlap with a tile must lie inside ITS fine level) is
                 // asserted each step.
                 if !cfg.bodies.is_empty() {
-                    h = h.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
+                    h = h.with_bodies(build_bodies_and_horizon::<$d>(cfg));
                     h.attach_body_shapes(build_body_shapes(&cfg.bodies));
                 }
                 h.prime();
@@ -3448,7 +3465,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 let mut sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
+                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
                 };
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
@@ -3907,7 +3924,7 @@ macro_rules! build_and_run_mhd {
         let sim = if cfg.bodies.is_empty() {
             sim
         } else {
-            sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
+            sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
         };
         let theta = build_theta(cfg);
         let sub = sim
@@ -4057,7 +4074,7 @@ macro_rules! build_and_run_imhd {
         let sim = if cfg.bodies.is_empty() {
             sim
         } else {
-            sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
+            sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
         };
         let theta = build_theta(cfg);
         let sub = sim
@@ -4237,7 +4254,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
+                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
                 };
                 let sub = sim
                     .substrate()
@@ -4418,7 +4435,7 @@ macro_rules! build_and_run_imhd_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
+                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
                 };
                 let sub = sim
                     .substrate()
@@ -4772,7 +4789,7 @@ macro_rules! build_and_run_iso_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
+                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
                 };
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
@@ -4933,7 +4950,7 @@ macro_rules! build_and_run_iso {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
+            let mut sim = sim.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
             sim
         };
@@ -5069,7 +5086,7 @@ macro_rules! build_and_run_iso {
         // level owns the full (accreting) bodies, coarser levels a gravity-only
         // proxy (finest-owns-bodies, so the sink applies once).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
-            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
+            hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
 
