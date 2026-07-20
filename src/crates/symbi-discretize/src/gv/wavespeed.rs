@@ -606,67 +606,73 @@ pub fn rmhd_source_cfl_gr_gv(
     // the inverse spatial metric (raises the covariant momentum for the admissible-cone norm) and
     // the covariant source (autodiff Dual metric), dispatched by (spacetime, chart). the momentum
     // source at p = 0, the energy source at the full p.
-    let (gm_inv, s_mom, s_tau): (Matrix<Gv, 3>, Tensor<Gv, 3>, Gv) = match (spacetime, coords) {
+    // also harvest the lapse + shift: the evolved energy slot is the covariant ehat, so the eulerian
+    // admissibility energy E = tau + D is recovered as E = (ehat + D + beta^i S_i) / alpha.
+    let (gm_inv, alpha, beta, s_mom, s_tau): (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>, Tensor<Gv, 3>, Gv) =
+        match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
-            let gi = Schwarzschild { mass: mass_gv }.spatial_metric_inv(x);
+            let mg = Schwarzschild { mass: mass_gv };
             let (sm, _) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
-            let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
+            let mg = SchwarzschildKSCartesian { mass: mass_gv };
             let (sm, _) = grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
-            let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
+            let mg = SchwarzschildKSCylindrical { mass: mass_gv };
             let (sm, _) = grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
         (Spacetime::KerrSchild, _) => {
-            let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
+            let mg = SchwarzschildKS { mass: mass_gv };
             let (sm, _) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::Kerr, Coords::Cartesian) => {
             let spin_gv = Gv::scalar("kerr_spin");
-            let gi = KerrKSCartesian { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let mg = KerrKSCartesian { mass: mass_gv, spin: spin_gv };
             let spin = Dual::constant(spin_gv);
             let (sm, _) = grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
 (Spacetime::Kerr, Coords::Cylindrical) => {
             let spin_gv = Gv::scalar("kerr_spin");
-            let gi = KerrKSCylindrical { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let mg = KerrKSCylindrical { mass: mass_gv, spin: spin_gv };
             let spin = Dual::constant(spin_gv);
             let (sm, _) = grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
         (Spacetime::Kerr, _) => {
             let spin_gv = Gv::scalar("kerr_spin");
-            let gi = KerrKS { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let mg = KerrKS { mass: mass_gv, spin: spin_gv };
             let spin = Dual::constant(spin_gv);
             let (sm, _) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pre, b);
-            (gi, sm, st)
+            (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
         }
         (Spacetime::Minkowski, _) => {
             unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
         }
     };
-    // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j.
+    // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j. the stored
+    // energy is the covariant ehat, so E = (ehat + D + beta^i S_i) / alpha (metric-free b^2 blocks a
+    // direct e - p reconstruction; the invert is exact).
     let d_cons = Gv::field("cons_den", FieldRef::cons_den());
     let mom: [Gv; 3] =
         std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
-    let tau = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    let e_cons = tau + d_cons;
+    let ehat = Gv::field("cons_nrg", FieldRef::cons_nrg());
+    let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
+    let e_cons = (ehat + d_cons + beta_s) / alpha;
     let gamma_norm = |a: &[Gv; 3]| {
         let mut acc = Gv::ZERO;
         for ii in 0..3 {

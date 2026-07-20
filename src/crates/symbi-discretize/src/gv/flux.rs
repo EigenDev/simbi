@@ -909,12 +909,22 @@ pub fn rmhd_flux_gr_gv(
     // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
     // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
     // constant added to the magnetic flux after the fan (identical to adding it to both sides).
+    // covariant (killing) energy flux: F_ehat = alpha^2 F_tau + alpha(alpha-1) F_D - alpha beta^i
+    // F_{S_i}, the linear re-split of the Valencia numerical fluxes into the free-index-down energy
+    // current. both HLLD and HLLE emit the Valencia flux in the shifted-G "godunov re-applies alpha"
+    // convention (F_X = F_X* - (beta^n/alpha) X*), and this combination lands sqrt(-g)(T^n_t + rho u^n)
+    // the covariant-energy godunov consumes with NO lapse re-weight. alpha=1, beta=0 -> F_tau
+    // (the flat Valencia energy flux), and beta=0 -> alpha^2 F_tau + alpha(alpha-1) F_D.
+    let covariant_nrg = |f: &symbi_hydro::MhdCons<Gv, 3>| {
+        alpha * alpha * f.nrg + alpha * (alpha - Gv::ONE) * f.den - alpha * beta.dot(&f.mom)
+    };
     if hlld && !rusanov {
         let w = if has_shift { beta[coord_n] / alpha } else { Gv::ZERO };
         let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
         if has_shift {
             flux.mag = flux.mag + beta.scale(bn_face / alpha);
         }
+        flux.hydro.nrg = covariant_nrg(&flux);
         let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
         for k in 0..3 {
             writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
@@ -933,7 +943,7 @@ pub fn rmhd_flux_gr_gv(
         let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
         return (k, writes);
     }
-    let flux = if has_shift {
+    let mut flux = if has_shift {
         // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
         let beta_n = beta[coord_n];
         let w = beta_n / alpha;
@@ -965,6 +975,7 @@ pub fn rmhd_flux_gr_gv(
     } else {
         hlle_with_speeds(&regime, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r)
     };
+    flux.hydro.nrg = covariant_nrg(&flux);
 
     let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
     for k in 0..3 {

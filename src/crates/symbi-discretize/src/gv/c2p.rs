@@ -307,22 +307,25 @@ pub fn rmhd_c2p_gr_gv(
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (gm, gm_inv) = match (spacetime, coords) {
+    // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
+    // so the recovery harvests the cell lapse + shift to invert it back to the Valencia tau the KKC
+    // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
+    let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
@@ -331,28 +334,30 @@ pub fn rmhd_c2p_gr_gv(
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
             let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
 (Spacetime::Kerr, Coords::Cylindrical) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
             let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::Minkowski, _) => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
     };
     let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
+    let mom_t = Tensor::new(mom);
+    let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
     let cons = MhdCons::<Gv, 3> {
-        hydro: Cons { den, mom: Tensor::new(mom), nrg },
+        hydro: Cons { den, mom: mom_t, nrg: tau },
         mag: Tensor::new(mag),
     };
     let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
