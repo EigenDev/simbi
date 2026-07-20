@@ -1,15 +1,15 @@
 // =============================================================================
 // excise_law.rs
 //
-// the horizon-excision kernels' gates: the compiled onion-sweep fill pair +
-// the valencia conserved rebuild are BIT-IDENTICAL to the f64 host chain built
-// from the same carrier-generic pieces (`onion_fill_cell`, `RhdGr::to_conserved`
+// the horizon-excision kernels' gates: the compiled vacuum-sink fill pair +
+// the covariant conserved rebuild are BIT-IDENTICAL to the f64 host chain built
+// from the same carrier-generic pieces (the vacuum floor, `RhdGr::to_conserved`
 // on the guarded cartesian kerr-schild metric), run as the same sequence
 // (K sweeps, then the rebuild). the geometry mirror uses the kernel's own
 // centroid arithmetic — faces x_lo + i dx, centroid = face midpoint.
-// a uniform state with self-consistent conserved fields must round-trip
-// bitwise: the fill copies equal values and the rebuild recomputes the very
-// arithmetic that produced the inputs.
+// every excised cell is frozen at the cold c2p-safe vacuum floor (RHO_FLOOR,
+// v = 0, P_FLOOR) — a one-way absorbing horizon — and the rebuild recomputes the
+// covariant conserved state from it; live cells pass through untouched.
 // =============================================================================
 
 use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
@@ -20,7 +20,7 @@ use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
 use symbi_hydro::RhdGr;
-use symbi_ib::excise::{onion_fill_cell, onion_pass_count};
+use symbi_ib::excise::onion_pass_count;
 
 const N: usize = 24;
 const X_LO: f64 = -0.6;
@@ -49,7 +49,10 @@ fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state:
         Gamma::new(m.spatial_metric(x)),
         GammaInv::new(m.spatial_metric_inv(x)),
     );
-    RhdGr { metric, alpha: 1.0 }.to_conserved(&IdealGas { gamma: GAMMA }, prim)
+    // the covariant excise p2c: the cell lapse + shift so the rebuilt energy slot is the covariant
+    // ehat = alpha tau + (alpha-1) D - beta^i S_i the kernel stores (matches gv_excise).
+    RhdGr { metric, alpha: m.lapse(x), shift: m.shift(x) }
+        .to_conserved(&IdealGas { gamma: GAMMA }, prim)
 }
 
 struct Grid {
@@ -196,37 +199,23 @@ fn run_compiled(g: &mut Grid) {
 
 /// the f64 chain: the same sweep + rebuild sequence from the same carrier code.
 fn run_reference(g: &mut Grid) {
+    // the vacuum-floor sink: every excised cell is frozen at the cold c2p-safe vacuum the kernel
+    // writes (RHO_FLOOR = 1e-10, v = 0, P_FLOOR = 1e-12; the bitwise f64 literals gv_excise emits).
+    // live cells are untouched. the pass count is retained (the write is idempotent) so the sweep
+    // structure matches the compiled dispatch.
     for _ in 0..onion_pass_count(R_EXC, DX) {
-        let (rho, v0, v1, pre) = (g.rho.clone(), g.v0.clone(), g.v1.clone(), g.pre.clone());
-        let at = |f: &[f64], ii: isize, jj: isize| f[ii as usize + jj as usize * N];
         for jj in 1..(N - 1) as isize {
             for ii in 1..(N - 1) as isize {
-                let st = |di: isize, dj: isize| -> [f64; 4] {
-                    [
-                        at(&rho, ii + di, jj + dj),
-                        at(&v0, ii + di, jj + dj),
-                        at(&v1, ii + di, jj + dj),
-                        at(&pre, ii + di, jj + dj),
-                    ]
-                };
-                // the excision mask at this cell: the a = 0 kerr-schild radius
-                // equals the euclidean radius, so the disk test is exact here.
+                // the excision mask at this cell: the a = 0 kerr-schild radius equals the euclidean
+                // radius, so the disk test is exact here.
                 let (x, y) = (xc(ii as usize), xc(jj as usize));
-                let excised = x * x + y * y < R_EXC * R_EXC;
-                let filled = onion_fill_cell(
-                    st(0, 0),
-                    st(1, 1),
-                    st(1, -1),
-                    st(-1, 1),
-                    st(-1, -1),
-                    [x, y],
-                    excised,
-                );
-                let c = ii as usize + jj as usize * N;
-                g.rho[c] = filled[0];
-                g.v0[c] = filled[1];
-                g.v1[c] = filled[2];
-                g.pre[c] = filled[3];
+                if x * x + y * y < R_EXC * R_EXC {
+                    let c = ii as usize + jj as usize * N;
+                    g.rho[c] = 1e-10;
+                    g.v0[c] = 0.0;
+                    g.v1[c] = 0.0;
+                    g.pre[c] = 1e-12;
+                }
             }
         }
     }
@@ -297,9 +286,9 @@ fn compiled_excise_sequence_matches_the_f64_chain_bitwise() {
 
 #[test]
 fn uniform_state_round_trips_bitwise() {
-    // uniform primitives with per-cell self-consistent conserved fields: the fill
-    // copies equal values and the rebuild recomputes the arithmetic that produced
-    // the inputs — the whole sequence is the bitwise identity.
+    // uniform primitives with per-cell self-consistent conserved fields: the LIVE cells pass
+    // through the whole sequence as the bitwise identity, while every EXCISED cell is overwritten
+    // with the cold vacuum floor + its covariant conserved rebuild (the one-way absorbing horizon).
     let mut g = smooth_grid();
     let uni = Prim::<f64, 2> { rho: 1.2, vel: Tensor::new([0.1, -0.05]), pre: 0.03 };
     for jj in 0..N {
@@ -327,14 +316,36 @@ fn uniform_state_round_trips_bitwise() {
         nrg: g.nrg.clone(),
     };
     run_compiled(&mut g);
-    for c in 0..N * N {
-        assert_eq!(g.rho[c].to_bits(), before.rho[c].to_bits(), "rho at {c}");
-        assert_eq!(g.v0[c].to_bits(), before.v0[c].to_bits(), "v0 at {c}");
-        assert_eq!(g.v1[c].to_bits(), before.v1[c].to_bits(), "v1 at {c}");
-        assert_eq!(g.pre[c].to_bits(), before.pre[c].to_bits(), "pre at {c}");
-        assert_eq!(g.den[c].to_bits(), before.den[c].to_bits(), "den at {c}");
-        assert_eq!(g.m0[c].to_bits(), before.m0[c].to_bits(), "m0 at {c}");
-        assert_eq!(g.m1[c].to_bits(), before.m1[c].to_bits(), "m1 at {c}");
-        assert_eq!(g.nrg[c].to_bits(), before.nrg[c].to_bits(), "nrg at {c}");
+    let mut n_excised = 0usize;
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let (x, y) = (xc(ii), xc(jj));
+            if x * x + y * y < R_EXC * R_EXC {
+                // excised: the cold vacuum floor + its covariant conserved rebuild.
+                n_excised += 1;
+                let vac = Prim::<f64, 2> { rho: 1e-10, vel: Tensor::new([0.0, 0.0]), pre: 1e-12 };
+                let cons = to_conserved_at(x, y, &vac);
+                assert_eq!(g.rho[c].to_bits(), 1e-10_f64.to_bits(), "rho vacuum at {c}");
+                assert_eq!(g.v0[c].to_bits(), 0.0_f64.to_bits(), "v0 vacuum at {c}");
+                assert_eq!(g.v1[c].to_bits(), 0.0_f64.to_bits(), "v1 vacuum at {c}");
+                assert_eq!(g.pre[c].to_bits(), 1e-12_f64.to_bits(), "pre vacuum at {c}");
+                assert_eq!(g.den[c].to_bits(), cons.den.to_bits(), "den at {c}");
+                assert_eq!(g.m0[c].to_bits(), cons.mom[0].to_bits(), "m0 at {c}");
+                assert_eq!(g.m1[c].to_bits(), cons.mom[1].to_bits(), "m1 at {c}");
+                assert_eq!(g.nrg[c].to_bits(), cons.nrg.to_bits(), "nrg at {c}");
+            } else {
+                // live: the whole sequence is the bitwise identity.
+                assert_eq!(g.rho[c].to_bits(), before.rho[c].to_bits(), "rho at {c}");
+                assert_eq!(g.v0[c].to_bits(), before.v0[c].to_bits(), "v0 at {c}");
+                assert_eq!(g.v1[c].to_bits(), before.v1[c].to_bits(), "v1 at {c}");
+                assert_eq!(g.pre[c].to_bits(), before.pre[c].to_bits(), "pre at {c}");
+                assert_eq!(g.den[c].to_bits(), before.den[c].to_bits(), "den at {c}");
+                assert_eq!(g.m0[c].to_bits(), before.m0[c].to_bits(), "m0 at {c}");
+                assert_eq!(g.m1[c].to_bits(), before.m1[c].to_bits(), "m1 at {c}");
+                assert_eq!(g.nrg[c].to_bits(), before.nrg[c].to_bits(), "nrg at {c}");
+            }
+        }
     }
+    assert!(n_excised > 0, "the disk must excise some cells");
 }

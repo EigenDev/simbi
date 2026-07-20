@@ -22,6 +22,7 @@ pub mod collection;
 pub mod drain;
 pub mod motion;
 pub mod diagnostics;
+pub mod shell_flux;
 
 pub use body::{Body, BodyKind, BodySpec, MagneticSpec, SurfaceSpec};
 pub use bondi::{accretion_coefficient, bondi_profile, mdot_bondi, sonic_radius, BondiState};
@@ -34,3 +35,4 @@ pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_
 pub use collection::{BodyCollection, BinaryParams, ReferenceFrame, MAX_BODIES};
 pub use motion::{rotate_2d, rotate_3d, advance_binary, apply_body_deltas, keplerian_binary};
 pub use diagnostics::DiagnosticAccumulator;
+pub use shell_flux::{shell_accretion, FaceFlux};
