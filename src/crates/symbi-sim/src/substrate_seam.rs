@@ -114,6 +114,19 @@ where
     /// accreted-mass from the fluid into the side-car diagnostics, once per step. default: no-op.
     fn body_feedback(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
+    /// the GR horizon shell-flux accretion diagnostic: the rest-mass and covariant (killing) energy
+    /// rates `(mdot, edot)` crossing a coordinate sphere at `diagnostic_radius`, measured by a
+    /// GPU Add-reduction of the per-cell outward boundary flux of `Omega = { r_ks < diagnostic_radius }`
+    /// (divergence-theorem-consistent with the godunov; `edot` is `diagnostic_radius`-invariant at
+    /// steady state). default `(0, 0)`: flat backgrounds / regimes without the baked shell kernels.
+    fn horizon_accretion(
+        &self,
+        _store: &FieldStore<NDIM, DOF, Mem, Sc>,
+        _diagnostic_radius: f64,
+    ) -> (f64, f64) {
+        (0.0, 0.0)
+    }
+
     /// the immersed-boundary penalization: the property-
     /// algebra surface physics (drain, walls, porosity, thermal surfaces),
     /// applied post-source each substage — the ONE body

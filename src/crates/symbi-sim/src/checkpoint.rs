@@ -595,8 +595,10 @@ struct BodyStateSnap {
     pos: Vec<f64>,         // [nb, D]
     vel: Vec<f64>,         // [nb, D]
     mass: Vec<f64>,        // [nb]
-    accreted: Vec<f64>,    // [nb] cumulative (0 for non-sinks)
-    rate: Vec<f64>,        // [nb] instantaneous (0 for non-sinks)
+    accreted: Vec<f64>,    // [nb] cumulative rest mass (0 for non-sinks)
+    rate: Vec<f64>,        // [nb] instantaneous Mdot (0 for non-sinks)
+    accreted_energy: Vec<f64>, // [nb] cumulative covariant (killing) energy (GR horizon only)
+    energy_rate: Vec<f64>,     // [nb] instantaneous Edot (GR horizon only)
     orientation: Vec<f64>, // [nb, 3, 3] row-major rotation matrix (evolved spin state)
     omega: Vec<f64>,       // [nb, 3] angular-velocity vector
     shape_json: Vec<String>, // per-body CSG wire (empty = the analytic sphere), for viz
@@ -613,6 +615,8 @@ fn body_state_snap<const D: usize>(
         mass: Vec::with_capacity(nb),
         accreted: Vec::with_capacity(nb),
         rate: Vec::with_capacity(nb),
+        accreted_energy: Vec::with_capacity(nb),
+        energy_rate: Vec::with_capacity(nb),
         orientation: Vec::with_capacity(nb * 9),
         omega: Vec::with_capacity(nb * 3),
         shape_json: Vec::with_capacity(nb),
@@ -646,10 +650,23 @@ fn body_state_snap<const D: usize>(
             symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
                 (total_accreted_mass, accretion_rate)
             }
+            // the GR horizon books the shell-flux rest-mass ledger into the same datasets (Mdot).
+            symbi_ib::BodyKind::Horizon { total_accreted_mass, mdot, .. } => {
+                (total_accreted_mass, mdot)
+            }
             _ => (0.0, 0.0),
         };
         snap.accreted.push(acc);
         snap.rate.push(rate);
+        // the GR horizon also books the covariant (killing) energy ledger (Edot, cumulative E).
+        let (acc_e, rate_e) = match body.kind {
+            symbi_ib::BodyKind::Horizon { total_accreted_energy, edot, .. } => {
+                (total_accreted_energy, edot)
+            }
+            _ => (0.0, 0.0),
+        };
+        snap.accreted_energy.push(acc_e);
+        snap.energy_rate.push(rate_e);
     }
     snap
 }
@@ -667,6 +684,12 @@ fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
             DataRef::F64(&snap.accreted),
         ))
         .with_dataset(Dataset::new("accretion_rate", vec![nb], DataRef::F64(&snap.rate)))
+        .with_dataset(Dataset::new(
+            "total_accreted_energy",
+            vec![nb],
+            DataRef::F64(&snap.accreted_energy),
+        ))
+        .with_dataset(Dataset::new("accretion_energy_rate", vec![nb], DataRef::F64(&snap.energy_rate)))
         .with_dataset(Dataset::new(
             "orientation",
             vec![nb, 3, 3],

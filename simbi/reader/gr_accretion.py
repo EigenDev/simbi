@@ -351,3 +351,48 @@ def rex_invariance(mdot: Array, r: Array, radii: Sequence[float]) -> dict[str, A
     mean = float(np.mean(vals))
     spread = float((np.max(vals) - np.min(vals)) / abs(mean)) if mean != 0.0 else float("inf")
     return {"samples": samples, "mean": mean, "relative_spread": spread}
+
+
+# =============================================================================
+# the RUNTIME horizon ledger (the first-class immersed-boundary diagnostic)
+#
+# the excision horizon is auto-created as a first-class BodyKind::Horizon for a
+# cartesian kerr-schild excision run. each step the substrate reduces the shell
+# flux (a GPU Add-reduction of the outward boundary flux through a coordinate
+# sphere at diagnostic_radius) into the body's ledger, checkpointed under the
+# `bodies` group. UNLIKE `accretion_rate` above (a post-hoc surface integral),
+# this is the flux the scheme ACTUALLY applied, and -- because the code evolves
+# the covariant (killing) energy -- Edot is diagnostic_radius-invariant to
+# roundoff at steady state.
+# =============================================================================
+
+
+def horizon_ledger(checkpoint: str) -> dict[str, float]:
+    """the GR horizon's runtime accretion ledger from a checkpoint's `bodies` group:
+    the shell-flux rest-mass rate `mdot` and covariant (killing) energy rate `edot`,
+    plus their cumulative totals. the horizon is the MASSLESS body (its gravity is the
+    fixed metric, so `mass == 0` distinguishes it from any newtonian sink)."""
+    import h5py
+
+    with h5py.File(checkpoint, "r") as f:
+        if "bodies" not in f:
+            raise ValueError(f"horizon_ledger: '{checkpoint}' has no bodies group")
+        g = f["bodies"]
+        mass = np.asarray(g["mass"], dtype=float)
+        if mass.size == 0:
+            raise ValueError("horizon_ledger: no bodies in the checkpoint")
+        h = int(np.argmin(mass))  # the massless horizon (metric gravity)
+        return {
+            "mdot": float(np.asarray(g["accretion_rate"])[h]),
+            "edot": float(np.asarray(g["accretion_energy_rate"])[h]),
+            "total_accreted_mass": float(np.asarray(g["total_accreted_mass"])[h]),
+            "total_accreted_energy": float(np.asarray(g["total_accreted_energy"])[h]),
+        }
+
+
+def horizon_ledger_series(checkpoints: Sequence[str]) -> dict[str, Array]:
+    """the horizon accretion time series `(mdot, edot, totals)` over an ORDERED list of
+    checkpoint files -- the Mdot(t) / Edot(t) record for the steady-state approach."""
+    keys = ("mdot", "edot", "total_accreted_mass", "total_accreted_energy")
+    rows = [horizon_ledger(cp) for cp in checkpoints]
+    return {k: np.array([r[k] for r in rows], dtype=float) for k in keys}

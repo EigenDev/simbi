@@ -37,7 +37,8 @@ use crate::regimes::substrate_kernels::{
     GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries,
     dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov,
     dispatch_gradient_boundaries, dispatch_runtime_source, fused_runtime_cpu_kernel, geom_scalar,
-    geom_suffix, gr_chart_dof_tag, kernel_geom, resolve_params, scalars_for, spacetime_slug,
+    geom_suffix, gr_chart_dof_tag, kernel_geom, resolve_params, scalars_for, shell_accretion_rates,
+    spacetime_slug,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
@@ -361,6 +362,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             source_cfl.as_deref(),
             self.excision_radius,
         )
+    }
+
+    fn horizon_accretion(&self, sim: &FieldStore<D, DOF, Mem, Sc>, diagnostic_radius: f64) -> (f64, f64) {
+        // the shell-flux kernels are baked for the cartesian kerr-schild chart (the only chart that
+        // excises). reuse the (already-consumed) cfl scratch for the per-quantity Add-reduction.
+        if sim.geom.spacetime != Spacetime::KerrSchild
+            || sim.geom.coords != symbi_geometry::Geometry::Cartesian
+        {
+            return (0.0, 0.0);
+        }
+        let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
+        shell_accretion_rates(sim, pre, &self.cfl_scratch, diagnostic_radius)
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {

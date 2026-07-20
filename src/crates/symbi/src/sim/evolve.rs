@@ -221,6 +221,31 @@ where
         // inside the dispatch.
         kernels.excise(sim);
 
+        // the GR horizon shell-flux accretion, ONCE per step: the mass_flux / nrg_flux fields still
+        // hold the last stage's flux, so a GPU Add-reduction of the boundary flux through the
+        // diagnostic shell gives (mdot, edot) INTO the hole, booked onto the horizon body's ledger.
+        let horizon = sim.immersed.as_ref().and_then(|im| {
+            im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
+                symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => Some((i, diagnostic_radius)),
+                _ => None,
+            })
+        });
+        if let Some((idx, r_d)) = horizon {
+            let dt = sim.dt;
+            let (mdot, edot) = prof("horizon_accretion", || kernels.horizon_accretion(sim, r_d));
+            if let Some(im) = sim.immersed.as_mut() {
+                if let symbi_ib::BodyKind::Horizon {
+                    total_accreted_mass, total_accreted_energy, mdot: m, edot: e, ..
+                } = &mut im.bodies.get_mut(idx).kind
+                {
+                    *total_accreted_mass += mdot * dt;
+                    *total_accreted_energy += edot * dt;
+                    *m = mdot;
+                    *e = edot;
+                }
+            }
+        }
+
         if sim.has_bodies() {
             // the IBM surface physics, ONCE per step AFTER the
             // full RK combination: applied inside the stage blend, a stage's
