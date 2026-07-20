@@ -700,8 +700,17 @@ pub fn godunov_stage_gv_with_fused_built(
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 if axes.contains(&c) { coord_centroid[c] } else { gv_ungridded_slot(coords, c) }
             }));
-            let e = rho + Gv::field("nrg", FieldRef::cons_nrg()) + Gv::field("pre", FieldRef::PrimPre);
+            // the effective inertia e = rho h W^2 for the covariant stress. reconstructed metric-free
+            // as h D^2 / rho_prim (W = D/rho_prim, D = cons_den) — independent of the energy variable,
+            // so it holds whether the nrg slot stores the Valencia tau (RMHD) or the covariant ehat
+            // (RHD, where D + tau + p no longer equals the nrg field).
             let p = Gv::field("pre", FieldRef::PrimPre);
+            let e = {
+                let prim_rho = Gv::field("prim_rho", FieldRef::PrimRho);
+                let gamma_eos = Gv::scalar("gamma");
+                let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * p / prim_rho;
+                h_enth * rho * rho / prim_rho
+            };
             // the CONTRAVARIANT velocity in coordinate slots (the metric-aware c2p output);
             // spherical GR momentum slots are coordinate-ordered, so slot k == coordinate k.
             // coordinates without a momentum slot carry zero.
@@ -853,13 +862,26 @@ pub fn godunov_stage_gv_with_fused_built(
             &contribs.mom[k],
         ));
     }
+    // relativistic-hydro on a curved background evolves the COVARIANT (killing) energy ehat, whose
+    // self-contained flux f_ehat already carries the lapse + shift and whose source vanishes on a
+    // stationary metric (HARM/AthenaK; docs/covariant_energy.md). the RMHD energy is still the
+    // Valencia tau (the magnetized-stress lift is separate), so it keeps the lapse-weighted flux +
+    // geodesic source.
+    let is_covariant_energy =
+        spacetime != Spacetime::Minkowski && matches!(source, GeoSource::Hydro { .. });
     let nrg_g = has_energy.then(|| {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
-        with_sources(
-            combine(u_n_nrg, fe(nrg, gv_divergence("nrg_flux", ndim, &geo), nrg_gravity)),
-            &contribs.nrg,
-        )
+        let div = gv_divergence("nrg_flux", ndim, &geo);
+        let stage = if is_covariant_energy {
+            // pure conservation d_t ehat + div F_ehat = 0: NO lapse re-weight (f_ehat carries alpha),
+            // NO geodesic energy source (it is identically zero for the killing energy on a static
+            // slice, unlike the normal-observer tau). mesh dilution subtracts an exact zero on GR.
+            nrg - dt * div - dt * (h_dil * nrg)
+        } else {
+            fe(nrg, div, nrg_gravity)
+        };
+        with_sources(combine(u_n_nrg, stage), &contribs.nrg)
     });
 
     // immersed-body wrap. the body is a POST-combine operator `(cons_g + ac_dt*S_grav)*f` with

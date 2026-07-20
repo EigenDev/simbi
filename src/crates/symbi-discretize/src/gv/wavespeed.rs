@@ -741,9 +741,13 @@ pub fn rhd_source_cfl_gr_gv(
         }
     }));
     let d_cons = Gv::field("cons_den", FieldRef::cons_den());
-    let tau = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    // the total energy density the covariant hydro source contracts (rest + internal + pressure).
-    let e = rho + tau + pre;
+    // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
+    // metric-free and independent of the energy variable: the RHD nrg slot stores the covariant
+    // ehat, not the Valencia tau, so `rho + tau + pre` no longer names rho h W^2. the eulerian
+    // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
+    let gamma_eos = Gv::scalar("gamma");
+    let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
+    let e = h_enth * d_cons * d_cons / rho;
     let mass_gv = Gv::scalar("schwarzschild_mass");
     let mass = Dual::constant(mass_gv);
     let (gm_inv, s_mom, s_tau): (Matrix<Gv, 3>, Tensor<Gv, 3>, Gv) = match (spacetime, coords) {
@@ -808,7 +812,9 @@ pub fn rhd_source_cfl_gr_gv(
             Gv::ZERO
         }
     });
-    let e_cons = tau + d_cons;
+    // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no ehat -> tau
+    // inversion needed for the admissibility cone).
+    let e_cons = e - pre;
     let gamma_norm = |a: &[Gv; 3]| {
         let mut acc = Gv::ZERO;
         for ii in 0..3 {

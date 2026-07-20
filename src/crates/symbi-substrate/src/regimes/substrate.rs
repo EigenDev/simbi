@@ -389,6 +389,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             dt,
             a0,
             ac,
+            // iso carries no energy, so the covariant-energy godunov never binds the EOS scalar;
+            // the sound speed is passed only to satisfy the (unreached) Gamma/Cs arm.
+            self.cs,
             self.fused_source.as_ref(),
         );
     }

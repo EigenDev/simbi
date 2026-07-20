@@ -91,10 +91,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         prim: &Self::Prim,
         gamma: &SpatialMetric<S, D>,
         alpha: S,
+        _shift: Tensor<S, D>,
     ) -> Self::Cons {
         // the Valencia covariant storage: delegate to `RmhdGr` at the cell's spatial metric so
         // the initial conserved momentum is S_i = (rho h W^2 + B^2) v_i - (v.B) B_i — the state
-        // the metric-aware KKC c2p inverts.
+        // the metric-aware KKC c2p inverts. the RMHD energy slot is still the Valencia tau (the
+        // covariant-energy lift lands on the magnetized stress separately), so shift is unused.
         RmhdGr { metric: *gamma, alpha }.to_conserved(eos, prim)
     }
 
