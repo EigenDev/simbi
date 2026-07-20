@@ -305,6 +305,12 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "field plot; follows --slice (cartesian only)",
     )
     parser.add_argument(
+        "--draw-horizon",
+        action="store_true",
+        help="overlay the black-hole event horizon (r_+ = M + sqrt(M^2 - a^2)) of a "
+        "curved-spacetime run, read from the checkpoint metadata; flat runs draw nothing",
+    )
+    parser.add_argument(
         "--xlims",
         nargs=2,
         type=float,

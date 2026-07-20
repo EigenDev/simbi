@@ -416,6 +416,7 @@ class Figure:
         # the immersed-body silhouette artists from the PREVIOUS frame, removed before
         # the next frame's overlay so a tumbling body does not smear across the movie.
         self._body_artists: list = []
+        self._horizon_artists: list = []
 
         # build a map of the original component payload signatures used to
         # request the same plotted fields for each frame.
@@ -542,6 +543,23 @@ class Figure:
                 self._body_artists = overlay_bodies_on_slice(
                     self.axes.get("main") if hasattr(self, "axes") else None,
                     file_path,
+                    self.config.plot.slice,
+                    sim_data.metadata.coord_system,
+                )
+
+            # the horizon is fixed (BH at the origin, constant mass), but redraw it per
+            # frame so it survives an axis clear between frames.
+            if getattr(self.config.figure, "draw_horizon", False):
+                for art in self._horizon_artists:
+                    try:
+                        art.remove()
+                    except Exception:
+                        pass
+                from simbi.viz.horizon import overlay_horizon_on_slice
+
+                self._horizon_artists = overlay_horizon_on_slice(
+                    self.axes.get("main") if hasattr(self, "axes") else None,
+                    sim_data.metadata,
                     self.config.plot.slice,
                     sim_data.metadata.coord_system,
                 )
