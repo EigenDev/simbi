@@ -41,7 +41,7 @@ pub use symbi_ir::{Gv, GvKernel};
 pub use gv_excise::{
     excise_fill_3d_gv, excise_fill_dof3_gv, excise_fill_gv, excise_p2c_3d_gv, excise_p2c_gv,
     excise_p2c_mhd_3d_gv, excise_p2c_mhd_gv, excise_writeback_3d_gv, excise_writeback_dof3_gv,
-    excise_writeback_gv,
+    excise_writeback_gv, shell_flux_map_gv,
 };
 pub use gv_penalize::{
     body_resistive_emf_2d_gv, body_resistive_emf_3d_dir_gv,
