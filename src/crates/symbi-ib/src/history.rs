@@ -33,6 +33,9 @@ pub struct BodyHistory<const D: usize> {
     energy_delta: Vec<f64>,
     /// force on the body (gravity reaction + accretion drag): [len, nb, D].
     force: Vec<f64>,
+    /// the NORMAL (form-drag / pressure) component of the wall force: [len, nb, D]. skin friction is
+    /// `force - force_normal` (derived). zero for a bare drain/gravitational body.
+    force_normal: Vec<f64>,
     /// torque on the body (the r x F moment that drives the Euler rotation / precession): the
     /// evolution consumes `torque_delta` but net force cannot reconstruct it, so record it. always
     /// 3-component (rotation is a 3-space rank-2 object even for a 2D flow): [len, nb, 3].
@@ -48,6 +51,7 @@ impl<const D: usize> BodyHistory<D> {
             mass_delta: Vec::new(),
             energy_delta: Vec::new(),
             force: Vec::new(),
+            force_normal: Vec::new(),
             torque: Vec::new(),
         }
     }
@@ -62,6 +66,9 @@ impl<const D: usize> BodyHistory<D> {
             self.energy_delta.push(d.map_or(0.0, |d| d.energy_delta));
             for ax in 0..D {
                 self.force.push(d.map_or(0.0, |d| d.force_delta[ax]));
+            }
+            for ax in 0..D {
+                self.force_normal.push(d.map_or(0.0, |d| d.force_normal_delta[ax]));
             }
             for ax in 0..3 {
                 self.torque.push(d.map_or(0.0, |d| d.torque_delta[ax]));
@@ -99,6 +106,10 @@ impl<const D: usize> BodyHistory<D> {
 
     pub fn force(&self) -> &[f64] {
         &self.force
+    }
+
+    pub fn force_normal(&self) -> &[f64] {
+        &self.force_normal
     }
 
     pub fn torque(&self) -> &[f64] {

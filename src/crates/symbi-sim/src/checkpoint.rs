@@ -767,6 +767,11 @@ where
                     DataRef::F64(im.history.force()),
                 ))
                 .with_dataset(Dataset::new(
+                    "force_normal",
+                    vec![n, nb, D],
+                    DataRef::F64(im.history.force_normal()),
+                ))
+                .with_dataset(Dataset::new(
                     "torque",
                     vec![n, nb, 3],
                     DataRef::F64(im.history.torque()),
@@ -867,6 +872,7 @@ where
                 .with_dataset(Dataset::new("mass_delta", vec![n, nb], DataRef::F64(im.history.mass_delta())))
                 .with_dataset(Dataset::new("energy_delta", vec![n, nb], DataRef::F64(im.history.energy_delta())))
                 .with_dataset(Dataset::new("force", vec![n, nb, D], DataRef::F64(im.history.force())))
+                .with_dataset(Dataset::new("force_normal", vec![n, nb, D], DataRef::F64(im.history.force_normal())))
                 .with_dataset(Dataset::new("torque", vec![n, nb, 3], DataRef::F64(im.history.torque()))),
         );
     }
