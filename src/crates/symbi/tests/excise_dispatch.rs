@@ -3,9 +3,9 @@
 //
 // the horizon-excision dispatch, end to end on a real sim: an origin-containing
 // cartesian kerr-schild box with the black hole (and its coordinate singularity)
-// on the grid. the pass overwrites the excised sphere's primitives with outward
-// zero-gradient copies + local conserved rebuilds, leaves the far field
-// BIT-untouched, and a uniform state passes through as the exact identity.
+// on the grid. the pass freezes the excised sphere at the cold vacuum floor
+// (a Dirichlet sink: rho = 1e-10, v = 0, p = 1e-12, rebuilt cons), leaves the
+// far field BIT-untouched, and is exactly idempotent.
 // =============================================================================
 
 use symbi::regimes::substrate_kernels::dispatch_excise;
@@ -117,35 +117,59 @@ fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
 }
 
 #[test]
-fn excision_preserves_uniform_prims_and_is_idempotent() {
-    // a uniform primitive state: every donor equals every target, so the fill
-    // sweeps are the bitwise identity on the primitives. the conserved rebuild
-    // recomputes the excised cells' cons from those prims — its arithmetic may
-    // differ from the builder's host-side initial conversion by reassociation
-    // (allowed, bounded below), but the PASS ITSELF must be idempotent: a second
-    // dispatch reads the same prims at the same metric and must change nothing.
+fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
+    // the excised interior is a DIRICHLET vacuum sink: every cell with
+    // r_ks < r_exc is frozen at the cold c2p-safe floor (rho = 1e-10, v = 0,
+    // p = 1e-12) each pass, the live exterior is bit-untouched (prims AND
+    // cons — the rebuild passes live cons through), and the pass is exactly
+    // idempotent: a second dispatch reads the same prims at the same metric
+    // and must change nothing anywhere.
+    const RHO_FLOOR: f64 = 1e-10;
+    const P_FLOOR: f64 = 1e-12;
     let sim = build_sim(|_| Prim { rho: 1.3, vel: Tensor::new([0.05, -0.04]), pre: 0.02 });
     let before = snapshot(&sim);
     dispatch_excise(&sim, GAMMA, R_EXC);
     let once = snapshot(&sim);
 
+    let dx = 2.0 * L / N as f64;
+    let coords: Vec<[f64; 2]> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| {
+            let lo = sim.geom.interior.spaces[0].lo;
+            [
+                sim.geom.x_lo[0] + ((c[0] - lo) as f64 + 0.5) * dx,
+                sim.geom.x_lo[1] + ((c[1] - lo) as f64 + 0.5) * dx,
+            ]
+        })
+        .collect();
+
+    let mut n_floor = 0usize;
     for (i, (a, b)) in once.iter().zip(before.iter()).enumerate() {
-        // primitives: bitwise identity everywhere (copy of a uniform state).
-        for k in 0..4 {
-            assert_eq!(a[k].to_bits(), b[k].to_bits(), "prim {k} changed at interior cell {i}");
-        }
-        // conserved: the traced rebuild must agree with the builder's host
-        // conversion physically; the spelling difference is reassociation-scale.
-        for k in 4..8 {
-            let scale = b[k].abs().max(1e-30);
-            assert!(
-                (a[k] - b[k]).abs() / scale < 1e-4,
-                "cons {k} at cell {i}: rebuild {} vs stored {}",
-                a[k],
-                b[k]
-            );
+        let r = (coords[i][0].powi(2) + coords[i][1].powi(2)).sqrt();
+        if r < R_EXC - 2.0 * dx {
+            // deep interior: the exact vacuum floor, every field.
+            assert_eq!(a[0].to_bits(), RHO_FLOOR.to_bits(), "rho floor at cell {i}");
+            assert_eq!(a[1].to_bits(), 0.0f64.to_bits(), "vx floor at cell {i}");
+            assert_eq!(a[2].to_bits(), 0.0f64.to_bits(), "vy floor at cell {i}");
+            assert_eq!(a[3].to_bits(), P_FLOOR.to_bits(), "pre floor at cell {i}");
+            for k in 4..8 {
+                assert!(a[k].is_finite(), "non-finite rebuilt cons {k} at cell {i}");
+            }
+            n_floor += 1;
+        } else if r > R_EXC + 2.0 * dx {
+            // live exterior: prims and cons bit-untouched.
+            for k in 0..8 {
+                assert_eq!(
+                    a[k].to_bits(),
+                    b[k].to_bits(),
+                    "live cell touched: field {k} at interior cell {i}"
+                );
+            }
         }
     }
+    assert!(n_floor > 20, "the deep sphere must carry the floor (got {n_floor} cells)");
 
     dispatch_excise(&sim, GAMMA, R_EXC);
     let twice = snapshot(&sim);
