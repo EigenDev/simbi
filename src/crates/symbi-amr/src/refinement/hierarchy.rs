@@ -48,7 +48,8 @@ use super::transfer::{
     restrict_bface, restrict_cell_field, ProlongSweepScratch,
     restrict_cons,
 };
-use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions};
+use symbi_sim::stage::{fold_stage, HookPoint, StageArgs};
+use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_time_fractions};
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
 use symbi_sim::state::{
@@ -1002,136 +1003,92 @@ where
     /// one SSP stage `ii` of level `level` -- the body of `advance_level`'s stage loop. `alpha0` is
     /// this level's substep start as a fraction of the parent step (0 on the root). pure extraction.
     pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) {
+        // the phase sequence is THE shared table (symbi-sim::stage); this
+        // driver contributes only its two structural interleaves through the
+        // hook points — flux-register sampling (on the high-order fluxes,
+        // before a fofc splice) and the coarse-fine ghost re-prolongation.
+        // everything the hooks touch is reached by shared reference (the
+        // registers and field writes go through interior mutability), so the
+        // fold's borrow of the level state never conflicts.
         let has_finer = level + 1 < self.levels.len();
         let has_coarser = level > 0;
         let stages = self.levels[level].state.timestepping.stages();
         let n = stages.len();
         let weights = flux_weights(stages);
         let stage_time = stage_time_fractions(stages);
-        let additive_source = self.levels[level].kernels.has_additive_source();
         let (a0, ac) = stages[ii];
 
-        let l = &self.levels[level];
-        // the stage-input cons snapshot: needed by the additive source pass AND by FOFC (which
-        // restores `cons <- u_stage` to reconstruct the first-order fluxes from the physical input).
-        //
-        // at the FIRST stage of a multi-stage scheme `level_step_begin` has just run `snapshot`
-        // (`cons -> u_n`) and nothing has touched cons since, so u_n ALREADY holds the stage input.
-        // flag it and skip the copy: `stage_input()` binds u_n for this stage, saving a full-grid
-        // conserved memcpy per step. u_stage is never written while the flag is set, so the alias is
-        // read-only. `stages.len() == 1` has no `snapshot`, so u_n is stale and the copy stands.
-        let stage_input_is_un = ii == 0
-            && n > 1
-            && l.state.workspace.elide_stage_snapshot.load(std::sync::atomic::Ordering::Relaxed);
-        l.state
-            .workspace
-            .stage_input_is_un
-            .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
-        if !stage_input_is_un && (additive_source || l.kernels.fofc_active()) {
-            prof("snapshot_stage", || l.kernels.snapshot_stage(&l.state));
-        }
-        l.kernels.wave_speeds(&l.state);
-        prof("flux", || {
-            for dd in 0..NDIM {
-                l.kernels.flux(&l.state, dd);
+        let this = &*self;
+        let l = &this.levels[level];
+        let mut hook = |hp: HookPoint| match hp {
+            HookPoint::AfterFlux => {
+                prof("refine_flux_reg", || {
+                    if has_finer {
+                        let reg = &this.flux_registers[level];
+                        if uniform_cartesian(&l.state) {
+                            if ii == 0 {
+                                reg.zero_uniform();
+                            }
+                            for dd in 0..NDIM {
+                                reg.accumulate_coarse_uniform(
+                                    &l.state.fields.flux,
+                                    &l.state.geom.dx,
+                                    dd,
+                                    weights[ii] * dt,
+                                );
+                            }
+                        } else {
+                            if ii == 0 {
+                                reg.zero();
+                            }
+                            let geo = l.state.geom.block_geometry(l.state.physics.metric);
+                            for dd in 0..NDIM {
+                                reg.accumulate_coarse(&l.state.fields.flux, &geo, dd, weights[ii] * dt);
+                            }
+                        }
+                    }
+                    if has_coarser {
+                        let reg = &this.flux_registers[level - 1];
+                        if uniform_cartesian(&l.state) {
+                            for dd in 0..NDIM {
+                                reg.accumulate_fine_uniform(
+                                    &l.state.fields.flux,
+                                    &l.state.geom.dx,
+                                    dd,
+                                    weights[ii] * dt,
+                                );
+                            }
+                        } else {
+                            let geo = l.state.geom.block_geometry(l.state.physics.metric);
+                            for dd in 0..NDIM {
+                                reg.accumulate_fine(
+                                    &l.state.fields.flux,
+                                    &geo,
+                                    dd,
+                                    weights[ii] * dt,
+                                    RATIO,
+                                );
+                            }
+                        }
+                    }
+                });
             }
-        });
-        // register accumulation between flux and the stage update. the
-        // per-stage weight is the stage's EFFECTIVE flux contribution
-        // after the ssp convex recombination, so the step total is dt.
-        prof("refine_flux_reg", || {
-            if has_finer {
-                let reg = &self.flux_registers[level];
-                let l = &self.levels[level];
-                if uniform_cartesian(&l.state) {
-                    if ii == 0 {
-                        reg.zero_uniform();
-                    }
-                    for dd in 0..NDIM {
-                        reg.accumulate_coarse_uniform(
-                            &l.state.fields.flux,
-                            &l.state.geom.dx,
-                            dd,
-                            weights[ii] * dt,
-                        );
-                    }
-                } else {
-                    if ii == 0 {
-                        reg.zero();
-                    }
-                    let geo = l.state.geom.block_geometry(l.state.physics.metric);
-                    for dd in 0..NDIM {
-                        reg.accumulate_coarse(&l.state.fields.flux, &geo, dd, weights[ii] * dt);
-                    }
+            HookPoint::BeforeGhostFill => {
+                // c2p over the full allocated domain recomputed the coarse-fine
+                // prim ghosts from stale cons; re-prolong them at the time of
+                // the state entering the NEXT stage before the physical fill
+                // reads corners.
+                if has_coarser {
+                    this.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64);
                 }
             }
-            if has_coarser {
-                let reg = &self.flux_registers[level - 1];
-                let l = &self.levels[level];
-                if uniform_cartesian(&l.state) {
-                    for dd in 0..NDIM {
-                        reg.accumulate_fine_uniform(
-                            &l.state.fields.flux,
-                            &l.state.geom.dx,
-                            dd,
-                            weights[ii] * dt,
-                        );
-                    }
-                } else {
-                    let geo = l.state.geom.block_geometry(l.state.physics.metric);
-                    for dd in 0..NDIM {
-                        reg.accumulate_fine(
-                            &l.state.fields.flux,
-                            &geo,
-                            dd,
-                            weights[ii] * dt,
-                            RATIO,
-                        );
-                    }
-                }
-            }
-        });
-        let l = &self.levels[level];
-        prof("efield", || l.kernels.efield(&l.state));
-        prof("godunov_stage", || {
-            l.kernels.godunov_stage(&l.state, dt, a0, ac)
-        });
-        prof("post_godunov", || {
-            l.kernels.post_godunov(&l.state, dt, stage_tag(ii, n))
-        });
-        if additive_source {
-            prof("source_apply", || l.kernels.source_apply(&l.state, ac * dt));
-        }
-        if l.state.has_bodies() {
-            prof("body_source", || l.kernels.body_source(&l.state, ac * dt));
-        }
-        prof("c2p", || l.kernels.c2p(&l.state));
-        // first-order flux correction: redo any zone whose high-order c2p went unphysical with a
-        // first-order (PCM + HLLE) update from the stage-input state. host-gated on a failure
-        // reduction, so a clean substage is a scan + return (a no-op for regimes without FOFC).
-        // gated exactly like the uni-grid stage pipeline (Gate::Fofc), so the
-        // two drivers' phase sequences are comparable call-for-call — the
-        // sequence-equality law depends on identical gating, not on downstream
-        // no-ops happening to hide a divergence.
-        if l.kernels.fofc_active() {
-            prof("fofc", || l.kernels.fofc(&l.state, dt, a0, ac, stage_tag(ii, n)));
-        }
-        // the passive scalar rides after fofc so it consumes the (possibly
-        // spliced) mass flux and the stage-final density — the same ordering
-        // the uni-grid stage pipeline uses.
-        if l.state.has_passive_scalar() {
-            prof("chi_update", || l.kernels.chi_update(&l.state, dt, a0, ac));
-        }
-        // c2p over the full allocated domain recomputed the coarse-fine
-        // prim ghosts from stale cons; re-prolong them at the time of the
-        // state entering the NEXT stage (the last stage's tail lands on
-        // the substep end = the next substep's start) before the physical
-        // fill reads corners.
-        if has_coarser {
-            self.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64);
-        }
-        let l = &self.levels[level];
-        prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+        };
+        fold_stage(
+            &l.state,
+            &l.kernels,
+            StageArgs { dt, a0, ac, stage: ii, n_stages: n, allow_elision: true },
+            &mut hook,
+        );
     }
 
     /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the

@@ -736,7 +736,11 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     }
                 }
                 let sh = shared!();
-                let stage = (sidx + 1) as u8; // 1-based: post_godunov saves the emf at stage 1, averages at 2.
+                // the stage TAG is minted canonically inside the fold
+                // (stage_tag: euler = 0, rk2 = 1 then 2). the old hand-rolled
+                // `sidx + 1` here disagreed with every other driver on
+                // forward-euler (tag 1, the rk2-predictor identity) — a latent
+                // copy divergence the shared fold retires.
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || {
                         // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
@@ -749,43 +753,25 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         // accretion sink), POINTWISE from the body's GLOBAL position so each tile
                         // applies it to its own cells -- no cross-tile coupling. all of these are
                         // pointwise/local; the only cross-tile work is the post-stage halo exchange.
-                        let additive = kernels[i].has_additive_source();
-                        let fofc = kernels[i].fofc_active();
-                        if additive || fofc {
-                            // snapshot the stage-INPUT cons: the additive source evaluates S at it,
-                            // and the FOFC first-order redo restarts from it. the decomposed loop
-                            // never elides the copy (no stage_input_is_un tracking here).
-                            kernels[i].snapshot_stage(sh[i]);
-                        }
-                        kernels[i].wave_speeds(sh[i]);
-                        prof("flux", || {
-                            for dd in 0..D {
-                                kernels[i].flux(sh[i], dd);
-                            }
-                        });
-                        prof("efield", || kernels[i].efield(sh[i]));
-                        prof("godunov_stage", || kernels[i].godunov_stage(sh[i], dt, a0, ac));
-                        prof("post_godunov", || kernels[i].post_godunov(sh[i], dt, stage));
-                        if additive {
-                            // cons += (ac*dt) * S(u_stage), the SSP stage weight matching godunov.
-                            prof("source_apply", || kernels[i].source_apply(sh[i], ac * dt));
-                        }
-                        if sh[i].has_bodies() {
-                            // gravity on mom/nrg + the accretion sink on den, cons += (ac*dt)*S_body.
-                            // for adiabatic/curvilinear this IS the body pass; for iso-cartesian it
-                            // no-ops (fused into godunov_stage). proven by `decomp_body_equivalence`.
-                            prof("body_source", || kernels[i].body_source(sh[i], ac * dt));
-                        }
-                        prof("c2p", || kernels[i].c2p(sh[i]));
-                        if fofc {
-                            // first-order flux correction, per tile, BEFORE the post-stage
-                            // exchange (mirroring the hierarchy's c2p -> fofc order): the redo
-                            // reads the stage-input state whose halos are exchange-fresh from
-                            // the previous stage tail, so a flagged cell at a cut redoes its
-                            // faces from the same states the monolithic run sees.
-                            prof("fofc", || kernels[i].fofc(sh[i], dt, a0, ac, stage));
-                        }
-                        prof("ghost_fill", || kernels[i].ghost_fill(sh[i]));
+                        // the shared stage table (symbi-sim::stage): identical
+                        // phase sequence to every other driver. this loop never
+                        // elides the stage-input copy (no cross-tile alias
+                        // tracking); the halo exchange + second ghost fill
+                        // follow OUTSIDE the fold — the decomposed sequence's
+                        // documented delta.
+                        crate::stage::fold_stage(
+                            sh[i],
+                            kernels[i],
+                            crate::stage::StageArgs {
+                                dt,
+                                a0,
+                                ac,
+                                stage: sidx,
+                                n_stages: stages.len(),
+                                allow_elision: false,
+                            },
+                            &mut |_| {},
+                        );
                     });
                 }
                 // refresh the cut halos from each neighbor's stage-updated interior.
@@ -808,7 +794,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             // the final halo exchange (the +-1 stencil reads the neighbor's
             // exchanged edge). body-independent; inert when inviscid.
             for i in 0..n {
-                symbi_xpu::with_device(devices[i], || kernels[i].viscous(sh[i], dt));
+                symbi_xpu::with_device(devices[i], || prof("viscous", || kernels[i].viscous(sh[i], dt)));
             }
             drain_devices::<M>(devices);
             // horizon excision, once per step after the RK combination, mirroring
@@ -854,13 +840,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     // (receipt == removal; see evolve.rs), then the feedback —
                     // gated like the other drivers: only bodies whose dynamics
                     // consume the reduction (two-way or accreting) pay for it.
-                    symbi_xpu::with_device(devices[i], || kernels[i].penalize(sh[i], dt));
+                    symbi_xpu::with_device(devices[i], || prof("penalize", || kernels[i].penalize(sh[i], dt)));
                     let needs_fb = sh[i]
                         .immersed
                         .as_ref()
                         .is_some_and(|im| im.bodies.needs_feedback());
                     if needs_fb {
-                        symbi_xpu::with_device(devices[i], || kernels[i].body_feedback(sh[i], dt));
+                        symbi_xpu::with_device(devices[i], || prof("body_feedback", || kernels[i].body_feedback(sh[i], dt)));
                     }
                 }
                 drain_devices::<M>(devices);
@@ -887,6 +873,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 s.motion.a = a;
                 s.motion.a_dot = ad;
             }
+        }
+        if std::env::var_os("SYMBI_TRACE_DT").is_some() {
+            eprintln!("SYMBI_TRACE_DT iter={iter} t={t:.6e} dt={dt:.6e}");
         }
         t += dt;
         iter += 1;

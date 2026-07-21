@@ -19,6 +19,7 @@
 //  use symbi_sim::substrate_seam::{KernelSet, RegimeSubstrate, Solver};
 // =============================================================================
 
+pub mod stage;
 pub mod state;
 pub mod substrate_seam;
 pub mod driver;
