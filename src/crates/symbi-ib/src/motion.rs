@@ -71,11 +71,16 @@ pub fn advance_binary<S: Scalar, const D: usize>(
 /// the binary motion is PRESCRIBED (Keplerian, independent of the feedback). applying the SAME deltas
 /// to two identical collections yields identical state -- the property the decomposed loop relies on
 /// to keep every tile's bodies in lockstep (same global delta + same prescribed advance on each tile).
+/// only the SOURCE prefix integrates here: fragments (bodies beyond
+/// `source_count()`) get their ledger fields booked but their motion belongs to
+/// the bonded-fragment subcycle, which consumes the same deltas as frozen
+/// external loads.
 pub fn apply_body_deltas<const D: usize>(
     bodies: &mut BodyCollection<f64, D>,
     deltas: &[BodyDelta<f64, D>],
     dt: f64,
 ) {
+    let n_src = bodies.source_count();
     for delta in deltas {
         if delta.idx < bodies.len() {
             let body = bodies.get_mut(delta.idx);
@@ -86,7 +91,7 @@ pub fn apply_body_deltas<const D: usize>(
             // over the step divided by its mass: dv = force_delta * dt / mass. gated on two_way +
             // mass > 0. the ROTATIONAL reaction (torque_delta, likewise a torque = rate) is integrated
             // over dt in the orientation advance below via Euler's equations.
-            if body.two_way_coupling && body.mass > 0.0 {
+            if delta.idx < n_src && body.two_way_coupling && body.mass > 0.0 {
                 let m = body.mass;
                 for a in 0..D {
                     body.velocity[a] = body.velocity[a] + delta.force_delta[a] * dt / m;
@@ -118,7 +123,7 @@ pub fn apply_body_deltas<const D: usize>(
             bodies.get_mut(ii).velocity = advanced[ii].velocity;
         }
     }
-    for ii in 0..bodies.len() {
+    for ii in 0..n_src {
         let body = bodies.get_mut(ii);
         // force-driven TRANSLATION: a two-way body drifts under the velocity the gas reaction gave
         // it (position += velocity * dt). skipped when a prescribed binary orbit governs motion.

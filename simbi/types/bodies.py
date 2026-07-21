@@ -369,16 +369,217 @@ class ImmersedBodyConfig:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class BondMaterial:
+    """elastic-bond parameters: normal/tangential stiffness, damping, and the
+    strength envelope (tensile stress `sigma_t`, shear stress `tau_s`, over
+    cross-section `area`). infinite strengths never break."""
+
+    k_n: float
+    k_t: float = 0.0
+    gamma: float = 0.0
+    area: float = 1.0
+    sigma_t: float = math.inf
+    tau_s: float = math.inf
+
+    def __post_init__(self) -> None:
+        if self.k_n <= 0.0:
+            raise _config_error("bond k_n must be positive (the bond has no spring).")
+        if self.area <= 0.0 or self.sigma_t <= 0.0 or self.tau_s <= 0.0:
+            raise _config_error("bond area / sigma_t / tau_s must be positive.")
+
+
+@dataclass(frozen=True)
+class ContactMaterial:
+    """soft-sphere contact parameters: normal spring `k_n`, tangential spring
+    `k_t`, normal dashpot `gamma_n`, friction coefficient `mu`."""
+
+    k_n: float
+    k_t: float = 0.0
+    gamma_n: float = 0.0
+    mu: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.k_n <= 0.0:
+            raise _config_error("contact k_n must be positive.")
+        if self.mu < 0.0:
+            raise _config_error("contact mu must be non-negative.")
+
+
+@dataclass(frozen=True)
+class MutualGravity:
+    """pairwise gravity between all bodies (plummer-softened direct sum)."""
+
+    g: float = 1.0
+    softening: float = 0.0
+
+
+@dataclass(frozen=True)
+class BondedAssembly:
+    """a cluster of wall-only rigid spherical fragments joined by breakable
+    elastic bonds, with optional contact and mutual self-gravity. fragments
+    never gravitate on the gas and never accrete; the gas sees each one as a
+    sealed rigid wall and its motion integrates in the bonded subcycle.
+    `mobile` marks per-fragment mobility (False = a clamp / prescribed drift);
+    omitted means every fragment is mobile."""
+
+    positions: Sequence[Sequence[float]]
+    masses: Sequence[float]
+    radii: Sequence[float]
+    bonds: Sequence[Sequence[int]]
+    bond_material: BondMaterial
+    velocities: Optional[Sequence[Sequence[float]]] = None
+    inertias: Optional[Sequence[float]] = None
+    mobile: Optional[Sequence[bool]] = None
+    contact: Optional[ContactMaterial] = None
+    gravity: Optional[MutualGravity] = None
+    k_eta_n: float = 50.0
+    k_eta_t: float = 50.0
+
+    def __post_init__(self) -> None:
+        n = len(self.positions)
+        if n == 0:
+            raise _config_error("a bonded assembly needs at least one fragment.")
+        for name in ("masses", "radii"):
+            if len(getattr(self, name)) != n:
+                raise _config_error(
+                    f"bonded assembly `{name}` has {len(getattr(self, name))} entries "
+                    f"for {n} fragments."
+                )
+        for name in ("velocities", "inertias", "mobile"):
+            val = getattr(self, name)
+            if val is not None and len(val) != n:
+                raise _config_error(
+                    f"bonded assembly `{name}` has {len(val)} entries for {n} fragments."
+                )
+        if any(m <= 0.0 for m in self.masses):
+            raise _config_error("every fragment mass must be positive.")
+        if any(r <= 0.0 for r in self.radii):
+            raise _config_error("every fragment radius must be positive.")
+        seen: set[tuple[int, int]] = set()
+        for pair in self.bonds:
+            if len(pair) != 2:
+                raise _config_error(f"a bond is a pair (i, j); got {tuple(pair)}.")
+            i, j = int(pair[0]), int(pair[1])
+            if i == j or not (0 <= i < n) or not (0 <= j < n):
+                raise _config_error(
+                    f"bond ({i}, {j}) must join two distinct fragments in [0, {n})."
+                )
+            key = (min(i, j), max(i, j))
+            if key in seen:
+                raise _config_error(f"bond {key} is declared twice.")
+            seen.add(key)
+        if not isinstance(self.bond_material, BondMaterial):
+            raise _config_error(
+                "bond_material must be a BondMaterial (validated), not "
+                f"{type(self.bond_material).__name__}."
+            )
+
+    @classmethod
+    def pack(
+        cls,
+        shape: Shape,
+        bounds: Sequence[Sequence[float]],
+        spacing: float,
+        fragment_mass: float,
+        bond_material: BondMaterial,
+        neighbor_cutoff: float = 1.5,
+        jitter: float = 0.0,
+        seed: int = 7,
+        **kwargs: Any,
+    ) -> "BondedAssembly":
+        """fill `shape` (body-local frame) with a square/cubic lattice of
+        spherical fragments and bond every pair closer than
+        `neighbor_cutoff * spacing` (1.5 catches the 2d/3d diagonals). a
+        lattice point survives when its whole fragment fits inside the shape:
+        signed_distance <= -radius. `jitter` displaces each point by a
+        deterministic (seeded) uniform offset of up to `jitter * spacing` per
+        axis — an irregular pile instead of graph paper — and the fragment
+        radius shrinks to `(0.5 - jitter) * spacing` so jittered neighbors can
+        never start overlapped (the gaps close under self-gravity). pure
+        geometry; extra keyword arguments flow to the assembly (contact,
+        gravity, mobile...)."""
+        if not 0.0 <= jitter < 0.5:
+            raise _config_error(f"pack jitter must be in [0, 0.5); got {jitter}.")
+        radius = (0.5 - jitter) * spacing
+        axes = [np.arange(lo + 0.5 * spacing, hi, spacing) for lo, hi in bounds]
+        grids = np.meshgrid(*axes, indexing="ij")
+        points = np.stack([g.ravel() for g in grids], axis=1)
+        if jitter > 0.0:
+            rng = np.random.default_rng(seed)
+            points = points + rng.uniform(
+                -jitter * spacing, jitter * spacing, size=points.shape
+            )
+        kept: list[list[float]] = []
+        for p in points:
+            local = [float(p[0]), float(p[1]) if len(p) > 1 else 0.0, float(p[2]) if len(p) > 2 else 0.0]
+            if shape.signed_distance(local) <= -radius:
+                kept.append([float(c) for c in p])
+        if not kept:
+            raise _config_error(
+                f"packing produced zero fragments: no lattice point of spacing "
+                f"{spacing} fits radius {radius} inside the shape over {bounds}."
+            )
+        cutoff2 = (neighbor_cutoff * spacing) ** 2
+        bonds: list[tuple[int, int]] = []
+        for i in range(len(kept)):
+            for j in range(i + 1, len(kept)):
+                d2 = sum((a - b) ** 2 for a, b in zip(kept[i], kept[j]))
+                if d2 <= cutoff2:
+                    bonds.append((i, j))
+        n = len(kept)
+        return cls(
+            positions=kept,
+            masses=[fragment_mass] * n,
+            radii=[radius] * n,
+            bonds=bonds,
+            bond_material=bond_material,
+            **kwargs,
+        )
+
+    def to_backend(self) -> dict[str, Any]:
+        """the backend wire: plain lists + nested material dicts. per-fragment
+        inertia defaults to the solid sphere 0.4 m r^2; velocities default to
+        rest; mobility defaults to every fragment mobile."""
+        n = len(self.positions)
+        inertias = (
+            [float(v) for v in self.inertias]
+            if self.inertias is not None
+            else [0.4 * float(m) * float(r) ** 2 for m, r in zip(self.masses, self.radii)]
+        )
+        velocities = (
+            [[float(c) for c in v] for v in self.velocities]
+            if self.velocities is not None
+            else [[0.0] * len(self.positions[0]) for _ in range(n)]
+        )
+        mobile = [bool(b) for b in self.mobile] if self.mobile is not None else [True] * n
+        return {
+            "positions": [[float(c) for c in p] for p in self.positions],
+            "masses": [float(m) for m in self.masses],
+            "radii": [float(r) for r in self.radii],
+            "inertias": inertias,
+            "velocities": velocities,
+            "mobile": mobile,
+            "bonds": [[int(p[0]), int(p[1])] for p in self.bonds],
+            "bond_material": asdict(self.bond_material),
+            "contact": asdict(self.contact) if self.contact is not None else None,
+            "gravity": asdict(self.gravity) if self.gravity is not None else None,
+            "k_eta_n": float(self.k_eta_n),
+            "k_eta_t": float(self.k_eta_t),
+        }
+
+
 def body_payload(
     body_system: Optional[BodySystemConfig],
     immersed_bodies: Sequence[ImmersedBodyConfig],
+    bonded_assembly: Optional[BondedAssembly] = None,
 ) -> dict[str, Any]:
-    """the backend body fragment -- `{body_system?, immersed_bodies?}`, the keys the
-    rust body factory reads. pure: config values in, a plain dict out. an absent body
-    kind contributes no key (a missing key is read as body-free). each immersed body
-    must be a validated ImmersedBodyConfig: a raw dict would let the backend read every
-    field through a silent unwrap_or default, turning a typo into a wrong-physics run
-    rather than an error."""
+    """the backend body fragment -- `{body_system?, immersed_bodies?,
+    bonded_assembly?}`, the keys the rust body factory reads. pure: config values
+    in, a plain dict out. an absent body kind contributes no key (a missing key is
+    read as body-free). each immersed body must be a validated ImmersedBodyConfig:
+    a raw dict would let the backend read every field through a silent unwrap_or
+    default, turning a typo into a wrong-physics run rather than an error."""
     payload: dict[str, Any] = {}
     if body_system is not None and is_dataclass(body_system):
         payload["body_system"] = body_system.to_backend()
@@ -394,11 +595,22 @@ def body_payload(
         serialized.append(body.to_backend())
     if serialized:
         payload["immersed_bodies"] = serialized
+    if bonded_assembly is not None:
+        if not isinstance(bonded_assembly, BondedAssembly):
+            raise _config_error(
+                f"bonded_assembly is a {type(bonded_assembly).__name__}, not a "
+                f"BondedAssembly."
+            )
+        payload["bonded_assembly"] = bonded_assembly.to_backend()
     return payload
 
 
 __all__ = [
     "body_payload",
+    "BondedAssembly",
+    "BondMaterial",
+    "ContactMaterial",
+    "MutualGravity",
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
     "BinaryConfig",

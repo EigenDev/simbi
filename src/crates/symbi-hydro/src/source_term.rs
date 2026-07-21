@@ -211,7 +211,7 @@ impl<S: Scalar, const D: usize> PointMassGravity<S, D> {
 /// composing layer supplies the cell's Cartesian position + gas velocity (via the
 /// metric's to_cartesian) and projects the Cartesian momentum source back onto the
 /// physical coordinate basis (vector_from_cartesian) — so it is correct in
-/// Cartesian, cylindrical, AND spherical. the per-body MAX_BODIES sum lives one
+/// Cartesian, cylindrical, AND spherical. the per-body MAX_SOURCE_BODIES sum lives one
 /// layer up. future media (porous drag, deformable stress) extend THIS struct's
 /// methods, inheriting the frame handling + fused machinery for free.
 /// the EXACT support of the gaussian sink kernel, in accretion radii: the weight

@@ -673,7 +673,7 @@ pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpac
     /// never touch it, and pay neither the memory nor a per-call allocation). the feedback
     /// kernels assign-write every cell of their dispatch region before the reduction reads
     /// it, so reuse across calls needs no re-zeroing. sized by the first caller — the split
-    /// cartesian path needs D+5 fields, the combined curvilinear path MAX_BODIES*(D+5);
+    /// cartesian path needs D+5 fields, the combined curvilinear path MAX_SOURCE_BODIES*(D+5);
     /// a sim's geometry picks exactly one path for its lifetime.
     pub body_scratch: std::sync::OnceLock<Vec<Field<Sc, NDIM, M>>>,
 }
@@ -1393,6 +1393,11 @@ pub struct ImmersedBodies<const NDIM: usize> {
     /// JIT-compiled per distinct geometry (the sphere geometry is baked constants; the body
     /// position stays a runtime scalar, so a moving body rides the same kernel).
     pub shapes: Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>,
+    /// the bonded-fragment pair physics (bonds + contact + mutual gravity),
+    /// present iff the collection carries wall-only fragments. the fragment
+    /// subcycle integrates fragment motion with the gas force/torque held
+    /// frozen; the legacy body integrator owns only the source prefix.
+    pub fragment_physics: Option<symbi_ib::FragmentPhysics>,
     /// the GLOBAL fast-magnetosonic Alfven stiffness c_a2 = max_interior |B|^2/rho for the wall
     /// relaxation. the max is a domain-global property, so under domain decomposition the
     /// decomposed loop reduces the per-tile maxima and publishes the global value here; the
@@ -2007,6 +2012,16 @@ where
     /// the by-reference form of [`Self::with_bodies`] — the amr hierarchy
     /// attaches per-level collections to already-constructed level states.
     pub fn attach_bodies(&mut self, bodies: symbi_ib::BodyCollection<f64, D>) {
+        // wall-only fragments dispatch over per-body support boxes, which exist
+        // only on cartesian charts today; off-cartesian every fragment pass
+        // would sweep the full interior. fail loud instead of degrading.
+        assert!(
+            bodies.fragment_count() == 0
+                || self.geom.coords == symbi_geometry::Geometry::Cartesian,
+            "fragments require a cartesian chart (per-fragment support boxes); \
+             chart is {:?}",
+            self.geom.coords,
+        );
         let n = bodies.len();
         let has_energy = self.physics.regime.has_energy();
         if self.fields.source.is_none() {
@@ -2020,9 +2035,31 @@ where
             history: symbi_ib::BodyHistory::new(n),
             // default: every body is its analytic sphere; a config shape is attached separately.
             shapes: vec![None; n],
+            fragment_physics: None,
             // NaN = "compute the local max"; the decomposed loop publishes a global value.
             c_a2_override: std::sync::atomic::AtomicU64::new(f64::NAN.to_bits()),
         });
+    }
+
+    /// attach the bonded-fragment pair physics (bonds + contact + mutual
+    /// gravity). required whenever the collection carries fragments — without
+    /// it a two-way fragment would feel wall forces but never move, so the
+    /// mismatch fails loud here rather than silently freezing bodies.
+    pub fn attach_fragment_physics(&mut self, physics: symbi_ib::FragmentPhysics) {
+        let im = self
+            .immersed
+            .as_mut()
+            .expect("attach_fragment_physics: no immersed bodies attached");
+        for bond in &physics.bonds {
+            assert!(
+                bond.i < im.bodies.len() && bond.j < im.bodies.len(),
+                "bond ({}, {}) references a body outside the collection of {}",
+                bond.i,
+                bond.j,
+                im.bodies.len(),
+            );
+        }
+        im.fragment_physics = Some(physics);
     }
 
     /// attach per-body immersed-boundary shapes (parallel to the body collection); `None` entries

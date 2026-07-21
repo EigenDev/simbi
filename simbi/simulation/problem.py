@@ -30,7 +30,7 @@ from pydantic import (
     model_validator,
 )
 
-from simbi.types.bodies import BodySystemConfig, ImmersedBodyConfig
+from simbi.types.bodies import BodySystemConfig, BondedAssembly, ImmersedBodyConfig
 
 # re-export types that problem authors need
 from simbi.types.input import (
@@ -760,6 +760,11 @@ class SimbiProblem(BaseModel):
     @property
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         return []
+
+    @computed_field
+    @property
+    def bonded_assembly(self) -> Optional[BondedAssembly]:
+        return None
 
     # =========================================================================
     # abstract method - must be implemented by subclass

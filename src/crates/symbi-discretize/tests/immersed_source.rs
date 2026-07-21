@@ -4,7 +4,7 @@
 // validates the substrate body_source builder against an
 // independent inline implementation of the same spec: an interpreter run on a known
 // state with one ACTIVE body + one INACTIVE body (mass=0, sink=0) to prove the
-// branch-free MAX_BODIES loop contributes exactly zero for inactive slots.
+// branch-free MAX_SOURCE_BODIES loop contributes exactly zero for inactive slots.
 //
 //   gravity:   g = -mass (x - x_b) / (|x-x_b|^2 + soft^2)^{3/2}
 //   accretion: den_dot = den * min(sink, 1/t_nat, 1/dt) * exp(-(r/(0.5 racc))^2),

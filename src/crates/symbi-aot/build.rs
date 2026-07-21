@@ -55,7 +55,7 @@ use symbi_ir::{emit_kernel_cpu, emit_kernel_cpu_serial, prepare, prepared_to_ir,
 
 // the immersed-body kernels pack one slot per body; the count is owned by the
 // runtime (symbi-ib) and imported here so codegen and runtime share one definition.
-use symbi_ib::collection::MAX_BODIES;
+use symbi_ib::collection::MAX_SOURCE_BODIES;
 
 fn write_kernel(out_dir: &str, file: &str, desc: &symbi_ir::emit::KernelDescriptor) {
     let buffers: Vec<(String, bool)> = desc
@@ -590,11 +590,11 @@ fn gen_godunov_stage(
 // physics projected onto the physical basis). its own bake — the body source is a
 // set of coord-dependent `BuiltSource`s (`body_source_built`); being coord-dependent, it
 // doesn't ride the coord-agnostic `SourceSpec` FUSED_FAMILIES loop. one launch:
-// `cons_new = godunov(cons) + ac*dt*(gravity + accretion)` for MAX_BODIES bodies.
+// `cons_new = godunov(cons) + ac*dt*(gravity + accretion)` for MAX_SOURCE_BODIES bodies.
 fn gen_godunov_with_body_source(out_dir: &str, ndim: u8, prefix: &str, has_energy: bool, geom: Geom) {
     let name = format!("{prefix}_godunov_stage_with_body_source{}_{ndim}d", geom.suffix());
     let built = symbi_discretize::body_source_built(
-        geom.coords, ndim as usize, geom.ncomp as usize, &geom.axes, MAX_BODIES, has_energy,
+        geom.coords, ndim as usize, geom.ncomp as usize, &geom.axes, MAX_SOURCE_BODIES, has_energy,
     );
     let refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
         built.iter().map(|(t, b)| (t.as_str(), b)).collect();
@@ -1658,13 +1658,13 @@ fn gen_geometry_probe(out_dir: &str, ndim: u8, coords: Coords, spacing: &[Spacin
 }
 
 // immersed-body forward source: the cons->cons kernel — softened
-// Newtonian GRAVITY + Bondi-Hoyle mass ACCRETION from MAX_BODIES point masses. in-place
+// Newtonian GRAVITY + Bondi-Hoyle mass ACCRETION from MAX_SOURCE_BODIES point masses. in-place
 // writes cons.den (accretion removes mass) / cons.mom_* / cons.nrg; body params arrive as
-// scalar params packed by the runtime (MAX_BODIES imported from symbi-ib).
+// scalar params packed by the runtime (MAX_SOURCE_BODIES imported from symbi-ib).
 fn gen_body_source(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_source{}_{ndim}d", coords_suffix(coords));
     let g = Geom::identity(coords, ndim);
-    let (k, writes) = body_source_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
+    let (k, writes) = body_source_gv(MAX_SOURCE_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1677,13 +1677,13 @@ fn gen_body_source(out_dir: &str, ndim: u8, coords: Coords) {
 fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, has_energy: bool) {
     let g = Geom::identity(coords, ndim);
     let (k, w) =
-        fofc_select_with_body_gv(g.ncomp as usize, MAX_BODIES, coords, ndim as usize, &g.axes, has_energy);
+        fofc_select_with_body_gv(g.ncomp as usize, MAX_SOURCE_BODIES, coords, ndim as usize, &g.axes, has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_select_with_body{}_{ndim}d", coords_suffix(coords)), ndim, &k, &w);
 }
 
 // immersed-body BACKWARD feedback: per cell, per body, the force /
 // torque / accreted-mass contributions -> scratch fields a device reduction sums into
-// each body's BodyDelta. reads cons (pure); writes MAX_BODIES*(ndim+4) scratch outputs.
+// each body's BodyDelta. reads cons (pure); writes MAX_SOURCE_BODIES*(ndim+4) scratch outputs.
 fn gen_penalize(out_dir: &str, ndim: u8) {
     use symbi_discretize::coords::Coords;
     use symbi_discretize::kernel_slug::penalize_name;
@@ -1779,7 +1779,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
 fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_feedback{}_{ndim}d", coords_suffix(coords));
     let g = Geom::identity(coords, ndim);
-    let (k, writes) = body_feedback_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
+    let (k, writes) = body_feedback_gv(MAX_SOURCE_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
     // the SPLIT single-body halves: the gravity reaction reduces
     // globally over one streamed field; the drain-weighted quantities reduce over the
@@ -1799,14 +1799,14 @@ fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
 fn gen_body_source_iso(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_source_iso{}_{ndim}d", coords_suffix(coords));
     let g = Geom::identity(coords, ndim);
-    let (k, writes) = body_source_iso_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
+    let (k, writes) = body_source_iso_gv(MAX_SOURCE_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
 fn gen_body_feedback_iso(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_feedback_iso{}_{ndim}d", coords_suffix(coords));
     let g = Geom::identity(coords, ndim);
-    let (k, writes) = body_feedback_iso_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
+    let (k, writes) = body_feedback_iso_gv(MAX_SOURCE_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 

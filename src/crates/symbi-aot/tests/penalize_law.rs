@@ -30,15 +30,20 @@ fn cell_center(i: usize) -> f64 {
 }
 
 /// run a penalize kernel: `inputs` are the in-place cons reads (3 for iso: den,
-/// mom0, mom1; 4 for adiabatic: + nrg), `n_out` the total output count (cons
-/// clones first, then the delta scratch). returns every output buffer.
+/// mom0, mom1; 4 for adiabatic: + nrg). the output count (cons clones first,
+/// then the delta scratch) comes off the artifact's buffer manifest, so a
+/// receipt added to the kernels (torque, normal-force split) can never stale
+/// this harness. returns every output buffer.
 fn run_pen(
     kern: symbi_aot::KernelFn<f64>,
     ir: &str,
     inputs: &[&[f64]],
-    n_out: usize,
     scalar: impl Fn(&str) -> f64,
 ) -> Vec<Vec<f64>> {
+    let n_out = symbi_ir::kernel_bindings_from_ir(ir)
+        .iter()
+        .filter(|(_, is_output)| *is_output)
+        .count();
     let n2 = inputs[0].len();
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
@@ -114,6 +119,9 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     let mut pfy = vec![7.7; n2];
     let mut pe = vec![7.7; n2];
     let mut pt = vec![7.7; n2];
+    // the normal-projected force receipt occupies the two trailing outputs
+    let mut pfnx = vec![7.7; n2];
+    let mut pfny = vec![7.7; n2];
     {
         // in-place cons: the same buffers appear as inputs and outputs.
         let inputs = [
@@ -140,6 +148,8 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
             CpuFieldMut::from_layout(&mut pe, &lo, &ext),
             CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
         ];
         kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         drop(outs);
@@ -255,6 +265,9 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     let mut pfx = vec![7.7; n2];
     let mut pfy = vec![7.7; n2];
     let mut pt = vec![7.7; n2];
+    // the normal-projected force receipt occupies the two trailing outputs
+    let mut pfnx = vec![7.7; n2];
+    let mut pfny = vec![7.7; n2];
     {
         let inputs = [
             CpuField::from_layout(&den, &lo, &ext),
@@ -272,6 +285,8 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
             CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
         ];
         kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         drop(outs);
@@ -376,6 +391,8 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     let ext = [N as u32; 2];
     let (mut pm, mut pfx, mut pfy, mut pt) =
         (vec![7.7; n2], vec![7.7; n2], vec![7.7; n2], vec![7.7; n2]);
+    // the normal-projected force receipt occupies the two trailing outputs
+    let (mut pfnx, mut pfny) = (vec![7.7; n2], vec![7.7; n2]);
     {
         let inputs = [
             CpuField::from_layout(&den, &lo, &ext),
@@ -391,6 +408,8 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
             CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
         ];
         kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         drop(outs);
@@ -533,6 +552,8 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
         let (mut d, mut mx, mut my) = (den0.clone(), mx0.clone(), my0.clone());
         let (mut pm, mut pfx, mut pfy, mut pt) =
             (vec![7.7; n2], vec![7.7; n2], vec![7.7; n2], vec![7.7; n2]);
+        // the normal-projected force receipt occupies the two trailing outputs
+        let (mut pfnx, mut pfny) = (vec![7.7; n2], vec![7.7; n2]);
         {
             let mut outs = [
                 CpuFieldMut::from_layout(&mut d, &lo, &ext),
@@ -542,6 +563,8 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
             ];
             kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         }
@@ -701,6 +724,8 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
         let (mut d, mut mx, mut my) = (den0.clone(), mx0.clone(), my0.clone());
         let (mut pm, mut pfx, mut pfy, mut pt) =
             (vec![7.7; n2], vec![7.7; n2], vec![7.7; n2], vec![7.7; n2]);
+        // the normal-projected force receipt occupies the two trailing outputs
+        let (mut pfnx, mut pfny) = (vec![7.7; n2], vec![7.7; n2]);
         {
             let mut outs = [
                 CpuFieldMut::from_layout(&mut d, &lo, &ext),
@@ -710,6 +735,8 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
             ];
             kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         }
@@ -841,6 +868,9 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
         let mut pfy = vec![7.7; n2];
         let mut pe = vec![7.7; n2];
         let mut pt = vec![7.7; n2];
+        // the normal-projected force receipt occupies the two trailing outputs
+        let mut pfnx = vec![7.7; n2];
+        let mut pfny = vec![7.7; n2];
         let mut den_o = host_in.0.clone();
         let mut mx_o = host_in.1.clone();
         let mut my_o = host_in.2.clone();
@@ -862,6 +892,8 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pe, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
             ];
             kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         }
@@ -994,8 +1026,8 @@ fn iso_porous_reduces_to_iso_drain_at_p1() {
         }
     };
     let inp: [&[f64]; 3] = [&den, &mx, &my];
-    let p = run_pen(porous, pir, &inp, 7, &sc);
-    let d = run_pen(drain, dir, &inp, 7, &sc);
+    let p = run_pen(porous, pir, &inp, &sc);
+    let d = run_pen(drain, dir, &inp, &sc);
     let mut fired = 0usize;
     for c in 0..n2 {
         for k in 0..4 {
@@ -1047,8 +1079,8 @@ fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
         }
     };
     let inp: [&[f64]; 4] = [&den, &mx, &my, &nrg];
-    let t = run_pen(tf, tir, &inp, 9, &sc);
-    let d = run_pen(drain, dir, &inp, 9, &sc);
+    let t = run_pen(tf, tir, &inp, &sc);
+    let d = run_pen(drain, dir, &inp, &sc);
     let mut fired = 0usize;
     for c in 0..n2 {
         for k in 0..5 {
@@ -1107,7 +1139,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
         }
     };
     let inp: [&[f64]; 3] = [&den, &mx, &my];
-    let o = run_pen(kernel, ir, &inp, 7, &sc);
+    let o = run_pen(kernel, ir, &inp, &sc);
 
     let metric = CylindricalRPhi;
     let sphere = SdfExpr::<f64, 2>::sphere(CENTER, RACC_C);

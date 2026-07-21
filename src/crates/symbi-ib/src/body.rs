@@ -48,7 +48,7 @@ fn matvec3<S: Scalar>(m: [[S; 3]; 3], v: [S; 3]) -> [S; 3] {
 }
 
 /// the 3-vector cross product `a x b`.
-fn cross3<S: Scalar>(a: [S; 3], b: [S; 3]) -> [S; 3] {
+pub(crate) fn cross3<S: Scalar>(a: [S; 3], b: [S; 3]) -> [S; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],

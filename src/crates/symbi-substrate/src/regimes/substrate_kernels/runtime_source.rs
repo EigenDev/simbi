@@ -29,7 +29,7 @@ use super::exec::{policy_for, ExecPolicy};
 use super::layout::{alloc_layout, exec_layout};
 use super::params::{body_scalar, geom_scalar, motion_scalar, physical_geom, ScalarBind};
 
-use symbi_ib::collection::MAX_BODIES;
+use symbi_ib::collection::MAX_SOURCE_BODIES;
 
 /// dispatch a RUNTIME-BUILT IR kernel — one whose neutral IR blob was produced at sim
 /// startup (not AOT-baked into the registry), e.g., a python-authored user source lowered
@@ -319,7 +319,7 @@ fn build_fused_cpu_kernel<const D: usize>(
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
-        // baked at MAX_BODIES to match the standalone `body_source` kernel (unused slots zero via mass = 0).
+        // baked at MAX_SOURCE_BODIES to match the standalone `body_source` kernel (unused slots zero via mass = 0).
         coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false, n_bodies,
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
@@ -483,9 +483,9 @@ where
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);
-    // fold the immersed body only when the caller asks (Newtonian). baked at MAX_BODIES to match the
+    // fold the immersed body only when the caller asks (Newtonian). baked at MAX_SOURCE_BODIES to match the
     // standalone `body_source` kernel; 0 leaves the body out (iso, rhd, or no bodies).
-    let n_bodies = if fold_body && sim.immersed.is_some() { MAX_BODIES } else { 0 };
+    let n_bodies = if fold_body && sim.immersed.is_some() { MAX_SOURCE_BODIES } else { 0 };
     rs.fused_cpu
         .get_or_init(|| {
             symbi_sim::driver::prof("jit_build", || {
@@ -518,7 +518,7 @@ where
 /// user source. this is the no-runtime-source path — a gravity/accretion run that would otherwise
 /// two-pass the body. cached on the KERNEL-SET (not a RuntimeSource, since there is none). host+f64 +
 /// energy regime + bodies present; `None` otherwise (nothing to fold, or the two-pass fallback). the
-/// body is baked at MAX_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
+/// body is baked at MAX_SOURCE_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
 /// the fused-vs-two-pass policy: the two-pass —
 /// llvm-compiled aot godunov + the standalone aot body pass + the compiled
 /// cranelift source-only pass — is the DEFAULT. fusing puts ALL the stage compute
@@ -561,7 +561,7 @@ where
     let (coords, spacing, axes) = sim_gv_geom(sim);
     cache
         .get_or_init(|| {
-            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, has_energy, geo, &[], MAX_BODIES)
+            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, has_energy, geo, &[], MAX_SOURCE_BODIES)
         })
         .as_ref()
 }
@@ -613,7 +613,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
         physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
     // the immersed-body params (packed by the same side-car the standalone `body_source` reads), so the
     // fused body wrap resolves `body_{idx}_{field}` identically to the two-pass. `None` -> body_scalar
-    // returns zero (an inert slot), matching the MAX_BODIES bake.
+    // returns zero (an inert slot), matching the MAX_SOURCE_BODIES bake.
     let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
     let scalars: Vec<f64> = fk.scalar_params.iter().map(|bind| {
         let ScalarBind::Ref(sref) = bind else {

@@ -122,6 +122,7 @@ struct Config {
     // `immersed_bodies` list; empty for body-free runs. dimension-agnostic raw
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
     bodies: Vec<BodyParams>,
+    bonded_assembly: Option<BondedAssemblyParams>,
     // the prescribed binary orbit (`body_system.binary_config`), if any; attaches the Keplerian
     // orbit to the body collection so the two components orbit each other. None for non-binary runs.
     binary: Option<BinaryCfg>,
@@ -195,6 +196,25 @@ struct BodyParams {
     /// the body's Ohmic resistivity `eta` (`MagneticSpec::Resistive`): a magnetized immersed sink that
     /// dissipates the field threading it. None = magnetically transparent (`MagneticSpec::None`).
     magnetic_resistivity: Option<f64>,
+}
+
+/// a bonded-fragment assembly from the `bonded_assembly` config key: a cluster
+/// of wall-only rigid spherical fragments (sealed porous surfaces) joined by
+/// breakable elastic bonds, with optional soft-sphere contact and mutual
+/// gravity. fragments never enter the baked gravity/accretion source fan.
+struct BondedAssemblyParams {
+    positions: Vec<Vec<f64>>,
+    masses: Vec<f64>,
+    radii: Vec<f64>,
+    inertias: Vec<f64>,
+    velocities: Vec<Vec<f64>>,
+    mobile: Vec<bool>,
+    bonds: Vec<(usize, usize)>,
+    bond_material: symbi_ib::BondMaterial,
+    contact: Option<symbi_ib::ContactMaterial>,
+    gravity: Option<symbi_ib::MutualGravity>,
+    k_eta_n: f64,
+    k_eta_t: f64,
 }
 
 // =============================================================================
@@ -727,6 +747,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<String>().ok())
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
+        bonded_assembly: parse_bonded_assembly(dict)?,
         binary: parse_binary(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
         n_gpus: dict
@@ -752,6 +773,121 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
 /// parse the python `immersed_bodies` list (each a serialized ImmersedBodyConfig
 /// dict) into dimension-agnostic `BodyParams`. missing / malformed entries are
 /// skipped; a body-free config yields an empty vec.
+/// parse the `bonded_assembly` wire (the python `BondedAssembly.to_backend`
+/// dict). the python side validates shape/lengths; the extraction here still
+/// fails loud on any missing or mistyped key -- a fragment cluster silently
+/// dropped to zero bodies would be the body-system parse bug all over again.
+fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAssemblyParams>> {
+    let Some(obj) = dict.get_item("bonded_assembly")? else {
+        return Ok(None);
+    };
+    if obj.is_none() {
+        return Ok(None);
+    }
+    let d = obj
+        .downcast::<PyDict>()
+        .map_err(|_| PyValueError::new_err("bonded_assembly must be a dict"))?;
+    let get = |k: &str| -> PyResult<Bound<'_, PyAny>> {
+        d.get_item(k)?
+            .ok_or_else(|| PyValueError::new_err(format!("bonded_assembly missing key '{k}'")))
+    };
+    let positions: Vec<Vec<f64>> = get("positions")?.extract()?;
+    let masses: Vec<f64> = get("masses")?.extract()?;
+    let radii: Vec<f64> = get("radii")?.extract()?;
+    let inertias: Vec<f64> = get("inertias")?.extract()?;
+    let velocities: Vec<Vec<f64>> = get("velocities")?.extract()?;
+    let mobile: Vec<bool> = get("mobile")?.extract()?;
+    let bonds: Vec<(usize, usize)> = get("bonds")?
+        .extract::<Vec<Vec<usize>>>()?
+        .into_iter()
+        .map(|p| (p[0], p[1]))
+        .collect();
+    let n = positions.len();
+    if masses.len() != n || radii.len() != n || inertias.len() != n
+        || velocities.len() != n || mobile.len() != n
+    {
+        return Err(PyValueError::new_err(format!(
+            "bonded_assembly arrays disagree on the fragment count {n}"
+        )));
+    }
+    for &(i, j) in &bonds {
+        if i >= n || j >= n || i == j {
+            return Err(PyValueError::new_err(format!(
+                "bonded_assembly bond ({i}, {j}) outside the {n} fragments"
+            )));
+        }
+    }
+    let mat = get("bond_material")?;
+    let md = mat
+        .downcast::<PyDict>()
+        .map_err(|_| PyValueError::new_err("bond_material must be a dict"))?;
+    let mf = |k: &str| -> PyResult<f64> {
+        md.get_item(k)?
+            .ok_or_else(|| PyValueError::new_err(format!("bond_material missing '{k}'")))?
+            .extract()
+    };
+    let bond_material = symbi_ib::BondMaterial {
+        k_n: mf("k_n")?,
+        k_t: mf("k_t")?,
+        gamma: mf("gamma")?,
+        area: mf("area")?,
+        sigma_t: mf("sigma_t")?,
+        tau_s: mf("tau_s")?,
+    };
+    let contact = match d.get_item("contact")? {
+        Some(c) if !c.is_none() => {
+            let cd = c
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("contact must be a dict"))?
+                .clone();
+            let cf = |k: &str| -> PyResult<f64> {
+                cd.get_item(k)?
+                    .ok_or_else(|| PyValueError::new_err(format!("contact missing '{k}'")))?
+                    .extract()
+            };
+            Some(symbi_ib::ContactMaterial {
+                k_n: cf("k_n")?,
+                k_t: cf("k_t")?,
+                gamma_n: cf("gamma_n")?,
+                mu: cf("mu")?,
+            })
+        }
+        _ => None,
+    };
+    let gravity = match d.get_item("gravity")? {
+        Some(g) if !g.is_none() => {
+            let gd = g
+                .downcast::<PyDict>()
+                .map_err(|_| PyValueError::new_err("gravity must be a dict"))?
+                .clone();
+            let gf = |k: &str| -> PyResult<f64> {
+                gd.get_item(k)?
+                    .ok_or_else(|| PyValueError::new_err(format!("gravity missing '{k}'")))?
+                    .extract()
+            };
+            Some(symbi_ib::MutualGravity { g: gf("g")?, softening: gf("softening")? })
+        }
+        _ => None,
+    };
+    let kf = |k: &str| -> PyResult<f64> {
+        get(k)?.extract()
+    };
+    Ok(Some(BondedAssemblyParams {
+        positions,
+        masses,
+        radii,
+        inertias,
+        velocities,
+        mobile,
+        bonds,
+        bond_material,
+        contact,
+        gravity,
+        k_eta_n: kf("k_eta_n")?,
+        k_eta_t: kf("k_eta_t")?,
+    }))
+}
+
 fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
     let mut out: Vec<BodyParams> = Vec::new();
     // the GRAVITATIONAL BODY-SYSTEM branch (`body_system.binary_config`): the binary components are
@@ -2239,6 +2375,64 @@ fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg
 /// (outside the horizon, where the flux is well-posed and, with the covariant energy, radius-
 /// invariant at steady state). cartesian GR always uses the kerr-schild chart (schwarzschild is
 /// spherical), so `spacetime != minkowski && coord == cartesian && r_exc > 0` selects it.
+/// append the bonded-assembly fragments beyond the source prefix and build
+/// the pair-physics carrier. every fragment is a sealed rigid sphere (the
+/// drain-off porous wall); bond indices shift by the source-body count. the
+/// caller pushes the returned physics through `attach_fragment_physics` and
+/// keeps `shapes` parallel to the collection (fragments are analytic spheres).
+fn append_fragments<const D: usize>(
+    coll: BodyCollection<f64, D>,
+    shapes: &mut Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>,
+    asm: &BondedAssemblyParams,
+) -> (BodyCollection<f64, D>, symbi_ib::FragmentPhysics) {
+    let base = coll.len();
+    let mut coll = coll;
+    for k in 0..asm.positions.len() {
+        let pos = Tensor::new(std::array::from_fn(|ax| {
+            asm.positions[k].get(ax).copied().unwrap_or(0.0)
+        }));
+        let vel = Tensor::new(std::array::from_fn(|ax| {
+            asm.velocities[k].get(ax).copied().unwrap_or(0.0)
+        }));
+        let body = Body::rigid_sphere(
+            base + k,
+            pos,
+            vel,
+            asm.masses[k],
+            asm.radii[k],
+            asm.inertias[k],
+            true,
+        )
+        .with_surface(symbi_ib::SurfaceSpec::Porous {
+            porosity: 0.0,
+            k_eta_n: asm.k_eta_n,
+            k_eta_t: asm.k_eta_t,
+        })
+        .with_two_way_coupling(asm.mobile[k]);
+        coll = coll.add_fragment(body);
+        shapes.push(None);
+    }
+    let bonds = asm
+        .bonds
+        .iter()
+        .map(|&(i, j)| {
+            symbi_ib::Bond::form(
+                base + i,
+                base + j,
+                coll.get(base + i),
+                coll.get(base + j),
+                asm.bond_material,
+            )
+        })
+        .collect();
+    let physics = symbi_ib::FragmentPhysics {
+        bonds,
+        contacts: asm.contact.map(symbi_ib::Contacts::new),
+        gravity: asm.gravity,
+    };
+    (coll, physics)
+}
+
 fn build_bodies_and_horizon<const D: usize>(cfg: &Config) -> BodyCollection<f64, D> {
     let mut coll = build_bodies::<D>(&cfg.bodies, cfg.binary.as_ref());
     if cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0 {
@@ -2763,14 +2957,26 @@ macro_rules! build_and_run_hydro {
             })
             .build();
 
-        // attach immersed bodies (gravity / accretion sinks) when the config declares any. a REFINED
-        // run attaches them to the HIERARCHY instead (finest level owns the sinks), so skip the
-        // sim-level attach here and defer to `hier.with_bodies` after `into_hierarchy`.
-        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
+        // attach immersed bodies (gravity / accretion sinks + bonded fragments) when the config
+        // declares any. a REFINED run attaches them to the HIERARCHY instead (finest level owns
+        // the sinks), so skip the sim-level attach here and defer to `hier.with_bodies` after
+        // `into_hierarchy` (fragments reject refinement upstream).
+        let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+        let sim = if !has_any_body || cfg.refinement_enabled {
             sim
         } else {
-            let mut sim = sim.with_bodies(build_bodies_and_horizon::<$d>(cfg));
-            sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
+            let mut coll = build_bodies_and_horizon::<$d>(cfg);
+            let mut shapes = build_body_shapes(&cfg.bodies);
+            let physics = cfg.bonded_assembly.as_ref().map(|asm| {
+                let (with_frags, physics) = append_fragments::<$d>(coll.clone(), &mut shapes, asm);
+                coll = with_frags;
+                physics
+            });
+            let mut sim = sim.with_bodies(coll);
+            sim.attach_body_shapes(shapes);
+            if let Some(physics) = physics {
+                sim.attach_fragment_physics(physics);
+            }
             sim
         };
         let theta = build_theta(cfg);
@@ -4944,14 +5150,25 @@ macro_rules! build_and_run_iso {
             })
             .build();
 
-        // attach immersed bodies (gravity / accretion sinks) when declared. a REFINED
-        // run attaches them to the HIERARCHY instead (finest level owns the sinks),
-        // exactly like the energy-regime hydro macro.
-        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
+        // attach immersed bodies (gravity / accretion sinks + bonded fragments) when
+        // declared. a REFINED run attaches them to the HIERARCHY instead (finest level
+        // owns the sinks), exactly like the energy-regime hydro macro.
+        let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+        let sim = if !has_any_body || cfg.refinement_enabled {
             sim
         } else {
-            let mut sim = sim.with_bodies(build_bodies_and_horizon::<$d>(cfg));
-            sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
+            let mut coll = build_bodies_and_horizon::<$d>(cfg);
+            let mut shapes = build_body_shapes(&cfg.bodies);
+            let physics = cfg.bonded_assembly.as_ref().map(|asm| {
+                let (with_frags, physics) = append_fragments::<$d>(coll.clone(), &mut shapes, asm);
+                coll = with_frags;
+                physics
+            });
+            let mut sim = sim.with_bodies(coll);
+            sim.attach_body_shapes(shapes);
+            if let Some(physics) = physics {
+                sim.attach_fragment_physics(physics);
+            }
             sim
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
@@ -5212,6 +5429,50 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             "spacetime '{}' requires a relativistic regime (rhd or rmhd); got '{}'",
             cfg.spacetime, cfg.regime
         ));
+    }
+    // bonded fragments ride the uni-grid cartesian newtonian/isothermal paths:
+    // the per-fragment support-box dispatch plus the host bonded subcycle.
+    // every other combination has no fragment step yet and must fail loud —
+    // a silently frozen cluster would read as a valid static wall array.
+    if let Some(asm) = &cfg.bonded_assembly {
+        let n = asm.positions.len();
+        if !matches!(cfg.regime.as_str(), "newtonian" | "isothermal") {
+            return Err(format!(
+                "bonded_assembly ({n} fragments) is wired for newtonian/isothermal hydro; \
+                 got regime '{}'",
+                cfg.regime
+            ));
+        }
+        if cfg.coord_system != "cartesian" {
+            return Err(format!(
+                "bonded_assembly ({n} fragments) requires a cartesian chart (per-fragment \
+                 support boxes); got '{}'",
+                cfg.coord_system
+            ));
+        }
+        if cfg.refinement_enabled {
+            return Err(format!(
+                "bonded_assembly ({n} fragments) does not support refinement yet (no \
+                 fragment step on the hierarchy)"
+            ));
+        }
+        if cfg.n_gpus > 1 {
+            return Err(format!(
+                "bonded_assembly ({n} fragments) does not support gpus > 1 yet (the \
+                 decomposed body step has no fragment subcycle)"
+            ));
+        }
+        if cfg.dims < 2 {
+            return Err(format!(
+                "bonded_assembly ({n} fragments) needs a 2d or 3d grid (bond torques are \
+                 degenerate in 1d)"
+            ));
+        }
+        if cfg.mesh_motion {
+            return Err(format!(
+                "bonded_assembly ({n} fragments) is not wired with mesh motion"
+            ));
+        }
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
