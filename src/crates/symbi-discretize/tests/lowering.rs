@@ -32,10 +32,10 @@ use symbi_discretize::{
     rhd_c2p_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 
-// MAX_BODIES is owned by the runtime (symbi_ib::collection::MAX_BODIES = 2); mirrored
+// MAX_SOURCE_BODIES is owned by the runtime (symbi_ib::collection::MAX_SOURCE_BODIES = 2); mirrored
 // here as a literal since symbi-discretize does not depend on symbi-ib. the lowering
 // only cares that the per-body-unrolled graph builds + renders, regardless of the exact count.
-const MAX_BODIES: usize = 2;
+const MAX_SOURCE_BODIES: usize = 2;
 
 // the curvilinear momentum source the godunov binds, by regime prefix — mirrors
 // build.rs::geo_source. rmhd uses the magnetic-tension source; the hydro regimes
@@ -258,7 +258,7 @@ fn immersed_kernels_lower() {
     // body source: cartesian 1..=3, curvilinear cyl (r-phi 2D, r-phi-z 3D) + spherical (2D, 3D).
     for ndim in 1usize..=3 {
         let axes: Vec<usize> = (0..ndim).collect();
-        KernelRun::new(body_source_gv(MAX_BODIES, Coords::Cartesian, ndim, ndim, &axes))
+        KernelRun::new(body_source_gv(MAX_SOURCE_BODIES, Coords::Cartesian, ndim, ndim, &axes))
             .grid(vec![8usize; ndim])
             .assert_lowers();
     }
@@ -269,7 +269,7 @@ fn immersed_kernels_lower() {
         (Coords::Spherical, 3),
     ] {
         let axes: Vec<usize> = (0..ndim).collect();
-        KernelRun::new(body_source_gv(MAX_BODIES, coords, ndim, ndim, &axes))
+        KernelRun::new(body_source_gv(MAX_SOURCE_BODIES, coords, ndim, ndim, &axes))
             .grid(vec![8usize; ndim])
             .assert_lowers();
     }
@@ -277,7 +277,7 @@ fn immersed_kernels_lower() {
     for &cc in &[Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
         for ndim in 2usize..=3 {
             let axes: Vec<usize> = (0..ndim).collect();
-            KernelRun::new(body_feedback_gv(MAX_BODIES, cc, ndim, ndim, &axes))
+            KernelRun::new(body_feedback_gv(MAX_SOURCE_BODIES, cc, ndim, ndim, &axes))
                 .grid(vec![8usize; ndim])
                 .assert_lowers();
         }

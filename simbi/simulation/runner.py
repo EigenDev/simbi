@@ -187,8 +187,13 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     # the backend wire from the single serialization SSOT (simbi.types.bodies).
     model_dict.pop("body_system", None)
     model_dict.pop("immersed_bodies", None)
+    model_dict.pop("bonded_assembly", None)
     model_dict.update(
-        body_payload(problem.body_system, problem.immersed_bodies)
+        body_payload(
+            problem.body_system,
+            problem.immersed_bodies,
+            getattr(problem, "bonded_assembly", None),
+        )
     )
 
     # process bounds to separate x1, x2, x3 bounds

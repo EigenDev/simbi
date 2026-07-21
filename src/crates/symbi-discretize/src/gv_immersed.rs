@@ -233,7 +233,7 @@ fn body_contribution(
 }
 
 /// FORWARD source: `cons += dt * (S_grav + S_accretion)`, generic over coordinate system.
-/// reads cons (den/mom/nrg) in place; declares dt/gamma + per-axis grid scalars + the MAX_BODIES
+/// reads cons (den/mom/nrg) in place; declares dt/gamma + per-axis grid scalars + the MAX_SOURCE_BODIES
 /// body params (resolved by name at dispatch). returns the in-place conserved writes.
 /// per-cell body-evolved ADIABATIC conserved state: `(den, mom, nrg)` -> the state after `dt *` the
 /// forward immersed-body source (gravity + accretion sink) over all `n_bodies` slots. a PURE
@@ -424,7 +424,7 @@ pub fn body_feedback_drain_gv(
 }
 
 /// BACKWARD feedback: per cell, per body, the CARTESIAN force / 3D torque / absorbed mass / absorbed
-/// energy each body receives -> the MAX_BODIES*(ndim+5) reduction-scratch writes (`fb_{b}_force_{ax}`
+/// energy each body receives -> the MAX_SOURCE_BODIES*(ndim+5) reduction-scratch writes (`fb_{b}_force_{ax}`
 /// / `fb_{b}_torque_{t}` / `fb_{b}_mass` / `fb_{b}_energy`, the order the runtime sums). generic over
 /// coord system.
 pub fn body_feedback_gv(

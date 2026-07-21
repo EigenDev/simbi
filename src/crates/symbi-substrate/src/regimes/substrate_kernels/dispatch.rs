@@ -702,7 +702,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
-/// force[ndim]/torque[3]/mass/energy kernel into MAX_BODIES*(D+5) scratch fields, reduce each
+/// force[ndim]/torque[3]/mass/energy kernel into MAX_SOURCE_BODIES*(D+5) scratch fields, reduce each
 /// (device sum over the interior), assemble each body's BodyDelta (the drag force, accretion
 /// torque, emergent mass, and accretion power), and accumulate into the immersed side-car's
 /// diagnostics. 2D only (the torque is the z-component); no-op otherwise.
@@ -719,7 +719,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     }
     // cartesian grids take the SPLIT path: the gravity reaction reduces globally over
     // one streamed field, the drain-weighted quantities over the sink support box —
-    // the combined kernel wrote MAX_BODIES*(D+5) full-domain scratch fields per step
+    // the combined kernel wrote MAX_SOURCE_BODIES*(D+5) full-domain scratch fields per step
     // (~800 MB of traffic at 128^3) to integrate quantities supported on the sink.
     // curvilinear grids keep the combined kernel: the support box is a coordinate
     // ball spanning a non-rectangular index region, so the restriction does not apply directly.
@@ -733,7 +733,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
     // per body: force[ndim], torque[3], mass, energy (the adiabatic kernel carries the energy slot).
     let per_body = D + 5;
-    let n_out = symbi_ib::MAX_BODIES * per_body;
+    let n_out = symbi_ib::MAX_SOURCE_BODIES * per_body;
 
     // inputs in the manifest field_inputs order: cons.den, mom_0.., nrg (pure reads).
     let nrg = sim
@@ -767,7 +767,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
         .map(|s| field_reduce(s, &geom.interior, ReductionOp::Add))
         .collect();
     if let Some(ref im) = sim.immersed {
-        for b in 0..symbi_ib::MAX_BODIES {
+        for b in 0..symbi_ib::MAX_SOURCE_BODIES {
             let base = b * per_body;
             let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
             for g in 0..D {
@@ -806,11 +806,11 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     // every body pass shares this OnceLock (feedback grav D, drain D+5,
-    // penalize D+2, excise 4, the per-body feedback reduction MAX_BODIES x
+    // penalize D+2, excise 4, the per-body feedback reduction MAX_SOURCE_BODIES x
     // (D+5)): allocate the family maximum once so the first caller's size never
     // starves a later pass — the feedback reduction is the largest member, so
-    // the max must include its MAX_BODIES factor.
-    let n_alloc = n.max(symbi_ib::MAX_BODIES * (D + 5));
+    // the max must include its MAX_SOURCE_BODIES factor.
+    let n_alloc = n.max(symbi_ib::MAX_SOURCE_BODIES * (D + 5));
     let scratch = sim.workspace.body_scratch.get_or_init(|| {
         (0..n_alloc)
             .map(|_| {
@@ -893,15 +893,26 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     den_in.truncate(1);
 
     for b in 0..bodies.len() {
-        // gravity reaction: global support, reads cons.den only.
-        let g_out: Vec<&Field<Sc, D, Mem>> = scratch[..D].iter().collect();
-        let g_scalars = resolve(&grav_name, b);
-        dispatch_fields::<Sc, Mem, D>(
-            &grav_name, &geom.allocated, &geom.interior, &den_in, &g_out, &[], &g_scalars,
-        );
+        let body = bodies.get(b);
+        // a wall-only body (rigid fragment) exchanges momentum through the
+        // penalization receipts alone. its gravity-reaction integrand is
+        // identically zero (a non-gravitating body resolves mass = 0) and it
+        // has no drain, so the whole reduction pass is skipped: same totals,
+        // no full-interior dispatch per fragment.
+        if !body.has_gravity() && !body.has_accretion() {
+            continue;
+        }
         let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
-        for g in 0..D {
-            force[g] = field_reduce(&scratch[g], &geom.interior, ReductionOp::Add);
+        if body.has_gravity() {
+            // gravity reaction: global support, reads cons.den only.
+            let g_out: Vec<&Field<Sc, D, Mem>> = scratch[..D].iter().collect();
+            let g_scalars = resolve(&grav_name, b);
+            dispatch_fields::<Sc, Mem, D>(
+                &grav_name, &geom.allocated, &geom.interior, &den_in, &g_out, &[], &g_scalars,
+            );
+            for g in 0..D {
+                force[g] = field_reduce(&scratch[g], &geom.interior, ReductionOp::Add);
+            }
         }
 
         // drain-weighted quantities: support-box dispatch + reduce. the box derives
@@ -913,7 +924,6 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         // entirely, BEFORE Domain construction (an empty Space panics). a kernel
         // with NO declared support integrates over the full interior — sound,
         // never a silent physics loss.
-        let body = bodies.get(b);
         let bbox = body.accretion_radius().and_then(|_| {
             let names = super::binding::kernel_scalar_names(&drain_name);
             let ball = super::binding::kernel_output_support(&drain_name).and_then(|support| {
@@ -1584,7 +1594,7 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
     let name = format!("body_feedback_iso{sfx}_{D}d");
     let scalars = resolve_body_scalars(sim, dt, 0.0, &name);
     let per_body = D + 4;
-    let n_out = symbi_ib::MAX_BODIES * per_body;
+    let n_out = symbi_ib::MAX_SOURCE_BODIES * per_body;
 
     // inputs in the manifest order: cons.den, mom_0.., prim.pre (pure reads).
     let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
@@ -1611,7 +1621,7 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
         .map(|s| field_reduce(s, &geom.interior, ReductionOp::Add))
         .collect();
     if let Some(ref im) = sim.immersed {
-        for b in 0..symbi_ib::MAX_BODIES {
+        for b in 0..symbi_ib::MAX_SOURCE_BODIES {
             let base = b * per_body;
             let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
             for g in 0..D {

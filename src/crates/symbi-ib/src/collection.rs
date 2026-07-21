@@ -1,8 +1,11 @@
 // =============================================================================
 // collection.rs
 //
-// heterogeneous body container with subcycle interpolation. holds up to
-// MAX_BODIES bodies, provides capability-filtered iteration, and supports
+// heterogeneous body container with subcycle interpolation. the body list is
+// partitioned [source bodies | fragments]: source bodies occupy the baked
+// gravity/accretion kernel slots (at most MAX_SOURCE_BODIES), fragments are
+// wall-only rigid bodies in unbounded number that never enter the baked
+// source fan. provides capability-filtered iteration and supports
 // snapshot/interpolate/finalize for AMR subcycling.
 //
 // usage:
@@ -17,8 +20,11 @@ use symbi_algebra::{Tensor, OrderedNumeric};
 use symbi_ir::algebra::Scalar;
 use crate::body::{Body, BodyKind};
 
-/// maximum number of bodies in a collection. 2 covers binary systems.
-pub const MAX_BODIES: usize = 2;
+/// number of body slots statically unrolled into the baked gravity/accretion
+/// source kernels. 2 covers binary systems. only SOURCE bodies (gravity-on-gas
+/// or sinks) occupy slots; wall-only fragments live beyond the slot prefix and
+/// are reached exclusively through the per-instance penalization dispatch.
+pub const MAX_SOURCE_BODIES: usize = 2;
 
 /// orbital parameters for a binary system.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,6 +72,12 @@ pub struct BodyCollection<S: Scalar, const D: usize> {
     // the builder, so renaming the display `name` leaves the physics untouched.
     binary: bool,
 
+    // the source/fragment partition point: bodies[..n_sources] occupy the baked
+    // source-kernel slots, bodies[n_sources..] are wall-only fragments. sources
+    // are always added before fragments, so the prefix is contiguous and body
+    // indices are stable for the lifetime of the collection.
+    n_sources: usize,
+
     // subcycle snapshot
     bodies_n: Vec<Body<S, D>>,
     bodies_next: Vec<Body<S, D>>,
@@ -80,6 +92,7 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
             frame: ReferenceFrame::Inertial,
             binary_params: None,
             binary: false,
+            n_sources: 0,
             bodies_n: Vec::new(),
             bodies_next: Vec::new(),
             has_snapshot: false,
@@ -88,8 +101,33 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
 
     // -- builder pattern --
 
+    /// add a SOURCE body: it occupies the next baked source-kernel slot
+    /// (gravity-on-gas, sink accretion). every source must be added before
+    /// any fragment so the slot prefix stays contiguous.
     pub fn add(mut self, body: Body<S, D>) -> Self {
-        assert!(self.bodies.len() < MAX_BODIES, "body collection is full");
+        assert!(
+            self.n_sources < MAX_SOURCE_BODIES,
+            "source-body slots are full ({MAX_SOURCE_BODIES}); wall-only bodies go through add_fragment"
+        );
+        assert!(
+            self.n_sources == self.bodies.len(),
+            "source bodies must be added before fragments"
+        );
+        self.bodies.push(body);
+        self.n_sources += 1;
+        self
+    }
+
+    /// add a wall-only FRAGMENT: a rigid body that never gravitates on the gas
+    /// and never accretes, so it needs no baked source-kernel slot and the
+    /// fragment count is unbounded. the body's index is overwritten with its
+    /// list position so per-body dispatch and delta ledgers stay aligned.
+    pub fn add_fragment(mut self, mut body: Body<S, D>) -> Self {
+        assert!(
+            body.has_rigid() && !body.has_gravity() && !body.has_accretion(),
+            "a fragment must be a wall-only rigid body (no gravity, no accretion)"
+        );
+        body.idx = self.bodies.len();
         self.bodies.push(body);
         self
     }
@@ -142,6 +180,24 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
 
     pub fn bodies(&self) -> &[Body<S, D>] {
         &self.bodies
+    }
+
+    /// the bodies occupying baked source-kernel slots (gravity + accretion fan).
+    pub fn sources(&self) -> &[Body<S, D>] {
+        &self.bodies[..self.n_sources]
+    }
+
+    /// the wall-only fragments beyond the source-slot prefix.
+    pub fn fragments(&self) -> &[Body<S, D>] {
+        &self.bodies[self.n_sources..]
+    }
+
+    pub fn source_count(&self) -> usize {
+        self.n_sources
+    }
+
+    pub fn fragment_count(&self) -> usize {
+        self.bodies.len() - self.n_sources
     }
 
     pub fn is_binary(&self) -> bool {
@@ -298,12 +354,47 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "body collection is full")]
+    #[should_panic(expected = "source-body slots are full")]
     fn add_overflow() {
         BodyCollection::new()
             .add(grav(0, 0.0, 0.0))
             .add(grav(1, 1.0, 0.0))
             .add(grav(2, 2.0, 0.0));
+    }
+
+    fn frag(idx: usize, x: f64, y: f64) -> Body<f64, 2> {
+        Body::rigid_sphere(idx, V2::new([x, y]), V2::zeros(), 1.0, 0.1, 0.01, true)
+    }
+
+    #[test]
+    fn fragments_are_unbounded_and_partitioned() {
+        let mut coll = BodyCollection::new().add(grav(0, 0.0, 0.0));
+        for ii in 0..8 {
+            coll = coll.add_fragment(frag(0, ii as f64, 0.0));
+        }
+        assert_eq!(coll.len(), 9);
+        assert_eq!(coll.source_count(), 1);
+        assert_eq!(coll.fragment_count(), 8);
+        assert_eq!(coll.sources().len(), 1);
+        assert_eq!(coll.fragments().len(), 8);
+        // fragment indices are their list positions, source prefix first
+        for (ii, f) in coll.fragments().iter().enumerate() {
+            assert_eq!(f.idx, 1 + ii);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "source bodies must be added before fragments")]
+    fn source_after_fragment_panics() {
+        BodyCollection::new()
+            .add_fragment(frag(0, 0.0, 0.0))
+            .add(grav(1, 1.0, 0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "wall-only rigid body")]
+    fn gravitational_fragment_rejected() {
+        BodyCollection::new().add_fragment(grav(0, 0.0, 0.0));
     }
 
     #[test]

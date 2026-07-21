@@ -120,13 +120,37 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
     let (dt, time) = (sim.dt, sim.time);
 
     let Some(im) = sim.immersed.as_mut() else { return; };
+    // fragments without their pair physics would feel wall forces yet never
+    // move — a silently frozen cluster reads as valid output, so refuse it.
+    assert!(
+        im.bodies.fragment_count() == 0 || im.fragment_physics.is_some(),
+        "{} fragments attached without fragment physics (attach_fragment_physics)",
+        im.bodies.fragment_count(),
+    );
     let step_deltas = im.diagnostics.consolidate();
 
     // record feedback as DIAGNOSTICS + advance the prescribed binary orbit (the body's GRAVITATING
     // mass is held FIXED -- a fixed-potential sink: the fluid is removed + accretion measured, but
     // the central potential does not drift; force/torque are recorded for output only; the
     // prescribed motion does not consume them). the SAME apply the decomposed body step uses with its cross-tile sum.
+    // only the source prefix integrates here; fragment motion belongs to the
+    // bonded subcycle below.
     symbi_ib::apply_body_deltas(&mut im.bodies, &step_deltas, dt);
+
+    // bonded fragments: the penalization receipts become frozen external
+    // loads and the fragment system subcycles (bonds + contact + mutual
+    // gravity + gas drag) over the step.
+    if let Some(sys) = im.fragment_physics.as_mut() {
+        let n_src = im.bodies.source_count();
+        let mut external = vec![symbi_ib::ExternalLoad::zero(); im.bodies.len()];
+        for delta in &step_deltas {
+            if delta.idx >= n_src && delta.idx < external.len() {
+                external[delta.idx].force = delta.force_delta;
+                external[delta.idx].torque = delta.torque_delta;
+            }
+        }
+        sys.advance(&mut im.bodies, dt, &external);
+    }
 
     // the per-step exchange series: Mdot(t) and F_acc(t) as functionals of the
     // solved flow — the record the steady-state detector consumes.

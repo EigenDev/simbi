@@ -12,7 +12,10 @@
 // =============================================================================
 
 pub mod body;
+pub mod bond;
 pub mod bondi;
+pub mod contact;
+pub mod gravity;
 pub mod excise;
 pub mod history;
 pub mod penalize;
@@ -25,6 +28,9 @@ pub mod diagnostics;
 pub mod shell_flux;
 
 pub use body::{Body, BodyKind, BodySpec, MagneticSpec, SurfaceSpec};
+pub use bond::{advance_bonded, bond_potential_energy, Bond, BondMaterial, ExternalLoad, FragmentPhysics};
+pub use contact::{ContactMaterial, Contacts};
+pub use gravity::{gravitational_potential_energy, MutualGravity};
 pub use bondi::{accretion_coefficient, bondi_profile, mdot_bondi, sonic_radius, BondiState};
 pub use excise::{onion_fill_cell, onion_pass_count};
 pub use history::BodyHistory;
@@ -32,7 +38,7 @@ pub use penalize::{moment, omega_cross, penalize_cell, BodyKin, Property, Relax}
 pub use sdf::SdfExpr;
 pub use body_delta::BodyDelta;
 pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_speed_from_cons};
-pub use collection::{BodyCollection, BinaryParams, ReferenceFrame, MAX_BODIES};
+pub use collection::{BodyCollection, BinaryParams, ReferenceFrame, MAX_SOURCE_BODIES};
 pub use motion::{rotate_2d, rotate_3d, advance_binary, apply_body_deltas, keplerian_binary};
 pub use diagnostics::DiagnosticAccumulator;
 pub use shell_flux::{shell_accretion, FaceFlux};

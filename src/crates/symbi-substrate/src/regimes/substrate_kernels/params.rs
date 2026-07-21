@@ -227,10 +227,10 @@ pub(crate) fn body_scalar<const D: usize>(
 
 /// dispatch the forward body source (`body_source_{D}d`): a cons->cons in-place update
 /// `cons += dt * (S_grav + S_accretion)`. the scalar tail is resolved BY NAME from the kernel
-/// manifest (`dt`, `gamma`, the per-axis `x_lo`/`dx`, and the MAX_BODIES body params packed
+/// manifest (`dt`, `gamma`, the per-axis `x_lo`/`dx`, and the MAX_SOURCE_BODIES body params packed
 /// from the immersed side-car), so the runtime never hand-orders it. body-free sims are gated by the caller.
 /// resolve a body kernel's scalar tail BY NAME: `dt`, `gamma`, the per-axis `x_lo`/`dx`, and
-/// the MAX_BODIES body params from the immersed side-car. shared by the forward source + the backward
+/// the MAX_SOURCE_BODIES body params from the immersed side-car. shared by the forward source + the backward
 /// feedback (both kernels take the same scalar set).
 
 /// whether the IBM penalization owns accretion on this sim:

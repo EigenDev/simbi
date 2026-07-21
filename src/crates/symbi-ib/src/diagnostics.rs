@@ -22,7 +22,6 @@
 // =============================================================================
 
 use crate::body_delta::BodyDelta;
-use crate::MAX_BODIES;
 use symbi_ir::algebra::Scalar;
 use std::sync::Mutex;
 
@@ -36,9 +35,9 @@ pub struct DiagnosticAccumulator<S: Scalar, const D: usize> {
 }
 
 impl<const D: usize> DiagnosticAccumulator<f64, D> {
-    /// create an accumulator for the given number of bodies.
+    /// create an accumulator for the given number of bodies. sized by the
+    /// full body count (sources + fragments), unbounded.
     pub fn new(n_bodies: usize) -> Self {
-        assert!(n_bodies <= MAX_BODIES);
         let totals = (0..n_bodies).map(|ii| BodyDelta::new(ii)).collect();
         DiagnosticAccumulator {
             totals: Mutex::new(totals),
@@ -67,7 +66,7 @@ impl<const D: usize> DiagnosticAccumulator<f64, D> {
 
     /// accumulate a batch of deltas (one per body). designed for per-tile
     /// local accumulation: the caller sums cells within a tile into a
-    /// local [BodyDelta; MAX_BODIES], then calls this once per tile.
+    /// per-body local buffer, then calls this once per tile.
     /// one mutex acquisition per tile.
     pub fn accumulate_batch(&self, deltas: &[BodyDelta<f64, D>]) {
         let mut totals = self.totals.lock().unwrap();
