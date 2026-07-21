@@ -30,7 +30,15 @@ const N: usize = 32;
 const L: f64 = 1.2;
 const DX: f64 = 2.0 * L / N as f64;
 const MASS: f64 = 0.3;
-const T_FINAL: f64 = 0.1;
+// the vacuum-sink excision (rho = 1e-10 floor) against this test's very cold
+// atmosphere collapses dt geometrically (healthy 1.7e-4 at t = 0 down to a
+// 5.6e-13 floor by t ~ 8e-4), so the horizon is set BEFORE the collapse bites:
+// ~30 steps, with the correction firing at the rim from the first step — the
+// tiling-equivalence and fofc-fires assertions keep their full force.
+const T_FINAL: f64 = 5.0e-4;
+// any dt below this on a 32^2 unit-scale grid means the collapse returned;
+// fail fast and loud instead of running forever.
+const DT_FLOOR: f64 = 1.0e-9;
 const R_EXC: f64 = 0.35;
 
 type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -95,9 +103,19 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) -> u64 {
         Timestepping::Rk2,
         0.0,
         T_FINAL,
-        u64::MAX,
+        1,
         &LocalCopy,
-        |_, _, _| std::ops::ControlFlow::Continue(()),
+        |_, _, stores| {
+            // dt-collapse guard: below the floor this run can never finish —
+            // fail fast and name it instead of spinning forever.
+            let dt = stores[0].dt;
+            assert!(
+                dt > DT_FLOOR,
+                "dt collapsed to {dt:.3e} at t = {:.6e}: the cold-rim collapse returned",
+                stores[0].time,
+            );
+            std::ops::ControlFlow::Continue(())
+        },
     );
     let (fallback, _freeze) = fofc_stats();
     fallback

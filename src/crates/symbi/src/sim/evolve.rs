@@ -24,7 +24,7 @@ pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
 // sim-state core so the AMR driver shares them DRY. the public profiler API is
 // re-exported at the `sim::evolve::` path for the bench examples.
-use crate::sim::driver::{evolve_bodies, prof, stage_tag, stage_time_fractions};
+use crate::sim::driver::{evolve_bodies, prof, stage_time_fractions};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
 // =============================================================================
@@ -354,69 +354,10 @@ where
 // OUTSIDE the checked set; those orderings are fixed by the pipeline below.
 // =============================================================================
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct FieldSet(u8);
+// the stage table + fold live in symbi-sim::stage (the ONE sequence every
+// driver folds); this driver keeps only per-step scaffolding.
+use symbi_sim::stage::{fold_stage, StageArgs};
 
-impl FieldSet {
-    const NONE:   Self = FieldSet(0);
-    const CONS:   Self = FieldSet(1 << 0);
-    const PRIM:   Self = FieldSet(1 << 1);
-    const FLUX:   Self = FieldSet(1 << 2);
-    const USTAGE: Self = FieldSet(1 << 3);
-    const fn or(self, o: Self) -> Self { FieldSet(self.0 | o.0) }
-    fn contains(self, need: Self) -> bool { self.0 & need.0 == need.0 }
-}
-
-#[derive(Clone, Copy)]
-enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, C2p, Fofc, ChiUpdate, GhostFill }
-
-/// when a phase runs: unconditional, or gated by an additive source overlay /
-/// immersed bodies / the passive scalar.
-#[derive(Clone, Copy)]
-enum Gate { Always, AdditiveSource, Bodies, Fofc, AdditiveOrFofc, PassiveScalar }
-
-impl Gate {
-    #[inline]
-    fn active(self, additive: bool, bodies: bool, fofc: bool, chi: bool) -> bool {
-        match self {
-            Gate::Always => true,
-            Gate::AdditiveSource => additive,
-            Gate::Bodies => bodies,
-            Gate::Fofc => fofc,
-            // the stage-input snapshot serves BOTH consumers: the additive source pass
-            // evaluates S at the stage input, and the FOFC first-order redo restarts
-            // from it.
-            Gate::AdditiveOrFofc => additive || fofc,
-            Gate::PassiveScalar => chi,
-        }
-    }
-}
-
-struct Phase { name: &'static str, kind: PhaseKind, reads: FieldSet, writes: FieldSet, gate: Gate }
-
-// the per-stage SSP pipeline, in execution order. read/write sets are the
-// regime-independent data flow; stage entry is `cons | prim` (init c2p+ghost, or
-// the prior stage's tail). this list IS the canonical stage order — `step` folds it.
-const STAGE_PIPELINE: &[Phase] = &[
-    Phase { name: "snapshot_stage", kind: PhaseKind::SnapshotStage, reads: FieldSet::CONS,                    writes: FieldSet::USTAGE, gate: Gate::AdditiveOrFofc },
-    Phase { name: "wave_speeds",    kind: PhaseKind::WaveSpeeds,    reads: FieldSet::PRIM,                    writes: FieldSet::NONE,   gate: Gate::Always },
-    Phase { name: "flux",           kind: PhaseKind::Flux,          reads: FieldSet::PRIM,                    writes: FieldSet::FLUX,   gate: Gate::Always },
-    Phase { name: "efield",         kind: PhaseKind::Efield,        reads: FieldSet::FLUX,                    writes: FieldSet::NONE,   gate: Gate::Always },
-    Phase { name: "godunov_stage",  kind: PhaseKind::Godunov,       reads: FieldSet::CONS.or(FieldSet::FLUX), writes: FieldSet::CONS,   gate: Gate::Always },
-    Phase { name: "post_godunov",   kind: PhaseKind::PostGodunov,   reads: FieldSet::CONS,                    writes: FieldSet::NONE,   gate: Gate::Always },
-    Phase { name: "source_apply",   kind: PhaseKind::SourceApply,   reads: FieldSet::USTAGE,                  writes: FieldSet::CONS,   gate: Gate::AdditiveSource },
-    Phase { name: "body_source",    kind: PhaseKind::BodySource,    reads: FieldSet::CONS.or(FieldSet::PRIM), writes: FieldSet::CONS,   gate: Gate::Bodies },
-    Phase { name: "c2p",            kind: PhaseKind::C2p,           reads: FieldSet::CONS,                    writes: FieldSet::PRIM,   gate: Gate::Always },
-    // first-order flux correction: redo any zone whose high-order c2p went unphysical
-    // with a first-order (PCM + HLLE/light-cone) update from the stage input; host-gated
-    // internally on the failure reduction, so a clean substage is a scan + return.
-    Phase { name: "fofc",           kind: PhaseKind::Fofc,          reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE), writes: FieldSet::PRIM,   gate: Gate::Fofc },
-    // the dye rides AFTER fofc: it consumes the (possibly spliced) mass flux and
-    // divides by the stage-final density, so its transport telescopes with the
-    // exact mass update every stage.
-    Phase { name: "chi_update",     kind: PhaseKind::ChiUpdate,     reads: FieldSet::CONS.or(FieldSet::FLUX).or(FieldSet::PRIM), writes: FieldSet::CONS.or(FieldSet::PRIM), gate: Gate::PassiveScalar },
-    Phase { name: "ghost_fill",     kind: PhaseKind::GhostFill,     reads: FieldSet::PRIM,                    writes: FieldSet::PRIM,   gate: Gate::Always },
-];
 
 fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
@@ -440,8 +381,6 @@ where
     if n > 1 {
         prof("snapshot", || k.snapshot(sim));
     }
-    let additive_source = k.has_additive_source();
-    let fofc_active = k.fofc_active();
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
     // scalars from sim.motion, so a stage must see a(t) at its shu-osher ENTRY time
     // (the time of its input state — the same clock the amr cf ghosts use). a is
@@ -464,8 +403,6 @@ where
             }
         }
         let sim = &*sim;
-        let bodies = sim.has_bodies();
-        let chi_active = sim.has_passive_scalar();
         // FOLD the stage pipeline. each phase's semantics, in execution order:
         //  - snapshot_stage: cons BEFORE godunov overwrites it, so the additive source pass
         //    evaluates S at the stage input (the state the fused stage uses).
@@ -479,42 +416,19 @@ where
         // nothing has touched cons since, so u_n ALREADY holds the stage input. flag it and skip the
         // `snapshot_stage` copy — `stage_input()` binds u_n for this stage. forward-Euler (n == 1)
         // takes no snapshot, so u_n is stale there and the copy stands.
-        let stage_input_is_un = ii == 0
-            && n > 1
-            && sim.workspace.elide_stage_snapshot.load(std::sync::atomic::Ordering::Relaxed);
-        sim.workspace
-            .stage_input_is_un
-            .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
-        let mut have = FieldSet::CONS.or(FieldSet::PRIM);
-        for ph in STAGE_PIPELINE {
-            if !ph.gate.active(additive_source, bodies, fofc_active, chi_active) {
-                continue;
-            }
-            if matches!(ph.kind, PhaseKind::SnapshotStage) && stage_input_is_un {
-                have = have.or(ph.writes);
-                continue;
-            }
-            debug_assert!(
-                have.contains(ph.reads),
-                "R5 stage pipeline: phase '{}' reads a field not yet written this stage",
-                ph.name,
-            );
-            match ph.kind {
-                PhaseKind::SnapshotStage => prof("snapshot_stage", || k.snapshot_stage(sim)),
-                PhaseKind::WaveSpeeds    => k.wave_speeds(sim),
-                PhaseKind::Flux          => { for dd in 0..D { prof("flux", || k.flux(sim, dd)); } }
-                PhaseKind::Efield        => prof("efield", || k.efield(sim)),
-                PhaseKind::Godunov       => prof("godunov_stage", || k.godunov_stage(sim, sim.dt, a0, ac)),
-                PhaseKind::PostGodunov   => prof("post_godunov", || k.post_godunov(sim, sim.dt, stage_tag(ii, n))),
-                PhaseKind::SourceApply   => prof("source_apply", || k.source_apply(sim, ac * sim.dt)),
-                PhaseKind::BodySource    => prof("body_source", || k.body_source(sim, ac * sim.dt)),
-                PhaseKind::C2p           => prof("c2p", || k.c2p(sim)),
-                PhaseKind::Fofc          => prof("fofc", || k.fofc(sim, sim.dt, a0, ac, stage_tag(ii, n))),
-                PhaseKind::ChiUpdate     => prof("chi_update", || k.chi_update(sim, sim.dt, a0, ac)),
-                PhaseKind::GhostFill     => prof("ghost_fill", || k.ghost_fill(sim)),
-            }
-            have = have.or(ph.writes);
-        }
+        fold_stage(
+            sim,
+            k,
+            StageArgs {
+                dt: sim.dt,
+                a0,
+                ac,
+                stage: ii,
+                n_stages: n,
+                allow_elision: true,
+            },
+            &mut |_| {},
+        );
     }
     sim.motion.a = a_n;
 }

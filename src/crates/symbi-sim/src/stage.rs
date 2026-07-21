@@ -1,0 +1,223 @@
+// =============================================================================
+// stage.rs
+//
+// THE per-RK-stage phase sequence, in one place. every driver — the uni-grid
+// evolve loop, the hierarchy's level stage (single and refined), and the
+// decomposed (gpus > 1) tile loop — folds this same table through the same
+// function, so a phase added here exists on every driver by construction.
+// four hand-maintained copies of this sequence previously drifted twice
+// (a frozen passive scalar and a dead GR accretion ledger, both invisible to
+// the driver the tests exercised); the sequence-equality laws detect drift,
+// this fold makes it unrepresentable.
+//
+// driver-specific structure enters ONLY through `HookPoint` callbacks fired
+// between phases with no field borrow held: the hierarchy accumulates its
+// coarse/fine flux registers AfterFlux (sampling the high-order fluxes before
+// fofc may splice them) and re-prolongs coarse-fine ghosts BeforeGhostFill;
+// the decomposed loop's halo exchange + second ghost fill happen OUTSIDE the
+// fold (after it, per stage), which is its documented sequence delta.
+//
+// usage:
+//  fold_stage(sim, kernels, StageArgs { dt, a0, ac, stage, n_stages, allow_elision },
+//             &mut |_hp: HookPoint| {});
+// =============================================================================
+
+use crate::driver::{prof, stage_tag};
+use crate::state::FieldStore;
+use crate::substrate_seam::KernelSet;
+use symbi_ir::algebra::Scalar;
+use symbi_algebra::OrderedNumeric;
+use symbi_xpu::MemorySpace;
+
+/// the regime-independent data-flow sets a phase reads/writes; the fold
+/// asserts (debug) that a phase's reads were produced earlier in the stage.
+#[derive(Clone, Copy)]
+pub struct FieldSet(u8);
+
+impl FieldSet {
+    pub const NONE: Self = FieldSet(0);
+    pub const CONS: Self = FieldSet(1 << 0);
+    pub const PRIM: Self = FieldSet(1 << 1);
+    pub const FLUX: Self = FieldSet(1 << 2);
+    pub const USTAGE: Self = FieldSet(1 << 3);
+    pub const fn or(self, o: Self) -> Self {
+        FieldSet(self.0 | o.0)
+    }
+    pub fn contains(self, need: Self) -> bool {
+        self.0 & need.0 == need.0
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PhaseKind {
+    SnapshotStage,
+    WaveSpeeds,
+    Flux,
+    Efield,
+    Godunov,
+    PostGodunov,
+    SourceApply,
+    BodySource,
+    C2p,
+    Fofc,
+    ChiUpdate,
+    GhostFill,
+}
+
+/// when a phase runs: unconditional, or gated by an additive source overlay /
+/// immersed bodies / fofc / the passive scalar.
+#[derive(Clone, Copy)]
+pub enum Gate {
+    Always,
+    AdditiveSource,
+    Bodies,
+    Fofc,
+    AdditiveOrFofc,
+    PassiveScalar,
+}
+
+impl Gate {
+    #[inline]
+    fn active(self, additive: bool, bodies: bool, fofc: bool, chi: bool) -> bool {
+        match self {
+            Gate::Always => true,
+            Gate::AdditiveSource => additive,
+            Gate::Bodies => bodies,
+            Gate::Fofc => fofc,
+            // the stage-input snapshot serves BOTH consumers: the additive
+            // source pass evaluates S at the stage input, and the FOFC
+            // first-order redo restarts from it.
+            Gate::AdditiveOrFofc => additive || fofc,
+            Gate::PassiveScalar => chi,
+        }
+    }
+}
+
+pub struct Phase {
+    pub name: &'static str,
+    pub kind: PhaseKind,
+    pub reads: FieldSet,
+    pub writes: FieldSet,
+    pub gate: Gate,
+}
+
+/// the canonical stage order. this list IS the sequence — every driver folds it.
+pub const STAGE_PIPELINE: &[Phase] = &[
+    Phase { name: "snapshot_stage", kind: PhaseKind::SnapshotStage, reads: FieldSet::CONS,                    writes: FieldSet::USTAGE, gate: Gate::AdditiveOrFofc },
+    Phase { name: "wave_speeds",    kind: PhaseKind::WaveSpeeds,    reads: FieldSet::PRIM,                    writes: FieldSet::NONE,   gate: Gate::Always },
+    Phase { name: "flux",           kind: PhaseKind::Flux,          reads: FieldSet::PRIM,                    writes: FieldSet::FLUX,   gate: Gate::Always },
+    Phase { name: "efield",         kind: PhaseKind::Efield,        reads: FieldSet::FLUX,                    writes: FieldSet::NONE,   gate: Gate::Always },
+    Phase { name: "godunov_stage",  kind: PhaseKind::Godunov,       reads: FieldSet::CONS.or(FieldSet::FLUX), writes: FieldSet::CONS,   gate: Gate::Always },
+    Phase { name: "post_godunov",   kind: PhaseKind::PostGodunov,   reads: FieldSet::CONS,                    writes: FieldSet::NONE,   gate: Gate::Always },
+    Phase { name: "source_apply",   kind: PhaseKind::SourceApply,   reads: FieldSet::USTAGE,                  writes: FieldSet::CONS,   gate: Gate::AdditiveSource },
+    Phase { name: "body_source",    kind: PhaseKind::BodySource,    reads: FieldSet::CONS.or(FieldSet::PRIM), writes: FieldSet::CONS,   gate: Gate::Bodies },
+    Phase { name: "c2p",            kind: PhaseKind::C2p,           reads: FieldSet::CONS,                    writes: FieldSet::PRIM,   gate: Gate::Always },
+    // first-order flux correction: redo any zone whose high-order c2p went
+    // unphysical with a first-order update from the stage input; host-gated
+    // internally on the failure reduction.
+    Phase { name: "fofc",           kind: PhaseKind::Fofc,          reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE), writes: FieldSet::PRIM, gate: Gate::Fofc },
+    // the dye rides AFTER fofc: it consumes the (possibly spliced) mass flux
+    // and divides by the stage-final density.
+    Phase { name: "chi_update",     kind: PhaseKind::ChiUpdate,     reads: FieldSet::CONS.or(FieldSet::FLUX).or(FieldSet::PRIM), writes: FieldSet::CONS.or(FieldSet::PRIM), gate: Gate::PassiveScalar },
+    Phase { name: "ghost_fill",     kind: PhaseKind::GhostFill,     reads: FieldSet::PRIM,                    writes: FieldSet::PRIM,   gate: Gate::Always },
+];
+
+/// driver-specific interleave points, fired with no field borrow held by the
+/// fold itself (the callback receives nothing; drivers capture what they need
+/// by shared reference — field writes go through interior mutability).
+#[derive(Clone, Copy, PartialEq)]
+pub enum HookPoint {
+    /// after every flux direction, before efield: the hierarchy samples its
+    /// coarse/fine flux registers HERE, on the high-order fluxes, before a
+    /// fofc firing may splice them.
+    AfterFlux,
+    /// after chi_update, before ghost_fill: the hierarchy re-prolongs the
+    /// coarse-fine ghost band at the time of the state entering the next stage.
+    BeforeGhostFill,
+}
+
+#[derive(Clone, Copy)]
+pub struct StageArgs {
+    pub dt: f64,
+    pub a0: f64,
+    pub ac: f64,
+    /// zero-based stage index and the scheme's stage count.
+    pub stage: usize,
+    pub n_stages: usize,
+    /// whether this driver may elide the stage-0 stage-input copy (the
+    /// per-step snapshot already holds it). the decomposed loop passes false —
+    /// it never tracks the alias.
+    pub allow_elision: bool,
+}
+
+/// fold ONE RK stage of the canonical pipeline over a kernel set.
+pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    kernels: &K,
+    args: StageArgs,
+    hook: &mut impl FnMut(HookPoint),
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    let additive = kernels.has_additive_source();
+    let fofc = kernels.fofc_active();
+    let bodies = sim.has_bodies();
+    let chi = sim.has_passive_scalar();
+
+    // at the FIRST stage of a multi-stage scheme the per-step snapshot wrote
+    // `cons -> u_n` and nothing has touched cons since, so u_n ALREADY holds
+    // the stage input: flag it and skip the copy — `stage_input()` binds u_n
+    // for this stage. forward-Euler takes no per-step snapshot, so the copy
+    // stands there.
+    let stage_input_is_un = args.stage == 0
+        && args.n_stages > 1
+        && args.allow_elision
+        && sim.workspace.elide_stage_snapshot.load(std::sync::atomic::Ordering::Relaxed);
+    sim.workspace
+        .stage_input_is_un
+        .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
+
+    let tag = stage_tag(args.stage, args.n_stages);
+    let mut have = FieldSet::CONS.or(FieldSet::PRIM);
+    for ph in STAGE_PIPELINE {
+        if !ph.gate.active(additive, bodies, fofc, chi) {
+            continue;
+        }
+        if ph.kind == PhaseKind::SnapshotStage && stage_input_is_un {
+            have = have.or(ph.writes);
+            continue;
+        }
+        debug_assert!(
+            have.contains(ph.reads),
+            "stage pipeline: phase '{}' reads a field not yet written this stage",
+            ph.name,
+        );
+        match ph.kind {
+            PhaseKind::SnapshotStage => prof("snapshot_stage", || kernels.snapshot_stage(sim)),
+            PhaseKind::WaveSpeeds => kernels.wave_speeds(sim),
+            PhaseKind::Flux => {
+                for dd in 0..D {
+                    prof("flux", || kernels.flux(sim, dd));
+                }
+                hook(HookPoint::AfterFlux);
+            }
+            PhaseKind::Efield => prof("efield", || kernels.efield(sim)),
+            PhaseKind::Godunov => {
+                prof("godunov_stage", || kernels.godunov_stage(sim, args.dt, args.a0, args.ac))
+            }
+            PhaseKind::PostGodunov => prof("post_godunov", || kernels.post_godunov(sim, args.dt, tag)),
+            PhaseKind::SourceApply => prof("source_apply", || kernels.source_apply(sim, args.ac * args.dt)),
+            PhaseKind::BodySource => prof("body_source", || kernels.body_source(sim, args.ac * args.dt)),
+            PhaseKind::C2p => prof("c2p", || kernels.c2p(sim)),
+            PhaseKind::Fofc => prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag)),
+            PhaseKind::ChiUpdate => prof("chi_update", || kernels.chi_update(sim, args.dt, args.a0, args.ac)),
+            PhaseKind::GhostFill => {
+                hook(HookPoint::BeforeGhostFill);
+                prof("ghost_fill", || kernels.ghost_fill(sim));
+            }
+        }
+        have = have.or(ph.writes);
+    }
+}
