@@ -1186,11 +1186,11 @@ where
         // drained state — restriction consistency).
         if !has_finer {
             let l = &self.levels[level];
-            l.kernels.penalize(&l.state, dt);
+            prof("penalize", || l.kernels.penalize(&l.state, dt));
             // the viscous transport on the finest level — where
             // the resolved disk dynamics live. coarse-level viscosity (the outer
             // low-dynamics buffer) is not applied; inert when inviscid.
-            l.kernels.viscous(&l.state, dt);
+            prof("viscous", || l.kernels.viscous(&l.state, dt));
         }
         if has_finer {
             self.level_subcycle(level, dt);
@@ -1699,6 +1699,16 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
     let n = tiles.len();
+    // the finest-level tail owns the IBM surface physics; the refined-
+    // decomposed step never runs the root tail, so a refined run whose tiles
+    // ALL failed to build a fine patch would penalize its bodies NOWHERE —
+    // silent physics loss, refused here.
+    assert!(
+        tiles.iter().any(|h| h.levels.len() > 1)
+            || tiles.iter().all(|h| !h.levels[0].state.has_bodies()),
+        "refined-decomposed: no tile built a fine level while immersed bodies are active; \
+         the finest-level penalize would silently never run",
+    );
     let nstages = ts.stages().len();
     debug_assert_eq!(n, devices.len(), "tiles/devices length mismatch");
     let root_order: Vec<usize> = (0..n).collect();

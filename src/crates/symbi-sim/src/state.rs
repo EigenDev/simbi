@@ -1555,6 +1555,13 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// has already captured it and the driver elides the redundant `cons -> u_stage` copy), and the
     /// `u_stage` snapshot otherwise. every reader routes here; branching on
     /// `stage_input_is_un` at each call site is how a buffer alias drifts into a correctness bug.
+    /// whether this simulation has immersed bodies (an attached collection
+    /// with at least one body — `immersed.is_some()` alone disagrees with this
+    /// in the zero-body-collection state the historical parse bug produced).
+    pub fn has_bodies(&self) -> bool {
+        self.immersed.as_ref().map_or(false, |im| !im.bodies.is_empty())
+    }
+
     /// whether this run carries the passive scalar (dye): the cons `chi` slot is
     /// allocated. every chi consumer gates on this, so an undyed run pays nothing.
     #[inline]
@@ -2127,10 +2134,6 @@ where
         }
     }
 
-    /// whether this simulation has immersed bodies.
-    pub fn has_bodies(&self) -> bool {
-        self.immersed.as_ref().map_or(false, |im| !im.bodies.is_empty())
-    }
 }
 
 // =============================================================================
