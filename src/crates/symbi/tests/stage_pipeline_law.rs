@@ -125,6 +125,12 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
         self.push("horizon_accretion");
         (0.0, 0.0)
     }
+    fn excise_sweep(&self, _s: &Store) {
+        self.push("excise_sweep");
+    }
+    fn excise_finalize(&self, _s: &Store) {
+        self.push("excise_finalize");
+    }
 }
 
 fn tiny_sim(with_chi: bool) -> Sim {
@@ -230,6 +236,75 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
                     "the horizon ledger must be booked on both drivers"
                 );
             }
+        }
+    }
+}
+
+// the DECOMPOSED (gpus > 1) driver against the canonical sequence, modulo its
+// three DOCUMENTED structural deltas — anything else is drift:
+//   1. no stage-input elision: snapshot_stage runs at EVERY gated stage,
+//      including stage 0 of a multi-stage scheme (the uni-grid driver elides
+//      that copy into the per-step snapshot);
+//   2. a second ghost_fill per stage, after the halo exchange (cut-corner
+//      consistency);
+//   3. the excise protocol is sweep-based with its own equivalence oracle
+//      (decomp_excise_equivalence), so excise-family calls are normalized out
+//      of both logs here.
+// the passive scalar is config-fenced off this driver, so chi stays false.
+#[test]
+fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
+    use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+    const T: f64 = 2.5e-3;
+    for additive in [false, true] {
+        for fofc in [false, true] {
+            let rec_a = Recorder::new(additive, fofc);
+            let mut sim_a = tiny_sim(false);
+            evolve(&mut sim_a, &rec_a, T).expect("uni-grid drive");
+            let uni = rec_a.take();
+
+            // transform the canonical log by the documented deltas: drop the
+            // excise family, duplicate each ghost_fill, and materialize the
+            // elided stage-0 snapshot_stage (it directly follows the per-step
+            // snapshot in the canonical order).
+            let gated = additive || fofc;
+            let mut expected: Vec<String> = Vec::new();
+            for ph in &uni {
+                if ph.starts_with("excise") {
+                    continue;
+                }
+                expected.push(ph.clone());
+                if ph == "ghost_fill" {
+                    expected.push("ghost_fill".to_string());
+                }
+                if ph == "snapshot" && gated {
+                    expected.push("snapshot_stage".to_string());
+                }
+            }
+
+            let rec_c = Recorder::new(additive, fofc);
+            let mut sim_c = tiny_sim(false);
+            let stores: &mut [&mut Store] = &mut [&mut sim_c];
+            let kernels: Vec<&Recorder> = vec![&rec_c];
+            evolve_decomposed(
+                stores,
+                &kernels,
+                [1, 1],
+                &[0],
+                Timestepping::Rk2,
+                0.0,
+                T,
+                u64::MAX,
+                &LocalCopy,
+                |_, _, _| std::ops::ControlFlow::Continue(()),
+            );
+            let dec: Vec<String> =
+                rec_c.take().into_iter().filter(|p| !p.starts_with("excise")).collect();
+
+            assert_eq!(
+                dec, expected,
+                "decomposed sequence drifted from the canonical (additive={additive}, \
+                 fofc={fofc}):\ndecomposed: {dec:?}\nexpected:   {expected:?}"
+            );
         }
     }
 }

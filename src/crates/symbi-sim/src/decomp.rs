@@ -19,6 +19,7 @@
 // lives in one tested place.
 // =============================================================================
 
+use crate::driver::prof;
 use crate::state::{FieldStore, PartitionGeometry, Timestepping};
 use crate::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
@@ -757,32 +758,34 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             kernels[i].snapshot_stage(sh[i]);
                         }
                         kernels[i].wave_speeds(sh[i]);
-                        for dd in 0..D {
-                            kernels[i].flux(sh[i], dd);
-                        }
-                        kernels[i].efield(sh[i]);
-                        kernels[i].godunov_stage(sh[i], dt, a0, ac);
-                        kernels[i].post_godunov(sh[i], dt, stage);
+                        prof("flux", || {
+                            for dd in 0..D {
+                                kernels[i].flux(sh[i], dd);
+                            }
+                        });
+                        prof("efield", || kernels[i].efield(sh[i]));
+                        prof("godunov_stage", || kernels[i].godunov_stage(sh[i], dt, a0, ac));
+                        prof("post_godunov", || kernels[i].post_godunov(sh[i], dt, stage));
                         if additive {
                             // cons += (ac*dt) * S(u_stage), the SSP stage weight matching godunov.
-                            kernels[i].source_apply(sh[i], ac * dt);
+                            prof("source_apply", || kernels[i].source_apply(sh[i], ac * dt));
                         }
                         if sh[i].has_bodies() {
                             // gravity on mom/nrg + the accretion sink on den, cons += (ac*dt)*S_body.
                             // for adiabatic/curvilinear this IS the body pass; for iso-cartesian it
                             // no-ops (fused into godunov_stage). proven by `decomp_body_equivalence`.
-                            kernels[i].body_source(sh[i], ac * dt);
+                            prof("body_source", || kernels[i].body_source(sh[i], ac * dt));
                         }
-                        kernels[i].c2p(sh[i]);
+                        prof("c2p", || kernels[i].c2p(sh[i]));
                         if fofc {
                             // first-order flux correction, per tile, BEFORE the post-stage
                             // exchange (mirroring the hierarchy's c2p -> fofc order): the redo
                             // reads the stage-input state whose halos are exchange-fresh from
                             // the previous stage tail, so a flagged cell at a cut redoes its
                             // faces from the same states the monolithic run sees.
-                            kernels[i].fofc(sh[i], dt, a0, ac, stage);
+                            prof("fofc", || kernels[i].fofc(sh[i], dt, a0, ac, stage));
                         }
-                        kernels[i].ghost_fill(sh[i]);
+                        prof("ghost_fill", || kernels[i].ghost_fill(sh[i]));
                     });
                 }
                 // refresh the cut halos from each neighbor's stage-updated interior.
