@@ -33,7 +33,7 @@ use std::sync::{Arc, OnceLock};
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
 use crate::regimes::substrate_kernels::{
     cfl_wave_speed, dispatch_body_feedback, dispatch_body_source, dispatch_fields, dispatch_flux,
-    dispatch_penalize,
+    dispatch_penalize, geom_scalar,
     dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_gradient_boundaries,
     dispatch_godunov_maybe_fused,
     dispatch_named, dispatch_runtime_source, dispatch_source_apply, body_fused_in, fused_runtime_cpu_kernel,
@@ -374,6 +374,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         if !self.gradient_bcs.is_empty() {
             dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
         }
+        // the dye concentration ghost band: a true scalar (reflect sign +1)
+        // through the field-agnostic single-scalar pullback.
+        if let Some(chi) = sim.fields.prim.chi_field() {
+            crate::regimes::mhd_substrate::flag_ghost_fill(sim, chi);
+        }
     }
 
     fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -382,6 +387,37 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_named(sim, pre, None, 0, &name, &sim.geom.allocated, &[], &[]);
+        // the dye snapshot rides alongside: u_n.chi = cons.chi, the rk combine's
+        // step-start state.
+        if sim.has_passive_scalar() {
+            let cname = format!("chi_snapshot_{D}d");
+            dispatch_named(sim, pre, None, 0, &cname, &sim.geom.allocated, &[], &[]);
+        }
+    }
+
+    fn chi_update(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        if !sim.has_passive_scalar() {
+            return;
+        }
+        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
+        let name = format!("chi_godunov_{D}d");
+        let scalars = scalars_for(&name, |bind| {
+            let ScalarBind::Ref(sref) = bind else {
+                panic!("chi_godunov: unexpected spec scalar {bind:?}");
+            };
+            Sc::from_f64(match *sref {
+                ScalarRef::Dt => dt,
+                ScalarRef::A0 => a0,
+                ScalarRef::Ac => ac,
+                other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
+                    .unwrap_or_else(|| panic!("chi_godunov: unexpected scalar {other:?}")),
+            })
+        });
+        dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
+        // the dye concentration recovery: prim.chi = cons.chi / den, against the
+        // stage-final density (fofc has already spliced by this phase).
+        let cname = format!("chi_c2p_{D}d");
+        dispatch_named(sim, pre, None, 0, &cname, &sim.geom.interior, &[], &[]);
     }
 
     fn has_additive_source(&self) -> bool {

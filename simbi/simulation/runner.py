@@ -425,6 +425,7 @@ def run(
         sim_info=exec_dict,
         a=scale_factor,
         adot=scale_factor_derivative,
+        chi_field=problem.passive_scalar(),
     )
 
 

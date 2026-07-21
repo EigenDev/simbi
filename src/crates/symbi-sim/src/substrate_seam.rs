@@ -94,6 +94,13 @@ where
     /// per RK stage after godunov when the sim has bodies. default: no-op (body-free regimes).
     fn body_source(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
+    /// the passive-scalar (dye) stage update: `cons.chi` advances on the
+    /// materialized mass flux (donor-cell upwind) in the same SSP form as the
+    /// gas, then the concentration `prim.chi = cons.chi/den` is recovered. runs
+    /// AFTER the fofc phase so a spliced mass flux and the stage-final density
+    /// are what the dye rides. default: no-op (regimes without the dye wired).
+    fn chi_update(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _a0: f64, _ac: f64) {}
+
     /// does this kernel set carry a NON-fused (additive) source overlay? gates the per-stage
     /// `snapshot_stage` + `source_apply` in `step()`. default: false (fused / source-free sets).
     fn has_additive_source(&self) -> bool {

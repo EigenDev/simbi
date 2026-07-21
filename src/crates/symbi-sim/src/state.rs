@@ -109,6 +109,10 @@ pub struct ConsFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace
     pub den: Field<Sc, NDIM, M>,
     pub mom: [Field<Sc, NDIM, M>; DOF],
     pub nrg: Option<Field<Sc, NDIM, M>>,
+    /// the conserved passive scalar `D_chi = rho * chi` (dye). `None` unless the
+    /// run declares one; absent from the positional pointer ABI — chi kernels
+    /// bind it by manifest name only.
+    pub chi: Option<Field<Sc, NDIM, M>>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -162,11 +166,24 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
             den: Field::zeros(domain)?,
             mom: array_field_zeros(domain)?,
             nrg: if has_energy { Some(Field::zeros(domain)?) } else { None },
+            chi: None,
         })
+    }
+
+    /// allocate the passive-scalar slot (a run-level opt-in, unlike the
+    /// regime-static `nrg`).
+    pub fn alloc_chi(&mut self, domain: &Domain<NDIM>) -> symbi_xpu::Result<()> {
+        self.chi = Some(Field::zeros(domain)?);
+        Ok(())
     }
 
     /// whether this field set includes energy.
     pub fn has_energy(&self) -> bool { self.nrg_field().is_some() }
+
+    /// **the passive-scalar-slot accessor**: the ONE accessor for the `chi`
+    /// field, mirroring `nrg_field`. `None` when the run carries no dye.
+    #[inline]
+    pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.chi.as_ref() }
 
     /// **the energy-slot accessor**: the ONE
     /// accessor for the `nrg` field. ALL readers route through this, so swapping the representation
@@ -233,6 +250,9 @@ pub struct PrimFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace
     pub rho: Field<Sc, NDIM, M>,
     pub vel: [Field<Sc, NDIM, M>; DOF],
     pub pre: Option<Field<Sc, NDIM, M>>,
+    /// the primitive passive-scalar concentration `chi = D_chi / rho`. `None`
+    /// unless the run declares one; outside the positional pointer ABI.
+    pub chi: Option<Field<Sc, NDIM, M>>,
 }
 
 /// the natural case: velocity dimension == grid dimension.
@@ -271,7 +291,14 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
             rho: Field::zeros(domain)?,
             vel: array_field_zeros(domain)?,
             pre: if has_pressure { Some(Field::zeros(domain)?) } else { None },
+            chi: None,
         })
+    }
+
+    /// allocate the passive-scalar concentration slot (run-level opt-in).
+    pub fn alloc_chi(&mut self, domain: &Domain<NDIM>) -> symbi_xpu::Result<()> {
+        self.chi = Some(Field::zeros(domain)?);
+        Ok(())
     }
 
     /// **the pressure-slot accessor**: the ONE
@@ -279,6 +306,10 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// in one place. `None` when pressure is not stored (isothermal — derived from the EOS).
     #[inline]
     pub fn pre_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.pre.as_ref() }
+
+    /// **the passive-scalar-slot accessor**, mirroring `pre_field`.
+    #[inline]
+    pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.chi.as_ref() }
 
     #[inline]
     pub fn gather(&self, coord: [isize; NDIM]) -> Prim<Sc, DOF> {
@@ -1524,6 +1555,13 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// has already captured it and the driver elides the redundant `cons -> u_stage` copy), and the
     /// `u_stage` snapshot otherwise. every reader routes here; branching on
     /// `stage_input_is_un` at each call site is how a buffer alias drifts into a correctness bug.
+    /// whether this run carries the passive scalar (dye): the cons `chi` slot is
+    /// allocated. every chi consumer gates on this, so an undyed run pays nothing.
+    #[inline]
+    pub fn has_passive_scalar(&self) -> bool {
+        self.fields.cons.chi_field().is_some()
+    }
+
     #[inline]
     pub fn stage_input(&self) -> &ConsFieldsGeneric<NDIM, DOF, Mem, Sc> {
         if self.workspace.stage_input_is_un.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1919,6 +1957,18 @@ where
     pub fn with_bodies(mut self, bodies: symbi_ib::BodyCollection<f64, D>) -> Self {
         self.attach_bodies(bodies);
         self
+    }
+
+    /// allocate the passive-scalar (dye) slots: conserved `D_chi = rho chi`, the
+    /// primitive concentration, and the rk step snapshot. a run-level opt-in
+    /// (unlike the regime-static energy slot); every chi consumer gates on
+    /// `has_passive_scalar()`, so an unallocated dye costs nothing anywhere.
+    pub fn with_passive_scalar(mut self) -> symbi_xpu::Result<Self> {
+        let allocated = self.geom.allocated.clone();
+        self.fields.cons.alloc_chi(&allocated)?;
+        self.fields.prim.alloc_chi(&allocated)?;
+        self.workspace.u_n.alloc_chi(&allocated)?;
+        Ok(self)
     }
 
     /// select the cylindrical 2D MHD plane (r-z axisymmetric vs r-phi disk) — the grid-axis set

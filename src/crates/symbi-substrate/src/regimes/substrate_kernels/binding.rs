@@ -221,6 +221,9 @@ where
             StateComp::Den => &group.den,
             StateComp::Nrg => group.nrg_field().expect("state slot has no energy field"),
             StateComp::Mom(k) => &group.mom[k as usize],
+            StateComp::Chi => group
+                .chi_field()
+                .expect("state slot has no passive-scalar field (run not built with_passive_scalar)"),
         }
     };
     let mhd = || f.mhd.as_ref().expect("mhd path requires MHD fields");
@@ -236,6 +239,10 @@ where
         // deriving pressure from the sim binds the wrong, unfilled buffer.
         FieldRef::PrimPre => pre.expect("resolve_path: 'prim.pre' bound but no pressure override provided"),
         FieldRef::PrimVel(k) => &f.prim.vel[k as usize],
+        FieldRef::PrimChi => f
+            .prim
+            .chi_field()
+            .expect("prim.chi bound but the run carries no passive scalar"),
         // the cell-centered B (bcell) is the MHD primitive `mag`; the curvilinear MHD geo-source
         // reads it for the magnetic pressure (1/2|B|^2) + tension. resolved here so the MHD
         // godunov binds by manifest like every other curvilinear kernel.

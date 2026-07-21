@@ -243,22 +243,30 @@ where
         .map(|(ax, &x)| x * axis_scale(ax))
         .collect();
     // ----- RegimeSpec-driven conserved iteration ------
-    let conserved = collect_bucket(R::SPEC.fields, DOF, |fs, idx| match fs.name {
+    let mut conserved = collect_bucket(R::SPEC.fields, DOF, |fs, idx| match fs.name {
         "den" => Some(&sim.fields.cons.den),
         "mom" => Some(&sim.fields.cons.mom[idx]),
         "nrg" => sim.fields.cons.nrg_field(),
         "mag" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
         other => panic!("checkpoint write: unknown conserved field '{other}'"),
     });
+    // the passive scalar is a RUN-level opt-in, not a regime field, so it rides
+    // outside the spec iteration: present iff allocated.
+    if let Some(chi) = sim.fields.cons.chi_field() {
+        conserved.push(("chi".to_string(), extract_field(chi, chi.domain())));
+    }
 
     // ----- RegimeSpec-driven primitive iteration ------
-    let primitive = collect_bucket(R::SPEC.primitive_fields, DOF, |fs, idx| match fs.name {
+    let mut primitive = collect_bucket(R::SPEC.primitive_fields, DOF, |fs, idx| match fs.name {
         "rho" => Some(&sim.fields.prim.rho),
         "vel" => Some(&sim.fields.prim.vel[idx]),
         "pre" => sim.fields.prim.pre_field(),
         "bcell" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
         other => panic!("checkpoint write: unknown primitive field '{other}'"),
     });
+    if let Some(chi) = sim.fields.prim.chi_field() {
+        primitive.push(("chi".to_string(), extract_field(chi, chi.domain())));
+    }
 
     // ----- face-centered B (CT ground truth) — separate group ----
     let (bface, bface_dom): (Vec<(String, Vec<f64>)>, Vec<(Vec<i64>, Vec<i64>)>) =
@@ -1008,6 +1016,14 @@ where
             }
         }
     }
+    // the passive scalar rides outside the spec iteration (run-level opt-in):
+    // restored iff this run allocated it AND the file carries it — a dyed
+    // restart of an undyed file starts from chi = 0 rather than failing.
+    if let Some(chi) = sim.fields.cons.chi_field() {
+        if cons.find_dataset("chi").is_some() {
+            restore_field(cons, "chi", chi, chi.domain())?;
+        }
+    }
 
     // primitives (optional). RegimeSpec-driven iteration mirrors the write.
     if let Some(prim) = level_0.find_group("primitives") {
@@ -1047,6 +1063,13 @@ where
                     }
                     other => panic!("checkpoint read: unknown primitive field '{other}'"),
                 }
+            }
+        }
+        // the passive-scalar concentration, outside the spec iteration like its
+        // conserved counterpart.
+        if let Some(chi) = sim.fields.prim.chi_field() {
+            if prim.find_dataset("chi").is_some() {
+                restore_field(prim, "chi", chi, chi.domain())?;
             }
         }
     }
