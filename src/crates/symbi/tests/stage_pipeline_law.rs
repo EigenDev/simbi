@@ -109,6 +109,22 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
     fn chi_update(&self, _s: &Store, _dt: f64, _a0: f64, _ac: f64) {
         self.push("chi_update");
     }
+    fn viscous(&self, _s: &Store, _dt: f64) {
+        self.push("viscous");
+    }
+    fn excise(&self, _s: &Store) {
+        self.push("excise");
+    }
+    fn penalize(&self, _s: &Store, _dt: f64) {
+        self.push("penalize");
+    }
+    fn body_feedback(&self, _s: &Store, _dt: f64) {
+        self.push("body_feedback");
+    }
+    fn horizon_accretion(&self, _s: &Store, _r: f64) -> (f64, f64) {
+        self.push("horizon_accretion");
+        (0.0, 0.0)
+    }
 }
 
 fn tiny_sim(with_chi: bool) -> Sim {
@@ -126,6 +142,95 @@ fn tiny_sim(with_chi: bool) -> Sim {
         sim.with_passive_scalar().expect("chi alloc")
     } else {
         sim
+    }
+}
+
+// the per-STEP extras (viscous, excise, horizon ledger, penalize, feedback)
+// under the same equality demand — this is the coverage whose absence let the
+// zero-GR-ledger bug ship: the ledger booking existed in one driver only, and
+// no gate compared the drivers' per-step sequences.
+#[test]
+fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
+    const T: f64 = 2.5e-3;
+    // three body configurations: none; a one-way gravitational mass (feedback
+    // reduction skipped by the needs_feedback gate on BOTH drivers); a two-way
+    // rigid body plus a GR horizon diagnostic body (penalize + feedback +
+    // shell-flux ledger all active).
+    let configs: Vec<(&str, Option<symbi_ib::BodyCollection<f64, 2>>)> = vec![
+        ("none", None),
+        (
+            "one-way-grav",
+            Some(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0,
+                Tensor::new([0.0, 0.0]),
+                Tensor::zeros(),
+                1.0,
+                0.1,
+                0.05,
+            ))),
+        ),
+        (
+            "two-way-rigid+horizon",
+            Some(
+                symbi_ib::BodyCollection::new()
+                    .add(
+                        symbi_ib::Body::rigid_sphere(
+                            0,
+                            Tensor::new([0.0, 0.0]),
+                            Tensor::zeros(),
+                            1.0,
+                            0.2,
+                            0.05,
+                            true,
+                        )
+                        .with_two_way_coupling(true),
+                    )
+                    .add(symbi_ib::Body::horizon(1, 0.3, 0.6)),
+            ),
+        ),
+    ];
+    for (tag, bodies) in configs {
+        let rec_a = Recorder::new(false, false);
+        let mut sim_a = tiny_sim(false);
+        if let Some(b) = bodies.clone() {
+            sim_a = sim_a.with_bodies(b);
+        }
+        evolve(&mut sim_a, &rec_a, T).expect("uni-grid drive");
+        let uni = rec_a.take();
+
+        let rec_b = Recorder::new(false, false);
+        let mut sim_b = tiny_sim(false);
+        if let Some(b) = bodies.clone() {
+            sim_b = sim_b.with_bodies(b);
+        }
+        let mut hier = Hierarchy::single(sim_b, rec_b.clone());
+        hier.evolve(T).expect("hierarchy drive");
+        let hi = rec_b.take();
+
+        assert_eq!(
+            uni, hi,
+            "per-step sequences diverged for bodies = {tag}:\nuni-grid:  {uni:?}\nhierarchy: {hi:?}"
+        );
+        assert!(uni.contains(&"viscous".to_string()));
+        assert!(uni.contains(&"excise".to_string()));
+        match tag {
+            "none" => assert!(!uni.contains(&"penalize".to_string())),
+            "one-way-grav" => {
+                assert!(uni.contains(&"penalize".to_string()));
+                assert!(
+                    !uni.contains(&"body_feedback".to_string()),
+                    "one-way mass must skip the feedback reduction"
+                );
+            }
+            _ => {
+                assert!(uni.contains(&"penalize".to_string()));
+                assert!(uni.contains(&"body_feedback".to_string()));
+                assert!(
+                    uni.contains(&"horizon_accretion".to_string()),
+                    "the horizon ledger must be booked on both drivers"
+                );
+            }
+        }
     }
 }
 

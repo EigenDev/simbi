@@ -895,47 +895,8 @@ where
         // horizon excision, ONCE per step after the full RK combination (the same
         // point the single-grid loop applies it): overwrite the causally
         // disconnected cells inside the excision sphere with a zero-gradient
-        // outward primitive copy + local conserved rebuild. inert at zero radius
-        // (the kernel set gates on r_exc > 0); the excision request gate rejects
-        // refined runs, so the root level is the only carrier.
-        {
-            let l = &self.levels[0];
-            l.kernels.excise(&l.state);
-        }
-
-        // the GR horizon shell-flux accretion, ONCE per step: the mass/nrg flux
-        // fields still hold the last stage's flux, so the boundary-flux
-        // reduction through the diagnostic shell books (mdot, edot) INTO the
-        // hole on the horizon body's ledger. mirrors the uni-grid driver's
-        // per-step block exactly — the excision gate rejects refined runs, so
-        // the root level is the only carrier.
-        {
-            let l = &self.levels[0];
-            let horizon = l.state.immersed.as_ref().and_then(|im| {
-                im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
-                    symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
-                        Some((i, diagnostic_radius))
-                    }
-                    _ => None,
-                })
-            });
-            if let Some((idx, r_d)) = horizon {
-                let (mdot, edot) =
-                    prof("horizon_accretion", || l.kernels.horizon_accretion(&l.state, r_d));
-                let root = &mut self.levels[0];
-                if let Some(im) = root.state.immersed.as_mut() {
-                    if let symbi_ib::BodyKind::Horizon {
-                        total_accreted_mass, total_accreted_energy, mdot: m, edot: e, ..
-                    } = &mut im.bodies.get_mut(idx).kind
-                    {
-                        *total_accreted_mass += mdot * dt;
-                        *total_accreted_energy += edot * dt;
-                        *m = mdot;
-                        *e = edot;
-                    }
-                }
-            }
-        }
+        // viscous / excise / horizon-ledger / penalize now run in the finest
+        // level's tail (level_step_tail), in the uni-grid driver's exact order.
 
         let root = &mut self.levels[0];
         // homologous linear advance ONLY when there is no traced motion law.
@@ -1185,12 +1146,44 @@ where
         // parent's restriction (so the coarse covered cells sync to the
         // drained state — restriction consistency).
         if !has_finer {
+            // per-step operator order matches the uni-grid driver exactly:
+            // viscous -> excise -> horizon ledger -> penalize. transport first,
+            // then the causally-disconnected fill, then the shell-flux booking
+            // (the flux fields still hold the last stage's flux), then the IBM
+            // surface physics whose receipt must equal the removal.
+            {
+                let l = &self.levels[level];
+                prof("viscous", || l.kernels.viscous(&l.state, dt));
+                l.kernels.excise(&l.state);
+            }
+            let horizon = self.levels[level].state.immersed.as_ref().and_then(|im| {
+                im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
+                    symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
+                        Some((i, diagnostic_radius))
+                    }
+                    _ => None,
+                })
+            });
+            if let Some((idx, r_d)) = horizon {
+                let l = &self.levels[level];
+                let (mdot, edot) =
+                    prof("horizon_accretion", || l.kernels.horizon_accretion(&l.state, r_d));
+                if let Some(im) = self.levels[level].state.immersed.as_mut() {
+                    if let symbi_ib::BodyKind::Horizon {
+                        total_accreted_mass, total_accreted_energy, mdot: m, edot: e, ..
+                    } = &mut im.bodies.get_mut(idx).kind
+                    {
+                        *total_accreted_mass += mdot * dt;
+                        *total_accreted_energy += edot * dt;
+                        *m = mdot;
+                        *e = edot;
+                    }
+                }
+            }
             let l = &self.levels[level];
-            prof("penalize", || l.kernels.penalize(&l.state, dt));
-            // the viscous transport on the finest level — where
-            // the resolved disk dynamics live. coarse-level viscosity (the outer
-            // low-dynamics buffer) is not applied; inert when inviscid.
-            prof("viscous", || l.kernels.viscous(&l.state, dt));
+            if l.state.has_bodies() {
+                prof("penalize", || l.kernels.penalize(&l.state, dt));
+            }
         }
         if has_finer {
             self.level_subcycle(level, dt);

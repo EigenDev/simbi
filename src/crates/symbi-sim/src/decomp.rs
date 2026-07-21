@@ -848,9 +848,17 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 }
                 for i in 0..n {
                     // IBM surface physics ONCE per step, after all stages
-                    // (receipt == removal; see evolve.rs), then the feedback.
+                    // (receipt == removal; see evolve.rs), then the feedback —
+                    // gated like the other drivers: only bodies whose dynamics
+                    // consume the reduction (two-way or accreting) pay for it.
                     symbi_xpu::with_device(devices[i], || kernels[i].penalize(sh[i], dt));
-                    symbi_xpu::with_device(devices[i], || kernels[i].body_feedback(sh[i], dt));
+                    let needs_fb = sh[i]
+                        .immersed
+                        .as_ref()
+                        .is_some_and(|im| im.bodies.needs_feedback());
+                    if needs_fb {
+                        symbi_xpu::with_device(devices[i], || kernels[i].body_feedback(sh[i], dt));
+                    }
                 }
                 drain_devices::<M>(devices);
             }

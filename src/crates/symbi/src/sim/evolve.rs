@@ -252,11 +252,20 @@ where
             // exponential removal is partially undone by the SSP convex
             // combination while its receipt is not — the ledger then over-
             // counts (RK2: 3/2x). post-step, receipt == removal exactly.
-            kernels.penalize(sim, sim.dt);
+            prof("penalize", || kernels.penalize(sim, sim.dt));
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
             // the side-car diagnostics, then evolve_bodies consolidates + applies it
             // + advances the (prescribed) binary, and resets the accumulator for the next step.
-            prof("body_feedback", || kernels.body_feedback(sim, sim.dt));
+            // only bodies whose dynamics consume the reduction pay for it (two-way
+            // or accreting); a one-way fixed mass skips the full-domain sweep —
+            // the same gate the hierarchy driver applies.
+            let needs_fb = sim
+                .immersed
+                .as_ref()
+                .is_some_and(|im| im.bodies.needs_feedback());
+            if needs_fb {
+                prof("body_feedback", || kernels.body_feedback(sim, sim.dt));
+            }
             prof("body_motion", || evolve_bodies(sim));
         }
 
