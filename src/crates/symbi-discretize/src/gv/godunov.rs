@@ -1380,3 +1380,81 @@ fn bcell_godunov_geom(coords: Coords, spacetime: Spacetime, spacing: &[Spacing],
     }
 }
 
+
+// =============================================================================
+// passive-scalar (dye) transport: D_chi = rho*chi rides the ALREADY-materialized
+// mass flux, donor-cell upwinded on its sign per face:
+//   F_chi(face) = mass_flux(face) * (chi_donor)
+// so the dye moves exactly with the mass it is painted on: a uniform chi = c
+// gives F_chi = c * F_rho at every face and the update telescopes to c times the
+// mass update (uniform-preservation is bit-exact). the upwind chi comes from the
+// PRIMITIVE chi (the stage-input concentration, consistent with the primitives
+// the flux pass reconstructed from); the kernels read prim.chi at neighbor
+// offsets and write cons.chi at offset 0 only, so the in-place update is
+// race-free under tiled execution. cartesian flat charts only (dx_d scalars).
+// =============================================================================
+
+// the donor-cell chi flux divergence: sum_d (F_hi - F_lo)/dx_d with
+// F = mass_flux * upwind(prim.chi) selected by the flux sign at THAT face.
+fn chi_flux_div_gv(ndim: usize) -> Gv {
+    let zero_off = vec![0i32; ndim];
+    let zero = Gv::from_f64(0.0);
+    let mut div: Option<Gv> = None;
+    for d in 0..ndim {
+        let mut minus = zero_off.clone();
+        minus[d] = -1;
+        let mut plus = zero_off.clone();
+        plus[d] = 1;
+        let mf_key = format!("mass_flux_{d}");
+        let mf_path = FieldRef::MassFlux(d as u8).name();
+        let chi_path = FieldRef::PrimChi.name();
+        let f_lo = gv_field_at(&mf_key, &mf_path, ndim, &zero_off);
+        let f_hi = gv_field_at(&mf_key, &mf_path, ndim, &plus);
+        let chi_m = gv_field_at("prim_chi", &chi_path, ndim, &minus);
+        let chi_0 = gv_field_at("prim_chi", &chi_path, ndim, &zero_off);
+        let chi_p = gv_field_at("prim_chi", &chi_path, ndim, &plus);
+        let up_lo = Gv::select(f_lo.cmp_ge(zero), chi_m, chi_0);
+        let up_hi = Gv::select(f_hi.cmp_ge(zero), chi_0, chi_p);
+        let term = (f_hi * up_hi - f_lo * up_lo) / Gv::scalar(&format!("dx_{d}"));
+        div = Some(match div {
+            None => term,
+            Some(a) => a + term,
+        });
+    }
+    div.unwrap()
+}
+
+/// the dye godunov, in the same SSP Shu-Osher form as the gas stage:
+/// `cons.chi = a0*u_n.chi + ac*(cons.chi - dt*div(F_chi))`, in place, with the
+/// per-stage convex coefficients as runtime scalars (forward-Euler = (0, 1)) —
+/// one kernel serves every explicit SSP scheme.
+pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let chin = Gv::field("un_chi", FieldRef::un_chi());
+    let dchi = Gv::field("cons_chi", FieldRef::cons_chi());
+    let dt = Gv::scalar("dt");
+    let a0 = Gv::scalar("a0");
+    let ac = Gv::scalar("ac");
+    let new = a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim));
+    let writes = vec![("chi_new".to_string(), FieldRef::cons_chi().into(), new.node())];
+    (end_trace(), writes)
+}
+
+/// the dye concentration recovery: `prim.chi = cons.chi / cons.den` — chi's whole
+/// cons2prim, run after the stage's density is final so the concentration is
+/// consistent with the same-instant mass.
+pub fn chi_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let dchi = Gv::field("cons_chi", FieldRef::cons_chi());
+    let den = Gv::field("cons_den", FieldRef::cons_den());
+    let writes = vec![("prim_chi_new".to_string(), FieldRef::PrimChi.into(), (dchi / den).node())];
+    (end_trace(), writes)
+}
+
+/// the dye step snapshot: `u_n.chi <- cons.chi`, the rk2 combine's step-start state.
+pub fn chi_snapshot_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let dchi = Gv::field("cons_chi", FieldRef::cons_chi());
+    let writes = vec![("un_chi_new".to_string(), FieldRef::un_chi().into(), dchi.node())];
+    (end_trace(), writes)
+}

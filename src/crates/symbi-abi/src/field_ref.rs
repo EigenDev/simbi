@@ -68,6 +68,9 @@ pub enum StateComp {
     Den,
     Nrg,
     Mom(u8),
+    /// the conserved passive scalar `D_chi = rho * chi` (dye). optional per run:
+    /// the backing field is `None` when the config declares no passive scalar.
+    Chi,
 }
 
 /// a typed kernel field-buffer name. every variant round-trips through
@@ -86,6 +89,8 @@ pub enum FieldRef {
     /// primitive (cell-centered) magnetic field component `prim.mag[k]` == the mhd
     /// `bcell[k]`.
     PrimMag(u8),
+    /// primitive passive-scalar concentration `prim.chi` = `cons.chi / cons.den`.
+    PrimChi,
     /// a conserved/flux slot component (`cons.den`, `flux.mom_2`, ...).
     State { slot: StateSlot, comp: StateComp },
     /// flux-divergence alias for the mass flux in grid direction `ax`
@@ -144,6 +149,8 @@ impl FieldRef {
     pub const fn ustage_den() -> Self { Self::State { slot: StateSlot::UStage, comp: StateComp::Den } }
     pub const fn ustage_nrg() -> Self { Self::State { slot: StateSlot::UStage, comp: StateComp::Nrg } }
     pub const fn ustage_mom(k: u8) -> Self { Self::State { slot: StateSlot::UStage, comp: StateComp::Mom(k) } }
+    pub const fn cons_chi() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Chi } }
+    pub const fn un_chi() -> Self { Self::State { slot: StateSlot::UN, comp: StateComp::Chi } }
     pub const fn flux_den() -> Self { Self::State { slot: StateSlot::Flux, comp: StateComp::Den } }
     pub const fn flux_nrg() -> Self { Self::State { slot: StateSlot::Flux, comp: StateComp::Nrg } }
     pub const fn flux_mom(k: u8) -> Self { Self::State { slot: StateSlot::Flux, comp: StateComp::Mom(k) } }
@@ -156,10 +163,12 @@ impl FieldRef {
             FieldRef::PrimPre => "prim.pre".to_string(),
             FieldRef::PrimVel(k) => format!("prim.vel[{k}]"),
             FieldRef::PrimMag(k) => format!("prim.mag[{k}]"),
+            FieldRef::PrimChi => "prim.chi".to_string(),
             FieldRef::State { slot, comp } => match comp {
                 StateComp::Den => format!("{}.den", slot.prefix()),
                 StateComp::Nrg => format!("{}.nrg", slot.prefix()),
                 StateComp::Mom(k) => format!("{}.mom_{k}", slot.prefix()),
+                StateComp::Chi => format!("{}.chi", slot.prefix()),
             },
             FieldRef::MassFlux(ax) => format!("mass_flux[{ax}]"),
             FieldRef::NrgFlux(ax) => format!("nrg_flux[{ax}]"),
@@ -185,6 +194,7 @@ impl FieldRef {
         match path {
             "prim.rho" => return Some(FieldRef::PrimRho),
             "prim.pre" => return Some(FieldRef::PrimPre),
+            "prim.chi" => return Some(FieldRef::PrimChi),
             "scratch" => return Some(FieldRef::Scratch),
             "c" => return Some(FieldRef::ScratchC),
             "bface_n" => return Some(FieldRef::BFaceNormal),
@@ -258,6 +268,7 @@ impl FieldRef {
         let comp = match comp_str {
             "den" => StateComp::Den,
             "nrg" => StateComp::Nrg,
+            "chi" => StateComp::Chi,
             _ => StateComp::Mom(comp_str.strip_prefix("mom_")?.parse().ok()?),
         };
         Some(FieldRef::State { slot, comp })
@@ -337,8 +348,8 @@ mod tests {
 
     fn all_variants() -> Vec<FieldRef> {
         let mut v = vec![
-            FieldRef::PrimRho, FieldRef::PrimPre, FieldRef::Scratch, FieldRef::ScratchC,
-            FieldRef::BFaceNormal,
+            FieldRef::PrimRho, FieldRef::PrimPre, FieldRef::PrimChi, FieldRef::Scratch,
+            FieldRef::ScratchC, FieldRef::BFaceNormal,
         ];
         for k in 0..3u8 {
             v.push(FieldRef::PrimVel(k));
@@ -355,6 +366,7 @@ mod tests {
         for slot in [StateSlot::Cons, StateSlot::UN, StateSlot::UStage, StateSlot::Flux] {
             v.push(FieldRef::State { slot, comp: StateComp::Den });
             v.push(FieldRef::State { slot, comp: StateComp::Nrg });
+            v.push(FieldRef::State { slot, comp: StateComp::Chi });
             for k in 0..3u8 {
                 v.push(FieldRef::State { slot, comp: StateComp::Mom(k) });
             }

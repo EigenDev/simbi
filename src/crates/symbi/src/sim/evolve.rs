@@ -359,15 +359,16 @@ impl FieldSet {
 }
 
 #[derive(Clone, Copy)]
-enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, C2p, Fofc, GhostFill }
+enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, C2p, Fofc, ChiUpdate, GhostFill }
 
-/// when a phase runs: unconditional, or gated by an additive source overlay / immersed bodies.
+/// when a phase runs: unconditional, or gated by an additive source overlay /
+/// immersed bodies / the passive scalar.
 #[derive(Clone, Copy)]
-enum Gate { Always, AdditiveSource, Bodies, Fofc, AdditiveOrFofc }
+enum Gate { Always, AdditiveSource, Bodies, Fofc, AdditiveOrFofc, PassiveScalar }
 
 impl Gate {
     #[inline]
-    fn active(self, additive: bool, bodies: bool, fofc: bool) -> bool {
+    fn active(self, additive: bool, bodies: bool, fofc: bool, chi: bool) -> bool {
         match self {
             Gate::Always => true,
             Gate::AdditiveSource => additive,
@@ -377,6 +378,7 @@ impl Gate {
             // evaluates S at the stage input, and the FOFC first-order redo restarts
             // from it.
             Gate::AdditiveOrFofc => additive || fofc,
+            Gate::PassiveScalar => chi,
         }
     }
 }
@@ -400,6 +402,10 @@ const STAGE_PIPELINE: &[Phase] = &[
     // with a first-order (PCM + HLLE/light-cone) update from the stage input; host-gated
     // internally on the failure reduction, so a clean substage is a scan + return.
     Phase { name: "fofc",           kind: PhaseKind::Fofc,          reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE), writes: FieldSet::PRIM,   gate: Gate::Fofc },
+    // the dye rides AFTER fofc: it consumes the (possibly spliced) mass flux and
+    // divides by the stage-final density, so its transport telescopes with the
+    // exact mass update every stage.
+    Phase { name: "chi_update",     kind: PhaseKind::ChiUpdate,     reads: FieldSet::CONS.or(FieldSet::FLUX).or(FieldSet::PRIM), writes: FieldSet::CONS.or(FieldSet::PRIM), gate: Gate::PassiveScalar },
     Phase { name: "ghost_fill",     kind: PhaseKind::GhostFill,     reads: FieldSet::PRIM,                    writes: FieldSet::PRIM,   gate: Gate::Always },
 ];
 
@@ -450,6 +456,7 @@ where
         }
         let sim = &*sim;
         let bodies = sim.has_bodies();
+        let chi_active = sim.has_passive_scalar();
         // FOLD the stage pipeline. each phase's semantics, in execution order:
         //  - snapshot_stage: cons BEFORE godunov overwrites it, so the additive source pass
         //    evaluates S at the stage input (the state the fused stage uses).
@@ -471,7 +478,7 @@ where
             .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
         let mut have = FieldSet::CONS.or(FieldSet::PRIM);
         for ph in STAGE_PIPELINE {
-            if !ph.gate.active(additive_source, bodies, fofc_active) {
+            if !ph.gate.active(additive_source, bodies, fofc_active, chi_active) {
                 continue;
             }
             if matches!(ph.kind, PhaseKind::SnapshotStage) && stage_input_is_un {
@@ -494,6 +501,7 @@ where
                 PhaseKind::BodySource    => prof("body_source", || k.body_source(sim, ac * sim.dt)),
                 PhaseKind::C2p           => prof("c2p", || k.c2p(sim)),
                 PhaseKind::Fofc          => prof("fofc", || k.fofc(sim, sim.dt, a0, ac, stage_tag(ii, n))),
+                PhaseKind::ChiUpdate     => prof("chi_update", || k.chi_update(sim, sim.dt, a0, ac)),
                 PhaseKind::GhostFill     => prof("ghost_fill", || k.ghost_fill(sim)),
             }
             have = have.or(ph.writes);

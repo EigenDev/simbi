@@ -51,6 +51,7 @@ from simbi.types.input import (
 )
 from simbi.types.typing import (
     ExpressionDict,
+    GasStateGenerator,
     InitialStateType,
 )
 
@@ -764,6 +765,17 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def bonded_assembly(self) -> Optional[BondedAssembly]:
+        return None
+
+    # =========================================================================
+    # passive scalar (override in subclass)
+    # =========================================================================
+    def passive_scalar(self) -> Optional[GasStateGenerator]:
+        """the passive-scalar (dye) initial condition: a generator yielding one
+        chi value per interior cell, axis-0-fastest (the same traversal as the
+        gas state generator), or None for an undyed run. the dye advects with
+        the mass flux and appears as the `chi` dataset in checkpoints, with
+        `chi_dens` derivable in the viz."""
         return None
 
     # =========================================================================

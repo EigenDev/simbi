@@ -123,6 +123,11 @@ struct Config {
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
     bodies: Vec<BodyParams>,
     bonded_assembly: Option<BondedAssemblyParams>,
+    // the passive-scalar (dye) initial condition: one value per interior cell,
+    // axis-0-fastest, drained from the python `passive_scalar` generator.
+    // empty = the run carries no dye. set AFTER parse (run_simulation drains
+    // the generator), never read from the sim_info dict.
+    chi_ic: Vec<f64>,
     // the prescribed binary orbit (`body_system.binary_config`), if any; attaches the Keplerian
     // orbit to the body collection so the two components orbit each other. None for non-binary runs.
     binary: Option<BinaryCfg>,
@@ -748,6 +753,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
         bonded_assembly: parse_bonded_assembly(dict)?,
+        chi_ic: Vec::new(),
         binary: parse_binary(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
         n_gpus: dict
@@ -2976,6 +2982,44 @@ macro_rules! build_and_run_hydro {
             sim.attach_body_shapes(shapes);
             if let Some(physics) = physics {
                 sim.attach_fragment_physics(physics);
+            }
+            sim
+        };
+        // seed the passive scalar (dye): cons.chi = rho*chi and the primitive
+        // concentration over the interior; the evolve-entry ghost fill covers
+        // the halo before the first flux reads it.
+        let sim = if cfg.chi_ic.is_empty() {
+            sim
+        } else {
+            let sim = sim
+                .with_passive_scalar()
+                .map_err(|e| format!("passive-scalar allocation: {e:?}"))?;
+            let interior = sim.geom.interior.clone();
+            let lo: Vec<isize> = interior.spaces.iter().map(|s| s.lo).collect();
+            let ns: Vec<usize> = interior.spaces.iter().map(|s| (s.hi - s.lo) as usize).collect();
+            let n_total: usize = ns.iter().product();
+            if cfg.chi_ic.len() != n_total {
+                return Err(format!(
+                    "passive_scalar yielded {} values for {} interior cells",
+                    cfg.chi_ic.len(),
+                    n_total
+                ));
+            }
+            {
+                let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
+                let prim_chi = sim.fields.prim.chi_field().expect("prim chi");
+                for c in interior.iter() {
+                    let mut lin = 0usize;
+                    let mut stride = 1usize;
+                    for ax in 0..$d {
+                        lin += ((c[ax] - lo[ax]) as usize) * stride;
+                        stride *= ns[ax];
+                    }
+                    let chi_v = cfg.chi_ic[lin];
+                    let rho = *sim.fields.cons.den.view().at(c);
+                    cons_chi.view_mut().set(c, rho * chi_v);
+                    prim_chi.view_mut().set(c, chi_v);
+                }
             }
             sim
         };
@@ -5474,6 +5518,45 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             ));
         }
     }
+    // the passive scalar (dye) rides the uni-grid cartesian NEWTONIAN path in
+    // this increment: the chi kernels are baked cartesian, the drain/wall
+    // penalization does not carry the dye yet, and a driven face has no dye
+    // prescription. every other combination fails loud — a silently undyed or
+    // wrongly-dyed run reads as valid science.
+    if !cfg.chi_ic.is_empty() {
+        if cfg.regime != "newtonian" {
+            return Err(format!(
+                "passive_scalar is wired for the newtonian regime; got '{}'",
+                cfg.regime
+            ));
+        }
+        if cfg.coord_system != "cartesian" {
+            return Err(format!(
+                "passive_scalar requires a cartesian chart; got '{}'",
+                cfg.coord_system
+            ));
+        }
+        if cfg.refinement_enabled || cfg.n_gpus > 1 || cfg.mesh_motion {
+            return Err(
+                "passive_scalar does not support refinement, gpus > 1, or mesh motion yet"
+                    .to_string(),
+            );
+        }
+        if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
+            return Err(
+                "passive_scalar with immersed bodies is not wired yet (the drain/wall \
+                 penalization does not carry the dye)"
+                    .to_string(),
+            );
+        }
+        if !cfg.driven_exprs.is_empty() || !cfg.gradient_bcs.is_empty() {
+            return Err(
+                "passive_scalar with driven/gradient boundaries is not wired yet (no dye \
+                 prescription on those faces)"
+                    .to_string(),
+            );
+        }
+    }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
         "rhd" => hydro_dispatch!(cfg, prims, Rhd, Rhd),
@@ -5948,7 +6031,7 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, a, adot))]
+#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, a, adot, chi_field=None))]
 fn run_simulation(
     py: Python<'_>,
     prim_gen: &Bound<'_, PyAny>,
@@ -5956,8 +6039,20 @@ fn run_simulation(
     sim_info: &Bound<'_, PyDict>,
     a: &Bound<'_, PyAny>,
     adot: &Bound<'_, PyAny>,
+    chi_field: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
+    // drain the passive-scalar generator (None = undyed). one flat cell-centered
+    // buffer; the per-arm seeding checks the count against the interior.
+    if let Some(chi_field) = chi_field {
+        if !chi_field.is_none() {
+            let mut vals = Vec::new();
+            for v in chi_field.try_iter()? {
+                vals.push(v?.extract::<f64>()?);
+            }
+            cfg.chi_ic = vals;
+        }
+    }
     // fail fast on an unsupported multi-gpu request, before draining generators or allocating.
     validate_gpu_request(cfg.n_gpus).map_err(PyRuntimeError::new_err)?;
     // a GR run's inner radius must sit on the correct side of the horizon for its chart

@@ -903,6 +903,40 @@ where
             l.kernels.excise(&l.state);
         }
 
+        // the GR horizon shell-flux accretion, ONCE per step: the mass/nrg flux
+        // fields still hold the last stage's flux, so the boundary-flux
+        // reduction through the diagnostic shell books (mdot, edot) INTO the
+        // hole on the horizon body's ledger. mirrors the uni-grid driver's
+        // per-step block exactly — the excision gate rejects refined runs, so
+        // the root level is the only carrier.
+        {
+            let l = &self.levels[0];
+            let horizon = l.state.immersed.as_ref().and_then(|im| {
+                im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
+                    symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
+                        Some((i, diagnostic_radius))
+                    }
+                    _ => None,
+                })
+            });
+            if let Some((idx, r_d)) = horizon {
+                let (mdot, edot) =
+                    prof("horizon_accretion", || l.kernels.horizon_accretion(&l.state, r_d));
+                let root = &mut self.levels[0];
+                if let Some(im) = root.state.immersed.as_mut() {
+                    if let symbi_ib::BodyKind::Horizon {
+                        total_accreted_mass, total_accreted_energy, mdot: m, edot: e, ..
+                    } = &mut im.bodies.get_mut(idx).kind
+                    {
+                        *total_accreted_mass += mdot * dt;
+                        *total_accreted_energy += edot * dt;
+                        *m = mdot;
+                        *e = edot;
+                    }
+                }
+            }
+        }
+
         let root = &mut self.levels[0];
         // homologous linear advance ONLY when there is no traced motion law.
         if root.state.motion_law.is_none() && root.state.motion.homologous {
@@ -1114,7 +1148,19 @@ where
         // first-order flux correction: redo any zone whose high-order c2p went unphysical with a
         // first-order (PCM + HLLE) update from the stage-input state. host-gated on a failure
         // reduction, so a clean substage is a scan + return (a no-op for regimes without FOFC).
-        prof("fofc", || l.kernels.fofc(&l.state, dt, a0, ac, stage_tag(ii, n)));
+        // gated exactly like the uni-grid stage pipeline (Gate::Fofc), so the
+        // two drivers' phase sequences are comparable call-for-call — the
+        // sequence-equality law depends on identical gating, not on downstream
+        // no-ops happening to hide a divergence.
+        if l.kernels.fofc_active() {
+            prof("fofc", || l.kernels.fofc(&l.state, dt, a0, ac, stage_tag(ii, n)));
+        }
+        // the passive scalar rides after fofc so it consumes the (possibly
+        // spliced) mass flux and the stage-final density — the same ordering
+        // the uni-grid stage pipeline uses.
+        if l.state.has_passive_scalar() {
+            prof("chi_update", || l.kernels.chi_update(&l.state, dt, a0, ac));
+        }
         // c2p over the full allocated domain recomputed the coarse-fine
         // prim ghosts from stale cons; re-prolong them at the time of the
         // state entering the NEXT stage (the last stage's tail lands on

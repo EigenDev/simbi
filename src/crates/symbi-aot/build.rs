@@ -37,6 +37,7 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 use symbi_discretize::{
     body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
     body_source_gv, body_source_iso_gv,
+    chi_c2p_gv, chi_godunov_gv, chi_snapshot_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
     inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
     neumann_ghost_fill_gv, robin_ghost_fill_gv,
@@ -290,6 +291,18 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
             emit_gv(out_dir, KernelId::FieldLerpMulti { ncomp, ndim }.name(), ndim, &k, &writes);
         }
     }
+}
+
+// passive-scalar (dye) transport: the donor-cell D_chi update from the
+// materialized mass flux, plus its concentration recovery and rk snapshot.
+// cartesian flat charts, every dimension; euler + rk2 stage forms.
+fn gen_chi_kernels(out_dir: &str, ndim: u8) {
+    let (k, writes) = chi_godunov_gv(ndim as usize);
+    emit_gv(out_dir, &format!("chi_godunov_{ndim}d"), ndim, &k, &writes);
+    let (k, writes) = chi_c2p_gv();
+    emit_gv(out_dir, &format!("chi_c2p_{ndim}d"), ndim, &k, &writes);
+    let (k, writes) = chi_snapshot_gv();
+    emit_gv(out_dir, &format!("chi_snapshot_{ndim}d"), ndim, &k, &writes);
 }
 
 // single mass law, writing to a SEPARATE output buffer — the gv divergence + update.
@@ -1813,6 +1826,9 @@ fn gen_body_feedback_iso(out_dir: &str, ndim: u8, coords: Coords) {
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     gen_godunov_mass_1d(&out_dir);
+    for ndim in 1..=3u8 {
+        gen_chi_kernels(&out_dir, ndim);
+    }
     // amr field transfer: the refinement-lattice
     // pullbacks at ratio 2, every dimension.
     for ndim in 1u8..=3 {
