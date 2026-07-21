@@ -679,6 +679,16 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
         }
+        // fail loud on unphysical initial conditions, exactly like the uni-grid
+        // and hierarchy drivers: without this, a bad decomposed IC marches to a
+        // NaN-dt crash mid-run instead of naming the c2p failure at t = 0.
+        for i in 0..n {
+            let err = crate::hydro_ops::scan_c2p_errors(sh[i]);
+            assert!(
+                !err.is_err(),
+                "decomposed c2p failed on initial conditions (tile {i}): {err}"
+            );
+        }
     }
 
     let mut t = start_time;
@@ -757,7 +767,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             // cons += (ac*dt) * S(u_stage), the SSP stage weight matching godunov.
                             kernels[i].source_apply(sh[i], ac * dt);
                         }
-                        if sh[i].immersed.is_some() {
+                        if sh[i].has_bodies() {
                             // gravity on mom/nrg + the accretion sink on den, cons += (ac*dt)*S_body.
                             // for adiabatic/curvilinear this IS the body pass; for iso-cartesian it
                             // no-ops (fused into godunov_stage). proven by `decomp_body_equivalence`.

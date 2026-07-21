@@ -8,13 +8,13 @@
 // =============================================================================
 
 use symbi_algebra::Domain;
-use symbi_xpu::{ExecutionSpace, MemorySpace};
+use symbi_xpu::MemorySpace;
 use crate::state::*;
 
 /// scan the c2p error field and return the bitwise OR of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.
-pub fn scan_c2p_errors<const D: usize, const DOF: usize, S: ExecutionSpace, Mem: MemorySpace>(
-    sim: &SimStateGeneric<impl symbi_hydro::regime::Regime<f64, D>, D, DOF, impl symbi_geometry::Metric<f64, D>, impl symbi_hydro::eos::Eos<f64>, S, Mem>,
+pub fn scan_c2p_errors<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
 ) -> symbi_hydro::c2p_result::ErrorCode
 where Mem: Sync,
 {
