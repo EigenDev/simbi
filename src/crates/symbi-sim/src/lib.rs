@@ -20,6 +20,7 @@
 // =============================================================================
 
 pub mod stage;
+pub mod tracers;
 pub mod state;
 pub mod substrate_seam;
 pub mod driver;
