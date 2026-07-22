@@ -649,6 +649,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     // bodies are replicated identically on every tile; the per-step backward feedback + prescribed
     // advance run once per step when any tile carries them.
     let has_bodies = stores.iter().any(|s| s.immersed.is_some());
+    // no tracer advance exists on this driver yet: a tracer population here
+    // would feel nothing and freeze at its seed — the silently-missing-phase
+    // failure shape. refuse loudly until the decomposed tracer step lands.
+    assert!(
+        stores.iter().all(|s| !s.has_tracers()),
+        "lagrangian tracers are not wired on the decomposed (gpus > 1) driver",
+    );
 
     // a fresh SHARED reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
     // rebuilt per phase so the per-step body bookkeeping can take `&mut` between phases -- the

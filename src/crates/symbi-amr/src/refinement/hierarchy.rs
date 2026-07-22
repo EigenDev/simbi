@@ -961,6 +961,20 @@ where
             }
             self.assert_sinks_inside_finest();
         }
+
+        // lagrangian tracers, ONCE per root step against the post-step
+        // primitive velocity — the same slot and order as the uni-grid driver.
+        // single-level only: a refined run's root velocity is coarse under the
+        // fine patches, so tracer advection there silently degrades — refuse.
+        if self.levels[0].state.has_tracers() {
+            assert!(
+                self.levels.len() == 1,
+                "tracers on a refined hierarchy are not wired (root-level advection \
+                 would silently use coarse velocities under the fine patches)",
+            );
+            let root = &mut self.levels[0];
+            prof("tracers", || symbi_sim::tracers::advance_tracers(&mut root.state));
+        }
     }
 
     /// advance one level by dt, then subcycle the finer level, restrict, and

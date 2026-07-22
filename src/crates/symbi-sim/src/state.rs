@@ -1504,6 +1504,11 @@ pub struct FieldStore<
     pub geom: PartitionGeometry<NDIM>,
     pub boundaries: Boundaries<NDIM>,
 
+    /// lagrangian tracer particles (run-level opt-in; host-side, f64). `None`
+    /// costs nothing anywhere; the drivers advance them once per step against
+    /// the post-step primitive velocity.
+    pub tracers: Option<crate::tracers::TracerSet<NDIM>>,
+
     // ---- time state ----
     pub time: f64,
     pub dt: f64,
@@ -1560,6 +1565,12 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// in the zero-body-collection state the historical parse bug produced).
     pub fn has_bodies(&self) -> bool {
         self.immersed.as_ref().map_or(false, |im| !im.bodies.is_empty())
+    }
+
+    /// whether this run carries lagrangian tracers.
+    #[inline]
+    pub fn has_tracers(&self) -> bool {
+        self.tracers.is_some()
     }
 
     /// whether this run carries the passive scalar (dye): the cons `chi` slot is
@@ -1953,6 +1964,7 @@ where
                 motion: MotionState::static_mesh(),
                 motion_law: None,
                 immersed: None,
+                tracers: None,
             },
             physics: Physics { regime, metric, eos },
             ctx: Context { exec },

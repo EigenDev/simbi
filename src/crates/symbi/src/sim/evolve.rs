@@ -269,6 +269,13 @@ where
             prof("body_motion", || evolve_bodies(sim));
         }
 
+        // lagrangian tracers, ONCE per step against the post-step primitive
+        // velocity (ghost bands current). shared driver code on every driver;
+        // guarded by the cross-driver bitwise trajectory gate.
+        if sim.has_tracers() {
+            prof("tracers", || symbi_sim::tracers::advance_tracers(&mut *sim));
+        }
+
         if sim.iteration - last_cb >= interval {
             last_cb = sim.iteration;
             // the callback reads fields from the host: drain the device queue

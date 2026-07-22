@@ -11,7 +11,7 @@
 // exactness on linear fields, independently.
 //
 // seeding is MASS-WEIGHTED and DETERMINISTIC: per-cell tracer counts by
-// largest-remainder apportionment of `n * m_cell / m_total` (no rng anywhere —
+// golden-ratio stratified inversion of the cumulative mass (no rng anywhere —
 // restart and cross-driver bitwise gates come free), positions stratified on a
 // per-cell sub-lattice. the known bias of velocity-field tracers (clustering
 // at convergence zones; Genel et al. 2013) is a property of the METHOD, not
@@ -23,7 +23,7 @@
 // events convert directly to mass fluxes for the provenance ledgers.
 //
 // usage:
-//  let counts = largest_remainder_counts(&cell_masses, n_tracers);
+//  let counts = systematic_counts(&cell_masses, n_tracers);
 //  let mut set = TracerSet::<2>::seed_stratified(&cells, &counts, mass_total / n as f64);
 //  set.advance_rk2(dt, |x| velocity_sampler(x));
 // =============================================================================
@@ -49,26 +49,36 @@ pub struct TracerSet<const D: usize> {
     pub weight: f64,
 }
 
-/// largest-remainder apportionment of `n` tracers over cells proportional to
-/// their masses: exact total (sum == n), deterministic, no rng. the remainder
-/// ranking breaks ties by cell index, so equal-mass cells apportion stably.
-pub fn largest_remainder_counts(masses: &[f64], n: usize) -> Vec<usize> {
+/// stratified apportionment of `n` tracers over cells proportional to their
+/// masses: sample points from the sorted GOLDEN-RATIO low-discrepancy sequence
+/// `fract((k+1) phi) * M` along the cumulative mass and count how many land in
+/// each cell's interval. deterministic, no rng, exact total (sum == n),
+/// per-interval deviation O(log n) — and immune to two failure modes of the
+/// simpler schemes: largest-remainder degenerates to winner-take-all in the
+/// sparse regime (every quota below 1), and UNIFORM strata alias against
+/// periodic mass structure in the cell-walk order (a striped density walked
+/// column-wise at a rational strata-per-column ratio biases systematically).
+pub fn systematic_counts(masses: &[f64], n: usize) -> Vec<usize> {
     let total: f64 = masses.iter().sum();
+    let mut counts = vec![0usize; masses.len()];
     if total <= 0.0 || n == 0 {
-        return vec![0; masses.len()];
+        return counts;
     }
-    let quotas: Vec<f64> = masses.iter().map(|m| n as f64 * m / total).collect();
-    let mut counts: Vec<usize> = quotas.iter().map(|q| q.floor() as usize).collect();
-    let assigned: usize = counts.iter().sum();
-    let mut order: Vec<usize> = (0..masses.len()).collect();
-    // sort by descending remainder, index-ascending on ties (total order, so
-    // the apportionment is reproducible bit-for-bit).
-    order.sort_by(|&a, &b| {
-        let (ra, rb) = (quotas[a] - quotas[a].floor(), quotas[b] - quotas[b].floor());
-        rb.partial_cmp(&ra).unwrap().then(a.cmp(&b))
-    });
-    for &i in order.iter().take(n - assigned) {
-        counts[i] += 1;
+    const PHI: f64 = 0.618_033_988_749_894_9;
+    let mut pts: Vec<f64> = (0..n).map(|k| ((k as f64 + 1.0) * PHI).fract() * total).collect();
+    pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut cum = 0.0;
+    let mut k = 0usize;
+    for (i, m) in masses.iter().enumerate() {
+        cum += m;
+        while k < n && pts[k] < cum {
+            counts[i] += 1;
+            k += 1;
+        }
+    }
+    // float shortfall lands the trailing points in the last massive cell.
+    if let Some(last) = masses.iter().rposition(|&m| m > 0.0) {
+        counts[last] += n - k;
     }
     counts
 }
@@ -233,15 +243,33 @@ mod tests {
     #[test]
     fn apportionment_is_exact_and_proportional() {
         let masses = vec![1.0, 2.0, 3.0, 4.0];
-        let counts = largest_remainder_counts(&masses, 1000);
+        let counts = systematic_counts(&masses, 1000);
         assert_eq!(counts.iter().sum::<usize>(), 1000);
-        // largest-remainder never deviates more than 1 from the exact quota.
+        // the golden-ratio sequence's discrepancy bounds each interval to a
+        // few points of its exact quota (O(log n), not the uniform-strata 1).
         for (m, c) in masses.iter().zip(&counts) {
             let quota = 1000.0 * m / 10.0;
-            assert!((*c as f64 - quota).abs() <= 1.0, "count {c} vs quota {quota}");
+            assert!((*c as f64 - quota).abs() <= 4.0, "count {c} vs quota {quota}");
         }
-        // determinism: bit-identical on repeat.
-        assert_eq!(counts, largest_remainder_counts(&masses, 1000));
+        assert_eq!(counts, systematic_counts(&masses, 1000));
+    }
+
+    #[test]
+    fn sparse_apportionment_stays_proportional() {
+        // n far below the cell count — the regime where largest-remainder
+        // degenerates to winner-take-all on the densest cells: 2/5 of the
+        // cells carry rho 3 (2/3 of the mass) and must get ~2/3 of a sparse
+        // population, spread across the WHOLE band, not stacked densest-first.
+        let mut masses = vec![1.0; 2000];
+        for m in masses.iter_mut().take(800) {
+            *m = 3.0;
+        }
+        let counts = systematic_counts(&masses, 300);
+        assert_eq!(counts.iter().sum::<usize>(), 300);
+        let in_band: usize = counts[..800].iter().sum();
+        assert!((195..=205).contains(&in_band), "band got {in_band}, expected ~200");
+        // and the band allocation is spread, not concentrated at its head.
+        assert!(counts[..800].iter().filter(|&&c| c > 0).count() > 150);
     }
 
     #[test]
@@ -326,4 +354,93 @@ mod tests {
         assert_eq!(set.x[2], frozen[1], "crossed tracer moved");
         assert!(set.x[0] != [0.5, 0.5], "live tracer failed to move");
     }
+}
+
+// =============================================================================
+// grid-coupled layer: mass-weighted seeding from the conserved density and the
+// once-per-step advance against the post-step primitive velocity. host-side
+// (the sampler reads the field buffers directly); uniform cartesian charts
+// (constant cell volume, so per-cell mass is proportional to den).
+// =============================================================================
+
+use crate::state::FieldStore;
+use symbi_xpu::MemorySpace;
+
+/// seed `n` tracers mass-weighted over the interior density, stratified per
+/// cell, deterministic. the per-tracer weight is the total sampled mass over n.
+pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+    n: usize,
+) -> TracerSet<D> {
+    let interior = sim.geom.interior.clone();
+    let mut masses = Vec::new();
+    let mut cells: Vec<([f64; D], [f64; D])> = Vec::new();
+    for c in interior.iter() {
+        masses.push(*sim.fields.cons.den.view().at(c));
+        let mut lo = [0.0; D];
+        let mut dxs = [0.0; D];
+        for a in 0..D {
+            lo[a] = sim.geom.x_lo[a]
+                + (c[a] - interior.spaces[a].lo) as f64 * sim.geom.dx[a];
+            dxs[a] = sim.geom.dx[a];
+        }
+        cells.push((lo, dxs));
+    }
+    let counts = systematic_counts(&masses, n);
+    let vol: f64 = sim.geom.dx[..D].iter().product();
+    let weight = if n == 0 { 0.0 } else { masses.iter().sum::<f64>() * vol / n as f64 };
+    TracerSet::seed_stratified(&cells, &counts, weight)
+}
+
+/// advance the tracer population by one fluid step against the CURRENT
+/// primitive velocity (post-step, ghost bands filled), then scan events:
+/// domain escape, and crossing of the first accreting body's sink radius.
+/// shared by every driver — the per-driver call sites are guarded by the
+/// cross-driver bitwise trajectory gate rather than the recorder law (this is
+/// driver-level shared code, invisible to the kernel-set seam by design).
+pub fn advance_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+) {
+    let Some(mut tr) = sim.tracers.take() else { return };
+    let dt = sim.dt;
+    let time = sim.time;
+    let alloc = &sim.geom.allocated;
+    let mut n = [0usize; D];
+    let mut x_lo_alloc = [0.0; D];
+    let mut dxs = [0.0; D];
+    let mut lo_box = [0.0; D];
+    let mut hi_box = [0.0; D];
+    let ng = sim.geom.ng as f64;
+    let mut volume = 1usize;
+    for a in 0..D {
+        n[a] = (alloc.spaces[a].hi - alloc.spaces[a].lo) as usize;
+        dxs[a] = sim.geom.dx[a];
+        x_lo_alloc[a] = sim.geom.x_lo[a] - ng * dxs[a];
+        let n_int = (sim.geom.interior.spaces[a].hi - sim.geom.interior.spaces[a].lo) as f64;
+        lo_box[a] = sim.geom.x_lo[a];
+        hi_box[a] = sim.geom.x_lo[a] + n_int * dxs[a];
+        volume *= n[a];
+    }
+    // the first D velocity components advect positions; a DOF-lifted swirl
+    // component is out-of-plane and does not move a tracer on this grid.
+    let slices: [&[f64]; D] = std::array::from_fn(|a| unsafe {
+        std::slice::from_raw_parts(sim.fields.prim.vel[a].as_ptr(), volume)
+    });
+    let sampler = grid_velocity_sampler(slices, n, x_lo_alloc, dxs);
+    tr.advance_rk2(dt, sampler);
+
+    // sink: the first accreting body's mask, in cartesian world coordinates.
+    let sink = sim.immersed.as_ref().and_then(|im| {
+        im.bodies.bodies().iter().find(|b| b.has_accretion()).and_then(|b| {
+            b.accretion_radius().map(|r| {
+                let mut c = [0.0; D];
+                for a in 0..D {
+                    c[a] = b.position[a];
+                }
+                (c, r)
+            })
+        })
+    });
+    tr.scan_events(lo_box, hi_box, sink, time);
+    sim.tracers = Some(tr);
 }
