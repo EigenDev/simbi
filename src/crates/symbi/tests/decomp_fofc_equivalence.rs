@@ -2,14 +2,19 @@
 // decomp_fofc_equivalence.rs
 //
 // the tiling-invariance contract for the first-order flux correction on the
-// decomposed path: an EXCISED cartesian kerr-schild box with a very cold
-// atmosphere trips the correction at the excision rim (the fill's donor copies
-// meet the steepening infall there) while staying recoverable — an unexcised
-// clamped core is a PERSISTENT poison that (correctly) fires the freeze-streak
-// fail-loud instead. the per-tile redo — driven from exchange-fresh stage-input
-// halos with the failure reduction evaluated per tile — reproduces the monolithic
-// correction bit-for-bit, THROUGH genuine correction events (the fallback counters
-// assert non-vacuity).
+// decomposed path: an EXCISED cartesian kerr-schild box carrying a cold
+// atmosphere in prescribed mach-17 radial infall trips the correction where the
+// supersonic stream meets the excision rim's donor-filled cells, while staying
+// recoverable — an unexcised clamped core is a PERSISTENT poison that (correctly)
+// fires the freeze-streak fail-loud instead. the per-tile redo — driven from
+// exchange-fresh stage-input halos with the failure reduction evaluated per tile —
+// reproduces the monolithic correction bit-for-bit, THROUGH genuine correction
+// events (the fallback counters assert non-vacuity).
+//
+// the infall is prescribed in the initial data rather than left for gravity to
+// develop: a scheme accurate enough to keep the rim recoverable on its own would
+// otherwise silence the correction and leave the equivalence vacuous, which the
+// fallback-count assertions report as a failure rather than a pass.
 // =============================================================================
 
 use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
@@ -30,16 +35,17 @@ const N: usize = 32;
 const L: f64 = 1.2;
 const DX: f64 = 2.0 * L / N as f64;
 const MASS: f64 = 0.3;
-// the vacuum-sink excision (rho = 1e-10 floor) against this test's very cold
-// atmosphere collapses dt geometrically (healthy 1.7e-4 at t = 0 down to a
-// 5.6e-13 floor by t ~ 8e-4), so the horizon is set BEFORE the collapse bites:
-// ~30 steps, with the correction firing at the rim from the first step — the
-// tiling-equivalence and fofc-fires assertions keep their full force.
+// long enough that the prescribed infall reaches the excision rim and the correction
+// fires there over many substages, short enough to stay a unit-test-scale run.
 const T_FINAL: f64 = 5.0e-4;
-// any dt below this on a 32^2 unit-scale grid means the collapse returned;
-// fail fast and loud instead of running forever.
+// any dt below this on a 32^2 unit-scale grid means the source-admissibility rate has
+// started scaling with the pressure again; fail fast and loud instead of running forever.
 const DT_FLOOR: f64 = 1.0e-9;
 const R_EXC: f64 = 0.35;
+// prescribed radial infall speed. mach 17 against the cs = 1.15e-2 atmosphere, so the
+// stream reaching the excision rim is firmly supersonic and the rim's donor-filled cells
+// drive the high-order recovery out of the physical set.
+const V_INFALL: f64 = 0.2;
 
 type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
@@ -53,10 +59,27 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        // a cold atmosphere (p/rho = 1e-4; colder is a persistent poison the freeze-streak fail-loud correctly rejects): the supersonic infall meets the excision rim's
+        // a cold atmosphere (p/rho = 1e-4, so cs = sqrt(gamma p / rho) = 1.15e-2) falling
+        // radially inward at 0.2c — mach 17. the infall is PRESCRIBED rather than left to
+        // gravity, so the correction fires from the first step instead of depending on how
+        // fast the well steepens the flow. the supersonic stream meets the excision rim's
         // donor-filled cells and the high-order c2p there leaves the physical set
-        // intermittently — the deliberate, RECOVERABLE FOFC trigger.
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 2]), pre: 1.0e-4 })
+        // intermittently: the deliberate, RECOVERABLE FOFC trigger.
+        //
+        // p/rho = 1e-6 is deliberately colder than the correction needs: the admissibility
+        // rate of the geometric source is charged against the covariant energy, whose
+        // killing-energy source vanishes on a stationary metric, so the admissible dt no
+        // longer scales with the pressure. charging the valencia form instead makes dt
+        // proportional to p and collapses this atmosphere into the floor below — this
+        // temperature is therefore also the regression guard on that rate.
+        .set_initial(|x| {
+            let r = (x[0] * x[0] + x[1] * x[1]).sqrt().max(1.0e-12);
+            Prim {
+                rho: 1.0,
+                vel: Tensor::new([-V_INFALL * x[0] / r, -V_INFALL * x[1] / r]),
+                pre: 1.0e-6,
+            }
+        })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC);
     (sim, k)

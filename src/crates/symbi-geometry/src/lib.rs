@@ -18,8 +18,10 @@ pub mod metric;
 pub mod grhd_source;
 pub mod motion;
 pub mod block;
+pub mod centroid;
 
 pub use coord_map::{CellInterval, CoordMap, UniformMap, LogMap};
 pub use metric::{DiagonalMetric, Metric, Geometry, Spacetime, Cartesian, Spherical, Cylindrical, CylindricalRPhi, Schwarzschild, KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 pub use motion::MotionState;
 pub use block::{BlockGeometry, AxisMap};
+pub use centroid::volume_weighted_centroid;

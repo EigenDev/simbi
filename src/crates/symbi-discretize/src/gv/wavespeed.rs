@@ -756,56 +756,70 @@ pub fn rhd_source_cfl_gr_gv(
     let e = h_enth * d_cons * d_cons / rho;
     let mass_gv = Gv::scalar("schwarzschild_mass");
     let mass = Dual::constant(mass_gv);
-    let (gm_inv, s_mom, s_tau): (Matrix<Gv, 3>, Tensor<Gv, 3>, Gv) = match (spacetime, coords) {
+    let (gm_inv, s_mom, _s_tau, alpha, beta): (Matrix<Gv, 3>, Tensor<Gv, 3>, Gv, Gv, Tensor<Gv, 3>) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let gi = Schwarzschild { mass: mass_gv }.spatial_metric_inv(x);
+            let al = Schwarzschild { mass: mass_gv }.lapse(x);
+            let bt = Schwarzschild { mass: mass_gv }.shift(x);
             let (sm, _) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
+            let al = SchwarzschildKSCartesian { mass: mass_gv }.lapse(x);
+            let bt = SchwarzschildKSCartesian { mass: mass_gv }.shift(x);
             let (sm, _) = grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
+            let al = SchwarzschildKSCylindrical { mass: mass_gv }.lapse(x);
+            let bt = SchwarzschildKSCylindrical { mass: mass_gv }.shift(x);
             let (sm, _) = grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
         (Spacetime::KerrSchild, _) => {
             let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
+            let al = SchwarzschildKS { mass: mass_gv }.lapse(x);
+            let bt = SchwarzschildKS { mass: mass_gv }.shift(x);
             let (sm, _) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::Kerr, Coords::Cartesian) => {
             let spin_gv = Gv::scalar("kerr_spin");
             let gi = KerrKSCartesian { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let al = KerrKSCartesian { mass: mass_gv, spin: spin_gv }.lapse(x);
+            let bt = KerrKSCartesian { mass: mass_gv, spin: spin_gv }.shift(x);
             let spin = Dual::constant(spin_gv);
             let (sm, _) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
 (Spacetime::Kerr, Coords::Cylindrical) => {
             let spin_gv = Gv::scalar("kerr_spin");
             let gi = KerrKSCylindrical { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let al = KerrKSCylindrical { mass: mass_gv, spin: spin_gv }.lapse(x);
+            let bt = KerrKSCylindrical { mass: mass_gv, spin: spin_gv }.shift(x);
             let spin = Dual::constant(spin_gv);
             let (sm, _) = grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
         (Spacetime::Kerr, _) => {
             let spin_gv = Gv::scalar("kerr_spin");
             let gi = KerrKS { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let al = KerrKS { mass: mass_gv, spin: spin_gv }.lapse(x);
+            let bt = KerrKS { mass: mass_gv, spin: spin_gv }.shift(x);
             let spin = Dual::constant(spin_gv);
             let (sm, _) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pre);
-            (gi, sm, st)
+            (gi, sm, st, al, bt)
         }
         (Spacetime::Minkowski, _) => {
             unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
@@ -830,11 +844,43 @@ pub fn rhd_source_cfl_gr_gv(
         }
         acc
     };
-    let q0 = e_cons - (d_cons * d_cons + gamma_norm(&mom)).sqrt();
-    let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
-    let sm_norm = gamma_norm(&sm_arr).sqrt();
+    let root = (d_cons * d_cons + gamma_norm(&mom)).sqrt();
+    let q0 = e_cons - root;
     let q_safe = q0.max(Gv::from_f64(1e-12));
-    let lam_s = (s_tau.abs() + sm_norm) / q_safe;
+    // the rate at which the geometric source consumes the admissibility margin
+    // q0 = E - sqrt(D^2 + |S|^2), evaluated for the COVARIANT (killing) energy variable.
+    // over a source step the mass has no source and the killing energy has none either
+    // (its source is identically zero on a stationary metric), so ONLY the momentum
+    // source moves the state. writing the eulerian energy in the stored variables,
+    //   E = (ehat + D + beta^i S_i) / alpha,
+    // and differentiating along S -> S + dt Smom,
+    //   dq0/dt = (beta^i Smom_i)/alpha - (gamma^{ij} S_i Smom_j)/sqrt(D^2 + |S|^2).
+    // the second term carries the factor |S|/sqrt(D^2 + |S|^2) and vanishes at rest, so
+    // cold gas at rest on a SHIFT-FREE chart consumes no margin at first order: the
+    // gravitational work rides inside the conserved killing energy rather than being
+    // charged against the vanishing internal energy. charging the valencia form
+    // (|S_tau| + |Smom|)/q0 instead makes the admissible dt scale like the pressure and
+    // drives dt to zero on cold atmospheres, a limit this variable does not actually
+    // impose. the energy source is absent from the update and so absent here too.
+    let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
+    let beta_dot_sm = {
+        let mut acc = Gv::ZERO;
+        for ii in 0..3 {
+            acc = acc + beta[ii] * sm_arr[ii];
+        }
+        acc
+    };
+    let s_dot_sm = {
+        let mut acc = Gv::ZERO;
+        for ii in 0..3 {
+            for jj in 0..3 {
+                acc = acc + gm_inv[(ii, jj)] * mom[ii] * sm_arr[jj];
+            }
+        }
+        acc
+    };
+    let lam_s =
+        ((beta_dot_sm / alpha).abs() + (s_dot_sm / root.max(Gv::from_f64(1e-12))).abs()) / q_safe;
     // excised cells are numerical padding whose onion-filled state can sit near the
     // admissible-cone boundary indefinitely (the frozen clamped-core metric drives
     // enormous geodesic sources over donor-copied gas), so their admissibility rate

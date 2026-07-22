@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{volume_weighted_centroid, Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_algebra::Tensor;
 
 
@@ -453,16 +453,13 @@ fn spherical_geometry_gv(
     let (rl, rh) = (lo[0], hi[0]);
     let ir1 = (gv_powi(rh, 3) - gv_powi(rl, 3)) / Gv::from_f64(3.0); // int r^2 dr
     let ir2 = (gv_powi(rh, 2) - gv_powi(rl, 2)) / Gv::from_f64(2.0); // int r dr
-    let ir_cnum = (gv_powi(rh, 4) - gv_powi(rl, 4)) / Gv::from_f64(4.0); // int r^3 dr
-    let centroid_r = ir_cnum / ir1; // (3/4)(rh^4-rl^4)/(rh^3-rl^3)
+    let centroid_r = volume_weighted_centroid(Geometry::Spherical, 0, rl, rh);
 
     let (i_theta, sin_tl, sin_th, centroid_t) = if ndim >= 2 {
         let (tl, th) = (lo[1], hi[1]);
         let (ctl, cth) = (tl.cos(), th.cos());
         let it = ctl - cth; // cos(tl) - cos(th)
-        // volume-weighted theta centroid: [(sin th - th cos th)]_{tl}^{th} / Itheta.
-        let num = (th.sin() - th * cth) - (tl.sin() - tl * ctl);
-        (it, tl.sin(), th.sin(), num / it)
+        (it, tl.sin(), th.sin(), volume_weighted_centroid(Geometry::Spherical, 1, tl, th))
     } else {
         let z = Gv::ZERO;
         (Gv::from_f64(2.0), z, z, Gv::from_f64(pi / 2.0)) // cos(0)-cos(pi)=2; centroid at pi/2
@@ -555,8 +552,7 @@ fn cylindrical_geometry_gv(
 
     let (rl, rh) = (lo[r_ax], hi[r_ax]);
     let ir2 = (gv_powi(rh, 2) - gv_powi(rl, 2)) / Gv::from_f64(2.0); // int r dr
-    let ir_cnum = (gv_powi(rh, 3) - gv_powi(rl, 3)) / Gv::from_f64(3.0);
-    let centroid_r = ir_cnum / ir2; // (2/3)(rh^3-rl^3)/(rh^2-rl^2)
+    let centroid_r = volume_weighted_centroid(Geometry::Cylindrical, 0, rl, rh);
     let dr = rh - rl;
 
     // transverse measures: gridded -> the grid width; symmetry -> the full extent constant.
