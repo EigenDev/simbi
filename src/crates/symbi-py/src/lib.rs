@@ -123,6 +123,9 @@ struct Config {
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
     bodies: Vec<BodyParams>,
     bonded_assembly: Option<BondedAssemblyParams>,
+    /// lagrangian tracer count (0 = none): mass-weighted deterministic
+    /// seeding over the initial interior density.
+    n_tracers: usize,
     // the passive-scalar (dye) initial condition: one value per interior cell,
     // axis-0-fastest, drained from the python `passive_scalar` generator.
     // empty = the run carries no dye. set AFTER parse (run_simulation drains
@@ -753,6 +756,13 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
         bonded_assembly: parse_bonded_assembly(dict)?,
+        n_tracers: dict
+            .get_item("n_tracers")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<i64>().ok())
+            .map(|v| v.max(0) as usize)
+            .unwrap_or(0),
         chi_ic: Vec::new(),
         binary: parse_binary(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
@@ -3023,6 +3033,13 @@ macro_rules! build_and_run_hydro {
             }
             sim
         };
+        let sim = if cfg.n_tracers == 0 {
+            sim
+        } else {
+            let mut sim = sim;
+            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(&sim, cfg.n_tracers));
+            sim
+        };
         let theta = build_theta(cfg);
         let sub = sim
             .substrate()
@@ -5215,6 +5232,13 @@ macro_rules! build_and_run_iso {
             }
             sim
         };
+        let sim = if cfg.n_tracers == 0 {
+            sim
+        } else {
+            let mut sim = sim;
+            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(&sim, cfg.n_tracers));
+            sim
+        };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
         let theta = build_theta(cfg);
         // the constant-nu viscosity — the iso path has its OWN
@@ -5554,6 +5578,29 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 "passive_scalar with driven/gradient boundaries is not wired yet (no dye \
                  prescription on those faces)"
                     .to_string(),
+            );
+        }
+    }
+    // lagrangian tracers ride the uni-grid cartesian flat-spacetime hydro/iso
+    // paths (host sampler over prim velocity; the advance is fenced off the
+    // decomposed and refined drivers in rust). fail loud elsewhere.
+    if cfg.n_tracers > 0 {
+        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+            return Err(format!(
+                "n_tracers = {} is wired for newtonian/rhd/isothermal hydro; got '{}'",
+                cfg.n_tracers, cfg.regime
+            ));
+        }
+        if cfg.coord_system != "cartesian" || cfg.spacetime != "minkowski" {
+            return Err(format!(
+                "n_tracers = {} requires a flat cartesian chart (the velocity sampler and \
+                 the coordinate transport dx/dt = v assume it); got ({}, {})",
+                cfg.n_tracers, cfg.coord_system, cfg.spacetime
+            ));
+        }
+        if cfg.refinement_enabled || cfg.n_gpus > 1 || cfg.mesh_motion {
+            return Err(
+                "n_tracers does not support refinement, gpus > 1, or mesh motion yet".to_string(),
             );
         }
     }
