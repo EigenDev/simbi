@@ -502,12 +502,18 @@ where
         let w = beta_n / alpha;
         let mut g_l = f_l - u_l * w;
         let mut g_r = f_r - u_r * w;
-        // the covariant energy flux f_ehat already carries the lapse AND the shift (it is the free-
-        // index-down -sqrt(-g)(T^n_t + rho u^n)/sqrt(gamma)); it does NOT take the Valencia
-        // G = F - (beta^n/alpha) U transform the mass/momentum fluxes need. only its shifted-fan
-        // dissipation (ehat_r - ehat_l) rides the HLL below.
-        g_l.nrg = f_l.nrg;
-        g_r.nrg = f_r.nrg;
+        // the covariant energy flux f_ehat carries the lapse AND the shift itself (the free-index-
+        // down -sqrt(-g)(T^n_t + rho u^n)/sqrt(gamma)), so it does NOT take the Valencia
+        // G = F - (beta^n/alpha) U transform the mass/momentum fluxes need. it DOES take a 1/alpha
+        // at the face: the godunov works in the FLAT coordinate measure with one cell lapse on the
+        // divergence (gv_lapse_weight), and the reduction of d_t(sqrt(gm) ehat) + d_n(sqrt(gm)
+        // f_ehat) = 0 to that measure puts sqrt(gm) = sqrt(gm_flat)/alpha on BOTH terms — the face
+        // flux is f_ehat/alpha, the update alpha_cell * div. dropping the pair leaves a spurious
+        // energy source f_ehat * d_n(ln alpha) that shifts every GR steady profile (the michel
+        // hold degrades ~15x at 128 zones). the fan dissipation (sh_l sh_r / alpha)(ehat_r -
+        // ehat_l) below is already the correct sh_l sh_r * d(ehat/alpha) for this pair.
+        g_l.nrg = f_l.nrg / alpha;
+        g_r.nrg = f_r.nrg / alpha;
         let sh_l = s_l - beta_n;
         let sh_r = s_r - beta_n;
         Gv::branch(
@@ -525,7 +531,13 @@ where
             },
         )
     } else {
-        hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r)
+        // unshifted sweep: plain HLL on (U, F) with F.nrg = f_ehat. the flat-measure reduction
+        // (see the shifted arm) still owes the energy component its 1/alpha at the face; scaling
+        // the WHOLE blended nrg output — central part and s_l s_r (ehat_r - ehat_l) dissipation
+        // alike — lands exactly the HLL of the pair (ehat/alpha, f_ehat/alpha).
+        let mut f = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
+        f.nrg = f.nrg / alpha;
+        f
     };
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
@@ -909,14 +921,17 @@ pub fn rmhd_flux_gr_gv(
     // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
     // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
     // constant added to the magnetic flux after the fan (identical to adding it to both sides).
-    // covariant (killing) energy flux: F_ehat = alpha^2 F_tau + alpha(alpha-1) F_D - alpha beta^i
-    // F_{S_i}, the linear re-split of the Valencia numerical fluxes into the free-index-down energy
-    // current. both HLLD and HLLE emit the Valencia flux in the shifted-G "godunov re-applies alpha"
-    // convention (F_X = F_X* - (beta^n/alpha) X*), and this combination lands sqrt(-g)(T^n_t + rho u^n)
-    // the covariant-energy godunov consumes with NO lapse re-weight. alpha=1, beta=0 -> F_tau
-    // (the flat Valencia energy flux), and beta=0 -> alpha^2 F_tau + alpha(alpha-1) F_D.
+    // covariant (killing) energy flux: F_ehat/alpha = alpha F_tau + (alpha-1) F_D - beta^i F_{S_i},
+    // the linear re-split of the Valencia numerical fluxes into the free-index-down energy current,
+    // in the SAME face convention the RHD arm stores: the godunov works in the flat coordinate
+    // measure (sqrt(gm) = sqrt(gm_flat)/alpha, static) and re-applies ONE cell lapse to the energy
+    // divergence like every other conserved law, so the face slot owes a 1/alpha — storing the
+    // fully self-contained sqrt(-g) current here instead leaves a spurious energy source
+    // f_ehat * d_n(ln alpha) on any chart with a varying lapse. both HLLD and HLLE emit the
+    // Valencia flux in the shifted-G "godunov re-applies alpha" convention
+    // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat Valencia energy flux).
     let covariant_nrg = |f: &symbi_hydro::MhdCons<Gv, 3>| {
-        alpha * alpha * f.nrg + alpha * (alpha - Gv::ONE) * f.den - alpha * beta.dot(&f.mom)
+        alpha * f.nrg + (alpha - Gv::ONE) * f.den - beta.dot(&f.mom)
     };
     if hlld && !rusanov {
         let w = if has_shift { beta[coord_n] / alpha } else { Gv::ZERO };

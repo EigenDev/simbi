@@ -1772,17 +1772,21 @@ where
                     }
                 }))
             } else {
-                let rl = self.geom.face_coord(coord, 0)[0];
-                let mut coord_hi = coord;
-                coord_hi[0] += 1;
-                let rh = self.geom.face_coord(coord_hi, 0)[0];
-                let r_vw = 0.75 * (rh.powi(4) - rl.powi(4)) / (rh.powi(3) - rl.powi(3));
-                let x_center = self.geom.cell_coord(coord);
+                let chart = <M as Metric<Sc, DOF>>::geometry(&self.physics.metric);
+                // EVERY gridded slot takes its chart's volume-weighted centroid, from the
+                // shared owner the in-kernel geometry uses — the radial moment differs
+                // between the spherical (r^2 dr) and cylindrical (R dR) weights, and the
+                // spherical polar slot is sin-weighted rather than centered.
+                let centroid_of = |k: usize| -> f64 {
+                    let lo = self.geom.face_coord(coord, k)[k];
+                    let mut coord_hi = coord;
+                    coord_hi[k] += 1;
+                    let hi = self.geom.face_coord(coord_hi, k)[k];
+                    symbi_geometry::volume_weighted_centroid(chart, k, lo, hi)
+                };
                 Tensor::new(std::array::from_fn(|k| {
-                    if k == 0 {
-                        Sc::from_f64(r_vw)
-                    } else if k < D {
-                        Sc::from_f64(x_center[k])
+                    if k < D {
+                        Sc::from_f64(centroid_of(k))
                     } else if k == 1 {
                         // an ungridded POLAR slot (DOF-lifted vectors on a 1D radial grid) takes
                         // the exact equatorial pi/2 — the same convention as the in-kernel metric

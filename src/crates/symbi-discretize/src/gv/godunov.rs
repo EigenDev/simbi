@@ -874,10 +874,13 @@ pub fn godunov_stage_gv_with_fused_built(
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
         let div = gv_divergence("nrg_flux", ndim, &geo);
         let stage = if is_covariant_energy {
-            // pure conservation d_t ehat + div F_ehat = 0: NO lapse re-weight (f_ehat carries alpha),
-            // NO geodesic energy source (it is identically zero for the killing energy on a static
-            // slice, unlike the normal-observer tau). mesh dilution subtracts an exact zero on GR.
-            nrg - dt * div - dt * (h_dil * nrg)
+            // conservation of the killing energy, d_t(sqrt(gm) ehat) + d_n(sqrt(gm) f_ehat) = 0,
+            // reduced to the code's FLAT coordinate measure (sqrt(gm) = sqrt(gm_flat)/alpha, static):
+            // d_t ehat + alpha_cell * div_flat(f_ehat/alpha_face) = 0. the flux kernel stores
+            // f_ehat/alpha at the face; the cell lapse rides here through `fe` — the SAME uniform
+            // lapse every other conserved law takes. NO geodesic energy source (it is identically
+            // zero for the killing energy on a stationary metric, unlike the normal-observer tau).
+            fe(nrg, div, None)
         } else {
             fe(nrg, div, nrg_gravity)
         };
