@@ -95,7 +95,18 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
         T_FINAL,
         u64::MAX,
         &LocalCopy,
-        |_, _, _| std::ops::ControlFlow::Continue(()),
+        |_, _, stores| {
+            // dt-collapse tripwire: the vacuum-sink rim can drive dt into the
+            // floor on cold configurations; a run that can never finish must
+            // fail loud, not spin (the fofc-equivalence lesson).
+            assert!(
+                stores[0].dt > 1.0e-9,
+                "dt collapsed to {:.3e} at t = {:.6e}",
+                stores[0].dt,
+                stores[0].time,
+            );
+            std::ops::ControlFlow::Continue(())
+        },
     );
 }
 
