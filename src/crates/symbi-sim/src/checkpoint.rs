@@ -20,6 +20,7 @@
 
 use std::path::Path;
 
+use crate::tracers as symbi_sim_tracers;
 use crate::state::*;
 use symbi_geometry::Metric;
 use symbi_hydro::eos::Eos;
@@ -693,6 +694,50 @@ fn body_state_snap<const D: usize>(
     snap
 }
 
+/// flattened tracer state for the checkpoint: positions row-major [n, D],
+/// ids and flags as f64 (ids stay exact below 2^53; flags are 0/1).
+struct TracerSnap {
+    n: usize,
+    x: Vec<f64>,
+    id: Vec<f64>,
+    escaped: Vec<f64>,
+    crossed: Vec<f64>,
+    crossing_time: Vec<f64>,
+    weight: Vec<f64>,
+}
+
+fn tracer_snap<const D: usize>(tr: &symbi_sim_tracers::TracerSet<D>) -> TracerSnap {
+    let n = tr.len();
+    let mut x = Vec::with_capacity(n * D);
+    for p in &tr.x {
+        x.extend_from_slice(&p[..]);
+    }
+    TracerSnap {
+        n,
+        x,
+        id: tr.id.iter().map(|&i| i as f64).collect(),
+        escaped: tr.flags.iter().map(|f| f.escaped as u8 as f64).collect(),
+        crossed: tr.flags.iter().map(|f| f.crossed_sink as u8 as f64).collect(),
+        crossing_time: tr.flags.iter().map(|f| f.crossing_time).collect(),
+        weight: vec![tr.weight],
+    }
+}
+
+fn tracer_group<const D: usize>(snap: &TracerSnap) -> Tree<'_> {
+    Tree::new("tracers")
+        .with_attr("n_tracers", snap.n as u64)
+        .with_dataset(Dataset::new("position", vec![snap.n, D], DataRef::F64(&snap.x)))
+        .with_dataset(Dataset::new("id", vec![snap.n], DataRef::F64(&snap.id)))
+        .with_dataset(Dataset::new("escaped", vec![snap.n], DataRef::F64(&snap.escaped)))
+        .with_dataset(Dataset::new("crossed_sink", vec![snap.n], DataRef::F64(&snap.crossed)))
+        .with_dataset(Dataset::new(
+            "crossing_time",
+            vec![snap.n],
+            DataRef::F64(&snap.crossing_time),
+        ))
+        .with_dataset(Dataset::new("weight", vec![1], DataRef::F64(&snap.weight)))
+}
+
 fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
     let nb = snap.nb;
     let mut t = Tree::new("bodies")
@@ -823,6 +868,10 @@ where
     if let Some(bs) = body_snap.as_ref() {
         tree.push_group(body_state_group::<D>(bs));
     }
+    let tr_snap = sim.tracers.as_ref().map(tracer_snap);
+    if let Some(ts) = tr_snap.as_ref() {
+        tree.push_group(tracer_group::<D>(ts));
+    }
     Hdf5Backend.write(Path::new(path), &tree)
 }
 
@@ -866,6 +915,12 @@ where
     let body_snap = levels.iter().filter_map(|l| l.immersed.as_ref()).next().map(body_state_snap);
     if let Some(bs) = body_snap.as_ref() {
         root.push_group(body_state_group::<D>(bs));
+    }
+    // the tracer population lives on whichever level carries it (uni-grid:
+    // level 0) — same group layout as the single-grid writer.
+    let tr_snap = levels.iter().filter_map(|l| l.tracers.as_ref()).next().map(tracer_snap);
+    if let Some(ts) = tr_snap.as_ref() {
+        root.push_group(tracer_group::<D>(ts));
     }
     // the per-step body-gas exchange series: whichever level carries the
     // immersed sidecar (the driver consolidates on one) supplies it — the
@@ -1097,6 +1152,40 @@ where
     // and a sink's cumulative accreted mass (the diagnostics.dat ledger would
     // step down at the seam). checkpoints written before the group exists
     // restore fields only — bodies keep their config values.
+    // the tracer population: restored whenever the file carries the group —
+    // the run continues the previous population (flags, ids, weight intact)
+    // regardless of what the fresh-run config would have seeded.
+    if let Some(tg) = tree.find_group("tracers") {
+        let getf = |name: &str| -> Result<Vec<f64>> {
+            Ok(tg
+                .find_dataset(name)
+                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}")))?
+                .data
+                .as_f64()
+                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not f64")))?
+                .to_vec())
+        };
+        let (xs, ids) = (getf("position")?, getf("id")?);
+        let (esc, crx, ct) = (getf("escaped")?, getf("crossed_sink")?, getf("crossing_time")?);
+        let weight = getf("weight")?.first().copied().unwrap_or(0.0);
+        let n = ids.len();
+        let mut tr = symbi_sim_tracers::TracerSet::<D> { weight, ..Default::default() };
+        for i in 0..n {
+            let mut p = [0.0; D];
+            for a in 0..D {
+                p[a] = xs[i * D + a];
+            }
+            tr.x.push(p);
+            tr.id.push(ids[i] as u64);
+            tr.flags.push(symbi_sim_tracers::TracerFlags {
+                escaped: esc[i] != 0.0,
+                crossed_sink: crx[i] != 0.0,
+                crossing_time: ct[i],
+            });
+        }
+        sim.tracers = Some(tr);
+    }
+
     if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), sim.immersed.as_mut()) {
         let get = |name: &str| -> Result<Vec<f64>> {
             Ok(bodies_g

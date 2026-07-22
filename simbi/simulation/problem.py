@@ -767,6 +767,14 @@ class SimbiProblem(BaseModel):
     def bonded_assembly(self) -> Optional[BondedAssembly]:
         return None
 
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        """lagrangian tracer count: mass-weighted deterministic seeding over
+        the initial density; tracers advect on the post-step velocity and land
+        in the checkpoint `tracers` group. 0 = none."""
+        return 0
+
     # =========================================================================
     # passive scalar (override in subclass)
     # =========================================================================
