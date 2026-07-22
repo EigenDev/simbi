@@ -309,6 +309,109 @@ fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
     }
 }
 
+// the decomposed driver's per-STEP extras (viscous / penalize / gated
+// feedback) against the canonical order, with a two-way body active — the
+// same transform as the stage law (excise family normalized: the decomposed
+// sweep protocol has its own oracle; body MOTION is driver-level shared code,
+// invisible to the recorder on every driver).
+#[test]
+fn decomposed_per_step_extras_match_the_canonical_order() {
+    use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+    const T: f64 = 2.5e-3;
+    let bodies = || {
+        symbi_ib::BodyCollection::new().add(
+            symbi_ib::Body::rigid_sphere(
+                0,
+                Tensor::new([0.0, 0.0]),
+                Tensor::zeros(),
+                1.0,
+                0.2,
+                0.05,
+                true,
+            )
+            .with_two_way_coupling(true),
+        )
+    };
+
+    let rec_a = Recorder::new(false, false);
+    let mut sim_a = tiny_sim(false).with_bodies(bodies());
+    evolve(&mut sim_a, &rec_a, T).expect("uni-grid body drive");
+    let mut expected: Vec<String> = Vec::new();
+    for ph in rec_a.take() {
+        if ph.starts_with("excise") {
+            continue;
+        }
+        expected.push(ph.clone());
+        if ph == "ghost_fill" {
+            expected.push("ghost_fill".to_string());
+        }
+    }
+
+    let rec_c = Recorder::new(false, false);
+    let mut sim_c = tiny_sim(false).with_bodies(bodies());
+    let stores: &mut [&mut Store] = &mut [&mut sim_c];
+    let kernels: Vec<&Recorder> = vec![&rec_c];
+    evolve_decomposed(
+        stores,
+        &kernels,
+        [1, 1],
+        &[0],
+        Timestepping::Rk2,
+        0.0,
+        T,
+        u64::MAX,
+        &LocalCopy,
+        |_, _, _| std::ops::ControlFlow::Continue(()),
+    );
+    let dec: Vec<String> = rec_c.take().into_iter().filter(|p| !p.starts_with("excise")).collect();
+
+    assert_eq!(
+        dec, expected,
+        "decomposed per-step extras drifted:\ndecomposed: {dec:?}\nexpected:   {expected:?}"
+    );
+    assert!(expected.contains(&"penalize".to_string()));
+    assert!(expected.contains(&"body_feedback".to_string()));
+    assert!(expected.contains(&"viscous".to_string()));
+}
+
+// LAW COMPLETENESS: every phase in the canonical table must actually appear in
+// the recorded logs when its gate is on. this closes the recorder-coupling
+// gap: a phase added to STAGE_PIPELINE whose recorder method is missing would
+// no-op identically on every driver — the equality laws would still pass while
+// their coverage silently shrank. iterating the exported table makes that
+// impossible: the new phase's name never appears and THIS test names it.
+#[test]
+fn every_canonical_phase_appears_in_the_recorded_union() {
+    const T: f64 = 2.5e-3;
+    let mut union: Vec<String> = Vec::new();
+
+    // all scalar gates on at once (additive + fofc + chi)...
+    let rec = Recorder::new(true, true);
+    let mut sim = tiny_sim(true);
+    evolve(&mut sim, &rec, T).expect("gated drive");
+    union.extend(rec.take());
+
+    // ...plus a body-bearing run for the Bodies gate.
+    let rec = Recorder::new(false, false);
+    let mut sim = tiny_sim(false).with_bodies(symbi_ib::BodyCollection::new().add(
+        symbi_ib::Body::gravitational(0, Tensor::new([0.0, 0.0]), Tensor::zeros(), 1.0, 0.1, 0.05),
+    ));
+    evolve(&mut sim, &rec, T).expect("body drive");
+    union.extend(rec.take());
+
+    for ph in symbi_sim::stage::STAGE_PIPELINE {
+        // the flux phase logs per direction ("flux0", "flux1"); every other
+        // phase logs its table name verbatim.
+        let present = union.iter().any(|e| e == ph.name || e.starts_with(ph.name));
+        assert!(
+            present,
+            "canonical phase '{}' never appeared in any recorded log — the law's \
+             recorder is missing its method, so sequence equality no longer covers it",
+            ph.name,
+        );
+    }
+}
+
 #[test]
 fn both_drivers_issue_the_identical_stage_sequence() {
     // fixed dt = 1e-3, t_final = 2.5e-3 -> the same 3 steps on both drivers.

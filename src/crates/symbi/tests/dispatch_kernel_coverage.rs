@@ -121,3 +121,23 @@ fn every_mhd_stage_cfl_and_bcell_kernel_is_emitted() {
         missing.join("\n  ")
     );
 }
+
+// the passive-scalar (dye) family: dimension-only names — no chart suffix, the
+// dye rides the cartesian mass flux — requested by the newtonian chi_update
+// dispatch for every grid dimension. enumerated here so a future chart- or
+// regime-suffixed chi kernel cannot silently narrow this gate's completeness.
+#[test]
+fn chi_family_is_baked_for_every_dimension() {
+    for d in 1..=3u8 {
+        for name in [
+            format!("chi_godunov_{d}d"),
+            format!("chi_c2p_{d}d"),
+            format!("chi_snapshot_{d}d"),
+        ] {
+            assert!(
+                symbi_aot::kernel_by_name::<f64>(&name).is_some(),
+                "missing baked passive-scalar kernel '{name}'"
+            );
+        }
+    }
+}
