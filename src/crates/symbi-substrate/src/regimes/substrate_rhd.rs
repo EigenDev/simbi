@@ -346,12 +346,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // background (DOF == D, where FOFC is active) the source-admissibility rate lambda_S folds in
         // after the map: the geodesic source must not push U + dt S out of the physical cone.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        let source_cfl = (sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski)
-            .then(|| {
-                let sfx = geom_suffix(sim.geom.coords, DOF, D);
-                let st = spacetime_slug(sim.geom.spacetime);
-                format!("rhd_source_cfl{sfx}{st}_{D}d")
-            });
+        // the WU 2017 source-admissibility rate lambda_S is now SUBSUMED by the admissible-boundary
+        // projection: the projection guarantees U in G post-hoc for ANY dt, so lambda_S no longer has
+        // to shrink the step to keep U + dt S admissible. dropping it lets the near-horizon cusp cell
+        // (near-vacuum ultrarelativistic infall, where lambda_S -> inf and collapsed the step) FLOOR
+        // via the projection instead of dictating the global dt — the HARM discipline. dt is then set
+        // by the flux light-cone; a resolved cell's geodesic source is well within it, an unresolvable
+        // cusp cell is floored. flat SRHD never had a source rate.
+        let source_cfl: Option<String> = None;
         cfl_wave_speed(
             sim,
             pre,
@@ -544,6 +546,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || {}, // rhd has no immersed-body source (trait-default no-op)
+            || {
+                // ADMISSIBLE-BOUNDARY PROJECTION: on a curved background, project every spliced cell
+                // onto partial-G along the segment to the admissible stage input, replacing the freeze
+                // parachute with a provable map into the physical set. flat SRHD keeps the freeze.
+                if curved {
+                    crate::regimes::substrate_kernels::fofc_project(
+                        sim, "rhd", dof_sfx, sim.stage_input(), &sim.fields.cons, &sim.fields.prim,
+                    );
+                }
+            },
             None,  // no body-evolved freeze parachute (no rhd body source)
             || {}, // hydro: no induction flux
             || {}, // hydro: no cell B to restore

@@ -1412,16 +1412,21 @@ where
     // totals so the benchmark cadence can post the per-window delta (a limiter that fired is shown,
     // never silent). cumulative totals also close out the run summary.
     symbi::regimes::fofc::fofc_reset_stats();
-    // on a cartesian black-hole run, split the counters at the horizon r_+ = 2M:
-    // everything inside is causally disconnected (and the excised interior fires
-    // steadily by design), so the log stays on the EXTERIOR signal — the acceptance
-    // criterion for a production run is exterior events == 0.
+    // on a cartesian black-hole run, split the FOFC counters at the OUTER HORIZON
+    // r_+ = M + sqrt(M^2 - a^2): everything inside is causally disconnected (and the
+    // near-horizon infall band fires steadily by design), so the exterior signal is the
+    // acceptance criterion for a production run (exterior events == 0). the split is now
+    // load-bearing — the freeze-streak HALT gates on the exterior count — so it uses the
+    // TRUE spin-dependent r_+, not the Schwarzschild 2M: cells in (r_+, 2M) at nonzero spin
+    // are OUTSIDE the horizon and a poison there must still halt the run.
     symbi::regimes::fofc::fofc_set_horizon_radius(
         if cfg.spacetime != "minkowski"
             && cfg.coord_system == "cartesian"
             && cfg.schwarzschild_mass > 0.0
         {
-            2.0 * cfg.schwarzschild_mass
+            let m = cfg.schwarzschild_mass;
+            let a = cfg.kerr_spin.abs().min(m); // |a| <= M; clamp guards the sqrt
+            m + (m * m - a * a).sqrt()
         } else {
             0.0
         },

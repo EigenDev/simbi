@@ -348,6 +348,7 @@ where
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || {}, // MHD has no immersed-body source (trait-default no-op)
+            || {}, // MHD: no admissible-boundary projection yet (the RMHD admissible set is harder; keeps the freeze)
             None,  // no body-evolved freeze parachute (no MHD body source)
             || crate::regimes::mhd_substrate::fofc_ct_save(sim),
             || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),

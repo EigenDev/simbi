@@ -10,6 +10,7 @@
 //   use symbi_hydro::{IdealGas, Prim, Cons, Newtonian, hlle};
 // =============================================================================
 
+pub mod admissible;
 pub mod c2p_result;
 pub mod energy;
 pub mod eos;

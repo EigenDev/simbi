@@ -689,13 +689,12 @@ pub fn rmhd_source_cfl_gr_gv(
     // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0).
     let q_safe = q0.max(Gv::from_f64(1e-12));
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
-    // excised cells are numerical padding whose onion-filled state can sit near the
-    // admissible-cone boundary indefinitely (the frozen clamped-core metric drives
-    // enormous geodesic sources over donor-copied gas), so their admissibility rate
-    // must not throttle the global dt — inside the horizon nothing they do reaches
-    // the exterior. the mask is the SAME r_ks < r_exc level set the excision fill
-    // uses; `excision_radius` binds 0 on an unexcised run, making the mask empty and
-    // the rate bit-identical. cartesian charts only (spherical charts never excise).
+    // excised cells are numerical padding whose onion-filled state can sit near the admissible-cone
+    // boundary indefinitely (the frozen clamped-core metric drives enormous geodesic sources over
+    // donor-copied gas), so their admissibility rate must not throttle the global dt — inside the
+    // horizon nothing they do reaches the exterior. the mask is the `r_ks < r_exc` excision level
+    // set; `excision_radius` binds 0 on an unexcised run, making the mask empty and the rate
+    // bit-identical. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
     {
@@ -906,13 +905,12 @@ pub fn rhd_source_cfl_gr_gv(
     let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
     let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
     let lam_s = lam_first + lam_second;
-    // excised cells are numerical padding whose onion-filled state can sit near the
-    // admissible-cone boundary indefinitely (the frozen clamped-core metric drives
-    // enormous geodesic sources over donor-copied gas), so their admissibility rate
-    // must not throttle the global dt — inside the horizon nothing they do reaches
-    // the exterior. the mask is the SAME r_ks < r_exc level set the excision fill
-    // uses; `excision_radius` binds 0 on an unexcised run, making the mask empty and
-    // the rate bit-identical. cartesian charts only (spherical charts never excise).
+    // excised cells are numerical padding whose onion-filled state can sit near the admissible-cone
+    // boundary indefinitely (the frozen clamped-core metric drives enormous geodesic sources over
+    // donor-copied gas), so their admissibility rate must not throttle the global dt — inside the
+    // horizon nothing they do reaches the exterior. the mask is the `r_ks < r_exc` excision level
+    // set; `excision_radius` binds 0 on an unexcised run, making the mask empty and the rate
+    // bit-identical. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
     {
@@ -954,6 +952,102 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
         writes.push((format!("ws_l_{d}"), format!("wave_speed_l[{d}]").into(), lmin.node()));
         writes.push((format!("ws_r_{d}"), format!("wave_speed_r[{d}]").into(), lmax.node()));
     }
+    (end_trace(), writes)
+}
+
+
+/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-hydro (adiabatic) — the provable replacement for the
+/// freeze parachute. where the spliced first-order conserved `x_*` is inadmissible, blend it toward the
+/// stage-input anchor `us_*` (admissible from stage entry) exactly onto the boundary of the
+/// relativistic admissible set `G = { D > 0, E^2 > D^2 + gamma^{ij} S_i S_j }` (Wu & Tang 2015). G is
+/// CONVEX, so the segment from an admissible anchor to any candidate crosses partial-G at most once and
+/// the projection ALWAYS yields an admissible state — an already-admissible cell passes through
+/// untouched (theta = 1), so no cell is ever unrecoverable. reads + writes the densitized conserveds
+/// `x_den`/`x_mom_k`/`x_nrg` in place, reads the anchor `us_*`; the metric at the cell midpoint supplies
+/// gamma^{ij} (for |S|^2) and alpha/beta (to reconstruct the eulerian energy E = (ehat + D + beta^i
+/// S_i)/alpha from the stored killing energy). densitization is a common positive factor that cancels
+/// in the admissibility sign, so this works directly on the stored state. curved spacetime only.
+pub fn fofc_project_gr_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ncomp: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let mid = gv_cell_midpoints(spacing, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => mid[d],
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm_inv, alpha, beta): (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
+            let m = Schwarzschild { mass };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::KerrSchild, _) => {
+            let m = SchwarzschildKS { mass };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::Kerr, Coords::Cylindrical) => {
+            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::Kerr, _) => {
+            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the FOFC projection is baked only for a curved spacetime")
+        }
+    };
+    let read = |k: &str| Gv::field(k, k);
+    let x_den = read("x_den");
+    let x_nrg = read("x_nrg");
+    let us_den = read("us_den");
+    let us_nrg = read("us_nrg");
+    let x_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("x_mom_{k}"))).collect();
+    let us_mom: Vec<Gv> = (0..ncomp).map(|k| read(&format!("us_mom_{k}"))).collect();
+    // pad the momentum to the metric's 3 slots (suppressed axes carry zero).
+    let pad = |m: &[Gv]| Tensor::<Gv, 3>::new(std::array::from_fn(|k| if k < ncomp { m[k] } else { Gv::ZERO }));
+    let s_c = pad(&x_mom);
+    let s_a = pad(&us_mom);
+    // E = (ehat + D + beta^i S_i)/alpha; beta^i contravariant, S_i covariant.
+    let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
+    let inv_alpha = Gv::ONE / alpha;
+    let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
+    let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
+    // strict-interior floors relative to the admissible anchor (keep the projected state off the exact
+    // boundary so the downstream c2p converges).
+    let eps_d = Gv::from_f64(1e-12) * us_den;
+    let eps_f = Gv::from_f64(1e-10) * e_a * e_a;
+    let theta = symbi_hydro::admissible::admissible_theta(
+        x_den, s_c, e_c, us_den, s_a, e_a, &gm_inv, eps_d, eps_f,
+    );
+    let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    writes.push(("x_den".to_string(), "x_den".into(), proj(x_den, us_den).node()));
+    for k in 0..ncomp {
+        let key = format!("x_mom_{k}");
+        writes.push((key.clone(), key.into(), proj(x_mom[k], us_mom[k]).node()));
+    }
+    writes.push(("x_nrg".to_string(), "x_nrg".into(), proj(x_nrg, us_nrg).node()));
     (end_trace(), writes)
 }
 

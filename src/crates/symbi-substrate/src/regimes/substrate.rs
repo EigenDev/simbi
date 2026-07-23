@@ -567,6 +567,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || if sim.immersed.is_some() { self.body_source(sim, ac * dt) },
+            || {}, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
             || {}, // hydro: no induction flux
