@@ -850,9 +850,10 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::Minkowski => unreachable!("flat handled above"),
                 };
                 if densitized {
-                    // the connection source carries every geometric block, pressure included, and
+                    // the momentum call takes p = 0: the pressure block rides the DISCRETE
+                    // well-balanced form below, exactly as it does on the flat curvilinear path.
                     // the free-index-down energy source vanishes on a stationary metric.
-                    let (s_mom, _) = src_at(p);
+                    let (s_mom, _) = src_at(Gv::ZERO);
                     Some((s_mom, Gv::ZERO))
                 } else {
                     let (s_mom, _) = src_at(Gv::ZERO);
@@ -868,6 +869,47 @@ pub fn godunov_stage_gv_with_fused_built(
         (Some((s_mom, s_tau)), Some(m)) => Some((s_mom.scale(m), s_tau)),
         (g, _) => g,
     };
+    // the WELL-BALANCED pressure block of the densitized momentum source.
+    //
+    // the momentum flux carries sqrt(-g) p delta^j_i, so its divergence contributes
+    // p d_i sqrt(-g) + sqrt(-g) d_i p, while the connection source's pressure part is
+    // (1/2) sqrt(-g) p g^{ab} d_i g_ab = p d_i sqrt(-g). the two p d_i sqrt(-g) terms cancel
+    // ANALYTICALLY, leaving sqrt(-g) d_i p — identically zero at uniform pressure. they do NOT
+    // cancel discretely if the flux side differences sqrt(-g) p across the faces while the source
+    // side takes a pointwise derivative at the center: that mismatch is O(dx^2), the same order as
+    // the truncation error, and it lands on exactly the momentum components.
+    //
+    // so the pressure block is discretized with the SAME operator the divergence uses — a face
+    // difference of the measure over the coordinate width — and a uniform-p state then cancels the
+    // pressure flux divergence bit-exactly. only a GRIDDED coordinate has a pressure gradient.
+    let mom_pressure: Option<Vec<Gv>> = densitized.then(|| {
+        let p = Gv::field("pre", FieldRef::PrimPre);
+        // the measure at a face of THIS cell: the swept coordinate at the face, every other slot
+        // where the flux kernel puts it — gridded slots at the cell midpoint, ungridded slots at
+        // the chart's symmetry default. taking the raw centroid vector instead would leave an
+        // ungridded spherical polar slot at theta = 0, where sin(theta) zeroes the measure and the
+        // whole block with it.
+        let base = x_cell.expect("a curved spacetime has a metric position");
+        let measure_at = |slot: usize, offset: i64| -> Gv {
+            let d = axes.iter().position(|&a| a == slot).expect("a gridded coordinate");
+            let face = gv_axis_face_at(d, spacing[d], offset);
+            let xf: Vec<Gv> =
+                (0..3).map(|c| if c == slot { face } else { base[c] }).collect();
+            let lapse_f =
+                gv_lapse_weight(coords, spacetime, &xf).expect("a curved spacetime has a lapse");
+            let xt = Tensor::<Gv, 3>::new(std::array::from_fn(|c| xf[c]));
+            lapse_f * gv_metric_volume_factor_at(spacetime, coords, xt)
+        };
+        (0..ncomp)
+            .map(|coord| match axes.iter().position(|&c| c == coord) {
+                Some(d) => {
+                    let width = gv_axis_face_at(d, spacing[d], 1) - gv_axis_face_at(d, spacing[d], 0);
+                    p * (measure_at(coord, 1) - measure_at(coord, 0)) / width
+                }
+                None => Gv::ZERO,
+            })
+            .collect()
+    });
     let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);
     // the GR geodesic ENERGY source S_tau — the second output of the contraction (gravity's rate
     // of work on the infalling gas). zero on a flat background.
@@ -920,6 +962,11 @@ pub fn godunov_stage_gv_with_fused_built(
         let mom_src = match mom_gravity {
             Some(g) => Some(geo_src.map_or(g[k], |s| s + g[k])),
             None => geo_src,
+        };
+        // the densitized path's pressure block, in the divergence's own face-difference form.
+        let mom_src = match &mom_pressure {
+            Some(pb) => Some(mom_src.map_or(pb[k], |s| s + pb[k])),
+            None => mom_src,
         };
         // Valencia covariant storage: the conserved momentum is the COVARIANT S_i = rho h W^2
         // gamma_ij v^j (the metric-aware c2p + flux), and the geodesic source is written for that

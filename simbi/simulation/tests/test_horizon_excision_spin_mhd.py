@@ -163,8 +163,10 @@ class _KsMhdExcised3D(SimbiProblem):
         zf = lambda k: -L + k * d
 
         def sqrtg(x: float, y: float, z: float) -> float:
-            r = max(np.sqrt(x * x + y * y + z * z), 0.5 * MASS)
-            return float(np.sqrt(1.0 + 2.0 * MASS / r))
+            r_true = np.sqrt(x * x + y * y + z * z)
+            r = max(r_true, 0.5 * MASS)
+            ll2 = (r_true / r) ** 2  # |l|^2, exactly 1 outside the radius floor
+            return float(np.sqrt(1.0 + (2.0 * MASS / r) * ll2))
 
         def gas_state() -> GasStateGenerator:
             for _ in range(nx * ny * nz):
@@ -214,8 +216,10 @@ def _densitized_div(f: dict[str, np.ndarray], dd: float) -> float:
 
     def w(xg, yg, zg):
         rr = np.sqrt(xg * xg + yg * yg + zg * zg)
+        r_true = rr.copy()
         np.maximum(rr, 0.5 * MASS, out=rr)
-        return np.sqrt(1.0 + 2.0 * MASS / rr)
+        ll2 = (r_true / rr) ** 2  # |l|^2, exactly 1 outside the radius floor
+        return np.sqrt(1.0 + (2.0 * MASS / rr) * ll2)
 
     zc, yc, xf = np.meshgrid(xs, xs, xs_f, indexing="ij")
     w1 = w(xf, yc, zc)

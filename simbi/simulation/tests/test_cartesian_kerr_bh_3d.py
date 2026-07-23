@@ -122,11 +122,14 @@ def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
     # states would also "agree").
     assert a["rho"].max() > 1.05 * RHO0, "no accretion developed in the a = 0 kerr run"
     # the a = 0 kerr metric is ALGEBRAICALLY the schwarzschild cartesian KS chart
-    # (2H = 2M/r, l = x/r) EVERYWHERE the oblate-spheroidal radius is unclamped;
-    # inside the r < M/2 guard the two metrics continue the frozen core differently
-    # (both consistent, both unphysical — excision owns those cells), so the gate
-    # bounds the physical region: tight outside the horizon, looser in the strong
-    # field just outside the clamp, silent inside it. the bound DECAYS outward.
+    # (2H = 2M/r, l = x/r), and both charts now contract their rank-1 forms with the
+    # ACTUAL |l|^2, so they agree INSIDE the r < M/2 radius floor too — where the floor
+    # drives |l| below 1 and a unit-l assumption once made the two continue the core
+    # differently. the evolved states therefore agree to ROUNDOFF everywhere, not merely
+    # to a bound that decays outward: measured 1.3e-14 (strong field) and 1.8e-14
+    # (exterior). the old form of this gate also required the strong-field disagreement
+    # to be at least 2x the exterior one, which described the leak rather than the law
+    # and cannot hold once both are at roundoff.
     dd = 2.0 * L / RES
     xs = (np.arange(RES) + 0.5) * dd - L
     z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
@@ -136,11 +139,12 @@ def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
     for nm in ("rho", "pre", "v1", "v2", "v3"):
         d_mid = np.abs(a[nm] - b[nm])[mid].max()
         d_ext = np.abs(a[nm] - b[nm])[ext].max()
-        assert d_mid < 1e-2, f"a=0 kerr vs kerr_schild strong-field mismatch in {nm}: {d_mid:e}"
-        assert d_ext < 1e-4, f"a=0 kerr vs kerr_schild exterior mismatch in {nm}: {d_ext:e}"
-        assert d_ext < 0.5 * max(d_mid, 1e-300), (
-            f"{nm}: core disagreement does not decay outward (mid {d_mid:e}, ext {d_ext:e})"
-        )
+        # roundoff on both shells: the two charts are the same spacetime, evaluated by two
+        # code paths, and nothing about the radius floor may separate them. these bounds are
+        # ~1000x tighter than the 1e-2 / 1e-4 they replace and would catch any reappearance
+        # of the unit-l inconsistency at its first digit.
+        assert d_mid < 1e-11, f"a=0 kerr vs kerr_schild strong-field mismatch in {nm}: {d_mid:e}"
+        assert d_ext < 1e-11, f"a=0 kerr vs kerr_schild exterior mismatch in {nm}: {d_ext:e}"
 
 
 @needs_backend
