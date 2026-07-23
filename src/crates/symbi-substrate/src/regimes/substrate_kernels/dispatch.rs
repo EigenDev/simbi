@@ -21,7 +21,7 @@ use crate::regimes::substrate_gpu::{field_max_reduce, field_reduce};
 use symbi_ir::emit::ReductionOp;
 use symbi_sim::state::FieldStore;
 
-use super::binding::{bind_manifest, kernel_bindings, resolve_path};
+use super::binding::{bind_manifest, kernel_bindings, kernel_field_binds, resolve_path};
 use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
@@ -125,6 +125,74 @@ where
         lambda_max = f64::INFINITY;
     }
     cfl_from_lambda(lambda_max, cfl_number)
+}
+
+/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION dispatch (GR-hydro): blend the spliced first-order
+/// conserved toward the admissible stage-input anchor exactly onto partial-G, so every cell it touches
+/// is admissible. field binds mirror `fofc_select` (x_* the live cons in place, us_* the stage input);
+/// the metric + grid scalars resolve exactly as for the source-CFL. runs BEFORE the freeze-count c2p,
+/// so the freeze tier afterwards fires only on a genuinely inadmissible ANCHOR — an SSP-admissibility
+/// violation, the real poison. curved GR-hydro only.
+pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dof_sfx: &str,
+    u_stage: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    cons: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    prim: &symbi_sim::state::PrimFieldsGeneric<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let st = spacetime_slug(geom.spacetime);
+    let name = format!("{prefix}_fofc_project{dof_sfx}{st}_{D}d");
+    // x_* -> live cons (read + write in place), us_* -> stage input (read).
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        if let Some(c) = s.strip_prefix("us_") {
+            crate::regimes::fofc::fofc_comp(u_stage, prim, c)
+        } else if let Some(c) = s.strip_prefix("x_") {
+            crate::regimes::fofc::fofc_comp(cons, prim, c)
+        } else {
+            panic!("fofc_project: unknown slot '{s}'")
+        }
+    };
+    // metric mass/spin + grid scalars, resolved as in cfl_wave_speed.
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let resolve = |bind: &ScalarBind| -> Sc {
+        let sref = match bind {
+            ScalarBind::Ref(sref) => sref,
+            other => panic!("fofc_project: unexpected spec scalar {other:?}"),
+        };
+        match *sref {
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v).expect("fofc_project: needs schwarzschild_mass"),
+            ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v).expect("fofc_project: needs kerr_spin"),
+            ),
+            other => Sc::from_f64(
+                motion_scalar(&sim.motion, geom.coords, D, other)
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, other))
+                    .unwrap_or_else(|| panic!("fofc_project: unexpected scalar {other:?}")),
+            ),
+        }
+    };
+    let scalars = scalars_for(&name, &resolve);
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(&name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
+    }
+    super::exec::dispatch_fields_each::<Sc, Mem, D>(&name, &geom.interior, &inputs, &outputs, &[], &scalars);
 }
 
 /// the GR horizon accretion diagnostic: run the shell-flux emit `shell_{quantity}_flux_{D}d` over

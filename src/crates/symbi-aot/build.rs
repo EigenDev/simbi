@@ -923,6 +923,18 @@ fn gen_rhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the FOFC admissible-boundary projection (the provable freeze replacement): blends an inadmissible
+// spliced first-order cell toward the admissible stage-input anchor exactly onto partial-G. curved
+// spacetime only; name parallels the source-CFL so the fofc dispatch builds the matching string.
+fn gen_rhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
+    assert!(geom.spacetime != Spacetime::Minkowski);
+    let name = format!("rhd_fofc_project{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
+    let (k, writes) = symbi_discretize::gv::fofc_project_gr_gv(
+        geom.coords, geom.spacetime, &geom.spacing, &geom.axes, geom.ncomp as usize,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 // the RMHD (relativistic MHD) cons->prim: the KKC false-position (a vector-state
 // bracketed iterate over kkc_fmu44, with find_mu_plus + Illinois half-damp,
 // `max_iters` baked). reads the 8-field conserved (D, S_k, tau, B_k) + gamma;
@@ -1552,7 +1564,8 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // the wu 2017 source-admissibility rate folds into the same scratch after this map (every curved
     // background — DOF == D and the swirl DOF-lift, where GR-hydro FOFC is active).
     if geom.spacetime != Spacetime::Minkowski {
-        gen_rhd_source_cfl_gr(out_dir, ndim, geom);
+        gen_rhd_source_cfl_gr(out_dir, ndim, geom.clone());
+        gen_rhd_fofc_project_gr(out_dir, ndim, geom);
     }
 }
 

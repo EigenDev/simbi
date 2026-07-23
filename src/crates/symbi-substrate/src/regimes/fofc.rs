@@ -115,12 +115,16 @@ where
 }
 
 /// book a per-substage flagged count into a horizon subtotal, when the split is active:
-/// a configured radius, a cartesian chart, and host-resident memory.
+/// a configured radius, a cartesian chart, and host-resident memory. returns the number of
+/// events booked (the count INSIDE the horizon), or 0 when no split applies — so the caller can
+/// derive the exterior count as `total - returned` and treat a run with no configured horizon as
+/// all-exterior (unchanged behavior).
 fn book_horizon_events<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     flag: &Field<Sc, D, Mem>,
     counter: &AtomicU64,
-) where
+) -> u64
+where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
@@ -129,10 +133,11 @@ fn book_horizon_events<const D: usize, const DOF: usize, Mem, Sc>(
         || Mem::IS_DEVICE_ACCESSIBLE
         || sim.geom.coords != symbi_geometry::Geometry::Cartesian
     {
-        return;
+        return 0;
     }
     let n = horizon_flagged_count(flag, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, r_h);
     counter.fetch_add(n, Ordering::Relaxed);
+    n
 }
 
 /// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
@@ -390,6 +395,11 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the cells where fallback is most likely. self-gating (no-op when the sim has no bodies); a
     // no-op where the godunov already fuses the body (iso cartesian), so it never double-applies.
     body_apply: impl Fn(),
+    // the ADMISSIBLE-BOUNDARY PROJECTION (GR-hydro): blend every spliced cell toward the admissible
+    // stage-input anchor onto partial-G BEFORE the c2p, so the recovery succeeds on every cell and the
+    // freeze tier below fires only on a genuinely inadmissible anchor. a no-op for regimes without a
+    // baked projection (flat, MHD, iso), which keep the freeze parachute.
+    project: impl Fn(),
     // the FREEZE-tier body parachute: `Some((dt_eff, gamma))` when the sim carries immersed bodies AND
     // the regime has a `_with_body` freeze-select kernel (adiabatic only). a frozen cell holds the
     // stage input `u_stage` (pre-body), so `body_apply` above — which targets the LIVE cons — never
@@ -468,6 +478,11 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         source_apply();
     }
     body_apply(); // re-apply the immersed-body source on the redo (mirrors the HO godunov->additive->body order)
+    // ADMISSIBLE-BOUNDARY PROJECTION (GR-hydro): map every spliced cell into G along the segment to
+    // the admissible stage-input anchor, BEFORE the c2p that follows — so the recovery converges on
+    // every cell and the freeze tier below counts only genuinely-inadmissible-anchor cells. a no-op
+    // for regimes without a baked projection.
+    project();
     c2p();
     // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier holds the stage input where even full first-order
     // fluxes leave a cell unphysical. it is the rare correct parachute for a genuinely hard cell
@@ -475,16 +490,32 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // that FOFC cannot fix freezes EVERY stage. track the consecutive streak and halt loudly once it
     // persists.
     let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, cons, prim);
-    if froze > 0.5 {
+    // the freeze-streak HALT gates on the EXTERIOR (r > r_+) freeze count only. a cell inside the
+    // event horizon is causally disconnected from the exterior — no numerical signal crosses r_+
+    // outward faster than the light cone the CFL bounds — so a persistent freeze there is expected
+    // and harmless: the near-vacuum supersonic infall between the excision surface and the horizon
+    // is the stiffest gas in the domain, and the acceptance criterion for a black-hole run is
+    // EXTERIOR events == 0 (the small residual interior->exterior leak is separately bounded by the
+    // excision-leakage gate). the panic exists to catch a poison spreading across the PHYSICAL
+    // domain; charging it for causally-disconnected interior fiction halts a healthy run. a run with
+    // no configured horizon (flat, angular chart, device) books zero interior events, so exterior ==
+    // total and the halt is bit-unchanged.
+    let interior_froze = if froze > 0.5 {
         FOFC_FREEZE_CELLS.fetch_add(froze as u64, Ordering::Relaxed);
         // the freeze flag lives in `scratch` after fofc_freeze_count.
-        book_horizon_events(sim, scratch, &FOFC_FREEZE_CELLS_HORIZON);
+        book_horizon_events(sim, scratch, &FOFC_FREEZE_CELLS_HORIZON)
+    } else {
+        0
+    };
+    let exterior_froze = (froze as u64).saturating_sub(interior_froze);
+    if exterior_froze > 0 {
         let streak = freeze_streak.fetch_add(1, Ordering::Relaxed) + 1;
         assert!(
             streak < FOFC_FREEZE_HALT_STREAK,
-            "FOFC last-resort freeze fired on {streak} consecutive substages (regime={prefix}{dof_sfx}): \
-             a zone is persistently unrecoverable by the first-order redo — a genuine breakdown, not \
-             the rare isolated parachute. check the source / initial data / boundary for a poison."
+            "FOFC last-resort freeze fired on {streak} consecutive substages in the EXTERIOR (r > r_+, \
+             regime={prefix}{dof_sfx}): a physical zone is persistently unrecoverable by the first-order \
+             redo — a genuine breakdown, not the rare isolated parachute. check the source / initial \
+             data / boundary for a poison. (freezes inside the horizon are expected and do not halt.)"
         );
     } else {
         freeze_streak.store(0, Ordering::Relaxed);
