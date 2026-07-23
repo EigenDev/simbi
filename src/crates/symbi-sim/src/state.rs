@@ -1777,23 +1777,33 @@ where
                 // shared owner the in-kernel geometry uses — the radial moment differs
                 // between the spherical (r^2 dr) and cylindrical (R dR) weights, and the
                 // spherical polar slot is sin-weighted rather than centered.
-                let centroid_of = |k: usize| -> f64 {
-                    let lo = self.geom.face_coord(coord, k)[k];
+                // grid axis `d` carries COORDINATE slot `axes[d]`, which is not the identity on
+                // the cylindrical r-z plane (axes = [0, 2]: grid axis 1 is the z coordinate,
+                // slot 2). indexing the slot by the grid axis puts z in the azimuthal slot and
+                // leaves slot 2 at zero, so a metric forming the spherical radius from the
+                // cylindrical pair, r = sqrt(R^2 + z^2), reads r = R everywhere off the
+                // midplane. the centroid moment is likewise a property of the COORDINATE, not
+                // of the grid axis.
+                let centroid_of = |d: usize, slot: usize| -> f64 {
+                    let lo = self.geom.face_coord(coord, d)[d];
                     let mut coord_hi = coord;
-                    coord_hi[k] += 1;
-                    let hi = self.geom.face_coord(coord_hi, k)[k];
-                    symbi_geometry::volume_weighted_centroid(chart, k, lo, hi)
+                    coord_hi[d] += 1;
+                    let hi = self.geom.face_coord(coord_hi, d)[d];
+                    symbi_geometry::volume_weighted_centroid(chart, slot, lo, hi)
                 };
-                Tensor::new(std::array::from_fn(|k| {
-                    if k < D {
-                        Sc::from_f64(centroid_of(k))
-                    } else if k == 1 {
+                Tensor::new(std::array::from_fn(|slot| {
+                    match self.geom.axes.iter().position(|&a| a == slot) {
+                        Some(d) => Sc::from_f64(centroid_of(d, slot)),
                         // an ungridded POLAR slot (DOF-lifted vectors on a 1D radial grid) takes
-                        // the exact equatorial pi/2 — the same convention as the in-kernel metric
-                        // points; zero would degenerate gamma_{phi phi} = r^2 sin^2(theta).
-                        Sc::from_f64(std::f64::consts::FRAC_PI_2)
-                    } else {
-                        Sc::ZERO
+                        // the exact equatorial pi/2; zero would degenerate
+                        // gamma_{phi phi} = r^2 sin^2(theta). every other ungridded slot is a
+                        // symmetry direction the metric never reads.
+                        None if slot == 1
+                            && chart == symbi_geometry::Geometry::Spherical =>
+                        {
+                            Sc::from_f64(std::f64::consts::FRAC_PI_2)
+                        }
+                        None => Sc::ZERO,
                     }
                 }))
             };

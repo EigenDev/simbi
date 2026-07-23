@@ -879,8 +879,20 @@ pub fn rhd_source_cfl_gr_gv(
         }
         acc
     };
-    let lam_s =
-        ((beta_dot_sm / alpha).abs() + (s_dot_sm / root.max(Gv::from_f64(1e-12))).abs()) / q_safe;
+    // the FIRST-ORDER rate above degenerates exactly where cold gas sits: at rest S -> 0
+    // kills the second term, and a shift-free chart kills the first, leaving no constraint
+    // at all. the margin is still consumed at SECOND order, because |S| grows like
+    // dt |Smom| and
+    //   sqrt(D^2 + |S|^2) ~ root + (dt |Smom|)^2 / (2 root),
+    // so admissibility needs dt < sqrt(2 root q0) / |Smom|. carried as the rate
+    // |Smom| / sqrt(2 root q0), it makes the cold-gas limit scale like sqrt(p) instead of
+    // the valencia form's p — far weaker, but NOT absent. omitting it lets a stationary
+    // rotating equilibrium on a zero-shift chart run past its admissible step.
+    let root_safe = root.max(Gv::from_f64(1e-12));
+    let sm_norm = gamma_norm(&sm_arr).sqrt();
+    let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
+    let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
+    let lam_s = lam_first + lam_second;
     // excised cells are numerical padding whose onion-filled state can sit near the
     // admissible-cone boundary indefinitely (the frozen clamped-core metric drives
     // enormous geodesic sources over donor-copied gas), so their admissibility rate
