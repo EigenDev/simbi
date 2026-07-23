@@ -627,6 +627,18 @@ pub fn godunov_stage_gv_with_fused_built(
         ),
         _ => cell_geometry_covariant_gv(coords, spacing, axes, ndim as usize, None),
     });
+    // GR HYDRO evolves the fully densitized state (Gammie et al. 2003; Stone et al. 2024 eq. 20):
+    // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] with the flux carrying the SAME measure, so
+    // the divergence is plain coordinate differencing, there is no lapse to place, the geometry
+    // arrives through the pointwise connection source (1/2) sqrt(-g) (d_i g_ab) T^ab, and the
+    // energy source is identically zero because the metric is stationary. GR MHD keeps the
+    // area-weighted Valencia path (its induction and CT seam are not densitized).
+    let densitized =
+        spacetime != Spacetime::Minkowski && matches!(source, GeoSource::Hydro { .. });
+    assert!(
+        !densitized || (sources.is_empty() && n_bodies == 0),
+        "a densitized GR state cannot take undensitized user-source or immersed-body rates"
+    );
     let rho = Gv::field("rho", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
         .map(|k| Gv::field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
@@ -645,8 +657,11 @@ pub fn godunov_stage_gv_with_fused_built(
         (_, GeoSource::Hydro { .. }) | (_, GeoSource::Rmhd) => GeoSource::Hydro { inertial: false },
         (_, s) => s,
     };
-    let src = geo
-        .as_ref()
+    // under densitization the whole geometric momentum contribution — pressure block included —
+    // arrives through the connection source below, so the discrete area-weighted form is retired.
+    let src = (!densitized)
+        .then(|| geo.as_ref())
+        .flatten()
         .map(|g| gv_geometric_source(coords, axes, ndim as usize, ncomp, g, source_discrete, &mom, mag_from_bcell));
 
     let contribs = splice_fused_sources_to_contribs(
@@ -667,9 +682,16 @@ pub fn godunov_stage_gv_with_fused_built(
     // curvilinear path carries one (cartesian-uniform geo = None is always Minkowski -> unused).
     let coord_centroid: Vec<Gv> = match &geo {
         Some(g) => {
+            // the densitized law's cell average is over the plain coordinate volume, so its metric
+            // sampling point is the arithmetic midpoint; the area-weighted law's average carries
+            // the chart's volume element and reads the volume-weighted centroid.
+            let mid = densitized.then(|| gv_cell_midpoints(spacing, ndim as usize));
             let mut c = vec![Gv::ZERO; 3];
             for d in 0..(ndim as usize) {
-                c[axes[d]] = g.centroid[d];
+                c[axes[d]] = match &mid {
+                    Some(m) => m[d],
+                    None => g.centroid[d],
+                };
             }
             c
         }
@@ -680,36 +702,62 @@ pub fn godunov_stage_gv_with_fused_built(
             || matches!(source, GeoSource::Rmhd | GeoSource::Hydro { .. }),
         "the GR godunov source carries the perfect-fluid or ideal-MHD stress only"
     );
-    let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
+    // the cell lapse. on the Valencia path it weights the spatial RHS; under densitization it is
+    // one factor of the measure sqrt(-g) = alpha sqrt(det gamma), and the RHS weight is identically
+    // 1 (sqrt(-g) sits on both the state and the flux) so there is no lapse left to place.
+    let cell_lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
+    let lapse = if densitized { None } else { cell_lapse };
+    // coordinate-indexed metric position: each gridded coordinate at its centroid, each ungridded
+    // coordinate at its chart symmetry default (spherical polar -> pi/2, else 0). a flat spacetime
+    // has no metric to sample and (on a cartesian-uniform grid) no centroid nodes at all.
+    let x_cell: Option<Tensor<Gv, 3>> = (spacetime != Spacetime::Minkowski).then(|| {
+        Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+            if axes.contains(&c) { coord_centroid[c] } else { gv_ungridded_slot(coords, c) }
+        }))
+    });
+    // the cell measure, evaluated at the metric's FULL spatial dimension so a reduced grid keeps
+    // the suppressed directions' volume element. the state carries sqrt(det gamma), the flux and
+    // the connection source carry sqrt(-g) = alpha sqrt(det gamma).
+    let sqrt_gamma_cell = densitized.then(|| {
+        gv_metric_volume_factor_at(
+            spacetime,
+            coords,
+            x_cell.expect("a curved spacetime has a metric position"),
+        )
+    });
+    let sqrt_neg_g =
+        sqrt_gamma_cell.map(|g| cell_lapse.expect("a curved spacetime has a lapse") * g);
     // the GR geodesic sources from the FULL covariant contraction `grhd_covariant_source`: the
     // per-coordinate momentum source S_j = (1/2) T^{mu nu} d_j g_{mu nu} and the energy source
     // S_tau, one forward-autodiff pass per axis at the metric's full spherical D = 3 (the metric
-    // supplies only its ADM line element — no hand-derived christoffels). the MOMENTUM call takes
-    // p = 0: the E-part only (gravity + covariant centrifugal), because the pressure block
-    // `p d_j ln(alpha sqrt(gamma))` rides the DISCRETE well-balanced form in gv_geometric_source
-    // above. the ENERGY call takes the full p — S_tau needs no discrete balance (it vanishes
-    // identically at a zero-shift hydrostatic state). the polar angle is the cell centroid when
-    // gridded, else pi/2 (exact: with no polar grid every theta-dependence cancels). flat -> None.
+    // supplies only its ADM line element — no hand-derived christoffels).
+    //
+    // on the Valencia path the MOMENTUM call takes p = 0 (the E-part only: gravity + covariant
+    // centrifugal), because the pressure block `p d_j ln(alpha sqrt(gamma))` rides the DISCRETE
+    // well-balanced form in gv_geometric_source above, and the ENERGY call takes the full p.
+    // under densitization the connection source IS the whole geometric contribution, so ONE pass
+    // at the full pressure serves the momentum and the energy source is structurally zero.
     // GRMHD-ready: the EM stress just changes T^{mu nu}.
     let geodesic: Option<(Tensor<Gv, 3>, Gv)> = match spacetime {
         Spacetime::Minkowski => None,
         _ => {
             let mass = Dual::constant(Gv::scalar("schwarzschild_mass")); // constant w.r.t. position
-            // coordinate-indexed metric position: each gridded coordinate at its centroid, each
-            // ungridded coordinate at its chart symmetry default (spherical polar -> pi/2, else 0).
-            let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-                if axes.contains(&c) { coord_centroid[c] } else { gv_ungridded_slot(coords, c) }
-            }));
+            let x = x_cell.expect("a curved spacetime has a metric position");
             // the effective inertia e = rho h W^2 for the covariant stress. reconstructed metric-free
-            // as h D^2 / rho_prim (W = D/rho_prim, D = cons_den) — independent of the energy variable,
-            // so it holds whether the nrg slot stores the Valencia tau (RMHD) or the covariant ehat
-            // (RHD, where D + tau + p no longer equals the nrg field).
+            // as h D^2 / rho_prim (W = D/rho_prim) — independent of the energy variable, so it holds
+            // whether the nrg slot stores the Valencia tau (RMHD) or the killing energy (RHD, where
+            // D + tau + p no longer equals the nrg field). the mass slot is densitized on the GR
+            // hydro path, so the baryon density D is recovered as cons_den / sqrt(det gamma).
             let p = Gv::field("pre", FieldRef::PrimPre);
             let e = {
                 let prim_rho = Gv::field("prim_rho", FieldRef::PrimRho);
                 let gamma_eos = Gv::scalar("gamma");
                 let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * p / prim_rho;
-                h_enth * rho * rho / prim_rho
+                let d_baryon = match sqrt_gamma_cell {
+                    Some(g) => rho / g,
+                    None => rho,
+                };
+                h_enth * d_baryon * d_baryon / prim_rho
             };
             // the CONTRAVARIANT velocity in coordinate slots (the metric-aware c2p output);
             // spherical GR momentum slots are coordinate-ordered, so slot k == coordinate k.
@@ -801,11 +849,24 @@ pub fn godunov_stage_gv_with_fused_built(
                     }
                     Spacetime::Minkowski => unreachable!("flat handled above"),
                 };
-                let (s_mom, _) = src_at(Gv::ZERO);
-                let (_, s_tau) = src_at(p);
-                Some((s_mom, s_tau))
+                if densitized {
+                    // the connection source carries every geometric block, pressure included, and
+                    // the free-index-down energy source vanishes on a stationary metric.
+                    let (s_mom, _) = src_at(p);
+                    Some((s_mom, Gv::ZERO))
+                } else {
+                    let (s_mom, _) = src_at(Gv::ZERO);
+                    let (_, s_tau) = src_at(p);
+                    Some((s_mom, s_tau))
+                }
             }
         }
+    };
+    // the connection source is the right side of d_t U + d_j F^j = sqrt(-g)(1/2)(d_i g_ab) T^ab, so
+    // it takes the SAME measure the state and the flux carry.
+    let geodesic = match (geodesic, sqrt_neg_g) {
+        (Some((s_mom, s_tau)), Some(m)) => Some((s_mom.scale(m), s_tau)),
+        (g, _) => g,
     };
     let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);
     // the GR geodesic ENERGY source S_tau — the second output of the contraction (gravity's rate
@@ -819,6 +880,15 @@ pub fn godunov_stage_gv_with_fused_built(
             r = r + dt * s;
         }
         r
+    };
+    // the densitized law differences the face fluxes in PLAIN coordinates — sqrt(-g) already
+    // carries the geometry, so there is no area or volume weighting on any chart.
+    let divergence = |base: &str| {
+        if densitized {
+            gv_divergence_coord(base, ndim, spacing)
+        } else {
+            gv_divergence(base, ndim, &geo)
+        }
     };
     let combine = |un: Gv, fe: Gv| a0 * un + ac * fe;
     // the USER sources ride as a SEPARATE additive term after the combine: `+ \sum ac*dt*contrib`,
@@ -835,13 +905,13 @@ pub fn godunov_stage_gv_with_fused_built(
 
     let u_n_rho = Gv::field("u_n_rho", FieldRef::un_den());
     let rho_g = with_sources(
-        combine(u_n_rho, fe(rho, gv_divergence("mass_flux", ndim, &geo), None)),
+        combine(u_n_rho, fe(rho, divergence("mass_flux"), None)),
         &contribs.den,
     );
     let mut mom_g: Vec<Gv> = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
         let u_n_mom = Gv::field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
-        let div = gv_divergence(&format!("mom_flux_{k}"), ndim, &geo);
+        let div = divergence(&format!("mom_flux_{k}"));
         let geo_src = src.as_ref().map(|s| s[k]);
         // every momentum slot carries its covariant geodesic block (gravity + covariant
         // centrifugal, coordinate k of the contraction) on top of the discrete pressure form in
@@ -872,7 +942,7 @@ pub fn godunov_stage_gv_with_fused_built(
     let nrg_g = has_energy.then(|| {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
-        let div = gv_divergence("nrg_flux", ndim, &geo);
+        let div = divergence("nrg_flux");
         let stage = if is_covariant_energy {
             // conservation of the killing energy, d_t(sqrt(gm) ehat) + d_n(sqrt(gm) f_ehat) = 0,
             // reduced to the code's FLAT coordinate measure (sqrt(gm) = sqrt(gm_flat)/alpha, static):

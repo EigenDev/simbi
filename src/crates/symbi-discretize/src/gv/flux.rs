@@ -307,13 +307,14 @@ pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind
 }
 
 
-/// the RHD face flux on a curved SPATIAL metric — the `_schw`/`_ks` GR path (Valencia covariant U/F +
-/// Banyuls-Font coordinate wave speeds). PLM-reconstruct the CONTRAVARIANT-velocity primitive, build
-/// the in-kernel `SpatialMetric` (gamma/gamma^{-1}) + lapse from the metric at the radial face, and run
-/// `riemann::hlle_with_speeds` at the `RhdGr` regime. `RhdGr` REDUCES to `Rhd` at identity gamma, so at
-/// a flat metric this is bit-identical to `rhd_flux_gv`. the kerr-schild shift + the alpha
-/// densitization ride the godunov (unchanged). D-generic over the sweep (metric at the swept-axis face,
-/// transverse coords at the centroid); baked only for a curved spacetime.
+/// the RHD face flux on a curved spacetime — the `_schw`/`_ks` GR path. PLM-reconstruct the
+/// CONTRAVARIANT-velocity primitive, build the in-kernel 3+1 block (gamma/gamma^{-1}, lapse, shift)
+/// and the densitization measure `sqrt(det gamma)` from the metric at the swept-axis face, then run
+/// `riemann::hlle_with_speeds` at the `RhdGr` regime. the emitted flux is the fully densitized
+/// `sqrt(-g)[rho u^n, T^n_i, -(T^n_t + rho u^n)]`, so the godunov differences it in plain
+/// coordinates with no area, volume or lapse weight. `RhdGr` REDUCES to `Rhd` at identity gamma,
+/// unit lapse, zero shift and unit measure. D-generic over the sweep (metric at the swept-axis
+/// face, transverse coords at the centroid); baked only for a curved spacetime.
 pub fn rhd_flux_gr_gv<const D: usize>(
     dir: u8,
     spacetime: Spacetime,
@@ -341,13 +342,16 @@ where
     // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
     // slot (the axisymmetric phi) takes zero: the spherical metrics never read phi, and
     // gamma_{phi phi} = r^2 sin^2(theta) needs only the gridded (r, theta).
-    let geo = (ndim > 1).then(|| cell_geometry_gv(coords, spacing, axes, ndim));
+    // the transverse coordinate is the cell's ARITHMETIC MIDPOINT: the face flux is a face
+    // AVERAGE over the transverse coordinate extent, whose second-order sampling point is the
+    // midpoint — the same point the cell state densitizes at.
+    let mid = gv_cell_midpoints(spacing, ndim);
     let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
         if c == axes[dir as usize] {
             gv_axis_face_at(dir as usize, spacing[dir as usize], 0)
         } else {
             match axes.iter().position(|&a| a == c) {
-                Some(d) => geo.as_ref().expect("a transverse gridded axis implies ndim > 1").centroid[d],
+                Some(d) => mid[d],
                 None => gv_ungridded_slot(coords, c),
             }
         }
@@ -357,38 +361,42 @@ where
     // the SPHERICAL chart (SchwarzschildKS, radial shift) OR the CARTESIAN chart
     // (SchwarzschildKSCartesian, non-diagonal, shift along every axis). the shift `beta` is carried
     // out for the per-axis shift term below (zero for the static Schwarzschild chart).
-    let (gamma, gamma_inv, alpha, beta) = match (spacetime, coords) {
+    // `volume_factor` is sqrt(det gamma) of the FULL chart at any instantiated `D`, so a reduced
+    // radial or equatorial block still carries the suppressed directions' measure (spherical 1D:
+    // r^2/sqrt(f)); `alpha * volume_factor = sqrt(-g)` is the densitization the state and the flux
+    // both ride on.
+    let (gamma, gamma_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update
         // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius; non-diagonal
         // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
         (Spacetime::Kerr, Coords::Cartesian) => {
             let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
-(Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::Kerr, Coords::Cylindrical) => {
             let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} at the face — swirl (D = 3) only.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::Minkowski, _) => unreachable!("the GR flux is baked only for a curved spacetime"),
     };
@@ -399,7 +407,7 @@ where
     // exactly, and w = 0 to roundoff for dragging states. reconstructing v^phi raw mixes the
     // geometric dragging profile into the limited slopes and generates S_phi at truncation level.
     // the per-offset coefficient q = gamma_{r phi}/gamma_{phi phi} is evaluated at each stencil
-    // cell's VOLUME-WEIGHTED centroid — the exact position the c2p inverted the metric at, so the
+    // cell's ARITHMETIC MIDPOINT — the exact position the c2p inverted the metric at, so the
     // cell-wise cancellation transfers to the stencil values at roundoff; the face coefficient
     // comes from the SAME face matrices the riemann states lower with. gamma_{r phi} vanishes for
     // every other background, so this block is kerr-only — and SPHERICAL-swirl-only: the cartesian
@@ -409,22 +417,19 @@ where
         assert!(D == 3, "the kerr flux carries the swirl DOF");
         let mass = Gv::scalar("schwarzschild_mass");
         let spin = Gv::scalar("kerr_spin");
-        // q at the volume-weighted centroid of the cell `off` steps along the sweep axis; the
-        // transverse coordinate sits at THIS cell's centroid (the stencil shifts one axis only).
-        let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+        // q at the arithmetic midpoint of the cell `off` steps along the sweep axis; the
+        // transverse coordinate sits at THIS cell's midpoint (the stencil shifts one axis only).
+        let half = Gv::from_f64(0.5);
         let q_at = |off: i32| -> Gv {
+            let shifted_mid = |ax: usize| {
+                (gv_axis_face_at(ax, spacing[ax], off as i64)
+                    + gv_axis_face_at(ax, spacing[ax], off as i64 + 1))
+                    * half
+            };
             let (r_c, th_c) = if dir == 0 {
-                let rl = gv_axis_face_at(0, spacing[0], off as i64);
-                let rh = gv_axis_face_at(0, spacing[0], off as i64 + 1);
-                let num = gv_powi(rh, 4) - gv_powi(rl, 4);
-                let den = gv_powi(rh, 3) - gv_powi(rl, 3);
-                (Gv::from_f64(0.75) * num / den, geo.centroid[1])
+                (shifted_mid(0), mid[1])
             } else {
-                let tl = gv_axis_face_at(1, spacing[1], off as i64);
-                let th = gv_axis_face_at(1, spacing[1], off as i64 + 1);
-                // volume-weighted polar centroid: [(sin - t cos)]_{tl}^{th} / (cos tl - cos th).
-                let num = (th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos());
-                (geo.centroid[0], num / (tl.cos() - th.cos()))
+                (mid[0], shifted_mid(1))
             };
             let m = KerrKS { mass, spin };
             let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
@@ -456,89 +461,26 @@ where
         metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
         alpha,
         shift: beta,
+        sqrt_gamma,
     };
     let coord_n = axes[dir as usize];
     // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
-    // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
-    // applied by the shifted fan below). every fluid characteristic lies inside the light cone, so
-    // it cannot under-bound near the boundary of the physical set; the low-order update keeps the
-    // conserved state inside the physical cone.
+    // s = +/- alpha sqrt(gamma^{nn}) - beta^n — the STATE-INDEPENDENT maximal signal bound in
+    // COORDINATE form, matching the shift the flux carries. every fluid characteristic lies inside
+    // the light cone, so it cannot under-bound near the boundary of the physical set; the low-order
+    // update keeps the conserved state inside the physical cone.
     let (s_l, s_r) = if rusanov {
         let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
-        (Gv::ZERO - lam, lam)
+        let beta_n = beta[coord_n];
+        (Gv::ZERO - lam - beta_n, lam - beta_n)
     } else {
         regime.extremal_speeds(&eos, &left, &right, &nhat)
     };
-    // the kerr-schild charts carry a shift: the face flux is the hll solution of the full valencia
-    // system d_t U + (1/sqrt(gm)) d_n (sqrt(gm) [alpha F - beta^n U]). with the godunov applying the
-    // alpha sqrt(gm) measure to the kernel flux, the exact pieces are: per-side fluxes
-    // G = F - (beta^n/alpha) U, signal speeds s - beta^n (the banyuls-font s already carries alpha),
-    // and fan dissipation (s_l s_r / alpha) dU — densitization then lands the true central part
-    // sqrt(gm)(alpha F - beta U) AND the true dissipation sqrt(gm) s_l s_r dU. the SWEPT-axis shift
-    // component beta^n = beta[coord_n]: the spherical kerr-schild + kerr charts carry only beta^r, so
-    // only the radial sweep is shifted (beta^theta = beta^phi = 0); the CARTESIAN kerr-schild chart
-    // carries beta^i on every axis, so every sweep is shifted. a zero beta^n reduces to the plain
-    // HLL bit-identically. mesh motion (vface) never composes with a curved spacetime in the bake.
-    let shifted = match (spacetime, coords) {
-        // cartesian kerr-schild charts (a = 0 and spinning): beta^i = (2H/(1 + 2H |l|^2)) l_i
-        // is nonzero on EVERY axis, so every sweep carries the shift.
-        (Spacetime::KerrSchild | Spacetime::Kerr, Coords::Cartesian) => true,
-        // cylindrical: beta^R (coord 0) and beta^z (coord 2) are nonzero, beta^phi (coord 1) = 0
-        // (a = 0, no frame dragging), so every sweep EXCEPT the azimuthal carries the shift.
-        (Spacetime::KerrSchild, Coords::Cylindrical) => coord_n != 1,
-        // SPINNING kerr on the cylindrical chart: the frame dragging puts beta^phi != 0,
-        // so every sweep carries the shift (dropping the azimuthal one is silent wrong
-        // dragging, the same class as the cartesian-kerr per-axis bug).
-        (Spacetime::Kerr, Coords::Cylindrical) => true,
-        (Spacetime::KerrSchild, _) | (Spacetime::Kerr, _) => coord_n == 0,
-        _ => false,
-    };
-    let flux = if shifted {
-        let beta_n = beta[coord_n];
-        let u_l = regime.to_conserved(&eos, &left);
-        let u_r = regime.to_conserved(&eos, &right);
-        let f_l = regime.to_flux(&left, &nhat, &eos);
-        let f_r = regime.to_flux(&right, &nhat, &eos);
-        let w = beta_n / alpha;
-        let mut g_l = f_l - u_l * w;
-        let mut g_r = f_r - u_r * w;
-        // the covariant energy flux f_ehat carries the lapse AND the shift itself (the free-index-
-        // down -sqrt(-g)(T^n_t + rho u^n)/sqrt(gamma)), so it does NOT take the Valencia
-        // G = F - (beta^n/alpha) U transform the mass/momentum fluxes need. it DOES take a 1/alpha
-        // at the face: the godunov works in the FLAT coordinate measure with one cell lapse on the
-        // divergence (gv_lapse_weight), and the reduction of d_t(sqrt(gm) ehat) + d_n(sqrt(gm)
-        // f_ehat) = 0 to that measure puts sqrt(gm) = sqrt(gm_flat)/alpha on BOTH terms — the face
-        // flux is f_ehat/alpha, the update alpha_cell * div. dropping the pair leaves a spurious
-        // energy source f_ehat * d_n(ln alpha) that shifts every GR steady profile (the michel
-        // hold degrades ~15x at 128 zones). the fan dissipation (sh_l sh_r / alpha)(ehat_r -
-        // ehat_l) below is already the correct sh_l sh_r * d(ehat/alpha) for this pair.
-        g_l.nrg = f_l.nrg / alpha;
-        g_r.nrg = f_r.nrg / alpha;
-        let sh_l = s_l - beta_n;
-        let sh_r = s_r - beta_n;
-        Gv::branch(
-            sh_l.cmp_ge(Gv::ZERO),
-            || g_l,
-            || {
-                Gv::branch(
-                    sh_r.cmp_le(Gv::ZERO),
-                    || g_r,
-                    || {
-                        let inv = Gv::ONE / (sh_r - sh_l);
-                        (g_l * sh_r - g_r * sh_l + (u_r - u_l) * (sh_l * sh_r / alpha)) * inv
-                    },
-                )
-            },
-        )
-    } else {
-        // unshifted sweep: plain HLL on (U, F) with F.nrg = f_ehat. the flat-measure reduction
-        // (see the shifted arm) still owes the energy component its 1/alpha at the face; scaling
-        // the WHOLE blended nrg output — central part and s_l s_r (ehat_r - ehat_l) dissipation
-        // alike — lands exactly the HLL of the pair (ehat/alpha, f_ehat/alpha).
-        let mut f = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
-        f.nrg = f.nrg / alpha;
-        f
-    };
+    // one HLL fan on the densitized pair (U, F^n): both sides carry the SAME measure sqrt(-g), the
+    // shift rides inside F^n, and the signal speeds are the coordinate speeds lambda^n - beta^n, so
+    // no per-chart advection transform and no lapse re-weighting of any component. mesh motion
+    // (vface) never composes with a curved spacetime in the bake.
+    let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }

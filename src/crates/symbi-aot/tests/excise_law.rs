@@ -49,9 +49,9 @@ fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state:
         Gamma::new(m.spatial_metric(x)),
         GammaInv::new(m.spatial_metric_inv(x)),
     );
-    // the covariant excise p2c: the cell lapse + shift so the rebuilt energy slot is the covariant
-    // ehat = alpha tau + (alpha-1) D - beta^i S_i the kernel stores (matches gv_excise).
-    RhdGr { metric, alpha: m.lapse(x), shift: m.shift(x) }
+    // the densitized excise p2c: the cell lapse, shift and full-chart measure so the rebuilt state
+    // is the sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] the kernel stores (matches gv_excise).
+    RhdGr { metric, alpha: m.lapse(x), shift: m.shift(x), sqrt_gamma: m.volume_factor(x) }
         .to_conserved(&IdealGas { gamma: GAMMA }, prim)
 }
 

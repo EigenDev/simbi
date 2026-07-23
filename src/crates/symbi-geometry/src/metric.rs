@@ -1070,25 +1070,42 @@ pub struct SchwarzschildKSCartesian<S> {
 }
 
 impl<S: Scalar> SchwarzschildKSCartesian<S> {
-    /// (r, 2H) at a cartesian position: r = sqrt(sum x_i^2) the euclidean/kerr-schild radius,
-    /// 2H = 2M/r. the number of gridded axes D is the slice (D = 2 -> the z = 0 equatorial plane).
+    /// (r, 2H, |l|^2) at a cartesian position: r = sqrt(sum x_i^2) the euclidean/kerr-schild
+    /// radius, 2H = 2M/r, and the SQUARED NORM of the null covector l^i = x^i / r. the number of
+    /// gridded axes D is the slice (D = 2 -> the z = 0 equatorial plane).
     ///
     /// the radius is clamped to r >= M/2: the chart's coordinate singularity at r = 0 sits ON
     /// the grid when the domain contains the origin, and the metric (h = 1 + 2M/r) and its
     /// derivatives (christoffels ~ M/r^2) diverge there. the clamp bounds every metric quantity
-    /// (h <= 5, alpha >= 1/sqrt(5)) while `max(r, M/2)` is the BIT-EXACT identity for r > M/2 —
-    /// deep inside the horizon r_+ = 2M and below any excision surface, so no cell whose state
-    /// matters ever reads a clamped value. inside the clamp the metric is a constant, so its
-    /// autodiff derivative — hence the geodesic source — is exactly zero: a frozen metric has
-    /// no gravity, correct for cells the excision fill overwrites each step.
+    /// while `max(r, M/2)` is the BIT-EXACT identity for r > M/2 — deep inside the horizon
+    /// r_+ = 2M and below any excision surface.
+    ///
+    /// the clamp leaves l^i = x^i / r_clamped, so |l| = |x| / r_clamped drops BELOW 1 inside it
+    /// and the kerr-schild null condition no longer holds there. every closed form below
+    /// therefore contracts with the ACTUAL |l|^2 rather than assuming 1 — the rank-1 determinant
+    /// det(delta + 2H l l^T) = 1 + 2H |l|^2 and its sherman-morrison inverse — so the clamped
+    /// region stays a CONSISTENT positive-definite metric whose determinant agrees with the
+    /// matrix it came from. assuming |l| = 1 there instead makes sqrt(det gamma) disagree with
+    /// the metric by ~18% at r = 0.45 M, breaks the four-volume identity
+    /// alpha sqrt(det gamma) = 1, and turns the pressure block of the connection source,
+    /// (1/2) p g^{ab} d_i g_ab = p d_i ln sqrt(-g), from identically zero into a spurious force.
+    /// outside the clamp |l|^2 is exactly 1 (r / r is exactly 1 in IEEE arithmetic), so every
+    /// form reduces bit-for-bit to the unit-l one.
     #[inline]
-    fn radius_two_h<const D: usize>(&self, x: Tensor<S, D>) -> (S, S) {
+    fn radius_two_h<const D: usize>(&self, x: Tensor<S, D>) -> (S, S, S) {
         let mut r2 = S::ZERO;
         for ii in 0..D {
             r2 = r2 + x[ii] * x[ii];
         }
-        let r = r2.sqrt().max(S::from_f64(0.5) * self.mass);
-        (r, S::from_f64(2.0) * self.mass / r)
+        let r_g = S::from_f64(0.5) * self.mass;
+        let r_true = r2.sqrt();
+        let r = r_true.max(r_g);
+        // |l|^2 = |x|^2 / r_clamped^2, formed from the UNROOTED r2 so it stays differentiable at
+        // the origin: d(sqrt(r2))/dx is infinite there, and squaring that back gives a NaN tangent
+        // rather than the true zero. outside the clamp |l|^2 is exactly 1 by construction, which
+        // keeps every form below bit-identical to the unit-l one wherever the null condition holds.
+        let ll2 = S::select(r_true.cmp_ge(r_g), S::ONE, r2 / (r * r));
+        (r, S::from_f64(2.0) * self.mass / r, ll2)
     }
 }
 
@@ -1102,42 +1119,46 @@ macro_rules! impl_schwarzschild_ks_cartesian {
             }
 
             fn lapse(&self, x: Tensor<S, $d>) -> S {
-                let (_r, two_h) = self.radius_two_h(x);
-                S::ONE / (S::ONE + two_h).sqrt()
+                let (_r, two_h, ll2) = self.radius_two_h(x);
+                S::ONE / (S::ONE + two_h * ll2).sqrt()
             }
-            // alpha^2 = 1/(1 + 2M/r) in EXACT closed form (no sqrt round-trip; the GR CFL depends on it).
+            // alpha^2 = 1/(1 + 2H |l|^2) in EXACT closed form (no sqrt round-trip; the GR CFL
+            // depends on it). |l| = 1 outside the radius clamp, where this is 1/(1 + 2M/r).
             fn lapse_sq(&self, x: Tensor<S, $d>) -> S {
-                let (_r, two_h) = self.radius_two_h(x);
-                S::ONE / (S::ONE + two_h)
+                let (_r, two_h, ll2) = self.radius_two_h(x);
+                S::ONE / (S::ONE + two_h * ll2)
             }
-            // beta^i = (2H / (1 + 2H)) l^i, l^i = x_i / r.
+            // beta^i = gamma^{ij} (2H l_j) = (2H / (1 + 2H |l|^2)) l^i, l^i = x_i / r.
             fn shift(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
-                let (r, two_h) = self.radius_two_h(x);
-                let s = (two_h / (S::ONE + two_h)) / r;
+                let (r, two_h, ll2) = self.radius_two_h(x);
+                let s = (two_h / (S::ONE + two_h * ll2)) / r;
                 Tensor::new(std::array::from_fn(|ii| s * x[ii]))
             }
 
-            // gamma_ij = delta_ij + (2H / r^2) x_i x_j.
+            // gamma_ij = delta_ij + 2H l_i l_j = delta_ij + (2H / r^2) x_i x_j.
             fn spatial_metric(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
-                let (r, two_h) = self.radius_two_h(x);
+                let (r, two_h, _ll2) = self.radius_two_h(x);
                 let coef = two_h / (r * r);
                 Matrix::from_fn(|ii, jj| {
                     let kron = if ii == jj { S::ONE } else { S::ZERO };
                     kron + coef * x[ii] * x[jj]
                 })
             }
-            // gamma^{ij} = delta_ij - (2H / (1 + 2H)) l^i l^j (sherman-morrison, l a unit vector).
+            // gamma^{ij} = delta_ij - (2H / (1 + 2H |l|^2)) l^i l^j (sherman-morrison on the
+            // rank-1 update; the ACTUAL |l|^2, so the inverse stays the true inverse of the
+            // matrix above inside the radius clamp where |l| < 1).
             fn spatial_metric_inv(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
-                let (r, two_h) = self.radius_two_h(x);
-                let coef = (two_h / (S::ONE + two_h)) / (r * r);
+                let (r, two_h, ll2) = self.radius_two_h(x);
+                let coef = (two_h / (S::ONE + two_h * ll2)) / (r * r);
                 Matrix::from_fn(|ii, jj| {
                     let kron = if ii == jj { S::ONE } else { S::ZERO };
                     kron - coef * x[ii] * x[jj]
                 })
             }
+            // det(delta + 2H l l^T) = 1 + 2H |l|^2 exactly (rank-1 determinant lemma).
             fn sqrt_det_gamma(&self, x: Tensor<S, $d>) -> S {
-                let (_r, two_h) = self.radius_two_h(x);
-                (S::ONE + two_h).sqrt()
+                let (_r, two_h, ll2) = self.radius_two_h(x);
+                (S::ONE + two_h * ll2).sqrt()
             }
             // full-rank cartesian chart (D == physical dim): the proper measure is sqrt_det_gamma.
             fn volume_factor(&self, x: Tensor<S, $d>) -> S { self.sqrt_det_gamma(x) }
@@ -3142,21 +3163,40 @@ mod tests {
     }
 
     #[test]
-    fn cartesian_ks_is_bounded_and_frozen_inside_the_clamp() {
-        // inside r = M/2 the metric is the constant r = M/2 metric: h = 1 + 2M/(M/2) = 5,
-        // alpha = 1/sqrt(5). the origin itself (a face position when the domain contains it)
-        // evaluates cleanly — finite, no NaN, equal to the frozen values.
+    fn cartesian_ks_is_bounded_and_consistent_inside_the_clamp() {
+        // the radius clamp exists to bound the chart's coordinate singularity at r = 0, which the
+        // grid straddles whenever the domain contains the origin. inside r = M/2 the clamp freezes
+        // r and hence 2H, but NOT the metric: l^i = x^i / r_clamped still varies with position and
+        // its norm |l| = |x| / r_clamped falls below 1, so the rank-1 forms must contract with the
+        // ACTUAL |l|^2. with M = 1 that gives 1 + 2H |l|^2 = 1 + 16 |x|^2 on the clamp, running
+        // continuously from the flat value 1 at the origin to the exterior value 5 at r = M/2.
+        // the requirement is boundedness and consistency, not constancy: alpha in [1/sqrt(5), 1],
+        // every component finite through the origin, and sqrt(det gamma) equal to the determinant
+        // of the matrix it describes.
         let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
-        let alpha_frozen = 1.0 / 5.0_f64.sqrt();
-        let sq_frozen = 5.0_f64.sqrt();
-        for &(px, py) in &[(0.0_f64, 0.0), (1e-300, 0.0), (0.1, 0.1), (0.3, 0.2)] {
+        for &(px, py) in &[(0.0_f64, 0.0), (1e-300, 0.0), (0.1, 0.1), (0.3, 0.2), (0.5, 0.0)] {
             let x = Tensor::new([px, py]);
             let alpha = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x);
             let sq = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::sqrt_det_gamma(&bh, x);
             let beta = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::shift(&bh, x);
             let gm = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::spatial_metric(&bh, x);
-            assert_eq!(alpha, alpha_frozen, "lapse frozen at ({px},{py})");
-            assert_eq!(sq, sq_frozen, "sqrt_det_gamma frozen at ({px},{py})");
+            let r2 = px * px + py * py;
+            assert!(
+                (alpha - 1.0 / (1.0 + 16.0 * r2).sqrt()).abs() < 1e-15,
+                "lapse on the clamp at ({px},{py}): {alpha}"
+            );
+            assert!(
+                alpha >= 1.0 / 5.0_f64.sqrt() - 1e-15 && alpha <= 1.0 + 1e-15,
+                "lapse out of the clamp bounds at ({px},{py}): {alpha}"
+            );
+            // the 2x2 determinant must equal the closed form: the guard region is a CONSISTENT
+            // metric, not one whose measure disagrees with its components.
+            let det = gm[(0, 0)] * gm[(1, 1)] - gm[(0, 1)] * gm[(1, 0)];
+            assert!(
+                (det - sq * sq).abs() < 1e-14 * det.max(1.0),
+                "det {det} vs sqrt_det_gamma^2 {} at ({px},{py})",
+                sq * sq
+            );
             for ii in 0..2 {
                 assert!(beta[ii].is_finite(), "shift finite at ({px},{py})");
                 for jj in 0..2 {
@@ -3167,10 +3207,14 @@ mod tests {
     }
 
     #[test]
-    fn cartesian_ks_frozen_metric_has_zero_derivative() {
-        // the geodesic source is built from Dual derivatives of the metric; inside the clamp
-        // the metric is constant, so the tangent must be EXACTLY zero (no gravity in the
-        // frozen region), and nonzero outside where the true metric varies.
+    fn cartesian_ks_clamp_bounds_the_metric_gradient() {
+        // the geodesic source is built from Dual derivatives of the metric. what the clamp has to
+        // deliver is a BOUNDED derivative — the unclamped chart's d(alpha)/dx grows like M/r^2 and
+        // diverges at the origin — not a vanishing one. on the clamp the lapse derivative is
+        // -16 x / (1 + 16 |x|^2)^{3/2} (M = 1), which is bounded by ~2.5 and vanishes at the
+        // origin by symmetry. the metric is NOT constant there: freezing r leaves l^i = x^i/r_g
+        // varying with position, so a claim of zero gravity inside the clamp holds for no
+        // component of the source.
         use symbi_ir::dual::Dual;
         let bh = SchwarzschildKSCartesian { mass: Dual { value: 1.0_f64, tangent: 0.0 } };
         let lapse_dx = |px: f64, py: f64| -> f64 {
@@ -3180,8 +3224,14 @@ mod tests {
             ]);
             <SchwarzschildKSCartesian<Dual<f64>> as Metric<Dual<f64>, 2>>::lapse(&bh, x).tangent
         };
-        assert_eq!(lapse_dx(0.2, 0.1), 0.0, "zero gradient inside the clamp");
-        assert_eq!(lapse_dx(0.0, 0.0), 0.0, "zero gradient at the origin");
+        assert_eq!(lapse_dx(0.0, 0.0), 0.0, "the gradient vanishes at the origin by symmetry");
+        for &(px, py) in &[(0.2_f64, 0.1), (0.4, 0.0), (0.1, 0.3), (0.49, 0.0)] {
+            let d = lapse_dx(px, py);
+            let r2 = px * px + py * py;
+            let want = -16.0 * px / (1.0 + 16.0 * r2).powf(1.5);
+            assert!((d - want).abs() < 1e-14, "clamp gradient at ({px},{py}): {d} vs {want}");
+            assert!(d.abs() < 3.0, "clamp gradient unbounded at ({px},{py}): {d}");
+        }
         assert!(lapse_dx(1.0, 0.4).abs() > 1e-3, "true gradient outside the clamp");
     }
 

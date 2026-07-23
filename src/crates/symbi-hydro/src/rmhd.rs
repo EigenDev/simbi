@@ -92,6 +92,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         gamma: &SpatialMetric<S, D>,
         alpha: S,
         shift: Tensor<S, D>,
+        _sqrt_gamma: S,
     ) -> Self::Cons {
         // the covariant storage: the Valencia conserved (S_i = (rho h W^2 + B^2) v_i - (v.B) B_i),
         // then the energy slot re-split to the covariant (killing) energy ehat = alpha tau +

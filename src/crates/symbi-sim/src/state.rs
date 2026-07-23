@@ -1773,10 +1773,10 @@ where
                 }))
             } else {
                 let chart = <M as Metric<Sc, DOF>>::geometry(&self.physics.metric);
-                // EVERY gridded slot takes its chart's volume-weighted centroid, from the
-                // shared owner the in-kernel geometry uses — the radial moment differs
-                // between the spherical (r^2 dr) and cylindrical (R dR) weights, and the
-                // spherical polar slot is sin-weighted rather than centered.
+                // EVERY gridded slot takes its moment from the shared owner the in-kernel
+                // geometry uses — under the chart's volume element the radial weight differs
+                // between spherical (r^2 dr) and cylindrical (R dR), and the spherical polar slot
+                // is sin-weighted rather than centered.
                 // grid axis `d` carries COORDINATE slot `axes[d]`, which is not the identity on
                 // the cylindrical r-z plane (axes = [0, 2]: grid axis 1 is the z coordinate,
                 // slot 2). indexing the slot by the grid axis puts z in the azimuthal slot and
@@ -1784,12 +1784,22 @@ where
                 // cylindrical pair, r = sqrt(R^2 + z^2), reads r = R everywhere off the
                 // midplane. the centroid moment is likewise a property of the COORDINATE, not
                 // of the grid axis.
+                // the moment depends on the MEASURE the scheme's cell average is taken against.
+                // the area-weighted law integrates the chart's volume element and reads the
+                // volume-weighted centroid; the densitized relativistic-hydro law integrates the
+                // plain coordinate volume (its measure rides inside the conserved variable) and
+                // reads the arithmetic midpoint, which is what the in-kernel c2p undensitizes at.
+                let densitized = self.fields.mhd.is_none();
                 let centroid_of = |d: usize, slot: usize| -> f64 {
                     let lo = self.geom.face_coord(coord, d)[d];
                     let mut coord_hi = coord;
                     coord_hi[d] += 1;
                     let hi = self.geom.face_coord(coord_hi, d)[d];
-                    symbi_geometry::volume_weighted_centroid(chart, slot, lo, hi)
+                    if densitized {
+                        (lo + hi) * 0.5
+                    } else {
+                        symbi_geometry::volume_weighted_centroid(chart, slot, lo, hi)
+                    }
                 };
                 Tensor::new(std::array::from_fn(|slot| {
                     match self.geom.axes.iter().position(|&a| a == slot) {
@@ -1813,8 +1823,13 @@ where
             );
             let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
             let shift = <M as Metric<Sc, DOF>>::shift(&self.physics.metric, x_dof);
+            // the FULL-chart spatial measure, including the directions the momentum block
+            // suppresses: `volume_factor` is r^2 sin(theta)/sqrt(f) on a 1D radial spherical grid
+            // where the 1x1 determinant would give only 1/sqrt(f). paired with the lapse it is the
+            // sqrt(-g) the densitized relativistic state carries.
+            let sqrt_gamma = <M as Metric<Sc, DOF>>::volume_factor(&self.physics.metric, x_dof);
             <R as Regime<Sc, DOF>>::to_conserved_covariant(
-                &self.physics.regime, &self.physics.eos, prim, &sm, alpha, shift,
+                &self.physics.regime, &self.physics.eos, prim, &sm, alpha, shift, sqrt_gamma,
             )
         };
         self.fields.cons.scatter_from(coord, cons.hydro_part());

@@ -81,10 +81,15 @@ pub struct KernelDescriptor {
 
 // ---- shared device-source helpers (consumed by tensor/emit_kernel.rs) ----
 
+// nvrtc and hiprtc both pre-define the device api -- builtin vector types, the
+// `__global__`/`__device__` qualifiers, the thread/block index builtins, and the math
+// intrinsics -- and compile from an in-memory buffer with no filesystem access. neither
+// accepts an include of the toolkit's runtime header: under hiprtc `#include
+// <hip/hip_runtime.h>` fails to resolve and aborts the compile. metal is compiled from
+// source by a filesystem-backed compiler and does need its standard library named.
 pub(crate) fn header(target: Target) -> &'static str {
     match target {
-        Target::Cuda => "",
-        Target::Hip => "#include <hip/hip_runtime.h>\n",
+        Target::Cuda | Target::Hip => "",
         Target::Metal => "#include <metal_stdlib>\nusing namespace metal;\n",
     }
 }

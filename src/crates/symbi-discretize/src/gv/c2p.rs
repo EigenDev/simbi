@@ -137,12 +137,12 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, F
 }
 
 
-/// the RHD cons->prim on a curved SPATIAL metric — the `_schw`/`_ks` GR path. identical to
-/// `rhd_c2p_gv` except the recovery contracts with the REAL spatial metric gamma(r) at the cell
-/// (not identity): `|S|^2 = gamma^{ij} S_i S_j` and the recovered `v^i = gamma^{ij} S_j / (tau+D+p)`
-/// is the CONTRAVARIANT velocity (Valencia). the metric is evaluated at the volume-weighted radial
-/// centroid — the SAME cell radius the godunov densitization lapse uses — so the covariant conserved
-/// `S_i` round-trips. reduces to `rhd_c2p_gv` bit-for-bit at identity gamma. `D` is the momentum
+/// the RHD cons->prim on a curved spacetime — the `_schw`/`_ks` GR path. it undensitizes the
+/// evolved state by the known measure `sqrt(-g)(x)` and then runs the recovery contracted with the
+/// REAL spatial metric gamma(r) at the cell (not identity): `|S|^2 = gamma^{ij} S_i S_j` and the
+/// recovered `v^i = gamma^{ij} S_j / (tau+D+p)` is the CONTRAVARIANT velocity (Valencia). the metric
+/// is evaluated at the volume-weighted centroid — the SAME point the seeding densitizes at — so the
+/// state round-trips per cell. reduces to `rhd_c2p_gv` at identity gamma. `D` is the momentum
 /// DOF (all D components contracted), the GRID dimension is `axes.len()` — they differ for the
 /// spherical swirl (DOF = 3 azimuthal momentum on a 2D (r, theta) grid). reads
 /// `schwarzschild_mass` + the grid scalars for the cell centroid.
@@ -168,62 +168,68 @@ where
     let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
     let gamma = Gv::scalar("gamma");
 
-    // the in-kernel spatial metric at the cell centroid — the SAME volume-weighted centroid the
-    // godunov densitization lapse uses, so the covariant `S_i` stored under `to_conserved` inverts
-    // exactly (well-balanced). gridded coordinate slots take the cell centroid; an ungridded
-    // symmetry slot (the axisymmetric phi of the spherical swirl) takes zero — the spherical
-    // metrics never read phi, and gamma_{phi phi} = r^2 sin^2(theta) needs only the GRIDDED
-    // (r, theta). a suppressed POLAR slot would zero sin(theta) (singular gamma) — rejected.
+    // the in-kernel spatial metric at the cell's ARITHMETIC MIDPOINT — the SAME point the seeding
+    // densitizes at and the godunov evaluates the connection source at, so the stored state
+    // inverts exactly. the densitized law's cell average is over the plain coordinate volume, so
+    // the midpoint (not the chart's volume-weighted centroid) is its second-order sampling point.
+    // gridded coordinate slots take that midpoint; an ungridded symmetry slot (the axisymmetric
+    // phi of the spherical swirl) takes zero — the spherical metrics never read phi, and
+    // gamma_{phi phi} = r^2 sin^2(theta) needs only the GRIDDED (r, theta). a suppressed POLAR
+    // slot would zero sin(theta) (singular gamma) — rejected.
     let ndim = axes.len();
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let mid = gv_cell_midpoints(spacing, ndim);
     let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
-            Some(d) => geo.centroid[d],
+            Some(d) => mid[d],
             None => gv_ungridded_slot(coords, c),
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
-    // so the recovery harvests the cell lapse + shift to invert it back to the Valencia tau the
-    // newton consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
+    // the evolved state is the densitized sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], so the
+    // recovery harvests the cell lapse, shift and full-chart measure `volume_factor`: undensitize
+    // by the known sqrt(det gamma)(x), then invert the killing energy back to the Valencia tau the
+    // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
+    let (gm, gm_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::Kerr, Coords::Cartesian) => {
             let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
-(Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::Kerr, Coords::Cylindrical) => {
             let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} — only the azimuthal-momentum (swirl,
             // D = 3) instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
         }
         (Spacetime::Minkowski, _) => unreachable!("the GR c2p is baked only for a curved spacetime"),
     };
     let metric = SpatialMetric::<Gv, D>::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
-    let mom_t = Tensor::new(mom);
+    let inv_dens = Gv::ONE / sqrt_gamma;
+    let den = den * inv_dens;
+    let nrg = nrg * inv_dens;
+    let mom_t = Tensor::new(mom).scale(inv_dens);
     let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
     let cons = Cons::<Gv, D> { den, mom: mom_t, nrg: tau };
     let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
