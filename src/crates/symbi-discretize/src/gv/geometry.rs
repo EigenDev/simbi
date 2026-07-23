@@ -53,6 +53,29 @@ fn gv_divergence_weighted(base: &str, ndim: u8, geo: &CellGeometryGv) -> Gv {
 }
 
 
+/// the PLAIN COORDINATE divergence `sum_i (F_i[+e_i] - F_i) / width_i` — no face-area or
+/// cell-volume weighting on ANY chart. this is the divergence of a fully densitized conservation
+/// law `d_t U + d_j F^j = S`, where the measure `sqrt(-g)` rides inside both `U` and `F` and
+/// already carries every geometric factor. the widths come from the per-cell index map rather than
+/// a single `dx` scalar, so a log-spaced axis is exact.
+pub(crate) fn gv_divergence_coord(base: &str, ndim: u8, spacing: &[Spacing]) -> Gv {
+    let (_, _, width) = gv_faces(spacing, ndim as usize);
+    let mut acc: Option<Gv> = None;
+    for ii in 0..ndim {
+        let key = format!("{base}_{ii}");
+        let rt = format!("{base}[{ii}]");
+        let f_lo = Gv::field_shifted(&key, &rt, ndim, ii, 0);
+        let f_hi = Gv::field_shifted(&key, &rt, ndim, ii, 1);
+        let term = (f_hi - f_lo) / width[ii as usize];
+        acc = Some(match acc {
+            None => term,
+            Some(a) => a + term,
+        });
+    }
+    acc.expect("godunov divergence needs ndim >= 1")
+}
+
+
 /// the per-direction inverse divergence operator for `base`: cartesian-uniform `(F_hi -
 /// F_lo)/dx_i`, else the area-weighted `(1/V)(F_hi*A_hi - F_lo*A_lo)` from `geo`.
 pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) -> Gv {
@@ -126,6 +149,56 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
         )),
     }
 }
+
+/// the per-axis ARITHMETIC cell midpoints. a cell's stored value is its cell AVERAGE, and the
+/// point where a smooth field's average equals its point value to second order depends on the
+/// measure the average is taken against: the area-weighted law integrates against the chart's
+/// volume element and reads the volume-weighted centroid, while the densitized law integrates
+/// against the plain coordinate volume — its measure rides inside the conserved variable — and
+/// reads the midpoint. on a spherical radial axis the two differ by `dr^2/(6r)`, which offsets a
+/// pointwise connection source from the flux difference it must balance at exactly the order of
+/// the truncation error.
+pub(crate) fn gv_cell_midpoints(spacing: &[Spacing], ndim: usize) -> Vec<Gv> {
+    let (lo, hi, _) = gv_faces(spacing, ndim);
+    let half = Gv::from_f64(0.5);
+    (0..ndim).map(|d| (lo[d] + hi[d]) * half).collect()
+}
+
+
+/// the full-chart spatial measure `sqrt(det gamma)` at a 3-slot coordinate position, dispatched
+/// `(Spacetime, Coords) -> concrete Metric -> Metric::volume_factor`. always evaluated at the
+/// metric's full spatial dimension, so a reduced grid still carries the suppressed directions: on a
+/// 1D radial spherical grid the measure is `r^2 sin(theta) sqrt(gamma_rr)`, of which the 1x1 radial
+/// block alone would keep only `sqrt(gamma_rr)`. paired with the lapse it gives the four-volume
+/// densitization `sqrt(-g) = alpha sqrt(det gamma)`. flat spacetime never reaches this.
+pub(crate) fn gv_metric_volume_factor_at(
+    spacetime: Spacetime,
+    coords: Coords,
+    x: Tensor<Gv, 3>,
+) -> Gv {
+    let mass = Gv::scalar("schwarzschild_mass");
+    match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => Schwarzschild { mass }.volume_factor(x),
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            SchwarzschildKSCartesian { mass }.volume_factor(x)
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            SchwarzschildKSCylindrical { mass }.volume_factor(x)
+        }
+        (Spacetime::KerrSchild, _) => SchwarzschildKS { mass }.volume_factor(x),
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") }.volume_factor(x)
+        }
+        (Spacetime::Kerr, Coords::Cylindrical) => {
+            KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") }.volume_factor(x)
+        }
+        (Spacetime::Kerr, _) => KerrKS { mass, spin: Gv::scalar("kerr_spin") }.volume_factor(x),
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the flat measure is the coordinate volume element")
+        }
+    }
+}
+
 
 /// the analytic lapse alpha(r) as a traced Gv, dispatched `Spacetime -> concrete Metric ->
 /// Metric::lapse` — the SINGLE codegen seam for the GR lapse. every consumer (the densitization cell

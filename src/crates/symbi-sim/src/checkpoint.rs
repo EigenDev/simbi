@@ -774,6 +774,32 @@ fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
     t
 }
 
+/// root attribute naming the measure the stored conserved state carries. absent means the
+/// undensitized Valencia state (`D`, `S_i`, `ehat` per unit coordinate volume).
+const CONSERVED_DENSITIZATION_ATTR: &str = "conserved_densitization";
+/// the value written for the free-index-down GR-hydro state
+/// `sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)]`.
+const SQRT_MINUS_G: &str = "sqrt_minus_g";
+
+/// the measure the run's conserved state carries, or `None` when it is undensitized. relativistic
+/// hydro on a curved spacetime stores the fully densitized state; every other configuration —
+/// flat spacetime, and GR MHD, whose induction and CT seam are still Valencia — does not. the two
+/// states differ by a per-cell factor `sqrt(-g)(x)`, so reloading one as the other is silently
+/// wrong rather than loud, which is why the file records which it holds.
+fn conserved_densitization<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+) -> Option<&'static str>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let curved = sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
+    (curved && sim.fields.mhd.is_none()).then_some(SQRT_MINUS_G)
+}
+
 fn build_tree<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     snap: &'a Snapshot<D>,
@@ -789,6 +815,9 @@ where
     let mut root = Tree::new("")
         .with_attr("format_version", "2.0")
         .with_attr("symbi_version", "0.1.0");
+    if let Some(tag) = conserved_densitization(sim) {
+        root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
+    }
     root.push_group(build_metadata_group(sim, snap, extras));
     root.push_group(build_level_group(sim, snap, 0));
     // the per-step body-gas exchange series (immersed runs): Mdot(t) is
@@ -905,6 +934,9 @@ where
     let mut root = Tree::new("")
         .with_attr("format_version", "2.0")
         .with_attr("symbi_version", "0.1.0");
+    if let Some(tag) = conserved_densitization(levels[0]) {
+        root = root.with_attr(CONSERVED_DENSITIZATION_ATTR, tag);
+    }
     // global metadata authored from the coarse level.
     root.push_group(build_metadata_group(levels[0], &snaps[0], extras));
     for (idx, snap) in snaps.iter().enumerate() {
@@ -1026,6 +1058,22 @@ where
     Mem: MemorySpace,
 {
     let tree = Hdf5Backend.read(Path::new(path))?;
+    // the conserved group is the restart primary, so its MEASURE must match what this run
+    // evolves. a densitized GR-hydro run reading an undensitized file (or the reverse) differs by
+    // a per-cell sqrt(-g) and would restart onto a physically different state without any symptom
+    // the first step could not explain away.
+    let stored = match tree.find_attr(CONSERVED_DENSITIZATION_ATTR) {
+        Some(Attr::Str(s)) => Some(s.as_str()),
+        _ => None,
+    };
+    let expected = conserved_densitization(sim);
+    if stored != expected {
+        return Err(IoError::Backend(format!(
+            "{path}: the checkpoint stores a {} conserved state but this run evolves a {} one",
+            stored.unwrap_or("undensitized"),
+            expected.unwrap_or("undensitized"),
+        )));
+    }
     let meta = read_meta_from(&tree)?;
     sim.time = meta.time;
     sim.dt = meta.dt;

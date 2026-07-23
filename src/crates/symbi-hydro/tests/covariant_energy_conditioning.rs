@@ -36,7 +36,14 @@ fn ks_regime(r: f64) -> RhdGr<f64, 1> {
         Gamma::new(Matrix::diag(Tensor::new([grr]))),
         GammaInv::new(Matrix::diag(Tensor::new([1.0 / grr]))),
     );
-    RhdGr { metric, alpha: 1.0 / (1.0 + a2).sqrt(), shift: Tensor::new([2.0 / (r + 2.0)]) }
+    RhdGr {
+        metric,
+        alpha: 1.0 / (1.0 + a2).sqrt(),
+        shift: Tensor::new([2.0 / (r + 2.0)]),
+        // the FULL spherical measure r^2 sin(theta) sqrt(gamma_rr) at the equator: the round trip
+        // measured here is the one the code performs, densitization multiply and divide included.
+        sqrt_gamma: r * r * grr.sqrt(),
+    }
 }
 
 /// relative error of the pressure after prim -> ehat -> prim.
@@ -101,6 +108,7 @@ fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
         metric: SpatialMetric::flat(),
         alpha: 1.0,
         shift: Tensor::zeros(),
+        sqrt_gamma: 1.0,
     };
     let prim = Prim { rho, vel: Tensor::new([vel]), pre };
     let cons = gr.to_conserved(&eos, &prim);

@@ -208,9 +208,10 @@ pub fn excise_p2c_gv() -> (GvKernel, Writes) {
         Gamma::new(m.spatial_metric(xt)),
         GammaInv::new(m.spatial_metric_inv(xt)),
     );
-    // the covariant energy slot ehat = alpha tau + (alpha-1) D - beta^i S_i reads the cell lapse and
-    // shift, so the excised-fill storage carries the same 3+1 block the flux/c2p use.
-    let regime = RhdGr { metric, alpha: m.lapse(xt), shift: m.shift(xt) };
+    // the densitized storage sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] reads the cell lapse,
+    // shift and full-chart measure, so the excised fill carries the same block the flux/c2p use.
+    let regime =
+        RhdGr { metric, alpha: m.lapse(xt), shift: m.shift(xt), sqrt_gamma: m.volume_factor(xt) };
     let prim = Prim::<Gv, 2> { rho, vel: Tensor::new(vel), pre };
     let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
 
@@ -297,9 +298,10 @@ pub fn excise_p2c_3d_gv() -> (GvKernel, Writes) {
         Gamma::new(m.spatial_metric(xt)),
         GammaInv::new(m.spatial_metric_inv(xt)),
     );
-    // the covariant energy slot ehat = alpha tau + (alpha-1) D - beta^i S_i reads the cell lapse and
-    // shift, so the excised-fill storage carries the same 3+1 block the flux/c2p use.
-    let regime = RhdGr { metric, alpha: m.lapse(xt), shift: m.shift(xt) };
+    // the densitized storage sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] reads the cell lapse,
+    // shift and full-chart measure, so the excised fill carries the same block the flux/c2p use.
+    let regime =
+        RhdGr { metric, alpha: m.lapse(xt), shift: m.shift(xt), sqrt_gamma: m.volume_factor(xt) };
     let prim = Prim::<Gv, 3> { rho, vel: Tensor::new(vel), pre };
     let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
 

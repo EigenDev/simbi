@@ -105,6 +105,13 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
         // carry the identical curl stencil; extract the uniform (else) arm — the canonical
         // instantiation, and the exact DAG this proof verified before spacing became a runtime scalar.
         Op::IfElse { else_results, .. } => eval_rat(graph, else_results[0], fields, scalars),
+        // a metric COEFFICIENT guarded by a position predicate — the kerr-schild radius floor
+        // selects |l|^2 = 1 outside it and |x|^2 / r_floor^2 within. like the spacing map above,
+        // this is a leaf reparametrization the curl telescopes through: two cells sharing a face
+        // evaluate the predicate at the SAME position and so take the SAME arm, making
+        // div(curl) = 0 structural in either. extract the TRUE arm — the exterior, where the
+        // kerr-schild null condition holds and the DAG is the canonical unit-l instantiation.
+        Op::Select(_cond, then_id, _else_id) => eval_rat(graph, *then_id, fields, scalars),
         other => panic!("proof(rat): unsupported op in curvilinear curl DAG: {other:?}"),
     }
 }

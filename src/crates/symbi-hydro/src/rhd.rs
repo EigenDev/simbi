@@ -64,11 +64,11 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
         gamma: &crate::spatial_metric::SpatialMetric<S, D>,
         alpha: S,
         shift: Tensor<S, D>,
+        sqrt_gamma: S,
     ) -> Self::Cons {
-        // the covariant storage: delegate to `RhdGr` at the cell's 3+1 block so the initial conserved
-        // momentum is the covariant `S_i = rho h W^2 gamma_ij v^j` AND the energy is the covariant
-        // `ehat = alpha tau + (alpha-1) D - beta^i S_i` — both the state the metric-aware c2p inverts.
-        RhdGr { metric: *gamma, alpha, shift }.to_conserved(eos, prim)
+        // delegate to `RhdGr` at the cell's 3+1 block so the seeded state is the densitized
+        // sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] the metric-aware c2p inverts.
+        RhdGr { metric: *gamma, alpha, shift, sqrt_gamma }.to_conserved(eos, prim)
     }
 
     #[inline]

@@ -68,14 +68,14 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// convert primitive to conservative.
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons;
 
-    /// convert primitive to conservative on a curved SPATIAL metric — the Valencia covariant momentum
-    /// `S_i = rho h W^2 gamma_ij v^j`, with `|v|^2 = gamma_ij v^i v^j`. the DEFAULT ignores the metric
-    /// and delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
-    /// regime and every flat run are unchanged; the relativistic regime OVERRIDES it so the
-    /// initial-condition conserved state matches the metric-aware c2p (the storage↔recovery bijection
-    /// is per-cell in the same gamma). `gamma`/`alpha`/`shift` are the spatial metric + lapse +
-    /// contravariant shift `beta^i` at the cell (the relativistic-hydro energy slot is the covariant
-    /// `ehat = alpha tau + (alpha-1) D - beta^i S_i`, so its storage needs the full 3+1 block).
+    /// convert primitive to conservative on a curved spacetime. the DEFAULT ignores the metric and
+    /// delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
+    /// regime and every flat run are unchanged; the relativistic regimes OVERRIDE it so the
+    /// initial-condition conserved state matches the metric-aware c2p (the storage↔recovery
+    /// bijection is per-cell at the same metric point). `gamma`/`alpha`/`shift` are the spatial
+    /// metric, lapse and contravariant shift `beta^i` at the cell; `sqrt_gamma` is sqrt(det gamma)
+    /// of the FULL chart, so `alpha sqrt_gamma` is the four-volume measure the densitized
+    /// relativistic-hydro state carries.
     fn to_conserved_covariant(
         &self,
         eos: &impl Eos<S>,
@@ -83,6 +83,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
         _gamma: &crate::spatial_metric::SpatialMetric<S, D>,
         _alpha: S,
         _shift: Tensor<S, D>,
+        _sqrt_gamma: S,
     ) -> Self::Cons {
         self.to_conserved(eos, prim)
     }

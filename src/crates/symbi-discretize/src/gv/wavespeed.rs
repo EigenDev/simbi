@@ -739,17 +739,24 @@ pub fn rhd_source_cfl_gr_gv(
     });
     let pre = Gv::field("prim_pre", FieldRef::PrimPre);
     let v = Tensor::<Gv, 3>::new(vel);
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    // the densitized law samples its metric coefficients at the cell's ARITHMETIC MIDPOINT, the
+    // same point the c2p undensitizes at, so the cone reads the state the recovery produced.
+    let mid = gv_cell_midpoints(spacing, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
-            Some(d) => geo.centroid[d],
+            Some(d) => mid[d],
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let d_cons = Gv::field("cons_den", FieldRef::cons_den());
+    // the admissible cone is a statement about the PHYSICAL state, so the densitized conserveds
+    // are divided by the full-chart measure sqrt(det gamma) before entering it. the densitized
+    // update adds `dt sqrt(-g) S` to `sqrt(det gamma) U`, so the undensitized source rate the cone
+    // sees is `alpha S` — the lapse is applied to the connection source below.
+    let inv_dens = Gv::ONE / gv_metric_volume_factor_at(spacetime, coords, x);
+    let d_cons = Gv::field("cons_den", FieldRef::cons_den()) * inv_dens;
     // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
-    // metric-free and independent of the energy variable: the RHD nrg slot stores the covariant
-    // ehat, not the Valencia tau, so `rho + tau + pre` no longer names rho h W^2. the eulerian
+    // metric-free and independent of the energy variable: the RHD nrg slot stores the killing
+    // energy, not the Valencia tau, so `rho + tau + pre` no longer names rho h W^2. the eulerian
     // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
     let gamma_eos = Gv::scalar("gamma");
     let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
@@ -827,12 +834,18 @@ pub fn rhd_source_cfl_gr_gv(
     };
     let mom: [Gv; 3] = std::array::from_fn(|k| {
         if k < ncomp {
-            Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+            Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)) * inv_dens
         } else {
             Gv::ZERO
         }
     });
-    // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no ehat -> tau
+    // the connection source is densitized by sqrt(-g) while the state carries only
+    // sqrt(det gamma), so the undensitized state actually moves at rate alpha S — a lapse the rate
+    // below deliberately does NOT apply. alpha <= 1, so charging the full |S| bounds the true
+    // margin consumption from above and the admissible step from below; relaxing it by the lapse
+    // is a sharpening that has to be justified against the cone it protects, not a free
+    // simplification.
+    // the eulerian total energy E = tau + D = rho h W^2 - p = e - p (metric-free; no killing-energy
     // inversion needed for the admissibility cone).
     let e_cons = e - pre;
     let gamma_norm = |a: &[Gv; 3]| {

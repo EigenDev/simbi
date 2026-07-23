@@ -5,8 +5,12 @@
 // level once per root step (the request gate rejects fine patches overlapping
 // the excised region, so the root owns every excised cell), while an
 // off-horizon fine patch refines the far field. gates:
-// - the excision genuinely acts on the refined run (two radii produce
-//   different interiors — the non-vacuity that once exposed a dead phase);
+// - the excision genuinely acts on the refined run (excising differs from not
+//   excising — the non-vacuity that once exposed a dead phase);
+// - the excision is CAUSALLY CORRECT: two surfaces strictly inside the horizon
+//   produce the same root, because nothing done inside a horizon may reach the
+//   exterior. demanding instead that the two radii DIFFER asserts the opposite,
+//   and holds only while a defect leaks the surface position outward;
 // - the fine patch genuinely evolves (its state departs the seeded IC);
 // - the run stays finite and positive with both machineries active.
 // =============================================================================
@@ -95,9 +99,30 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
         .zip(&root_b)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
+    // NON-VACUITY: the excise phase actually ran on the hierarchy. the comparison is against NO
+    // excision, which is the only baseline a correct scheme is obliged to differ from — measured
+    // 1.96e1 against the r_exc = 0.35 run.
+    let none = run(0.0).0;
+    let acted = root_a
+        .iter()
+        .zip(&none)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
     assert!(
-        max_diff > 1e-10,
-        "the two excision radii produced identical roots; the pass never ran on the hierarchy"
+        acted > 1e-10,
+        "excising and not excising produced identical roots; the pass never ran on the hierarchy"
+    );
+
+    // and the phase is CAUSALLY CORRECT: r_+ = 2M = 0.6, so both radii sit strictly inside the
+    // horizon, and nothing done there may reach the exterior. the two runs must therefore agree —
+    // measured bit-identical. an excision surface whose position leaks outward is the defect this
+    // asserts against, and it is exactly what a core metric with an inconsistent determinant
+    // produces: while `sqrt_det_gamma` disagreed with det(gamma) inside the r < M/2 radius floor,
+    // the same two radii differed by 9.0 here, growing monotonically with the radius.
+    assert!(
+        max_diff <= 1e-10,
+        "excision radii inside the horizon changed the root by {max_diff:e}: the excised region \
+         is leaking into the causally disconnected exterior"
     );
 
     // the fine patch genuinely evolved: the infall reaches the corner quadrant
