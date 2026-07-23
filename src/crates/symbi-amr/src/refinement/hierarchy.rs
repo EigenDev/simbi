@@ -1116,17 +1116,27 @@ where
         // AFTER the full RK combination (receipt == removal) and BEFORE the
         // parent's restriction (so the coarse covered cells sync to the
         // drained state — restriction consistency).
+        // per-step operator order matches the uni-grid driver exactly:
+        // viscous -> excise -> horizon ledger -> penalize. transport first, then the
+        // causally-disconnected fill, then the shell-flux booking (the flux fields still hold the
+        // last stage's flux), then the IBM surface physics whose receipt must equal the removal.
         if !has_finer {
-            // per-step operator order matches the uni-grid driver exactly:
-            // viscous -> excise -> horizon ledger -> penalize. transport first,
-            // then the causally-disconnected fill, then the shell-flux booking
-            // (the flux fields still hold the last stage's flux), then the IBM
-            // surface physics whose receipt must equal the removal.
-            {
-                let l = &self.levels[level];
-                prof("viscous", || l.kernels.viscous(&l.state, dt));
-                l.kernels.excise(&l.state);
-            }
+            let l = &self.levels[level];
+            prof("viscous", || l.kernels.viscous(&l.state, dt));
+        }
+        // EXCISE runs on EVERY level, not only the finest: the excised (causally-disconnected) region
+        // is owned by whichever level contains it, and the refinement request gate forbids a finer
+        // patch overlapping it, so a REFINED ROOT still owns — and must excise — its singular core.
+        // gating this on `!has_finer` silently skipped excision wherever the excised region sat under
+        // a refined level (the root of an off-core refined run), leaving the core evolving. ordered
+        // after viscous (bit-identical on the finest, where both run); a no-op at excision_radius = 0,
+        // so unexcised and uni-grid runs are unchanged. the excised fill survives the finer subcycle +
+        // restriction below because the excised region is never a covered (finer-patch) region.
+        {
+            let l = &self.levels[level];
+            l.kernels.excise(&l.state);
+        }
+        if !has_finer {
             let horizon = self.levels[level].state.immersed.as_ref().and_then(|im| {
                 im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
                     symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
