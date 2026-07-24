@@ -142,6 +142,21 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         args.push(&nrg_ptr);
     }
 
+    /// the cell-centered conserved fields carried by the decomposition halo exchange and
+    /// the output gather, in a fixed order: den, mom[0..DOF], nrg (adiabatic only), chi
+    /// (the passive scalar, run-level opt-in). the set is derived HERE, beside the fields,
+    /// so an optional slot cannot be silently dropped by a hand-maintained list in the
+    /// transport; a `None` slot contributes nothing, so hydro/iso and non-dye runs are
+    /// unchanged. `bcell`/`bface` live on the mhd side-car and are appended by the caller.
+    pub fn exchange_fields(&self) -> Vec<&Field<Sc, NDIM, M>> {
+        let mut fields: Vec<&Field<Sc, NDIM, M>> = Vec::with_capacity(DOF + 3);
+        fields.push(&self.den);
+        fields.extend(self.mom.iter());
+        fields.extend(self.nrg.as_ref());
+        fields.extend(self.chi.as_ref());
+        fields
+    }
+
     /// return all scalar field raw pointers in order: den, mom[0..DOF], nrg.
     /// for isothermal regimes (nrg = None), pushes a null pointer.
     pub fn all_ptrs(&self) -> Vec<*const Sc> {
@@ -310,6 +325,20 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// **the passive-scalar-slot accessor**, mirroring `pre_field`.
     #[inline]
     pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.chi.as_ref() }
+
+    /// the cell-centered primitive components the flux stage reconstructs from and the
+    /// decomposition exchanges each step, in a fixed order: rho, vel[0..DOF], pre
+    /// (adiabatic only), chi (the passive scalar, run-level opt-in). derived beside the
+    /// fields for the same reason as the conserved set — an optional slot cannot be
+    /// forgotten by a transport-side list; a `None` slot contributes nothing.
+    pub fn exchange_fields(&self) -> Vec<&Field<Sc, NDIM, M>> {
+        let mut fields: Vec<&Field<Sc, NDIM, M>> = Vec::with_capacity(DOF + 2);
+        fields.push(&self.rho);
+        fields.extend(self.vel.iter());
+        fields.extend(self.pre.as_ref());
+        fields.extend(self.chi.as_ref());
+        fields
+    }
 
     #[inline]
     pub fn gather(&self, coord: [isize; NDIM]) -> Prim<Sc, DOF> {
@@ -2713,6 +2742,51 @@ mod tests {
     use symbi_hydro::eos::IdealGas;
     use symbi_geometry::Cartesian;
     use symbi_xpu::{CpuSpace, HostMemory};
+
+    // THE atlas invariant: the decomposition transport set is DERIVED from the store's
+    // populated slots, not a hand-maintained list. a passive scalar (dye), allocated as a
+    // run-level opt-in, must appear in the exchanged set the moment it exists and must be
+    // absent otherwise -- a hand-listed set is exactly what silently dropped it before.
+    #[test]
+    fn exchange_set_tracks_the_optional_passive_scalar_slot() {
+        let domain = Domain::<2>::new([
+            symbi_algebra::Space { name: "x", lo: 0, hi: 16 },
+            symbi_algebra::Space { name: "y", lo: 0, hi: 16 },
+        ]);
+
+        // adiabatic hydro: den + 2 momenta + nrg = 4 conserved, rho + 2 vel + pre = 4 prim.
+        let mut cons = ConsFields::<2, HostMemory>::zeros(&domain).unwrap();
+        let mut prim = PrimFields::<2, HostMemory>::zeros(&domain).unwrap();
+        assert_eq!(cons.exchange_fields().len(), 4, "den, mom[0], mom[1], nrg");
+        assert_eq!(prim.exchange_fields().len(), 4, "rho, vel[0], vel[1], pre");
+
+        // allocating the dye extends BOTH sets by exactly one, with no other change.
+        cons.alloc_chi(&domain).unwrap();
+        prim.alloc_chi(&domain).unwrap();
+        assert_eq!(cons.exchange_fields().len(), 5, "dye adds cons.chi");
+        assert_eq!(prim.exchange_fields().len(), 5, "dye adds prim.chi");
+
+        // the appended field IS the chi slot (the gather/exchange zip relies on chi being
+        // last so global and tile sets stay aligned when both carry it).
+        let cons_last = *cons.exchange_fields().last().unwrap() as *const _;
+        assert_eq!(cons_last, cons.chi_field().unwrap() as *const _);
+        let prim_last = *prim.exchange_fields().last().unwrap() as *const _;
+        assert_eq!(prim_last, prim.chi_field().unwrap() as *const _);
+    }
+
+    // isothermal drops the energy/pressure slot, so the derived set must shrink -- the
+    // enumeration reads the actual slots, it does not assume the adiabatic arity.
+    #[test]
+    fn exchange_set_omits_the_absent_isothermal_energy_slot() {
+        let domain = Domain::<2>::new([
+            symbi_algebra::Space { name: "x", lo: 0, hi: 16 },
+            symbi_algebra::Space { name: "y", lo: 0, hi: 16 },
+        ]);
+        let cons = ConsFields::<2, HostMemory>::zeros_with_energy(&domain, false).unwrap();
+        let prim = PrimFields::<2, HostMemory>::zeros_with_pressure(&domain, false).unwrap();
+        assert_eq!(cons.exchange_fields().len(), 3, "den, mom[0], mom[1]; no nrg");
+        assert_eq!(prim.exchange_fields().len(), 3, "rho, vel[0], vel[1]; no pre");
+    }
 
     #[test]
     fn sim_construction_1d() {

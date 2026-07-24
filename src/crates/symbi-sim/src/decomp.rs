@@ -225,20 +225,16 @@ fn ghost_strip<const D: usize>(
 /// used by `gather_interiors` to reassemble a decomposed run into one global store for output --
 /// the gathered global then writes through the existing single-grid checkpoint path unchanged.
 /// the STAGGERED `bface` lives on a face domain, so it is gathered separately
-/// by `gather_faces`. hydro/iso stores have no `mhd`, so the bcell tail is empty there; global and
-/// tiles share a regime, so both data_fields lists align component-for-component.
+/// by `gather_faces`. the cell-centered set is DERIVED from the store's populated slots
+/// (`ConsFields::exchange_fields` + `PrimFields::exchange_fields`), so an optional field like the
+/// passive scalar rides along automatically and no hand-listed set can drop it. hydro/iso stores
+/// have no `mhd`, so the bcell tail is empty there; global and tiles share a regime and dye opt-in,
+/// so both lists align component-for-component.
 fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
-    let c = &store.fields.cons;
-    let p = &store.fields.prim;
-    let mut fields: Vec<&Field<f64, D, M>> = std::iter::once(&c.den)
-        .chain(c.mom.iter())
-        .chain(c.nrg.as_ref())
-        .chain(std::iter::once(&p.rho))
-        .chain(p.vel.iter())
-        .chain(p.pre.as_ref())
-        .collect();
+    let mut fields = store.fields.cons.exchange_fields();
+    fields.extend(store.fields.prim.exchange_fields());
     if let Some(mhd) = store.fields.mhd.as_ref() {
         fields.extend(mhd.bcell.b.iter());
     }
@@ -319,18 +315,16 @@ pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
-/// the CELL-CENTERED components the flux stage reconstructs from: rho, each velocity, pressure,
-/// and -- for MHD -- the cell-centered magnetic field `bcell` (the reconstruction reads it like
-/// any other primitive). hydro/iso stores have no `mhd`, so the bcell tail is empty there and
-/// the exchange is unchanged. the STAGGERED `bface` is exchanged separately (`bface_strips`),
-/// since its faces live on a different domain than the cells.
+/// the CELL-CENTERED components the flux stage reconstructs from, DERIVED from the store's
+/// populated primitive slots (`PrimFields::exchange_fields`): rho, each velocity, pressure, the
+/// passive scalar when present, and -- for MHD -- the cell-centered magnetic field `bcell` (the
+/// reconstruction reads it like any other primitive). hydro/iso stores have no `mhd`, so the bcell
+/// tail is empty there and the exchange is unchanged. the STAGGERED `bface` is exchanged separately
+/// (`bface_strips`), since its faces live on a different domain than the cells.
 fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
-    let mut fields: Vec<&Field<f64, D, M>> = std::iter::once(&store.fields.prim.rho)
-        .chain(store.fields.prim.vel.iter())
-        .chain(store.fields.prim.pre.as_ref())
-        .collect();
+    let mut fields = store.fields.prim.exchange_fields();
     if let Some(mhd) = store.fields.mhd.as_ref() {
         fields.extend(mhd.bcell.b.iter());
     }
