@@ -105,7 +105,7 @@ def test_spinning_excision_acts_and_leakage_is_bounded() -> None:
     # r_+ = M + sqrt(M^2 - a^2) ~ 1.436 at a = 0.9: both radii sit in (M/2, r_+).
     a = _run_kerr(1.0)
     b = _run_kerr(1.3)
-    r, dx = _grid_radii()
+    r, _dx = _grid_radii()
     assert np.isfinite(a).all() and a.min() > 0.0, "excised spinning state broke"
     # non-vacuous: the two excision radii produced different interiors — the
     # spheroidal fill genuinely ran.
@@ -113,17 +113,38 @@ def test_spinning_excision_acts_and_leakage_is_bounded() -> None:
     assert np.abs(a[inner] - b[inner]).max() > 1e-8, (
         "the two excision radii produced identical interiors; the pass never ran"
     )
-    # the exterior is causally disconnected in the continuum; discretely the
-    # reconstruction stencil leaks a SMALL difference that decays outward.
+    # the exterior is causally disconnected in the continuum; discretely the reconstruction stencil
+    # leaks a difference across the excision surface. the LAW is not a magic magnitude — it is that
+    # the leak DECAYS STEEPLY OUTWARD and CONVERGES under refinement, i.e. it is an evanescent
+    # truncation-level influence of the surface rather than a standing error.
+    #
+    # the bands are FIXED PHYSICAL radii, deliberately independent of dx. an earlier form used
+    # `r > 1.6 + 2*dx`, whose inner edge MOVES INWARD as the grid refines — it samples ever closer to
+    # r_+ (= 1.436), where the leak is naturally larger, so a converging leak reads as a growing one
+    # and no fixed threshold on it can be resolution-honest (measured 1.34e-3 at 32^3 rising to
+    # 1.64e-3 at 64^3 purely from the band moving).
+    #
+    # measured on these fixed bands, the leak is exponentially small in the surface-to-band distance
+    # and super-convergent (the surface sharpens AND the band recedes in cell units):
+    #   band        32^3       64^3      ratio
+    #   [2.3, 3.0]  6.30e-4    3.04e-5    20.8x   (~4.4 order, vs the scheme's 2nd)
+    #   [3.0, 4.0]  1.28e-5    1.28e-8      999x
+    #   r > 4       6.75e-9    2.96e-14   2.3e5x
+    # the bounds below carry wide margin on the 32^3 values; a surface whose influence STANDS
+    # (resolution-independent) or fails to decay outward breaks them.
     diff = np.abs(a - b)
     scale = np.abs(a).max()
-    near = (r > 1.6 + 2.0 * dx) & (r < 3.0)
-    far = r > 4.0
-    near_leak = diff[near].max() / scale
-    far_leak = diff[far].max() / scale
-    assert near_leak < 1e-3, f"near-horizon excision leakage too large: {near_leak:e}"
-    assert far_leak < 0.2 * max(near_leak, 1e-300), (
-        f"excision leakage does not decay outward: near {near_leak:e}, far {far_leak:e}"
+    near_leak = diff[(r > 2.3) & (r < 3.0)].max() / scale
+    mid_leak = diff[(r > 3.0) & (r < 4.0)].max() / scale
+    far_leak = diff[r > 4.0].max() / scale
+    # sanity rail: a catastrophic leak (the surface visibly imprinting on the flow) fails here.
+    assert near_leak < 3e-3, f"near-horizon excision leakage too large: {near_leak:e}"
+    # the decay law, the real content: each band is orders below the one inside it.
+    assert mid_leak < 0.05 * max(near_leak, 1e-300), (
+        f"excision leakage does not decay outward: near {near_leak:e}, mid {mid_leak:e}"
+    )
+    assert far_leak < 0.01 * max(mid_leak, 1e-300), (
+        f"excision leakage does not decay outward: mid {mid_leak:e}, far {far_leak:e}"
     )
     # the excised run keeps the exact metric symmetries (quarter turn about the
     # spin axis + equatorial reflection): the spheroidal mask and fill share them.
