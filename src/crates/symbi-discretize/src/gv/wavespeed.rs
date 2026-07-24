@@ -689,18 +689,28 @@ pub fn rmhd_source_cfl_gr_gv(
     // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0).
     let q_safe = q0.max(Gv::from_f64(1e-12));
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
-    // excised cells are numerical padding whose onion-filled state can sit near the admissible-cone
-    // boundary indefinitely (the frozen clamped-core metric drives enormous geodesic sources over
-    // donor-copied gas), so their admissibility rate must not throttle the global dt — inside the
-    // horizon nothing they do reaches the exterior. the mask is the `r_ks < r_exc` excision level
-    // set; `excision_radius` binds 0 on an unexcised run, making the mask empty and the rate
-    // bit-identical. cartesian charts only (spherical charts never excise).
+    // no cell inside the event horizon may throttle the global timestep. the outer horizon
+    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
+    // interior reaches the exterior, so an interior cell's admissibility rate carries no information
+    // about exterior stability. infalling gas drives the interior pressure toward zero, which sends
+    // the cone margin q -> 0 and the source rate lambda_S = (|S_tau| + ||S_mom||_gamma)/q -> inf, so
+    // without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
+    // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
+    // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
+    //
+    // the threshold is the LARGER of r_+ and the excision surface, so a run that excises further out
+    // keeps masking everything it excises. an excised cell is additionally numerical padding whose
+    // onion-filled state can sit near the cone boundary indefinitely, the frozen clamped-core metric
+    // driving enormous geodesic sources over donor-copied gas. gating cell CENTERS on r_+ matches how
+    // interior guard activations are counted. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
     {
         let spin = if spacetime == Spacetime::Kerr { Gv::scalar("kerr_spin") } else { Gv::ZERO };
         let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
-        let excised = symbi_ib::excise::ks_excised(&xc, spin, Gv::scalar("excision_radius"));
+        let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
+        let r_mask = r_plus.max(Gv::scalar("excision_radius"));
+        let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
         Gv::select(excised, Gv::ZERO, lam_s)
     } else {
         lam_s
@@ -905,18 +915,28 @@ pub fn rhd_source_cfl_gr_gv(
     let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
     let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
     let lam_s = lam_first + lam_second;
-    // excised cells are numerical padding whose onion-filled state can sit near the admissible-cone
-    // boundary indefinitely (the frozen clamped-core metric drives enormous geodesic sources over
-    // donor-copied gas), so their admissibility rate must not throttle the global dt — inside the
-    // horizon nothing they do reaches the exterior. the mask is the `r_ks < r_exc` excision level
-    // set; `excision_radius` binds 0 on an unexcised run, making the mask empty and the rate
-    // bit-identical. cartesian charts only (spherical charts never excise).
+    // no cell inside the event horizon may throttle the global timestep. the outer horizon
+    // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
+    // interior reaches the exterior, so an interior cell's admissibility rate carries no information
+    // about exterior stability. infalling gas drives the interior pressure toward zero, which sends
+    // the cone margin q -> 0 and the source rate lambda_S = (|S_tau| + ||S_mom||_gamma)/q -> inf, so
+    // without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
+    // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
+    // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
+    //
+    // the threshold is the LARGER of r_+ and the excision surface, so a run that excises further out
+    // keeps masking everything it excises. an excised cell is additionally numerical padding whose
+    // onion-filled state can sit near the cone boundary indefinitely, the frozen clamped-core metric
+    // driving enormous geodesic sources over donor-copied gas. gating cell CENTERS on r_+ matches how
+    // interior guard activations are counted. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
     {
         let spin = if spacetime == Spacetime::Kerr { Gv::scalar("kerr_spin") } else { Gv::ZERO };
         let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
-        let excised = symbi_ib::excise::ks_excised(&xc, spin, Gv::scalar("excision_radius"));
+        let r_plus = mass_gv + (mass_gv * mass_gv - spin * spin).max(Gv::ZERO).sqrt();
+        let r_mask = r_plus.max(Gv::scalar("excision_radius"));
+        let excised = symbi_ib::excise::ks_excised(&xc, spin, r_mask);
         Gv::select(excised, Gv::ZERO, lam_s)
     } else {
         lam_s
