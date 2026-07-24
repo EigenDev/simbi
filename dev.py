@@ -5,7 +5,7 @@
 # simbi build/install wrapper around MATURIN (which drives cargo directly).
 # the rust backend (src/crates/symbi-py) builds the pyo3 extension installed
 # as simbi/libs/cpu_ext; the unchanged `simbi.libs.cpu_ext` import loads it.
-# gpu is a cargo FEATURE: `--gpu`/`--cuda` -> nvidia (`--features cuda`, NVRTC JIT,
+# gpu is a cargo FEATURE: `--cuda` -> nvidia (`--features cuda`, NVRTC JIT,
 # links libcuda/libnvrtc); `--hip` -> amd (`--features hip`, hipRTC JIT, links
 # libamdhip64/libhiprtc under ROCM_PATH). no nvcc/hipcc/meson needed. both produce
 # the gpu_ext extension, which coexists with cpu_ext.
@@ -13,7 +13,7 @@
 #  ./dev.py install            # maturin develop --release (editable build + install)
 #  ./dev.py build              # maturin build --release (wheel in src/target/wheels)
 #  (no-uv path: `pip install -e .` builds editable via the maturin backend directly)
-#  ./dev.py build --gpu        # nvidia gpu build (cargo 'cuda' feature)
+#  ./dev.py build --cuda       # nvidia gpu build (cargo 'cuda' feature)
 #  ./dev.py install --hip      # amd gpu build (cargo 'hip' feature, ROCm)
 #  ./dev.py clean [--all]      # remove extensions; --all also runs cargo clean
 # =============================================================================
@@ -125,9 +125,9 @@ def run(cmd, **kwargs) -> None:
 
 def _features(args) -> str:
     feats = [f.strip() for f in (args.features or "").split(",") if f.strip()]
-    # `--gpu`/`--cuda` -> the nvidia backend; `--hip` -> the amd backend.
+    # `--cuda` -> the nvidia backend; `--hip` -> the amd backend.
     # mutually exclusive: the rust crate compile_error!s if both are set.
-    if getattr(args, "gpu", False) and "cuda" not in feats:
+    if getattr(args, "cuda", False) and "cuda" not in feats:
         feats.append("cuda")
     if getattr(args, "hip", False) and "hip" not in feats:
         feats.append("hip")
@@ -346,7 +346,7 @@ def _add_build_args(p) -> None:
         help="comma-separated cargo features (e.g., cuda)",
     )
     p.add_argument(
-        "--gpu",
+        "--cuda",
         action="store_true",
         help="nvidia gpu build -> cargo 'cuda' feature (NVRTC JIT)",
     )
@@ -389,7 +389,7 @@ def main() -> None:
         "--with-cpu",
         action="store_true",
         help="on a gpu build, also build cpu_ext so both backends coexist (recompiles the "
-        "shared crate under a second feature-set -> full build cost; no-op without --gpu/--hip)",
+        "shared crate under a second feature-set -> full build cost; no-op without --cuda/--hip)",
     )
     ip.set_defaults(func=install_command)
 
