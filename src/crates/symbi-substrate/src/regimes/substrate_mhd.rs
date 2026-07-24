@@ -348,7 +348,30 @@ where
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || {}, // MHD has no immersed-body source (trait-default no-op)
-            || {}, // MHD: no admissible-boundary projection yet (the RMHD admissible set is harder; keeps the freeze)
+            || {
+                // ADMISSIBLE-BOUNDARY PROJECTION on a curved background, enforcing the SUFFICIENT
+                // rmhd admissibility condition (D > 0, q > 0, psi > 0). the cell-centered B enters
+                // the residual but is never blended: constrained transport owns the staggered value
+                // shared with the neighbor, so div(B) survives by construction. the magnetic slot
+                // is a 3-vector on every MHD grid (the physics is 3D; grid symmetry handles 1D/2D),
+                // matching the 3-component momentum the same kernel reads. energy regimes only (the
+                // iso cone has no tau).
+                if R::SPEC.has_energy
+                    && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
+                {
+                    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+                    let mhd = sim.fields.mhd.as_ref().expect("GRMHD projection requires mhd fields");
+                    crate::regimes::substrate_kernels::fofc_project(
+                        sim,
+                        Self::kernel_prefix(),
+                        &sfx,
+                        sim.stage_input(),
+                        &sim.fields.cons,
+                        &sim.fields.prim,
+                        Some([&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]]),
+                    );
+                }
+            },
             None,  // no body-evolved freeze parachute (no MHD body source)
             || crate::regimes::mhd_substrate::fofc_ct_save(sim),
             || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
@@ -677,6 +700,21 @@ where
         // flux light-cone rate already in the scratch and adds the source characteristic rate
         // lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U) in place, so the reduction sizes dt against
         // both (dt (lambda_flux + lambda_S) < 1). the source-CFL kernel is baked for GR-RMHD only.
+        // KEPT for GRMHD, unlike the GR-hydro path where the projection retires it. the difference is
+        // the strength of the guarantee: the hydro admissible cone is necessary AND sufficient, so the
+        // projection lands every cell in G for ANY dt and lambda_S is genuinely redundant. the RMHD
+        // cone is B-FREE and only NECESSARY — a state inside it can still fail the magnetic
+        // decomposition — so the projection does NOT bound the step, and removing this throttle takes
+        // the magnetized FM torus to NaN within five steps at native resolution (measured). the
+        // source-admissibility rate stays until the projection enforces the SUFFICIENT rmhd
+        // admissibility condition rather than the necessary one. that condition is closed-form in the
+        // conserved variables (wu & tang, arXiv:1709.05838, theorem 2.1): admissibility is
+        // D > 0, q(U) > 0 and Psi(U) > 0 with
+        //   Phi = sqrt((|B|^2 - E)^2 + 3(E^2 - D^2 - |m|^2))
+        //   Psi = (Phi - 2(|B|^2 - E)) sqrt(Phi + |B|^2 - E) - sqrt((27/2)(D^2|B|^2 + (m.B)^2))
+        // the set is convex, so the blend factor is still a unique boundary crossing, but Psi is not
+        // concave (unlike the hydro lorentz-cone function), so it needs a bracketed solve rather than
+        // the closed-form quadratic root.
         if !st.is_empty() {
             let sname = format!(
                 "{}_source_cfl{}{st}_{D}d",

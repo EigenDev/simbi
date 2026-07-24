@@ -1116,7 +1116,8 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         );
         emit_gv(out_dir, &name, ndim, &k, &writes);
         // the wu 2017 source-admissibility rate folds into the same scratch after this map.
-        gen_rmhd_source_cfl_gr(out_dir, ndim, geom);
+        gen_rmhd_source_cfl_gr(out_dir, ndim, geom.clone());
+        gen_rmhd_fofc_project_gr(out_dir, ndim, geom);
         return;
     }
     // flat: the radial spacing is a runtime `map_kind` scalar (a log-radial grid selects the
@@ -1131,6 +1132,21 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // in the scratch and adds the source characteristic rate, folding the source-limited timestep into
 // the same reduction. curved spacetime only; mag_from_bcell = false to match the fused godunov
 // source (which reads prim.mag). name parallels the wave-speed map.
+// the GRMHD admissible-boundary projection (the provable freeze replacement): blends an
+// inadmissible spliced cell toward the admissible stage-input anchor onto partial-G. the RMHD cone
+// is B-free, so the staggered field is untouched and div(B) survives. curved spacetime only.
+fn gen_rmhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
+    assert!(geom.spacetime != Spacetime::Minkowski);
+    let name = format!(
+        "rmhd_fofc_project{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::fofc_project_gr_mhd_gv(
+        geom.coords, geom.spacetime, &geom.spacing, &geom.axes,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_rmhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
     let name = format!(
