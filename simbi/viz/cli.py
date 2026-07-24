@@ -305,6 +305,12 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "field plot; follows --slice (cartesian only)",
     )
     parser.add_argument(
+        "--draw-tracers",
+        action="store_true",
+        help="scatter the lagrangian tracer particles on the field plot (crossed-sink "
+        "crimson, escaped grey, live blue); follows --slice; no tracers draws nothing",
+    )
+    parser.add_argument(
         "--draw-horizon",
         action="store_true",
         help="overlay the black-hole event horizon (r_+ = M + sqrt(M^2 - a^2)) of a "

@@ -15,8 +15,9 @@
 #
 # usage:
 #  simbi run traced_kh                       # 2000 tracers by default
-#  simbi run traced_kh --n-tracers 8000      # denser particle sampling
+#  simbi run traced_kh --tracers 8000        # denser particle sampling
 #  simbi run traced_kh --resolution 512,512  # sharper billows
+#  simbi plot data/traced_kh/*.h5 --field rho --draw-tracers   # scatter the particles
 # =============================================================================
 from pathlib import Path
 from typing import Annotated

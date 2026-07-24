@@ -190,6 +190,9 @@ def plot(
     if config.figure.draw_horizon:
         _overlay_horizon(figure, config, sim_data)
 
+    if config.figure.draw_tracers:
+        _overlay_tracers(figure, files[0], config)
+
     if save_as:
         figure.save(save_as)
     if show:
@@ -209,6 +212,25 @@ def _overlay_bodies(figure, checkpoint_path, config, sim_data) -> None:
         config.plot.slice,
         sim_data.metadata.coord_system,
     )
+
+
+def _overlay_tracers(figure, checkpoint_path, config) -> None:
+    """scatter the run's lagrangian tracer particles on the rendered field axis, for the
+    two in-plane axes of the field's slice. a run with no tracers draws nothing."""
+    from .bodies import slice_to_plane
+    from .tracers import overlay_tracers
+
+    ax = figure.axes.get("main") if figure.axes else None
+    if ax is None:
+        return
+    mapped = slice_to_plane(config.plot.slice)
+    if mapped is None:  # the field reduced to a 1-D line: no scatter plane
+        return
+    plane, at = mapped
+    # 2-D runs have no out-of-plane axis (all particles in-plane); a 3-D run projects
+    # every particle onto the plane here -- call overlay_tracers with `slab=` directly for
+    # a thin sheet matching a 3-D field slab.
+    overlay_tracers(ax, checkpoint_path, plane=plane, at=at)
 
 
 def _overlay_horizon(figure, config, sim_data) -> None:
