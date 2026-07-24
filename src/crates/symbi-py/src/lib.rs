@@ -2251,18 +2251,34 @@ fn refinement_regions_nd<const D: usize>(
 /// region_to_domain rounds to >= 1 cell). a TILE-LOCAL patch survives in exactly one tile; a patch
 /// SPANNING a cut is split into the abutting tiles, each clipped to its own slab (the per-tile
 /// hierarchies then share the cut on the fine level, exchanged by `evolve_hierarchy_decomposed`).
+/// clip the global refinement regions to one tile's physical box. `maps` carries the tile's own
+/// coordinate maps, so the tile's far corner and its cell widths come from the MAP rather than from
+/// `origin + cells * dx`: on a log radial axis the widths grow with radius and the linear form would
+/// place the tile's outer edge far short of where its last cell actually ends, silently dropping
+/// refinement regions that do overlap the tile.
+///
+/// the survival test compares each clipped extent against the width of the SMALLEST cell in the
+/// overlap rather than a single global `dx`, which is the same "narrower than half a cell" rule the
+/// uniform path applied, expressed so it still means that when the cells are not all one size.
 fn clip_regions_to_tile<const D: usize>(
     regions: &[RefinementRegion<D>],
     origin: [f64; D],
     cells: [usize; D],
-    dx: [f64; D],
+    maps: &[symbi_geometry::AxisMap; D],
 ) -> Vec<RefinementRegion<D>> {
-    let hi: [f64; D] = std::array::from_fn(|a| origin[a] + cells[a] as f64 * dx[a]);
+    let hi: [f64; D] = std::array::from_fn(|a| maps[a].face(cells[a] as isize));
+    // the narrowest cell on each axis: for a uniform map every cell has this width, for a log map it
+    // is the innermost one, so the test never discards a region an actual cell could resolve.
+    let min_w: [f64; D] = std::array::from_fn(|a| {
+        (0..cells[a])
+            .map(|i| maps[a].face(i as isize + 1) - maps[a].face(i as isize))
+            .fold(f64::INFINITY, f64::min)
+    });
     let mut out = Vec::new();
     for r in regions {
         let lo: [f64; D] = std::array::from_fn(|a| r.x_lo[a].max(origin[a]));
         let up: [f64; D] = std::array::from_fn(|a| r.x_hi[a].min(hi[a]));
-        if (0..D).all(|a| up[a] - lo[a] > 0.5 * dx[a]) {
+        if (0..D).all(|a| up[a] - lo[a] > 0.5 * min_w[a]) {
             out.push(RefinementRegion { x_lo: lo, x_hi: up });
         }
     }
@@ -2849,6 +2865,60 @@ fn motion_state(cfg: &Config) -> MotionState<f64> {
 /// builder keeps the bit-identical `x_lo + i*dx` path). a log-spaced radial axis maps to
 /// `face(i) = start * 10^(i * slope)`, the slope set so the last face reaches `r_hi = start + dx*n`
 /// (dx being the linear width the binding derived from the bounds). requires `start > 0`.
+/// the per-axis coordinate maps for ONE TILE of a decomposed grid, and the tile's physical origin.
+///
+/// a tile holds LOCAL cell indices `0..m` positioned by an origin, so the map it carries must place
+/// local index `i` where the global grid places `g + i` (`g` = the tile's first global cell on that
+/// axis).
+///
+/// for a uniform axis that composes additively — `x_lo + g dx` then `+ i dx` — which is what the
+/// decomposed builder has always done. a LOG axis maps `face(i) = start * 10^(i * slope)`, so the
+/// composition is MULTIPLICATIVE: the tile's origin is `start * 10^(g * slope)`.
+///
+/// the slope is GLOBAL and must be inherited, never re-derived from the tile's own extent: it is a
+/// per-cell stretching, so a tile that recomputed it from its local start and cell count would give
+/// itself a different stretching and the grid would break at every seam. re-deriving it from the
+/// CORRECT tile origin is consistent — `log10(hi_local/start_local)/m = log10(10^(m s))/m = s` — so
+/// inheriting is the same value, obtained without the chance of getting it wrong.
+fn tile_axis_maps<const D: usize>(
+    cfg: &Config,
+    tile_lo: [usize; D],
+) -> Option<[symbi_geometry::AxisMap; D]> {
+    let global = axis_maps::<D>(cfg)?;
+    Some(std::array::from_fn(|ax| shift_axis_map(global[ax], tile_lo[ax])))
+}
+
+/// advance one axis map to a tile whose first cell is global index `tile_lo`, so the tile's LOCAL
+/// index `i` lands where the global grid puts `tile_lo + i`. uniform composes additively, log
+/// multiplicatively; the log slope is a per-cell stretching and is carried through unchanged.
+fn shift_axis_map(global: symbi_geometry::AxisMap, tile_lo: usize) -> symbi_geometry::AxisMap {
+    use symbi_geometry::AxisMap;
+    match global {
+        AxisMap::Log { start, log_slope } => AxisMap::Log {
+            start: start * 10.0_f64.powf(tile_lo as f64 * log_slope),
+            log_slope,
+        },
+        AxisMap::Uniform { start, dx } => AxisMap::Uniform {
+            start: start + tile_lo as f64 * dx,
+            dx,
+        },
+    }
+}
+
+/// the physical lower corner of a decomposed tile whose first global cell is `tile_lo`. the ONE
+/// place this formula lives: a uniform axis advances additively by `g dx`, a log axis
+/// multiplicatively by `10^(g slope)`, and a caller that assumed the uniform form on a log grid
+/// would silently place the tile at the wrong radius.
+fn tile_origin<const D: usize>(cfg: &Config, tile_lo: [usize; D]) -> [f64; D] {
+    match tile_axis_maps::<D>(cfg, tile_lo) {
+        Some(maps) => std::array::from_fn(|ax| match maps[ax] {
+            symbi_geometry::AxisMap::Log { start, .. } => start,
+            symbi_geometry::AxisMap::Uniform { start, .. } => start,
+        }),
+        None => std::array::from_fn(|ax| cfg.x_lo[ax] + tile_lo[ax] as f64 * cfg.dx[ax]),
+    }
+}
+
 fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D]> {
     use symbi_geometry::AxisMap;
     if !cfg.x1_spacing.eq_ignore_ascii_case("log") {
@@ -3477,21 +3547,28 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let mut tiles: Vec<Hier> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            let origin: [f64; $d] =
-                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            // the tile's first GLOBAL cell on each axis; the origin and the coordinate maps both
+            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let phys = boundaries_nd::<$d>(&cfg.boundaries);
             let bnd = Boundaries(std::array::from_fn(|ax| {
                 let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
                 let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
                 [lo, hi]
             }));
-            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, dx);
+            let tile_maps: [symbi_geometry::AxisMap; $d] = tile_axis_maps::<$d>(cfg, tile_lo)
+                .unwrap_or_else(|| std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform {
+                    start: origin[ax], dx: dx[ax],
+                }));
+            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, &tile_maps);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
                 let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(dx)
+                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -3691,8 +3768,10 @@ macro_rules! build_and_run_hydro_decomposed {
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            let origin: [f64; $d] =
-                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            // the tile's first GLOBAL cell on each axis; the origin and the coordinate maps both
+            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = Boundaries(std::array::from_fn(|ax| {
                 let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
@@ -3705,6 +3784,7 @@ macro_rules! build_and_run_hydro_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -4467,8 +4547,10 @@ macro_rules! build_and_run_mhd_decomposed {
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            let origin: [f64; $d] =
-                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            // the tile's first GLOBAL cell on each axis; the origin and the coordinate maps both
+            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = Boundaries(std::array::from_fn(|ax| {
                 let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
@@ -4485,6 +4567,7 @@ macro_rules! build_and_run_mhd_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -4653,8 +4736,10 @@ macro_rules! build_and_run_imhd_decomposed {
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            let origin: [f64; $d] =
-                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            // the tile's first GLOBAL cell on each axis; the origin and the coordinate maps both
+            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = Boundaries(std::array::from_fn(|ax| {
                 let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
@@ -4669,6 +4754,7 @@ macro_rules! build_and_run_imhd_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -5017,8 +5103,10 @@ macro_rules! build_and_run_iso_decomposed {
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            let origin: [f64; $d] =
-                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            // the tile's first GLOBAL cell on each axis; the origin and the coordinate maps both
+            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| tc[ax] * m[ax]);
+            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = Boundaries(std::array::from_fn(|ax| {
                 let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
@@ -5031,6 +5119,7 @@ macro_rules! build_and_run_iso_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -5877,14 +5966,11 @@ fn check_excision_request(
             0.7 * r_plus
         ));
     }
-    if refinement_enabled && n_gpus > 1 {
-        return Err(
-            "excision is wired for the refined path and the decomposed path separately, \
-             not their combination; use refinement with gpus = 1 or excise unrefined \
-             decomposed"
-                .into(),
-        );
-    }
+    // refinement + decomposition + excision compose: the decomposed driver runs the ROOT excise
+    // (`level_tail_excise`) in the same position the uni-grid tail does, and the overlap check below
+    // — which applies to every gpu count — keeps fine patches off the excised surface, which is the
+    // condition that makes a root-only excise correct in the first place.
+    let _ = n_gpus;
     if refinement_enabled {
         // the excise pass runs on the ROOT level only; a fine patch overlapping the
         // excised region would evolve its copy of those cells and restrict them back
@@ -5960,14 +6046,15 @@ mod excision_gate_tests {
     }
 
     #[test]
-    fn decomposed_and_refined_are_each_allowed_but_not_combined() {
-        // multi-gpu decomposed: the sweeps interleave halo exchanges (bit-equal to
-        // monolithic); refined: the excise pass runs on the root level with fine
-        // patches off the horizon. the combination stays unwired.
+    fn decomposition_refinement_and_their_combination_are_all_allowed() {
+        // the excise pass is owned by whichever LEVEL contains the excised region, and the decomposed
+        // driver runs the root excise in the same position the uni-grid tail does, so decomposition
+        // and refinement compose. the condition that makes a root-only excise correct is that no fine
+        // patch overlaps the excised surface, which the overlap check enforces at every gpu count.
         assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2).is_ok());
         let far = vec![vec![5.0, 8.0, 5.0, 8.0, 5.0, 8.0]];
         assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 2).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 2).is_ok());
     }
 
     #[test]
@@ -5985,9 +6072,23 @@ mod excision_gate_tests {
     }
 
     #[test]
-    fn excision_rejects_multi_gpu_with_refinement_only() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &[], 2).is_err());
+    fn the_horizon_overlap_check_governs_at_every_gpu_count() {
+        // the protection that matters is the patch/spheroid overlap test, NOT the gpu count: a fine
+        // patch on the horizon would evolve its own copy of the excised cells and restrict them back
+        // over the root fill, and that is equally wrong on one device or many. so the same region is
+        // accepted or refused identically however the grid is split.
+        let far = vec![vec![5.0, 8.0, 5.0, 8.0, 5.0, 8.0]];
+        let central = vec![vec![-2.0, 2.0, -2.0, 2.0, -2.0, 2.0]];
+        for gpus in [1usize, 2, 4] {
+            assert!(
+                check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, gpus).is_ok(),
+                "a far patch was refused at gpus = {gpus}"
+            );
+            assert!(
+                check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &central, gpus).is_err(),
+                "a patch ON the excised spheroid was accepted at gpus = {gpus}"
+            );
+        }
     }
 }
 
@@ -6153,16 +6254,11 @@ fn run_simulation(
             )));
         }
     }
-    // multi-gpu domain decomposition splits the SAME grid across tiles; a log axis needs each
-    // tile's local origin offset to the global log position (start*10^(global_lo*slope)), which is
-    // not yet wired. reject; evolving tiles on the mismatched uniform geometry would misplace them.
-    if cfg.n_gpus > 1 && !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
-        return Err(PyValueError::new_err(format!(
-            "multi-gpu decomposition does not yet support non-linear ('{}') cell spacing (the \
-             per-tile log origin offset is unwired); run single-gpu for log-spaced grids",
-            cfg.x1_spacing
-        )));
-    }
+    // a non-linear (log) radial axis IS supported under decomposition: each tile carries the global
+    // per-cell slope and an origin advanced multiplicatively to its first global cell
+    // (`start * 10^(g * slope)`), so a tile's local index i lands exactly where the undecomposed grid
+    // puts g + i, and refinement regions are clipped against the tile's map rather than a linear
+    // extent. gated by tile_coord_tests.
     // evaluate the scale-factor callables at the start time (GIL held). the rust
     // mesh-motion model integrates `a` from the constant rate `a_dot` (linear /
     // free homologous expansion, a_ddot = 0), so a single sample at t0 suffices.
@@ -6273,4 +6369,122 @@ fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pymodule]
 fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)
+}
+
+
+#[cfg(test)]
+mod tile_coord_tests {
+    use super::shift_axis_map;
+    use symbi_geometry::AxisMap;
+
+    // THE LAW a decomposed grid must satisfy: a tile holds LOCAL indices, so its local cell `i` has
+    // to land exactly where the undecomposed grid puts global cell `tile_lo + i`. if it does not, the
+    // tiles describe different physical domains and the halo exchange glues together grids that do
+    // not meet.
+    #[test]
+    fn tile_local_faces_reproduce_the_global_grid_on_a_log_axis() {
+        let (n, tiles) = (64usize, 4usize);
+        let (start, r_hi) = (1.5_f64, 400.0_f64);
+        let global = AxisMap::Log { start, log_slope: (r_hi / start).log10() / n as f64 };
+        let m = n / tiles;
+        let mut checked = 0;
+        for t in 0..tiles {
+            let g = t * m;
+            let local = shift_axis_map(global, g);
+            // every face of the tile INCLUDING the far one must coincide with the global face.
+            for i in 0..=m {
+                let want = global.face((g + i) as isize);
+                let got = local.face(i as isize);
+                assert!(
+                    (got - want).abs() <= 1e-12 * want.abs(),
+                    "tile {t} local face {i} (global {}) sits at {got}, global grid puts it at {want}",
+                    g + i
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, tiles * (m + 1), "the sweep did not cover every tile face");
+        // the seam: tile t's far face IS tile t+1's origin, so tiles abut with no gap or overlap.
+        for t in 0..tiles - 1 {
+            let far = shift_axis_map(global, t * m).face(m as isize);
+            let next = shift_axis_map(global, (t + 1) * m).face(0);
+            assert!(
+                (far - next).abs() <= 1e-12 * next.abs(),
+                "tiles {t}/{} do not abut: {far} vs {next}", t + 1
+            );
+        }
+    }
+
+    // the slope is a PER-CELL stretching and is global; a tile inherits it rather than re-deriving it
+    // from its own extent. re-derivation would give each tile its own stretching -- the failure mode
+    // this pins. the check is that re-deriving from the CORRECT tile endpoints returns the same
+    // number, so inheriting is consistent rather than a special case.
+    #[test]
+    fn a_tile_re_deriving_its_slope_would_get_the_global_one() {
+        let (n, m) = (64usize, 16usize);
+        let (start, r_hi) = (1.5_f64, 400.0_f64);
+        let s_global = (r_hi / start).log10() / n as f64;
+        let global = AxisMap::Log { start, log_slope: s_global };
+        for t in 0..4 {
+            let local = shift_axis_map(global, t * m);
+            match local {
+                AxisMap::Log { log_slope, .. } => {
+                    assert_eq!(log_slope, s_global, "tile {t} carries a different slope");
+                    let (lo, hi) = (local.face(0), local.face(m as isize));
+                    let s_local = (hi / lo).log10() / m as f64;
+                    assert!((s_local - s_global).abs() <= 1e-12 * s_global,
+                        "tile {t} endpoints imply slope {s_local}, global is {s_global}");
+                }
+                _ => panic!("tile {t} lost its log map"),
+            }
+        }
+    }
+
+    // a uniform axis is untouched: the same additive origin the decomposed builder always produced,
+    // so this change is a no-op wherever it was already correct.
+
+    // the clip must use the tile's MAP, not `origin + cells * dx`. on a log radial axis the cells
+    // widen outward, so the linear form puts the tile's far corner well inside where its last cell
+    // actually ends and silently drops refinement regions that really do overlap the tile. this
+    // region sits in that gap: it is inside the true tile extent and outside the linear estimate.
+    #[test]
+    fn log_tile_clipping_keeps_a_region_the_linear_extent_would_drop() {
+        use super::{clip_regions_to_tile, RefinementRegion};
+        let (m, start) = (16usize, 1.5_f64);
+        let slope = (400.0_f64 / start).log10() / 64.0;
+        let map = AxisMap::Log { start, log_slope: slope };
+        let maps = [map, AxisMap::Uniform { start: 0.0, dx: 1.0 }, AxisMap::Uniform { start: 0.0, dx: 1.0 }];
+        let origin = [map.face(0), 0.0, 0.0];
+        let true_hi = map.face(m as isize);
+        // the linear estimate the old code used: origin + m * (innermost width).
+        let dx0 = map.face(1) - map.face(0);
+        let linear_hi = origin[0] + m as f64 * dx0;
+        assert!(linear_hi < true_hi,
+            "setup is vacuous: the linear extent {linear_hi} must fall short of the true {true_hi}");
+        // a region living strictly between the two: genuinely on the tile, invisible to linear.
+        let r = RefinementRegion {
+            x_lo: [0.5 * (linear_hi + true_hi), 0.0, 0.0],
+            x_hi: [true_hi, 1.0, 1.0],
+        };
+        let kept = clip_regions_to_tile::<3>(&[r], origin, [m, 1, 1], &maps);
+        assert_eq!(kept.len(), 1,
+            "the map-aware clip dropped a region that overlaps the tile (true hi {true_hi}, \
+             linear hi {linear_hi})");
+        assert!(kept[0].x_hi[0] <= true_hi + 1e-12 * true_hi,
+            "clipped region extends past the tile's far face");
+    }
+
+    #[test]
+    fn a_uniform_axis_keeps_its_additive_origin() {
+        let global = AxisMap::Uniform { start: -2.0, dx: 0.125 };
+        for g in [0usize, 16, 48] {
+            let local = shift_axis_map(global, g);
+            for i in 0..=8 {
+                let want = global.face((g + i) as isize);
+                let got = local.face(i as isize);
+                assert!((got - want).abs() <= 1e-15 * want.abs().max(1.0),
+                    "uniform tile at {g}, local face {i}: {got} != {want}");
+            }
+        }
+    }
 }

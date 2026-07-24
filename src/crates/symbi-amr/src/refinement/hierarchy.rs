@@ -1132,10 +1132,7 @@ where
         // after viscous (bit-identical on the finest, where both run); a no-op at excision_radius = 0,
         // so unexcised and uni-grid runs are unchanged. the excised fill survives the finer subcycle +
         // restriction below because the excised region is never a covered (finer-patch) region.
-        {
-            let l = &self.levels[level];
-            l.kernels.excise(&l.state);
-        }
+        self.level_tail_excise(level);
         if !has_finer {
             let horizon = self.levels[level].state.immersed.as_ref().and_then(|im| {
                 im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
@@ -1179,6 +1176,25 @@ where
     /// and the fine-side register (a coarser level exists). no-op for hydro. PURE EXTRACTION from
     /// level_step_tail so the DECOMPOSED driver can interpose a fine-level halo exchange between the
     /// root stages and the (driver-controlled) fine subcycle.
+    /// the excise pass for ONE level, as a PURE EXTRACTION from `level_step_tail` — the same reason
+    /// `level_tail_emf` is extracted: the DECOMPOSED driver builds the step itself and must be able to
+    /// run this piece of the tail without the finest-level pieces (viscous, horizon ledger, penalize)
+    /// that legitimately belong to the finest level alone.
+    ///
+    /// it runs on EVERY level, not only the finest: the excised region is owned by whichever level
+    /// contains it, and the refinement request gate forbids a finer patch overlapping it, so a refined
+    /// ROOT still owns and must excise its singular core. a decomposed driver that omitted this would
+    /// evolve un-excised gas inside the horizon forever — silent, since the interior is causally
+    /// disconnected and never protests.
+    ///
+    /// no halo re-exchange is needed after it: the fill writes only cells inside the excised surface,
+    /// and the refinement gate keeps every fine patch off that surface, so the prolongation that
+    /// follows never reads an excised cell.
+    pub fn level_tail_excise(&self, level: usize) {
+        let l = &self.levels[level];
+        l.kernels.excise(&l.state);
+    }
+
     pub fn level_tail_emf(&self, level: usize, dt: f64) {
         let has_finer = level + 1 < self.levels.len();
         let has_coarser = level > 0;
@@ -1713,6 +1729,13 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
+        }
+        // the ROOT excise, in the same position the uni-grid tail puts it (after the emf
+        // bookkeeping). the rest of the tail — viscous, horizon ledger, penalize — belongs to the
+        // finest level and is driven with the fine subcycle; the excise does not, because the excised
+        // region is owned by whichever level contains it and a refined root still owns its core.
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
         }
         // the FINE subcycle, decomposed across the refined tiles: RATIO substeps, each fine substep
         // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).
