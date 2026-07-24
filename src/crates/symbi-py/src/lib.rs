@@ -2998,13 +2998,23 @@ macro_rules! build_and_run_hydro {
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
-        // the DOF-lifted (swirl) tile decomposition is not wired; refuse until it is.
+        // the DOF-lifted (swirl) tile decomposition IS wired: the decomposed build is
+        // DOF-generic and the transport carries the out-of-plane momentum across cuts
+        // (decomp_curvilinear_equivalence swirl gates). refinement / bodies with swirl are
+        // not, matching the single-device swirl guards below.
         if cfg.n_gpus > 1 {
-            if $dof != $d {
-                return Err("DOF-lifted (swirl) runs do not yet support gpus > 1".to_string());
+            if $dof != $d && cfg.refinement_enabled {
+                return Err(
+                    "DOF-lifted (swirl) runs do not yet support mesh refinement".to_string(),
+                );
+            }
+            if $dof != $d && !cfg.bodies.is_empty() {
+                return Err(
+                    "DOF-lifted (swirl) runs do not yet support immersed bodies".to_string(),
+                );
             }
             return build_and_run_hydro_decomposed!(
-                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
+                $cfg, $prims, $regime, $regime_ty, $d, $dof, $geom, $geom_ty
             );
         }
         if $dof != $d && cfg.refinement_enabled {
@@ -3744,11 +3754,13 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 /// checkpoint cadence is the LINEAR `checkpoint_interval`; the log cadence + live display are
 /// single-grid only. correctness is the same oracle contract (decomposed == monolithic).
 macro_rules! build_and_run_hydro_decomposed {
-    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
-        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+        // `$d` is the grid dimension, `$dof` the momentum-component count; they differ for the
+        // swirl lift (the azimuthal momentum on a 2D (r, z)/(r, theta) grid, DOF = 3).
+        type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, IdealGas<f64>>;
 
         // refinement + gpus>1 takes the decomposed-HIERARCHY path (per-tile hierarchies + the
         // root/fine halo exchange); plain single-level continues below.
@@ -3820,7 +3832,7 @@ macro_rules! build_and_run_hydro_decomposed {
                         Prim {
                             rho: row[0],
                             vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                            pre: row[1 + $d],
+                            pre: row[1 + $dof],
                         }
                     })
                     .build();
@@ -3885,7 +3897,7 @@ macro_rules! build_and_run_hydro_decomposed {
                             .map_err(|e| format!("source expression parse: {e}"))?;
                         let built = symbi_hydro::expr_bridge::build_user_source(
                             &scfg,
-                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                            <$regime_ty as Regime<f64, $dof>>::SPEC,
                         )
                         .map_err(|e| format!("source expression lower: {e}"))?;
                         sub.attach_runtime_source(built, scfg.params.clone())?
@@ -3905,7 +3917,7 @@ macro_rules! build_and_run_hydro_decomposed {
                             .map_err(|e| format!("boundary expression parse: {e}"))?;
                         let built = symbi_hydro::expr_bridge::build_boundary_dag(
                             &bcfg,
-                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                            <$regime_ty as Regime<f64, $dof>>::SPEC,
                         )
                         .map_err(|e| format!("boundary expression lower: {e}"))?;
                         sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
@@ -3942,7 +3954,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 Prim {
                     rho: row[0],
                     vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                    pre: row[1 + $d],
+                    pre: row[1 + $dof],
                 }
             })
             .build();
