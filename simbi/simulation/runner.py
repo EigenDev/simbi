@@ -295,9 +295,29 @@ def _get_iterators(
 # =============================================================================
 # backend loading
 # =============================================================================
+def _enable_gpu_page_migration() -> None:
+    """make managed allocations device-resident on amd.
+
+    fields are allocated as unified/managed memory, which only migrates onto the gpu
+    when the device can fault on an absent page. that mechanism is XNACK, and it is
+    disabled by default on gfx90a (MI250X). without it a managed allocation stays
+    host-resident for the life of the run and every kernel access crosses the host
+    bus instead of hitting hbm -- a ~24x throughput loss on a memory-bound stencil,
+    with no error and no warning. the amd runtime reads this variable once when it
+    initializes, so it must be set before the gpu extension is imported.
+
+    nvidia ignores the variable entirely and page-migrates on fault unconditionally,
+    so setting it is inert there. an explicit value from the environment is left
+    alone, which keeps the disabling case reachable.
+    """
+    os.environ.setdefault("HSA_XNACK", "1")
+
+
 def _load_backend(compute_mode: str) -> Optional[ModuleType]:
     """load the appropriate backend module."""
     lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
+    if lib_mode == "gpu":
+        _enable_gpu_page_migration()
     try:
         return importlib.import_module(f"simbi.libs.{lib_mode}_ext")
     except ImportError as e:
