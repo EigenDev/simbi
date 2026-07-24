@@ -3274,7 +3274,7 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
 {
     use symbi::sim::decomp::{
-        enable_peer_mesh, evolve_decomposed, gather_faces, gather_interiors,
+        enable_peer_mesh, evolve_decomposed, gather_faces, gather_interiors, gather_tracers,
     };
 
     let ntiles = tiles.len();
@@ -3325,6 +3325,7 @@ where
         global.motion = sh[0].motion;
         gather_interiors(&global, &sh, counts);
         gather_faces(&global, &sh, counts);
+        gather_tracers(&mut global, &sh);
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
         let _ = write_hierarchy_checkpoint(
             &[&global],
@@ -3371,6 +3372,7 @@ where
                     global.motion = sh[0].motion;
                     gather_interiors(&global, sh, counts);
                     gather_faces(&global, sh, counts);
+                    gather_tracers(&mut global, sh);
                     let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
                     let _ = write_hierarchy_checkpoint(
                         &[&global],
@@ -3407,6 +3409,7 @@ where
         global.motion = sh[0].motion;
         gather_interiors(&global, &sh, counts);
         gather_faces(&global, &sh, counts);
+        gather_tracers(&mut global, &sh);
     }
     let _ = write_hierarchy_checkpoint(
         &[&global],
@@ -3961,13 +3964,25 @@ macro_rules! build_and_run_hydro_decomposed {
         // the gather copies each tile's dye into this output view (data_fields includes chi), so
         // the destination slot must exist; the interior is overwritten every checkpoint, so it is
         // allocated but not seeded here.
-        let global = if cfg.chi_ic.is_empty() {
+        let mut global = if cfg.chi_ic.is_empty() {
             global
         } else {
             global
                 .with_passive_scalar()
                 .map_err(|e| format!("global output dye allocation: {e:?}"))?
         };
+
+        // lagrangian tracers: seed the population once from the global density (the monolithic
+        // seeding) and split it across the tiles by initial position, so a decomposed run starts
+        // from the identical particles a single-grid run would. the output view carries an empty
+        // set the checkpoint gather refills from the tiles each write.
+        if cfg.n_tracers > 0 {
+            let per_tile = symbi_sim::tracers::seed_and_partition(&global, cfg.n_tracers, counts);
+            for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                tile.tracers = Some(set);
+            }
+            global.tracers = Some(symbi_sim::tracers::TracerSet::default());
+        }
 
         // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
         // gather + checkpoint, universal transport). every regime shares this loop.
@@ -5764,10 +5779,20 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.n_tracers, cfg.coord_system, cfg.spacetime
             ));
         }
-        if cfg.refinement_enabled || cfg.n_gpus > 1 || cfg.mesh_motion {
+        if cfg.refinement_enabled || cfg.mesh_motion {
             return Err(
-                "n_tracers does not support refinement, gpus > 1, or mesh motion yet".to_string(),
+                "n_tracers does not support refinement or mesh motion yet".to_string(),
             );
+        }
+        // gpus > 1 IS wired: the decomposed hydro build seeds + partitions tracers per tile and
+        // the driver advects + MIGRATES them across cuts (decomp_tracers_equivalence). the per-tile
+        // seed lives on the hydro decomposed path only, so other regimes stay refused rather than
+        // run silently tracerless.
+        if cfg.n_gpus > 1 && !matches!(cfg.regime.as_str(), "newtonian" | "rhd") {
+            return Err(format!(
+                "n_tracers with gpus > 1 is wired for newtonian/rhd hydro; regime '{}' not yet",
+                cfg.regime
+            ));
         }
     }
     match cfg.regime.as_str() {
