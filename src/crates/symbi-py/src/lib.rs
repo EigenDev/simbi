@@ -3876,10 +3876,28 @@ macro_rules! build_and_run_hydro_decomposed {
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
                 // binary orbit identically (oracle: decomp_body_equivalence).
 
-                let mut sim = if cfg.bodies.is_empty() {
+                // gravity / accretion sinks PLUS bonded fragments + shaped walls, attached per
+                // tile at their GLOBAL positions (refinement takes the refined decomposed path
+                // earlier, so no hierarchy branch here). unshaped point bodies get an empty shape
+                // list (a no-op), so only shaped / fragment runs differ from a bare with_bodies.
+                let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+                let mut sim = if !has_any_body {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
+                    let mut coll = build_bodies_and_horizon::<$d>(cfg);
+                    let mut shapes = build_body_shapes(&cfg.bodies);
+                    let physics = cfg.bonded_assembly.as_ref().map(|asm| {
+                        let (with_frags, physics) =
+                            append_fragments::<$d>(coll.clone(), &mut shapes, asm);
+                        coll = with_frags;
+                        physics
+                    });
+                    let mut sim = sim.with_bodies(coll);
+                    sim.attach_body_shapes(shapes);
+                    if let Some(physics) = physics {
+                        sim.attach_fragment_physics(physics);
+                    }
+                    sim
                 };
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
@@ -5702,12 +5720,9 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                  fragment step on the hierarchy)"
             ));
         }
-        if cfg.n_gpus > 1 {
-            return Err(format!(
-                "bonded_assembly ({n} fragments) does not support gpus > 1 yet (the \
-                 decomposed body step has no fragment subcycle)"
-            ));
-        }
+        // gpus > 1 IS wired: the decomposed body step sums each fragment's per-tile fluid load and
+        // runs the bonded DEM subcycle on the total, replicated across tiles
+        // (decomp_fragment_equivalence). refinement with fragments stays refused above.
         if cfg.dims < 2 {
             return Err(format!(
                 "bonded_assembly ({n} fragments) needs a 2d or 3d grid (bond torques are \

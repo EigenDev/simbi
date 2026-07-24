@@ -646,6 +646,23 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
     for s in stores.iter_mut() {
         let Some(im) = s.immersed.as_mut() else { continue };
         apply_body_deltas(&mut im.bodies, &global, dt);
+        // bonded fragments: the cross-tile-summed fluid loads drive the DEM subcycle (bonds +
+        // contact + mutual gravity + gas drag), replicated identically on every tile. the bodies
+        // and the summed external loads are identical on every tile, so the fragment motion is
+        // too -- the decomposed analog of the single-grid `evolve_bodies` fragment step. a fragment
+        // straddling a cut gets its total fluid load from the reduction above, so the cluster moves
+        // as one regardless of which tiles its pieces sit in.
+        if let Some(sys) = im.fragment_physics.as_mut() {
+            let n_src = im.bodies.source_count();
+            let mut external = vec![symbi_ib::ExternalLoad::zero(); im.bodies.len()];
+            for d in &global {
+                if d.idx >= n_src && d.idx < external.len() {
+                    external[d.idx].force = d.force_delta;
+                    external[d.idx].torque = d.torque_delta;
+                }
+            }
+            sys.advance(&mut im.bodies, dt, &external);
+        }
         im.diagnostics.reset();
     }
 }
