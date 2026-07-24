@@ -199,6 +199,90 @@ macro_rules! decomp_harness {
                 out
             }
 
+            // the dye rides the mass flux, so a cut only exercises chi exchange if mass actually
+            // crosses it AND the dye has a gradient there. the bump is centered on the domain
+            // (x = 0.5), so at a cut sitting on it the flux is ~zero by symmetry -- which makes a
+            // cut-centered dye gate vacuous. the chi runs therefore add a uniform DIAGONAL drift
+            // so every cut is flux-bearing, and paint the dye as a diagonal ramp so every cut
+            // carries a gradient; then dropping the exchange on ANY axis breaks the match.
+            const CHI_DRIFT: f64 = 0.4; // subsonic (cs ~ 1.18 here), same on every axis
+
+            // the dye concentration at a GLOBAL point: a ramp along the space diagonal, so it has
+            // a gradient across every axis's cut. evaluated at the cell center so mono and every
+            // tile seed the identical value.
+            fn chi_ic(x: [f64; $d]) -> f64 {
+                0.25 + 0.1 * x.iter().sum::<f64>()
+            }
+
+            // like `make`, plus a uniform diagonal drift (so cuts carry mass flux) and the dye
+            // slot allocated + seeded from `chi_ic`. the kernel set is unchanged -- chi advection
+            // is a runtime-gated phase in the substrate step (has_passive_scalar), dispatching
+            // kernels baked unconditionally.
+            fn make_chi(
+                cells: [usize; $d],
+                origin: [f64; $d],
+                bnd: Boundaries<$d>,
+                ts: Timestepping,
+            ) -> (Sim, Kern) {
+                let (mut sim, k) = make(cells, origin, bnd, ts);
+                sim = sim.with_passive_scalar().expect("dye allocation failed");
+                let ilo: [isize; $d] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+                let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
+                let prim_chi = sim.fields.prim.chi_field().expect("prim chi");
+                for c in sim.geom.interior.iter() {
+                    // the drift is uniform, so cons.mom = rho * CHI_DRIFT and prim.vel = CHI_DRIFT
+                    // on every axis; both must be set since the evolve reads cons and the flux
+                    // reconstructs prim.
+                    let rho = *sim.fields.cons.den.view().at(c);
+                    for dd in 0..$d {
+                        sim.fields.cons.mom[dd].view_mut().set(c, rho * CHI_DRIFT);
+                        sim.fields.prim.vel[dd].view_mut().set(c, CHI_DRIFT);
+                    }
+                    // global position of this cell center (tile origin + local offset).
+                    let x: [f64; $d] =
+                        std::array::from_fn(|a| origin[a] + ((c[a] - ilo[a]) as f64 + 0.5) * DX);
+                    let chi = chi_ic(x);
+                    cons_chi.view_mut().set(c, rho * chi);
+                    prim_chi.view_mut().set(c, chi);
+                }
+                (sim, k)
+            }
+
+            fn grid_tiles_chi(counts: [usize; $d], ts: Timestepping) -> Vec<(Sim, Kern)> {
+                let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
+                let total: usize = counts.iter().product();
+                (0..total)
+                    .map(|flat| {
+                        let tc = unflatten(flat, counts);
+                        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+                        let bnd = Boundaries(std::array::from_fn(|a| {
+                            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                            [lo, hi]
+                        }));
+                        with_device(tile_device(flat), || make_chi(m, origin, bnd, ts))
+                    })
+                    .collect()
+            }
+
+            // scatter every tile's interior primitive dye into one global N^D grid.
+            fn global_chi(tiles: &[(Sim, Kern)], counts: [usize; $d]) -> Vec<f64> {
+                sync_devices();
+                let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
+                let mut out = vec![f64::NAN; N.pow($d as u32)];
+                for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
+                    let tc = unflatten(flat_tile, counts);
+                    let ilo: [isize; $d] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+                    let chi = sim.fields.prim.chi_field().expect("prim chi");
+                    for c in sim.geom.interior.iter() {
+                        let g: [usize; $d] =
+                            std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+                        out[flatten(g, [N; $d])] = *chi.view().at(c);
+                    }
+                }
+                out
+            }
+
             // run mono (counts = [1; D]) and the requested decomposition with integrator
             // `ts`, then assert the global density grids agree to round-off.
             pub fn assert_matches(counts: [usize; $d], ts: Timestepping) {
@@ -247,6 +331,53 @@ macro_rules! decomp_harness {
                     $d
                 );
             }
+
+            // the ATLAS gate: with a passive scalar allocated, a decomposition must reproduce
+            // the monolithic DYE field to round-off -- which it can only do if prim.chi is
+            // exchanged across every cut. the dye is derived into the transport set from the
+            // store, so this is what proves the derivation actually carries it.
+            pub fn assert_chi_matches(counts: [usize; $d], ts: Timestepping) {
+                let mut mono = grid_tiles_chi([1; $d], ts);
+                run(&mut mono, [1; $d], ts);
+                let mono_chi = global_chi(&mono, [1; $d]);
+
+                let mut dec = grid_tiles_chi(counts, ts);
+                run(&mut dec, counts, ts);
+                let dec_chi = global_chi(&dec, counts);
+
+                assert!(
+                    mono_chi.iter().all(|v| v.is_finite()) && dec_chi.iter().all(|v| v.is_finite()),
+                    "some dye cells were never written (gather bug)"
+                );
+
+                // NON-VACUITY: the flow must have actually MOVED the dye, or a decomposition that
+                // never exchanges chi would match the monolithic run trivially and the gate would
+                // test nothing. compare the evolved monolithic dye to its analytic IC and require a
+                // real change -- the dye rides the bump-driven mass flux across the cut.
+                let mut max_advect = 0.0_f64;
+                for (flat, &chi_now) in mono_chi.iter().enumerate() {
+                    let g = unflatten(flat, [N; $d]);
+                    let x: [f64; $d] = std::array::from_fn(|a| (g[a] as f64 + 0.5) * DX);
+                    max_advect = max_advect.max((chi_now - chi_ic(x)).abs());
+                }
+                assert!(
+                    max_advect > 1e-6,
+                    "dye never advected (max move {max_advect:e}); the chi phase did not fire, so \
+                     the decomposition equivalence is vacuous"
+                );
+
+                let max_err = mono_chi
+                    .iter()
+                    .zip(&dec_chi)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                assert!(
+                    max_err < 1e-12,
+                    "decomposition {counts:?} (D={}, {ts:?}) vs monolithic DYE max err {max_err:e} \
+                     (advected {max_advect:e})",
+                    $d
+                );
+            }
         }
     };
 }
@@ -286,6 +417,25 @@ fn rk2_four_tile_1d() {
 #[test]
 fn euler_two_tile_2d_single_axis() {
     d2::assert_matches([2, 1], Timestepping::Euler);
+}
+
+// the passive scalar (dye) must survive decomposition: exchanged across the cut like any
+// primitive the flux reconstructs from. 1d 4-tile puts an interior tile between two cuts;
+// the 2x2 rk2 grid adds the per-stage exchange and diagonal corners.
+#[test]
+fn rk2_four_tile_1d_dye() {
+    d1::assert_chi_matches([4], Timestepping::Rk2);
+}
+
+#[test]
+fn rk2_quad_tile_2d_grid_dye() {
+    d2::assert_chi_matches([2, 2], Timestepping::Rk2);
+}
+
+// 3d 2x2x2: the dye must cross faces, edges, and corners of the tile grid.
+#[test]
+fn euler_octo_tile_3d_grid_dye() {
+    d3::assert_chi_matches([2, 2, 2], Timestepping::Euler);
 }
 
 // the hard combined case: a 2x2 grid (diagonal-neighbor corners) under rk2 (per-stage
