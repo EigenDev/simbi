@@ -6360,8 +6360,6 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-// cpu build -> `simbi.libs.cpu_ext`.
-#[cfg(not(feature = "gpu"))]
 // =============================================================================
 // machine-card accelerator description
 // =============================================================================
@@ -6388,6 +6386,8 @@ fn device_stats(_ndim: usize, _extent: &[u32]) -> Option<symbi_display::hostinfo
     None
 }
 
+// cpu build -> `simbi.libs.cpu_ext`.
+#[cfg(not(feature = "gpu"))]
 #[pymodule]
 fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)
