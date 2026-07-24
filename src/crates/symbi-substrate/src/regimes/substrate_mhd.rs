@@ -695,26 +695,30 @@ where
         dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &wname, &geom.interior, &[], &scalars);
         // the wu 2017 (arXiv:1708.07267) source-admissibility rate: on a curved background the
         // geometric source S advances U -> U + dt S and can push the conserved state out of the
-        // physical-constraint cone; the light-cone LxF FOFC flux is only physical-constraint-
-        // preserving under a timestep that also keeps U + dt S admissible. this kernel reads the
-        // flux light-cone rate already in the scratch and adds the source characteristic rate
-        // lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U) in place, so the reduction sizes dt against
-        // both (dt (lambda_flux + lambda_S) < 1). the source-CFL kernel is baked for GR-RMHD only.
-        // KEPT for GRMHD, unlike the GR-hydro path where the projection retires it. the difference is
-        // the strength of the guarantee: the hydro admissible cone is necessary AND sufficient, so the
-        // projection lands every cell in G for ANY dt and lambda_S is genuinely redundant. the RMHD
-        // cone is B-FREE and only NECESSARY — a state inside it can still fail the magnetic
-        // decomposition — so the projection does NOT bound the step, and removing this throttle takes
-        // the magnetized FM torus to NaN within five steps at native resolution (measured). the
-        // source-admissibility rate stays until the projection enforces the SUFFICIENT rmhd
-        // admissibility condition rather than the necessary one. that condition is closed-form in the
-        // conserved variables (wu & tang, arXiv:1709.05838, theorem 2.1): admissibility is
-        // D > 0, q(U) > 0 and Psi(U) > 0 with
-        //   Phi = sqrt((|B|^2 - E)^2 + 3(E^2 - D^2 - |m|^2))
-        //   Psi = (Phi - 2(|B|^2 - E)) sqrt(Phi + |B|^2 - E) - sqrt((27/2)(D^2|B|^2 + (m.B)^2))
-        // the set is convex, so the blend factor is still a unique boundary crossing, but Psi is not
-        // concave (unlike the hydro lorentz-cone function), so it needs a bracketed solve rather than
-        // the closed-form quadratic root.
+        // physical-constraint set; the light-cone LxF FOFC flux is only physical-constraint-preserving
+        // under a timestep that also keeps U + dt S admissible. this kernel reads the flux light-cone
+        // rate already in the scratch and adds the source characteristic rate
+        // lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U) in place, so the reduction sizes dt against both
+        // (dt (lambda_flux + lambda_S) < 1). baked for GR-RMHD only.
+        //
+        // KEPT for GRMHD even though the projection enforces the SUFFICIENT admissibility condition
+        // (wu & tang, arXiv:1709.05838, theorem 2.1), unlike the GR-hydro path where the same
+        // projection retires it. enforcing sufficiency is necessary for the retirement but not enough
+        // to license it, because an a-posteriori projection is not the physical-constraint-preserving
+        // LIMITER those theorems assume: the limiter bounds the RECONSTRUCTION at every quadrature
+        // point of every cell and the CFL still carries lambda_S alongside it, whereas this projection
+        // maps the already-updated state and only runs when some cell has tripped the correction flag.
+        // dropping the rate leaves two residual violations, both measured on the magnetized torus at
+        // native resolution: the recovered gas pressure reaches -8.3e-10, which is what projecting ONTO
+        // the admissible boundary gives once downstream rounding crosses it, and the field mirror
+        // symmetry degrades to 5.3e-13 against a 1e-14 stencil bound, because the boundary crossing is
+        // ill-conditioned where psi approaches it tangentially and amplifies a roundoff-scale asymmetry
+        // in the two mirror states into a discrete difference in the blend factor.
+        //
+        // the sufficient condition still does most of the work: under the B-free necessary cone the
+        // same retirement produced NaN within a few steps, so psi lifts the failure from a blowup to a
+        // rounding-scale boundary violation. what remains is a limiter-versus-projection gap, not a
+        // missing magnetic term.
         if !st.is_empty() {
             let sname = format!(
                 "{}_source_cfl{}{st}_{D}d",
