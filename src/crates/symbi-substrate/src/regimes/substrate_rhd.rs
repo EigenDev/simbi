@@ -553,6 +553,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 if curved {
                     crate::regimes::substrate_kernels::fofc_project(
                         sim, "rhd", dof_sfx, sim.stage_input(), &sim.fields.cons, &sim.fields.prim,
+                        None, // hydro: the admissible cone carries no magnetic term
                     );
                 }
             },

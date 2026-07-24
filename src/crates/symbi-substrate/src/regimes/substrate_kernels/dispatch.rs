@@ -140,19 +140,30 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     u_stage: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
     cons: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
     prim: &symbi_sim::state::PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    bcell: Option<[&Field<Sc, D, Mem>; 3]>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
     let st = spacetime_slug(geom.spacetime);
+    // `dof_sfx` carries the chart/DOF tag the bake used: the hydro bake keys on `geom.suffix()`,
+    // the MHD bake on `mhd_geom_slug`. the caller passes whichever matches its own family.
     let name = format!("{prefix}_fofc_project{dof_sfx}{st}_{D}d");
-    // x_* -> live cons (read + write in place), us_* -> stage input (read).
+    // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
+    // (read only; the magnetized admissibility residual needs the field but never blends it, since
+    // constrained transport owns the staggered value shared with the neighbor).
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("us_") {
             crate::regimes::fofc::fofc_comp(u_stage, prim, c)
         } else if let Some(c) = s.strip_prefix("x_") {
             crate::regimes::fofc::fofc_comp(cons, prim, c)
+        } else if let Some(c) = s.strip_prefix("bc_") {
+            let k: usize = c.parse().unwrap_or_else(|_| panic!("fofc_project: bad cell-B index '{s}'"));
+            bcell.unwrap_or_else(|| panic!(
+                "fofc_project: kernel '{name}' reads '{s}' but no cell-B was supplied — the \
+                 magnetized admissibility condition requires it"
+            ))[k]
         } else {
             panic!("fofc_project: unknown slot '{s}'")
         }

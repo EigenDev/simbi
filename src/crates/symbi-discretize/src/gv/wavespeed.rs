@@ -967,6 +967,128 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 /// gamma^{ij} (for |S|^2) and alpha/beta (to reconstruct the eulerian energy E = (ehat + D + beta^i
 /// S_i)/alpha from the stored killing energy). densitization is a common positive factor that cancels
 /// in the admissibility sign, so this works directly on the stored state. curved spacetime only.
+/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-MHD — the magnetized twin of
+/// [`fofc_project_gr_gv`], and the provable replacement for the RMHD freeze parachute.
+///
+/// two facts make the hydro projection carry over unchanged:
+/// - the RMHD c2p's OWN admissibility criterion is the B-FREE cone `E^2 > D^2 + gamma^{ij} S_i S_j`
+///   (`relativistic_cone_residual`, the Wu 2017 bound shared with the hydro recovery) — the magnetic
+///   terms do not enter it, so `admissible_theta` is the same function;
+/// - because that cone is B-free it is CONVEX in `(D, S_i, tau)` at FIXED `B`, so blending only the
+///   hydro slots is sound. that matters: `B` is CONSTRAINED-TRANSPORT-evolved and must NOT be
+///   touched, or `div(B) = 0` breaks. the projection leaves the staggered field alone by
+///   construction.
+///
+/// GRMHD is UNDENSITIZED (the Valencia state with the covariant killing energy in the `nrg` slot),
+/// so there is no `sqrt(-g)` here; the eulerian energy is recovered as
+/// `E = (ehat + D + beta^i S_i)/alpha`, the same inversion the GRMHD c2p performs.
+///
+/// this enforces the SUFFICIENT admissibility condition, not merely the B-free cone: a state is
+/// admissible iff D > 0, q > 0 AND psi > 0, where psi carries the magnetic terms and rejects states
+/// whose magnetic energy leaves no positive gas pressure to recover. see
+/// `symbi_hydro::admissible::rmhd_admissible_residuals`.
+///
+/// CAVEAT, stated because it bounds the guarantee: the magnetic field cannot be blended (constrained
+/// transport owns it), so the projection searches only the affine slice B = B_candidate. the anchor
+/// is admissible with its OWN field and need not be admissible in that slice; when it is not, no
+/// blend along the segment succeeds and theta = 0 is returned. hydrodynamics has no such failure
+/// mode — there the anchor is unconditionally admissible and theta = 0 always lands. the freeze tier
+/// therefore REMAINS as the residual backstop for GRMHD, and the guard census measures how much of
+/// it survives.
+pub fn fofc_project_gr_mhd_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let mid = gv_cell_midpoints(spacing, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => mid[d],
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
+        match (spacetime, coords) {
+            (Spacetime::Schwarzschild, _) => {
+                let m = Schwarzschild { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::KerrSchild, Coords::Cartesian) => {
+                let m = SchwarzschildKSCartesian { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::KerrSchild, Coords::Cylindrical) => {
+                let m = SchwarzschildKSCylindrical { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::KerrSchild, _) => {
+                let m = SchwarzschildKS { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::Kerr, Coords::Cartesian) => {
+                let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::Kerr, Coords::Cylindrical) => {
+                let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::Kerr, _) => {
+                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::Minkowski, _) => {
+                unreachable!("the GRMHD FOFC projection is baked only for a curved spacetime")
+            }
+        };
+    let read = |k: &str| Gv::field(k, k);
+    let x_den = read("x_den");
+    let x_nrg = read("x_nrg");
+    let us_den = read("us_den");
+    let us_nrg = read("us_nrg");
+    // RMHD momentum is ALWAYS a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
+    let x_mom: Vec<Gv> = (0..3).map(|k| read(&format!("x_mom_{k}"))).collect();
+    let us_mom: Vec<Gv> = (0..3).map(|k| read(&format!("us_mom_{k}"))).collect();
+    let s_c = Tensor::<Gv, 3>::new(std::array::from_fn(|k| x_mom[k]));
+    let s_a = Tensor::<Gv, 3>::new(std::array::from_fn(|k| us_mom[k]));
+    let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
+    let inv_alpha = Gv::ONE / alpha;
+    let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
+    let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
+    // the magnetic field is held FIXED at the candidate's cell-centered value: it is
+    // constrained-transport-evolved on the staggered faces and shared between neighbors, so blending
+    // it per cell would desynchronize the shared face value and break div(B) = 0.
+    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+        Gv::field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
+    }));
+    // strict-interior floors, each scaled to the dimensions of its own residual so the thresholds are
+    // relative rather than absolute: q carries one power of energy, psi carries three halves.
+    let eps_d = Gv::from_f64(1e-12) * us_den;
+    let eps_q = Gv::from_f64(1e-10) * e_a;
+    let eps_psi = Gv::from_f64(1e-10) * e_a * e_a.max(Gv::ZERO).sqrt();
+    // 20 halvings resolve theta to ~1e-6. every iteration unrolls into the traced expression graph,
+    // and a truncated bisection only returns a SMALLER (more conservative) blend, never an
+    // inadmissible one, so the count trades kernel size against how sharply the projection hugs the
+    // boundary.
+    let theta = symbi_hydro::admissible::rmhd_admissible_theta(
+        x_den, s_c, e_c, us_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
+    );
+    let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    writes.push(("x_den".to_string(), "x_den".into(), proj(x_den, us_den).node()));
+    for k in 0..3 {
+        let key = format!("x_mom_{k}");
+        writes.push((key.clone(), key.into(), proj(x_mom[k], us_mom[k]).node()));
+    }
+    writes.push(("x_nrg".to_string(), "x_nrg".into(), proj(x_nrg, us_nrg).node()));
+    (end_trace(), writes)
+}
+
+
 pub fn fofc_project_gr_gv(
     coords: Coords,
     spacetime: Spacetime,
