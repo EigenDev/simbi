@@ -227,10 +227,19 @@ pub(crate) fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]
     }))
 }
 
-/// smooth sign (for the HLLC/HLLD denominator guards): f/(|f|+eps), in [-1,1], 0 at f=0.
-fn sign_gv(f: Gv) -> Gv {
-    let eps = Gv::from_f64(1.0e-300);
-    f / (f.abs() + eps)
+/// clamp a denominator's MAGNITUDE to at least `eps` while preserving its sign. the HLLC/HLLD
+/// coefficients divide by wave-speed differences that approach zero in a degenerate riemann fan (the
+/// fast speed meeting the contact speed requires both the sound and alfven speeds to vanish), and by
+/// an HLL-averaged density that approaches zero in vacuum.
+///
+/// this is NOT `x + eps * sgn(x)`, and deliberately so. signum is zero at zero, so that form adds
+/// nothing exactly where the guard is needed and still divides by zero; and for a well-resolved
+/// denominator it perturbs a value that needed no help. clamping the magnitude leaves every argument
+/// with `|x| >= eps` EXACTLY UNCHANGED and moves only the arguments that would otherwise be unsafe.
+/// an exact zero takes the positive branch — at zero either direction is equally valid, so the
+/// choice is arbitrary and only the magnitude matters.
+fn guard_denominator(x: Gv, eps: Gv) -> Gv {
+    Gv::select(x.cmp_ge(Gv::ZERO), x.max(eps), x.min(Gv::ZERO - eps))
 }
 
 #[cfg(test)]

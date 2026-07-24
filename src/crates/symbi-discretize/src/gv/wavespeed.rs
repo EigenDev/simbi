@@ -685,9 +685,11 @@ pub fn rmhd_source_cfl_gr_gv(
     let q0 = e_cons - (d_cons * d_cons + gamma_norm(&mom)).sqrt();
     let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
     let sm_norm = gamma_norm(&sm_arr).sqrt();
-    // lambda_S = (|S_tau| + ||S_mom||_gamma) / q; the max keeps a near-boundary cell driving
-    // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0).
-    let q_safe = q0.max(Gv::from_f64(1e-12));
+    // lambda_S = (|S_tau| + ||S_mom||_gamma) / q; the floor keeps a near-boundary cell driving
+    // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0). it is RELATIVE to the
+    // cell's own energy because q carries one power of energy: an absolute floor would mean something
+    // different in a near-vacuum atmosphere than in a dense core.
+    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * e_cons.abs());
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
     // no cell inside the event horizon may throttle the global timestep. the outer horizon
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
@@ -868,7 +870,7 @@ pub fn rhd_source_cfl_gr_gv(
     };
     let root = (d_cons * d_cons + gamma_norm(&mom)).sqrt();
     let q0 = e_cons - root;
-    let q_safe = q0.max(Gv::from_f64(1e-12));
+    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * e_cons.abs());
     // the rate at which the geometric source consumes the admissibility margin
     // q0 = E - sqrt(D^2 + |S|^2), evaluated for the COVARIANT (killing) energy variable.
     // over a source step the mass has no source and the killing energy has none either
@@ -910,7 +912,7 @@ pub fn rhd_source_cfl_gr_gv(
     // |Smom| / sqrt(2 root q0), it makes the cold-gas limit scale like sqrt(p) instead of
     // the valencia form's p — far weaker, but NOT absent. omitting it lets a stationary
     // rotating equilibrium on a zero-shift chart run past its admissible step.
-    let root_safe = root.max(Gv::from_f64(1e-12));
+    let root_safe = root.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * e_cons.abs());
     let sm_norm = gamma_norm(&sm_arr).sqrt();
     let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
     let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();

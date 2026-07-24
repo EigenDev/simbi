@@ -857,8 +857,8 @@ fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
     // guard the (lambda^s - lstar) denominators away from zero (preserve sign).
     let den_l = ll - lstar;
     let den_r = lr - lstar;
-    let den_l = den_l + eps * sign_gv(den_l);
-    let den_r = den_r + eps * sign_gv(den_r);
+    let den_l = guard_denominator(den_l, eps);
+    let den_r = guard_denominator(den_r, eps);
     let chi_l = (Gv::ZERO - (vxl - ll)) / den_l;
     let chi_r = (Gv::ZERO - (vxr - lr)) / den_r;
     // Eq. 38: d^s = ((|lstar| - |lambda^s|)/2) chi^s + |lstar|/2  (the LAST term is |lstar|, the
@@ -1386,7 +1386,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         let inv = Gv::ONE / (sr - sl + eps);
         let rho_hll = (sr * rr - sl * rl + mxl - mxr) * inv;
         let mx_hll = (sr * mxr - sl * mxl + fl - fr) * inv;
-        let lstar = mx_hll / (rho_hll + eps * sign_gv(rho_hll));
+        let lstar = mx_hll / guard_denominator(rho_hll, eps);
         let c = uct_hllc_coeffs(sl, sr, lstar, vl, vr);
         (c.dl, c.dr)
     };

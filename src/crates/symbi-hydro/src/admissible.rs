@@ -22,6 +22,20 @@
 // =============================================================================
 
 use symbi_algebra::{Matrix, Tensor};
+
+/// the RELATIVE margin below which an admissibility residual is treated as indistinguishable from
+/// zero, measured against the cell's own energy density.
+///
+/// the residuals guarded by it — `q = E - sqrt(D^2 + |S|^2)` and the norm `sqrt(D^2 + |S|^2)` — both
+/// carry one power of energy, so a bare absolute floor would encode an assumption about the problem's
+/// energy scaling that nothing enforces: the same constant is far too loose for a near-vacuum
+/// atmosphere and far too tight for a dense core. scaling by the local energy makes the criterion
+/// DIMENSIONLESS, so it means the same thing at every density.
+///
+/// the value sits about six orders above the accumulated roundoff of a multi-operation flux
+/// computation (roughly 1e-16 relative per operation), which is enough margin that a residual falling
+/// under it is genuinely numerical noise rather than a resolved small number.
+pub const ADMISSIBLE_REL_FLOOR: f64 = 1e-10;
 use symbi_ir::algebra::Scalar;
 
 /// the largest `theta` in [0, 1] with `anchor + theta (cand - anchor)` in the admissible set G,

@@ -39,7 +39,10 @@ use symbi_xpu::{with_device, KernelArgs, LaunchConfig, MemoryBlock};
 /// the one piece of device identity a cross-device exchange genuinely needs (the rest of the
 /// code uses the ambient current-device model). single-device transports
 /// (`LocalCopy`, `DeviceCopy`, `StagedCopy`) ignore them; `PeerCopy` uses them to drive
-/// `cuMemcpyPeer` between the two devices.
+/// a device-to-device peer copy between the two devices. the transport is BACKEND-GENERIC —
+/// `symbi_xpu::memcpy_peer` resolves to `cuMemcpyPeer` on nvidia and `hipMemcpyPeer` on amd — and it
+/// is correct whether or not peer access could be enabled for the pair: without it the driver stages
+/// through host memory, which costs bandwidth but never correctness.
 pub trait HaloTransport {
     fn copy_region<const D: usize, M: MemorySpace>(
         &self,
@@ -902,7 +905,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
 
 // the gather/scatter kernels for `StagedCopy`: pack a strided strip into a contiguous
 // buffer, and scatter a contiguous buffer back into a strided strip. the contiguous buffer
-// is the interchange a peer-copy (nvlink) or mpi transfer moves across the link.
+// is the interchange a peer copy moves across the device-to-device link.
 #[cfg(feature = "gpu")]
 const HALO_GATHER_KERNEL: &str = r#"
 extern "C" __global__ void halo_gather(
@@ -943,7 +946,7 @@ thread_local! {
 /// staged device transport: gather the strided strip into a CONTIGUOUS device buffer, then
 /// scatter it into the destination. on a single device the buffer is the staging area
 /// (gather then scatter, no move). ACROSS devices the contiguous buffer is exactly what a
-/// `cuMemcpyPeer` over nvlink (intra-node) or an mpi send/recv (multi-node) moves between
+/// a peer copy over the intra-node device fabric moves between
 /// the two ranks -- so this validates the pack/unpack halves of the multi-gpu transport on
 /// a single card; only the move in the middle is added on real hardware. host fallback for
 /// a cpu backend.
@@ -1016,7 +1019,7 @@ impl HaloTransport for StagedCopy {
             }
 
             // MOVE: single device -- the buffer IS the staging, nothing to move. across devices
-            // this is where cuMemcpyPeer (nvlink) or mpi send/recv copies `buf` to the neighbor's
+            // this is where the peer copy moves `buf` to the neighbor's
             // buffer before the scatter runs there.
 
             // scatter: dst[didx[i]] = buf[i].
@@ -1124,8 +1127,8 @@ pub fn enable_peer_mesh(devices: &[i32]) {
 pub fn enable_peer_mesh(_devices: &[i32]) {}
 
 /// the cross-device halo transport: gather the strip into the source
-/// device's contiguous buffer, `cuMemcpyPeer` it to the destination device's buffer over the
-/// link (nvlink intra-node), then scatter it into the destination strip. the gather and
+/// device's contiguous buffer, peer-copy it to the destination device's buffer over the
+/// intra-node device fabric, then scatter it into the destination strip. the gather and
 /// scatter ARE `StagedCopy`'s proven halves; only the peer move in the middle is new. when
 /// `src_dev == dst_dev` there is nothing to move across, so it defers to the proven
 /// single-device `StagedCopy`. host fallback for a cpu backend. NOT exercisable on one gpu (a
@@ -1151,8 +1154,8 @@ impl HaloTransport for PeerCopy {
         // fall back to the staged copy (contiguous gather/scatter over managed memory, correct
         // for ANY device pair) unless the two logical devices can DIRECTLY peer. this is the
         // universal-transport invariant: the SAME `PeerCopy` works on one card (logical devices
-        // fold onto the same physical gpu -> no peer -> staged), on a node with nvlink (real peer
-        // -> cuMemcpyPeer fast path), and on a node without p2p (staged) -- for any gpu count, no
+        // fold onto the same physical gpu -> no peer -> staged), on a node whose devices can peer
+        // (direct fast path), and on a node without peer access (staged) -- for any gpu count, no
         // machine-specific code. only a genuine cross-device link takes the peer path below.
         if src_dev == dst_dev || !peer_ok(src_dev, dst_dev) {
             StagedCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
@@ -1227,7 +1230,7 @@ impl HaloTransport for PeerCopy {
                 src_dev,
                 n * std::mem::size_of::<f64>(),
             )
-            .expect("cuMemcpyPeer failed");
+            .expect("device peer copy failed");
 
             // stage 3: scatter on the destination device -- dst[didx[i]] = dst_buf[i].
             with_device(dst_dev, || {
