@@ -2984,6 +2984,31 @@ macro_rules! into_hierarchy {
     }};
 }
 
+/// attach the config's immersed bodies (gravity / accretion sinks + shaped walls) plus any bonded
+/// fragment assembly to a built sim, at their GLOBAL positions. THE single site both the
+/// single-device and the decomposed (per-tile) hydro builds call, so a body / shape / fragment
+/// feature is wired ONCE -- a decomposed copy silently dropping the shapes (as it once did) is
+/// exactly what a shared attach prevents. the caller owns the empty / refined guard (a refined run
+/// attaches to the hierarchy's finest level instead).
+macro_rules! attach_bodies_and_fragments {
+    ($sim:expr, $cfg:expr, $d:literal) => {{
+        let cfg: &Config = $cfg;
+        let mut coll = build_bodies_and_horizon::<$d>(cfg);
+        let mut shapes = build_body_shapes(&cfg.bodies);
+        let physics = cfg.bonded_assembly.as_ref().map(|asm| {
+            let (with_frags, physics) = append_fragments::<$d>(coll.clone(), &mut shapes, asm);
+            coll = with_frags;
+            physics
+        });
+        let mut sim = $sim.with_bodies(coll);
+        sim.attach_body_shapes(shapes);
+        if let Some(physics) = physics {
+            sim.attach_fragment_physics(physics);
+        }
+        sim
+    }};
+}
+
 /// build one monomorphized hydro sim (regime x D x geometry, ideal-gas eos),
 /// seed it from the drained python buffer (axis-0-fastest linearization), and
 /// drive the run loop. the build chain's typestate + per-regime `substrate()`
@@ -3073,19 +3098,7 @@ macro_rules! build_and_run_hydro {
         let sim = if !has_any_body || cfg.refinement_enabled {
             sim
         } else {
-            let mut coll = build_bodies_and_horizon::<$d>(cfg);
-            let mut shapes = build_body_shapes(&cfg.bodies);
-            let physics = cfg.bonded_assembly.as_ref().map(|asm| {
-                let (with_frags, physics) = append_fragments::<$d>(coll.clone(), &mut shapes, asm);
-                coll = with_frags;
-                physics
-            });
-            let mut sim = sim.with_bodies(coll);
-            sim.attach_body_shapes(shapes);
-            if let Some(physics) = physics {
-                sim.attach_fragment_physics(physics);
-            }
-            sim
+            attach_bodies_and_fragments!(sim, cfg, $d)
         };
         // seed the passive scalar (dye): cons.chi = rho*chi and the primitive
         // concentration over the interior; the evolve-entry ghost fill covers
@@ -3525,8 +3538,12 @@ where
 /// each tile builds its root slab + the global refinement region CLIPPED to that slab (single-level
 /// where the region misses it); a patch that spans a cut is split into the abutting tiles and the
 /// fine halos are exchanged at the cut. output gathers each level into the global hierarchy (root
-/// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. v1: PLAIN
-/// hydro + a single refined region (bodies / sources / motion with refinement-decomp are refused).
+/// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. hydro + a
+/// single refined region, carrying immersed bodies (with shapes), user sources, and driven
+/// boundaries -- each attached per tile and evolved in lockstep (oracle-gated:
+/// decomp_refine_{body,source,driven}_equivalence). mesh motion, the passive scalar, tracers, and
+/// bonded fragments are NOT carried here -- they are unwired with REFINEMENT generally (refused for
+/// single-grid refined runs too), not a decomposition-specific gap.
 macro_rules! build_and_run_hydro_decomposed_refined {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
@@ -3884,20 +3901,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 let mut sim = if !has_any_body {
                     sim
                 } else {
-                    let mut coll = build_bodies_and_horizon::<$d>(cfg);
-                    let mut shapes = build_body_shapes(&cfg.bodies);
-                    let physics = cfg.bonded_assembly.as_ref().map(|asm| {
-                        let (with_frags, physics) =
-                            append_fragments::<$d>(coll.clone(), &mut shapes, asm);
-                        coll = with_frags;
-                        physics
-                    });
-                    let mut sim = sim.with_bodies(coll);
-                    sim.attach_body_shapes(shapes);
-                    if let Some(physics) = physics {
-                        sim.attach_fragment_physics(physics);
-                    }
-                    sim
+                    attach_bodies_and_fragments!(sim, cfg, $d)
                 };
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
