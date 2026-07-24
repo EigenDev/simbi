@@ -282,6 +282,36 @@ pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
 /// shared internal face (a tile's hi-`d` face == its neighbor's lo-`d` face) is written by both
 /// neighbors from CT-consistent (bit-identical) values, so the overwrite is harmless. no-op when
 /// the store carries no `mhd` fields (hydro/iso), so the shared run loop calls it unconditionally.
+/// reassemble the decomposed tracer population into `global.tracers` for output: union every
+/// tile's set, sorted by id, so the checkpoint's tracer order is identical to a single-grid run
+/// (ids are the stable identity; tile membership is a decomposition detail). no-op when the run
+/// carries no tracers.
+pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
+    global: &mut FieldStore<D, DOF, M, f64>,
+    tiles: &[&FieldStore<D, DOF, M>],
+) {
+    let Some(g) = global.tracers.as_mut() else {
+        return;
+    };
+    g.x.clear();
+    g.id.clear();
+    g.flags.clear();
+    for t in tiles {
+        if let Some(tr) = t.tracers.as_ref() {
+            g.x.extend_from_slice(&tr.x);
+            g.id.extend_from_slice(&tr.id);
+            g.flags.extend_from_slice(&tr.flags);
+            g.weight = tr.weight;
+        }
+    }
+    // stable id order: build the permutation, apply to each SoA column.
+    let mut perm: Vec<usize> = (0..g.id.len()).collect();
+    perm.sort_by_key(|&i| g.id[i]);
+    g.x = perm.iter().map(|&i| g.x[i]).collect();
+    g.id = perm.iter().map(|&i| g.id[i]).collect();
+    g.flags = perm.iter().map(|&i| g.flags[i]).collect();
+}
+
 pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
     global: &FieldStore<D, DOF, M>,
     tiles: &[&FieldStore<D, DOF, M>],
@@ -646,13 +676,10 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     // bodies are replicated identically on every tile; the per-step backward feedback + prescribed
     // advance run once per step when any tile carries them.
     let has_bodies = stores.iter().any(|s| s.immersed.is_some());
-    // no tracer advance exists on this driver yet: a tracer population here
-    // would feel nothing and freeze at its seed — the silently-missing-phase
-    // failure shape. refuse loudly until the decomposed tracer step lands.
-    assert!(
-        stores.iter().all(|s| !s.has_tracers()),
-        "lagrangian tracers are not wired on the decomposed (gpus > 1) driver",
-    );
+    // lagrangian tracers advance once per step at the step tail (below), against each tile's
+    // halo-filled velocity, then migrate across cuts -- the decomposed analog of the single-grid
+    // `advance_tracers`.
+    let has_tracers = stores.iter().any(|s| s.has_tracers());
 
     // a fresh SHARED reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
     // rebuilt per phase so the per-step body bookkeeping can take `&mut` between phases -- the
@@ -858,6 +885,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         }
         if has_bodies {
             step_bodies_decomposed(stores, dt);
+        }
+        // lagrangian tracers, once per step after the field + body update, against the post-step
+        // primitive velocity (cut ghosts current from the last stage exchange -- nothing in the
+        // tail recomputes prim). each tile advects its own population, then tracers that crossed a
+        // cut migrate to the owning tile. matches the single-grid `advance_tracers` order.
+        if has_tracers {
+            crate::tracers::advance_tracers_decomposed(stores, counts);
         }
         // per-tile clocks + mesh-motion advance, in lockstep (identical law + identical dt on
         // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the

@@ -402,23 +402,30 @@ pub fn advance_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
     sim: &mut FieldStore<D, DOF, Mem, f64>,
 ) {
     let Some(mut tr) = sim.tracers.take() else { return };
-    let dt = sim.dt;
-    let time = sim.time;
+    advance_positions(sim, &mut tr);
+    let (lo, hi) = interior_box(sim);
+    tr.scan_events(lo, hi, sink_of(sim), sim.time);
+    sim.tracers = Some(tr);
+}
+
+/// advect the population one step against `sim`'s post-step primitive velocity, sampled
+/// over the allocated grid (ghost bands current). the POSITION update only -- event scans
+/// (escape / sink) are separate so a decomposed step can advance per tile, MIGRATE across
+/// cuts, then scan once against the global domain.
+fn advance_positions<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+    tr: &mut TracerSet<D>,
+) {
     let alloc = &sim.geom.allocated;
     let mut n = [0usize; D];
     let mut x_lo_alloc = [0.0; D];
     let mut dxs = [0.0; D];
-    let mut lo_box = [0.0; D];
-    let mut hi_box = [0.0; D];
     let ng = sim.geom.ng as f64;
     let mut volume = 1usize;
     for a in 0..D {
         n[a] = (alloc.spaces[a].hi - alloc.spaces[a].lo) as usize;
         dxs[a] = sim.geom.dx[a];
         x_lo_alloc[a] = sim.geom.x_lo[a] - ng * dxs[a];
-        let n_int = (sim.geom.interior.spaces[a].hi - sim.geom.interior.spaces[a].lo) as f64;
-        lo_box[a] = sim.geom.x_lo[a];
-        hi_box[a] = sim.geom.x_lo[a] + n_int * dxs[a];
         volume *= n[a];
     }
     // the first D velocity components advect positions; a DOF-lifted swirl
@@ -427,10 +434,31 @@ pub fn advance_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
         std::slice::from_raw_parts(sim.fields.prim.vel[a].as_ptr(), volume)
     });
     let sampler = grid_velocity_sampler(slices, n, x_lo_alloc, dxs);
-    tr.advance_rk2(dt, sampler);
+    tr.advance_rk2(sim.dt, sampler);
+}
 
-    // sink: the first accreting body's mask, in cartesian world coordinates.
-    let sink = sim.immersed.as_ref().and_then(|im| {
+/// the sim's interior physical box `[x_lo, x_lo + n_int*dx)` per axis -- the escape test
+/// domain. for a single-grid run this IS the whole domain; for a decomposed tile it is only
+/// the tile's slab, so the decomposed step scans against the GLOBAL box instead.
+fn interior_box<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+) -> ([f64; D], [f64; D]) {
+    let mut lo = [0.0; D];
+    let mut hi = [0.0; D];
+    for a in 0..D {
+        let n_int = (sim.geom.interior.spaces[a].hi - sim.geom.interior.spaces[a].lo) as f64;
+        lo[a] = sim.geom.x_lo[a];
+        hi[a] = sim.geom.x_lo[a] + n_int * sim.geom.dx[a];
+    }
+    (lo, hi)
+}
+
+/// the first accreting body's sink mask (center, radius) in cartesian world coordinates, or
+/// None. tiles replicate the bodies at their global positions, so any tile yields the sink.
+fn sink_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+) -> Option<([f64; D], f64)> {
+    sim.immersed.as_ref().and_then(|im| {
         im.bodies.bodies().iter().find(|b| b.has_accretion()).and_then(|b| {
             b.accretion_radius().map(|r| {
                 let mut c = [0.0; D];
@@ -440,7 +468,152 @@ pub fn advance_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
                 (c, r)
             })
         })
-    });
-    tr.scan_events(lo_box, hi_box, sink, time);
-    sim.tracers = Some(tr);
+    })
+}
+
+/// advance the tracers of a DECOMPOSED run one step: advect each tile's population against
+/// its own (halo-filled) velocity, MIGRATE tracers that crossed a cut into the tile that now
+/// owns them, then scan escape/sink against the GLOBAL domain. a tracer near a cut is
+/// advected by its owning tile whose ghost band the halo exchange filled from the neighbor,
+/// so the trajectory is bit-identical to the monolithic sampler; migration only re-homes it.
+/// tiles carry EQUAL cell counts on a uniform Cartesian grid, so the owning tile of a
+/// position is a floor-divide -- decomposed tracers are gated to that case upstream.
+pub fn advance_tracers_decomposed<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, Mem, f64>],
+    counts: [usize; D],
+) {
+    if stores.iter().all(|s| !s.has_tracers()) {
+        return;
+    }
+    // advect per tile (position only), leaving the tracers in place.
+    for s in stores.iter_mut() {
+        if let Some(mut tr) = s.tracers.take() {
+            advance_positions(*s, &mut tr);
+            s.tracers = Some(tr);
+        }
+    }
+    migrate_tracers(stores, counts);
+    // the global domain box = tile (0,..,0)'s lower corner extended by the full cell count.
+    let (mut glo, mut ghi) = ([0.0; D], [0.0; D]);
+    for a in 0..D {
+        let n_int = (stores[0].geom.interior.spaces[a].hi - stores[0].geom.interior.spaces[a].lo)
+            as f64;
+        glo[a] = stores[0].geom.x_lo[a];
+        ghi[a] = glo[a] + n_int * counts[a] as f64 * stores[0].geom.dx[a];
+    }
+    let sink = stores.iter().find_map(|s| sink_of(*s));
+    for s in stores.iter_mut() {
+        if let Some(mut tr) = s.tracers.take() {
+            tr.scan_events(glo, ghi, sink, s.time);
+            s.tracers = Some(tr);
+        }
+    }
+}
+
+/// the flat tile index owning a physical position, or None if outside the global domain. the
+/// tile grid is uniform, so it is a floor-divide by the per-tile extent; the flat index is the
+/// SAME `flatten` the decomposition addresses tiles by, so a tracer lands in the store the
+/// decomposition calls its owner.
+fn tile_owner<const D: usize>(
+    x: &[f64; D],
+    glo: [f64; D],
+    extent: [f64; D],
+    counts: [usize; D],
+) -> Option<usize> {
+    let mut tc = [0usize; D];
+    for a in 0..D {
+        if x[a] < glo[a] || x[a] >= glo[a] + extent[a] * counts[a] as f64 {
+            return None;
+        }
+        let idx = ((x[a] - glo[a]) / extent[a]).floor() as isize;
+        tc[a] = idx.clamp(0, counts[a] as isize - 1) as usize;
+    }
+    Some(crate::decomp::flatten(tc, counts))
+}
+
+/// the global lower corner and per-tile physical extent of a uniform decomposition, read from
+/// tile 0 (its interior cell count is the per-tile count `m`).
+fn tile_geometry<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    tile0: &FieldStore<D, DOF, Mem, f64>,
+) -> ([f64; D], [f64; D]) {
+    let mut glo = [0.0; D];
+    let mut extent = [0.0; D];
+    for a in 0..D {
+        let m = (tile0.geom.interior.spaces[a].hi - tile0.geom.interior.spaces[a].lo) as usize;
+        glo[a] = tile0.geom.x_lo[a];
+        extent[a] = m as f64 * tile0.geom.dx[a];
+    }
+    (glo, extent)
+}
+
+/// seed `n` tracers from `global`'s density (the monolithic seeding) and split them across the
+/// `counts` tiles by initial position, returning one set per tile in flat order. the monolithic
+/// and decomposed runs thus start from the IDENTICAL population (same ids, same positions), so a
+/// decomposed run can be gated against the single-grid trajectories.
+pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    global: &FieldStore<D, DOF, Mem, f64>,
+    n: usize,
+    counts: [usize; D],
+) -> Vec<TracerSet<D>> {
+    let set = seed_mass_weighted(global, n);
+    // the per-tile extent from the FULL-SIZE global grid: interior cells / tile counts, times dx.
+    let mut glo = [0.0; D];
+    let mut extent = [0.0; D];
+    for a in 0..D {
+        let n_int =
+            (global.geom.interior.spaces[a].hi - global.geom.interior.spaces[a].lo) as usize;
+        glo[a] = global.geom.x_lo[a];
+        extent[a] = (n_int / counts[a]) as f64 * global.geom.dx[a];
+    }
+    let ntiles: usize = counts.iter().product();
+    let mut per_tile: Vec<TracerSet<D>> = (0..ntiles)
+        .map(|_| TracerSet { weight: set.weight, ..Default::default() })
+        .collect();
+    for i in 0..set.x.len() {
+        // the seed is inside the domain by construction, so `tile_owner` is always Some.
+        let dest = tile_owner(&set.x[i], glo, extent, counts).unwrap_or(0);
+        per_tile[dest].x.push(set.x[i]);
+        per_tile[dest].id.push(set.id[i]);
+        per_tile[dest].flags.push(set.flags[i]);
+    }
+    per_tile
+}
+
+fn migrate_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, Mem, f64>],
+    counts: [usize; D],
+) {
+    let (glo, extent) = tile_geometry(&*stores[0]);
+    let owner = |x: &[f64; D]| -> Option<usize> { tile_owner(x, glo, extent, counts) };
+
+    // collect (dest_tile, x, id, flags) for every tracer that must move, removing it from its
+    // source tile by swap_remove (SoA-consistent). done in one pass per tile so a tracer is
+    // considered exactly once this step.
+    let mut moved: Vec<(usize, [f64; D], u64, TracerFlags)> = Vec::new();
+    for (src, s) in stores.iter_mut().enumerate() {
+        let Some(tr) = s.tracers.as_mut() else { continue };
+        let mut i = 0;
+        while i < tr.x.len() {
+            let f = tr.flags[i];
+            // a frozen tracer (escaped/crossed) stays; otherwise its owner is by position, and
+            // an owner outside the domain (None) stays too, for the global scan to flag it.
+            let dest = if f.escaped || f.crossed_sink { Some(src) } else { owner(&tr.x[i]) };
+            match dest {
+                Some(d) if d != src => {
+                    let x = tr.x.swap_remove(i);
+                    let id = tr.id.swap_remove(i);
+                    let fl = tr.flags.swap_remove(i);
+                    moved.push((d, x, id, fl));
+                    // do not advance i: swap_remove moved the last element into slot i.
+                }
+                _ => i += 1,
+            }
+        }
+    }
+    for (dest, x, id, fl) in moved {
+        let tr = stores[dest].tracers.as_mut().expect("dest tile carries a tracer set");
+        tr.x.push(x);
+        tr.id.push(id);
+        tr.flags.push(fl);
+    }
 }
