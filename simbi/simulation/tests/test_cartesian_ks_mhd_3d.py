@@ -32,7 +32,7 @@ import pytest
 
 from simbi import ProblemParam, SimbiProblem
 from simbi.simulation import runner
-from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver, Spacetime
+from simbi.types import BoundaryCondition, CoordSystem, CtMethod, Regime, Solver, Spacetime
 from simbi.types.typing import GasStateGenerator, InitialStateType
 
 _BACKEND = runner._load_backend("cpu")
@@ -203,8 +203,6 @@ def test_cartesian_ks_mhd_3d_uct_preserves_divb_and_mirror() -> None:
     # densitized divergence stays at machine zero from the EVOLVED staggered field,
     # and the early-time field mirror symmetry holds to roundoff (the sharp
     # coordinate-role gate over the per-edge slot bindings).
-    from simbi.types import CtMethod
-
     d = tempfile.mkdtemp() + "/"
     p = _CartesianKsMhd3D(data_directory=Path(d))
     p.ct_method = CtMethod.UCT
@@ -259,8 +257,17 @@ def test_cartesian_ks_mhd_3d_stencils_are_mirror_exact_early() -> None:
     # is tolerance-level and takes several steps to grow), the discrete CT stencils must
     # hold the field mirror symmetry to roundoff — the sharp coordinate-role gate for the
     # 3d GR corner-EMF and curl.
+    #
+    # UCT, not the contact scheme: this initial data is uniform gas falling radially onto
+    # the hole, so v_x = v_r x/r is identically zero on the plane x = 0 and the contact
+    # upwind selector — which reads the sign of the normal mass flux — has no defined
+    # direction on that entire face plane. UCT selects on wave speeds, which stay bounded
+    # away from zero, so it is well posed here. the contact scheme's failure on exactly this
+    # configuration is gated by
+    # `test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane` below.
     d = tempfile.mkdtemp() + "/"
     p = _CartesianKsMhd3D(data_directory=Path(d))
+    p.ct_method = CtMethod.UCT
     runner.run(p, compute_mode="cpu", max_steps=2)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     with h5py.File(finals[0], "r") as h:
@@ -275,3 +282,53 @@ def test_cartesian_ks_mhd_3d_stencils_are_mirror_exact_early() -> None:
     assert berr < 1e-14, f"early B mirror symmetry broken: {berr:e} (stencil asymmetry)"
     rerr = np.abs(rho - np.transpose(rho, (0, 2, 1))).max()
     assert rerr < 1e-13, f"early rho transpose symmetry broken: {rerr:e}"
+
+
+@needs_backend
+def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
+    # the contact CT scheme selects the electromotive-force derivative by the SIGN of the
+    # normal mass flux (Gardiner & Stone 2005, eq. 51). that flux vanishes identically on a
+    # symmetry plane of the flow — here uniform gas falls radially onto the hole, so
+    # v_x = v_r x/r is zero on x = 0 — leaving the selector with no defined direction across
+    # that whole face plane, and the sign is then set by roundoff. the resulting
+    # electromotive-force error is fed back through the next step's fluxes and grows.
+    #
+    # UCT selects on wave speeds instead, which carry the fast magnetosonic speed and never
+    # approach zero, so it has a well-defined direction everywhere and holds the symmetry.
+    #
+    # this configuration is EXACTLY mirror symmetric under exchanging x and y: the metric is
+    # spherically symmetric (zero spin), the gas is uniform and at rest, and the field is
+    # purely vertical with a magnitude depending only on radius. so B_x(x, y, z) must equal
+    # B_y(y, x, z) for all time, and any departure is numerical.
+    #
+    # the gate is RELATIVE, comparing the two schemes on identical data rather than pinning a
+    # measured number: UCT must hold the symmetry, and the contact scheme must violate it by
+    # orders of magnitude. if a future contact formulation becomes well posed here this test
+    # FAILS, which is the signal to delete it and the UCT pin in the mirror test above.
+    def run_with(ct: CtMethod) -> float:
+        d = tempfile.mkdtemp() + "/"
+        p = _CartesianKsMhd3D(data_directory=Path(d))
+        p.ct_method = ct
+        runner.run(p, compute_mode="cpu", max_steps=2)
+        finals = glob.glob(os.path.join(d, "*final*.h5"))
+        assert finals, f"3d cartesian KS GRMHD run crashed under {ct}"
+        with h5py.File(finals[0], "r") as h:
+            prims = h["level_0/partition_0/hydro/primitives"]
+            halo = (prims["rho"].shape[0] - RES) // 2
+            sl = slice(halo, halo + RES)
+            b1 = prims["b1"][sl, sl, sl]
+            b2 = prims["b2"][sl, sl, sl]
+        assert np.abs(b1).max() > 1e-5, f"the field never moved under {ct}; vacuous"
+        return float(np.abs(b1 - np.transpose(b2, (0, 2, 1))).max())
+
+    uct = run_with(CtMethod.UCT)
+    contact = run_with(CtMethod.CONTACT)
+
+    assert uct < 1e-14, (
+        f"UCT broke the x<->y mirror symmetry of an exactly symmetric configuration: {uct:e}"
+    )
+    assert contact > 100.0 * uct, (
+        f"the contact CT scheme held the mirror symmetry ({contact:e} vs UCT {uct:e}) — its "
+        "upwind selector is no longer ill posed where the normal mass flux vanishes, so this "
+        "test and the UCT pin in the mirror-exactness test above are both obsolete"
+    )
