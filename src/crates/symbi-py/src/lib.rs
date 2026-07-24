@@ -1737,6 +1737,13 @@ where
             // resident memory vs the node's physical ram. rss grows, so re-sample
             // each cadence; an attach client reads the compute node's stats, never the client's own host.
             table.set_host(Some(symbi_display::hostinfo::HostStats::sample()));
+            // the bound accelerator and the block shape the root level's interior sweep
+            // launches with. the root extent is the representative one: finer levels are
+            // smaller and flux-face domains are transverse-expanded.
+            let dev_extent: Vec<u32> = (0..cfg.dims)
+                .map(|ax| h.levels[0].state.geom.interior.spaces[ax].size() as u32)
+                .collect();
+            table.set_device(device_stats(cfg.dims, &dev_extent));
             // live field heatmap: a screen-sized decimated density slice (2D/3D-mid;
             // None for 1D or device runs), compositing the nested refinement levels
             // so the refined region shows its fine detail. cost bounded by the
@@ -6355,6 +6362,32 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 // cpu build -> `simbi.libs.cpu_ext`.
 #[cfg(not(feature = "gpu"))]
+// =============================================================================
+// machine-card accelerator description
+// =============================================================================
+
+/// the accelerator bound to this process, or None on a cpu build. `extent` is the
+/// interior cell count per axis, which selects the launch block shape: the derivation
+/// widens the contiguous (stride-1) axis to a full warp before filling the transverse
+/// ones, so a thin domain and a fat one do not launch the same geometry. an explicit
+/// `SYMBI_BLOCK_{1,2,3}D` in the environment overrides the derivation, and reporting
+/// `block_for` rather than the fixed base keeps the card honest about what actually ran.
+#[cfg(feature = "gpu")]
+fn device_stats(ndim: usize, extent: &[u32]) -> Option<symbi_display::hostinfo::DeviceStats> {
+    let info = symbi::symbi_xpu::device_info().ok()?;
+    Some(symbi_display::hostinfo::DeviceStats {
+        name: info.name,
+        count: info.device_count.max(0) as usize,
+        mem_total: info.total_memory_bytes,
+        block: symbi::symbi_xpu::block_for(ndim, extent),
+    })
+}
+
+#[cfg(not(feature = "gpu"))]
+fn device_stats(_ndim: usize, _extent: &[u32]) -> Option<symbi_display::hostinfo::DeviceStats> {
+    None
+}
+
 #[pymodule]
 fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)

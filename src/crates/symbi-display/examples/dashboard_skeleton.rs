@@ -250,6 +250,12 @@ impl App {
             field: Some(self.field_slice()),
             field_count: 3, // density / pressure / line-out (dummy)
             host: Some(symbi_display::hostinfo::HostStats::sample()),
+            device: Some(symbi_display::hostinfo::DeviceStats {
+                name: "AMD Instinct MI250X".into(),
+                count: 1,
+                mem_total: 68_702_699_520,
+                block: [32, 8, 1],
+            }),
         }
     }
 }

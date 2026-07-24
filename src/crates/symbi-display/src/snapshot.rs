@@ -118,6 +118,12 @@ mod tests {
                 mem_rss: 3_221_225_472,
                 mem_total: 68_719_476_736,
             }),
+            device: Some(crate::hostinfo::DeviceStats {
+                name: "AMD Instinct MI250X".into(),
+                count: 2,
+                mem_total: 68_702_699_520,
+                block: [32, 8, 1],
+            }),
         }
     }
 
