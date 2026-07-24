@@ -290,3 +290,158 @@ fn cyl_log_quad_tile_rk2() {
 fn sph_log_radial_four_tile_rk2() {
     sph_log::assert_matches([4, 1], Timestepping::Rk2);
 }
+
+// =============================================================================
+// swirl (DOF != NDIM): the out-of-plane azimuthal momentum under decomposition
+// =============================================================================
+//
+// a cylindrical (r, z) grid with DOF = 3 lifts the azimuthal momentum v_phi (slot 1,
+// scale factor h3 = r) onto the 2D grid. it is advected by the in-plane radial flow and
+// carries an angular-momentum geometric source; the decomposition must exchange it across
+// a radial cut like any other momentum component (the transport ranges over mom[0..DOF]).
+// this is the piece the swirl build-macro refusal was guarding: only the BUILD hardcoded
+// DOF = D, never the transport.
+mod swirl {
+    use super::*;
+
+    type Sim = SimStateGeneric<Newtonian, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
+
+    const NDEV: i32 = 2;
+    fn tile_device(flat: usize) -> i32 {
+        (flat as i32) % NDEV
+    }
+    fn sync_devices() {
+        for dd in 0..NDEV {
+            with_device(dd, || device_sync::<HostMemory>());
+        }
+    }
+
+    // a localized azimuthal-velocity blob, NOT rigid rotation (which would be a discrete
+    // null and never move); the radial pulse's flow advects it across the cut.
+    fn vphi(r: f64) -> f64 {
+        0.3 * (-((r - 1.5) / 0.1).powi(2)).exp()
+    }
+
+    fn make(origin: [f64; 2], bnd: Boundaries<2>, cells: [usize; 2], ts: Timestepping) -> (Sim, Kern) {
+        let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
+            .cells(cells)
+            .origin(origin)
+            .spacing([DR, DT_AX])
+            .boundaries(bnd)
+            .timestepping(ts)
+            .allocate()
+            .expect("swirl sim construction failed")
+            .set_initial(|x| {
+                let b = pulse(x[0]);
+                // vel = (v_r, v_phi, v_z); the swirl rides slot 1.
+                Prim { rho: 1.0 + b, vel: Tensor::new([0.0, vphi(x[0]), 0.0]), pre: 1.0 + b }
+            })
+            .build();
+        let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
+        (sim, k)
+    }
+
+    fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
+        let m: [usize; 2] = [NR / counts[0], NT / counts[1]];
+        let total = counts[0] * counts[1];
+        (0..total)
+            .map(|flat| {
+                let tc = unflatten(flat, counts);
+                let origin = [R_LO + (tc[0] * m[0]) as f64 * DR, (tc[1] * m[1]) as f64 * DT_AX];
+                let bnd = Boundaries::per_axis([
+                    [
+                        if tc[0] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
+                        if tc[0] == counts[0] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
+                    ],
+                    [
+                        if tc[1] == 0 { BoundaryType::Periodic } else { BoundaryType::CoarseFine },
+                        if tc[1] == counts[1] - 1 { BoundaryType::Periodic } else { BoundaryType::CoarseFine },
+                    ],
+                ]);
+                with_device(tile_device(flat), || make(origin, bnd, m, ts))
+            })
+            .collect()
+    }
+
+    fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
+        let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
+        let mut stores = Vec::new();
+        let mut kernels = Vec::new();
+        for (s, k) in tiles.iter_mut() {
+            stores.push(&mut **s);
+            kernels.push(&*k);
+        }
+        evolve_decomposed(
+            &mut stores, &kernels, counts, &devices, ts, 0.0, T_FINAL, u64::MAX, &LocalCopy,
+            |_, _, _| std::ops::ControlFlow::Continue(()),
+        );
+    }
+
+    // scatter the azimuthal momentum (slot 1) into one global grid.
+    fn global_mphi(tiles: &[(Sim, Kern)], counts: [usize; 2]) -> Vec<f64> {
+        sync_devices();
+        let m: [usize; 2] = [NR / counts[0], NT / counts[1]];
+        let mut out = vec![f64::NAN; NR * NT];
+        for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
+            let tc = unflatten(flat_tile, counts);
+            let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+            for c in sim.geom.interior.iter() {
+                let g: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+                out[flatten(g, [NR, NT])] = *sim.fields.cons.mom[1].view().at(c);
+            }
+        }
+        out
+    }
+
+    pub fn assert_matches(counts: [usize; 2], ts: Timestepping) {
+        let mut mono = grid_tiles([1, 1], ts);
+        let ic = global_mphi(&mono, [1, 1]);
+        run(&mut mono, [1, 1], ts);
+        let mono_vals = global_mphi(&mono, [1, 1]);
+
+        let mut dec = grid_tiles(counts, ts);
+        run(&mut dec, counts, ts);
+        let dec_vals = global_mphi(&dec, counts);
+
+        assert!(
+            mono_vals.iter().all(|v| v.is_finite()) && dec_vals.iter().all(|v| v.is_finite()),
+            "some global cells were never written"
+        );
+
+        // NON-VACUITY: the azimuthal momentum must have moved off its IC, or a broken
+        // exchange of the out-of-plane slot would match a frozen field trivially.
+        let max_move = mono_vals
+            .iter()
+            .zip(&ic)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_move > 1e-4,
+            "the azimuthal momentum never moved (max {max_move:e}); the gate is vacuous"
+        );
+
+        let max_err = mono_vals
+            .iter()
+            .zip(&dec_vals)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_err < 1e-12,
+            "swirl decomposition {counts:?} ({ts:?}) vs monolithic S_phi max err {max_err:e} \
+             (moved {max_move:e})"
+        );
+    }
+}
+
+// the radial cut is load-bearing: the two tiles carry different r-ranges AND the azimuthal
+// momentum must cross the cut. 4-tile rk2 puts an interior tile between two cuts.
+#[test]
+fn swirl_radial_two_tile_euler() {
+    swirl::assert_matches([2, 1], Timestepping::Euler);
+}
+
+#[test]
+fn swirl_radial_four_tile_rk2() {
+    swirl::assert_matches([4, 1], Timestepping::Rk2);
+}
