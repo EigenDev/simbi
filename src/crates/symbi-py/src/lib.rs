@@ -3762,6 +3762,14 @@ macro_rules! build_and_run_hydro_decomposed {
         if prims.len() != total {
             return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
         }
+        // the dye IC (when present) spans the whole global grid in the same axis-0-fastest order
+        // as the prims; each tile reads its own sub-box out of it below.
+        if !cfg.chi_ic.is_empty() && cfg.chi_ic.len() != total {
+            return Err(format!(
+                "passive_scalar yielded {} dye values, expected {total}",
+                cfg.chi_ic.len()
+            ));
+        }
         // choose the tile grid (product == n_gpus), validate even divisibility.
         let counts = decompose_grid(n, cfg.n_gpus)?;
         let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
@@ -3816,6 +3824,38 @@ macro_rules! build_and_run_hydro_decomposed {
                         }
                     })
                     .build();
+                // seed the passive scalar (dye) on this tile: cons.chi = rho*chi, prim.chi = chi
+                // over the tile interior, indexed from the GLOBAL dye IC by the same axis-0-fastest
+                // global lin as the prim seed above. the transport carries prim.chi across cuts
+                // (derived into the exchange set from the store), so the decomposed dye matches the
+                // monolithic run to round-off (oracle: decomp_equivalence dye gates).
+                let sim = if cfg.chi_ic.is_empty() {
+                    sim
+                } else {
+                    let sim = sim
+                        .with_passive_scalar()
+                        .map_err(|e| format!("tile {flat} dye allocation: {e:?}"))?;
+                    let ilo: [isize; $d] =
+                        std::array::from_fn(|ax| sim.geom.interior.spaces[ax].lo);
+                    {
+                        let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
+                        let prim_chi = sim.fields.prim.chi_field().expect("prim chi");
+                        for c in sim.geom.interior.iter() {
+                            let mut lin = 0usize;
+                            let mut stride = 1usize;
+                            for ax in 0..$d {
+                                let g = tc[ax] * m[ax] + (c[ax] - ilo[ax]) as usize;
+                                lin += g * stride;
+                                stride *= n[ax];
+                            }
+                            let chi_v = cfg.chi_ic[lin];
+                            let rho = *sim.fields.cons.den.view().at(c);
+                            cons_chi.view_mut().set(c, rho * chi_v);
+                            prim_chi.view_mut().set(c, chi_v);
+                        }
+                    }
+                    sim
+                };
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
                 // bodies at their GLOBAL positions; each applies the source to its own cells. the
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
@@ -3906,6 +3946,16 @@ macro_rules! build_and_run_hydro_decomposed {
                 }
             })
             .build();
+        // the gather copies each tile's dye into this output view (data_fields includes chi), so
+        // the destination slot must exist; the interior is overwritten every checkpoint, so it is
+        // allocated but not seeded here.
+        let global = if cfg.chi_ic.is_empty() {
+            global
+        } else {
+            global
+                .with_passive_scalar()
+                .map_err(|e| format!("global output dye allocation: {e:?}"))?
+        };
 
         // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
         // gather + checkpoint, universal transport). every regime shares this loop.
@@ -5661,10 +5711,13 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.coord_system
             ));
         }
-        if cfg.refinement_enabled || cfg.n_gpus > 1 || cfg.mesh_motion {
+        // gpus > 1 is wired: the decomposed hydro build seeds the dye per tile and the halo
+        // exchange carries prim.chi across cuts (decomp_equivalence dye gates). refinement and
+        // mesh motion are not — the fine-level prolong and the moving-mesh remap do not carry
+        // the dye yet.
+        if cfg.refinement_enabled || cfg.mesh_motion {
             return Err(
-                "passive_scalar does not support refinement, gpus > 1, or mesh motion yet"
-                    .to_string(),
+                "passive_scalar does not support refinement or mesh motion yet".to_string(),
             );
         }
         if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
