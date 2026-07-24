@@ -107,6 +107,8 @@ pub struct Table {
     field_count: usize,
     /// compute-host + process resource sample (machine card); None until sampled.
     host: Option<crate::hostinfo::HostStats>,
+    /// the accelerator bound to the run (machine card); None on a cpu run.
+    device: Option<crate::hostinfo::DeviceStats>,
 }
 
 /// throughput-history ring-buffer cap, sized to the chart's pixel width.
@@ -182,6 +184,7 @@ impl Table {
             field_range: None,
             field_count: 1,
             host: None,
+            device: None,
         }
     }
 
@@ -195,6 +198,13 @@ impl Table {
     /// card. sampled by the solver each cadence so `mem_rss` tracks the footprint.
     pub fn set_host(&mut self, host: Option<crate::hostinfo::HostStats>) {
         self.host = host;
+    }
+
+    /// set (or clear) the accelerator description for the machine card. static for
+    /// the life of a run (device binding and block shape do not change), so unlike
+    /// `set_host` this needs setting only once. None renders a cpu run.
+    pub fn set_device(&mut self, device: Option<crate::hostinfo::DeviceStats>) {
+        self.device = device;
     }
 
     /// set (or clear) the live field-heatmap slice for the overview hero. cheap:
@@ -450,6 +460,7 @@ impl Table {
             field: self.field.clone(),
             field_count: self.field_count,
             host: self.host.clone(),
+            device: self.device.clone(),
         }
     }
 

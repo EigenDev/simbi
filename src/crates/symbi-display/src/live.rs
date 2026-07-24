@@ -17,7 +17,7 @@
 use ratatui::Frame;
 use serde::{Deserialize, Serialize};
 
-use crate::hostinfo::HostStats;
+use crate::hostinfo::{DeviceStats, HostStats};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
@@ -100,6 +100,9 @@ pub struct DiagnosticView {
     /// compute-host + process resource sample (hostname, cores, rss vs total ram);
     /// None until sampled. drives the machine card.
     pub host: Option<HostStats>,
+    /// the accelerator bound to the run (name, device count, memory, launch block
+    /// shape); None on a cpu run. drives the machine card's gpu rows.
+    pub device: Option<DeviceStats>,
 }
 
 /// perceptually-uniform colormaps for the field heatmap.
@@ -618,7 +621,10 @@ fn render_cards(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     spec.push(Constraint::Length(3)); // cfl
     let has_host = view.host.is_some();
     if has_host {
-        spec.push(Constraint::Length(5)); // machine card
+        // hostname / cores / memory inside a border, plus the device identity and
+        // launch shape on a gpu run.
+        let gpu_rows = if view.device.is_some() { 2 } else { 0 };
+        spec.push(Constraint::Length(5 + gpu_rows)); // machine card
     }
     spec.push(Constraint::Min(0));
     let r = Layout::vertical(spec).split(area);
@@ -672,12 +678,12 @@ fn render_machine(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     if inner.height == 0 {
         return;
     }
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(inner);
+    // a cpu run draws hostname / cores / memory; a gpu run adds the device identity
+    // and the launch block shape beneath them. the card is sized to whichever is
+    // present so a cpu run leaves no blank rows.
+    let gpu_rows = if view.device.is_some() { 2 } else { 0 };
+    let rows = Layout::vertical([Constraint::Length(1); 5][..3 + gpu_rows].to_vec())
+        .split(inner);
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(h.hostname.clone(), fgb(VALUE)))),
@@ -713,6 +719,33 @@ fn render_machine(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
         )))
         .right_aligned(),
         cols[1],
+    );
+
+    if let Some(d) = &view.device {
+        render_device(frame, &rows[3..5], d);
+    }
+}
+
+/// the machine card's accelerator rows: device identity and the kernel launch shape.
+/// `rows` is exactly the two lines reserved for them.
+fn render_device(frame: &mut Frame, rows: &[Rect], d: &DeviceStats) {
+    let name = if d.count > 1 {
+        format!("{} x{}", d.name, d.count)
+    } else {
+        d.name.clone()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(name, fgb(VALUE)))),
+        rows[0],
+    );
+
+    let [bx, by, bz] = d.block;
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("block {bx}x{by}x{bz} · {} vram", fmt_bytes(d.mem_total)),
+            fg(DIM),
+        ))),
+        rows[1],
     );
 }
 
@@ -990,6 +1023,7 @@ mod tests {
             field: None,
             field_count: 1,
             host: None,
+            device: None,
         }
     }
 
@@ -1034,6 +1068,51 @@ mod tests {
         // present again once the run is relativistic.
         v.max_w = Some(3.2);
         assert!(dump(&v).contains("max W"));
+    }
+
+    /// the machine card names the bound accelerator and the launch block shape, so a
+    /// run that silently fell back to a different device or block geometry than
+    /// intended is visible on screen rather than only in a profile.
+    #[test]
+    fn the_machine_card_reports_the_accelerator_and_launch_shape() {
+        let mut v = sample();
+        v.tab = 0;
+        v.host = Some(crate::hostinfo::HostStats {
+            hostname: "frontier06123".into(),
+            cpu_count: 112,
+            threads: 112,
+            mem_rss: 73_014_444_032,
+            mem_total: 539_797_950_464,
+        });
+        v.device = Some(DeviceStats {
+            name: "AMD Instinct MI250X".into(),
+            count: 2,
+            mem_total: 68_702_699_520,
+            block: [32, 8, 1],
+        });
+        let d = dump(&v);
+        assert!(d.contains("MI250X"), "device name missing from the machine card");
+        assert!(d.contains("x2"), "multi-device count not reported");
+        assert!(d.contains("32x8x1"), "launch block shape missing");
+    }
+
+    /// a cpu run carries no device, and the card must not reserve or draw the
+    /// accelerator rows -- an empty "block 0x0x0" would read as a real launch shape.
+    #[test]
+    fn a_cpu_run_draws_no_accelerator_rows() {
+        let mut v = sample();
+        v.tab = 0;
+        v.host = Some(crate::hostinfo::HostStats {
+            hostname: "login1".into(),
+            cpu_count: 8,
+            threads: 8,
+            mem_rss: 1_073_741_824,
+            mem_total: 17_179_869_184,
+        });
+        v.device = None;
+        let d = dump(&v);
+        assert!(d.contains("login1"), "machine card did not render at all");
+        assert!(!d.contains("block "), "accelerator rows drawn on a cpu run");
     }
 
     /// each tab renders without panicking.

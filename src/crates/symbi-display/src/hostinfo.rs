@@ -31,6 +31,23 @@ pub struct HostStats {
     pub mem_total: u64,
 }
 
+/// the accelerator a run is executing on, for the dashboard's machine card. absent on
+/// a cpu run. sampled solver-side like `HostStats`: this crate never links a gpu
+/// runtime, so the values are handed in by the driver that owns the device binding.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DeviceStats {
+    /// the vendor's device name, e.g. "AMD Instinct MI250X".
+    pub name: String,
+    /// devices visible to this process.
+    pub count: usize,
+    /// one device's total global memory in bytes.
+    pub mem_total: u64,
+    /// the kernel launch block shape as [x, y, z] threads. x is the contiguous
+    /// (stride-1) axis, so it sets how much of a warp/wavefront reads one
+    /// unbroken run of memory -- the coalescing width.
+    pub block: [u32; 3],
+}
+
 impl HostStats {
     /// sample all fields now. cheap (a handful of syscalls); called each cadence
     /// so `mem_rss` tracks the run's growing footprint.
