@@ -6216,6 +6216,31 @@ fn bondi_sonic_radius(gamma: f64) -> f64 {
     symbi_ib::sonic_radius(gamma)
 }
 
+/// the GUARD-ACTIVATION CENSUS for the run that just finished: `(fallback, freeze,
+/// fallback_inside_horizon, freeze_inside_horizon)` in cell-substage events. `run_simulation`
+/// zeroes these at run start, so the values are that run's totals.
+///
+/// this is the ONE number that says whether a passing gate passed on its own merits or on a
+/// limiter. it covers the whole defensive surface of a smooth GR-hydro run, not just FOFC:
+/// `fofc_orchestrate` EARLY-RETURNS when no cell is flagged, and both the admissible-boundary
+/// projection and the first-order redo run INSIDE it, so a zero fallback count proves neither
+/// acted; the relativistic velocity ceiling only binds an out-of-cone state, which is exactly what
+/// sets the flag. a smooth, warm, shock-free flow has no physical business tripping any of them, so
+/// its acceptance criterion is ZERO — "a limiter is fine as long as it is visible", made checkable.
+#[pyfunction]
+fn guard_census() -> (u64, u64, u64, u64) {
+    let (fb, fz) = symbi::regimes::fofc::fofc_stats();
+    let (fb_h, fz_h) = symbi::regimes::fofc::fofc_horizon_stats();
+    (fb, fz, fb_h, fz_h)
+}
+
+/// zero the guard-activation counters. `run_simulation` already does this at run start; a caller
+/// measuring across several runs resets explicitly.
+#[pyfunction]
+fn reset_guard_census() {
+    symbi::regimes::fofc::fofc_reset_stats();
+}
+
 // shared module body. the pyo3 entry-point name below decides the `PyInit_*`
 // symbol and the imported module name: `cpu_ext` for the default build,
 // `gpu_ext` for the cuda build. both compile the SAME source — cuda only adds
@@ -6226,6 +6251,8 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bondi_profile, m)?)?;
     m.add_function(wrap_pyfunction!(mdot_bondi, m)?)?;
     m.add_function(wrap_pyfunction!(bondi_sonic_radius, m)?)?;
+    m.add_function(wrap_pyfunction!(guard_census, m)?)?;
+    m.add_function(wrap_pyfunction!(reset_guard_census, m)?)?;
     afterglow::register(m)?;
     Ok(())
 }

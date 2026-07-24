@@ -73,6 +73,19 @@ def _run(nr: int, npolar: int, t_end: float, spin: float):
     p.data_directory = d
     p.checkpoint_interval = max(t_end, 1.0)
     runner.run(p, compute_mode="cpu")
+    # GUARD-ACTIVATION CENSUS: this is an EXACT stationary solution, smooth and warm — no limiter
+    # has any physical business firing on it, at either spin. a nonzero count would mean the
+    # equilibrium is being held by a floor rather than by the scheme, which would also silently
+    # contaminate the one-step residual this file measures. the count covers the whole defensive
+    # surface: the admissible-boundary projection and the first-order redo run INSIDE
+    # `fofc_orchestrate` (which early-returns when nothing is flagged), and the relativistic
+    # velocity ceiling only binds an out-of-cone state — exactly what sets the flag.
+    fallback, freeze, _, _ = _BACKEND.guard_census()
+    assert (fallback, freeze) == (0, 0), (
+        f"rotating equilibrium tripped a limiter at {nr}x{npolar} spin={spin}: {fallback} "
+        f"first-order fallback cell-steps, {freeze} freezes — an exact stationary state must be "
+        "held by the scheme, and a guard firing here also taints the one-step residual"
+    )
     crashed = glob.glob(os.path.join(d, "*crashed*.h5"))
     assert not crashed, f"rotating equilibrium crashed at {nr}x{npolar}"
     first = sorted(glob.glob(os.path.join(d, "*chkpt.000_000*.h5")))[0]

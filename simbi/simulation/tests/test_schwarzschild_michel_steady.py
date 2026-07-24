@@ -120,6 +120,18 @@ def _held_profile_errors(res: int):
         d = d + "/"
         p = _michel_problem(res, d)
         runner.run(p, compute_mode="cpu")
+        # GUARD-ACTIVATION CENSUS: michel is smooth, warm and shock-free, so NO limiter has any
+        # physical business firing. a nonzero count means this gate is passing on life support —
+        # the profile would be held by a floor rather than by the scheme. the count covers the whole
+        # defensive surface, not just FOFC: the admissible-boundary projection and the first-order
+        # redo both run INSIDE `fofc_orchestrate`, which early-returns when nothing is flagged, and
+        # the relativistic velocity ceiling only binds an out-of-cone state — exactly what sets the
+        # flag. so zero here proves none of them acted.
+        fallback, freeze, _, _ = _BACKEND.guard_census()
+        assert (fallback, freeze) == (0, 0), (
+            f"michel tripped a limiter at {res} zones: {fallback} first-order fallback cell-steps, "
+            f"{freeze} freezes — a smooth transonic profile must be held by the scheme, not a guard"
+        )
 
         finals = glob.glob(os.path.join(d, "*.chkpt.final*.h5"))
         assert finals, f"michel steady run crashed at {res} zones"

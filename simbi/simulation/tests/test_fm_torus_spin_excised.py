@@ -59,6 +59,26 @@ def _run(spin: float) -> np.ndarray:
     # source-admissibility rate) burns the cap, and the time
     # assertion below reports it as the failure it is.
     runner.run(p, compute_mode="cpu", max_steps=2000)
+    # GUARD-ACTIVATION CENSUS. the two limiter tiers are NOT the same kind of event and must not be
+    # gated the same way:
+    #   FALLBACK — the high-order c2p was unphysical, so the cell takes the first-order redo. that is
+    #     the scheme correctly REDUCING ORDER on an under-resolved feature, which is what the tier is
+    #     for. measured here: ~2.0e4 cell-steps over 2000 steps (~10 cells/step) at 48^3, ALL of them
+    #     in the physical near-horizon exterior — the redshift-pileup infall just outside r_+, the
+    #     stiffest gas in the domain and genuinely under-resolved at this resolution (the torus
+    #     completes cleanly at 96^3). reported, not gated: a count is not a defect.
+    #   FREEZE — no flux could update the cell admissibly. THAT is a breakdown, and the
+    #     admissible-boundary projection exists precisely so it cannot happen while the stage-input
+    #     anchor is admissible. it is gated at ZERO in the physical exterior.
+    # the interior (r < r_+) is causally disconnected fiction and is exempt from both; measured 0 for
+    # both here anyway, since excision plus the projection leave it completely clean.
+    fb, fz, fb_h, fz_h = _BACKEND.guard_census()
+    ext_fz = fz - fz_h
+    assert ext_fz == 0, (
+        f"the a={spin} torus FROZE {ext_fz} cell-steps OUTSIDE the horizon (interior, causally "
+        f"disconnected: {fz_h}; exterior first-order fallbacks: {fb - fb_h}) — a physical cell that "
+        "no flux can update admissibly is a breakdown the projection is supposed to preclude"
+    )
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"spinning FM torus run (a={spin}) crashed"
     with h5py.File(finals[0], "r") as h:
