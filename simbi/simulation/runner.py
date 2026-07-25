@@ -98,6 +98,8 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         # get all model fields
         model_dict = problem.model_dump()
 
+    _validate_expression_payloads(model_dict)
+
     # the problem's class name — shown in the rust run dashboard header.
     model_dict["name"] = type(problem).__name__
 
@@ -233,6 +235,115 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         model_dict["resolution"] = [resolution[0], resolution[1], 1]
 
     return model_dict
+
+
+def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
+    """reject ambiguous or backend-invalid expression wires before rust."""
+    source_fields = (
+        "gravity_source_expressions",
+        "hydro_source_expressions",
+    )
+    active_sources = [
+        field for field in source_fields if model_dict.get(field)
+    ]
+    if len(active_sources) > 1:
+        raise ValueError(
+            "both gravity_source_expressions and hydro_source_expressions are "
+            "non-empty, but the backend accepts only one source payload"
+        )
+
+    boundary_fields = (
+        "bx1_inner_expressions",
+        "bx1_outer_expressions",
+        "bx2_inner_expressions",
+        "bx2_outer_expressions",
+        "bx3_inner_expressions",
+        "bx3_outer_expressions",
+    )
+    for field in (*source_fields, *boundary_fields, "scale_factor_expressions"):
+        payload = model_dict.get(field)
+        if not payload:
+            continue
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"{field} must be a serialized expression dictionary"
+            )
+        if "kind" not in payload:
+            raise ValueError(
+                f"{field} is missing `kind`; use serialize_source(), "
+                "serialize_boundary(), or serialize_motion() instead of serialize()"
+            )
+        outputs = payload.get("outputs")
+        if not isinstance(outputs, list):
+            raise ValueError(f"{field} must contain an `outputs` list")
+
+        kind = str(payload["kind"]).lower()
+        dim = int(payload.get("dim", model_dict.get("dimensionality", 1)))
+        has_energy = not bool(model_dict.get("isothermal", False))
+        if field in source_fields:
+            known_kinds = {
+                "force",
+                "cooling",
+                "relax",
+                "sponge",
+                "inject",
+                "raw",
+            }
+            if kind not in known_kinds:
+                raise ValueError(
+                    f"{field} has unknown source kind {kind!r}"
+                )
+            if model_dict.get("is_relativistic", False) and kind in {
+                "force",
+                "cooling",
+                "relax",
+                "sponge",
+            }:
+                raise ValueError(
+                    f"{field} kind={kind!r} bakes a Newtonian conservation law "
+                    "and is invalid for a relativistic regime; use raw or inject"
+                )
+            if kind == "cooling" and not has_energy:
+                raise ValueError(
+                    f"{field} cooling requires an energy equation"
+                )
+            if kind == "raw":
+                target = payload.get("target")
+                if target not in {"den", "mom", "nrg"}:
+                    raise ValueError(
+                        f"{field} raw source requires target den, mom, or nrg"
+                    )
+                if target == "nrg" and not has_energy:
+                    raise ValueError(
+                        f"{field} raw target nrg requires an energy equation"
+                    )
+            expected = {
+                "force": dim,
+                "cooling": 1,
+                "relax": 1 + dim,
+                "sponge": (3 if has_energy else 2) + dim,
+                "inject": (2 if has_energy else 1) + dim,
+            }.get(kind)
+            if kind == "raw":
+                expected = dim if target == "mom" else 1
+            if expected is not None and len(outputs) != expected:
+                raise ValueError(
+                    f"{field} kind={kind!r} has {len(outputs)} outputs; "
+                    f"expected {expected} for dim={dim}"
+                )
+        elif field in boundary_fields:
+            if kind != "dirichlet":
+                raise ValueError(
+                    f"{field} must use kind='dirichlet', got {kind!r}"
+                )
+            expected = 1 + dim + int(has_energy)
+            if model_dict.get("is_mhd", False):
+                expected += dim
+            if len(outputs) != expected:
+                raise ValueError(
+                    f"{field} has {len(outputs)} outputs; expected {expected} "
+                    f"primitive values for dim={dim}"
+                )
 
 
 def _process_boundary_conditions(
