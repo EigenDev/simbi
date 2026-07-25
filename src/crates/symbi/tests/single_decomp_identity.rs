@@ -12,6 +12,8 @@ use symbi::prelude::*;
 use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
 use symbi_algebra::Domain;
 use symbi_grid::Field;
+use symbi_hydro::expr_bridge::build_user_sources;
+use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
 
 const GAMMA: f64 = 1.4;
 const T_FINAL: f64 = 0.03;
@@ -64,11 +66,26 @@ fn assert_field_bits(
 fn assert_driver_identity(timestepping: Timestepping) {
     let (mut single, single_kernels) = make(timestepping);
     let (mut decomposed, decomposed_kernels) = make(timestepping);
+    run_and_assert_identity(
+        &mut single,
+        &single_kernels,
+        &mut decomposed,
+        &decomposed_kernels,
+        timestepping,
+    );
+}
 
-    evolve(&mut single, &single_kernels, T_FINAL).expect("single-grid evolve");
+fn run_and_assert_identity(
+    single: &mut Sim,
+    single_kernels: &Kern,
+    decomposed: &mut Sim,
+    decomposed_kernels: &Kern,
+    timestepping: Timestepping,
+) {
+    evolve(single, single_kernels, T_FINAL).expect("single-grid evolve");
     evolve_decomposed(
         &mut [&mut *decomposed],
-        &[&decomposed_kernels],
+        &[decomposed_kernels],
         [1, 1],
         &[0],
         timestepping,
@@ -104,6 +121,61 @@ fn assert_driver_identity(timestepping: Timestepping) {
     );
 }
 
+fn make_with_sources(timestepping: Timestepping) -> (Sim, Kern) {
+    let (sim, _) = make(timestepping);
+    let configs = [
+        r#"{
+            "kind":"force", "dim":2, "outputs":[2,3], "params":[0.25],
+            "nodes":[{"op":"PARAMETER","param_idx":0},
+                     {"op":"VARIABLE_X1"},
+                     {"op":"MULTIPLY","left":0,"right":1},
+                     {"op":"CONSTANT","value":0.0}]
+        }"#,
+        r#"{
+            "kind":"force", "dim":2, "outputs":[2,3], "params":[0.75],
+            "nodes":[{"op":"PARAMETER","param_idx":0},
+                     {"op":"VARIABLE_X1"},
+                     {"op":"MULTIPLY","left":0,"right":1},
+                     {"op":"CONSTANT","value":0.0}]
+        }"#,
+    ]
+    .map(|json| SourceConfig::from_json(json).expect("source parse"));
+    let (built, params) =
+        build_user_sources(&configs, &NEWTONIAN_SPEC).expect("source composition");
+    let kernels = sim.substrate().with_fused_runtime_source(built, params);
+    (sim, kernels)
+}
+
+fn assert_source_driver_identity(timestepping: Timestepping) {
+    let (mut single, single_kernels) = make_with_sources(timestepping);
+    let (mut decomposed, decomposed_kernels) = make_with_sources(timestepping);
+    let initial_momentum: f64 = single
+        .geom
+        .interior
+        .iter()
+        .map(|cell| *single.fields.cons.mom[0].view().at(cell))
+        .sum();
+
+    run_and_assert_identity(
+        &mut single,
+        &single_kernels,
+        &mut decomposed,
+        &decomposed_kernels,
+        timestepping,
+    );
+
+    let final_momentum: f64 = single
+        .geom
+        .interior
+        .iter()
+        .map(|cell| *single.fields.cons.mom[0].view().at(cell))
+        .sum();
+    assert!(
+        (final_momentum - initial_momentum).abs() > 1.0e-3,
+        "source produced no momentum; driver identity is vacuous",
+    );
+}
+
 #[test]
 fn euler_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_driver_identity(Timestepping::Euler);
@@ -117,4 +189,19 @@ fn rk2_single_grid_equals_one_tile_decomposed_bitwise() {
 #[test]
 fn rk3_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_driver_identity(Timestepping::Rk3);
+}
+
+#[test]
+fn euler_source_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_source_driver_identity(Timestepping::Euler);
+}
+
+#[test]
+fn rk2_source_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_source_driver_identity(Timestepping::Rk2);
+}
+
+#[test]
+fn rk3_source_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_source_driver_identity(Timestepping::Rk3);
 }
