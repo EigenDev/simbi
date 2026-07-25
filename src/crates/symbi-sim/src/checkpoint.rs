@@ -487,21 +487,49 @@ where
         // the interior lower edge — honors an AMR fine level whose interior
         // starts at a non-zero global index (start = global origin offset by
         // the interior origin), so the reader rebuilds cell centers correctly.
-        let start = snap.x_lo_phys[ax] + sim.geom.interior.spaces[ax].lo as f64 * snap.dx_phys[ax];
-        let end = start + snap.dx_phys[ax] * snap.resolution[ax] as f64;
+        let lo_index = sim.geom.interior.spaces[ax].lo;
+        let hi_index = sim.geom.interior.spaces[ax].hi;
+        let scale = match sim.physics.metric.geometry() {
+            symbi_geometry::Geometry::Cartesian => sim.motion.a,
+            symbi_geometry::Geometry::Spherical => {
+                if ax == 0 { sim.motion.a } else { 1.0 }
+            }
+            symbi_geometry::Geometry::Cylindrical => {
+                if ax == 0 || ax == D - 1 { sim.motion.a } else { 1.0 }
+            }
+        };
+        let (start, end) = match &sim.geom.maps {
+            Some(maps) => (
+                maps[ax].face(lo_index) * scale,
+                maps[ax].face(hi_index) * scale,
+            ),
+            None => {
+                let start =
+                    snap.x_lo_phys[ax] + lo_index as f64 * snap.dx_phys[ax];
+                (
+                    start,
+                    start + snap.dx_phys[ax] * snap.resolution[ax] as f64,
+                )
+            }
+        };
         // the per-axis spacing the reader reconstructs cell centers from: "linear" -> uniform faces
         // start + i*dx, "log" -> geometric faces start*10^(i*slope). taken from the grid's coordinate
         // maps (uniform when unset). start/end are the axis domain bounds [r_lo, r_hi]; logspace over
         // them recovers the geometric grid.
-        let spacing_label = match &sim.geom.maps {
-            Some(maps) if !maps[ax].is_uniform() => "log",
-            _ => "linear",
+        let (spacing_label, spacing_ratio) = match &sim.geom.maps {
+            Some(maps) => match maps[ax] {
+                symbi_geometry::AxisMap::Uniform { .. } => ("linear", 1.0),
+                symbi_geometry::AxisMap::Log { .. } => ("log", 1.0),
+                symbi_geometry::AxisMap::Geometric { ratio, .. } => ("geometric", ratio),
+            },
+            None => ("linear", 1.0),
         };
         geometry.push_group(
             Tree::new(format!("dim_{slot}"))
                 .with_attr("start", start)
                 .with_attr("end", end)
-                .with_attr("type", spacing_label),
+                .with_attr("type", spacing_label)
+                .with_attr("ratio", spacing_ratio),
         );
     }
     let mesh = Tree::new("mesh")
@@ -1394,6 +1422,66 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn checkpoint_records_geometric_spacing_parameters() {
+        let ratio = 0.9_f64;
+        let cells = 8_usize;
+        let width = (ratio - 1.0) / (ratio.powf(cells as f64) - 1.0);
+        let maps = [
+            symbi_geometry::AxisMap::Geometric {
+                start: 0.0,
+                width,
+                ratio,
+            },
+            symbi_geometry::AxisMap::Uniform {
+                start: 0.0,
+                dx: 1.0,
+            },
+            symbi_geometry::AxisMap::Uniform {
+                start: 0.0,
+                dx: 1.0,
+            },
+        ];
+        let mut sim = Sim::new(
+            Newtonian,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+            [cells, 1, 1],
+            [0.0; 3],
+            [1.0 / cells as f64, 1.0, 1.0],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
+        sim.geom.set_maps(maps);
+
+        let dir = std::env::temp_dir().join("symbi_checkpoint_geometric_spacing");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("geometric.h5");
+        write_checkpoint(&sim, path.to_str().unwrap(), &Metadata::new()).unwrap();
+
+        let tree = Hdf5Backend.read(&path).unwrap();
+        let dim = tree
+            .find_group("level_0")
+            .unwrap()
+            .find_group("mesh")
+            .unwrap()
+            .find_group("geometry")
+            .unwrap()
+            .find_group("dim_2")
+            .unwrap();
+        assert_eq!(dim.find_attr("type").unwrap().as_str("type").unwrap(), "geometric");
+        assert!(
+            (dim.find_attr("ratio").unwrap().as_f64("ratio").unwrap() - ratio).abs()
+                < 1.0e-14
+        );
+        assert!((dim.find_attr("start").unwrap().as_f64("start").unwrap()).abs() < 1.0e-14);
+        assert!((dim.find_attr("end").unwrap().as_f64("end").unwrap() - 1.0).abs() < 1.0e-12);
     }
 
     #[test]

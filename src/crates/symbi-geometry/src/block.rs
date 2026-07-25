@@ -25,13 +25,15 @@ use symbi_ir::algebra::Scalar;
 use crate::metric::{DiagonalMetric, Metric};
 
 /// per-axis coordinate map. Copy + GPU-friendly enum.
-/// covers uniform and logarithmic spacing.
+/// covers uniform, logarithmic, and geometrically graded spacing.
 #[derive(Clone, Copy, Debug)]
 pub enum AxisMap {
     /// x(i) = start + i * dx
     Uniform { start: f64, dx: f64 },
     /// x(i) = start * 10^(i * log_slope)
     Log { start: f64, log_slope: f64 },
+    /// cell widths follow `width(i) = width * ratio^i`.
+    Geometric { start: f64, width: f64, ratio: f64 },
 }
 
 impl AxisMap {
@@ -41,6 +43,13 @@ impl AxisMap {
         match self {
             AxisMap::Uniform { start, dx } => start + ii as f64 * dx,
             AxisMap::Log { start, log_slope } => start * 10.0_f64.powf(ii as f64 * log_slope),
+            AxisMap::Geometric { start, width, ratio } => {
+                if (*ratio - 1.0).abs() < 1.0e-12 {
+                    start + ii as f64 * width
+                } else {
+                    start + width * (ratio.powf(ii as f64) - 1.0) / (ratio - 1.0)
+                }
+            }
         }
     }
 
@@ -54,6 +63,7 @@ impl AxisMap {
                 let hi = self.face(ii + 1);
                 (lo * hi).sqrt() // geometric mean
             }
+            AxisMap::Geometric { .. } => 0.5 * (self.face(ii) + self.face(ii + 1)),
         }
     }
 
@@ -61,6 +71,26 @@ impl AxisMap {
     #[inline]
     pub fn width(&self, ii: isize) -> f64 {
         self.face(ii + 1) - self.face(ii)
+    }
+
+    /// inverse map: physical position to the containing cell index.
+    #[inline]
+    pub fn index_at(&self, x: f64) -> isize {
+        match self {
+            AxisMap::Uniform { start, dx } => ((x - start) / dx).floor() as isize,
+            AxisMap::Log { start, log_slope } => {
+                ((x / start).log10() / log_slope).floor() as isize
+            }
+            AxisMap::Geometric { start, width, ratio } => {
+                if (*ratio - 1.0).abs() < 1.0e-12 {
+                    ((x - start) / width).floor() as isize
+                } else {
+                    (1.0 + (x - start) * (ratio - 1.0) / width)
+                        .log(*ratio)
+                        .floor() as isize
+                }
+            }
+        }
     }
 
     /// is this a uniform map?
@@ -82,6 +112,70 @@ impl From<&crate::coord_map::LogMap<f64>> for AxisMap {
         AxisMap::Log {
             start: m.face(0),
             log_slope: (m.face(1) / m.face(0)).log10(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod axis_map_tests {
+    use super::AxisMap;
+
+    #[test]
+    fn geometric_faces_reach_extent_and_follow_width_ratio() {
+        let ratio = 0.8_f64;
+        let cells = 8_i32;
+        let extent = 3.0_f64;
+        let width = extent * (ratio - 1.0) / (ratio.powi(cells) - 1.0);
+        let map = AxisMap::Geometric {
+            start: 2.0,
+            width,
+            ratio,
+        };
+
+        assert!((map.face(cells as isize) - 5.0).abs() < 1.0e-12);
+        for ii in 0..cells - 1 {
+            assert!((map.width(ii as isize + 1) / map.width(ii as isize) - ratio).abs() < 1.0e-12);
+        }
+        for ii in 0..cells {
+            assert_eq!(map.index_at(map.center(ii as isize)), ii as isize);
+        }
+    }
+
+    #[test]
+    fn shifted_geometric_map_matches_global_faces() {
+        let global = AxisMap::Geometric {
+            start: -1.0,
+            width: 0.3,
+            ratio: 1.1,
+        };
+        let offset = 7_isize;
+        let local = AxisMap::Geometric {
+            start: global.face(offset),
+            width: global.width(offset),
+            ratio: 1.1,
+        };
+
+        for ii in -2..6 {
+            assert!((local.face(ii) - global.face(offset + ii)).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn homologous_scaling_preserves_geometric_grading() {
+        let map = AxisMap::Geometric {
+            start: 1.5,
+            width: 0.2,
+            ratio: 0.93,
+        };
+        let scale = 2.4;
+        let physical = AxisMap::Geometric {
+            start: 1.5 * scale,
+            width: 0.2 * scale,
+            ratio: 0.93,
+        };
+
+        for ii in -2..12 {
+            assert!((physical.face(ii) - scale * map.face(ii)).abs() < 1.0e-12);
         }
     }
 }

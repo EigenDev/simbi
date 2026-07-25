@@ -295,7 +295,7 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     let start = Gv::scalar(&format!("x_lo_{ax}"));
     let param = Gv::scalar(&format!("dx_{ax}"));
     // spacing is a RUNTIME per-axis value: `map_kind_{ax}` selects the face-
-    // position map (0 = uniform `start + i*dx`, 1 = log `start * 10^(i*slope)`), so ONE kernel per
+    // position map (0 = uniform, 1 = log, 2 = geometric cell widths), so ONE kernel per
     // (regime, geometry) serves every spacing (log-r, log-theta, ...) and a moving mesh updates
     // `x_lo`/`dx` on the fly while the map kind stays fixed. the bake-time `spacing` enum is no
     // longer read here (kept in the signature during the transition).
@@ -305,9 +305,18 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     // `map_kind` is per-launch-uniform (same for every cell/lane), so the branch never diverges.
     let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
     Gv::cond(
-        map_kind.cmp_gt(Gv::from_f64(0.5)),
-        || start * Gv::from_f64(10.0).powf(i * param), // log:     face = x_lo * 10^(i*slope)
-        || start + i * param,                          // uniform: face = x_lo + i*dx
+        map_kind.cmp_gt(Gv::from_f64(1.5)),
+        || {
+            let ratio = Gv::scalar(&format!("map_param_{ax}"));
+            start + param * (ratio.powf(i) - Gv::ONE) / (ratio - Gv::ONE)
+        },
+        || {
+            Gv::cond(
+                map_kind.cmp_gt(Gv::from_f64(0.5)),
+                || start * Gv::from_f64(10.0).powf(i * param),
+                || start + i * param,
+            )
+        },
     )
 }
 

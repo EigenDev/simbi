@@ -133,6 +133,9 @@ pub enum ScalarRef {
     /// so one kernel per (regime, geometry) serves every spacing; a moving mesh updates the
     /// `x_lo`/`dx` scalars on the fly while `map_kind` stays fixed.
     MapKind(u8),
+    /// the per-axis coordinate-map parameter `map_param_{ax}`. geometric grading uses the
+    /// adjacent-cell width ratio; uniform and logarithmic maps bind zero.
+    MapParam(u8),
     /// a moving-mesh rate (`mesh_hdil`, `mesh_adot_{ax}`, `mesh_vtrans_{ax}`).
     Mesh(MeshScalar),
     /// a user-source tunable knob `p{i}`.
@@ -165,6 +168,7 @@ impl ScalarRef {
             ScalarRef::XLo(ax) => format!("x_lo_{ax}"),
             ScalarRef::Dx(ax) => format!("dx_{ax}"),
             ScalarRef::MapKind(ax) => format!("map_kind_{ax}"),
+            ScalarRef::MapParam(ax) => format!("map_param_{ax}"),
             ScalarRef::Mesh(m) => m.name(),
             ScalarRef::UserParam(i) => format!("p{i}"),
             ScalarRef::Body { idx, field } => format!("body_{idx}_{}", field.name()),
@@ -208,6 +212,9 @@ impl ScalarRef {
         }
         if let Some(ax) = name.strip_prefix("map_kind_") {
             return ax.parse().ok().map(ScalarRef::MapKind);
+        }
+        if let Some(ax) = name.strip_prefix("map_param_") {
+            return ax.parse().ok().map(ScalarRef::MapParam);
         }
         if let Some(ax) = name.strip_prefix("dx_") {
             return ax.parse().ok().map(ScalarRef::Dx);

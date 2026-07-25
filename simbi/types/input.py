@@ -119,6 +119,7 @@ class Robin:
 class CellSpacing(str, ExtendedEnum):
     LINEAR = "linear"
     LOG = "log"
+    GEOMETRIC = "geometric"
 
 
 class TimeStepping(str, ExtendedEnum):
@@ -181,6 +182,25 @@ class MeshConfig:
     bounds_max: tuple[float, ...]
     halo_radius: int
     spacing_types: tuple[str, ...]
+    spacing_ratios: tuple[float, ...] = (1.0, 1.0, 1.0)
+
+    def _vertices(self, axis: int, count: int) -> Array:
+        spacing = self.spacing_types[axis]
+        lower = self.bounds_min[axis]
+        upper = self.bounds_max[axis]
+        if spacing == CellSpacing.LINEAR:
+            return np.linspace(lower, upper, count + 1)
+        if spacing == CellSpacing.LOG:
+            return np.geomspace(lower, upper, count + 1)
+        ratio = self.spacing_ratios[axis]
+        indices = np.arange(count + 1, dtype=float)
+        if abs(ratio - 1.0) < 1.0e-12:
+            fractions = indices / count
+        else:
+            fractions = np.expm1(indices * np.log(ratio)) / np.expm1(
+                count * np.log(ratio)
+            )
+        return lower + (upper - lower) * fractions
 
     @property
     def effective_dimensions(self) -> int:
@@ -190,62 +210,38 @@ class MeshConfig:
     @property
     def x1v(self) -> Array:
         """Get x1 coordinates"""
-        if self.spacing_types[0] == CellSpacing.LINEAR:
-            return np.linspace(
-                self.bounds_min[0], self.bounds_max[0], self.shape[-1] + 1
-            )
-        else:
-            return np.geomspace(
-                self.bounds_min[0], self.bounds_max[0], self.shape[-1] + 1
-            )
+        return self._vertices(0, self.shape[-1])
 
     @property
     def x2v(self) -> Array:
         """Get x2 coordinates"""
-        if self.spacing_types[1] == CellSpacing.LINEAR:
-            return np.linspace(
-                self.bounds_min[1], self.bounds_max[1], self.shape[-2] + 1
-            )
-        else:
-            return np.geomspace(
-                self.bounds_min[1], self.bounds_max[1], self.shape[-2] + 1
-            )
+        return self._vertices(1, self.shape[-2])
 
     @property
     def x3v(self) -> Array:
         """Get x3 coordinates"""
-        if self.spacing_types[2] == CellSpacing.LINEAR:
-            return np.linspace(
-                self.bounds_min[2], self.bounds_max[2], self.shape[-3] + 1
-            )
-        else:
-            return np.geomspace(
-                self.bounds_min[2], self.bounds_max[2], self.shape[-3] + 1
-            )
+        return self._vertices(2, self.shape[-3])
 
     @property
     def x1c(self) -> Array:
         """Get x1 cell centers"""
-        if self.spacing_types[0] == CellSpacing.LINEAR:
-            return 0.5 * (self.x1v[:-1] + self.x1v[1:])
-        else:
+        if self.spacing_types[0] == CellSpacing.LOG:
             return np.sqrt(self.x1v[:-1] * self.x1v[1:])
+        return 0.5 * (self.x1v[:-1] + self.x1v[1:])
 
     @property
     def x2c(self) -> Array:
         """Get x2 cell centers"""
-        if self.spacing_types[1] == CellSpacing.LINEAR:
-            return 0.5 * (self.x2v[:-1] + self.x2v[1:])
-        else:
+        if self.spacing_types[1] == CellSpacing.LOG:
             return np.sqrt(self.x2v[:-1] * self.x2v[1:])
+        return 0.5 * (self.x2v[:-1] + self.x2v[1:])
 
     @property
     def x3c(self) -> Array:
         """Get x3 cell centers"""
-        if self.spacing_types[2] == CellSpacing.LINEAR:
-            return 0.5 * (self.x3v[:-1] + self.x3v[1:])
-        else:
+        if self.spacing_types[2] == CellSpacing.LOG:
             return np.sqrt(self.x3v[:-1] * self.x3v[1:])
+        return 0.5 * (self.x3v[:-1] + self.x3v[1:])
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get coordinate array by key"""
@@ -311,6 +307,7 @@ class Metadata:
     # optional fields from checkpoint
     checkpoint_interval: float = 0.0
     x1_spacing: str = "linear"
+    x1_spacing_ratio: float = 1.0
     x2_spacing: str = "linear"
     x3_spacing: str = "linear"
     boundary_conditions: tuple[str, ...] = ()

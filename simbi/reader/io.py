@@ -110,6 +110,7 @@ class MeshGeometry:
     dims: tuple[tuple[float, float], ...]  # [(x1min, x1max), ...]
     global_cells: tuple[int, ...]  # [nx3, nx2, nx1] in storage order
     spacing_types: tuple[str, ...]  # ["linear", "log", ...]
+    spacing_ratios: tuple[float, ...]  # adjacent-cell width ratios
     metric: str  # "cartesian", "spherical", etc.
     halo_radius: int
     coordinate_system: str = "physical"  # "physical" or "comoving"
@@ -366,6 +367,7 @@ def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -
         rank = len(global_cells)
         dims = []
         spacing_types = []
+        spacing_ratios = []
 
         for dd in range(rank):
             dim_group = geo[f"dim_{dd}"]
@@ -379,6 +381,7 @@ def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -
                 if isinstance(spacing_type_val, bytes)
                 else str(spacing_type_val)
             )
+            spacing_ratios.append(float(dim_group.attrs.get("ratio", 1.0)))
 
         # read motion state from level group if present
         coordinate_system = "physical"
@@ -401,6 +404,7 @@ def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -
                 dims=tuple(dims),
                 global_cells=global_cells,
                 spacing_types=tuple(spacing_types),
+                spacing_ratios=tuple(spacing_ratios),
                 metric=metric,
                 halo_radius=halo_radius,
                 coordinate_system=coordinate_system,

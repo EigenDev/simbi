@@ -784,6 +784,7 @@ where
             Some(maps) => match maps[d] {
                 AxisMap::Uniform { .. } => Spacing::Uniform,
                 AxisMap::Log { .. } => Spacing::Log,
+                AxisMap::Geometric { .. } => Spacing::Uniform,
             },
             None => Spacing::Uniform,
         })

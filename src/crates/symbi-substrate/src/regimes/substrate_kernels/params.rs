@@ -79,8 +79,19 @@ pub(crate) fn geom_scalar<const D: usize>(
         ScalarRef::Dx(ax) => Some(dx[ax as usize]),
         // a Log axis map -> 1.0, else uniform -> 0.0; a None maps is a fully uniform grid.
         ScalarRef::MapKind(ax) => Some(match maps {
-            Some(m) if !m[ax as usize].is_uniform() => 1.0,
+            Some(m) => match m[ax as usize] {
+                symbi_geometry::AxisMap::Uniform { .. } => 0.0,
+                symbi_geometry::AxisMap::Log { .. } => 1.0,
+                symbi_geometry::AxisMap::Geometric { .. } => 2.0,
+            },
             _ => 0.0,
+        }),
+        ScalarRef::MapParam(ax) => Some(match maps {
+            Some(m) => match m[ax as usize] {
+                symbi_geometry::AxisMap::Geometric { ratio, .. } => ratio,
+                _ => 0.0,
+            },
+            None => 0.0,
         }),
         _ => None,
     }
@@ -148,6 +159,7 @@ pub(crate) fn kernel_geom<const D: usize>(
         std::array::from_fn(|ax| match m[ax] {
             symbi_geometry::AxisMap::Uniform { dx, .. } => dx * scale(ax),
             symbi_geometry::AxisMap::Log { log_slope, .. } => log_slope,
+            symbi_geometry::AxisMap::Geometric { width, .. } => width * scale(ax),
         }),
     )
 }

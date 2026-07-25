@@ -101,6 +101,7 @@ struct Config {
     // 2d or 3d); 0 disables excision. must sit inside the horizon r_+ = 2M.
     excision_radius: f64,
     x1_spacing: String,
+    x1_spacing_ratio: f64,
     start_time: f64,
     // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
     // start_time, which is the physical/resume clock (= checkpoint time on restart). 0 = unset ->
@@ -817,6 +818,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         resistivity: get_f64_or(dict, "resistivity", 0.0),
         excision_radius: get_f64_or(dict, "excision_radius", 0.0),
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
+        x1_spacing_ratio: get_f64_or(dict, "x1_spacing_ratio", 1.0),
         start_time: get_f64_or(dict, "start_time", 0.0),
         checkpoint_log_anchor: get_f64_or(dict, "checkpoint_log_anchor", 0.0),
         checkpoint_index: dict
@@ -2998,6 +3000,11 @@ fn shift_axis_map(global: symbi_geometry::AxisMap, tile_lo: usize) -> symbi_geom
             start: start + tile_lo as f64 * dx,
             dx,
         },
+        AxisMap::Geometric { start, width, ratio } => AxisMap::Geometric {
+            start: AxisMap::Geometric { start, width, ratio }.face(tile_lo as isize),
+            width: width * ratio.powf(tile_lo as f64),
+            ratio,
+        },
     }
 }
 
@@ -3010,6 +3017,7 @@ fn tile_origin<const D: usize>(cfg: &Config, tile_lo: [usize; D]) -> [f64; D] {
         Some(maps) => std::array::from_fn(|ax| match maps[ax] {
             symbi_geometry::AxisMap::Log { start, .. } => start,
             symbi_geometry::AxisMap::Uniform { start, .. } => start,
+            symbi_geometry::AxisMap::Geometric { start, .. } => start,
         }),
         None => std::array::from_fn(|ax| cfg.x_lo[ax] + tile_lo[ax] as f64 * cfg.dx[ax]),
     }
@@ -3017,13 +3025,32 @@ fn tile_origin<const D: usize>(cfg: &Config, tile_lo: [usize; D]) -> [f64; D] {
 
 fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D]> {
     use symbi_geometry::AxisMap;
-    if !cfg.x1_spacing.eq_ignore_ascii_case("log") {
+    if cfg.x1_spacing.eq_ignore_ascii_case("linear") {
         return None;
     }
+    let geometric = cfg.x1_spacing.eq_ignore_ascii_case("geometric");
+    assert!(
+        cfg.x1_spacing.eq_ignore_ascii_case("log") || geometric,
+        "unsupported x1 cell spacing '{}'",
+        cfg.x1_spacing
+    );
+    assert!(
+        !geometric || cfg.x1_spacing_ratio.is_finite() && cfg.x1_spacing_ratio > 0.0,
+        "x1_spacing_ratio must be positive and finite"
+    );
     Some(std::array::from_fn(|ax| {
         let start = cfg.x_lo[ax];
         let n = cfg.n_cells[ax] as f64;
-        if ax == 0 && start > 0.0 && n > 0.0 {
+        if ax == 0 && geometric && n > 0.0 {
+            let ratio = cfg.x1_spacing_ratio;
+            let extent = cfg.dx[ax] * n;
+            let width = if (ratio - 1.0).abs() < 1.0e-12 {
+                cfg.dx[ax]
+            } else {
+                extent * (ratio - 1.0) / (ratio.powf(n) - 1.0)
+            };
+            AxisMap::Geometric { start, width, ratio }
+        } else if ax == 0 && start > 0.0 && n > 0.0 {
             let r_hi = start + cfg.dx[ax] * n;
             AxisMap::Log { start, log_slope: (r_hi / start).log10() / n }
         } else {
@@ -5833,6 +5860,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("checkpoint_index", checkpoint_index)
         .with("checkpoint_interval", cfg.checkpoint_interval)
         .with("x1_spacing", cfg.x1_spacing.as_str())
+        .with("x1_spacing_ratio", cfg.x1_spacing_ratio)
         .with("initial_time", cfg.start_time)
         .with("time_unit", cfg.time_unit)
         .with("time_unit_label", cfg.time_unit_label.as_str())
@@ -6561,6 +6589,33 @@ mod tile_coord_tests {
                 (far - next).abs() <= 1e-12 * next.abs(),
                 "tiles {t}/{} do not abut: {far} vs {next}", t + 1
             );
+        }
+    }
+
+    #[test]
+    fn tile_local_faces_reproduce_the_global_grid_on_a_geometric_axis() {
+        let (n, tiles) = (60usize, 4usize);
+        let ratio = 0.97_f64;
+        let extent = 12.0_f64;
+        let width = extent * (ratio - 1.0) / (ratio.powf(n as f64) - 1.0);
+        let global = AxisMap::Geometric {
+            start: -2.0,
+            width,
+            ratio,
+        };
+        let cells_per_tile = n / tiles;
+
+        for tile in 0..tiles {
+            let offset = tile * cells_per_tile;
+            let local = shift_axis_map(global, offset);
+            for ii in 0..=cells_per_tile {
+                let got = local.face(ii as isize);
+                let want = global.face((offset + ii) as isize);
+                assert!(
+                    (got - want).abs() <= 1.0e-12 * want.abs().max(1.0),
+                    "tile {tile} face {ii}: local {got}, global {want}"
+                );
+            }
         }
     }
 

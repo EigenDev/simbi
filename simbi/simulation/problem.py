@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import warnings
 from abc import abstractmethod
 from pathlib import Path
@@ -476,6 +477,14 @@ class SimbiProblem(BaseModel):
     x1_spacing: Annotated[
         CellSpacing,
         ProblemParam(CellSpacing.LINEAR, description="x1 cell spacing"),
+    ]
+    x1_spacing_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            description="adjacent x1 cell-width ratio for geometric spacing",
+        ),
     ]
     x2_spacing: Annotated[
         CellSpacing,
@@ -979,6 +988,20 @@ class SimbiProblem(BaseModel):
         # boundary (runner.py); the validated model keeps the user's positive
         # compression so the field's own gt=0 constraint holds on every path a
         # model round-trips (assignment validation, checkpoint restore).
+        return self
+
+    @model_validator(mode="after")
+    def _validate_geometric_spacing(self) -> SimbiProblem:
+        """validate the geometric x1 cell-width ratio."""
+        if self.x1_spacing == CellSpacing.GEOMETRIC:
+            if not math.isfinite(self.x1_spacing_ratio) or self.x1_spacing_ratio <= 0.0:
+                raise ValueError(
+                    "x1_spacing_ratio must be positive and finite for geometric spacing"
+                )
+        elif self.x1_spacing_ratio != 1.0:
+            raise ValueError(
+                "x1_spacing_ratio is only valid when x1_spacing='geometric'"
+            )
         return self
 
     def validate_refinement_config(self) -> None:
