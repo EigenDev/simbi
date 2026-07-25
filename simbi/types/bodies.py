@@ -163,10 +163,11 @@ class AccretionProperties:
     porosity: float | None = None
     k_eta_n: float = 0.0
     k_eta_t: float = 0.0
-    # the torque-free dial: None keeps the pure drain; a value
-    # in [0, 1] selects the isothermal torque-free accretor (the Dittmann sink),
-    # where xi = 1 removes mass but no angular momentum. mutually exclusive with
-    # porosity (a different surface physics on the same tangential channel).
+    # the torque-free dial: None selects the pure drain kernel. a value in
+    # [0, 1] selects the dittmann torque-free kernel for either adiabatic or
+    # isothermal hydrodynamics, where xi = 1 removes mass but no angular
+    # momentum. xi = 0 still selects that kernel and is not numerically
+    # equivalent to None near evacuation. mutually exclusive with porosity.
     torque_free_xi: float | None = None
 
     def __post_init__(self) -> None:
