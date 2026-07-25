@@ -4,9 +4,17 @@
 # validation gates for geometrically graded x1 cell widths.
 # =============================================================================
 
+from pathlib import Path
+
+import h5py
 import pytest
 from pydantic import ValidationError
 
+from simbi.simulation.checkpoint import (
+    load_checkpoint_metadata,
+    metadata_to_config_dict,
+)
+from simbi.simulation.runner import run
 from simbi.types import CellSpacing, MeshConfig
 from simbi_configs.examples.grhd.gr_bondi_ks import GrBondiKS
 from simbi_configs.examples.srhd.marti_muller_3d import MartiMuller3D
@@ -95,3 +103,34 @@ def test_mesh_config_reconstructs_independent_geometric_axes():
     ):
         widths = vertices[1:] - vertices[:-1]
         assert widths[1:] / widths[:-1] == pytest.approx(ratio)
+
+
+@pytest.mark.parametrize(("axis", "ratio"), [(2, 1.04), (3, 0.96)])
+def test_transverse_geometric_axis_evolves_and_round_trips(
+    axis, ratio, tmp_path: Path
+):
+    output = tmp_path / f"x{axis}"
+    problem = MartiMuller3D(
+        resolution=(8, 6, 4),
+        data_directory=output,
+        **{
+            f"x{axis}_spacing": CellSpacing.GEOMETRIC,
+            f"x{axis}_spacing_ratio": ratio,
+        },
+    )
+
+    run(problem, compute_mode="cpu", max_steps=1)
+
+    checkpoint = next(output.glob("*.final.h5"))
+    storage_slot = 3 - axis
+    with h5py.File(checkpoint) as handle:
+        geometry = handle[f"level_0/mesh/geometry/dim_{storage_slot}"]
+        assert geometry.attrs["type"] == "geometric"
+        assert geometry.attrs["ratio"] == pytest.approx(ratio)
+        assert geometry.attrs["start"] == pytest.approx(0.0)
+        assert geometry.attrs["end"] == pytest.approx(1.0)
+
+    metadata, shape = load_checkpoint_metadata(checkpoint)
+    restored = metadata_to_config_dict(metadata, shape)
+    assert restored[f"x{axis}_spacing"] == CellSpacing.GEOMETRIC
+    assert restored[f"x{axis}_spacing_ratio"] == pytest.approx(ratio)
