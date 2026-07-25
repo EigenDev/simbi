@@ -22,7 +22,7 @@ mod afterglow;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 
 use symbi::prelude::*;
 use symbi::sim::refinement::transfer::prolong_field;
@@ -134,9 +134,9 @@ struct Config {
     // the prescribed binary orbit (`body_system.binary_config`), if any; attaches the Keplerian
     // orbit to the body collection so the two components orbit each other. None for non-binary runs.
     binary: Option<BinaryCfg>,
-    // a single user source expression in the rust `SourceConfig` wire format
-    // (json string), or None. lowered + attached on the hydro path.
-    source_json: Option<String>,
+    // ordered user source expressions in the rust `SourceConfig` wire format.
+    // contributions are lowered, grouped by target, and added on the hydro path.
+    source_jsons: Vec<String>,
     // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
     motion_json: Option<String>,
@@ -298,6 +298,25 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
     Ok(Some(s))
 }
 
+fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<String>> {
+    let mut sources = Vec::new();
+    if let Some(obj) = dict.get_item("source_expressions")? {
+        let list = obj.downcast::<PyList>().map_err(|_| {
+            PyValueError::new_err("source_expressions must be a list of source payloads")
+        })?;
+        let json = obj.py().import("json")?;
+        for source in list {
+            sources.push(json.call_method1("dumps", (source,))?.extract()?);
+        }
+    }
+    for field in ["gravity_source_expressions", "hydro_source_expressions"] {
+        if let Some(source) = get_source_json(dict, field)? {
+            sources.push(source);
+        }
+    }
+    Ok(sources)
+}
+
 /// uniform runtime-source attach across the substrate kernel sets the hydro
 /// dispatch macro instantiates. the macro body monomorphizes for EVERY regime it
 /// covers (newtonian/adiabatic AND rhd), but `with_runtime_source` is inherent
@@ -414,6 +433,29 @@ where
     fn enable_source_fusion(self) -> Self {
         self
     }
+}
+
+fn attach_configured_sources<T>(
+    substrate: T,
+    source_jsons: &[String],
+    spec: &symbi_hydro::RegimeSpec,
+) -> Result<T, String>
+where
+    T: AttachRuntimeSource + EnableSourceFusion,
+{
+    if source_jsons.is_empty() {
+        return Ok(substrate.enable_source_fusion());
+    }
+    let configs = source_jsons
+        .iter()
+        .map(|json| {
+            symbi_hydro::SourceConfig::from_json(json)
+                .map_err(|error| format!("source expression parse: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let (built, params) = symbi_hydro::expr_bridge::build_user_sources(&configs, spec)
+        .map_err(|error| format!("source expression lower: {error}"))?;
+    substrate.attach_runtime_source(built, params)
 }
 
 fn solver_from_str(s: &str) -> PyResult<Solver> {
@@ -773,12 +815,9 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<usize>().ok())
             .unwrap_or(1)
             .max(1),
-        // user source expressions (force/cooling/relax/raw) -> the rust source
-        // front door. `gravity_source_expressions` is the conventional force slot;
-        // `hydro_source_expressions` is the generic self-describing source. one
-        // one runtime source per run (the kernel set holds a single slot).
-        source_json: get_source_json(dict, "gravity_source_expressions")?
-            .or(get_source_json(dict, "hydro_source_expressions")?),
+        // the collection field is canonical; the two legacy hooks append in
+        // gravity-then-hydro order and remain source-compatible adapters.
+        source_jsons: get_source_jsons(dict)?,
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
         driven_exprs,
         gradient_bcs,
@@ -2056,7 +2095,7 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     if !cfg.bodies.is_empty() {
         push("Physics", "immersed bodies", cfg.bodies.len().to_string());
     }
-    if cfg.source_json.is_some() {
+    if !cfg.source_jsons.is_empty() {
         push("Physics", "source term", "active".into());
     }
     if cfg.motion_json.is_some() {
@@ -3159,21 +3198,11 @@ macro_rules! build_and_run_hydro {
         // force/cooling/relax on relativistic regimes (use raw). the base level attaches it here;
         // refined runs re-attach the same source to each fine level in the `into_hierarchy` `$make`
         // closure below, so it acts on every level it overlaps.
-        let sub = match &cfg.source_json {
-            Some(json) => {
-                let scfg = symbi_hydro::SourceConfig::from_json(json)
-                    .map_err(|e| format!("source expression parse: {e}"))?;
-                let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg,
-                    <$regime_ty as Regime<f64, $dof>>::SPEC,
-                )
-                .map_err(|e| format!("source expression lower: {e}"))?;
-                sub.attach_runtime_source(built, scfg.params.clone())?
-            }
-            // no user source: still enable fusion so an immersed body folds into godunov (adiabatic);
-            // a no-op for regimes without a host body fold.
-            None => sub.enable_source_fusion(),
-        };
+        let sub = attach_configured_sources(
+            sub,
+            &cfg.source_jsons,
+            <$regime_ty as Regime<f64, $dof>>::SPEC,
+        )?;
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]` — the complete prim prescription [rho, vel_0..DOF-1, pre]
         // as coordinate DAGs. a theta-stratified rotating equilibrium REQUIRES
@@ -3236,24 +3265,12 @@ macro_rules! build_and_run_hydro {
             // attach the SAME user source to each fine level as the base level, so a source
             // overlapping a refined region still acts there (a base-only attach would be restricted
             // away by the fine solution). the source was already validated at the base attach.
-            match &cfg.source_json {
-                Some(json) => {
-                    let scfg = symbi_hydro::SourceConfig::from_json(json)
-                        .expect("fine-level source parse");
-                    let built = symbi_hydro::expr_bridge::build_user_source(
-                        &scfg,
-                        <$regime_ty as Regime<f64, $dof>>::SPEC,
-                    )
-                    .expect("fine-level source lower");
-                    // fuse at the fine level too (mirrors the base attach) so a refined run does not
-                    // silently drop to the two-pass on its finest, most-cell-dense levels.
-                    ks.attach_runtime_source(built, scfg.params.clone())
-                        .expect("fine-level source attach")
-                }
-                // no user source: enable fusion so an immersed body folds into the fine-level godunov
-                // (adiabatic); a no-op otherwise.
-                None => ks.enable_source_fusion(),
-            }
+            attach_configured_sources(
+                ks,
+                &cfg.source_jsons,
+                <$regime_ty as Regime<f64, $dof>>::SPEC,
+            )
+            .expect("fine-level source attach")
         });
         // a refined run attaches its immersed bodies to the hierarchy: the FINEST level owns the full
         // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
@@ -3660,19 +3677,12 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     // each tile evaluates S at its own GLOBAL coordinates, so a position-dependent
                     // force is correct across cuts AND level seams; the canonical per-level stage
                     // drives source_apply. already validated at the front door.
-                    if let Some(json) = &cfg.source_json {
-                        let scfg = symbi_hydro::SourceConfig::from_json(json)
-                            .expect("tile source parse");
-                        let built = symbi_hydro::expr_bridge::build_user_source(
-                            &scfg,
-                            <$regime_ty as Regime<f64, $d>>::SPEC,
-                        )
-                        .expect("tile source lower");
-                        ks = ks
-                            .attach_runtime_source(built, scfg.params.clone())
-                            .expect("tile source attach");
-                    }
-                    ks
+                    attach_configured_sources(
+                        ks,
+                        &cfg.source_jsons,
+                        <$regime_ty as Regime<f64, $d>>::SPEC,
+                    )
+                    .expect("tile source attach")
                 };
                 let sub = register(sub);
                 let make = |s: &Sim| {
@@ -3916,19 +3926,11 @@ macro_rules! build_and_run_hydro_decomposed {
                 // position-dependent force is correct across cuts -- proven decomposed==monolithic
                 // to round-off by `decomp_source_equivalence`. the global output sim carries no
                 // source (it is touched only at gather/output).
-                let sub = match &cfg.source_json {
-                    Some(json) => {
-                        let scfg = symbi_hydro::SourceConfig::from_json(json)
-                            .map_err(|e| format!("source expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_user_source(
-                            &scfg,
-                            <$regime_ty as Regime<f64, $dof>>::SPEC,
-                        )
-                        .map_err(|e| format!("source expression lower: {e}"))?;
-                        sub.attach_runtime_source(built, scfg.params.clone())?
-                    }
-                    None => sub,
-                };
+                let sub = attach_configured_sources(
+                    sub,
+                    &cfg.source_jsons,
+                    <$regime_ty as Regime<f64, $dof>>::SPEC,
+                )?;
                 // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
                 // the ids ride the boundary enum copied from the physical faces, so only edge
                 // tiles carry Driven faces and interior tiles hold the dags inert. each tile
@@ -4397,27 +4399,16 @@ macro_rules! build_and_run_mhd {
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
         // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
         // B is CT-evolved, so it takes no cell source. single-grid only.
-        let sub = match &cfg.source_json {
-            Some(json) => {
-                if cfg.refinement_enabled {
-                    return Err(
-                        "user source expressions are not yet supported with mesh refinement"
-                            .to_string(),
-                    );
-                }
-                let scfg = symbi_hydro::SourceConfig::from_json(json)
-                    .map_err(|e| format!("source expression parse: {e}"))?;
-                let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg,
-                    <$regime_ty as Regime<f64, $d>>::SPEC,
-                )
-                .map_err(|e| format!("source expression lower: {e}"))?;
-                sub.attach_runtime_source(built, scfg.params.clone())?
-            }
-            // no user source: still enable fusion so an immersed body folds into godunov (adiabatic);
-            // a no-op for regimes without a host body fold.
-            None => sub.enable_source_fusion(),
-        };
+        if !cfg.source_jsons.is_empty() && cfg.refinement_enabled {
+            return Err(
+                "user source expressions are not yet supported with mesh refinement".to_string(),
+            );
+        }
+        let sub = attach_configured_sources(
+            sub,
+            &cfg.source_jsons,
+            <$regime_ty as Regime<f64, $d>>::SPEC,
+        )?;
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]`. a complete prim prescription incl. the cell B (purely
         // toroidal: in-plane B = 0, out-of-plane B_phi injected). single-grid only.
@@ -4545,25 +4536,16 @@ macro_rules! build_and_run_imhd {
             .with_resistivity(cfg.resistivity);
         // attach a user source. iso MHD has no energy -> momentum-only force/relax,
         // raw den/mom (raw->nrg rejected); B is CT-evolved. single-grid only.
-        let sub = match &cfg.source_json {
-            Some(json) => {
-                if cfg.refinement_enabled {
-                    return Err(
-                        "user source expressions are not yet supported with mesh refinement"
-                            .to_string(),
-                    );
-                }
-                let scfg = symbi_hydro::SourceConfig::from_json(json)
-                    .map_err(|e| format!("source expression parse: {e}"))?;
-                let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg,
-                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                )
-                .map_err(|e| format!("source expression lower: {e}"))?;
-                sub.attach_runtime_source(built, scfg.params.clone())?
-            }
-            None => sub,
-        };
+        if !cfg.source_jsons.is_empty() && cfg.refinement_enabled {
+            return Err(
+                "user source expressions are not yet supported with mesh refinement".to_string(),
+            );
+        }
+        let sub = attach_configured_sources(
+            sub,
+            &cfg.source_jsons,
+            <IsothermalMhd as Regime<f64, $d>>::SPEC,
+        )?;
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]`. the iso-MHD prescription is [rho, vel.., B..] (no
         // pressure slot; the eos closure p = cs^2 rho covers the ghosts). purely toroidal
@@ -4729,19 +4711,11 @@ macro_rules! build_and_run_mhd_decomposed {
                 // attach the user source per tile (two-pass). targets the mhd hydro slots
                 // (den/mom/nrg); B is CT-evolved, so it takes no cell source. each tile evaluates S at its
                 // own global coords. rmhd is relativistic -> raw only (enforced in build_user_source).
-                let sub = match &cfg.source_json {
-                    Some(json) => {
-                        let scfg = symbi_hydro::SourceConfig::from_json(json)
-                            .map_err(|e| format!("source expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_user_source(
-                            &scfg,
-                            <$regime_ty as Regime<f64, $d>>::SPEC,
-                        )
-                        .map_err(|e| format!("source expression lower: {e}"))?;
-                        sub.attach_runtime_source(built, scfg.params.clone())?
-                    }
-                    None => sub,
-                };
+                let sub = attach_configured_sources(
+                    sub,
+                    &cfg.source_jsons,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )?;
                 // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
                 // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
                 // tile evaluates the coordinate prescription at its own GLOBAL coords -- the
@@ -4912,19 +4886,11 @@ macro_rules! build_and_run_imhd_decomposed {
                     .with_excision(cfg.excision_radius);
                 // attach the user source per tile (two-pass). iso mhd has no energy -> momentum-only
                 // force/relax, raw den/mom; B is CT-evolved. each tile evaluates S at its own coords.
-                let sub = match &cfg.source_json {
-                    Some(json) => {
-                        let scfg = symbi_hydro::SourceConfig::from_json(json)
-                            .map_err(|e| format!("source expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_user_source(
-                            &scfg,
-                            <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                        )
-                        .map_err(|e| format!("source expression lower: {e}"))?;
-                        sub.attach_runtime_source(built, scfg.params.clone())?
-                    }
-                    None => sub,
-                };
+                let sub = attach_configured_sources(
+                    sub,
+                    &cfg.source_jsons,
+                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                )?;
                 // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
                 // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
                 // tile evaluates the coordinate prescription at its own GLOBAL coords. the iso-mhd
@@ -5270,19 +5236,11 @@ macro_rules! build_and_run_iso_decomposed {
                     .with_alpha(cfg.alpha);
                 // attach the user source per tile (two-pass). iso has no energy -> momentum-only
                 // force/relax, raw den/mom. each tile evaluates S at its own global coords.
-                let sub = match &cfg.source_json {
-                    Some(json) => {
-                        let scfg = symbi_hydro::SourceConfig::from_json(json)
-                            .map_err(|e| format!("source expression parse: {e}"))?;
-                        let built = symbi_hydro::expr_bridge::build_user_source(
-                            &scfg,
-                            <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                        )
-                        .map_err(|e| format!("source expression lower: {e}"))?;
-                        sub.attach_runtime_source(built, scfg.params.clone())?
-                    }
-                    None => sub,
-                };
+                let sub = attach_configured_sources(
+                    sub,
+                    &cfg.source_jsons,
+                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                )?;
                 // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
                 // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
                 // tile evaluates the coordinate prescription at its own GLOBAL coords -- the same
@@ -5453,19 +5411,11 @@ macro_rules! build_and_run_iso {
         // (against the iso spec) drops the energy overlay for force/relax and rejects
         // raw->nrg; den/mom sources work. refined runs re-attach the same source to
         // each fine level in the into_hierarchy make-closure below.
-        let sub = match &cfg.source_json {
-            Some(json) => {
-                let scfg = symbi_hydro::SourceConfig::from_json(json)
-                    .map_err(|e| format!("source expression parse: {e}"))?;
-                let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg,
-                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                )
-                .map_err(|e| format!("source expression lower: {e}"))?;
-                sub.attach_runtime_source(built, scfg.params.clone())?
-            }
-            None => sub,
-        };
+        let sub = attach_configured_sources(
+            sub,
+            &cfg.source_jsons,
+            <IsoNewtonian as Regime<f64, $d>>::SPEC,
+        )?;
 
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order, lowered against the iso
         // spec: the prescription is [rho, vel..] only (no pressure slot; the ghost pressure
@@ -5552,20 +5502,12 @@ macro_rules! build_and_run_iso {
             // attach the SAME user source to each fine level (a base-only attach
             // would be restricted away by the fine solution). already validated
             // at the base attach.
-            match &cfg.source_json {
-                Some(json) => {
-                    let scfg = symbi_hydro::SourceConfig::from_json(json)
-                        .expect("fine-level source parse");
-                    let built = symbi_hydro::expr_bridge::build_user_source(
-                        &scfg,
-                        <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                    )
-                    .expect("fine-level source lower");
-                    ks.attach_runtime_source(built, scfg.params.clone())
-                        .expect("fine-level source attach")
-                }
-                None => ks,
-            }
+            attach_configured_sources(
+                ks,
+                &cfg.source_jsons,
+                <IsoNewtonian as Regime<f64, $d>>::SPEC,
+            )
+            .expect("fine-level source attach")
         });
         // a refined run attaches its immersed bodies to the hierarchy: the FINEST
         // level owns the full (accreting) bodies, coarser levels a gravity-only
@@ -6379,7 +6321,7 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
             ));
         }
     }
-    if let Some(json) = &cfg.source_json {
+    for json in &cfg.source_jsons {
         symbi_hydro::SourceConfig::from_json(json)
             .map_err(|err| format!("source expression parse: {err}"))?;
     }

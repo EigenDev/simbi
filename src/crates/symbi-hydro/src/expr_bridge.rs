@@ -426,6 +426,82 @@ pub fn build_user_source(
     }
 }
 
+/// lower an ordered collection of user sources into one runtime source set.
+/// parameter indices are made global before lowering, and contributions that
+/// target the same conserved field are summed component by component.
+pub fn build_user_sources(
+    configs: &[symbi_expr::SourceConfig],
+    spec: &crate::regime_spec::RegimeSpec,
+) -> Result<(Vec<(String, BuiltSource)>, Vec<f64>), String> {
+    let mut parameter_offset = 0usize;
+    let mut params = Vec::new();
+    let mut lowered = Vec::new();
+
+    for config in configs {
+        let mut config = config.clone();
+        for node in &mut config.nodes {
+            if let Some(index) = &mut node.param_idx {
+                *index += parameter_offset;
+            }
+        }
+        parameter_offset += config.params.len();
+        params.extend_from_slice(&config.params);
+        lowered.extend(build_user_source(&config, spec)?);
+    }
+
+    let mut composed: Vec<(String, BuiltSource)> = Vec::new();
+    for (target, built) in lowered {
+        if let Some((_, existing)) = composed.iter_mut().find(|(name, _)| name == &target) {
+            *existing = sum_built_sources(existing, &built, &target)?;
+        } else {
+            composed.push((target, built));
+        }
+    }
+    Ok((composed, params))
+}
+
+fn sum_built_sources(
+    left: &BuiltSource,
+    right: &BuiltSource,
+    target: &str,
+) -> Result<BuiltSource, String> {
+    if left.outputs.len() != right.outputs.len() {
+        return Err(format!(
+            "source target '{target}' has incompatible component counts: {} and {}",
+            left.outputs.len(),
+            right.outputs.len()
+        ));
+    }
+
+    let mut graph = Graph::new();
+    let mut params = left.params.clone();
+    for name in &right.params {
+        if !params.contains(name) {
+            params.push(name.clone());
+        }
+    }
+    let leaves: HashMap<String, NodeId> = params
+        .iter()
+        .map(|name| {
+            let node = graph.add_scalar_param(name, ElementTy::F64);
+            (name.clone(), node)
+        })
+        .collect();
+    let resolve = |symbol: &symbi_ir::Symbol| leaves.get(symbol.as_str()).copied();
+    let outputs = left
+        .outputs
+        .iter()
+        .zip(&right.outputs)
+        .map(|(&left_root, &right_root)| {
+            let left_node = graph.import_subgraph(&left.graph, left_root, resolve);
+            let right_node = graph.import_subgraph(&right.graph, right_root, resolve);
+            graph.element_wise(ElementWiseOp::Add, vec![left_node, right_node], None)
+        })
+        .collect();
+
+    Ok(BuiltSource { graph, params, outputs })
+}
+
 /// multiply the named `field` outputs by the region mask `chi` (in the field's own graph), if a
 /// region is present. the lifts are linear in these outputs, so this masks the final conserved
 /// contribution. `idxs` selects WHICH outputs carry the maskable quantity (e.g., relax masks only
@@ -525,6 +601,29 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("expected build_user_source to reject the config"),
         }
+    }
+
+    #[test]
+    fn source_collection_isolates_params_and_sums_shared_targets() {
+        let first = cfg_from(
+            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[2.0], "target":"nrg",
+                 "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
+        );
+        let second = cfg_from(
+            r#"{ "kind":"raw", "dim":1, "outputs":[0], "params":[5.0], "target":"nrg",
+                 "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
+        );
+
+        let (built, params) =
+            build_user_sources(&[first, second], &NEWTONIAN_SPEC).expect("compose sources");
+        assert_eq!(params, [2.0, 5.0]);
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0].0, "nrg");
+        let evaluator = crate::SourceEvaluator::from_built(&built);
+        let value = evaluator
+            .eval("nrg", &[("p0", params[0]), ("p1", params[1])])
+            .expect("energy source");
+        assert_eq!(value, [7.0]);
     }
 
     #[test]
