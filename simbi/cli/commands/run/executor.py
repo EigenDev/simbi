@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from simbi.simulation import SimbiProblem, run
+from simbi.simulation.runner import validate_problem
 
 
 def _discover_problem_classes(script: str) -> list[tuple[str, type[SimbiProblem]]]:
@@ -134,6 +135,10 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
 
         # configure environment
         _configure_environment(args)
+
+        if getattr(args, "validate_only", False):
+            validate_problem(problem, compute_mode=args.compute_mode)
+            continue
 
         # run the simulation. no preamble: the live dashboard is a self-contained
         # full-screen tool that owns the terminal for the duration of the run.

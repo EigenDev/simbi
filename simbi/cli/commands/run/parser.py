@@ -177,6 +177,13 @@ def setup_parser(subparsers) -> None:
         help="list available configs",
         action=PrintAvailableConfigsAction,
     )
+    util_group.add_argument(
+        "--validate",
+        dest="validate_only",
+        help="validate the complete configuration without allocating a grid or writing output",
+        default=False,
+        action="store_true",
+    )
 
     run_parser.set_defaults(func=execute)
 

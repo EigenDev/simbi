@@ -6311,6 +6311,7 @@ fn run_simulation(
     chi_field: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
+    validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
     // drain the passive-scalar generator (None = undyed). one flat cell-centered
     // buffer; the per-arm seeding checks the count against the interior.
     if let Some(chi_field) = chi_field {
@@ -6392,6 +6393,61 @@ fn run_simulation(
         .map_err(PyRuntimeError::new_err)
 }
 
+fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
+    validate_gpu_request(cfg.n_gpus)?;
+    check_horizon_containment(
+        &cfg.spacetime,
+        cfg.schwarzschild_mass,
+        cfg.kerr_spin,
+        &cfg.coord_system,
+        cfg.x_lo[0],
+    )?;
+    check_excision_request(
+        cfg.excision_radius,
+        &cfg.spacetime,
+        &cfg.coord_system,
+        cfg.dims,
+        cfg.schwarzschild_mass,
+        cfg.kerr_spin,
+        cfg.refinement_enabled,
+        &cfg.refinement_regions,
+        cfg.n_gpus,
+    )?;
+    if cfg.refinement_enabled {
+        if cfg.coord_system != "cartesian" {
+            return Err(format!(
+                "mesh refinement is cartesian-only; got coord_system = '{}'",
+                cfg.coord_system
+            ));
+        }
+        if !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
+            return Err(format!(
+                "mesh refinement requires linear cell spacing; got x1_spacing = '{}'",
+                cfg.x1_spacing
+            ));
+        }
+    }
+    if let Some(json) = &cfg.source_json {
+        symbi_hydro::SourceConfig::from_json(json)
+            .map_err(|err| format!("source expression parse: {err}"))?;
+    }
+    for (ii, json) in cfg.driven_exprs.iter().enumerate() {
+        symbi_hydro::SourceConfig::from_json(json)
+            .map_err(|err| format!("driven boundary {ii} parse: {err}"))?;
+    }
+    if let Some(json) = &cfg.motion_json {
+        symbi_hydro::motion_law::MotionLaw::from_json(json, cfg.start_time, cfg.t_final)
+            .map_err(|err| format!("mesh motion parse: {err}"))?;
+    }
+    Ok(())
+}
+
+#[pyfunction]
+fn validate_simulation(sim_info: &Bound<'_, PyDict>) -> PyResult<()> {
+    let cfg = parse_config(sim_info)?;
+    validate_config_preflight(&cfg).map_err(PyValueError::new_err)
+}
+
 /// read-only live monitor: poll `<rundir>/.simbi-live/snapshot.bin` (written by a
 /// run started with `live_monitor = true`) and render the dashboard until the user
 /// quits or Ctrl-C. blocks on a dedicated terminal — release the gil so the
@@ -6459,6 +6515,7 @@ fn reset_guard_census() {
 // the NVRTC device path — so the registration is identical and lives here.
 fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_simulation, m)?)?;
     m.add_function(wrap_pyfunction!(attach_dashboard, m)?)?;
     m.add_function(wrap_pyfunction!(bondi_profile, m)?)?;
     m.add_function(wrap_pyfunction!(mdot_bondi, m)?)?;
