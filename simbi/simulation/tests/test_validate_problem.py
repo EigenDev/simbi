@@ -17,7 +17,7 @@ from simbi_configs.examples.newtonian.sod import SodProblem
 
 
 def test_validate_problem_calls_rust_preflight(monkeypatch, capsys) -> None:
-    problem = SimpleNamespace()
+    problem = SimpleNamespace(passive_scalar=lambda: None)
     calls: list[dict[str, object]] = []
     backend = SimpleNamespace(
         validate_simulation=lambda **kwargs: calls.append(kwargs)
@@ -62,3 +62,13 @@ def test_rust_preflight_rejects_legacy_bare_boundary_payload() -> None:
 
     with pytest.raises(ValueError, match="missing field `kind`"):
         backend.validate_simulation(sim_info=payload)
+
+
+def test_scalar_sample_rejects_nonfinite_magnetic_field() -> None:
+    with pytest.raises(ValueError, match="Bz.*finite"):
+        runner._check_first_scalar("Probe", "Bz", iter([float("nan")]))
+
+
+def test_scalar_sample_rejects_empty_passive_scalar() -> None:
+    with pytest.raises(ValueError, match="passive scalar.*yielded nothing"):
+        runner._check_first_scalar("Probe", "passive scalar", iter(()))
