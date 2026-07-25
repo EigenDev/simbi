@@ -630,6 +630,12 @@ for dashes; underscores also work).
 | `bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
 | `uniform_sphere.py` | `uniform-sphere` | Uniform sphere with homologous mesh expansion |
 | `quad_shocktube.py` | `quad-shocktube` | 2D multi-region shock |
+| `ordered_sources.py` | `ordered-sources` | Ordered density, momentum, and energy source composition |
+| `rotating_sponge.py` | `rotating-sponge` | Rotating-frame forces composed with an outer sponge |
+| `tabulated_source_1d.py` | `tabulated-source-1d` | Piecewise-linear tabulated energy source |
+| `tabulated_source_2d.py` | `tabulated-source-2d` | Bilinear tabulated energy source |
+| `geometric_boundaries.py` | `geometric-boundaries` | Geometric cell concentration at either boundary |
+| `decomposed_tabulated_geometric.py` | `decomposed-tabulated-geometric` | Geometric mesh and tabulated source on one or several devices |
 
 Run any of them:
 
