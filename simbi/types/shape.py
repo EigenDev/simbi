@@ -48,6 +48,26 @@ class Shape:
             raise ValueError(f"box half_extents must all be > 0, got {h}")
         return Shape({"kind": "box", "center": _vec3("center", center), "half_extents": h})
 
+    @staticmethod
+    def cylinder(
+        center: Sequence[float], radius: float, half_height: float
+    ) -> "Shape":
+        """a finite cylinder aligned with the body-local z axis."""
+        if radius <= 0.0:
+            raise ValueError(f"cylinder radius must be > 0, got {radius}")
+        if half_height <= 0.0:
+            raise ValueError(
+                f"cylinder half_height must be > 0, got {half_height}"
+            )
+        return Shape(
+            {
+                "kind": "cylinder",
+                "center": _vec3("center", center),
+                "radius": float(radius),
+                "half_height": float(half_height),
+            }
+        )
+
     def union(self, other: "Shape") -> "Shape":
         """the region inside EITHER shape (min of signed distances)."""
         return Shape({"kind": "union", "a": self.wire, "b": other.wire})
@@ -109,6 +129,12 @@ def _sdf_dist(node: dict[str, Any], x: list[float]) -> float:
         q = [abs(x[a] - c[a]) - h[a] for a in range(3)]
         outside = math.sqrt(sum(max(qi, 0.0) ** 2 for qi in q))
         return outside + min(max(q), 0.0)
+    if kind == "cylinder":
+        c = node["center"]
+        radial = math.hypot(x[0] - c[0], x[1] - c[1]) - node["radius"]
+        axial = abs(x[2] - c[2]) - node["half_height"]
+        outside = math.hypot(max(radial, 0.0), max(axial, 0.0))
+        return outside + min(max(radial, axial), 0.0)
     if kind == "union":
         return min(_sdf_dist(node["a"], x), _sdf_dist(node["b"], x))
     if kind == "intersect":

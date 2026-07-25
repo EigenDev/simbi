@@ -25,7 +25,8 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_ib::{Body, BodyCollection, BodyKind};
+use symbi_ib::{Body, BodyCollection, BodyKind, SurfaceSpec};
+use symbi_ib::sdf::SdfExpr;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -175,6 +176,69 @@ fn central_bh_accretes_on_the_finest_level_only() {
             assert!(den.is_finite() && den > 0.0, "level {ll} {c:?}: den {den}");
         }
     }
+}
+
+#[test]
+fn shaped_rigid_wall_crossing_refinement_boundary_acts_on_both_levels() {
+    let radius = 0.12_f64;
+    let half_height = 0.35_f64;
+    let bound = (radius * radius + half_height * half_height).sqrt();
+    let body = Body::rigid_sphere(
+        0,
+        Tensor::new([0.5; 3]),
+        Tensor::zeros(),
+        1.0,
+        bound,
+        0.1,
+        false,
+    )
+    .with_surface(SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 1.0e3,
+        k_eta_t: 1.0e3,
+    });
+    let mut hierarchy = two_level(0.0, BodyCollection::new().add(body));
+    hierarchy.attach_body_shapes(vec![Some(SdfExpr::capped_cylinder(
+        [0.0; 3],
+        radius,
+        half_height,
+    ))]);
+
+    for level in &hierarchy.levels {
+        let energy = level.state.fields.cons.nrg_field().unwrap();
+        for cell in level.state.geom.interior.iter() {
+            level.state.fields.cons.den.view_mut().set(cell, 2.0);
+            level.state.fields.cons.mom[0].view_mut().set(cell, 2.0);
+            level.state.fields.cons.mom[1].view_mut().set(cell, 0.0);
+            level.state.fields.cons.mom[2].view_mut().set(cell, 0.0);
+            energy.view_mut().set(cell, 2.5);
+        }
+    }
+
+    hierarchy.evolve_steps(1).unwrap();
+
+    let coarse_momentum = *hierarchy.levels[0]
+        .state
+        .fields
+        .cons
+        .mom[0]
+        .view()
+        .at([8, 8, 2]);
+    let fine_momentum = *hierarchy.levels[1]
+        .state
+        .fields
+        .cons
+        .mom[0]
+        .view()
+        .at([16, 16, 16]);
+    assert!(
+        coarse_momentum < 1.9,
+        "uncovered coarse cylinder segment was not rigidly enforced: {coarse_momentum}"
+    );
+    assert!(
+        fine_momentum < 1.9,
+        "fine cylinder segment was not rigidly enforced: {fine_momentum}"
+    );
 }
 
 #[test]

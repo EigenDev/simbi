@@ -535,12 +535,13 @@ where
         self
     }
 
-    /// attach per-body immersed-boundary shapes to the FINEST level, which owns the full
-    /// (wall / accreting) bodies; coarser levels carry gravity-only proxies with no surface, so
-    /// they need no shape. `None` entries keep the analytic sphere.
+    /// attach per-body immersed-boundary shapes to every level. rigid walls remain active on
+    /// uncovered coarse cells when a body crosses a coarse-fine boundary, so every level must
+    /// evaluate the same shape. `None` entries keep the analytic sphere.
     pub fn attach_body_shapes(&mut self, shapes: Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>) {
-        let finest = self.levels.len() - 1;
-        self.levels[finest].state.attach_body_shapes(shapes);
+        for level in &mut self.levels {
+            level.state.attach_body_shapes(shapes.clone());
+        }
     }
 
     /// every accreting body's sink sphere must lie inside the finest level's
@@ -1145,10 +1146,19 @@ where
                     dt,
                 );
             }
-            let l = &self.levels[level];
-            if l.state.has_bodies() {
-                prof("penalize", || l.kernels.penalize(&l.state, dt));
-            }
+        }
+        // rigid surfaces act on every level: a wall may cross a coarse-fine boundary, and its
+        // uncovered segment belongs to the coarse level. covered coarse writes are replaced by
+        // restriction after the fine subcycle. accretion remains finest-only because coarse
+        // proxies have their sink capability removed.
+        let l = &self.levels[level];
+        let has_rigid = l
+            .state
+            .immersed
+            .as_ref()
+            .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
+        if l.state.has_bodies() && (!has_finer || has_rigid) {
+            prof("penalize", || l.kernels.penalize(&l.state, dt));
         }
         if has_finer {
             self.level_subcycle(level, dt);
@@ -1451,10 +1461,8 @@ fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     }
 }
 
-/// a gravity-only proxy of a body collection for the coarser levels: accreting
-/// bodies keep their mass / softening / motion but lose the sink (the kernels
-/// then see sink_rate = 0 and remove no mass); collection-level capabilities
-/// (binary params, frame) are preserved.
+/// remove accretion from coarser-level body proxies. rigid surfaces remain active because a
+/// body may cross a coarse-fine boundary and must act on uncovered coarse cells.
 fn gravity_only<const D: usize>(
     bodies: &symbi_ib::BodyCollection<f64, D>,
 ) -> symbi_ib::BodyCollection<f64, D> {
@@ -1722,6 +1730,22 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // region is owned by whichever level contains it and a refined root still owns its core.
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
+        }
+        // rigid walls also act on uncovered root cells when their shape crosses the refined
+        // patch boundary. covered root writes are replaced by restriction after the fine
+        // subcycle; accretion remains absent from root proxies.
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || {
+                let level = &tiles[i].levels[0];
+                let has_rigid = level
+                    .state
+                    .immersed
+                    .as_ref()
+                    .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
+                if has_rigid {
+                    prof("penalize", || level.kernels.penalize(&level.state, gdt));
+                }
+            });
         }
         // the FINE subcycle, decomposed across the refined tiles: RATIO substeps, each fine substep
         // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).

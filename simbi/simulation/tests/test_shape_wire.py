@@ -79,6 +79,12 @@ def test_signed_distance_matches_analytic() -> None:
     assert abs(box.signed_distance((0.0, 0.0, 0.0)) + 0.2) < 1e-12  # inside, nearest face at z=0.2
     assert abs(box.signed_distance((0.6, 0.0, 0.0)) - 0.1) < 1e-12  # outside in x by 0.1
 
+    cylinder = Shape.cylinder((0.0, 0.0, 1.0), radius=0.5, half_height=2.0)
+    assert cylinder.signed_distance((0.0, 0.0, 1.0)) == pytest.approx(-0.5)
+    assert cylinder.signed_distance((0.75, 0.0, 1.0)) == pytest.approx(0.25)
+    assert cylinder.signed_distance((0.0, 0.0, 3.25)) == pytest.approx(0.25)
+    assert cylinder.signed_distance((0.8, 0.0, 3.4)) == pytest.approx(0.5)
+
     union = Shape.sphere((0.0, 0.0, 0.0), 1.0).union(Shape.box((3.0, 0.0, 0.0), (0.5, 0.5, 0.5)))
     assert union.contains((0.0, 0.0, 0.0)) and union.contains((3.0, 0.0, 0.0))
     assert not union.contains((1.6, 0.0, 0.0))
@@ -99,5 +105,9 @@ def test_degenerate_dimensions_rejected() -> None:
         Shape.sphere((0.0, 0.0, 0.0), 0.0)
     with pytest.raises(ValueError, match="half_extents must all be > 0"):
         Shape.box((0.0, 0.0, 0.0), (0.5, -1.0, 0.5))
+    with pytest.raises(ValueError, match="radius must be > 0"):
+        Shape.cylinder((0.0, 0.0, 0.0), 0.0, 1.0)
+    with pytest.raises(ValueError, match="half_height must be > 0"):
+        Shape.cylinder((0.0, 0.0, 0.0), 1.0, 0.0)
     with pytest.raises(ValueError, match="3 components"):
         Shape.sphere((0.0, 0.0), 1.0)
