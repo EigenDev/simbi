@@ -61,7 +61,7 @@ quite a while.
 
 | Moving Mesh Techniques | Magnetic Turbulence |
 |:---:|:---:|
-| [Animation](https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4) | [Animation](https://github.com/user-attachments/assets/9e5b8c42-ce3e-4c23-a380-7903eec52b92) |
+| [Animation](https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4) | [Animation](https://github.com/user-attachments/assets/c3c636f9-60ca-4331-9600-3442970a6325)
 
 </div>
 
