@@ -25,8 +25,8 @@ pub use crate::sim::substrate_seam::KernelSet;
 // sim-state core so the AMR driver shares them DRY. the public profiler API is
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
-    advance_clock, advance_motion, evolve_bodies, prof, select_timestep, set_stage_motion,
-    stage_schedule, needs_step_snapshot,
+    advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request,
+    needs_step_snapshot, prof, select_timestep, set_stage_motion, stage_schedule,
 };
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -193,11 +193,8 @@ where
 
         // the scale factor advances for homologous expansion only; uniform
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
-        (sim.time, sim.iteration) = advance_clock(sim.time, sim.iteration, sim.dt);
-        let law_value = sim.motion_law.as_ref()
-            .map(|law| (law.a_at(sim.time), law.adot_at(sim.time)));
         let dt = sim.dt;
-        advance_motion(&mut sim.motion, law_value, dt);
+        advance_state_clock(sim, dt);
 
         if let Some(c) = trace_coord {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
@@ -223,26 +220,12 @@ where
         // the GR horizon shell-flux accretion, ONCE per step: the mass_flux / nrg_flux fields still
         // hold the last stage's flux, so a GPU Add-reduction of the boundary flux through the
         // diagnostic shell gives (mdot, edot) INTO the hole, booked onto the horizon body's ledger.
-        let horizon = sim.immersed.as_ref().and_then(|im| {
-            im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
-                symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => Some((i, diagnostic_radius)),
-                _ => None,
-            })
-        });
-        if let Some((idx, r_d)) = horizon {
+        if let Some((index, diagnostic_radius)) = horizon_request(sim) {
             let dt = sim.dt;
-            let (mdot, edot) = prof("horizon_accretion", || kernels.horizon_accretion(sim, r_d));
-            if let Some(im) = sim.immersed.as_mut() {
-                if let symbi_ib::BodyKind::Horizon {
-                    total_accreted_mass, total_accreted_energy, mdot: m, edot: e, ..
-                } = &mut im.bodies.get_mut(idx).kind
-                {
-                    *total_accreted_mass += mdot * dt;
-                    *total_accreted_energy += edot * dt;
-                    *m = mdot;
-                    *e = edot;
-                }
-            }
+            let (mdot, edot) = prof("horizon_accretion", || {
+                kernels.horizon_accretion(sim, diagnostic_radius)
+            });
+            book_horizon_receipt(sim, index, mdot, edot, dt);
         }
 
         if sim.has_bodies() {

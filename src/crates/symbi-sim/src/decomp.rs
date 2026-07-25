@@ -19,7 +19,7 @@
 // lives in one tested place.
 // =============================================================================
 
-use crate::driver::prof;
+use crate::driver::{advance_state_clock, book_horizon_receipt, horizon_request, prof};
 use crate::state::{FieldStore, PartitionGeometry, Timestepping};
 use crate::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
@@ -864,20 +864,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 drain_devices::<M>(devices);
                 exchange_grid(&sh, counts, devices, transport);
             }
-            let horizon = sh.first().and_then(|store| {
-                store.immersed.as_ref().and_then(|im| {
-                    im.bodies
-                        .bodies()
-                        .iter()
-                        .enumerate()
-                        .find_map(|(index, body)| match body.kind {
-                            symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
-                                Some((index, diagnostic_radius))
-                            }
-                            _ => None,
-                        })
-                })
-            });
+            let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
                 let (mdot, edot) = (0..n)
                     .map(|ii| {
@@ -927,21 +914,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         }
         if let Some((index, mdot, edot)) = horizon_receipt {
             for store in stores.iter_mut() {
-                if let Some(im) = store.immersed.as_mut() {
-                    if let symbi_ib::BodyKind::Horizon {
-                        total_accreted_mass,
-                        total_accreted_energy,
-                        mdot: mass_rate,
-                        edot: energy_rate,
-                        ..
-                    } = &mut im.bodies.get_mut(index).kind
-                    {
-                        *total_accreted_mass += mdot * dt;
-                        *total_accreted_energy += edot * dt;
-                        *mass_rate = mdot;
-                        *energy_rate = edot;
-                    }
-                }
+                book_horizon_receipt(&mut **store, index, mdot, edot, dt);
             }
         }
         if has_bodies {
@@ -961,10 +934,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // single-grid step; a traced motion law is then sampled EXACTLY at the new time
         // (a constant-rate extrapolation would overshoot a decelerating mesh).
         for s in stores.iter_mut() {
-            (s.time, s.iteration) = crate::driver::advance_clock(s.time, s.iteration, dt);
-            let law_value = s.motion_law.as_ref()
-                .map(|law| (law.a_at(s.time), law.adot_at(s.time)));
-            crate::driver::advance_motion(&mut s.motion, law_value, dt);
+            advance_state_clock(&mut **s, dt);
         }
         if std::env::var_os("SYMBI_TRACE_DT").is_some() {
             eprintln!("SYMBI_TRACE_DT iter={iter} t={t:.6e} dt={dt:.6e}");

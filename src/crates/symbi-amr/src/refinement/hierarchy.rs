@@ -50,8 +50,9 @@ use super::transfer::{
 };
 use symbi_sim::stage::{fold_stage, HookPoint, StageArgs};
 use symbi_sim::driver::{
-    advance_clock, advance_motion, check_dt_or_panic, evolve_bodies, needs_step_snapshot, prof,
-    select_timestep, stage_time_fractions,
+    advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic,
+    evolve_bodies, horizon_request, needs_step_snapshot, prof, select_timestep,
+    stage_time_fractions,
 };
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
@@ -912,11 +913,7 @@ where
 
         let root = &mut self.levels[0];
         // homologous linear advance ONLY when there is no traced motion law.
-        (root.state.time, root.state.iteration) =
-            advance_clock(root.state.time, root.state.iteration, dt);
-        let law_value = root.state.motion_law.as_ref()
-            .map(|law| (law.a_at(root.state.time), law.adot_at(root.state.time)));
-        advance_motion(&mut root.state.motion, law_value, dt);
+        advance_state_clock(&mut root.state, dt);
 
         // body feedback + motion: the FINEST level owns the sink and the
         // diagnostics; advance the (prescribed) motion there once per root
@@ -1132,29 +1129,21 @@ where
         // restriction below because the excised region is never a covered (finer-patch) region.
         self.level_tail_excise(level);
         if !has_finer {
-            let horizon = self.levels[level].state.immersed.as_ref().and_then(|im| {
-                im.bodies.bodies().iter().enumerate().find_map(|(i, b)| match b.kind {
-                    symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
-                        Some((i, diagnostic_radius))
-                    }
-                    _ => None,
-                })
-            });
-            if let Some((idx, r_d)) = horizon {
+            if let Some((index, diagnostic_radius)) =
+                horizon_request(&self.levels[level].state)
+            {
                 let l = &self.levels[level];
-                let (mdot, edot) =
-                    prof("horizon_accretion", || l.kernels.horizon_accretion(&l.state, r_d));
-                if let Some(im) = self.levels[level].state.immersed.as_mut() {
-                    if let symbi_ib::BodyKind::Horizon {
-                        total_accreted_mass, total_accreted_energy, mdot: m, edot: e, ..
-                    } = &mut im.bodies.get_mut(idx).kind
-                    {
-                        *total_accreted_mass += mdot * dt;
-                        *total_accreted_energy += edot * dt;
-                        *m = mdot;
-                        *e = edot;
-                    }
-                }
+                let (mdot, edot) = prof("horizon_accretion", || {
+                    l.kernels
+                        .horizon_accretion(&l.state, diagnostic_radius)
+                });
+                book_horizon_receipt(
+                    &mut self.levels[level].state,
+                    index,
+                    mdot,
+                    edot,
+                    dt,
+                );
             }
             let l = &self.levels[level];
             if l.state.has_bodies() {

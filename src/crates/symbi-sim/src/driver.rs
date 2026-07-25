@@ -20,7 +20,7 @@ use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 
-use crate::state::SimStateGeneric;
+use crate::state::{FieldStore, SimStateGeneric};
 
 /// the loud livelock guard: a NaN/Inf/non-positive `dt` means the state went NaN and the loop
 /// would spin forever without surfacing it. shared by `evolve` and the AMR driver so both paths
@@ -186,6 +186,72 @@ pub fn advance_motion(motion: &mut MotionState<f64>, law_value: Option<(f64, f64
         motion.a_dot = a_dot;
     } else if motion.homologous {
         motion.a += motion.a_dot * dt;
+    }
+}
+
+/// advance one field store to its accepted step time, including its motion law.
+pub fn advance_state_clock<const D: usize, const DOF: usize, Mem>(
+    state: &mut FieldStore<D, DOF, Mem, f64>,
+    dt: f64,
+) where
+    Mem: MemorySpace,
+{
+    (state.time, state.iteration) = advance_clock(state.time, state.iteration, dt);
+    let law_value = state
+        .motion_law
+        .as_ref()
+        .map(|law| (law.a_at(state.time), law.adot_at(state.time)));
+    advance_motion(&mut state.motion, law_value, dt);
+}
+
+/// return the first horizon body's index and diagnostic-shell radius.
+pub fn horizon_request<const D: usize, const DOF: usize, Mem>(
+    state: &FieldStore<D, DOF, Mem, f64>,
+) -> Option<(usize, f64)>
+where
+    Mem: MemorySpace,
+{
+    state.immersed.as_ref().and_then(|immersed| {
+        immersed
+            .bodies
+            .bodies()
+            .iter()
+            .enumerate()
+            .find_map(|(index, body)| match body.kind {
+                symbi_ib::BodyKind::Horizon {
+                    diagnostic_radius,
+                    ..
+                } => Some((index, diagnostic_radius)),
+                _ => None,
+            })
+    })
+}
+
+/// book one accepted diagnostic-shell flux receipt onto a horizon body.
+pub fn book_horizon_receipt<const D: usize, const DOF: usize, Mem>(
+    state: &mut FieldStore<D, DOF, Mem, f64>,
+    index: usize,
+    mdot: f64,
+    edot: f64,
+    dt: f64,
+) where
+    Mem: MemorySpace,
+{
+    let Some(immersed) = state.immersed.as_mut() else {
+        return;
+    };
+    if let symbi_ib::BodyKind::Horizon {
+        total_accreted_mass,
+        total_accreted_energy,
+        mdot: mass_rate,
+        edot: energy_rate,
+        ..
+    } = &mut immersed.bodies.get_mut(index).kind
+    {
+        *total_accreted_mass += mdot * dt;
+        *total_accreted_energy += edot * dt;
+        *mass_rate = mdot;
+        *energy_rate = edot;
     }
 }
 
