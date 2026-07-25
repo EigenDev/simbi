@@ -96,6 +96,7 @@ def metadata_to_config_dict(
     config.update({
         "checkpoint_interval": float(metadata.checkpoint_interval),
         "x1_spacing": CellSpacing(metadata.x1_spacing),
+        "x1_spacing_ratio": float(getattr(metadata, "x1_spacing_ratio", 1.0)),
         "x2_spacing": CellSpacing(metadata.x2_spacing),
         "x3_spacing": CellSpacing(metadata.x3_spacing),
         "boundary_conditions": [

@@ -64,8 +64,8 @@ fn log_slope() -> f64 {
 // MULTIPLICATIVELY (R_LO * 10^(tile_lo*slope)) and a shifted Log map with the SAME slope carries
 // the geometry -- mirroring the production per-tile map shift, so a tile's local cell i sits at
 // the identical physical r as the undecomposed grid's global cell tc0*m0 + i.
-fn tile_radial(logr: bool, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMap; 2]>) {
-    if logr {
+fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMap; 2]>) {
+    if mode == 1 {
         let slope = log_slope();
         let r_start = R_LO * 10.0_f64.powf((tc0 * m0) as f64 * slope);
         (
@@ -75,17 +75,34 @@ fn tile_radial(logr: bool, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[Axis
                 AxisMap::Uniform { start: z0, dx: DT_AX },
             ]),
         )
+    } else if mode == 2 {
+        let ratio = 0.98_f64;
+        let width = (R_HI - R_LO) * (ratio - 1.0) / (ratio.powf(NR as f64) - 1.0);
+        let offset = (tc0 * m0) as f64;
+        let global = AxisMap::Geometric { start: R_LO, width, ratio };
+        let start = global.face(offset as isize);
+        (
+            start,
+            Some([
+                AxisMap::Geometric {
+                    start,
+                    width: width * ratio.powf(offset),
+                    ratio,
+                },
+                AxisMap::Uniform { start: z0, dx: DT_AX },
+            ]),
+        )
     } else {
         (R_LO + (tc0 * m0) as f64 * DR, None)
     }
 }
 
 macro_rules! curvilinear_harness {
-    ($modname:ident, $chart:ty, $chart_val:expr, $logr:expr) => {
+    ($modname:ident, $chart:ty, $chart_val:expr, $mode:expr) => {
         mod $modname {
             use super::*;
 
-            const LOGR: bool = $logr;
+            const MAP_MODE: u8 = $mode;
             type Sim = SimState<Newtonian, 2, $chart, IdealGas<f64>, CpuSpace, HostMemory>;
             type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
@@ -137,7 +154,7 @@ macro_rules! curvilinear_harness {
                     .map(|flat| {
                         let tc = unflatten(flat, counts);
                         let z0 = (tc[1] * m[1]) as f64 * DT_AX;
-                        let (r0, maps) = tile_radial(LOGR, tc[0], m[0], z0);
+                        let (r0, maps) = tile_radial(MAP_MODE, tc[0], m[0], z0);
                         let origin = [r0, z0];
                         let bnd = Boundaries::per_axis([
                             [
@@ -239,12 +256,13 @@ macro_rules! curvilinear_harness {
     };
 }
 
-curvilinear_harness!(cyl, Cylindrical, Cylindrical, false);
-curvilinear_harness!(sph, Spherical, Spherical, false);
+curvilinear_harness!(cyl, Cylindrical, Cylindrical, 0);
+curvilinear_harness!(sph, Spherical, Spherical, 0);
 // log radial: the disk/accretor case, where the per-tile origin is advanced multiplicatively
 // and the coordinate-map arithmetic (not just a shifted linear extent) has to be right.
-curvilinear_harness!(cyl_log, Cylindrical, Cylindrical, true);
-curvilinear_harness!(sph_log, Spherical, Spherical, true);
+curvilinear_harness!(cyl_log, Cylindrical, Cylindrical, 1);
+curvilinear_harness!(sph_log, Spherical, Spherical, 1);
+curvilinear_harness!(sph_geometric, Spherical, Spherical, 2);
 
 // a radial cut is the load-bearing case: the two tiles carry different r-ranges. euler
 // isolates the exchange; rk2 adds the between-stage exchange. the 2x2 grid cuts the
@@ -289,6 +307,11 @@ fn cyl_log_quad_tile_rk2() {
 #[test]
 fn sph_log_radial_four_tile_rk2() {
     sph_log::assert_matches([4, 1], Timestepping::Rk2);
+}
+
+#[test]
+fn sph_geometric_radial_four_tile_rk2() {
+    sph_geometric::assert_matches([4, 1], Timestepping::Rk2);
 }
 
 // =============================================================================

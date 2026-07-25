@@ -30,6 +30,7 @@ class MeshAdapter:
         comoving_xmin, comoving_xmax = self._mesh.dims[axis]
         global_cells = self._mesh.global_cells[axis]
         spacing_type = self._mesh.spacing_types[axis]
+        spacing_ratio = self._mesh.spacing_ratios[axis]
 
         # when owned_domain is provided, compute actual patch bounds
         if self._owned_domain is not None:
@@ -54,6 +55,15 @@ class MeshAdapter:
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
         elif spacing_type == "log":
             coords_comoving = np.logspace(np.log10(xmin), np.log10(xmax), ncells + 1)
+        elif spacing_type == "geometric":
+            indices = np.arange(ncells + 1, dtype=float)
+            if abs(spacing_ratio - 1.0) < 1.0e-12:
+                fractions = indices / ncells
+            else:
+                fractions = np.expm1(indices * np.log(spacing_ratio)) / np.expm1(
+                    ncells * np.log(spacing_ratio)
+                )
+            coords_comoving = xmin + (xmax - xmin) * fractions
         else:
             # default to linear
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)

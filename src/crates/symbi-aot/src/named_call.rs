@@ -198,7 +198,11 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     .or_else(|| {
                         matches!(
                             bind,
-                            ScalarBind::Ref(ScalarRef::Mesh(_) | ScalarRef::MapKind(_))
+                            ScalarBind::Ref(
+                                ScalarRef::Mesh(_)
+                                    | ScalarRef::MapKind(_)
+                                    | ScalarRef::MapParam(_),
+                            )
                         )
                         .then_some(S::ZERO)
                     })
