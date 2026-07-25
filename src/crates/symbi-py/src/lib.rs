@@ -136,7 +136,7 @@ struct Config {
     binary: Option<BinaryCfg>,
     // ordered user source expressions in the rust `SourceConfig` wire format.
     // contributions are lowered, grouped by target, and added on the hydro path.
-    source_jsons: Vec<String>,
+    source_jsons: Vec<SourcePayload>,
     // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
     motion_json: Option<String>,
@@ -158,6 +158,11 @@ struct Config {
     // single device (the only implemented path). >1 is validated here but the decomposed run
     // loop (M4) is not yet wired, so it errors -- this is a runtime-decomposition knob.
     n_gpus: usize,
+}
+
+struct SourcePayload {
+    origin: String,
+    json: String,
 }
 
 /// dimension-agnostic raw body parameters from the python `immersed_bodies`
@@ -298,20 +303,26 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
     Ok(Some(s))
 }
 
-fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<String>> {
+fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
     let mut sources = Vec::new();
     if let Some(obj) = dict.get_item("source_expressions")? {
         let list = obj.downcast::<PyList>().map_err(|_| {
             PyValueError::new_err("source_expressions must be a list of source payloads")
         })?;
         let json = obj.py().import("json")?;
-        for source in list {
-            sources.push(json.call_method1("dumps", (source,))?.extract()?);
+        for (index, source) in list.iter().enumerate() {
+            sources.push(SourcePayload {
+                origin: format!("source_expressions[{index}]"),
+                json: json.call_method1("dumps", (source,))?.extract()?,
+            });
         }
     }
     for field in ["gravity_source_expressions", "hydro_source_expressions"] {
         if let Some(source) = get_source_json(dict, field)? {
-            sources.push(source);
+            sources.push(SourcePayload {
+                origin: field.to_string(),
+                json: source,
+            });
         }
     }
     Ok(sources)
@@ -437,7 +448,7 @@ where
 
 fn attach_configured_sources<T>(
     substrate: T,
-    source_jsons: &[String],
+    source_jsons: &[SourcePayload],
     spec: &symbi_hydro::RegimeSpec,
 ) -> Result<T, String>
 where
@@ -446,16 +457,64 @@ where
     if source_jsons.is_empty() {
         return Ok(substrate.enable_source_fusion());
     }
+    let (built, params) = lower_configured_sources(source_jsons, spec)?;
+    substrate.attach_runtime_source(built, params)
+}
+
+fn lower_configured_sources(
+    source_jsons: &[SourcePayload],
+    spec: &symbi_hydro::RegimeSpec,
+) -> Result<(Vec<(String, symbi_hydro::source_spec::BuiltSource)>, Vec<f64>), String> {
     let configs = source_jsons
         .iter()
-        .map(|json| {
-            symbi_hydro::SourceConfig::from_json(json)
-                .map_err(|error| format!("source expression parse: {error}"))
+        .map(|source| {
+            let config = symbi_hydro::SourceConfig::from_json(&source.json)
+                .map_err(|error| format!("{} parse: {error}", source.origin))?;
+            symbi_hydro::expr_bridge::build_user_source(&config, spec)
+                .map_err(|error| format!("{} lower: {error}", source.origin))?;
+            Ok(config)
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, String>>()?;
     let (built, params) = symbi_hydro::expr_bridge::build_user_sources(&configs, spec)
         .map_err(|error| format!("source expression lower: {error}"))?;
-    substrate.attach_runtime_source(built, params)
+    Ok((built, params))
+}
+
+#[cfg(test)]
+mod source_collection_tests {
+    use super::*;
+
+    #[test]
+    fn lower_error_names_collection_index() {
+        let sources = [SourcePayload {
+            origin: "source_expressions[3]".to_string(),
+            json: r#"{
+                "kind":"force", "dim":1, "outputs":[2], "params":[],
+                "nodes":[{"op":"CONSTANT","value":1.0},
+                         {"op":"CONSTANT","value":2.0},
+                         {"op":"MOD","left":0,"right":1}]
+            }"#
+            .to_string(),
+        }];
+        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC) {
+            Err(error) => error,
+            Ok(_) => panic!("unsupported source operation was accepted"),
+        };
+        assert!(error.contains("source_expressions[3] lower:"), "{error}");
+    }
+
+    #[test]
+    fn parse_error_names_legacy_hook() {
+        let sources = [SourcePayload {
+            origin: "gravity_source_expressions".to_string(),
+            json: "{".to_string(),
+        }];
+        let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC) {
+            Err(error) => error,
+            Ok(_) => panic!("malformed source json was accepted"),
+        };
+        assert!(error.contains("gravity_source_expressions parse:"), "{error}");
+    }
 }
 
 fn solver_from_str(s: &str) -> PyResult<Solver> {
@@ -6321,9 +6380,9 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
             ));
         }
     }
-    for json in &cfg.source_jsons {
-        symbi_hydro::SourceConfig::from_json(json)
-            .map_err(|err| format!("source expression parse: {err}"))?;
+    for source in &cfg.source_jsons {
+        symbi_hydro::SourceConfig::from_json(&source.json)
+            .map_err(|err| format!("{} parse: {err}", source.origin))?;
     }
     for (ii, json) in cfg.driven_exprs.iter().enumerate() {
         symbi_hydro::SourceConfig::from_json(json)
