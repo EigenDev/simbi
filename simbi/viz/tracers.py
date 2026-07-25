@@ -14,6 +14,7 @@
 # =============================================================================
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Optional
 
@@ -74,10 +75,20 @@ def overlay_tracers(
       - "flag": crossed-sink crimson, escaped grey, live blue (provenance at a glance)
       - "id":   a stable per-particle color (follow a particle across frames)
       - "none": a single color (pass `c=` / `color=` through kwargs)
-    returns the scatter artist (None when there are no tracers), so an animation can
-    remove it between frames."""
+    returns the scatter artist, or None when there is nothing to draw -- in which case it
+    WARNS to stderr (a checkpoint with no `tracers` group, or an empty one) rather than
+    drawing nothing silently, so `--draw-tracers` on a run that carried no tracers tells
+    you why the plot is bare."""
     cloud = load_tracers(checkpoint_path)
-    if cloud is None or len(cloud) == 0:
+    if cloud is None:
+        print(
+            f"--draw-tracers: '{checkpoint_path}' has no 'tracers' group "
+            "(the run carried no tracers; set n_tracers > 0 to seed them)",
+            file=sys.stderr,
+        )
+        return None
+    if len(cloud) == 0:
+        print(f"--draw-tracers: '{checkpoint_path}' tracer group is empty", file=sys.stderr)
         return None
 
     ai, aj = _AXIS[plane[0]], _AXIS[plane[1]]
@@ -90,12 +101,22 @@ def overlay_tracers(
         keep = np.abs(pos[:, ak] - at) <= slab
     x, y = pos[keep, ai], pos[keep, aj]
 
-    opts = {"s": 4, "alpha": 0.7, "linewidths": 0}
+    # a thin dark outline makes any fill legible on top of ANY field colormap, and a high
+    # zorder keeps the particles above the mesh; sized to read as points, not a haze.
+    opts = {
+        "s": 9,
+        "alpha": 0.9,
+        "edgecolors": "black",
+        "linewidths": 0.3,
+        "zorder": 5,
+    }
     if color_by == "flag":
+        # live particles white (pops on viridis/inferno/magma alike); crossed-sink and
+        # escaped keep their provenance colors.
         opts["c"] = np.where(
             cloud.crossed_sink[keep],
             "crimson",
-            np.where(cloud.escaped[keep], "0.6", "deepskyblue"),
+            np.where(cloud.escaped[keep], "0.5", "white"),
         )
     elif color_by == "id":
         opts["c"] = cloud.id[keep]
