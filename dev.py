@@ -210,6 +210,25 @@ def _require_cargo() -> None:
         sys.exit(1)
 
 
+def _build_env(args) -> dict:
+    """the child build environment: `venv_env` plus, under `--lean`, LTO disabled. the final
+    symbi-py cdylib's thin-LTO codegen is one rustc process whose peak memory exceeds a typical
+    login-node cgroup cap (the SIGKILL). GPU hot loops are JIT-compiled kernels (nvrtc / hiprtc),
+    NOT this cdylib, so dropping cdylib LTO costs a GPU run ~nothing while slashing build memory;
+    a memory-rich node can omit `--lean` and keep LTO. defers to a caller-set override."""
+    env = venv_env()
+    if getattr(args, "lean", False):
+        env.setdefault("CARGO_PROFILE_RELEASE_LTO", "false")
+        print("lean build: LTO disabled (lower peak memory; negligible GPU-run cost)")
+    jobs = getattr(args, "jobs", None)
+    if jobs is not None:
+        # explicit override of the auto-cap: a shared login node kills a many-core compile, so
+        # `--jobs 4` keeps rustc under the policer's CPU threshold (slower, but it finishes).
+        env["CARGO_BUILD_JOBS"] = str(jobs)
+        print(f"build jobs: {jobs} (explicit --jobs)")
+    return env
+
+
 def build_command(args) -> None:
     """maturin build --release -> a wheel under src/target/wheels."""
     _require_cargo()
@@ -217,7 +236,7 @@ def build_command(args) -> None:
     start = time.time()
     run(
         [*maturin(), "build", "--release", *_common(args)],
-        env=venv_env(),
+        env=_build_env(args),
         verbose=args.verbose,
     )
     print(
@@ -249,13 +268,13 @@ def install_command(args) -> None:
         cpu_cmd = [*maturin(), "develop", "--release"]
         if args.verbose:
             cpu_cmd.append("-v")
-        run(cpu_cmd, env=venv_env(), verbose=args.verbose)
+        run(cpu_cmd, env=_build_env(args), verbose=args.verbose)
     # the cuda build writes to the cpu_ext filename before it is renamed to gpu_ext,
     # so stash an existing cpu_ext first and restore it after. this lets the cpu and
     # gpu extensions live side by side.
     stashed = _stash_cpu_ext() if gpu else []
     try:
-        run(cmd, env=venv_env(), verbose=args.verbose)
+        run(cmd, env=_build_env(args), verbose=args.verbose)
         if gpu:
             _finalize_gpu_ext()
     finally:
@@ -344,6 +363,21 @@ def _add_build_args(p) -> None:
         "--features",
         default="",
         help="comma-separated cargo features (e.g., cuda)",
+    )
+    p.add_argument(
+        "--lean",
+        action="store_true",
+        help="disable release LTO to cut peak build memory + time. costs a GPU run ~nothing "
+        "(kernels are JIT'd). pair with --jobs on a policed login node",
+    )
+    p.add_argument(
+        "--jobs",
+        type=int,
+        default=None,
+        metavar="N",
+        help="cap parallel rustc jobs (sets CARGO_BUILD_JOBS). shared login nodes (e.g. "
+        "Princeton Della) KILL compiles that use many cores -- build there with a few (e.g. "
+        "--jobs 4 --lean), or omit for the RAM/core auto-cap on a machine you own",
     )
     p.add_argument(
         "--cuda",
