@@ -84,10 +84,14 @@ def test_persistent_freeze_halts_on_unrecoverable_source() -> None:
 
     class EnergySink(SodProblem):
         @property
-        def hydro_source_expressions(self):
+        def source_expressions(self):
             g = expr.ExprGraph()
             sink = expr.constant(-1.0e6, g)  # subtract energy every step -> eps < 0, finite
-            return g.compile([sink]).serialize_source(expr.SourceKind.RAW, dim=1, target="nrg")
+            return [
+                g.compile([sink]).serialize_source(
+                    expr.SourceKind.RAW, dim=1, target="nrg"
+                )
+            ]
 
     p = EnergySink.from_cli([])
     p.data_directory = tempfile.mkdtemp() + "/"

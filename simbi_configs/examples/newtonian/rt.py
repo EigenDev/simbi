@@ -136,7 +136,7 @@ class RayleighTaylor(SimbiProblem):
 
     @computed_field
     @property
-    def gravity_source_expressions(self) -> ExpressionDict:
+    def source_expressions(self) -> list[ExpressionDict]:
         """uniform downward gravity a = (0, -g0) as a `force` source — the rust
         backend lifts it to the newtonian momentum + energy overlays (S_mom=rho*a,
         S_nrg=rho*a.v). emitted in the rust `SourceConfig` wire format."""
@@ -146,4 +146,4 @@ class RayleighTaylor(SimbiProblem):
         y_comp = expr.constant(-self.g0, graph)
 
         compiled = graph.compile([x_comp, y_comp])
-        return compiled.serialize_source(expr.SourceKind.FORCE, dim=2)
+        return [compiled.serialize_source(expr.SourceKind.FORCE, dim=2)]

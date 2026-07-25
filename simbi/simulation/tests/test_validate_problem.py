@@ -44,24 +44,18 @@ def test_validate_problem_writes_no_output_directory(tmp_path) -> None:
     assert not output.exists()
 
 
-def test_rust_preflight_rejects_legacy_bare_source_payload() -> None:
+def test_rust_preflight_rejects_bare_source_payload() -> None:
     payload = to_execution_dict(SodProblem())
-    graph = expr.ExprGraph()
-    payload["hydro_source_expressions"] = graph.compile(
-        [expr.constant(1.0, graph)]
-    ).serialize()
+    payload["source_expressions"] = [{"outputs": [0], "nodes": []}]
 
     with pytest.raises(ValueError, match="missing field `kind`"):
         backend.validate_simulation(sim_info=payload)
 
 
-def test_rust_preflight_rejects_legacy_bare_boundary_payload() -> None:
+def test_rust_preflight_rejects_bare_boundary_payload() -> None:
     payload = to_execution_dict(SodProblem())
-    graph = expr.ExprGraph()
     payload["boundary_conditions"][0] = "dynamic"
-    payload["bx1_inner_expressions"] = graph.compile(
-        [expr.constant(1.0, graph)]
-    ).serialize()
+    payload["bx1_inner_expressions"] = {"outputs": [0], "nodes": []}
 
     with pytest.raises(ValueError, match="missing field `kind`"):
         backend.validate_simulation(sim_info=payload)
@@ -77,61 +71,40 @@ def test_scalar_sample_rejects_empty_passive_scalar() -> None:
         runner._check_first_scalar("Probe", "passive scalar", iter(()))
 
 
-def test_execution_dict_preserves_source_collection_and_legacy_hooks() -> None:
-    class DualSource(SodProblem):
+def test_execution_dict_preserves_source_collection_order() -> None:
+    class MultipleSources(SodProblem):
         @property
         def source_expressions(self):
-            return [{
-                "kind": "raw",
-                "dim": 1,
-                "target": "den",
-                "outputs": [0],
-                "nodes": [{"op": "CONSTANT", "value": 1.0}],
-            }]
+            return [
+                {
+                    "kind": "raw",
+                    "dim": 1,
+                    "target": target,
+                    "outputs": [0],
+                    "nodes": [{"op": "CONSTANT", "value": value}],
+                }
+                for target, value in (("den", 1.0), ("mom", 2.0), ("nrg", 3.0))
+            ]
 
-        @property
-        def gravity_source_expressions(self):
-            return {
-                "kind": "raw",
-                "dim": 1,
-                "target": "mom",
-                "outputs": [0],
-                "nodes": [{"op": "CONSTANT", "value": 2.0}],
-            }
-
-        @property
-        def hydro_source_expressions(self):
-            return {
-                "kind": "raw",
-                "dim": 1,
-                "target": "nrg",
-                "outputs": [0],
-                "nodes": [{"op": "CONSTANT", "value": 3.0}],
-            }
-
-    payload = to_execution_dict(DualSource())
-    assert [source["target"] for source in payload["source_expressions"]] == ["den"]
-    assert payload["gravity_source_expressions"]["target"] == "mom"
-    assert payload["hydro_source_expressions"]["target"] == "nrg"
+    payload = to_execution_dict(MultipleSources())
+    assert [source["target"] for source in payload["source_expressions"]] == [
+        "den",
+        "mom",
+        "nrg",
+    ]
 
 
-def test_execution_dict_rejects_bare_source_serialize() -> None:
-    class BareSource(SodProblem):
-        @property
-        def hydro_source_expressions(self):
-            graph = expr.ExprGraph()
-            return graph.compile([expr.constant(1.0, graph)]).serialize()
-
-    with pytest.raises(ValueError, match="hydro_source_expressions.*missing `kind`"):
-        to_execution_dict(BareSource())
+def test_compiled_expression_exposes_only_typed_serializers() -> None:
+    graph = expr.ExprGraph()
+    compiled = graph.compile([expr.constant(1.0, graph)])
+    assert not hasattr(compiled, "serialize")
 
 
 def test_execution_dict_rejects_bare_boundary_serialize() -> None:
     class BareBoundary(SodProblem):
         @property
         def bx1_inner_expressions(self):
-            graph = expr.ExprGraph()
-            return graph.compile([expr.constant(1.0, graph)]).serialize()
+            return {"outputs": [0], "nodes": []}
 
     with pytest.raises(ValueError, match="bx1_inner_expressions.*missing `kind`"):
         to_execution_dict(BareBoundary())
@@ -151,11 +124,11 @@ def test_execution_dict_rejects_source_arity(
     kind: str, count: int, expected: int
 ) -> None:
     payload = {
-        "hydro_source_expressions": {
+        "source_expressions": [{
             "kind": kind,
             "dim": 2,
             "outputs": list(range(count)),
-        },
+        }],
         "isothermal": False,
     }
     with pytest.raises(ValueError, match=rf"expected {expected}"):
@@ -191,12 +164,12 @@ def test_percent_in_cli_description_formats_cleanly() -> None:
 @pytest.mark.parametrize("target", [None, "temperature", ""])
 def test_raw_source_requires_a_conserved_target(target) -> None:
     payload = {
-        "hydro_source_expressions": {
+        "source_expressions": [{
             "kind": "raw",
             "dim": 2,
             "target": target,
             "outputs": [0],
-        },
+        }],
     }
     with pytest.raises(ValueError, match="raw.*target"):
         runner._validate_expression_payloads(payload)
@@ -204,12 +177,12 @@ def test_raw_source_requires_a_conserved_target(target) -> None:
 
 def test_isothermal_raw_source_rejects_energy_target() -> None:
     payload = {
-        "hydro_source_expressions": {
+        "source_expressions": [{
             "kind": "raw",
             "dim": 2,
             "target": "nrg",
             "outputs": [0],
-        },
+        }],
         "isothermal": True,
     }
     with pytest.raises(ValueError, match="energy equation"):
@@ -220,11 +193,11 @@ def test_isothermal_raw_source_rejects_energy_target() -> None:
 def test_relativistic_regime_rejects_newtonian_source_laws(kind: str) -> None:
     counts = {"force": 2, "cooling": 1, "relax": 3, "sponge": 5}
     payload = {
-        "hydro_source_expressions": {
+        "source_expressions": [{
             "kind": kind,
             "dim": 2,
             "outputs": list(range(counts[kind])),
-        },
+        }],
         "is_relativistic": True,
     }
     with pytest.raises(ValueError, match="relativistic"):
@@ -247,7 +220,7 @@ def test_relativistic_regime_accepts_conserved_sources(
         source["target"] = target
     runner._validate_expression_payloads(
         {
-            "hydro_source_expressions": source,
+            "source_expressions": [source],
             "is_relativistic": True,
         }
     )
@@ -256,12 +229,12 @@ def test_relativistic_regime_accepts_conserved_sources(
 def test_isothermal_raw_density_source_is_valid() -> None:
     runner._validate_expression_payloads(
         {
-            "hydro_source_expressions": {
+            "source_expressions": [{
                 "kind": "raw",
                 "dim": 2,
                 "target": "den",
                 "outputs": [0],
-            },
+            }],
             "isothermal": True,
         }
     )

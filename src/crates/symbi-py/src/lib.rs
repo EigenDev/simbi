@@ -317,14 +317,6 @@ fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
             });
         }
     }
-    for field in ["gravity_source_expressions", "hydro_source_expressions"] {
-        if let Some(source) = get_source_json(dict, field)? {
-            sources.push(SourcePayload {
-                origin: field.to_string(),
-                json: source,
-            });
-        }
-    }
     Ok(sources)
 }
 
@@ -504,16 +496,16 @@ mod source_collection_tests {
     }
 
     #[test]
-    fn parse_error_names_legacy_hook() {
+    fn parse_error_names_collection_index() {
         let sources = [SourcePayload {
-            origin: "gravity_source_expressions".to_string(),
+            origin: "source_expressions[2]".to_string(),
             json: "{".to_string(),
         }];
         let error = match lower_configured_sources(&sources, &symbi_hydro::NEWTONIAN_SPEC) {
             Err(error) => error,
             Ok(_) => panic!("malformed source json was accepted"),
         };
-        assert!(error.contains("gravity_source_expressions parse:"), "{error}");
+        assert!(error.contains("source_expressions[2] parse:"), "{error}");
     }
 }
 
@@ -704,7 +696,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     }
 
     let solver_name = enum_str(dict, "solver")?;
-    // constrained-transport edge-EMF scheme; defaults to contact for back-compat.
+    // constrained-transport edge-emf scheme; contact is the default method.
     let ct_method = ct_method_from_str(&enum_str_or(dict, "ct_method", "contact"))?;
 
     // canonicalize the coordinate system: the three cylindrical python variants
@@ -874,8 +866,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<usize>().ok())
             .unwrap_or(1)
             .max(1),
-        // the collection field is canonical; the two legacy hooks append in
-        // gravity-then-hydro order and remain source-compatible adapters.
+        // ordered source configs use the sole public source-expression wire.
         source_jsons: get_source_jsons(dict)?,
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
         driven_exprs,

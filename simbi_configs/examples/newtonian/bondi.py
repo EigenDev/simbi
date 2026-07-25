@@ -523,13 +523,13 @@ class SphericalBondiTest(SimbiProblem):
         return [kappa, rho_ref, mom_x, mom_y, mom_z, nrg_ref]
 
     @property
-    def hydro_source_expressions(self) -> ExpressionDict:
+    def source_expressions(self) -> list[ExpressionDict]:
         """the outer buffer-zone full-state sponge as a rust `sponge` source (or no source when
         disabled). params=[inv_gm1] = 1/(gamma-1) lets the energy channel reconstruct the conserved
         total energy from pressure. the well-posed (gamma < 5/3) Bondi test is regulated by the sonic
         surface, so the sponge is an outer-boundary nicety, not load-bearing."""
         if not self.use_buffer:
-            return {}
+            return []
         graph = expr.ExprGraph()
         x1 = expr.variable("x1", graph)
         x2 = expr.variable("x2", graph)
@@ -537,9 +537,11 @@ class SphericalBondiTest(SimbiProblem):
         outputs = self.buffer_sponge_terms(x1, x2, x3)
         gamma = self.adiabatic_index
         inv_gm1 = 1.0 / (gamma - 1.0) if gamma != 1.0 else 0.0
-        return graph.compile(outputs).serialize_source(
-            expr.SourceKind.SPONGE, dim=3, params=[inv_gm1]
-        )
+        return [
+            graph.compile(outputs).serialize_source(
+                expr.SourceKind.SPONGE, dim=3, params=[inv_gm1]
+            )
+        ]
 
     # =========================================================================
     # analytical solution

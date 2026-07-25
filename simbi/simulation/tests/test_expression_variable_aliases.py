@@ -13,9 +13,11 @@ from simbi.expression.dag_expression import variable
 
 def _op_of(name: str) -> str:
     expr = variable(name)
-    exprs = expr.graph.compile([expr]).serialize()["expressions"]
-    assert len(exprs) == 1
-    return exprs[0]["op"]
+    nodes = expr.graph.compile([expr]).serialize_source(
+        "raw", dim=1, target="den"
+    )["nodes"]
+    assert len(nodes) == 1
+    return nodes[0]["op"]
 
 
 def test_phi_serializes_to_x3() -> None:
