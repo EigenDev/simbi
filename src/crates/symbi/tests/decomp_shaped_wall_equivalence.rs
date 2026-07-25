@@ -44,7 +44,7 @@ const T_FINAL: f64 = 0.03;
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-// a fresh sealed shaped (SDF sphere) rigid wall at the GLOBAL origin, per tile.
+// a fresh sealed capped-cylinder rigid wall at the GLOBAL origin, per tile.
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
@@ -62,7 +62,8 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
                 .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 }),
         ));
     // the CSG shape routes dispatch to the runtime shaped kernel.
-    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::capped_cylinder([0.0, 0.0, 0.0], R_BODY, 1.0));
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
     (sim, k)
 }

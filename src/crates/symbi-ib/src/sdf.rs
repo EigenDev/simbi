@@ -42,6 +42,8 @@ pub enum SdfExpr<S, const D: usize> {
     Sphere { center: [S; D], radius: S },
     /// an axis-aligned box (exact euclidean distance, inside and out).
     Cuboid { center: [S; D], half_extents: [S; D] },
+    /// a capped cylinder aligned with the final coordinate axis.
+    CappedCylinder { center: [S; D], radius: S, half_height: S },
     /// min of distances: inside either body.
     Union(Box<SdfExpr<S, D>>, Box<SdfExpr<S, D>>),
     /// max of distances: inside both bodies.
@@ -63,6 +65,14 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
 
     pub fn cuboid(center: [S; D], half_extents: [S; D]) -> Self {
         SdfExpr::Cuboid { center, half_extents }
+    }
+
+    pub fn capped_cylinder(center: [S; D], radius: S, half_height: S) -> Self {
+        SdfExpr::CappedCylinder {
+            center,
+            radius,
+            half_height,
+        }
     }
 
     pub fn union(self, other: Self) -> Self {
@@ -117,6 +127,25 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
                 // distance bias of sqrt(min_positive) ~ 1e-154.
                 out_sq.max(S::from_f64(f64::MIN_POSITIVE)).sqrt() + q_max.min(S::ZERO)
             }
+            SdfExpr::CappedCylinder {
+                center,
+                radius,
+                half_height,
+            } => {
+                let mut radial_sq = S::ZERO;
+                for a in 0..D - 1 {
+                    let delta = x[a] - center[a];
+                    radial_sq = radial_sq + delta * delta;
+                }
+                let radial = radial_sq.sqrt() - *radius;
+                let axial = (x[D - 1] - center[D - 1]).abs() - *half_height;
+                let radial_out = radial.max(S::ZERO);
+                let axial_out = axial.max(S::ZERO);
+                (radial_out * radial_out + axial_out * axial_out)
+                    .max(S::from_f64(f64::MIN_POSITIVE))
+                    .sqrt()
+                    + radial.max(axial).min(S::ZERO)
+            }
             SdfExpr::Union(a, b) => a.dist(x).min(b.dist(x)),
             SdfExpr::Intersect(a, b) => a.dist(x).max(b.dist(x)),
             SdfExpr::Complement(a) => S::ZERO - a.dist(x),
@@ -148,6 +177,15 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
             SdfExpr::Cuboid { center, half_extents } => SdfExpr::Cuboid {
                 center: center.map(|c| f(c)),
                 half_extents: half_extents.map(|h| f(h)),
+            },
+            SdfExpr::CappedCylinder {
+                center,
+                radius,
+                half_height,
+            } => SdfExpr::CappedCylinder {
+                center: center.map(|c| f(c)),
+                radius: f(*radius),
+                half_height: f(*half_height),
             },
             SdfExpr::Union(a, b) => SdfExpr::Union(Box::new(a.lift(f)), Box::new(b.lift(f))),
             SdfExpr::Intersect(a, b) => {
@@ -220,6 +258,16 @@ impl SdfExpr<f64, 3> {
             SdfExpr::Cuboid { center, half_extents } => {
                 json!({"kind": "box", "center": center, "half_extents": half_extents})
             }
+            SdfExpr::CappedCylinder {
+                center,
+                radius,
+                half_height,
+            } => json!({
+                "kind": "cylinder",
+                "center": center,
+                "radius": radius,
+                "half_height": half_height
+            }),
             SdfExpr::Union(a, b) => json!({"kind": "union", "a": a.to_value(), "b": b.to_value()}),
             SdfExpr::Intersect(a, b) => {
                 json!({"kind": "intersect", "a": a.to_value(), "b": b.to_value()})
@@ -279,6 +327,11 @@ impl SdfExpr<f64, 3> {
         match kind {
             "sphere" => Ok(SdfExpr::Sphere { center: vec3("center")?, radius: scalar("radius")? }),
             "box" => Ok(SdfExpr::Cuboid { center: vec3("center")?, half_extents: vec3("half_extents")? }),
+            "cylinder" => Ok(SdfExpr::CappedCylinder {
+                center: vec3("center")?,
+                radius: scalar("radius")?,
+                half_height: scalar("half_height")?,
+            }),
             "union" => Ok(SdfExpr::Union(Box::new(child("a")?), Box::new(child("b")?))),
             "intersect" => Ok(SdfExpr::Intersect(Box::new(child("a")?), Box::new(child("b")?))),
             "complement" => Ok(SdfExpr::Complement(Box::new(child("inner")?))),
@@ -307,6 +360,11 @@ impl<const D: usize> SdfExpr<f64, D> {
                 let r = half_extents.iter().map(|h| h * h).sum::<f64>().sqrt();
                 Some((*center, r))
             }
+            SdfExpr::CappedCylinder {
+                center,
+                radius,
+                half_height,
+            } => Some((*center, (radius * radius + half_height * half_height).sqrt())),
             SdfExpr::Union(a, b) => match (a.bounding_ball(), b.bounding_ball()) {
                 (Some(ba), Some(bb)) => Some(enclosing_ball(ba, bb)),
                 _ => None,
@@ -382,6 +440,27 @@ mod tests {
         assert!(approx(c.dist([2.0, 3.0, 0.0]), (1.0f64 + 1.0).sqrt(), 1e-15));
         // outside a corner: the 3d hypotenuse.
         assert!(approx(c.dist([2.0, 3.0, 4.0]), 3.0f64.sqrt(), 1e-15));
+    }
+
+    #[test]
+    fn capped_cylinder_distance_and_bound_are_analytic() {
+        let cylinder = Sdf3::capped_cylinder([0.0, 0.0, 1.0], 0.5, 2.0);
+        assert!(approx(cylinder.dist([0.0, 0.0, 1.0]), -0.5, 1e-15));
+        assert!(approx(cylinder.dist([0.75, 0.0, 1.0]), 0.25, 1e-15));
+        assert!(approx(cylinder.dist([0.0, 0.0, 3.25]), 0.25, 1e-15));
+        assert!(approx(cylinder.dist([0.8, 0.0, 3.4]), 0.5, 1e-15));
+        let (center, radius) = cylinder.bounding_ball().unwrap();
+        assert_eq!(center, [0.0, 0.0, 1.0]);
+        assert!(approx(radius, (0.5_f64.powi(2) + 2.0_f64.powi(2)).sqrt(), 1e-15));
+    }
+
+    #[test]
+    fn capped_cylinder_json_round_trip_is_exact() {
+        let cylinder = Sdf3::capped_cylinder([0.1, -0.2, 0.3], 0.5, 1.5);
+        assert_eq!(
+            Sdf3::from_json(&cylinder.to_json()).expect("cylinder round trip"),
+            cylinder
+        );
     }
 
     #[test]

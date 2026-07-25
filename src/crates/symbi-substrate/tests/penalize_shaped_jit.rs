@@ -47,6 +47,16 @@ fn shaped_porous_penalize_jit_compiles_2p5d() {
 }
 
 #[test]
+fn capped_cylinder_penalize_jit_compiles_on_host() {
+    let shape = SdfExpr::<f64, 3>::capped_cylinder([0.0, 0.0, 0.0], 0.4, 0.8);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
+    assert!(
+        symbi_jit::compile_gv_kernel(&kernel, &writes, 3).is_ok(),
+        "the capped-cylinder penalize kernel is outside the JIT subset",
+    );
+}
+
+#[test]
 fn shaped_rotated_penalize_jit_compiles() {
     // a ROTATED box (static tilt): the Rotated node is affine (multiply/add), so it must lie in
     // the JIT subset — the same runtime kernel bakes the orientation matrix as constants.
