@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import math
-from typing import Any, Callable, Optional, Set, TypeVar, Union
+from typing import Any, Callable, Optional, Sequence, Set, TypeVar, Union
 
 
 class SourceKind(str, enum.Enum):
@@ -35,6 +35,13 @@ class ConservedField(str, enum.Enum):
     DENSITY = "den"
     MOMENTUM = "mom"
     ENERGY = "nrg"
+
+
+class TableBounds(str, enum.Enum):
+    """out-of-bounds behavior for an immutable one-dimensional table."""
+
+    CLAMP = "clamp"
+    ZERO = "zero"
 
 # type defs for clarity
 NodeId = int
@@ -654,6 +661,140 @@ def logical_xnor(expr1: Expr, expr2: Expr) -> Expr:
 def where(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
     """Where function for conditional expressions."""
     return if_then_else(condition, true_case, false_case)
+
+
+def tabulated_1d(
+    coordinate: Expr,
+    coordinates: Sequence[float],
+    values: Sequence[float],
+    *,
+    bounds: TableBounds | str,
+) -> Expr:
+    """piecewise-linear immutable field evaluated at `coordinate`.
+
+    samples must be finite, equal-length, and strictly increasing. `bounds` is
+    mandatory: `clamp` returns the nearest endpoint and `zero` returns zero.
+    the table lowers to the ordinary constant/comparison/select graph, so host
+    and device execution use the same backend program.
+    """
+    xs = tuple(float(value) for value in coordinates)
+    ys = tuple(float(value) for value in values)
+    if len(xs) != len(ys):
+        raise ValueError(
+            f"tabulated_1d coordinate/value lengths differ: {len(xs)} != {len(ys)}"
+        )
+    if len(xs) < 2:
+        raise ValueError("tabulated_1d requires at least two samples")
+    if not all(math.isfinite(value) for value in (*xs, *ys)):
+        raise ValueError("tabulated_1d samples must be finite")
+    if any(right <= left for left, right in zip(xs, xs[1:])):
+        raise ValueError("tabulated_1d coordinates must be strictly increasing")
+    try:
+        bounds_mode = bounds if isinstance(bounds, TableBounds) else TableBounds(bounds)
+    except ValueError as exc:
+        raise ValueError(
+            "tabulated_1d bounds must be 'clamp' or 'zero'"
+        ) from exc
+
+    return _tabulated_1d_expr_values(
+        coordinate,
+        xs,
+        tuple(constant(value, coordinate.graph) for value in ys),
+        bounds_mode,
+    )
+
+
+def _tabulated_1d_expr_values(
+    coordinate: Expr,
+    coordinates: tuple[float, ...],
+    values: tuple[Expr, ...],
+    bounds: TableBounds,
+) -> Expr:
+    """linear interpolation over expression-valued samples."""
+    graph = coordinate.graph
+    segments: list[Expr] = []
+    for left_x, right_x, left_y, right_y in zip(
+        coordinates, coordinates[1:], values, values[1:]
+    ):
+        x0 = constant(left_x, graph)
+        fraction = (coordinate - x0) / (right_x - left_x)
+        segments.append(left_y + fraction * (right_y - left_y))
+
+    interior = segments[-1]
+    for upper_x, segment in reversed(
+        list(zip(coordinates[1:-1], segments[:-1]))
+    ):
+        interior = where(coordinate < constant(upper_x, graph), segment, interior)
+
+    outside_low = (
+        values[0] if bounds is TableBounds.CLAMP else constant(0.0, graph)
+    )
+    outside_high = (
+        values[-1] if bounds is TableBounds.CLAMP else constant(0.0, graph)
+    )
+    return where(
+        coordinate < constant(coordinates[0], graph),
+        outside_low,
+        where(
+            coordinate > constant(coordinates[-1], graph),
+            outside_high,
+            interior,
+        ),
+    )
+
+
+def tabulated_2d(
+    coordinate_x: Expr,
+    coordinate_y: Expr,
+    coordinates_x: Sequence[float],
+    coordinates_y: Sequence[float],
+    values: Sequence[Sequence[float]],
+    *,
+    bounds: TableBounds | str,
+) -> Expr:
+    """bilinear immutable field on a rectilinear two-dimensional table."""
+    if coordinate_x.graph is not coordinate_y.graph:
+        raise ValueError("tabulated_2d coordinates must belong to the same graph")
+    xs = tuple(float(value) for value in coordinates_x)
+    ys = tuple(float(value) for value in coordinates_y)
+    rows = tuple(tuple(float(value) for value in row) for row in values)
+    if len(xs) < 2 or len(ys) < 2:
+        raise ValueError("tabulated_2d requires at least two samples per axis")
+    if len(rows) != len(ys) or any(len(row) != len(xs) for row in rows):
+        raise ValueError(
+            "tabulated_2d values must have shape "
+            "(len(coordinates_y), len(coordinates_x))"
+        )
+    flat_values = tuple(value for row in rows for value in row)
+    if not all(math.isfinite(value) for value in (*xs, *ys, *flat_values)):
+        raise ValueError("tabulated_2d samples must be finite")
+    if any(right <= left for left, right in zip(xs, xs[1:])) or any(
+        right <= left for left, right in zip(ys, ys[1:])
+    ):
+        raise ValueError("tabulated_2d coordinates must be strictly increasing")
+    try:
+        bounds_mode = bounds if isinstance(bounds, TableBounds) else TableBounds(bounds)
+    except ValueError as exc:
+        raise ValueError(
+            "tabulated_2d bounds must be 'clamp' or 'zero'"
+        ) from exc
+
+    graph = coordinate_x.graph
+    row_fields = tuple(
+        _tabulated_1d_expr_values(
+            coordinate_x,
+            xs,
+            tuple(constant(value, graph) for value in row),
+            bounds_mode,
+        )
+        for row in rows
+    )
+    return _tabulated_1d_expr_values(
+        coordinate_y,
+        ys,
+        row_fields,
+        bounds_mode,
+    )
 
 
 def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:

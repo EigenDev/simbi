@@ -59,6 +59,39 @@ const SOURCE_JSON_2: &str = r#"{
                {"op": "CONSTANT", "value": 0.0} ]
 }"#;
 
+const SOURCE_JSON_TABLE_2D: &str = r#"{
+    "kind":"force","dim":2,"outputs":[44,45],"params":[],"nodes":[
+        {"op":"VARIABLE_X1"},{"op":"VARIABLE_X2"},
+        {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":1.0},
+        {"op":"CONSTANT","value":0.0},{"op":"SUBTRACT","left":0,"right":4},
+        {"op":"CONSTANT","value":1.0},{"op":"DIVIDE","left":5,"right":6},
+        {"op":"SUBTRACT","left":3,"right":2},{"op":"MULTIPLY","left":7,"right":8},
+        {"op":"ADD","left":2,"right":9},{"op":"CONSTANT","value":0.0},
+        {"op":"LT","left":0,"right":11},{"op":"CONSTANT","value":1.0},
+        {"op":"GT","left":0,"right":13},
+        {"op":"IF_THEN_ELSE","condition":14,"true_case":3,"false_case":10},
+        {"op":"IF_THEN_ELSE","condition":12,"true_case":2,"false_case":15},
+        {"op":"CONSTANT","value":1.0},{"op":"CONSTANT","value":2.0},
+        {"op":"CONSTANT","value":0.0},{"op":"SUBTRACT","left":0,"right":19},
+        {"op":"CONSTANT","value":1.0},{"op":"DIVIDE","left":20,"right":21},
+        {"op":"SUBTRACT","left":18,"right":17},{"op":"MULTIPLY","left":22,"right":23},
+        {"op":"ADD","left":17,"right":24},{"op":"CONSTANT","value":0.0},
+        {"op":"LT","left":0,"right":26},{"op":"CONSTANT","value":1.0},
+        {"op":"GT","left":0,"right":28},
+        {"op":"IF_THEN_ELSE","condition":29,"true_case":18,"false_case":25},
+        {"op":"IF_THEN_ELSE","condition":27,"true_case":17,"false_case":30},
+        {"op":"CONSTANT","value":0.0},{"op":"SUBTRACT","left":1,"right":32},
+        {"op":"CONSTANT","value":1.0},{"op":"DIVIDE","left":33,"right":34},
+        {"op":"SUBTRACT","left":31,"right":16},{"op":"MULTIPLY","left":35,"right":36},
+        {"op":"ADD","left":16,"right":37},{"op":"CONSTANT","value":0.0},
+        {"op":"LT","left":1,"right":39},{"op":"CONSTANT","value":1.0},
+        {"op":"GT","left":1,"right":41},
+        {"op":"IF_THEN_ELSE","condition":42,"true_case":31,"false_case":38},
+        {"op":"IF_THEN_ELSE","condition":40,"true_case":16,"false_case":43},
+        {"op":"CONSTANT","value":0.0}
+    ]
+}"#;
+
 // a smooth centered density+pressure bump -> sound waves cross the cut while the source drives a
 // position-dependent acceleration; outflow boundaries + a short time keep waves interior so mono ==
 // decomposed is exact.
@@ -81,7 +114,27 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
             Prim { rho: 1.0 + b, vel: Tensor::new([0.0; 2]), pre: 1.0 + b }
         })
         .build();
-    let configs = [SOURCE_JSON_1, SOURCE_JSON_2]
+    let table = r#"{
+        "kind":"force", "dim":2, "outputs":[23,24], "params":[],
+        "nodes":[
+            {"op":"VARIABLE_X1"},{"op":"CONSTANT","value":0.0},
+            {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":1.0},
+            {"op":"SUBTRACT","left":0,"right":1},
+            {"op":"MULTIPLY","left":3,"right":4},{"op":"ADD","left":2,"right":5},
+            {"op":"CONSTANT","value":0.5},{"op":"CONSTANT","value":0.5},
+            {"op":"CONSTANT","value":-1.0},{"op":"SUBTRACT","left":0,"right":7},
+            {"op":"MULTIPLY","left":9,"right":10},{"op":"ADD","left":8,"right":11},
+            {"op":"CONSTANT","value":0.5},{"op":"LT","left":0,"right":13},
+            {"op":"IF_THEN_ELSE","condition":14,"true_case":6,"false_case":12},
+            {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":0.0},
+            {"op":"CONSTANT","value":0.0},{"op":"LT","left":0,"right":18},
+            {"op":"CONSTANT","value":1.0},{"op":"GT","left":0,"right":20},
+            {"op":"IF_THEN_ELSE","condition":21,"true_case":17,"false_case":15},
+            {"op":"IF_THEN_ELSE","condition":19,"true_case":16,"false_case":22},
+            {"op":"CONSTANT","value":0.0}
+        ]
+    }"#;
+    let configs = [SOURCE_JSON_1, SOURCE_JSON_2, table, SOURCE_JSON_TABLE_2D]
         .map(|json| SourceConfig::from_json(json).expect("parse source config"));
     let (built, params) =
         build_user_sources(&configs, &NEWTONIAN_SPEC).expect("lower source collection");

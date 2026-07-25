@@ -167,6 +167,26 @@ def test_expression_validation_accepts_cartesian_enum_for_rotating_frame() -> No
     runner._validate_expression_payloads(payload)
 
 
+def test_rust_preflight_accepts_tabulated_source_payload() -> None:
+    graph = expr.ExprGraph()
+    radius = expr.variable("x1", graph)
+    acceleration = expr.tabulated_1d(
+        radius,
+        [1.0, 2.0, 4.0],
+        [-1.0, -0.5, -0.25],
+        bounds=expr.TableBounds.CLAMP,
+    )
+    payload = to_execution_dict(SodProblem())
+    payload["source_expressions"] = [
+        graph.compile([acceleration]).serialize_source(
+            expr.SourceKind.RAW,
+            dim=1,
+            target=expr.ConservedField.MOMENTUM,
+        )
+    ]
+    backend.validate_simulation(sim_info=payload)
+
+
 def test_execution_dict_rejects_boundary_arity() -> None:
     payload = {
         "bx1_inner_expressions": {
