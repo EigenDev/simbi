@@ -141,6 +141,26 @@ fn make_with_sources(timestepping: Timestepping) -> (Sim, Kern) {
                      {"op":"MULTIPLY","left":0,"right":1},
                      {"op":"CONSTANT","value":0.0}]
         }"#,
+        r#"{
+            "kind":"force", "dim":2, "outputs":[23,24], "params":[],
+            "nodes":[
+                {"op":"VARIABLE_X1"},{"op":"CONSTANT","value":0.0},
+                {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":1.0},
+                {"op":"SUBTRACT","left":0,"right":1},
+                {"op":"MULTIPLY","left":3,"right":4},{"op":"ADD","left":2,"right":5},
+                {"op":"CONSTANT","value":0.5},{"op":"CONSTANT","value":0.5},
+                {"op":"CONSTANT","value":-1.0},{"op":"SUBTRACT","left":0,"right":7},
+                {"op":"MULTIPLY","left":9,"right":10},{"op":"ADD","left":8,"right":11},
+                {"op":"CONSTANT","value":0.5},{"op":"LT","left":0,"right":13},
+                {"op":"IF_THEN_ELSE","condition":14,"true_case":6,"false_case":12},
+                {"op":"CONSTANT","value":0.0},{"op":"CONSTANT","value":0.0},
+                {"op":"CONSTANT","value":0.0},{"op":"LT","left":0,"right":18},
+                {"op":"CONSTANT","value":1.0},{"op":"GT","left":0,"right":20},
+                {"op":"IF_THEN_ELSE","condition":21,"true_case":17,"false_case":15},
+                {"op":"IF_THEN_ELSE","condition":19,"true_case":16,"false_case":22},
+                {"op":"CONSTANT","value":0.0}
+            ]
+        }"#,
     ]
     .map(|json| SourceConfig::from_json(json).expect("source parse"));
     let (built, params) =

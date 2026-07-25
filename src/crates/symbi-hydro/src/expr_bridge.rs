@@ -675,6 +675,42 @@ mod tests {
     }
 
     #[test]
+    fn python_tabulated_field_lowers_and_interpolates_in_the_rust_evaluator() {
+        let cfg = cfg_from(
+            r#"{"kind":"raw","dim":1,"outputs":[23],"params":[],"target":"nrg","nodes":[
+                {"op":"VARIABLE_X1"},{"op":"CONSTANT","value":1.0},
+                {"op":"CONSTANT","value":10.0},{"op":"CONSTANT","value":10.0},
+                {"op":"SUBTRACT","left":0,"right":1},
+                {"op":"MULTIPLY","left":3,"right":4},{"op":"ADD","left":2,"right":5},
+                {"op":"CONSTANT","value":2.0},{"op":"CONSTANT","value":20.0},
+                {"op":"CONSTANT","value":-10.0},{"op":"SUBTRACT","left":0,"right":7},
+                {"op":"MULTIPLY","left":9,"right":10},{"op":"ADD","left":8,"right":11},
+                {"op":"CONSTANT","value":2.0},{"op":"LT","left":0,"right":13},
+                {"op":"IF_THEN_ELSE","condition":14,"true_case":6,"false_case":12},
+                {"op":"CONSTANT","value":10.0},{"op":"CONSTANT","value":0.0},
+                {"op":"CONSTANT","value":1.0},{"op":"LT","left":0,"right":18},
+                {"op":"CONSTANT","value":4.0},{"op":"GT","left":0,"right":20},
+                {"op":"IF_THEN_ELSE","condition":21,"true_case":17,"false_case":15},
+                {"op":"IF_THEN_ELSE","condition":19,"true_case":16,"false_case":22}
+            ]}"#,
+        );
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("lower table");
+        let evaluator = crate::SourceEvaluator::from_built(&built);
+        assert_eq!(
+            evaluator.eval("nrg", &[("x_0", 1.5)]).expect("interior"),
+            [15.0],
+        );
+        assert_eq!(
+            evaluator.eval("nrg", &[("x_0", -1.0)]).expect("lower clamp"),
+            [10.0],
+        );
+        assert_eq!(
+            evaluator.eval("nrg", &[("x_0", 9.0)]).expect("upper clamp"),
+            [0.0],
+        );
+    }
+
+    #[test]
     fn rotating_frame_lowers_to_momentum_and_energy_and_rejects_relativity() {
         let cfg = cfg_from(
             r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
