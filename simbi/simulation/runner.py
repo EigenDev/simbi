@@ -239,20 +239,11 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
 
 def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
     """reject backend-invalid expression wires before rust."""
-    source_fields = (
-        "gravity_source_expressions",
-        "hydro_source_expressions",
-    )
     source_payloads = [
         (f"source_expressions[{index}]", payload)
         for index, payload in enumerate(model_dict.get("source_expressions", ()))
         if payload
     ]
-    source_payloads.extend(
-        (field, model_dict[field])
-        for field in source_fields
-        if model_dict.get(field)
-    )
 
     boundary_fields = (
         "bx1_inner_expressions",
@@ -285,7 +276,7 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
         kind = str(payload["kind"]).lower()
         dim = int(payload.get("dim", model_dict.get("dimensionality", 1)))
         has_energy = not bool(model_dict.get("isothermal", False))
-        if field in source_fields or field.startswith("source_expressions["):
+        if field.startswith("source_expressions["):
             known_kinds = {
                 "force",
                 "cooling",

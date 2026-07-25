@@ -89,7 +89,7 @@ def test_velocity_axis_bounds() -> None:
 def test_rt_config_emits_force_source() -> None:
     # the reference config: RT gravity is a `force` source with `dim` accel outputs.
     prob = RayleighTaylor(g0=0.3)
-    src = prob.gravity_source_expressions
+    [src] = prob.source_expressions
     assert src["kind"] == "force"
     assert len(src["outputs"]) == src["dim"] == 2
     # a = (0, -g0): the second output node is the -g0 constant.

@@ -274,17 +274,19 @@ class DittmannSingleDisk(SimbiProblem):
 
     @computed_field
     @property
-    def hydro_source_expressions(self) -> ExpressionDict:
+    def source_expressions(self) -> list[ExpressionDict]:
         """the outer sponge as a rust `sponge` source (or none when disabled)."""
         if not self.use_buffer:
-            return {}
+            return []
         graph = expr.ExprGraph()
         x1 = expr.variable("x1", graph)
         x2 = expr.variable("x2", graph)
         outputs = self.buffer_sponge_terms(x1, x2)
-        return graph.compile(outputs).serialize_source(
-            expr.SourceKind.SPONGE, dim=2, params=[0.0]
-        )
+        return [
+            graph.compile(outputs).serialize_source(
+                expr.SourceKind.SPONGE, dim=2, params=[0.0]
+            )
+        ]
 
     def initial_primitive_state(self) -> InitialStateType:
         """cavity surface density + keplerian rotation with pressure correction."""

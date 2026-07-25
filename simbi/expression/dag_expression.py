@@ -871,8 +871,8 @@ class CompiledExpr:
         # return output values
         return [values[out_id] for out_id in self._output_ids]
 
-    def serialize(self) -> dict[str, object]:
-        """Serialize the compiled expression for C++ evaluation."""
+    def _serialize_nodes(self) -> dict[str, object]:
+        """serialize graph nodes for the typed wire-format methods."""
         expressions: list[dict[str, Any]] = []
 
         # map from internal node ids to serialized indices
@@ -1266,9 +1266,7 @@ class CompiledExpr:
     ) -> dict[str, object]:
         """serialize to the rust `SourceConfig` wire format consumed by
         symbi-expr (`load.rs::SourceConfig::from_json`) and lowered by
-        symbi-hydro's `build_user_source`. the node encoding is byte-identical
-        to `serialize()`; this only re-wraps it with the source SEMANTICS the
-        rust side needs:
+        symbi-hydro's `build_user_source`:
           kind   -- 'force' | 'cooling' | 'relax' | 'sponge' | 'inject' | 'raw' (law wrap)
           dim    -- spatial dimensionality (force needs `dim` accel outputs,
                     cooling 1, relax 1+dim; sponge [kappa, den_ref, dim*mom_ref,
@@ -1278,9 +1276,8 @@ class CompiledExpr:
                     for sponge on an energy regime, params=[inv_gm1] = 1/(gamma-1)
           region -- optional node index of a chi(x) mask folded into the source
           target -- for kind='raw' only: the conserved slot ('den'|'mom'|'nrg')
-        the bare `serialize()` form is kept for local evaluation + back-compat.
         """
-        base = self.serialize()
+        base = self._serialize_nodes()
         # normalize the enums to their canonical rust strings at the boundary.
         kind_str = kind.value if isinstance(kind, SourceKind) else str(kind)
         cfg: dict[str, object] = {
@@ -1308,7 +1305,7 @@ class CompiledExpr:
         rust side splits these into the den/mom/nrg/bcell ghost-fill slots. for a
         purely toroidal injection set the in-plane B to 0 and the out-of-plane
         component to B_phi (cell-centered, div-free by axisymmetry)."""
-        base = self.serialize()
+        base = self._serialize_nodes()
         return {
             "kind": "dirichlet",
             "dim": int(dim),
@@ -1323,7 +1320,7 @@ class CompiledExpr:
         NO conservation-law wrap (unlike `serialize_source`) — the two scalar-in-`t` expressions are
         lowered to a `BuiltSource` and evaluated every step; the backend finite-difference-checks
         `a_dot` against `a` at setup before running, so an inconsistent derivative fails loudly."""
-        base = self.serialize()
+        base = self._serialize_nodes()
         out = base["output_indices"]
         if len(out) != 2:
             raise ValueError(f"motion expects exactly 2 outputs [a, a_dot], got {len(out)}")

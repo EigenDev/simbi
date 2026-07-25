@@ -737,16 +737,6 @@ class SimbiProblem(BaseModel):
 
     @computed_field
     @property
-    def hydro_source_expressions(self) -> ExpressionDict:
-        return {}
-
-    @computed_field
-    @property
-    def gravity_source_expressions(self) -> ExpressionDict:
-        return {}
-
-    @computed_field
-    @property
     def scale_factor_expressions(self) -> ExpressionDict:
         """mesh-motion scale factor a(t) + its derivative a_dot(t) as a TRACED expression pair,
         evaluated exactly in the rust time loop (no linearization, no python in the loop). override

@@ -386,8 +386,7 @@ class SimulationParameterSummary:
                     "bx2_outer_expressions",
                     "bx3_inner_expressions",
                     "bx3_outer_expressions",
-                    "gravity_source_expressions",
-                    "hydro_source_expressions",
+                    "source_expressions",
                 ],
             },
         }

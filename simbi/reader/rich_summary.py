@@ -255,8 +255,7 @@ class RichSimulationSummary:
             "bx2_outer_expressions": "User-defined outer boundary conditions for outer x2 boundary",
             "bx3_inner_expressions": "User-defined inner boundary conditions for inner x3 boundary",
             "bx3_outer_expressions": "User-defined outer boundary conditions for outer x3 boundary",
-            "gravity_source_expressions": "Gravity source term expressions",
-            "hydro_source_expressions": "Hydrodynamic source term expressions",
+            "source_expressions": "Source term expressions",
         }
         return descriptions.get(param_name, "")
 
