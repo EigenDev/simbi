@@ -365,8 +365,13 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
         raise ValueError(f"generator validation failed: {errors}")
 
     exec_dict = to_execution_dict(problem)
-    prim_iterator, _ = _get_iterators(problem)
+    prim_iterator, bfield_iterators = _get_iterators(problem)
     _check_first_tuple(problem, prim_iterator)
+    for name, iterator in zip(("Bx", "By", "Bz"), bfield_iterators):
+        _check_first_scalar(type(problem).__name__, name, iterator)
+    chi_field = problem.passive_scalar()
+    if chi_field is not None:
+        _check_first_scalar(type(problem).__name__, "passive scalar", chi_field)
 
     backend = _load_backend(compute_mode)
     if backend is None:
@@ -375,6 +380,29 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
         )
     backend.validate_simulation(sim_info=exec_dict)
     print(f"{type(problem).__name__}: validation passed")
+
+
+def _check_first_scalar(problem_name: str, field_name: str, iterator: Any) -> float:
+    """validate one scalar generator value without weakening finite-state rules."""
+    import math
+
+    try:
+        raw = next(iterator)
+    except StopIteration:
+        raise ValueError(
+            f"{problem_name}.{field_name}: generator yielded nothing"
+        ) from None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{problem_name}.{field_name}: generator values must be numeric: {exc}"
+        ) from None
+    if not math.isfinite(value):
+        raise ValueError(
+            f"{problem_name}.{field_name}: first value must be finite, got {value}"
+        )
+    return value
 
 
 def run(
