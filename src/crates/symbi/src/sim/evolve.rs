@@ -24,7 +24,7 @@ pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
 // sim-state core so the AMR driver shares them DRY. the public profiler API is
 // re-exported at the `sim::evolve::` path for the bench examples.
-use crate::sim::driver::{evolve_bodies, prof, stage_time_fractions};
+use crate::sim::driver::{advance_motion, evolve_bodies, prof, set_stage_motion, stage_schedule};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
 // =============================================================================
@@ -187,17 +187,11 @@ where
 
         // the scale factor advances for homologous expansion only; uniform
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
-        if sim.motion_law.is_none() && sim.motion.homologous {
-            sim.motion.a += sim.motion.a_dot * sim.dt;
-        }
         sim.time += sim.dt;
-        // expression motion: refresh a / a_dot to the EXACT values at the new step time (for output
-        // and the next step's stage-0 entry); a constant a_dot never tracks a decelerating shock.
-        let tnew = sim.time;
-        if let Some((a, ad)) = sim.motion_law.as_ref().map(|ml| (ml.a_at(tnew), ml.adot_at(tnew))) {
-            sim.motion.a = a;
-            sim.motion.a_dot = ad;
-        }
+        let law_value = sim.motion_law.as_ref()
+            .map(|law| (law.a_at(sim.time), law.adot_at(sim.time)));
+        let dt = sim.dt;
+        advance_motion(&mut sim.motion, law_value, dt);
         sim.iteration += 1;
 
         if let Some(c) = trace_coord {
@@ -394,21 +388,12 @@ where
     // restored afterward; the canonical step advance lives in the caller. static
     // meshes assign a_n back to itself — no behavioral change.
     let a_n = sim.motion.a;
-    let frac = stage_time_fractions(stages);
-    for (ii, &(a0, ac)) in stages.iter().enumerate() {
-        {
-            let entry = if ii == 0 { 0.0 } else { frac[ii - 1] };
-            let t_entry = sim.time + entry * sim.dt;
-            // expression motion: a / a_dot are EXACT functions of time -> evaluate at the stage entry
-            // time (no linearization). homologous linear motion: extrapolate from a_n at constant a_dot.
-            let mexpr = sim.motion_law.as_ref().map(|ml| (ml.a_at(t_entry), ml.adot_at(t_entry)));
-            if let Some((a, ad)) = mexpr {
-                sim.motion.a = a;
-                sim.motion.a_dot = ad;
-            } else if sim.motion.homologous {
-                sim.motion.a = a_n + sim.motion.a_dot * (entry * sim.dt);
-            }
-        }
+    for stage in stage_schedule(stages) {
+        let t_entry = sim.time + stage.entry * sim.dt;
+        let law_value = sim.motion_law.as_ref()
+            .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
+        let dt = sim.dt;
+        set_stage_motion(&mut sim.motion, law_value, dt, a_n, stage.entry);
         let sim = &*sim;
         // FOLD the stage pipeline. each phase's semantics, in execution order:
         //  - snapshot_stage: cons BEFORE godunov overwrites it, so the additive source pass
@@ -428,9 +413,9 @@ where
             k,
             StageArgs {
                 dt: sim.dt,
-                a0,
-                ac,
-                stage: ii,
+                a0: stage.a0,
+                ac: stage.ac,
+                stage: stage.index,
                 n_stages: n,
                 allow_elision: true,
             },

@@ -764,24 +764,19 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // applied in lockstep on every tile (identical inputs -> identical a). `a` is
         // restored to the step-entry value after the stages; the canonical step advance
         // lives at the step tail. static meshes assign a_n back to itself — no change.
-        let frac = crate::driver::stage_time_fractions(stages);
         let a_n: Vec<f64> = stores.iter().map(|s| s.motion.a).collect();
         for s in stores.iter_mut() {
             s.dt = dt;
         }
         {
-            for (sidx, &(a0, ac)) in stages.iter().enumerate() {
-                let entry = if sidx == 0 { 0.0 } else { frac[sidx - 1] };
+            for stage in crate::driver::stage_schedule(stages) {
                 for (i, s) in stores.iter_mut().enumerate() {
-                    let t_entry = s.time + entry * dt;
-                    let mexpr =
-                        s.motion_law.as_ref().map(|ml| (ml.a_at(t_entry), ml.adot_at(t_entry)));
-                    if let Some((a, ad)) = mexpr {
-                        s.motion.a = a;
-                        s.motion.a_dot = ad;
-                    } else if s.motion.homologous {
-                        s.motion.a = a_n[i] + s.motion.a_dot * (entry * dt);
-                    }
+                    let t_entry = s.time + stage.entry * dt;
+                    let law_value = s.motion_law.as_ref()
+                        .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
+                    crate::driver::set_stage_motion(
+                        &mut s.motion, law_value, dt, a_n[i], stage.entry,
+                    );
                 }
                 let sh = shared!();
                 // the stage TAG is minted canonically inside the fold
@@ -812,9 +807,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             kernels[i],
                             crate::stage::StageArgs {
                                 dt,
-                                a0,
-                                ac,
-                                stage: sidx,
+                                a0: stage.a0,
+                                ac: stage.ac,
+                                stage: stage.index,
                                 n_stages: stages.len(),
                                 allow_elision: false,
                             },
@@ -917,17 +912,11 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // single-grid step; a traced motion law is then sampled EXACTLY at the new time
         // (a constant-rate extrapolation would overshoot a decelerating mesh).
         for s in stores.iter_mut() {
-            if s.motion_law.is_none() && s.motion.homologous {
-                s.motion.a += s.motion.a_dot * dt;
-            }
             s.time += dt;
             s.iteration += 1;
-            if let Some((a, ad)) =
-                s.motion_law.as_ref().map(|ml| (ml.a_at(s.time), ml.adot_at(s.time)))
-            {
-                s.motion.a = a;
-                s.motion.a_dot = ad;
-            }
+            let law_value = s.motion_law.as_ref()
+                .map(|law| (law.a_at(s.time), law.adot_at(s.time)));
+            crate::driver::advance_motion(&mut s.motion, law_value, dt);
         }
         if std::env::var_os("SYMBI_TRACE_DT").is_some() {
             eprintln!("SYMBI_TRACE_DT iter={iter} t={t:.6e} dt={dt:.6e}");

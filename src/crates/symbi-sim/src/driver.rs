@@ -15,7 +15,7 @@
 //  prof("flux", || k.flux(sim, dd));
 // =============================================================================
 
-use symbi_geometry::Metric;
+use symbi_geometry::{Metric, MotionState};
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
@@ -92,6 +92,56 @@ pub fn stage_time_fractions(stages: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StageSpec {
+    pub index: usize,
+    pub a0: f64,
+    pub ac: f64,
+    pub entry: f64,
+}
+
+/// build the canonical stage schedule, including the physical time fraction
+/// at which each stage reads its input state.
+pub fn stage_schedule(stages: &[(f64, f64)]) -> Vec<StageSpec> {
+    let exits = stage_time_fractions(stages);
+    stages
+        .iter()
+        .enumerate()
+        .map(|(ii, &(a0, ac))| StageSpec {
+            index: ii,
+            a0,
+            ac,
+            entry: if ii == 0 { 0.0 } else { exits[ii - 1] },
+        })
+        .collect()
+}
+
+/// set mesh motion to the stage-entry clock shared by every topology.
+pub fn set_stage_motion(
+    motion: &mut MotionState<f64>,
+    law_value: Option<(f64, f64)>,
+    dt: f64,
+    a_n: f64,
+    entry: f64,
+) {
+    if let Some((a, a_dot)) = law_value {
+        motion.a = a;
+        motion.a_dot = a_dot;
+    } else if motion.homologous {
+        motion.a = a_n + motion.a_dot * entry * dt;
+    }
+}
+
+/// advance mesh motion to the accepted step time.
+pub fn advance_motion(motion: &mut MotionState<f64>, law_value: Option<(f64, f64)>, dt: f64) {
+    if let Some((a, a_dot)) = law_value {
+        motion.a = a;
+        motion.a_dot = a_dot;
+    } else if motion.homologous {
+        motion.a += motion.a_dot * dt;
+    }
+}
+
 /// map a stage index to the `post_godunov` semantic tag that the constrained-transport hook
 /// consumes: 0 = single (forward-Euler), 1 = predictor (saves E_n / bcell_n), 2 = corrector
 /// (time-averages the EMF). a >2-stage scheme's interior stages get tag 3 — a no-op for hydro,
@@ -161,7 +211,7 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
 
 #[cfg(test)]
 mod tests {
-    use super::check_dt_or_panic;
+    use super::{check_dt_or_panic, stage_schedule};
 
     #[test]
     fn check_dt_or_panic_accepts_positive_finite() {
@@ -217,5 +267,14 @@ mod tests {
     #[should_panic(expected = "iter 99")]
     fn check_dt_or_panic_message_carries_iter() {
         check_dt_or_panic(f64::NAN, 99, 2.5);
+    }
+
+    #[test]
+    fn rk3_stage_schedule_uses_stage_input_times() {
+        let schedule = stage_schedule(&[(0.0, 1.0), (0.75, 0.25), (1.0 / 3.0, 2.0 / 3.0)]);
+        assert_eq!(schedule.len(), 3);
+        assert_eq!(schedule[0].entry, 0.0);
+        assert_eq!(schedule[1].entry, 1.0);
+        assert_eq!(schedule[2].entry, 0.5);
     }
 }

@@ -16,7 +16,7 @@
 // forward euler (one stage) and rk2 (two stages, with a halo exchange BETWEEN stages).
 //
 // coverage (dimension x integrator x topology):
-//   - 1d euler 2-tile, 1d rk2 4-tile (interior tile fed from both neighbors)
+//   - 1d euler 2-tile, 1d rk2/rk3 4-tile (interior tile fed from both neighbors)
 //   - 2d euler single-axis, 2d rk2 2x2 grid (the corner case under rk2)
 //   - 3d euler 2x2x2 grid (edges + corners in 3d)
 //
@@ -412,6 +412,13 @@ fn euler_two_tile_1d() {
 #[test]
 fn rk2_four_tile_1d() {
     d1::assert_matches([4], Timestepping::Rk2);
+}
+
+// rk3 adds a second between-stage exchange. this pins the complete three-stage
+// orchestration before the single-grid and decomposed step runners are unified.
+#[test]
+fn rk3_four_tile_1d() {
+    d1::assert_matches([4], Timestepping::Rk3);
 }
 
 #[test]
