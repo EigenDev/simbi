@@ -6323,54 +6323,6 @@ fn run_simulation(
             cfg.chi_ic = vals;
         }
     }
-    // fail fast on an unsupported multi-gpu request, before draining generators or allocating.
-    validate_gpu_request(cfg.n_gpus).map_err(PyRuntimeError::new_err)?;
-    // a GR run's inner radius must sit on the correct side of the horizon for its chart
-    // (outside for singular schwarzschild, inside for horizon-penetrating kerr-schild/kerr)
-    // so the accretion-rate certificate's innermost flux surface is causally one-way.
-    check_horizon_containment(
-        &cfg.spacetime,
-        cfg.schwarzschild_mass,
-        cfg.kerr_spin,
-        &cfg.coord_system,
-        cfg.x_lo[0],
-    )
-    .map_err(PyValueError::new_err)?;
-    // an excision request is only meaningful on the baked 2d cartesian kerr-schild
-    // slice, with the sphere strictly between the metric-guard radius M/2 and the
-    // horizon r_+ = 2M.
-    check_excision_request(
-        cfg.excision_radius,
-        &cfg.spacetime,
-        &cfg.coord_system,
-        cfg.dims,
-        cfg.schwarzschild_mass,
-        cfg.kerr_spin,
-        cfg.refinement_enabled,
-        &cfg.refinement_regions,
-        cfg.n_gpus,
-    )
-    .map_err(PyValueError::new_err)?;
-    // mesh refinement is cartesian + uniform-spacing ONLY: the coarse-fine prolongation/restriction
-    // transfer kernels are geometry-agnostic (equal index-based sub-cells), correct solely for
-    // uniform-volume cells. a curvilinear grid (variable r^2 / r cell volumes) or a non-linear axis
-    // (unequal sub-cells) would get silently-wrong transfers, so reject it loudly instead.
-    if cfg.refinement_enabled {
-        if cfg.coord_system != "cartesian" {
-            return Err(PyValueError::new_err(format!(
-                "mesh refinement is cartesian-only (the coarse-fine transfer ignores curvilinear \
-                 cell volumes); got coord_system = '{}'",
-                cfg.coord_system
-            )));
-        }
-        if !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
-            return Err(PyValueError::new_err(format!(
-                "mesh refinement requires uniform (linear) cell spacing (the coarse-fine transfer \
-                 assumes equal sub-cells); got x1_spacing = '{}'",
-                cfg.x1_spacing
-            )));
-        }
-    }
     // a non-linear (log) radial axis IS supported under decomposition: each tile carries the global
     // per-cell slope and an origin advanced multiplicatively to its first global cell
     // (`start * 10^(g * slope)`), so a tile's local index i lands exactly where the undecomposed grid
