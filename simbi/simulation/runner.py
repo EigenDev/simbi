@@ -358,6 +358,25 @@ def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
 # =============================================================================
 # main entry point
 # =============================================================================
+def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
+    """validate a complete run without allocating its grid or writing output."""
+    errors = _validate_generator(problem)
+    if errors:
+        raise ValueError(f"generator validation failed: {errors}")
+
+    exec_dict = to_execution_dict(problem)
+    prim_iterator, _ = _get_iterators(problem)
+    _check_first_tuple(problem, prim_iterator)
+
+    backend = _load_backend(compute_mode)
+    if backend is None:
+        raise RuntimeError(
+            f"{compute_mode} backend is required for production Rust validation"
+        )
+    backend.validate_simulation(sim_info=exec_dict)
+    print(f"{type(problem).__name__}: validation passed")
+
+
 def run(
     problem: SimbiProblem,
     compute_mode: str = "cpu",
