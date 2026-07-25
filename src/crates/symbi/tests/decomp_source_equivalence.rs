@@ -2,11 +2,13 @@
 // decomp_source_equivalence.rs
 //
 // the SOURCE correctness contract for multi-gpu domain decomposition: a domain split into tiles,
-// each carrying the SAME runtime user source, evolved with the additive (two-pass) source pass in
+// each carrying the same runtime source collection, evolved with the additive source pass in
 // `evolve_decomposed`, must reproduce the monolithic run to round-off.
 //
-// the source is a POSITION-DEPENDENT force `a = [x, 0]` (the expr DAG's VARIABLE_X1 -> the cell's
-// global x). this is the decisive cross-tile test: a tile that evaluated the source at its tile-LOCAL
+// two independently parameterized forces sum to `a = [x, 0]`; both use local parameter index zero,
+// so the collection must isolate their values before composing the shared momentum and energy
+// targets. the position leaf uses the cell's global x. this is the decisive cross-tile test: a tile
+// that evaluated the source at its tile-local
 // coordinate would diverge from the monolithic run at every cut. a
 // constant force could not catch that bug. the source also exercises the energy work overlay
 // (S_nrg = mom . a) since Newtonian carries energy, so both overlays go through `source_apply`.
@@ -25,7 +27,7 @@ use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::expr_bridge::build_user_source;
+use symbi_hydro::expr_bridge::build_user_sources;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
@@ -43,9 +45,18 @@ type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 // a position-dependent force `a_x = x_0` (VARIABLE_X1, the cell's GLOBAL x), `a_y = 0`. the energy
 // regime lowers this into BOTH a momentum overlay (S_mom = rho*a) and an nrg work overlay; both
 // flow through the additive `source_apply` pass in `evolve_decomposed`.
-const SOURCE_JSON: &str = r#"{
-    "kind": "force", "dim": 2, "outputs": [0, 1], "params": [],
-    "nodes": [ {"op": "VARIABLE_X1"}, {"op": "CONSTANT", "value": 0.0} ]
+const SOURCE_JSON_1: &str = r#"{
+    "kind": "force", "dim": 2, "outputs": [2, 3], "params": [0.25],
+    "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "VARIABLE_X1"},
+               {"op": "MULTIPLY", "left": 0, "right": 1},
+               {"op": "CONSTANT", "value": 0.0} ]
+}"#;
+
+const SOURCE_JSON_2: &str = r#"{
+    "kind": "force", "dim": 2, "outputs": [2, 3], "params": [0.75],
+    "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "VARIABLE_X1"},
+               {"op": "MULTIPLY", "left": 0, "right": 1},
+               {"op": "CONSTANT", "value": 0.0} ]
 }"#;
 
 // a smooth centered density+pressure bump -> sound waves cross the cut while the source drives a
@@ -70,12 +81,14 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
             Prim { rho: 1.0 + b, vel: Tensor::new([0.0; 2]), pre: 1.0 + b }
         })
         .build();
-    let cfg = SourceConfig::from_json(SOURCE_JSON).expect("parse source config");
-    let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("lower source");
+    let configs = [SOURCE_JSON_1, SOURCE_JSON_2]
+        .map(|json| SourceConfig::from_json(json).expect("parse source config"));
+    let (built, params) =
+        build_user_sources(&configs, &NEWTONIAN_SPEC).expect("lower source collection");
     // two-pass (NOT fused): the decomposed loop drives plain godunov + the additive source_apply.
     // `with_runtime_source` sets has_additive_source -> evolve_decomposed runs snapshot_stage +
     // source_apply; the non-vacuous momentum check in `assert_source_matches` confirms it fires.
-    let k = sim.substrate().with_runtime_source(built, cfg.params.clone());
+    let k = sim.substrate().with_runtime_source(built, params);
     (sim, k)
 }
 
