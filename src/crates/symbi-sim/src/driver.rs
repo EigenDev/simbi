@@ -49,6 +49,48 @@ pub fn check_dt(dt: f64, iter: u64, time: f64) -> symbi_xpu::Result<()> {
     Ok(())
 }
 
+/// validate every local CFL candidate before reducing to the global step.
+/// validating first is required because `f64::min` discards a NaN operand.
+pub fn select_timestep(
+    candidates: impl IntoIterator<Item = f64>,
+    remaining: f64,
+    iter: u64,
+    time: f64,
+) -> symbi_xpu::Result<f64> {
+    check_dt(remaining, iter, time)?;
+    let mut dt = remaining;
+    let mut count = 0usize;
+    for (ii, candidate) in candidates.into_iter().enumerate() {
+        count += 1;
+        if !candidate.is_finite() || candidate <= 0.0 {
+            return Err(symbi_xpu::XpuError {
+                operation: "evolve",
+                code: -1,
+                detail: format!(
+                    "evolve: invalid CFL candidate {ii} = {candidate:e} at iter {iter} \
+                     (time {time:.4e}); state went NaN/inf"
+                ),
+            });
+        }
+        dt = dt.min(candidate);
+    }
+    if count == 0 {
+        return Err(symbi_xpu::XpuError {
+            operation: "evolve",
+            code: -1,
+            detail: format!(
+                "evolve: no CFL candidates at iter {iter} (time {time:.4e})"
+            ),
+        });
+    }
+    Ok(dt)
+}
+
+/// return the simulation clock after one accepted step.
+pub fn advance_clock(time: f64, iteration: u64, dt: f64) -> (f64, u64) {
+    (time + dt, iteration + 1)
+}
+
 // env-gated per-phase profiler (SYMBI_PROFILE=1). accumulates main-thread wall
 // time per phase; each kernel call returns when its rayon par_iter joins, so
 // main-thread timing captures the phase's wall cost. used by the zone-cycle
@@ -211,7 +253,7 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
 
 #[cfg(test)]
 mod tests {
-    use super::{check_dt_or_panic, stage_schedule};
+    use super::{advance_clock, check_dt_or_panic, select_timestep, stage_schedule};
 
     #[test]
     fn check_dt_or_panic_accepts_positive_finite() {
@@ -276,5 +318,26 @@ mod tests {
         assert_eq!(schedule[0].entry, 0.0);
         assert_eq!(schedule[1].entry, 1.0);
         assert_eq!(schedule[2].entry, 0.5);
+    }
+
+    #[test]
+    fn timestep_selection_rejects_a_nan_candidate_before_reduction() {
+        let err = select_timestep([0.2, f64::NAN, 0.1], 0.5, 7, 1.25)
+            .expect_err("a NaN tile CFL must not be hidden by f64::min");
+        assert!(err.detail.contains("candidate 1"));
+        assert!(err.detail.contains("NaN"));
+    }
+
+    #[test]
+    fn timestep_selection_uses_the_smallest_valid_candidate_and_remaining_time() {
+        assert_eq!(select_timestep([0.2, 0.1], 0.5, 0, 0.0).unwrap(), 0.1);
+        assert_eq!(select_timestep([0.2, 0.1], 0.05, 0, 0.0).unwrap(), 0.05);
+    }
+
+    #[test]
+    fn accepted_step_advances_time_and_iteration_once() {
+        let (time, iteration) = advance_clock(1.25, 7, 0.125);
+        assert_eq!(time, 1.375);
+        assert_eq!(iteration, 8);
     }
 }

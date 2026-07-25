@@ -745,19 +745,20 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     let mut last_cb: u64 = 0;
     while t < t_final {
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
-        let mut dt = t_final - t;
-        {
+        let dt = {
             let sh = shared!();
-            for i in 0..n {
-                dt = dt.min(symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
-            }
+            let candidates =
+                (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
+            let dt = crate::driver::select_timestep(candidates, t_final - t, iter, t)
+                .unwrap_or_else(|err| panic!("{}", err.detail));
             // snapshot u_n once before the stages for multi-stage schemes (the corrector reads it).
             if multistage {
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || kernels[i].snapshot(sh[i]));
                 }
             }
-        }
+            dt
+        };
         // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
         // scalars from the tile's motion state, which must hold a(t) at the stage's
         // shu-osher ENTRY time — the same per-stage refresh the single-grid step performs,
@@ -912,8 +913,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // single-grid step; a traced motion law is then sampled EXACTLY at the new time
         // (a constant-rate extrapolation would overshoot a decelerating mesh).
         for s in stores.iter_mut() {
-            s.time += dt;
-            s.iteration += 1;
+            (s.time, s.iteration) = crate::driver::advance_clock(s.time, s.iteration, dt);
             let law_value = s.motion_law.as_ref()
                 .map(|law| (law.a_at(s.time), law.adot_at(s.time)));
             crate::driver::advance_motion(&mut s.motion, law_value, dt);
@@ -921,8 +921,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         if std::env::var_os("SYMBI_TRACE_DT").is_some() {
             eprintln!("SYMBI_TRACE_DT iter={iter} t={t:.6e} dt={dt:.6e}");
         }
-        t += dt;
-        iter += 1;
+        (t, iter) = crate::driver::advance_clock(t, iter, dt);
         if iter - last_cb >= interval {
             last_cb = iter;
             drain_devices::<M>(devices);
