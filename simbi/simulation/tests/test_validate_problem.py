@@ -5,12 +5,15 @@
 # preflight entry point without entering the simulation runner.
 # =============================================================================
 
+import argparse
 from types import SimpleNamespace
+from typing import Annotated
 
 import pytest
 
 import simbi.expression as expr
 import simbi.libs.cpu_ext as backend
+from simbi import ProblemParam
 from simbi.simulation import runner
 from simbi.simulation.runner import to_execution_dict
 from simbi_configs.examples.newtonian.sod import SodProblem
@@ -72,3 +75,169 @@ def test_scalar_sample_rejects_nonfinite_magnetic_field() -> None:
 def test_scalar_sample_rejects_empty_passive_scalar() -> None:
     with pytest.raises(ValueError, match="passive scalar.*yielded nothing"):
         runner._check_first_scalar("Probe", "passive scalar", iter(()))
+
+
+def test_execution_dict_rejects_two_source_hooks() -> None:
+    class DualSource(SodProblem):
+        @property
+        def gravity_source_expressions(self):
+            return {"kind": "raw"}
+
+        @property
+        def hydro_source_expressions(self):
+            return {"kind": "raw"}
+
+    with pytest.raises(ValueError, match="both gravity_source_expressions"):
+        to_execution_dict(DualSource())
+
+
+def test_execution_dict_rejects_bare_source_serialize() -> None:
+    class BareSource(SodProblem):
+        @property
+        def hydro_source_expressions(self):
+            graph = expr.ExprGraph()
+            return graph.compile([expr.constant(1.0, graph)]).serialize()
+
+    with pytest.raises(ValueError, match="hydro_source_expressions.*missing `kind`"):
+        to_execution_dict(BareSource())
+
+
+def test_execution_dict_rejects_bare_boundary_serialize() -> None:
+    class BareBoundary(SodProblem):
+        @property
+        def bx1_inner_expressions(self):
+            graph = expr.ExprGraph()
+            return graph.compile([expr.constant(1.0, graph)]).serialize()
+
+    with pytest.raises(ValueError, match="bx1_inner_expressions.*missing `kind`"):
+        to_execution_dict(BareBoundary())
+
+
+@pytest.mark.parametrize(
+    ("kind", "count", "expected"),
+    [
+        ("force", 1, 2),
+        ("cooling", 2, 1),
+        ("relax", 2, 3),
+        ("sponge", 4, 5),
+        ("inject", 3, 4),
+    ],
+)
+def test_execution_dict_rejects_source_arity(
+    kind: str, count: int, expected: int
+) -> None:
+    payload = {
+        "hydro_source_expressions": {
+            "kind": kind,
+            "dim": 2,
+            "outputs": list(range(count)),
+        },
+        "isothermal": False,
+    }
+    with pytest.raises(ValueError, match=rf"expected {expected}"):
+        runner._validate_expression_payloads(payload)
+
+
+def test_execution_dict_rejects_boundary_arity() -> None:
+    payload = {
+        "bx1_inner_expressions": {
+            "kind": "dirichlet",
+            "dim": 2,
+            "outputs": [0, 1, 2],
+        },
+        "isothermal": False,
+        "is_mhd": False,
+    }
+    with pytest.raises(ValueError, match="expected 4 primitive"):
+        runner._validate_expression_payloads(payload)
+
+
+def test_percent_in_cli_description_formats_cleanly() -> None:
+    class PercentDescription(SodProblem):
+        pad: Annotated[
+            float,
+            ProblemParam(0.01, cli=True, description="add a 1% pad"),
+        ]
+
+    parser = argparse.ArgumentParser()
+    PercentDescription.setup_cli(parser)
+    assert "1% pad" in parser.format_help()
+
+
+@pytest.mark.parametrize("target", [None, "temperature", ""])
+def test_raw_source_requires_a_conserved_target(target) -> None:
+    payload = {
+        "hydro_source_expressions": {
+            "kind": "raw",
+            "dim": 2,
+            "target": target,
+            "outputs": [0],
+        },
+    }
+    with pytest.raises(ValueError, match="raw.*target"):
+        runner._validate_expression_payloads(payload)
+
+
+def test_isothermal_raw_source_rejects_energy_target() -> None:
+    payload = {
+        "hydro_source_expressions": {
+            "kind": "raw",
+            "dim": 2,
+            "target": "nrg",
+            "outputs": [0],
+        },
+        "isothermal": True,
+    }
+    with pytest.raises(ValueError, match="energy equation"):
+        runner._validate_expression_payloads(payload)
+
+
+@pytest.mark.parametrize("kind", ["force", "cooling", "relax", "sponge"])
+def test_relativistic_regime_rejects_newtonian_source_laws(kind: str) -> None:
+    counts = {"force": 2, "cooling": 1, "relax": 3, "sponge": 5}
+    payload = {
+        "hydro_source_expressions": {
+            "kind": kind,
+            "dim": 2,
+            "outputs": list(range(counts[kind])),
+        },
+        "is_relativistic": True,
+    }
+    with pytest.raises(ValueError, match="relativistic"):
+        runner._validate_expression_payloads(payload)
+
+
+@pytest.mark.parametrize(
+    ("kind", "target", "count"),
+    [("raw", "nrg", 1), ("inject", None, 4)],
+)
+def test_relativistic_regime_accepts_conserved_sources(
+    kind: str, target: str | None, count: int
+) -> None:
+    source = {
+        "kind": kind,
+        "dim": 2,
+        "outputs": list(range(count)),
+    }
+    if target is not None:
+        source["target"] = target
+    runner._validate_expression_payloads(
+        {
+            "hydro_source_expressions": source,
+            "is_relativistic": True,
+        }
+    )
+
+
+def test_isothermal_raw_density_source_is_valid() -> None:
+    runner._validate_expression_payloads(
+        {
+            "hydro_source_expressions": {
+                "kind": "raw",
+                "dim": 2,
+                "target": "den",
+                "outputs": [0],
+            },
+            "isothermal": True,
+        }
+    )

@@ -1145,9 +1145,10 @@ class SimbiProblem(BaseModel):
                 continue
 
             cli_name = metadata.cli_name or field_name.replace("_", "-")
+            help_text = field_info.description or f"set {field_name}"
             kwargs: dict[str, Any] = {
                 "dest": field_name,
-                "help": field_info.description or f"set {field_name}",
+                "help": help_text.replace("%", "%%"),
             }
 
             if field_info.default is not None and field_info.default is not ...:
