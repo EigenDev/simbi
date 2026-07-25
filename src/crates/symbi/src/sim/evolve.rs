@@ -24,7 +24,10 @@ pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
 // sim-state core so the AMR driver shares them DRY. the public profiler API is
 // re-exported at the `sim::evolve::` path for the bench examples.
-use crate::sim::driver::{advance_motion, evolve_bodies, prof, set_stage_motion, stage_schedule};
+use crate::sim::driver::{
+    advance_clock, advance_motion, evolve_bodies, prof, select_timestep, set_stage_motion,
+    stage_schedule,
+};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
 // =============================================================================
@@ -163,14 +166,17 @@ where
 
     let mut last_cb = sim.iteration;
     while sim.time < t_final {
-        let dt = prof("cfl", || kernels.cfl(sim)).min(t_final - sim.time);
-        if !(dt.is_finite() && dt > 0.0) {
-            // terminal NaN/inf cascade only: name the first bad cell before the panic. one-time
-            // host scan at the failure boundary — never on the happy path (see report fn).
+        let cfl = prof("cfl", || kernels.cfl(sim));
+        let dt = match select_timestep([cfl], t_final - sim.time, sim.iteration, sim.time) {
+            Ok(dt) => dt,
+            Err(err) => {
+                // terminal NaN/inf cascade only: name the first bad cell before returning. one-time
+                // host scan at the failure boundary — never on the happy path (see report fn).
             crate::regimes::substrate_gpu::device_sync::<Mem>();
             let _ = report_first_nonfinite_cell(sim);
-        }
-        check_dt(dt, sim.iteration, sim.time)?;
+                return Err(err);
+            }
+        };
         sim.dt = dt;
 
         step(sim, kernels);
@@ -187,12 +193,11 @@ where
 
         // the scale factor advances for homologous expansion only; uniform
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
-        sim.time += sim.dt;
+        (sim.time, sim.iteration) = advance_clock(sim.time, sim.iteration, sim.dt);
         let law_value = sim.motion_law.as_ref()
             .map(|law| (law.a_at(sim.time), law.adot_at(sim.time)));
         let dt = sim.dt;
         advance_motion(&mut sim.motion, law_value, dt);
-        sim.iteration += 1;
 
         if let Some(c) = trace_coord {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
