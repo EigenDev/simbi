@@ -98,7 +98,9 @@ def metadata_to_config_dict(
         "x1_spacing": CellSpacing(metadata.x1_spacing),
         "x1_spacing_ratio": float(getattr(metadata, "x1_spacing_ratio", 1.0)),
         "x2_spacing": CellSpacing(metadata.x2_spacing),
+        "x2_spacing_ratio": float(getattr(metadata, "x2_spacing_ratio", 1.0)),
         "x3_spacing": CellSpacing(metadata.x3_spacing),
+        "x3_spacing_ratio": float(getattr(metadata, "x3_spacing_ratio", 1.0)),
         "boundary_conditions": [
             BoundaryCondition(b) for b in metadata.boundary_conditions
         ],
@@ -318,14 +320,6 @@ def merge_with_checkpoint(
                 merged_data[key] = [
                     v.item() if hasattr(v, "dtype") else v for v in value
                 ]
-
-    # boundary_conditions special handling - convert single string to list
-    # checkpoint has list, but some problem classes may expect single value or vice versa
-    if "boundary_conditions" in merged_data:
-        bcs = merged_data["boundary_conditions"]
-        # if it's already a list of strings, keep it
-        # pydantic will handle Union[BoundaryCondition, Sequence[BoundaryCondition]]
-        pass
 
     # create new instance with merged config
     return type(problem)(**merged_data)

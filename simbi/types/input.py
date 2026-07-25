@@ -309,7 +309,9 @@ class Metadata:
     x1_spacing: str = "linear"
     x1_spacing_ratio: float = 1.0
     x2_spacing: str = "linear"
+    x2_spacing_ratio: float = 1.0
     x3_spacing: str = "linear"
+    x3_spacing_ratio: float = 1.0
     boundary_conditions: tuple[str, ...] = ()
     initial_time: float = 0.0  # start time from original initial conditions
     # the constant sound speed of an isothermal run; None on energy regimes

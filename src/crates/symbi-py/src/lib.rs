@@ -102,6 +102,10 @@ struct Config {
     excision_radius: f64,
     x1_spacing: String,
     x1_spacing_ratio: f64,
+    x2_spacing: String,
+    x2_spacing_ratio: f64,
+    x3_spacing: String,
+    x3_spacing_ratio: f64,
     start_time: f64,
     // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
     // start_time, which is the physical/resume clock (= checkpoint time on restart). 0 = unset ->
@@ -819,6 +823,10 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         excision_radius: get_f64_or(dict, "excision_radius", 0.0),
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
         x1_spacing_ratio: get_f64_or(dict, "x1_spacing_ratio", 1.0),
+        x2_spacing: enum_str_or(dict, "x2_spacing", "linear"),
+        x2_spacing_ratio: get_f64_or(dict, "x2_spacing_ratio", 1.0),
+        x3_spacing: enum_str_or(dict, "x3_spacing", "linear"),
+        x3_spacing_ratio: get_f64_or(dict, "x3_spacing_ratio", 1.0),
         start_time: get_f64_or(dict, "start_time", 0.0),
         checkpoint_log_anchor: get_f64_or(dict, "checkpoint_log_anchor", 0.0),
         checkpoint_index: dict
@@ -3025,36 +3033,62 @@ fn tile_origin<const D: usize>(cfg: &Config, tile_lo: [usize; D]) -> [f64; D] {
 
 fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D]> {
     use symbi_geometry::AxisMap;
-    if cfg.x1_spacing.eq_ignore_ascii_case("linear") {
+    let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
+    let ratios = [
+        cfg.x1_spacing_ratio,
+        cfg.x2_spacing_ratio,
+        cfg.x3_spacing_ratio,
+    ];
+    if spacings[..D]
+        .iter()
+        .all(|spacing| spacing.eq_ignore_ascii_case("linear"))
+    {
         return None;
     }
-    let geometric = cfg.x1_spacing.eq_ignore_ascii_case("geometric");
-    assert!(
-        cfg.x1_spacing.eq_ignore_ascii_case("log") || geometric,
-        "unsupported x1 cell spacing '{}'",
-        cfg.x1_spacing
-    );
-    assert!(
-        !geometric || cfg.x1_spacing_ratio.is_finite() && cfg.x1_spacing_ratio > 0.0,
-        "x1_spacing_ratio must be positive and finite"
-    );
     Some(std::array::from_fn(|ax| {
+        let spacing = spacings[ax];
         let start = cfg.x_lo[ax];
         let n = cfg.n_cells[ax] as f64;
-        if ax == 0 && geometric && n > 0.0 {
-            let ratio = cfg.x1_spacing_ratio;
-            let extent = cfg.dx[ax] * n;
-            let width = if (ratio - 1.0).abs() < 1.0e-12 {
-                cfg.dx[ax]
-            } else {
-                extent * (ratio - 1.0) / (ratio.powf(n) - 1.0)
+        if spacing.eq_ignore_ascii_case("linear") {
+            return AxisMap::Uniform {
+                start,
+                dx: cfg.dx[ax],
             };
-            AxisMap::Geometric { start, width, ratio }
-        } else if ax == 0 && start > 0.0 && n > 0.0 {
-            let r_hi = start + cfg.dx[ax] * n;
-            AxisMap::Log { start, log_slope: (r_hi / start).log10() / n }
+        }
+        if spacing.eq_ignore_ascii_case("log") {
+            assert!(
+                start > 0.0 && n > 0.0,
+                "log spacing on x{} requires positive bounds",
+                ax + 1
+            );
+            let end = start + cfg.dx[ax] * n;
+            return AxisMap::Log {
+                start,
+                log_slope: (end / start).log10() / n,
+            };
+        }
+        assert!(
+            spacing.eq_ignore_ascii_case("geometric"),
+            "unsupported x{} cell spacing '{}'",
+            ax + 1,
+            spacing
+        );
+        let ratio = ratios[ax];
+        assert!(
+            ratio.is_finite() && ratio > 0.0,
+            "x{}_spacing_ratio must be positive and finite",
+            ax + 1
+        );
+        let extent = cfg.dx[ax] * n;
+        let width = if (ratio - 1.0).abs() < 1.0e-12 {
+            cfg.dx[ax]
         } else {
-            AxisMap::Uniform { start, dx: cfg.dx[ax] }
+            extent * (ratio - 1.0) / (ratio.powf(n) - 1.0)
+        };
+        AxisMap::Geometric {
+            start,
+            width,
+            ratio,
         }
     }))
 }
@@ -5861,6 +5895,10 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("checkpoint_interval", cfg.checkpoint_interval)
         .with("x1_spacing", cfg.x1_spacing.as_str())
         .with("x1_spacing_ratio", cfg.x1_spacing_ratio)
+        .with("x2_spacing", cfg.x2_spacing.as_str())
+        .with("x2_spacing_ratio", cfg.x2_spacing_ratio)
+        .with("x3_spacing", cfg.x3_spacing.as_str())
+        .with("x3_spacing_ratio", cfg.x3_spacing_ratio)
         .with("initial_time", cfg.start_time)
         .with("time_unit", cfg.time_unit)
         .with("time_unit_label", cfg.time_unit_label.as_str())
@@ -6392,11 +6430,22 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
                 cfg.coord_system
             ));
         }
-        if !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
-            return Err(format!(
-                "mesh refinement requires linear cell spacing; got x1_spacing = '{}'",
-                cfg.x1_spacing
-            ));
+        for (axis, spacing) in [
+            &cfg.x1_spacing,
+            &cfg.x2_spacing,
+            &cfg.x3_spacing,
+        ]
+        .into_iter()
+        .enumerate()
+        .take(cfg.dims)
+        {
+            if !spacing.eq_ignore_ascii_case("linear") {
+                return Err(format!(
+                    "mesh refinement requires linear cell spacing; got x{}_spacing = '{}'",
+                    axis + 1,
+                    spacing
+                ));
+            }
         }
     }
     for source in &cfg.source_jsons {

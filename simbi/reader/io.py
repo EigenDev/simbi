@@ -511,8 +511,11 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                     attrs.get("checkpoint_interval", 0.0)
                 ),
                 x1_spacing=decode_str(attrs.get("x1_spacing", "linear")),
+                x1_spacing_ratio=float(attrs.get("x1_spacing_ratio", 1.0)),
                 x2_spacing=decode_str(attrs.get("x2_spacing", "linear")),
+                x2_spacing_ratio=float(attrs.get("x2_spacing_ratio", 1.0)),
                 x3_spacing=decode_str(attrs.get("x3_spacing", "linear")),
+                x3_spacing_ratio=float(attrs.get("x3_spacing_ratio", 1.0)),
                 boundary_conditions=bcs,
                 initial_time=float(attrs.get("initial_time", attrs["time"])),
                 sound_speed=(

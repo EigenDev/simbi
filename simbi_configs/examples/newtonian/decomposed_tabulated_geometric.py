@@ -35,6 +35,8 @@ class DecomposedTabulatedGeometric(SimbiProblem):
     adiabatic_index: float = 5.0 / 3.0
     x1_spacing: CellSpacing = CellSpacing.GEOMETRIC
     x1_spacing_ratio: float = 0.97
+    x2_spacing: CellSpacing = CellSpacing.GEOMETRIC
+    x2_spacing_ratio: float = 1.03
     end_time: float = 0.05
     checkpoint_interval: float = 0.05
 
