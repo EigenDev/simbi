@@ -490,9 +490,25 @@ class SimbiProblem(BaseModel):
         CellSpacing,
         ProblemParam(CellSpacing.LINEAR, description="x2 cell spacing"),
     ]
+    x2_spacing_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            description="adjacent x2 cell-width ratio for geometric spacing",
+        ),
+    ]
     x3_spacing: Annotated[
         CellSpacing,
         ProblemParam(CellSpacing.LINEAR, description="x3 cell spacing"),
+    ]
+    x3_spacing_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            description="adjacent x3 cell-width ratio for geometric spacing",
+        ),
     ]
 
     # =========================================================================
@@ -992,16 +1008,21 @@ class SimbiProblem(BaseModel):
 
     @model_validator(mode="after")
     def _validate_geometric_spacing(self) -> SimbiProblem:
-        """validate the geometric x1 cell-width ratio."""
-        if self.x1_spacing == CellSpacing.GEOMETRIC:
-            if not math.isfinite(self.x1_spacing_ratio) or self.x1_spacing_ratio <= 0.0:
+        """validate each geometric cell-width ratio."""
+        for axis in range(1, 4):
+            spacing = getattr(self, f"x{axis}_spacing")
+            ratio = getattr(self, f"x{axis}_spacing_ratio")
+            if spacing == CellSpacing.GEOMETRIC:
+                if not math.isfinite(ratio) or ratio <= 0.0:
+                    raise ValueError(
+                        f"x{axis}_spacing_ratio must be positive and finite "
+                        f"for geometric spacing"
+                    )
+            elif ratio != 1.0:
                 raise ValueError(
-                    "x1_spacing_ratio must be positive and finite for geometric spacing"
+                    f"x{axis}_spacing_ratio is only valid when "
+                    f"x{axis}_spacing='geometric'"
                 )
-        elif self.x1_spacing_ratio != 1.0:
-            raise ValueError(
-                "x1_spacing_ratio is only valid when x1_spacing='geometric'"
-            )
         return self
 
     def validate_refinement_config(self) -> None:

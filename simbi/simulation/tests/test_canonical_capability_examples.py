@@ -66,6 +66,7 @@ def test_integration_example_enables_decomposition():
 
     assert problem.gpus == 2
     assert problem.x1_spacing_ratio != 1.0
+    assert problem.x2_spacing_ratio != 1.0
     assert payload["source_expressions"][0]["kind"] == "raw"
 
 

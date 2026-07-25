@@ -15,7 +15,7 @@
 #  (no-uv path: `pip install -e .` builds editable via the maturin backend directly)
 #  ./dev.py build --cuda       # nvidia gpu build (cargo 'cuda' feature)
 #  ./dev.py install --hip      # amd gpu build (cargo 'hip' feature, ROCm)
-#  ./dev.py clean [--all]      # remove extensions; --all also runs cargo clean
+#  ./dev.py clean [--all]      # cargo clean; --all also removes python caches
 # =============================================================================
 
 import argparse
@@ -117,7 +117,7 @@ def run(cmd, **kwargs) -> None:
             print(
                 "hint: ensure the rust toolchain (https://rustup.rs) and maturin are installed "
                 "(`uv sync`, or `pip install maturin`); or skip dev.py entirely with "
-                "`pip install -e .` (builds via the maturin backend). then `./dev.py clean --all`.",
+                "`pip install -e .` (builds via the maturin backend). then `./dev.py clean`.",
                 file=sys.stderr,
             )
         sys.exit(exc.returncode)
@@ -333,20 +333,20 @@ def uninstall_command(args) -> None:
 
 
 def clean_command(args) -> None:
-    removed = _remove_extensions()
+    _require_cargo()
+    run(
+        [
+            "cargo",
+            "clean",
+            "--manifest-path",
+            str(SRC / "Cargo.toml"),
+        ],
+        verbose=args.verbose,
+    )
+    print("removed rust build artifacts; installed extensions preserved")
+
+    removed = 1
     if args.all:
-        if (SRC / "Cargo.toml").exists() and shutil.which("cargo"):
-            run(
-                [
-                    "cargo",
-                    "clean",
-                    "--manifest-path",
-                    str(SRC / "Cargo.toml"),
-                ],
-                verbose=args.verbose,
-            )
-            print("ran cargo clean")
-            removed += 1
         for cache in Path(".").rglob("__pycache__"):
             if cache.is_dir() and ".venv" not in cache.parts:
                 shutil.rmtree(cache)
@@ -431,12 +431,12 @@ def main() -> None:
     up.set_defaults(func=uninstall_command)
 
     cp = sub.add_parser(
-        "clean", help="remove compiled extensions; --all also cargo clean"
+        "clean", help="remove cargo build artifacts while preserving installed extensions"
     )
     cp.add_argument(
         "--all",
         action="store_true",
-        help="also run cargo clean + drop python cache",
+        help="also remove repository python caches",
     )
     cp.set_defaults(func=clean_command)
 

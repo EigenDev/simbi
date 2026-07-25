@@ -85,6 +85,37 @@ def test_negative_checkpoint_theta_maps_back_to_vanleer():
     assert "limiter" not in config
 
 
+def test_checkpoint_restores_every_geometric_spacing_ratio():
+    class _Meta:
+        time = 1.0
+        gamma = 5.0 / 3.0
+        coord_system = "cartesian"
+        regime = "newtonian"
+        solver = "hllc"
+        reconstruction = "plm"
+        timestepping = "rk2"
+        plm_theta = 1.5
+        cfl = 0.3
+        checkpoint_index = 2
+        checkpoint_interval = 0.5
+        x1_spacing = "geometric"
+        x1_spacing_ratio = 0.97
+        x2_spacing = "geometric"
+        x2_spacing_ratio = 1.03
+        x3_spacing = "geometric"
+        x3_spacing_ratio = 0.99
+        boundary_conditions = ["outflow"] * 6
+        level_dts = ()
+        level_substeps = ()
+        subcycling_mode = "none"
+
+    config = metadata_to_config_dict(_Meta(), (8, 10, 12))
+
+    assert config["x1_spacing_ratio"] == 0.97
+    assert config["x2_spacing_ratio"] == 1.03
+    assert config["x3_spacing_ratio"] == 0.99
+
+
 def test_values_agree_is_container_and_enum_insensitive():
     from simbi.types.input import Solver
 

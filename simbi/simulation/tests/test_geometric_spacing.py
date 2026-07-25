@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from simbi.types import CellSpacing, MeshConfig
 from simbi_configs.examples.grhd.gr_bondi_ks import GrBondiKS
+from simbi_configs.examples.srhd.marti_muller_3d import MartiMuller3D
 
 
 def test_geometric_spacing_accepts_positive_width_ratio():
@@ -38,6 +39,28 @@ def test_width_ratio_is_rejected_for_other_spacing_kinds():
         )
 
 
+@pytest.mark.parametrize("axis", [1, 2, 3])
+def test_geometric_spacing_is_configurable_on_every_axis(axis):
+    problem = MartiMuller3D(
+        resolution=(8, 6, 4),
+        **{
+            f"x{axis}_spacing": CellSpacing.GEOMETRIC,
+            f"x{axis}_spacing_ratio": 0.9 + 0.02 * axis,
+        },
+    )
+
+    assert getattr(problem, f"x{axis}_spacing") == CellSpacing.GEOMETRIC
+    assert getattr(problem, f"x{axis}_spacing_ratio") == pytest.approx(
+        0.9 + 0.02 * axis
+    )
+
+
+@pytest.mark.parametrize("axis", [2, 3])
+def test_transverse_width_ratio_is_rejected_for_linear_spacing(axis):
+    with pytest.raises(ValidationError, match=f"x{axis}_spacing_ratio.*only valid"):
+        MartiMuller3D(**{f"x{axis}_spacing_ratio": 0.98})
+
+
 def test_mesh_config_reconstructs_geometric_faces_and_centers():
     mesh = MeshConfig(
         shape=(4,),
@@ -53,3 +76,22 @@ def test_mesh_config_reconstructs_geometric_faces_and_centers():
     assert mesh.x1v[-1] == pytest.approx(5.0)
     assert widths[1:] / widths[:-1] == pytest.approx([0.8, 0.8, 0.8])
     assert mesh.x1c == pytest.approx(0.5 * (mesh.x1v[:-1] + mesh.x1v[1:]))
+
+
+def test_mesh_config_reconstructs_independent_geometric_axes():
+    mesh = MeshConfig(
+        shape=(4, 5, 6),
+        bounds_min=(-1.0, 2.0, 10.0),
+        bounds_max=(1.0, 5.0, 16.0),
+        halo_radius=2,
+        spacing_types=(CellSpacing.GEOMETRIC,) * 3,
+        spacing_ratios=(1.1, 0.9, 1.05),
+    )
+
+    for vertices, ratio in zip(
+        (mesh.x1v, mesh.x2v, mesh.x3v),
+        mesh.spacing_ratios,
+        strict=True,
+    ):
+        widths = vertices[1:] - vertices[:-1]
+        assert widths[1:] / widths[:-1] == pytest.approx(ratio)
