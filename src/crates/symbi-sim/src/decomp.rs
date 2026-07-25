@@ -686,7 +686,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
 {
     let stages = ts.stages();
-    let multistage = stages.len() > 1;
+    let multistage = crate::driver::needs_step_snapshot(stages);
     let n = stores.len();
     debug_assert_eq!(n, kernels.len(), "stores/kernels length mismatch");
     debug_assert_eq!(n, devices.len(), "stores/devices length mismatch");

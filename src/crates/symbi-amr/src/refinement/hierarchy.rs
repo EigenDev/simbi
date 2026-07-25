@@ -49,7 +49,10 @@ use super::transfer::{
     restrict_cons,
 };
 use symbi_sim::stage::{fold_stage, HookPoint, StageArgs};
-use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_time_fractions};
+use symbi_sim::driver::{
+    advance_clock, advance_motion, check_dt_or_panic, evolve_bodies, needs_step_snapshot, prof,
+    select_timestep, stage_time_fractions,
+};
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
 use symbi_sim::state::{
@@ -833,7 +836,11 @@ where
             let mut dt = f64::INFINITY;
             for (ll, lvl) in self.levels.iter().enumerate() {
                 let scale = RATIO.pow(ll as u32) as f64;
-                dt = dt.min(lvl.kernels.cfl(&lvl.state) * scale);
+                let candidate = lvl.kernels.cfl(&lvl.state) * scale;
+                if !candidate.is_finite() || candidate <= 0.0 {
+                    return candidate;
+                }
+                dt = dt.min(candidate);
             }
             dt
         });
@@ -858,7 +865,11 @@ where
             let mut dt = f64::INFINITY;
             for (ll, lvl) in self.levels.iter().enumerate() {
                 let scale = RATIO.pow(ll as u32) as f64;
-                dt = dt.min(lvl.kernels.cfl(&lvl.state) * scale);
+                let candidate = lvl.kernels.cfl(&lvl.state) * scale;
+                if !candidate.is_finite() || candidate <= 0.0 {
+                    return candidate;
+                }
+                dt = dt.min(candidate);
             }
             dt
         });
@@ -901,24 +912,11 @@ where
 
         let root = &mut self.levels[0];
         // homologous linear advance ONLY when there is no traced motion law.
-        if root.state.motion_law.is_none() && root.state.motion.homologous {
-            root.state.motion.a += root.state.motion.a_dot * dt;
-        }
-        root.state.time += dt;
-        // expression motion: set a / a_dot EXACTLY at the new time (for output and the next root
-        // step's cfl + stages); a constant-rate extrapolation would overshoot a
-        // decelerating mesh.
-        let tnew = root.state.time;
-        if let Some((a, ad)) = root
-            .state
-            .motion_law
-            .as_ref()
-            .map(|ml| (ml.a_at(tnew), ml.adot_at(tnew)))
-        {
-            root.state.motion.a = a;
-            root.state.motion.a_dot = ad;
-        }
-        root.state.iteration += 1;
+        (root.state.time, root.state.iteration) =
+            advance_clock(root.state.time, root.state.iteration, dt);
+        let law_value = root.state.motion_law.as_ref()
+            .map(|law| (law.a_at(root.state.time), law.adot_at(root.state.time)));
+        advance_motion(&mut root.state.motion, law_value, dt);
 
         // body feedback + motion: the FINEST level owns the sink and the
         // diagnostics; advance the (prescribed) motion there once per root
@@ -1008,7 +1006,7 @@ where
         }
         self.levels[level].state.dt = dt;
         let stages = self.levels[level].state.timestepping.stages();
-        if stages.len() > 1 {
+        if needs_step_snapshot(stages) {
             let l = &self.levels[level];
             prof("snapshot", || l.kernels.snapshot(&l.state));
         }
@@ -1293,8 +1291,7 @@ where
     fn level_clock(&mut self, level: usize, dt: f64) {
         if level > 0 {
             let s = &mut self.levels[level].state;
-            s.time += dt;
-            s.iteration += 1;
+            (s.time, s.iteration) = advance_clock(s.time, s.iteration, dt);
         }
     }
 
@@ -1712,10 +1709,10 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     let mut last_cb: u64 = 0;
     while t < t_final {
         // global dt = min over tiles' root cfl, clamped to land exactly on t_final.
-        let mut gdt = t_final - t;
-        for i in 0..n {
-            gdt = gdt.min(symbi_xpu::with_device(devices[i], || tiles[i].root_cfl_dt()));
-        }
+        let candidates =
+            (0..n).map(|i| symbi_xpu::with_device(devices[i], || tiles[i].root_cfl_dt()));
+        let gdt = select_timestep(candidates, t_final - t, iter, t)
+            .unwrap_or_else(|err| panic!("{}", err.detail));
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
         }
@@ -1776,8 +1773,8 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // the root clock (mesh motion in the root post-step remains deferred).
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || {
-                tiles[i].levels[0].state.time += gdt;
-                tiles[i].levels[0].state.iteration += 1;
+                let s = &mut tiles[i].levels[0].state;
+                (s.time, s.iteration) = advance_clock(s.time, s.iteration, gdt);
             });
         }
         // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
@@ -1822,8 +1819,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // stale halo cons, and the cut-adjacent reflux ghosts); refresh for the next step's stage 0.
         exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
 
-        t += gdt;
-        iter += 1;
+        (t, iter) = advance_clock(t, iter, gdt);
         if iter - last_cb >= interval {
             last_cb = iter;
             drain_devices::<Mem>(devices);
