@@ -285,6 +285,37 @@ pub fn build_user_source(
             }
             Ok(out)
         }
+        "rotating_frame" => {
+            reject_relativistic("rotating_frame")?;
+            if !matches!(cfg.dim, 2 | 3) {
+                return Err(format!(
+                    "'rotating_frame' requires a 2D or 3D cartesian state; dim = {}",
+                    cfg.dim,
+                ));
+            }
+            if n_out != 3 {
+                return Err(format!(
+                    "'rotating_frame' needs [omega, origin_x, origin_y]: outputs.len() = {n_out}, expected 3",
+                ));
+            }
+            if region.is_some() {
+                return Err(
+                    "'rotating_frame' does not accept a region mask; make omega zero outside the region"
+                        .to_string(),
+                );
+            }
+            let mut out = vec![(
+                "mom".to_string(),
+                crate::source_spec::user_rotating_frame_momentum_source(&field, cfg.dim),
+            )];
+            if spec.has_energy {
+                out.push((
+                    "nrg".to_string(),
+                    crate::source_spec::user_rotating_frame_energy_source(&field, cfg.dim),
+                ));
+            }
+            Ok(out)
+        }
         "cooling" => {
             reject_relativistic("cooling")?;
             if !spec.has_energy {
@@ -421,7 +452,7 @@ pub fn build_user_source(
             Ok(vec![(target, field)])
         }
         other => {
-            Err(format!("unknown source kind '{other}' (expected force | cooling | relax | sponge | inject | raw)"))
+            Err(format!("unknown source kind '{other}' (expected force | rotating_frame | cooling | relax | sponge | inject | raw)"))
         }
     }
 }
@@ -641,6 +672,92 @@ mod tests {
         assert_eq!(cfg.outputs, vec![0, 1]);
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python force config lowers");
         assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom", "nrg"]);
+    }
+
+    #[test]
+    fn rotating_frame_lowers_to_momentum_and_energy_and_rejects_relativity() {
+        let cfg = cfg_from(
+            r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
+                "nodes": [{"op": "CONSTANT", "value": 2.0},
+                          {"op": "CONSTANT", "value": 0.0},
+                          {"op": "CONSTANT", "value": 0.0}]}"#,
+        );
+        let built =
+            build_user_source(&cfg, &NEWTONIAN_SPEC).expect("rotating frame config lowers");
+        assert_eq!(
+            built.iter().map(|(target, _)| target.as_str()).collect::<Vec<_>>(),
+            ["mom", "nrg"],
+        );
+        assert!(expect_err(&cfg, &RHD_SPEC).contains("invalid for the relativistic regime"));
+    }
+
+    #[test]
+    fn rotating_frame_composes_with_sponge_in_one_momentum_plan() {
+        let rotating = cfg_from(
+            r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
+                "nodes": [{"op": "CONSTANT", "value": 2.0},
+                          {"op": "CONSTANT", "value": 0.0},
+                          {"op": "CONSTANT", "value": 0.0}]}"#,
+        );
+        let sponge = cfg_from(
+            r#"{"kind": "sponge", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
+                "nodes": [{"op": "CONSTANT", "value": 1.0},
+                          {"op": "CONSTANT", "value": 1.0},
+                          {"op": "CONSTANT", "value": 0.0},
+                          {"op": "CONSTANT", "value": 0.0}]}"#,
+        );
+        let (built, params) =
+            build_user_sources(&[rotating, sponge], &ISO_NEWTONIAN_SPEC).expect("compose");
+        assert!(params.is_empty());
+        assert_eq!(built.iter().filter(|(target, _)| target == "mom").count(), 1);
+
+        let evaluator = crate::SourceEvaluator::from_built(&built);
+        let momentum = evaluator
+            .eval(
+                "mom",
+                &[
+                    ("rho", 1.0),
+                    ("vel_0", 1.0),
+                    ("vel_1", 0.0),
+                    ("x_0", 1.0),
+                    ("x_1", 0.0),
+                ],
+            )
+            .expect("momentum source");
+        assert_eq!(momentum, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn rotating_frame_centrifugal_force_balances_a_harmonic_force() {
+        let rotating = cfg_from(
+            r#"{"kind": "rotating_frame", "dim": 2, "outputs": [0, 1, 2], "params": [],
+                "nodes": [{"op": "CONSTANT", "value": 2.0},
+                          {"op": "CONSTANT", "value": 0.0},
+                          {"op": "CONSTANT", "value": 0.0}]}"#,
+        );
+        let restoring = cfg_from(
+            r#"{"kind": "force", "dim": 2, "outputs": [3, 4], "params": [],
+                "nodes": [{"op": "VARIABLE_X1"}, {"op": "VARIABLE_X2"},
+                          {"op": "CONSTANT", "value": -4.0},
+                          {"op": "MULTIPLY", "left": 0, "right": 2},
+                          {"op": "MULTIPLY", "left": 1, "right": 2}]}"#,
+        );
+        let (built, _) =
+            build_user_sources(&[rotating, restoring], &ISO_NEWTONIAN_SPEC).expect("compose");
+        let evaluator = crate::SourceEvaluator::from_built(&built);
+        let momentum = evaluator
+            .eval(
+                "mom",
+                &[
+                    ("rho", 1.0),
+                    ("vel_0", 0.0),
+                    ("vel_1", 0.0),
+                    ("x_0", 3.0),
+                    ("x_1", -2.0),
+                ],
+            )
+            .expect("balanced momentum source");
+        assert_eq!(momentum, [0.0, 0.0]);
     }
 
     #[test]

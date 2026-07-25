@@ -279,6 +279,7 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
         if field.startswith("source_expressions["):
             known_kinds = {
                 "force",
+                "rotating_frame",
                 "cooling",
                 "relax",
                 "sponge",
@@ -291,6 +292,7 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
                 )
             if model_dict.get("is_relativistic", False) and kind in {
                 "force",
+                "rotating_frame",
                 "cooling",
                 "relax",
                 "sponge",
@@ -303,6 +305,22 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
                 raise ValueError(
                     f"{field} cooling requires an energy equation"
                 )
+            if kind == "rotating_frame":
+                coord_system = model_dict.get("coord_system", "")
+                coord_value = getattr(coord_system, "value", coord_system)
+                if str(coord_value).lower() != "cartesian":
+                    raise ValueError(
+                        f"{field} rotating_frame requires cartesian coordinates"
+                    )
+                if dim not in {2, 3}:
+                    raise ValueError(
+                        f"{field} rotating_frame requires dim 2 or 3"
+                    )
+                if len(outputs) != 3:
+                    raise ValueError(
+                        f"{field} rotating_frame requires "
+                        "[omega, origin_x, origin_y]"
+                    )
             if kind == "raw":
                 target = payload.get("target")
                 if target not in {"den", "mom", "nrg"}:

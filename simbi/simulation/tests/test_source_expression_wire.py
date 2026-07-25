@@ -49,6 +49,21 @@ def test_serialize_source_inject_emits_full_conserved_vector() -> None:
     json.dumps(cfg)
 
 
+def test_serialize_rotating_frame_emits_omega_and_origin() -> None:
+    graph = expr.ExprGraph()
+    cfg = graph.compile(
+        [
+            expr.constant(2.0, graph),
+            expr.constant(0.0, graph),
+            expr.constant(0.0, graph),
+        ]
+    ).serialize_source(expr.SourceKind.ROTATING_FRAME, dim=2)
+
+    assert cfg["kind"] == "rotating_frame"
+    assert cfg["outputs"] == [0, 1, 2]
+    json.dumps(cfg)
+
+
 def test_serialize_source_region_and_target_optional() -> None:
     g = expr.ExprGraph()
     out = expr.constant(1.0, g)

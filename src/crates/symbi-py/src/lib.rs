@@ -6372,8 +6372,14 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
         }
     }
     for source in &cfg.source_jsons {
-        symbi_hydro::SourceConfig::from_json(&source.json)
+        let parsed = symbi_hydro::SourceConfig::from_json(&source.json)
             .map_err(|err| format!("{} parse: {err}", source.origin))?;
+        if parsed.kind == "rotating_frame" && cfg.coord_system != "cartesian" {
+            return Err(format!(
+                "{} rotating_frame requires cartesian coordinates; got '{}'",
+                source.origin, cfg.coord_system,
+            ));
+        }
     }
     for (ii, json) in cfg.driven_exprs.iter().enumerate() {
         symbi_hydro::SourceConfig::from_json(json)

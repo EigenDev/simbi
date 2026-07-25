@@ -16,9 +16,12 @@ class SourceKind(str, enum.Enum):
     like RAW it supplies conserved components, so it is valid on relativistic/MHD.
     SPONGE is the full conserved-state relaxation (buffer zone): it relaxes den,
     mom, AND nrg toward a reference conserved state, where RELAX relaxes only the
-    velocity (density-preserving drag)."""
+    velocity (density-preserving drag). ROTATING_FRAME takes
+    [omega, origin_x, origin_y] and applies the Newtonian Coriolis and centrifugal
+    force for constant rotation about the positive z axis."""
 
     FORCE = "force"
+    ROTATING_FRAME = "rotating_frame"
     COOLING = "cooling"
     RELAX = "relax"
     SPONGE = "sponge"
@@ -1267,7 +1270,8 @@ class CompiledExpr:
         """serialize to the rust `SourceConfig` wire format consumed by
         symbi-expr (`load.rs::SourceConfig::from_json`) and lowered by
         symbi-hydro's `build_user_source`:
-          kind   -- 'force' | 'cooling' | 'relax' | 'sponge' | 'inject' | 'raw' (law wrap)
+          kind   -- 'force' | 'rotating_frame' | 'cooling' | 'relax' | 'sponge' |
+                    'inject' | 'raw' (law wrap)
           dim    -- spatial dimensionality (force needs `dim` accel outputs,
                     cooling 1, relax 1+dim; sponge [kappa, den_ref, dim*mom_ref,
                     nrg_ref] = 3+dim on energy regimes, 2+dim on iso; inject
