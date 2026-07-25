@@ -17,6 +17,7 @@
 [![Rust](https://img.shields.io/badge/Rust-backend-orange.svg?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/downloads/)
 [![CUDA](https://img.shields.io/badge/CUDA-supported-76B900.svg?style=for-the-badge&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
+[![ROCm](https://img.shields.io/badge/ROCm-supported-ED1C24.svg?style=for-the-badge&logo=amd)](https://rocm.docs.amd.com/)
 
 **[Quick Start](#quick-start) · [Installation](#installation) · [Usage](#usage) · [Publications](#publications)**
 
@@ -33,7 +34,7 @@ A quick note on what this is these days: SIMBI started life as a C++ code and wa
 **What you get:**
 - Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
 - Spacetime as its own axis: hand the relativistic regimes a Minkowski, Schwarzschild, or horizon-penetrating Kerr-Schild metric the same way you would pick a coordinate system
-- GPU acceleration on NVIDIA cards, with kernels compiled on the fly so there is no separate build step and no architecture flag to remember
+- GPU acceleration on NVIDIA CUDA and AMD ROCm/HIP devices, with kernels compiled on the fly for the active accelerator
 - High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant, see [Fleischmann et al. 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches (still working on strengthening this. Maybe I'll switch to [Zalesak and friends](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf) at some point).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
@@ -46,7 +47,10 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
-An AMD/HIP backend is in the tree as an experimental build feature (the compute layer is backend-agnostic, so the CUDA and HIP paths share one kernel definition). Multi-*node* decomposition is the next step on the roadmap; single-node multi-GPU already runs today.
+CUDA and HIP are peer production backends generated from the same kernel
+definitions. The AMD path runs on the OLCF Frontier cluster. Multi-*node*
+decomposition is the next step on the roadmap; single-node multi-GPU already
+runs today.
 I don't have a science problem that needs it at this time, so it prob won't be added for 
 quite a while.
 ---
@@ -93,10 +97,12 @@ uv run simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" 
 You can also save a bunch of time by doing `source .venv/bin/activate` and you'll remain in the 
 simbi environment you created when you ran `uv venv`. 
 
-Got an NVIDIA card? The GPU build adds the CUDA feature, so it goes through the project helper:
+Got an NVIDIA or AMD accelerator? Select its production backend through the
+project helper:
 
 ```bash
-./dev.py install --gpu
+./dev.py install --cuda
+./dev.py install --hip
 uv run simbi run marti-muller --mode gpu --resolution 1024
 ```
 
@@ -115,10 +121,12 @@ purposes these days. :D)
 - A Rust toolchain (cargo), the easy way is [rustup](https://rustup.rs)
 - Python 3.10 or newer
 - HDF5 (it gets linked into the extension)
-- For GPU, the NVIDIA driver, which gives you `libcuda` and `libnvrtc`
+- For NVIDIA GPU execution, a driver providing `libcuda` and `libnvrtc`
+- For AMD GPU execution, ROCm providing `libamdhip64` and `libhiprtc`
 - On Linux, `patchelf` (uv and maturin will tell you if it is missing)
 
-That is it. You do not need `nvcc`. Kernels are compiled at runtime with NVRTC, so the GPU build figures out your card's architecture on its own.
+That is it. You do not need `nvcc` or `hipcc`. Kernels are compiled at runtime
+with NVRTC on NVIDIA devices and hipRTC on AMD devices.
 
 ### The uv way (recommended)
 
@@ -155,17 +163,20 @@ If you are hacking on the code rather than just running it, that is when you wan
 
 ```bash
 ./dev.py install            # editable, rebuilds the rust backend
-./dev.py install --gpu      # same, with the cuda feature
+./dev.py install --cuda     # same, with the nvidia cuda backend
+./dev.py install --hip      # same, with the amd rocm/hip backend
 ```
 
 Plain `uv pip install -e .` works too for the Python side, but it will not recompile the Rust on its own, so `./dev.py install` is the better contributor loop.
 
 ### GPU builds
 
-The GPU path needs the cargo `cuda` feature turned on, so it goes through `dev.py`, which is a thin wrapper around maturin:
+GPU builds go through `dev.py`, a thin wrapper around maturin. Select CUDA for
+NVIDIA or HIP for AMD:
 
 ```bash
-./dev.py install --gpu
+./dev.py install --cuda
+./dev.py install --hip
 ```
 
 The CPU and GPU extensions coexist as separate modules (`cpu_ext` and `gpu_ext`), so you can keep both installed and pick the backend at run time with `--mode cpu`, `--mode omp` (OpenMP-threaded CPU, size it with `--nthreads N`), or `--mode gpu`.
@@ -173,8 +184,10 @@ The CPU and GPU extensions coexist as separate modules (`cpu_ext` and `gpu_ext`)
 ### Cleaning up
 
 ```bash
-./dev.py clean --all     # drop the built extensions and run cargo clean
-./dev.py install --gpu   # rebuild from scratch
+./dev.py clean           # remove cargo artifacts; preserve installed extensions
+./dev.py clean --all     # also remove repository python caches
+./dev.py install --cuda  # rebuild the nvidia backend
+./dev.py install --hip   # rebuild the amd backend
 ```
 
 ---
@@ -583,13 +596,13 @@ refinement_subcycling_mode: Annotated[
 
 Here is the quick tour of how the Rust side fits together, in case you want to hack on it.
 
-The compute backend is a Cargo workspace of small, focused crates. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
+The compute backend is a Cargo workspace of small, focused crates. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), HIP source (compiled at run time with hipRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
 
 The compiler layer earns its keep: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of expensive conditional branches (a `where(...)` in your source expressions becomes a real branch when the arms are worth skipping), and a cost-gated select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code. The guiding rule, enforced by the graph itself: only compute what you actually need.
 
 A few load-bearing pieces:
 
-- **`symbi-ir`** holds the kernel IR, the graph passes, and the code generators (CPU and CUDA share one renderer)
+- **`symbi-ir`** holds the kernel IR, graph passes, and CPU/CUDA/HIP code generation
 - **`symbi-hydro`** is the physics: regimes, equations of state, and the Riemann solvers
 - **`symbi-jit`** is the Cranelift JIT for runtime-authored kernels (your Python source expressions)
 - **`symbi-sim`** owns the simulation state and the kernel-native evolution driver
@@ -602,7 +615,7 @@ A few load-bearing pieces:
 
 A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That last part is what makes multi-GPU work: a subdomain is just a self-contained simulation state, so `gpus > 1` splits the domain into tiles that halo-exchange between neighbors in lockstep — bit-identical to a monolithic run, and riding the exact halo machinery the refinement hierarchy already uses. Multi-*node* is the natural next step from here.
 
-The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the CUDA and HIP (AMD, experimental) paths share one kernel definition and diverge only in the tiny token-map at the very bottom.
+The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the production CUDA and HIP paths share one kernel definition and diverge only in the small target-specific runtime and token mapping at the bottom.
 
 On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave at 256^3 sustains ~38 million zone-cycles per second on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, [AthenaK](https://github.com/IAS-Astrophysics/athenak) reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
 
@@ -683,7 +696,7 @@ archivePrefix = {ascl},
 
 | Version | Changes |
 |---------|---------|
-| **v0.9.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + Cranelift); GR spacetimes + horizon excision; constrained-transport MHD; viscosity + resistivity; two-way rigid-body immersed walls (CSG shapes, spin, energy-conserving coupling); single-node multi-GPU domain decomposition; static mesh refinement; live TUI; the big performance campaign |
+| **v0.9.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + hipRTC + Cranelift); production NVIDIA CUDA and AMD HIP support; GR spacetimes + horizon excision; constrained-transport MHD; viscosity + resistivity; two-way rigid-body immersed walls (CSG shapes, spin, energy-conserving coupling); single-node multi-GPU domain decomposition; static mesh refinement; live TUI; the big performance campaign |
 | **v0.8.0** | Minimized compiler warnings | 
 | **v0.7.0** | Added mypy type checking and the immersed boundary method |
 | **v0.6.0** | Fixed git tag ordering, general refactoring |
@@ -705,6 +718,7 @@ When something will not install, check the basics first:
 python --version   # want 3.10 or newer
 cargo --version    # the rust toolchain is present
 nvidia-smi         # the GPU and driver are visible (NVIDIA)
+rocminfo           # the GPU and ROCm runtime are visible (AMD)
 ```
 
 When a run misbehaves:
