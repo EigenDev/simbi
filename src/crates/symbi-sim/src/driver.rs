@@ -91,6 +91,11 @@ pub fn advance_clock(time: f64, iteration: u64, dt: f64) -> (f64, u64) {
     (time + dt, iteration + 1)
 }
 
+/// a multistage SSP scheme needs the step-entry state for later convex blends.
+pub fn needs_step_snapshot(stages: &[(f64, f64)]) -> bool {
+    stages.len() > 1
+}
+
 // env-gated per-phase profiler (SYMBI_PROFILE=1). accumulates main-thread wall
 // time per phase; each kernel call returns when its rayon par_iter joins, so
 // main-thread timing captures the phase's wall cost. used by the zone-cycle
@@ -253,7 +258,9 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
 
 #[cfg(test)]
 mod tests {
-    use super::{advance_clock, check_dt_or_panic, select_timestep, stage_schedule};
+    use super::{
+        advance_clock, check_dt_or_panic, needs_step_snapshot, select_timestep, stage_schedule,
+    };
 
     #[test]
     fn check_dt_or_panic_accepts_positive_finite() {
@@ -339,5 +346,11 @@ mod tests {
         let (time, iteration) = advance_clock(1.25, 7, 0.125);
         assert_eq!(time, 1.375);
         assert_eq!(iteration, 8);
+    }
+
+    #[test]
+    fn only_multistage_schemes_need_a_step_snapshot() {
+        assert!(!needs_step_snapshot(&[(0.0, 1.0)]));
+        assert!(needs_step_snapshot(&[(0.0, 1.0), (0.5, 0.5)]));
     }
 }

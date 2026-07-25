@@ -26,7 +26,7 @@ pub use crate::sim::substrate_seam::KernelSet;
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
     advance_clock, advance_motion, evolve_bodies, prof, select_timestep, set_stage_motion,
-    stage_schedule,
+    stage_schedule, needs_step_snapshot,
 };
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -384,7 +384,7 @@ where
     // CT magnetic-energy correction in the corrector — same logic applies (no corrector
     // on Euler, no read of bcell_n). regime kernel-sets need not branch internally;
     // the evolve loop is the single place to gate this.
-    if n > 1 {
+    if needs_step_snapshot(stages) {
         prof("snapshot", || k.snapshot(sim));
     }
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
