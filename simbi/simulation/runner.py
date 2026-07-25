@@ -238,19 +238,21 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
 
 
 def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
-    """reject ambiguous or backend-invalid expression wires before rust."""
+    """reject backend-invalid expression wires before rust."""
     source_fields = (
         "gravity_source_expressions",
         "hydro_source_expressions",
     )
-    active_sources = [
-        field for field in source_fields if model_dict.get(field)
+    source_payloads = [
+        (f"source_expressions[{index}]", payload)
+        for index, payload in enumerate(model_dict.get("source_expressions", ()))
+        if payload
     ]
-    if len(active_sources) > 1:
-        raise ValueError(
-            "both gravity_source_expressions and hydro_source_expressions are "
-            "non-empty, but the backend accepts only one source payload"
-        )
+    source_payloads.extend(
+        (field, model_dict[field])
+        for field in source_fields
+        if model_dict.get(field)
+    )
 
     boundary_fields = (
         "bx1_inner_expressions",
@@ -260,8 +262,11 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
         "bx3_inner_expressions",
         "bx3_outer_expressions",
     )
-    for field in (*source_fields, *boundary_fields, "scale_factor_expressions"):
-        payload = model_dict.get(field)
+    payloads = source_payloads + [
+        (field, model_dict.get(field))
+        for field in (*boundary_fields, "scale_factor_expressions")
+    ]
+    for field, payload in payloads:
         if not payload:
             continue
         if not isinstance(payload, dict):
@@ -280,7 +285,7 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
         kind = str(payload["kind"]).lower()
         dim = int(payload.get("dim", model_dict.get("dimensionality", 1)))
         has_energy = not bool(model_dict.get("isothermal", False))
-        if field in source_fields:
+        if field in source_fields or field.startswith("source_expressions["):
             known_kinds = {
                 "force",
                 "cooling",

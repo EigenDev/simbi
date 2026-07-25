@@ -77,18 +77,42 @@ def test_scalar_sample_rejects_empty_passive_scalar() -> None:
         runner._check_first_scalar("Probe", "passive scalar", iter(()))
 
 
-def test_execution_dict_rejects_two_source_hooks() -> None:
+def test_execution_dict_preserves_source_collection_and_legacy_hooks() -> None:
     class DualSource(SodProblem):
         @property
+        def source_expressions(self):
+            return [{
+                "kind": "raw",
+                "dim": 1,
+                "target": "den",
+                "outputs": [0],
+                "nodes": [{"op": "CONSTANT", "value": 1.0}],
+            }]
+
+        @property
         def gravity_source_expressions(self):
-            return {"kind": "raw"}
+            return {
+                "kind": "raw",
+                "dim": 1,
+                "target": "mom",
+                "outputs": [0],
+                "nodes": [{"op": "CONSTANT", "value": 2.0}],
+            }
 
         @property
         def hydro_source_expressions(self):
-            return {"kind": "raw"}
+            return {
+                "kind": "raw",
+                "dim": 1,
+                "target": "nrg",
+                "outputs": [0],
+                "nodes": [{"op": "CONSTANT", "value": 3.0}],
+            }
 
-    with pytest.raises(ValueError, match="both gravity_source_expressions"):
-        to_execution_dict(DualSource())
+    payload = to_execution_dict(DualSource())
+    assert [source["target"] for source in payload["source_expressions"]] == ["den"]
+    assert payload["gravity_source_expressions"]["target"] == "mom"
+    assert payload["hydro_source_expressions"]["target"] == "nrg"
 
 
 def test_execution_dict_rejects_bare_source_serialize() -> None:

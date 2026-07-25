@@ -11,7 +11,7 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi_hydro::expr_bridge::build_user_source;
+use symbi_hydro::expr_bridge::{build_user_source, build_user_sources};
 use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
@@ -61,4 +61,45 @@ fn runtime_loaded_force_accelerates_gas() {
         let rho = *sim.fields.cons.den.view().at(c);
         assert!((rho - 1.0).abs() < 1e-6, "density drifted at {c:?}: rho = {rho}");
     }
+}
+
+#[test]
+fn runtime_source_collection_sums_independent_parameters() {
+    let first = SourceConfig::from_json(
+        r#"{
+            "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.2],
+            "nodes": [ {"op": "PARAMETER", "param_idx": 0},
+                       {"op": "CONSTANT", "value": 0.0} ]
+        }"#,
+    )
+    .expect("parse first source");
+    let second = SourceConfig::from_json(
+        r#"{
+            "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.3],
+            "nodes": [ {"op": "PARAMETER", "param_idx": 0},
+                       {"op": "CONSTANT", "value": 0.0} ]
+        }"#,
+    )
+    .expect("parse second source");
+    let (built, params) =
+        build_user_sources(&[first, second], &NEWTONIAN_SPEC).expect("compose sources");
+
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: 1.4 }, Cartesian)
+        .cells([16, 16])
+        .bounds([0.0, 0.0], [1.0, 1.0])
+        .boundaries(BoundaryType::Periodic)
+        .finish()
+        .unwrap();
+    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    let sub = sim.substrate().with_runtime_source(built, params);
+
+    let t_final = 0.05;
+    evolve(&mut sim, &sub, t_final).expect("evolve under source collection");
+
+    let got = mom_x_total(&sim);
+    let expected = (0.2 + 0.3) * t_final * (16.0 * 16.0);
+    assert!(
+        (got - expected).abs() / expected < 0.02,
+        "composed force wrong magnitude: mom_x = {got}, expected {expected}",
+    );
 }

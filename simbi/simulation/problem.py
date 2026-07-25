@@ -731,6 +731,12 @@ class SimbiProblem(BaseModel):
     # =========================================================================
     @computed_field
     @property
+    def source_expressions(self) -> list[ExpressionDict]:
+        """ordered source terms applied additively during each stage."""
+        return []
+
+    @computed_field
+    @property
     def hydro_source_expressions(self) -> ExpressionDict:
         return {}
 
