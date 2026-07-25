@@ -314,15 +314,27 @@ def _enable_gpu_page_migration() -> None:
 
 
 def _load_backend(compute_mode: str) -> Optional[ModuleType]:
-    """load the appropriate backend module."""
+    """load the appropriate backend extension. a MISSING extension (never built for this
+    mode) returns None -> the caller's demo mode (config inspection, CI without a build). an
+    extension that EXISTS but fails to load -- typically a GPU runtime version mismatch
+    between build and run, surfacing as an undefined symbol -- raises: silently demoting a
+    scheduled GPU job to a config dump wastes the whole allocation."""
     lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
     if lib_mode == "gpu":
         _enable_gpu_page_migration()
     try:
         return importlib.import_module(f"simbi.libs.{lib_mode}_ext")
-    except ImportError as e:
-        print(f"warning: could not load {lib_mode} backend: {e}")
+    except ModuleNotFoundError as e:
+        print(f"warning: {lib_mode} backend not built ({e}); entering demo mode")
         return None
+    except ImportError as e:
+        raise RuntimeError(
+            f"the {lib_mode} backend is built but failed to load: {e}\n"
+            f"this is almost always a GPU runtime version mismatch between build and run -- "
+            f"load the SAME ROCm/CUDA module the extension was built against (e.g. the exact "
+            f"`rocm/<version>` from the session where the build + a test run succeeded), so "
+            f"the HIP/HSA (or CUDA/NVRTC) runtime versions agree."
+        ) from e
 
 
 def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
