@@ -832,6 +832,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         for (i, s) in stores.iter_mut().enumerate() {
             s.motion.a = a_n[i];
         }
+        let mut horizon_receipt = None;
         {
             let sh = shared!();
             // the viscous transport, per tile, once per step after
@@ -862,6 +863,34 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 }
                 drain_devices::<M>(devices);
                 exchange_grid(&sh, counts, devices, transport);
+            }
+            let horizon = sh.first().and_then(|store| {
+                store.immersed.as_ref().and_then(|im| {
+                    im.bodies
+                        .bodies()
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, body)| match body.kind {
+                            symbi_ib::BodyKind::Horizon { diagnostic_radius, .. } => {
+                                Some((index, diagnostic_radius))
+                            }
+                            _ => None,
+                        })
+                })
+            });
+            if let Some((index, diagnostic_radius)) = horizon {
+                let (mdot, edot) = (0..n)
+                    .map(|ii| {
+                        symbi_xpu::with_device(devices[ii], || {
+                            prof("horizon_accretion", || {
+                                kernels[ii].horizon_accretion(sh[ii], diagnostic_radius)
+                            })
+                        })
+                    })
+                    .fold((0.0, 0.0), |(mass, energy), (local_mass, local_energy)| {
+                        (mass + local_mass, energy + local_energy)
+                    });
+                horizon_receipt = Some((index, mdot, edot));
             }
             // backward immersed-body feedback (per STEP, after all stages): each tile reduces its
             // LOCAL interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
@@ -894,6 +923,25 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     }
                 }
                 drain_devices::<M>(devices);
+            }
+        }
+        if let Some((index, mdot, edot)) = horizon_receipt {
+            for store in stores.iter_mut() {
+                if let Some(im) = store.immersed.as_mut() {
+                    if let symbi_ib::BodyKind::Horizon {
+                        total_accreted_mass,
+                        total_accreted_energy,
+                        mdot: mass_rate,
+                        edot: energy_rate,
+                        ..
+                    } = &mut im.bodies.get_mut(index).kind
+                    {
+                        *total_accreted_mass += mdot * dt;
+                        *total_accreted_energy += edot * dt;
+                        *mass_rate = mdot;
+                        *energy_rate = edot;
+                    }
+                }
             }
         }
         if has_bodies {

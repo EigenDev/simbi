@@ -11,9 +11,12 @@
 use symbi::prelude::*;
 use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
 use symbi_algebra::Domain;
+use symbi_geometry::MotionState;
 use symbi_grid::Field;
 use symbi_hydro::expr_bridge::build_user_sources;
 use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_ib::{Body, BodyCollection, BodyKind};
+use symbi_sim::tracers::seed_mass_weighted;
 
 const GAMMA: f64 = 1.4;
 const T_FINAL: f64 = 0.03;
@@ -176,6 +179,187 @@ fn assert_source_driver_identity(timestepping: Timestepping) {
     );
 }
 
+fn make_with_body(timestepping: Timestepping) -> (Sim, Kern) {
+    let (sim, _) = make(timestepping);
+    let bodies = BodyCollection::new().add(Body::black_hole(
+        0,
+        Tensor::new([0.5, 0.375]),
+        Tensor::zeros(),
+        1.0,
+        0.05,
+        0.12,
+        10.0,
+        1.0e-3,
+        0.18,
+    ));
+    let sim = sim.with_bodies(bodies);
+    let kernels = sim.substrate().with_source_fusion();
+    (sim, kernels)
+}
+
+fn accreted_mass(sim: &Sim) -> f64 {
+    let body = sim.immersed.as_ref().expect("body collection").bodies.get(0);
+    match body.kind {
+        BodyKind::BlackHole {
+            total_accreted_mass,
+            ..
+        } => total_accreted_mass,
+        _ => panic!("test body is not a black hole"),
+    }
+}
+
+fn assert_body_driver_identity(timestepping: Timestepping) {
+    let (mut single, single_kernels) = make_with_body(timestepping);
+    let (mut decomposed, decomposed_kernels) = make_with_body(timestepping);
+    let (mut body_free, body_free_kernels) = make(timestepping);
+
+    run_and_assert_identity(
+        &mut single,
+        &single_kernels,
+        &mut decomposed,
+        &decomposed_kernels,
+        timestepping,
+    );
+    evolve(&mut body_free, &body_free_kernels, T_FINAL).expect("body-free evolve");
+
+    let single_mass = accreted_mass(&single);
+    let decomposed_mass = accreted_mass(&decomposed);
+    assert_eq!(
+        single_mass.to_bits(),
+        decomposed_mass.to_bits(),
+        "body accretion ledger differs",
+    );
+    assert!(
+        single_mass > 1.0e-6,
+        "body recorded no accretion; driver identity is vacuous",
+    );
+    let minimum_density = single
+        .geom
+        .interior
+        .iter()
+        .map(|cell| *single.fields.cons.den.view().at(cell))
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        minimum_density < 0.99,
+        "body sink removed no mass; driver identity is vacuous",
+    );
+    let gravity_changed_far_field = single.geom.interior.iter().any(|cell| {
+        let position = single.geom.cell_coord(cell);
+        let radius =
+            ((position[0] - 0.5).powi(2) + (position[1] - 0.375).powi(2)).sqrt();
+        radius > 0.25
+            && single.fields.cons.mom[0].view().at(cell).to_bits()
+                != body_free.fields.cons.mom[0].view().at(cell).to_bits()
+    });
+    assert!(
+        gravity_changed_far_field,
+        "body gravity left the far-field momentum unchanged; driver identity is vacuous",
+    );
+}
+
+fn make_with_motion(timestepping: Timestepping) -> (Sim, Kern) {
+    let (mut sim, _) = make(timestepping);
+    sim.motion = MotionState::homologous(1.0, 0.5);
+    let kernels = sim.substrate();
+    (sim, kernels)
+}
+
+fn assert_motion_driver_identity(timestepping: Timestepping) {
+    let (mut single, single_kernels) = make_with_motion(timestepping);
+    let (mut decomposed, decomposed_kernels) = make_with_motion(timestepping);
+
+    run_and_assert_identity(
+        &mut single,
+        &single_kernels,
+        &mut decomposed,
+        &decomposed_kernels,
+        timestepping,
+    );
+
+    assert_eq!(
+        single.motion.a.to_bits(),
+        decomposed.motion.a.to_bits(),
+        "mesh scale factor differs",
+    );
+    assert_eq!(
+        single.motion.a_dot.to_bits(),
+        decomposed.motion.a_dot.to_bits(),
+        "mesh expansion rate differs",
+    );
+    assert!(
+        single.motion.a > 1.0 + 0.25 * T_FINAL,
+        "mesh scale factor never advanced; driver identity is vacuous",
+    );
+}
+
+fn make_with_tracers(timestepping: Timestepping) -> (Sim, Kern) {
+    let (mut sim, _) = make(timestepping);
+    sim.tracers = Some(seed_mass_weighted(&sim, 128));
+    let kernels = sim.substrate();
+    (sim, kernels)
+}
+
+fn assert_tracer_driver_identity(timestepping: Timestepping) {
+    let (mut single, single_kernels) = make_with_tracers(timestepping);
+    let (mut decomposed, decomposed_kernels) = make_with_tracers(timestepping);
+    let initial_positions = single
+        .tracers
+        .as_ref()
+        .expect("single tracers")
+        .x
+        .clone();
+
+    run_and_assert_identity(
+        &mut single,
+        &single_kernels,
+        &mut decomposed,
+        &decomposed_kernels,
+        timestepping,
+    );
+
+    let single_tracers = single.tracers.as_ref().expect("single tracers");
+    let decomposed_tracers = decomposed.tracers.as_ref().expect("decomposed tracers");
+    assert_eq!(single_tracers.id, decomposed_tracers.id, "tracer ids differ");
+    assert_eq!(
+        single_tracers.weight.to_bits(),
+        decomposed_tracers.weight.to_bits(),
+        "tracer weights differ",
+    );
+    assert_eq!(single_tracers.len(), decomposed_tracers.len());
+    let mut moved = 0usize;
+    for index in 0..single_tracers.len() {
+        for axis in 0..2 {
+            assert_eq!(
+                single_tracers.x[index][axis].to_bits(),
+                decomposed_tracers.x[index][axis].to_bits(),
+                "tracer {index} position differs on axis {axis}",
+            );
+        }
+        let single_flags = single_tracers.flags[index];
+        let decomposed_flags = decomposed_tracers.flags[index];
+        assert_eq!(
+            single_flags.escaped, decomposed_flags.escaped,
+            "tracer {index} escaped flag differs",
+        );
+        assert_eq!(
+            single_flags.crossed_sink, decomposed_flags.crossed_sink,
+            "tracer {index} sink flag differs",
+        );
+        assert_eq!(
+            single_flags.crossing_time.to_bits(),
+            decomposed_flags.crossing_time.to_bits(),
+            "tracer {index} crossing time differs",
+        );
+        if single_tracers.x[index] != initial_positions[index] {
+            moved += 1;
+        }
+    }
+    assert!(
+        moved > single_tracers.len() / 2,
+        "only {moved} tracers moved; driver identity is vacuous",
+    );
+}
+
 #[test]
 fn euler_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_driver_identity(Timestepping::Euler);
@@ -204,4 +388,49 @@ fn rk2_source_single_grid_equals_one_tile_decomposed_bitwise() {
 #[test]
 fn rk3_source_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_source_driver_identity(Timestepping::Rk3);
+}
+
+#[test]
+fn euler_body_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_body_driver_identity(Timestepping::Euler);
+}
+
+#[test]
+fn rk2_body_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_body_driver_identity(Timestepping::Rk2);
+}
+
+#[test]
+fn rk3_body_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_body_driver_identity(Timestepping::Rk3);
+}
+
+#[test]
+fn euler_motion_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_motion_driver_identity(Timestepping::Euler);
+}
+
+#[test]
+fn rk2_motion_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_motion_driver_identity(Timestepping::Rk2);
+}
+
+#[test]
+fn rk3_motion_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_motion_driver_identity(Timestepping::Rk3);
+}
+
+#[test]
+fn euler_tracer_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_tracer_driver_identity(Timestepping::Euler);
+}
+
+#[test]
+fn rk2_tracer_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_tracer_driver_identity(Timestepping::Rk2);
+}
+
+#[test]
+fn rk3_tracer_single_grid_equals_one_tile_decomposed_bitwise() {
+    assert_tracer_driver_identity(Timestepping::Rk3);
 }
