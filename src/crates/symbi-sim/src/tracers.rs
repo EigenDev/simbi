@@ -175,6 +175,26 @@ impl<const D: usize> TracerSet<D> {
         }
     }
 
+    /// wrap live tracer positions across PERIODIC axes back into `[lo, hi)`: a tracer that
+    /// advected past a periodic boundary re-enters from the far side, so the population is
+    /// conserved on a periodic domain instead of freezing at the edge. non-periodic
+    /// (outflow) axes are untouched, left for `scan_events` to flag as escaped. call BEFORE
+    /// `scan_events` so a periodic crossing is never miscounted as an escape.
+    pub fn wrap_periodic(&mut self, lo: [f64; D], hi: [f64; D], periodic: [bool; D]) {
+        for (i, p) in self.x.iter_mut().enumerate() {
+            if self.flags[i].escaped || self.flags[i].crossed_sink {
+                continue;
+            }
+            for a in 0..D {
+                let l = hi[a] - lo[a];
+                if periodic[a] && l > 0.0 {
+                    // (x - lo) mod l, into [0, l), then shift back -> [lo, hi).
+                    p[a] = lo[a] + (p[a] - lo[a]).rem_euclid(l);
+                }
+            }
+        }
+    }
+
     /// the accreted tracer mass: crossing count times the per-tracer weight —
     /// the quantity the G-flux gate compares against the sink's Mdot ledger.
     pub fn crossed_mass(&self) -> f64 {
@@ -354,6 +374,64 @@ mod tests {
         assert_eq!(set.x[2], frozen[1], "crossed tracer moved");
         assert!(set.x[0] != [0.5, 0.5], "live tracer failed to move");
     }
+
+    // THE periodic-conservation contract: a tracer that advects past a periodic boundary
+    // must WRAP back into the domain (population conserved), not be marked escaped and lost.
+    // this reproduces the periodic-KH leak -- ambient tracers drift off one edge and never
+    // reappear on the far side -- and locks the fix.
+    #[test]
+    fn periodic_tracers_wrap_and_do_not_escape() {
+        let lo = [0.0, 0.0];
+        let hi = [1.0, 1.0];
+        // x periodic, y outflow. one tracer past +x, one past -x, one past the +y (outflow)
+        // edge, one interior.
+        let mut set = TracerSet::<2> {
+            x: vec![[1.2, 0.5], [-0.3, 0.5], [0.5, 1.4], [0.4, 0.6]],
+            id: vec![0, 1, 2, 3],
+            flags: vec![TracerFlags::default(); 4],
+            weight: 1.0,
+        };
+        set.wrap_periodic(lo, hi, [true, false]);
+        // periodic x wraps into [0, 1); y (non-periodic) is left alone for the scan.
+        assert!((set.x[0][0] - 0.2).abs() < 1e-12, "x=1.2 did not wrap to 0.2");
+        assert!((set.x[1][0] - 0.7).abs() < 1e-12, "x=-0.3 did not wrap to 0.7");
+        assert_eq!(set.x[2][1], 1.4, "outflow y wrongly wrapped");
+
+        set.scan_events(lo, hi, None, 0.0);
+        // the two periodic crossers survived (in-domain after wrap); only the outflow-y
+        // crosser escaped. population conserved on the periodic axis.
+        assert!(!set.flags[0].escaped, "periodic +x crosser lost");
+        assert!(!set.flags[1].escaped, "periodic -x crosser lost");
+        assert!(set.flags[2].escaped, "outflow-y crosser should escape");
+        assert!(!set.flags[3].escaped);
+        assert_eq!(
+            set.flags.iter().filter(|f| !f.escaped).count(),
+            3,
+            "exactly the 3 in-domain tracers remain live"
+        );
+    }
+
+    // a fully-periodic box loses NO tracers however far they advect: many wrap-arounds keep
+    // every tracer live and in-domain.
+    #[test]
+    fn fully_periodic_box_conserves_every_tracer() {
+        let mut set = TracerSet::<2> {
+            x: (0..50).map(|k| [k as f64 * 0.02, 0.5]).collect(),
+            id: (0..50).collect(),
+            flags: vec![TracerFlags::default(); 50],
+            weight: 1.0,
+        };
+        // advect a big uniform drift many steps (several box-lengths), wrapping each step.
+        for _ in 0..200 {
+            set.advance_rk2(0.05, |_| [1.0, 1.0]);
+            set.wrap_periodic([0.0, 0.0], [1.0, 1.0], [true, true]);
+            set.scan_events([0.0, 0.0], [1.0, 1.0], None, 0.0);
+        }
+        assert_eq!(set.flags.iter().filter(|f| f.escaped).count(), 0, "a periodic box lost tracers");
+        for p in &set.x {
+            assert!((0.0..1.0).contains(&p[0]) && (0.0..1.0).contains(&p[1]), "tracer left the box: {p:?}");
+        }
+    }
 }
 
 // =============================================================================
@@ -404,8 +482,20 @@ pub fn advance_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
     let Some(mut tr) = sim.tracers.take() else { return };
     advance_positions(sim, &mut tr);
     let (lo, hi) = interior_box(sim);
+    // periodic crossings wrap (conserved population); the escape scan then only fires on
+    // non-periodic (outflow) axes.
+    tr.wrap_periodic(lo, hi, periodic_axes(sim));
     tr.scan_events(lo, hi, sink_of(sim), sim.time);
     sim.tracers = Some(tr);
+}
+
+/// per-axis periodicity from the store's boundaries: an axis is periodic when its lo face is
+/// (a periodic axis is periodic on both faces). for a decomposed run the low-corner tile
+/// carries the physical lo-face boundary, so reading tile 0 gives the GLOBAL periodicity.
+fn periodic_axes<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+) -> [bool; D] {
+    std::array::from_fn(|a| matches!(sim.boundaries.0[a][0], crate::state::BoundaryType::Periodic))
 }
 
 /// advect the population one step against `sim`'s post-step primitive velocity, sampled
@@ -492,7 +582,6 @@ pub fn advance_tracers_decomposed<const D: usize, const DOF: usize, Mem: MemoryS
             s.tracers = Some(tr);
         }
     }
-    migrate_tracers(stores, counts);
     // the global domain box = tile (0,..,0)'s lower corner extended by the full cell count.
     let (mut glo, mut ghi) = ([0.0; D], [0.0; D]);
     for a in 0..D {
@@ -501,6 +590,17 @@ pub fn advance_tracers_decomposed<const D: usize, const DOF: usize, Mem: MemoryS
         glo[a] = stores[0].geom.x_lo[a];
         ghi[a] = glo[a] + n_int * counts[a] as f64 * stores[0].geom.dx[a];
     }
+    // wrap periodic crossings into the GLOBAL box BEFORE migration, so a tracer that left one
+    // periodic edge re-homes to the tile at the opposite edge. tile 0 is the low corner, so it
+    // carries the physical (global) boundary.
+    let periodic = periodic_axes(&*stores[0]);
+    for s in stores.iter_mut() {
+        if let Some(mut tr) = s.tracers.take() {
+            tr.wrap_periodic(glo, ghi, periodic);
+            s.tracers = Some(tr);
+        }
+    }
+    migrate_tracers(stores, counts);
     let sink = stores.iter().find_map(|s| sink_of(*s));
     for s in stores.iter_mut() {
         if let Some(mut tr) = s.tracers.take() {
