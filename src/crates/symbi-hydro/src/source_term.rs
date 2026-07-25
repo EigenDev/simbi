@@ -53,6 +53,28 @@ pub fn force_energy<S: Scalar>(rho: S, vel: &[S], accel: &[S]) -> S {
     rho * dot(accel, vel)
 }
 
+/// acceleration in a frame rotating counterclockwise about the z axis at constant
+/// angular speed `omega`. coordinates and velocities are measured in that frame.
+/// the result includes `-2 omega cross v` and `-omega cross (omega cross r)`;
+/// the z component is zero when a three-component state is supplied.
+pub fn rotating_frame_acceleration<S: Scalar>(
+    position: &[S],
+    vel: &[S],
+    omega: S,
+    origin_x: S,
+    origin_y: S,
+) -> Vec<S> {
+    assert!(position.len() >= 2);
+    assert_eq!(position.len(), vel.len());
+    let dx = position[0] - origin_x;
+    let dy = position[1] - origin_y;
+    let omega_sq = omega * omega;
+    let mut accel = vec![S::ZERO; position.len()];
+    accel[0] = S::from_f64(2.0) * omega * vel[1] + omega_sq * dx;
+    accel[1] = S::from_f64(-2.0) * omega * vel[0] + omega_sq * dy;
+    accel
+}
+
 /// cooling lift: `S_nrg = -Lambda`, for a cooling-rate field `Lambda`. an energy
 /// sink; mass + momentum are untouched (a cooling kind reaches only the nrg slot).
 pub fn cooling<S: Scalar>(rate: S) -> S {
@@ -472,5 +494,19 @@ mod tests {
         assert!((drag[0] - (-6.0)).abs() < 1e-13, "drag opposes velocity: {}", drag[0]);
         let work = relax_energy(rho, &vel, 2.0, &v_ref);
         assert!(work < 0.0, "relaxation must remove kinetic energy, got {work}");
+    }
+
+    #[test]
+    fn rotating_frame_acceleration_has_coriolis_and_centrifugal_signs() {
+        let accel =
+            rotating_frame_acceleration(&[3.0, 4.0, 7.0], &[5.0, 6.0, 8.0], 2.0, 1.0, 1.0);
+        assert_eq!(accel, vec![32.0, -8.0, 0.0]);
+    }
+
+    #[test]
+    fn rotating_frame_matches_an_inertially_stationary_particle() {
+        let omega = 2.0;
+        let accel = rotating_frame_acceleration(&[1.0, 0.0], &[0.0, -omega], omega, 0.0, 0.0);
+        assert_eq!(accel, vec![-omega * omega, 0.0]);
     }
 }

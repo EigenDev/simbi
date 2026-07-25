@@ -16,6 +16,7 @@ import simbi.libs.cpu_ext as backend
 from simbi import ProblemParam
 from simbi.simulation import runner
 from simbi.simulation.runner import to_execution_dict
+from simbi.types import CoordSystem
 from simbi_configs.examples.newtonian.sod import SodProblem
 
 
@@ -133,6 +134,37 @@ def test_execution_dict_rejects_source_arity(
     }
     with pytest.raises(ValueError, match=rf"expected {expected}"):
         runner._validate_expression_payloads(payload)
+
+
+def test_expression_validation_rejects_rotating_frame_in_curvilinear_coordinates() -> None:
+    payload = {
+        "source_expressions": [
+            {
+                "kind": "rotating_frame",
+                "dim": 2,
+                "outputs": [0, 1, 2],
+            }
+        ],
+        "coord_system": "spherical",
+        "isothermal": False,
+    }
+    with pytest.raises(ValueError, match="requires cartesian"):
+        runner._validate_expression_payloads(payload)
+
+
+def test_expression_validation_accepts_cartesian_enum_for_rotating_frame() -> None:
+    payload = {
+        "source_expressions": [
+            {
+                "kind": "rotating_frame",
+                "dim": 2,
+                "outputs": [0, 1, 2],
+            }
+        ],
+        "coord_system": CoordSystem.CARTESIAN,
+        "isothermal": False,
+    }
+    runner._validate_expression_payloads(payload)
 
 
 def test_execution_dict_rejects_boundary_arity() -> None:

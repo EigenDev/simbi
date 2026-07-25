@@ -821,6 +821,47 @@ pub fn user_force_energy_source(accel: &BuiltSource, d: usize) -> BuiltSource {
     })
 }
 
+/// rotating-frame momentum source for constant rotation about the z axis. the
+/// field is `[omega, origin_x, origin_y]`; position and velocity come from the
+/// evolving cell state, so this source composes with independent buffer sponges.
+pub fn user_rotating_frame_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource {
+    assert_eq!(field.outputs.len(), 3);
+    lift_to_built(|| {
+        let rho = Gv::scalar(law_params::RHO);
+        let position: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&format!("x_{kk}"))).collect();
+        let vel: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&law_params::vel(kk))).collect();
+        let values = splice_field_into_trace(field);
+        let accel = crate::source_term::rotating_frame_acceleration(
+            &position,
+            &vel,
+            values[0],
+            values[1],
+            values[2],
+        );
+        crate::source_term::force_momentum(rho, &accel)
+    })
+}
+
+/// rotating-frame work term derived from the same acceleration as the momentum
+/// source, so energy and momentum cannot diverge.
+pub fn user_rotating_frame_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
+    assert_eq!(field.outputs.len(), 3);
+    lift_to_built(|| {
+        let rho = Gv::scalar(law_params::RHO);
+        let position: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&format!("x_{kk}"))).collect();
+        let vel: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&law_params::vel(kk))).collect();
+        let values = splice_field_into_trace(field);
+        let accel = crate::source_term::rotating_frame_acceleration(
+            &position,
+            &vel,
+            values[0],
+            values[1],
+            values[2],
+        );
+        vec![crate::source_term::force_energy(rho, &vel, &accel)]
+    })
+}
+
 /// the axiomatic COOLING source: `S_nrg = -Lambda`, where `Lambda` is the user's 1-output
 /// rate field — an energy sink; momentum + mass are untouched. target field `"nrg"`.
 pub fn user_cooling_source(rate: &BuiltSource, _d: usize) -> BuiltSource {
