@@ -1566,8 +1566,15 @@ where
             prof("penalize", || l.kernels.penalize(&l.state, dt));
             if let Some(density_before) = accretion_density.as_deref() {
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                symbi_sim::tracers::advance_accretion_transport(
-                    &mut self.levels[level].state,
+                let layout = self.tracer_layout(level);
+                let geometry = self.levels[level]
+                    .state
+                    .geom
+                    .block_geometry(self.levels[level].state.physics.metric);
+                symbi_sim::tracers::advance_accretion_transport_store(
+                    &mut self.levels[level].state.store,
+                    &geometry,
+                    layout,
                     density_before,
                 )
                 .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));

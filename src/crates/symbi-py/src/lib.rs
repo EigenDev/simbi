@@ -5918,13 +5918,10 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     cfg.regime
                 ));
             }
-            if !cfg.gradient_bcs.is_empty()
-                || !cfg.bodies.is_empty()
-                || cfg.bonded_assembly.is_some()
-            {
+            if !cfg.gradient_bcs.is_empty() {
                 return Err(
-                    "n_tracers with refinement does not yet support immersed bodies or gradient \
-                     boundaries until their level-specific material receipts are wired"
+                    "n_tracers with refinement does not yet support gradient boundaries until \
+                     their level-specific material receipts are wired"
                         .to_string(),
                 );
             }

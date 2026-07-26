@@ -27,6 +27,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, BodyKind, SurfaceSpec};
 use symbi_ib::sdf::SdfExpr;
+use symbi_sim::tracers::ACCRETION_RESERVOIR;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -94,6 +95,54 @@ fn composite_mass(hier: &Hier) -> f64 {
         }
     }
     mass
+}
+
+#[test]
+fn refined_sink_receipt_moves_fine_tracers_into_the_accretion_reservoir() {
+    let mut hierarchy = two_level(0.0, BodyCollection::new().add(Body::black_hole(
+        0,
+        Tensor::new([0.5; 3]),
+        Tensor::zeros(),
+        0.05,
+        0.05,
+        0.1,
+        20.0,
+        1.0,
+        0.1,
+    )));
+    hierarchy.attach_mass_tracers(32_768);
+    let mass_before = composite_mass(&hierarchy);
+
+    hierarchy.evolve_steps(1).unwrap();
+
+    let removed_mass = mass_before - composite_mass(&hierarchy);
+    let tracers = hierarchy.levels[1].state.tracers.as_ref().unwrap();
+    let accreted = tracers
+        .owner
+        .iter()
+        .filter(|&&owner| owner == ACCRETION_RESERVOIR)
+        .count();
+    let represented_mass = accreted as f64 * tracers.weight;
+
+    assert!(removed_mass > 0.0, "the refined sink removed no fluid mass");
+    assert!(
+        accreted > 100,
+        "the refined sink produced no statistically useful tracer receipt: {accreted}"
+    );
+    assert!(
+        (represented_mass - removed_mass).abs() / removed_mass < 0.15,
+        "tracer reservoir mass {represented_mass:e} does not represent removed composite mass \
+         {removed_mass:e}"
+    );
+    assert!(
+        tracers
+            .flags
+            .iter()
+            .filter(|flags| flags.crossed_sink)
+            .count()
+            == accreted,
+        "sink flags and reservoir ownership disagree"
+    );
 }
 
 #[test]
