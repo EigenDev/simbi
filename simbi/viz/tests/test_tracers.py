@@ -240,8 +240,8 @@ def test_tracers_only_plot_uses_checkpoint_bounds(monkeypatch):
 
     np.testing.assert_allclose(ax.get_xlim(), [-2.0, 3.0])
     np.testing.assert_allclose(ax.get_ylim(), [-1.0, 4.0])
-    assert ax.get_xlabel() == "x"
-    assert ax.get_ylabel() == "y"
+    assert ax.get_xlabel() == "$x$"
+    assert ax.get_ylabel() == "$y$"
     assert len(ax.collections) == 1
 
 

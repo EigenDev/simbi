@@ -36,6 +36,7 @@ from .input import (
     Solver,
     SubCycleMode,
     TimeStepping,
+    TracerScheme,
     UArray,
 )
 from .typing import (
@@ -61,6 +62,7 @@ __all__ = [
     "CtMethod",
     "SubCycleMode",
     "TimeStepping",
+    "TracerScheme",
     # generator types
     "GasStateFunction",
     "GasStateGenerator",

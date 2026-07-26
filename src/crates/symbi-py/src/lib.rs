@@ -132,6 +132,7 @@ struct Config {
     /// mass-transport tracer count (0 = none): deterministic mass-weighted
     /// seeding over the initial interior density.
     n_tracers: usize,
+    tracer_scheme: String,
     // the passive-scalar (dye) initial condition: one value per interior cell,
     // axis-0-fastest, drained from the python `passive_scalar` generator.
     // empty = the run carries no dye. set AFTER parse (run_simulation drains
@@ -875,6 +876,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<i64>().ok())
             .map(|v| v.max(0) as usize)
             .unwrap_or(0),
+        tracer_scheme: dict
+            .get_item("tracer_scheme")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<String>().ok())
+            .unwrap_or_else(|| "discrete".to_string()),
         chi_ic: Vec::new(),
         cohort_ic: Vec::new(),
         binary: parse_binary(dict),
@@ -5996,6 +6003,18 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // curvilinear decomposition and mesh motion still require explicit
     // material-volume geometry in the decomposed driver.
     if cfg.n_tracers > 0 {
+        if !matches!(cfg.tracer_scheme.as_str(), "discrete" | "ito2" | "ito3") {
+            return Err(format!(
+                "tracer_scheme must be one of discrete, ito2, or ito3; got '{}'",
+                cfg.tracer_scheme
+            ));
+        }
+        if cfg.tracer_scheme != "discrete" {
+            return Err(format!(
+                "tracer_scheme '{}' is not wired into the particle driver yet",
+                cfg.tracer_scheme
+            ));
+        }
         if !matches!(
             cfg.regime.as_str(),
             "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd"
