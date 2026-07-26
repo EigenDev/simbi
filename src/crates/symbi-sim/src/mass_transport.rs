@@ -210,6 +210,20 @@ pub fn accepted_face_moment_rates(
     )
 }
 
+/// fold one stage's signed face transfer into the accepted-step transfer.
+///
+/// the shu-osher stage update is `u_next = a0*u_n + ac*(u_stage + dt*l)`;
+/// therefore the flux history obeys the same `ac*(history + stage)` recurrence.
+pub fn fold_accepted_face_mass(history: f64, stage_mass: f64, ac: f64) -> Result<f64, String> {
+    if !history.is_finite() || !stage_mass.is_finite() {
+        return Err("accepted face-mass history must be finite".to_string());
+    }
+    if !ac.is_finite() || !(0.0..=1.0).contains(&ac) {
+        return Err(format!("invalid shu-osher candidate weight {ac:?}"));
+    }
+    Ok(ac * (history + stage_mass))
+}
+
 /// zero-mean, unit-variance piecewise-skew-uniform distribution.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PiecewiseSkewUniform {
@@ -361,8 +375,8 @@ fn unit_f64(value: u64) -> f64 {
 mod tests {
     use super::{
         ContainerId, JumpMomentRates, MassTransfer, PiecewiseSkewUniform, SamplingKey,
-        TransportKernel, accepted_face_moment_rates, ito2_displacement, ito3_displacement,
-        sample_convex_blend, sample_systematic,
+        TransportKernel, accepted_face_moment_rates, fold_accepted_face_mass, ito2_displacement,
+        ito3_displacement, sample_convex_blend, sample_systematic,
     };
     use std::collections::BTreeMap;
 
@@ -413,6 +427,24 @@ mod tests {
             accepted_face_moment_rates(1.0, 0.6, 0.5, 1.0, 0.1)
                 .unwrap_err()
                 .contains("exceeds source mass")
+        );
+    }
+
+    #[test]
+    fn accepted_face_mass_recurrence_matches_euler_rk2_and_rk3_weights() {
+        let fold = |masses: &[f64], weights: &[f64]| {
+            masses
+                .iter()
+                .zip(weights)
+                .fold(0.0, |history, (&mass, &ac)| {
+                    fold_accepted_face_mass(history, mass, ac).unwrap()
+                })
+        };
+        assert_eq!(fold(&[2.0], &[1.0]), 2.0);
+        assert_eq!(fold(&[2.0, 6.0], &[1.0, 0.5]), 4.0);
+        assert_eq!(
+            fold(&[6.0, 12.0, 18.0], &[1.0, 0.25, 2.0 / 3.0]),
+            15.0
         );
     }
 

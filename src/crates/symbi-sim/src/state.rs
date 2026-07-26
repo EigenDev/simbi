@@ -1788,6 +1788,8 @@ pub struct FieldStore<
     pub continuous_tracers: Option<crate::tracers::ContinuousTracerSet<NDIM, Mem>>,
     /// accepted-flux moment rates consumed by continuous ito tracers.
     pub ito_coefficients: Option<crate::tracers::ItoCoefficientFields<NDIM, Mem>>,
+    /// full-step accepted mass-transfer receipt accumulated across hydro stages.
+    pub ito_transport: Option<crate::tracers::ItoTransportReceipt<NDIM, Mem>>,
 
     // ---- time state ----
     pub time: f64,
@@ -2341,6 +2343,7 @@ where
                 tracers: None,
                 continuous_tracers: None,
                 ito_coefficients: None,
+                ito_transport: None,
             },
             physics: Physics {
                 regime,

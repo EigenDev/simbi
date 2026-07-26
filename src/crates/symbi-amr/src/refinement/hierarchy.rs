@@ -1670,13 +1670,25 @@ where
                     .state
                     .geom
                     .block_geometry(self.levels[level].state.physics.metric);
+                let crossing_time = self.levels[level].state.time + dt;
                 symbi_sim::tracers::advance_accretion_transport_store(
                     &mut self.levels[level].state.store,
                     &geometry,
                     layout,
                     density_before,
+                    crossing_time,
                 )
                 .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
+                symbi_sim::tracers::advance_continuous_accretion_transport_store(
+                    &mut self.levels[level].state.store,
+                    &geometry,
+                    layout,
+                    density_before,
+                    crossing_time,
+                )
+                .unwrap_or_else(|detail| {
+                    panic!("continuous tracer accretion transport: {detail}")
+                });
             }
         }
         if has_finer {

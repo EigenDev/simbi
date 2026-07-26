@@ -260,6 +260,22 @@ where
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
                 symbi_sim::tracers::advance_accretion_transport(sim, density_before)
                     .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
+                if sim.continuous_tracers.is_some() {
+                    let geometry = sim.geom.block_geometry(sim.physics.metric);
+                    let layout =
+                        symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
+                    let crossing_time = sim.time;
+                    symbi_sim::tracers::advance_continuous_accretion_transport_store(
+                        &mut sim.store,
+                        &geometry,
+                        layout,
+                        density_before,
+                        crossing_time,
+                    )
+                    .unwrap_or_else(|detail| {
+                        panic!("continuous tracer accretion transport: {detail}")
+                    });
+                }
             }
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
             // the side-car diagnostics, then evolve_bodies consolidates + applies it
@@ -401,6 +417,11 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     if sim.has_tracers() {
         symbi_sim::tracers::snapshot_transport_state(sim);
     }
+    if sim.continuous_tracers.is_some() {
+        let geometry = sim.geom.block_geometry(sim.physics.metric);
+        symbi_sim::tracers::begin_ito_transport_store(&mut sim.store, &geometry)
+            .unwrap_or_else(|detail| panic!("ito transport initialization: {detail}"));
+    }
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
     // scalars from sim.motion, so a stage must see a(t) at its shu-osher ENTRY time
     // (the time of its input state — the same clock the amr cf ghosts use). a is
@@ -444,31 +465,78 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         );
         if sim.has_tracers() {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
-            let mut injections = symbi_sim::tracers::boundary_injection_transfers(sim);
-            injections.extend(symbi_sim::tracers::source_injection_transfers(
-                sim,
-                stage.a0,
-                stage.ac,
-            ));
-            symbi_sim::tracers::fold_injection_ledger(
-                &mut injection_ledger,
-                injections,
-                stage.ac,
-            );
-            prof("tracers", || {
-                symbi_sim::tracers::advance_stage_mass_transport(
+            if sim.continuous_tracers.is_some() {
+                let geometry = sim.geom.block_geometry(sim.physics.metric);
+                symbi_sim::tracers::accumulate_ito_transport_stage_store(
+                    &mut sim.store,
+                    &geometry,
+                    stage.ac,
+                )
+                .unwrap_or_else(|detail| panic!("ito transport accumulation: {detail}"));
+            }
+            if sim.tracers.is_some() {
+                let mut injections = symbi_sim::tracers::boundary_injection_transfers(sim);
+                injections.extend(symbi_sim::tracers::source_injection_transfers(
                     sim,
                     stage.a0,
                     stage.ac,
-                    stage.index,
-                )
-                .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
-            });
+                ));
+                symbi_sim::tracers::fold_injection_ledger(
+                    &mut injection_ledger,
+                    injections,
+                    stage.ac,
+                );
+                prof("tracers", || {
+                    symbi_sim::tracers::advance_stage_mass_transport(
+                        sim,
+                        stage.a0,
+                        stage.ac,
+                        stage.index,
+                    )
+                    .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
+                });
+            }
         }
     }
-    if sim.has_tracers() {
+    if sim.tracers.is_some() {
         symbi_sim::tracers::spawn_boundary_injection(sim, injection_ledger)
             .unwrap_or_else(|detail| panic!("tracer boundary injection: {detail}"));
+    }
+    if sim.continuous_tracers.is_some() {
+        let geometry = sim.geom.block_geometry(sim.physics.metric);
+        symbi_sim::tracers::materialize_ito_coefficients_store(&mut sim.store, &geometry)
+            .unwrap_or_else(|detail| panic!("ito coefficient materialization: {detail}"));
+        symbi_sim::tracers::fill_ito_coefficient_boundaries_host(
+            sim.ito_coefficients
+                .as_ref()
+                .expect("ito coefficients were materialized"),
+            &sim.geom,
+            sim.boundaries,
+        )
+        .unwrap_or_else(|detail| panic!("ito coefficient boundaries: {detail}"));
+        let mut tracers = sim
+            .continuous_tracers
+            .take()
+            .expect("continuous tracers remain attached through the hydro step");
+        let coefficients = sim
+            .ito_coefficients
+            .as_ref()
+            .expect("ito coefficients were materialized");
+        symbi_sim::tracers::advance_continuous_tracers_host(
+            &mut tracers,
+            coefficients,
+            &sim.geom,
+            sim.dt,
+        )
+        .unwrap_or_else(|detail| panic!("ito tracer advancement: {detail}"));
+        let bounds = symbi_sim::tracers::partition_physical_bounds(&sim.geom);
+        symbi_sim::tracers::apply_continuous_boundaries_host(
+            &mut tracers,
+            bounds,
+            sim.boundaries,
+        )
+        .unwrap_or_else(|detail| panic!("ito tracer boundaries: {detail}"));
+        sim.continuous_tracers = Some(tracers);
     }
     sim.motion.a = a_n;
 }
