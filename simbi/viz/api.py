@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from .components import (
     CoordinateProfileComponent,
@@ -44,6 +45,100 @@ def _get_props(
     if component_props and key in component_props:
         return component_props[key]
     return default_factory()
+
+
+def plot_tracers(
+    config: VisualizationConfig,
+    file: str,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    tracer_render: str = "concentration",
+    tracer_smoothing: Optional[float] = None,
+    tracer_color_by: str = "flag",
+    **kwargs,
+) -> Figure:
+    """render an ownership-derived tracer cloud without an eulerian field."""
+    from .bodies import slice_to_plane
+    from .tracers import load_tracers, overlay_tracers, tracer_concentration
+
+    sim_data = load_data(file)
+    if sim_data.metadata.coord_system != "cartesian":
+        raise ValueError("--tracers-only currently supports cartesian coordinates")
+    if sim_data.mesh.ndim < 2:
+        raise ValueError("--tracers-only requires a 2d or 3d checkpoint")
+
+    mapped = slice_to_plane(config.plot.slice)
+    if mapped is None:
+        raise ValueError("--tracers-only requires a 2d plane, not a 1d slice")
+    plane, at = mapped
+    cloud = load_tracers(file)
+    if cloud is None:
+        raise ValueError(f"checkpoint '{file}' has no tracer population")
+    if len(cloud) == 0:
+        raise ValueError(f"checkpoint '{file}' has an empty tracer population")
+
+    figure = prepare_figure(
+        config,
+        1,
+        projection="cartesian",
+        coord_system=CoordSystem.CARTESIAN,
+    )
+    figure.render()
+    ax = figure.axes["main"]
+    vertices = {
+        "x": sim_data.mesh.x1v,
+        "y": sim_data.mesh.x2v,
+        "z": sim_data.mesh.x3v,
+    }
+    x_edges = vertices[plane[0]]
+    y_edges = vertices[plane[1]]
+    if tracer_render == "concentration":
+        concentration = tracer_concentration(
+            cloud,
+            x_edges,
+            y_edges,
+            plane=plane,
+            smoothing=tracer_smoothing,
+        )
+        display_area = np.outer(np.diff(y_edges), np.diff(x_edges))
+        mean = np.sum(concentration * display_area) / np.sum(display_area)
+        normalized = concentration / max(mean, np.finfo(float).tiny)
+        mesh = ax.pcolormesh(
+            x_edges,
+            y_edges,
+            normalized,
+            shading="auto",
+            cmap="magma",
+        )
+        assert figure.fig is not None
+        colorbar = figure.fig.colorbar(mesh, ax=ax)
+        colorbar.set_label("tracer concentration / mean")
+    elif tracer_render == "scatter":
+        overlay_tracers(
+            ax,
+            file,
+            plane=plane,
+            at=at,
+            color_by=tracer_color_by,
+        )
+    else:
+        raise ValueError(f"unknown tracer rendering mode '{tracer_render}'")
+
+    if config.figure.xlims is None:
+        ax.set_xlim(float(vertices[plane[0]][0]), float(vertices[plane[0]][-1]))
+    if config.figure.ylims is None:
+        ax.set_ylim(float(vertices[plane[1]][0]), float(vertices[plane[1]][-1]))
+    ax.set_xlabel(config.figure.xlabel or plane[0])
+    ax.set_ylabel(config.figure.ylabel or plane[1])
+    ax.set_aspect("equal")
+    if config.figure.title:
+        ax.set_title(config.figure.title)
+
+    if save_as:
+        figure.save(save_as)
+    if show:
+        plt.show()
+    return figure
 
 
 def plot(
@@ -215,8 +310,8 @@ def _overlay_bodies(figure, checkpoint_path, config, sim_data) -> None:
 
 
 def _overlay_tracers(figure, checkpoint_path, config) -> None:
-    """scatter the run's lagrangian tracer particles on the rendered field axis, for the
-    two in-plane axes of the field's slice. a run with no tracers draws nothing."""
+    """scatter mass-transport tracers on the rendered field axis for the two
+    in-plane axes of the field slice."""
     from .bodies import slice_to_plane
     from .tracers import overlay_tracers
 

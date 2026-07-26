@@ -1,23 +1,25 @@
 # =============================================================================
 # traced_kh.py
 #
-# kelvin-helmholtz instability seeded with LAGRANGIAN TRACER PARTICLES: massless
-# points, seeded mass-weighted over the initial density (so the denser central
-# layer starts with more of them), advected each step on the post-step gas
-# velocity. as the shear rolls up, the tracers are wound into the billows and
-# carried across the mixing layer, so their final positions map out where the
-# layer's fluid ENDED UP -- the Lagrangian complement to the Eulerian dye in
-# dyed_kh.py (same instability, particle view instead of field view).
+# kelvin-helmholtz instability seeded with fixed-mass transport tracers. the
+# population is seeded in proportion to initial cell mass, so the denser
+# central layer starts with more tracers. accepted finite-volume mass transfers
+# move their authoritative cell owners through the same shear fluxes as the
+# gas. the checkpoint position is the derived owner-cell centroid, giving a
+# discrete lagrangian complement to the eulerian dye in dyed_kh.py.
 #
-# tracers land in the checkpoint `tracers` group (id, position, mass weight,
-# provenance flags); on a periodic domain none escape, so the population is
-# conserved and every checkpoint holds the full set.
+# tracers land in the checkpoint `tracers` group with exact ids, cell or
+# reservoir owners, derived positions, mass weight, provenance flags, and
+# deterministic spawning state. the periodic domain has no exterior reservoir,
+# so every checkpoint retains the full seeded population.
 #
 # usage:
 #  simbi run traced_kh                       # 2000 tracers by default
 #  simbi run traced_kh --tracers 8000        # denser particle sampling
 #  simbi run traced_kh --resolution 512,512  # sharper billows
 #  simbi plot data/traced_kh/*.h5 --field rho --draw-tracers   # scatter the particles
+#  simbi plot data/traced_kh/*.h5 --tracers-only               # concentration map
+#  simbi plot data/traced_kh/*.h5 --tracers-only --tracer-render scatter
 # =============================================================================
 from pathlib import Path
 from typing import Annotated
@@ -35,7 +37,6 @@ from simbi.types import (
 from simbi.types.typing import GasStateGenerator, InitialStateType
 
 SEED = 12345
-rng = np.random.default_rng(SEED)
 PEEK_TO_PEEK = 0.01
 
 
@@ -110,8 +111,7 @@ class TracedKelvinHelmholtz(SimbiProblem):
     @computed_field
     @property
     def n_tracers(self) -> int:
-        """the base problem reads tracer count here; expose it as the CLI-settable
-        `tracers` field so `--tracers N` works while the backend contract is unchanged."""
+        """expose the cli tracer count through the backend field."""
         return self.tracers
 
     def _in_layer(self, y: float) -> bool:
@@ -121,11 +121,12 @@ class TracedKelvinHelmholtz(SimbiProblem):
         """shear layer with seeded noise; pressure-uniform."""
 
         def gas_state() -> GasStateGenerator:
+            rng = np.random.default_rng(SEED)
             nx, ny = self.resolution
             (_, _), (ymin, ymax) = self.bounds[0], self.bounds[1]
             dy = (ymax - ymin) / ny
             for jj in range(ny):
-                y = ymin + jj * dy
+                y = ymin + (jj + 0.5) * dy
                 for _ii in range(nx):
                     vx_noise = PEEK_TO_PEEK * np.sin(2 * np.pi * rng.normal())
                     vy_noise = PEEK_TO_PEEK * np.sin(2 * np.pi * rng.normal())

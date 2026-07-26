@@ -2,9 +2,11 @@
 # test_canonical_capability_examples.py
 #
 # import, payload, rust-preflight, and bounded-evolution gates for the canonical
-# examples of the modern source, table, geometric-grid, and decomposition APIs.
+# examples of the modern source, table, geometric-grid, decomposition, and
+# mass-transport tracer APIs.
 # =============================================================================
 
+from itertools import islice
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,7 @@ from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.rotating_sponge import RotatingSponge
 from simbi_configs.examples.newtonian.tabulated_source_1d import TabulatedSource1D
 from simbi_configs.examples.newtonian.tabulated_source_2d import TabulatedSource2D
+from simbi_configs.examples.newtonian.traced_kh import TracedKelvinHelmholtz
 
 
 EXAMPLE_FACTORIES = [
@@ -30,6 +33,7 @@ EXAMPLE_FACTORIES = [
     TabulatedSource2D,
     GeometricBoundaries,
     DecomposedTabulatedGeometric,
+    TracedKelvinHelmholtz,
 ]
 
 
@@ -68,6 +72,16 @@ def test_integration_example_enables_decomposition():
     assert problem.x1_spacing_ratio != 1.0
     assert problem.x2_spacing_ratio != 1.0
     assert payload["source_expressions"][0]["kind"] == "raw"
+
+
+def test_traced_kh_initial_state_is_repeatable():
+    problem = TracedKelvinHelmholtz()
+
+    first = list(islice(problem.initial_primitive_state()(), 1024))
+    second = list(islice(problem.initial_primitive_state()(), 1024))
+
+    assert first == second
+    assert problem.n_tracers == problem.tracers
 
 
 @pytest.mark.parametrize("factory", EXAMPLE_FACTORIES)
