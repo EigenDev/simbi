@@ -1666,14 +1666,10 @@ where
         if guard.stop_requested() || user_quit {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let restart = checkpoint_name(cfg, "interrupted");
+            let restart =
+                checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Interrupted));
             let _ =
                 write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
-            let _ = write_hierarchy_checkpoint(
-                &states,
-                &checkpoint_name(cfg, "final"),
-                &checkpoint_metadata(cfg, cp_index),
-            );
             let reason = if user_quit {
                 "quit".to_string()
             } else {
@@ -1687,20 +1683,15 @@ where
         }
 
         // fatal cfl crash (set by the evolve loop when the wave speed went NaN / collapsed — an
-        // unphysical c2p, e.g. V -> 1 at the inner boundary): snapshot the LAST computed state as a
-        // `.crashed` checkpoint (+ the `.final` snapshot) so it can be inspected, then stop. mirrors the interrupt
-        // path; the post-loop renders it as a crash.
+        // unphysical c2p, e.g. V -> 1 at the inner boundary): snapshot the last computed state as a
+        // `.crashed` checkpoint so it can be inspected, then stop.
         if let Some(c) = h.crash {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let crashed = checkpoint_name(cfg, "crashed");
+            let crashed =
+                checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
             let _ =
                 write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index));
-            let _ = write_hierarchy_checkpoint(
-                &states,
-                &checkpoint_name(cfg, "final"),
-                &checkpoint_metadata(cfg, cp_index),
-            );
             table.post_error(&format!(
                 "crashed at {} (step {}) — state checkpoint {crashed}",
                 fmt_time_msg(cfg, c.time),
@@ -1933,7 +1924,8 @@ where
         screen.leave();
         table.set_dynamic(false);
         let root = &hier.levels[0].state;
-        let restart = checkpoint_name(cfg, "interrupted");
+        let restart =
+            checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Interrupted));
         let summary = format!(
             "interrupted — {} steps, t = {:.4} · restart {restart}",
             root.iteration, root.time,
@@ -1943,12 +1935,12 @@ where
         return Ok(());
     }
 
-    // crashed: the observer already snapshotted the `.crashed` + `.final` state. surface the halt as
-    // the red crash exit frame.
+    // crashed: the observer already snapshotted the `.crashed` state. surface the halt as the red
+    // crash exit frame.
     if let Some(c) = hier.crash {
         screen.leave();
         table.set_dynamic(false);
-        let crashed = checkpoint_name(cfg, "crashed");
+        let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
         let summary = format!(
             "crashed — {} steps, t = {:.4} — wave speed collapsed (unphysical c2p near a boundary) · state {crashed}",
             c.iter, c.time,
@@ -1959,7 +1951,8 @@ where
     }
 
     let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
-    let final_path = checkpoint_name(cfg, "final");
+    let final_path =
+        checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
     let t_io = std::time::Instant::now();
     symbi_sim::driver::prof("checkpoint_io", || {
         write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))
@@ -3555,7 +3548,10 @@ where
     }
     let _ = write_hierarchy_checkpoint(
         &[&global],
-        &checkpoint_name(cfg, "final"),
+        &checkpoint_name(
+            cfg,
+            checkpoint_status_tag(CheckpointOutcome::Completed),
+        ),
         &checkpoint_metadata(cfg, cp_index),
     );
     Ok(())
@@ -3658,7 +3654,14 @@ where
     );
 
     // canonical final snapshot.
-    write_cp(&tiles, &checkpoint_name(cfg, "final"), cp_index);
+    write_cp(
+        &tiles,
+        &checkpoint_name(
+            cfg,
+            checkpoint_status_tag(CheckpointOutcome::Completed),
+        ),
+        cp_index,
+    );
     Ok(())
 }
 
@@ -5992,8 +5995,46 @@ fn checkpoint_tag(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CheckpointOutcome {
+    Completed,
+    Interrupted,
+    Crashed,
+}
+
+/// the canonical checkpoint status is mutually exclusive: `final` certifies
+/// completion, while interrupted and crashed states remain distinguishable.
+fn checkpoint_status_tag(outcome: CheckpointOutcome) -> &'static str {
+    match outcome {
+        CheckpointOutcome::Completed => "final",
+        CheckpointOutcome::Interrupted => "interrupted",
+        CheckpointOutcome::Crashed => "crashed",
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_status_tests {
+    use super::{checkpoint_status_tag, CheckpointOutcome};
+
+    #[test]
+    fn final_is_reserved_for_successful_completion() {
+        assert_eq!(
+            checkpoint_status_tag(CheckpointOutcome::Completed),
+            "final"
+        );
+        assert_eq!(
+            checkpoint_status_tag(CheckpointOutcome::Interrupted),
+            "interrupted"
+        );
+        assert_eq!(
+            checkpoint_status_tag(CheckpointOutcome::Crashed),
+            "crashed"
+        );
+    }
+}
+
 /// the full checkpoint path: `<dir><zones>.chkpt.<tnow>[.<unit>].h5`. `tnow` is
-/// either a formatted time or a status word (interrupted / crashed). the unit
+/// either a formatted time or a status word (final / interrupted / crashed). the unit
 /// segment is appended only for a non-default time unit, so ordinary runs keep
 /// the terse `<zones>.chkpt.<time>.h5` form (e.g., `262144.chkpt.000_500.h5`).
 fn checkpoint_name(cfg: &Config, tnow: &str) -> String {
