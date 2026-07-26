@@ -434,9 +434,110 @@ where
 }
 
 const EXTERIOR_BIT: u64 = 1 << 63;
+const ACCRETION_RESERVOIR_ID: u64 = 1 << 62;
+
+pub const ACCRETION_RESERVOIR: crate::mass_transport::ContainerId =
+    crate::mass_transport::ContainerId(ACCRETION_RESERVOIR_ID);
 
 fn is_exterior(container: crate::mass_transport::ContainerId) -> bool {
     container.0 & EXTERIOR_BIT != 0
+}
+
+/// capture the conserved density immediately before a post-step material
+/// removal operator.
+pub fn snapshot_accretion_density<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+) -> Vec<f64> {
+    sim.geom
+        .interior
+        .iter()
+        .map(|coord| *sim.fields.cons.den.view().at(coord))
+        .collect()
+}
+
+/// transfer tracers with the accepted cellwise mass removed by post-step
+/// immersed-body penalization into the aggregate accretion reservoir.
+pub fn advance_accretion_transport<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    density_before: &[f64],
+) -> Result<(), String>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let geometry = sim.geom.block_geometry(sim.physics.metric);
+    let layout = TransportLayout::single(&interior);
+    advance_accretion_transport_store(&mut sim.store, &geometry, layout, density_before)
+}
+
+pub fn advance_accretion_transport_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    density_before: &[f64],
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    use crate::mass_transport::{
+        MassTransfer, SamplingKey, TransportKernel, sample_systematic,
+    };
+    use std::collections::BTreeMap;
+
+    let interior = sim.geom.interior.clone();
+    if density_before.len() != interior.volume() {
+        return Err("accretion density snapshot has the wrong cell count".to_string());
+    }
+    let Some(mut tracers) = sim.tracers.take() else {
+        return Ok(());
+    };
+    let mut by_source = BTreeMap::new();
+    for (ii, &owner) in tracers.owner.iter().enumerate() {
+        if !tracers.flags[ii].escaped && !tracers.flags[ii].crossed_sink {
+            by_source
+                .entry(owner)
+                .or_insert_with(Vec::new)
+                .push(tracers.id[ii]);
+        }
+    }
+    let key = SamplingKey {
+        run_seed: tracers.run_seed,
+        epoch: sim.iteration | (1 << 63),
+    };
+    let mut assignments = BTreeMap::new();
+    for (linear, coord) in interior.iter().enumerate() {
+        let source = cell_container(coord, &interior, layout);
+        let Some(ids) = by_source.get(&source) else {
+            continue;
+        };
+        let before = density_before[linear];
+        let after = *sim.fields.cons.den.view().at(coord);
+        let removed_density = (before - after).max(0.0);
+        let volume = geometry.volume(coord);
+        let kernel = TransportKernel::new(
+            source,
+            before * volume,
+            [MassTransfer {
+                destination: ACCRETION_RESERVOIR,
+                mass: removed_density * volume,
+            }],
+        )?;
+        assignments.extend(sample_systematic(&kernel, ids, key));
+    }
+    for (ii, id) in tracers.id.iter().enumerate() {
+        if assignments.get(id) == Some(&ACCRETION_RESERVOIR) {
+            tracers.owner[ii] = ACCRETION_RESERVOIR;
+            tracers.flags[ii].crossed_sink = true;
+            tracers.flags[ii].crossing_time = sim.time + sim.dt;
+        }
+    }
+    sim.tracers = Some(tracers);
+    Ok(())
 }
 
 fn exterior_container(axis: usize, high: bool) -> crate::mass_transport::ContainerId {

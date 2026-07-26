@@ -1013,6 +1013,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             s.motion.a = a_n[i];
         }
         let mut horizon_receipt = None;
+        let mut accretion_density = Vec::new();
         {
             let sh = shared!();
             // the viscous transport, per tile, once per step after
@@ -1081,6 +1082,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         im.set_c_a2_override(global_c_a2);
                     }
                 }
+                if has_tracers {
+                    drain_devices::<M>(devices);
+                    accretion_density = sh
+                        .iter()
+                        .map(|store| crate::tracers::snapshot_accretion_density(*store))
+                        .collect();
+                }
                 for i in 0..n {
                     // IBM surface physics ONCE per step, after all stages
                     // (receipt == removal; see evolve.rs), then the feedback —
@@ -1105,6 +1113,25 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         if let Some((index, mdot, edot)) = horizon_receipt {
             for store in stores.iter_mut() {
                 book_horizon_receipt(&mut **store, index, mdot, edot, dt);
+            }
+        }
+        if !accretion_density.is_empty() {
+            let local_cells: [usize; D] =
+                std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+            for (flat, store) in stores.iter_mut().enumerate() {
+                let tile = unflatten(flat, counts);
+                let layout = crate::tracers::TransportLayout {
+                    global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
+                    tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                };
+                let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::advance_accretion_transport_store(
+                    &mut **store,
+                    &geometry,
+                    layout,
+                    &accretion_density[flat],
+                )
+                .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
             }
         }
         if has_bodies {
