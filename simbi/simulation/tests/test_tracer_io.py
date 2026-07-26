@@ -34,6 +34,17 @@ def test_traced_checkpoint_carries_a_moving_population():
     d = tempfile.mkdtemp() + "/"
     p.data_directory = d
     p.checkpoint_interval = 1.0e30
+
+    initial_directory = tempfile.mkdtemp() + "/"
+    p.data_directory = initial_directory
+    runner.run(p, compute_mode="cpu", max_steps=1)
+    initial_final = glob.glob(initial_directory + "*final*.h5")
+    assert initial_final, "no initial checkpoint written"
+    with h5py.File(initial_final[0]) as checkpoint:
+        initial_ids = checkpoint["tracers/id"][:]
+        initial_owners = checkpoint["tracers/owner"][:]
+
+    p.data_directory = d
     runner.run(p, compute_mode="cpu", max_steps=120)
 
     final = glob.glob(d + "*final*.h5")
@@ -46,11 +57,6 @@ def test_traced_checkpoint_carries_a_moving_population():
         assert x.shape == (N_TRACERS, 2)
         assert np.isfinite(x).all()
         assert float(g["weight"][0]) > 0.0
-        # the shear flow must have MOVED the population off its stratified
-        # seed lattice: on the seed, every tracer x-coordinate sits at a
-        # cell-relative stratum; after 120 steps of +-0.5 shear the
-        # x-distribution decorrelates from any lattice. cheap detector: the
-        # population's x-spread of fractional cell coordinates is non-lattice.
         ids = g["id"][:]
         owners = g["owner"][:]
         assert ids.dtype == np.dtype("uint64")
@@ -58,12 +64,16 @@ def test_traced_checkpoint_carries_a_moving_population():
         assert len(owners) == N_TRACERS
         assert int(g.attrs["next_id"]) == N_TRACERS
         assert len(np.unique(ids)) == N_TRACERS, "tracer ids must be unique"
+        np.testing.assert_array_equal(ids, initial_ids)
+        assert np.any(owners != initial_owners), (
+            "the shear flow did not move any authoritative tracer owner"
+        )
+
+        # live positions are derived cell centroids, not independently advected
+        # state. every cartesian coordinate must therefore sit at half a cell.
         dx = 1.0 / 256  # kh domain [-0.5, 0.5] over 256 cells
         frac = np.mod((x[:, 0] + 0.5) / dx, 1.0)
-        assert frac.std() > 0.05, (
-            f"tracer x-fractions still lattice-locked (std {frac.std():.4f}): "
-            "the population did not advect"
-        )
+        np.testing.assert_allclose(frac, 0.5, atol=1.0e-12)
 
 
 @pytest.mark.simulation

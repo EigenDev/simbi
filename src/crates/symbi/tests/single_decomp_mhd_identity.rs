@@ -187,6 +187,72 @@ fn assert_mhd_tracer_driver_identity(timestepping: Timestepping) {
     assert_eq!(single_tracers.flags, decomposed_tracers.flags);
 }
 
+fn assert_mhd_tracing_inert(timestepping: Timestepping) {
+    const TRANSPORT_TIME: f64 = 0.2;
+
+    let (mut untraced, untraced_kernels) = make(timestepping);
+    let (mut traced, traced_kernels) = make(timestepping);
+    traced.tracers = Some(seed_mass_weighted(&traced, 512));
+    let initial_owners = traced.tracers.as_ref().unwrap().owner.clone();
+
+    evolve(&mut untraced, &untraced_kernels, TRANSPORT_TIME).expect("untraced mhd evolve");
+    evolve(&mut traced, &traced_kernels, TRANSPORT_TIME).expect("traced mhd evolve");
+
+    let moved = traced
+        .tracers
+        .as_ref()
+        .unwrap()
+        .owner
+        .iter()
+        .zip(initial_owners)
+        .filter(|(owner, initial)| **owner != *initial)
+        .count();
+    assert!(moved > 0, "mhd tracer transport was not exercised");
+    assert!(untraced.tracers.is_none());
+    assert_eq!(traced.time.to_bits(), untraced.time.to_bits());
+    assert_eq!(traced.dt.to_bits(), untraced.dt.to_bits());
+    assert_eq!(traced.iteration, untraced.iteration);
+
+    assert_field_bits(
+        &traced.fields.cons.den,
+        &untraced.fields.cons.den,
+        "cons.den",
+    );
+    for component in 0..3 {
+        assert_field_bits(
+            &traced.fields.cons.mom[component],
+            &untraced.fields.cons.mom[component],
+            &format!("cons.mom[{component}]"),
+        );
+    }
+    assert_field_bits(
+        traced.fields.cons.nrg_field().expect("traced energy"),
+        untraced.fields.cons.nrg_field().expect("untraced energy"),
+        "cons.nrg",
+    );
+
+    let traced_mhd = traced.fields.mhd.as_ref().expect("traced mhd fields");
+    let untraced_mhd = untraced
+        .fields
+        .mhd
+        .as_ref()
+        .expect("untraced mhd fields");
+    for component in 0..3 {
+        assert_field_bits(
+            &traced_mhd.bcell.b[component],
+            &untraced_mhd.bcell.b[component],
+            &format!("bcell[{component}]"),
+        );
+    }
+    for axis in 0..2 {
+        assert_field_bits(
+            &traced_mhd.bface[axis],
+            &untraced_mhd.bface[axis],
+            &format!("bface[{axis}]"),
+        );
+    }
+}
+
 #[test]
 fn euler_mhd_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_mhd_driver_identity(Timestepping::Euler);
@@ -200,4 +266,9 @@ fn rk2_mhd_single_grid_equals_one_tile_decomposed_bitwise() {
 #[test]
 fn rk2_mhd_tracers_single_grid_equal_one_tile_decomposed() {
     assert_mhd_tracer_driver_identity(Timestepping::Rk2);
+}
+
+#[test]
+fn rk2_mhd_tracing_is_bitwise_inert() {
+    assert_mhd_tracing_inert(Timestepping::Rk2);
 }
