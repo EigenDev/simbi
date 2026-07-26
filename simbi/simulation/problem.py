@@ -791,9 +791,10 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def n_tracers(self) -> int:
-        """lagrangian tracer count: mass-weighted deterministic seeding over
-        the initial density; tracers advect on the post-step velocity and land
-        in the checkpoint `tracers` group. 0 = none."""
+        """mass-transport tracer count: deterministic mass-weighted seeding;
+        accepted finite-volume mass transfers update authoritative cell or
+        reservoir ownership. checkpoints also carry derived positions for
+        visualization. 0 = none."""
         return 0
 
     # =========================================================================
