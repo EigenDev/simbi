@@ -127,11 +127,64 @@ fn seeding_follows_the_mass() {
 }
 
 #[test]
-fn tracerless_run_is_untouched() {
-    let mut sim = build();
-    assert!(!sim.has_tracers());
-    let sub =
-        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
-    evolve(&mut sim, &sub, 0.05).expect("tracerless drive");
-    assert!(sim.tracers.is_none());
+fn tracing_is_numerically_inert_to_the_hydro_solution() {
+    const T: f64 = 0.3;
+
+    let mut untraced = build();
+    let mut traced = build();
+    traced.tracers = Some(seed_mass_weighted(&traced, N_TRACERS));
+    let initial_owners = traced.tracers.as_ref().unwrap().owner.clone();
+
+    let untraced_kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.4,
+        &untraced.geom.allocated,
+    );
+    let traced_kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.4,
+        &traced.geom.allocated,
+    );
+    evolve(&mut untraced, &untraced_kernels, T).expect("untraced drive");
+    evolve(&mut traced, &traced_kernels, T).expect("traced drive");
+
+    let moved = traced
+        .tracers
+        .as_ref()
+        .unwrap()
+        .owner
+        .iter()
+        .zip(initial_owners)
+        .filter(|(owner, initial)| **owner != *initial)
+        .count();
+    assert!(
+        moved > N_TRACERS / 2,
+        "tracer transport was not exercised: only {moved} tracers moved"
+    );
+    assert!(untraced.tracers.is_none());
+    assert_eq!(traced.time.to_bits(), untraced.time.to_bits());
+    assert_eq!(traced.dt.to_bits(), untraced.dt.to_bits());
+    assert_eq!(traced.iteration, untraced.iteration);
+
+    let traced_nrg = traced.fields.cons.nrg_field().unwrap();
+    let untraced_nrg = untraced.fields.cons.nrg_field().unwrap();
+    for coord in traced.geom.allocated.iter() {
+        assert_eq!(
+            traced.fields.cons.den.view().at(coord).to_bits(),
+            untraced.fields.cons.den.view().at(coord).to_bits(),
+            "density changed at {coord:?}"
+        );
+        for dd in 0..2 {
+            assert_eq!(
+                traced.fields.cons.mom[dd].view().at(coord).to_bits(),
+                untraced.fields.cons.mom[dd].view().at(coord).to_bits(),
+                "momentum {dd} changed at {coord:?}"
+            );
+        }
+        assert_eq!(
+            traced_nrg.view().at(coord).to_bits(),
+            untraced_nrg.view().at(coord).to_bits(),
+            "energy changed at {coord:?}"
+        );
+    }
 }
