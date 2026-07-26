@@ -33,6 +33,8 @@ pub struct TracerFlags {
 pub struct TracerSet<const D: usize> {
     pub x: Vec<[f64; D]>,
     pub id: Vec<u64>,
+    /// immutable initial-material provenance label.
+    pub cohort: Vec<u16>,
     pub flags: Vec<TracerFlags>,
     pub weight: f64,
     /// material container that owns each tracer. cell containers use the
@@ -124,6 +126,7 @@ impl<const D: usize> TracerSet<D> {
                 }
                 set.x.push(p);
                 set.id.push(next_id);
+                set.cohort.push(0);
                 set.flags.push(TracerFlags::default());
                 set.owner.push(owners[ci]);
                 next_id += 1;
@@ -139,6 +142,21 @@ impl<const D: usize> TracerSet<D> {
 
     pub fn is_empty(&self) -> bool {
         self.x.is_empty()
+    }
+
+    /// assign initial-material labels from the owning cell's linear index.
+    pub fn assign_cell_cohorts(&mut self, cell_cohorts: &[u16]) -> Result<(), String> {
+        if self.owner.len() != self.cohort.len() {
+            return Err("tracer owner/cohort length mismatch".to_string());
+        }
+        for (cohort, owner) in self.cohort.iter_mut().zip(&self.owner) {
+            let linear = usize::try_from(owner.0)
+                .map_err(|_| format!("initial tracer owner {} is not a cell", owner.0))?;
+            *cohort = *cell_cohorts
+                .get(linear)
+                .ok_or_else(|| format!("missing cohort for initial cell {linear}"))?;
+        }
+        Ok(())
     }
 
     /// the accreted tracer mass: crossing count times the per-tracer weight —
@@ -201,6 +219,7 @@ pub fn spawn_injected_tracers<const D: usize>(
     for (id, owner) in sample_systematic(&kernel, &ids, key) {
         tracers.x.push(positions(owner));
         tracers.id.push(id);
+        tracers.cohort.push(u16::MAX);
         tracers.flags.push(TracerFlags::default());
         tracers.owner.push(owner);
         tracers.step_owner.push(owner);
@@ -478,6 +497,7 @@ mod tests {
         .unwrap();
         assert_eq!(spawned, 2);
         assert_eq!(tracers.id, [10, 11]);
+        assert_eq!(tracers.cohort, [u16::MAX; 2]);
         assert_eq!(tracers.next_id, 12);
         assert!((tracers.injection_remainder - 0.1).abs() < 1.0e-15);
         assert_eq!(tracers.owner.len(), 2);
@@ -498,6 +518,7 @@ mod tests {
         assert_eq!(spawned, 1);
         assert!(tracers.injection_remainder.abs() < 1.0e-15);
         assert_eq!(tracers.id, [10, 11, 12]);
+        assert_eq!(tracers.cohort, [u16::MAX; 3]);
     }
 
     #[test]
@@ -919,6 +940,23 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
     tracers.step_owner = tracers.owner.clone();
     tracers.step_flags = tracers.flags.clone();
     tracers
+}
+
+pub fn seed_mass_weighted_with_cohorts<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+    n: usize,
+    cell_cohorts: &[u16],
+) -> Result<TracerSet<D>, String> {
+    if cell_cohorts.len() != sim.geom.interior.volume() {
+        return Err(format!(
+            "tracer_cohort yielded {} values for {} interior cells",
+            cell_cohorts.len(),
+            sim.geom.interior.volume()
+        ));
+    }
+    let mut tracers = seed_mass_weighted(sim, n);
+    tracers.assign_cell_cohorts(cell_cohorts)?;
+    Ok(tracers)
 }
 
 /// seed a fixed-size tracer population over explicitly addressed cells whose
@@ -1470,6 +1508,24 @@ pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
     counts: [usize; D],
 ) -> Vec<TracerSet<D>> {
     let set = seed_mass_weighted(global, n);
+    partition_seeded(global, set, counts)
+}
+
+pub fn seed_and_partition_with_cohorts<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    global: &FieldStore<D, DOF, Mem, f64>,
+    n: usize,
+    counts: [usize; D],
+    cell_cohorts: &[u16],
+) -> Result<Vec<TracerSet<D>>, String> {
+    let set = seed_mass_weighted_with_cohorts(global, n, cell_cohorts)?;
+    Ok(partition_seeded(global, set, counts))
+}
+
+fn partition_seeded<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    global: &FieldStore<D, DOF, Mem, f64>,
+    set: TracerSet<D>,
+    counts: [usize; D],
+) -> Vec<TracerSet<D>> {
     // the per-tile extent from the FULL-SIZE global grid: interior cells / tile counts, times dx.
     let mut glo = [0.0; D];
     let mut extent = [0.0; D];
@@ -1491,6 +1547,7 @@ pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
         let dest = tile_owner(&set.x[i], glo, extent, counts).unwrap_or(0);
         per_tile[dest].x.push(set.x[i]);
         per_tile[dest].id.push(set.id[i]);
+        per_tile[dest].cohort.push(set.cohort[i]);
         per_tile[dest].flags.push(set.flags[i]);
         per_tile[dest].owner.push(set.owner[i]);
         per_tile[dest].step_owner.push(set.step_owner[i]);

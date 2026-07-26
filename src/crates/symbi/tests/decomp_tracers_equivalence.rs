@@ -136,6 +136,7 @@ fn partition_into(tiles: &mut [(Sim, Kern)], global: &TracerSet<2>, counts: [usi
         let dest = owner(&global.x[i], counts);
         per_tile[dest].x.push(global.x[i]);
         per_tile[dest].id.push(global.id[i]);
+        per_tile[dest].cohort.push(global.cohort[i]);
         per_tile[dest].flags.push(global.flags[i]);
         per_tile[dest].owner.push(global.owner[i]);
         per_tile[dest].step_owner.push(global.step_owner[i]);

@@ -18,7 +18,11 @@ matplotlib.use("Agg")
 from simbi.viz import api
 from simbi.viz.cli import setup_parser
 from simbi.viz.config import PlotConfig, VisualizationConfig
-from simbi.viz.tracers import load_tracers, tracer_concentration
+from simbi.viz.tracers import (
+    cohort_to_gas_ratio,
+    load_tracers,
+    tracer_concentration,
+)
 
 
 def test_load_tracers_preserves_exact_ownership_and_spawn_state(tmp_path):
@@ -32,6 +36,7 @@ def test_load_tracers_preserves_exact_ownership_and_spawn_state(tmp_path):
         group.attrs["injection_remainder"] = 0.125
         group.create_dataset("position", data=np.array([[0.25], [0.75]]))
         group.create_dataset("id", data=ids)
+        group.create_dataset("cohort", data=np.array([3, 5], dtype=np.uint16))
         group.create_dataset("owner", data=owners)
         group.create_dataset("escaped", data=np.array([0.0, 0.0]))
         group.create_dataset("crossed_sink", data=np.array([0.0, 1.0]))
@@ -42,6 +47,7 @@ def test_load_tracers_preserves_exact_ownership_and_spawn_state(tmp_path):
 
     assert cloud is not None
     np.testing.assert_array_equal(cloud.id, ids)
+    np.testing.assert_array_equal(cloud.cohort, [3, 5])
     np.testing.assert_array_equal(cloud.owner, owners)
     assert cloud.id.dtype == np.dtype("uint64")
     assert cloud.owner.dtype == np.dtype("uint64")
@@ -60,6 +66,7 @@ def test_body_accretion_reservoir_identity_is_available_to_visualization(tmp_pat
         group.attrs["injection_remainder"] = 0.0
         group.create_dataset("position", data=np.zeros((3, 2)))
         group.create_dataset("id", data=np.arange(3, dtype=np.uint64))
+        group.create_dataset("cohort", data=np.zeros(3, dtype=np.uint16))
         group.create_dataset(
             "owner",
             data=np.array([0, prefix, prefix | 7], dtype=np.uint64),
@@ -91,6 +98,7 @@ def test_tracer_concentration_is_mass_per_area_and_excludes_reservoirs():
             [[0.5, 0.5], [0.5, 0.5], [1.5, 0.5], [1.5, 1.5]]
         ),
         owner=np.array([0, 0, 1, 1 << 62], dtype=np.uint64),
+        cohort=np.array([0, 1, 1, 1], dtype=np.uint16),
         weight=2.0,
     )
     edges = np.array([0.0, 1.0, 2.0])
@@ -104,6 +112,28 @@ def test_tracer_concentration_is_mass_per_area_and_excludes_reservoirs():
 
     np.testing.assert_array_equal(concentration, [[4.0, 2.0], [0.0, 0.0]])
     assert np.sum(concentration) == 3 * cloud.weight
+
+    cohort_one = tracer_concentration(
+        cloud,
+        edges,
+        edges,
+        smoothing=0.0,
+        cohort=1,
+    )
+    np.testing.assert_array_equal(cohort_one, [[2.0, 2.0], [0.0, 0.0]])
+
+
+def test_cohort_to_gas_ratio_normalizes_both_column_densities():
+    cohort = np.array([[2.0, 4.0], [2.0, 4.0]])
+    gas = np.array([[1.0, 1.0], [2.0, 2.0]])
+    area = np.ones((2, 2))
+
+    ratio = cohort_to_gas_ratio(cohort, gas, area)
+
+    np.testing.assert_allclose(
+        ratio,
+        [[1.0, 2.0], [0.5, 1.0]],
+    )
 
 
 def test_tracers_only_plot_uses_checkpoint_bounds(monkeypatch):

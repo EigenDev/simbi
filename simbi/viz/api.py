@@ -55,11 +55,17 @@ def plot_tracers(
     tracer_render: str = "concentration",
     tracer_smoothing: Optional[float] = None,
     tracer_color_by: str = "flag",
+    tracer_cohort: Optional[int] = None,
     **kwargs,
 ) -> Figure:
     """render an ownership-derived tracer cloud without an eulerian field."""
     from .bodies import slice_to_plane
-    from .tracers import load_tracers, overlay_tracers, tracer_concentration
+    from .tracers import (
+        cohort_to_gas_ratio,
+        load_tracers,
+        overlay_tracers,
+        tracer_concentration,
+    )
 
     sim_data = load_data(file)
     if sim_data.metadata.coord_system != "cartesian":
@@ -92,27 +98,47 @@ def plot_tracers(
     }
     x_edges = vertices[plane[0]]
     y_edges = vertices[plane[1]]
-    if tracer_render == "concentration":
+    if tracer_render in {"concentration", "cohort-ratio"}:
+        if tracer_render == "cohort-ratio" and tracer_cohort is None:
+            raise ValueError("--tracer-render cohort-ratio requires --tracer-cohort")
         concentration = tracer_concentration(
             cloud,
             x_edges,
             y_edges,
             plane=plane,
             smoothing=tracer_smoothing,
+            cohort=tracer_cohort,
         )
         display_area = np.outer(np.diff(y_edges), np.diff(x_edges))
         mean = np.sum(concentration * display_area) / np.sum(display_area)
         normalized = concentration / max(mean, np.finfo(float).tiny)
+        cmap = "magma"
+        label = "tracer concentration / mean"
+        if tracer_render == "cohort-ratio":
+            rho = np.squeeze(sim_data.get_field("rho", crop_to_owned=True))
+            if rho.shape != concentration.shape:
+                if rho.T.shape == concentration.shape:
+                    rho = rho.T
+                else:
+                    raise ValueError(
+                        "cohort-ratio projection is not defined for this checkpoint slice"
+                    )
+            ratio = cohort_to_gas_ratio(concentration, rho, display_area)
+            normalized = np.log10(np.maximum(ratio, np.finfo(float).tiny))
+            cmap = "coolwarm"
+            label = f"log10 cohort {tracer_cohort} / gas concentration"
+        elif tracer_cohort is not None:
+            label = f"cohort {tracer_cohort} concentration / mean"
         mesh = ax.pcolormesh(
             x_edges,
             y_edges,
             normalized,
             shading="auto",
-            cmap="magma",
+            cmap=cmap,
         )
         assert figure.fig is not None
         colorbar = figure.fig.colorbar(mesh, ax=ax)
-        colorbar.set_label("tracer concentration / mean")
+        colorbar.set_label(label)
     elif tracer_render == "scatter":
         overlay_tracers(
             ax,

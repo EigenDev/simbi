@@ -53,6 +53,8 @@ def test_traced_checkpoint_carries_a_moving_population():
         assert "tracers" in f, f"no tracers group: {sorted(f.keys())}"
         g = f["tracers"]
         assert int(g.attrs["n_tracers"]) == N_TRACERS
+        assert "cohort" in g
+        assert np.asarray(g["cohort"]).dtype == np.dtype("uint64")
         x = g["position"][:]
         assert x.shape == (N_TRACERS, 2)
         assert np.isfinite(x).all()

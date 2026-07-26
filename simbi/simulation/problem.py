@@ -797,6 +797,12 @@ class SimbiProblem(BaseModel):
         visualization. 0 = none."""
         return 0
 
+    def tracer_cohort(self) -> Optional[GasStateGenerator]:
+        """initial-material provenance: one non-negative integer cohort per
+        interior cell in the same traversal order as the gas state. labels are
+        immutable on tracers; injected material uses the reserved label 65535."""
+        return None
+
     # =========================================================================
     # passive scalar (override in subclass)
     # =========================================================================
