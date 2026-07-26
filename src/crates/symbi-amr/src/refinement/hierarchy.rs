@@ -1183,7 +1183,21 @@ where
             .as_ref()
             .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
         if l.state.has_bodies() && (!has_finer || has_rigid) {
+            let accretion_density = if l.state.has_tracers() {
+                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                Some(symbi_sim::tracers::snapshot_accretion_density(&l.state))
+            } else {
+                None
+            };
             prof("penalize", || l.kernels.penalize(&l.state, dt));
+            if let Some(density_before) = accretion_density.as_deref() {
+                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                symbi_sim::tracers::advance_accretion_transport(
+                    &mut self.levels[level].state,
+                    density_before,
+                )
+                .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
+            }
         }
         if has_finer {
             self.level_subcycle(level, dt);

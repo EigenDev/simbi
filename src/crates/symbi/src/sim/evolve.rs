@@ -235,12 +235,23 @@ where
         }
 
         if sim.has_bodies() {
+            let accretion_density = if sim.has_tracers() {
+                crate::regimes::substrate_gpu::device_sync::<Mem>();
+                Some(symbi_sim::tracers::snapshot_accretion_density(sim))
+            } else {
+                None
+            };
             // the IBM surface physics, ONCE per step AFTER the
             // full RK combination: applied inside the stage blend, a stage's
             // exponential removal is partially undone by the SSP convex
             // combination while its receipt is not — the ledger then over-
             // counts (RK2: 3/2x). post-step, receipt == removal exactly.
             prof("penalize", || kernels.penalize(sim, sim.dt));
+            if let Some(density_before) = accretion_density.as_deref() {
+                crate::regimes::substrate_gpu::device_sync::<Mem>();
+                symbi_sim::tracers::advance_accretion_transport(sim, density_before)
+                    .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
+            }
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
             // the side-car diagnostics, then evolve_bodies consolidates + applies it
             // + advances the (prescribed) binary, and resets the accumulator for the next step.
