@@ -1451,6 +1451,12 @@ where
         root.state.dt = dt;
 
         self.advance_level(0, dt, 0.0);
+        if self.levels.iter().any(|level| {
+            level.state.continuous_tracers.is_some()
+        }) {
+            self.migrate_continuous_tracers_to_finest()
+                .unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
+        }
 
         // horizon excision, ONCE per step after the full RK combination (the same
         // point the single-grid loop applies it): overwrite the causally
@@ -1537,6 +1543,17 @@ where
             prof("refine_save_prim", || save_prim_old(&self.levels[level]));
         }
         self.levels[level].state.dt = dt;
+        if self.levels[level].state.continuous_tracers.is_some() {
+            let geometry = self.levels[level]
+                .state
+                .geom
+                .block_geometry(self.levels[level].state.physics.metric);
+            symbi_sim::tracers::begin_ito_transport_store(
+                &mut self.levels[level].state.store,
+                &geometry,
+            )
+            .unwrap_or_else(|detail| panic!("ito transport initialization: {detail}"));
+        }
         let stages = self.levels[level].state.timestepping.stages();
         if needs_step_snapshot(stages) {
             let l = &self.levels[level];
@@ -1671,6 +1688,19 @@ where
             },
             &mut hook,
         );
+        if self.levels[level].state.continuous_tracers.is_some() {
+            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+            let geometry = self.levels[level]
+                .state
+                .geom
+                .block_geometry(self.levels[level].state.physics.metric);
+            symbi_sim::tracers::accumulate_ito_transport_stage_store(
+                &mut self.levels[level].state.store,
+                &geometry,
+                ac,
+            )
+            .unwrap_or_else(|detail| panic!("ito transport accumulation: {detail}"));
+        }
         if self.levels[level].state.has_tracers() {
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
             let layout = self.tracer_layout(level);
@@ -1825,11 +1855,137 @@ where
                 });
             }
         }
+        if self.levels[level].state.continuous_tracers.is_some() {
+            self.prepare_level_ito_coefficients(level);
+        }
         if has_finer {
             self.level_subcycle(level, dt);
             self.level_restrict_reflux(level, alpha0);
         }
+        if self.levels[level].state.continuous_tracers.is_some() {
+            self.advance_level_continuous_tracers(level, dt);
+        }
         self.level_clock(level, dt);
+    }
+
+    /// derive one level's accepted-step coefficients before its finer level
+    /// subcycles so fine coarse/fine ghosts can sample the parent field.
+    fn prepare_level_ito_coefficients(&mut self, level: usize) {
+        let geometry = self.levels[level]
+            .state
+            .geom
+            .block_geometry(self.levels[level].state.physics.metric);
+        symbi_sim::tracers::materialize_ito_coefficients_store(
+            &mut self.levels[level].state.store,
+            &geometry,
+        )
+        .unwrap_or_else(|detail| panic!("ito coefficient materialization: {detail}"));
+        symbi_sim::tracers::fill_ito_coefficient_boundaries_host(
+            self.levels[level]
+                .state
+                .ito_coefficients
+                .as_ref()
+                .expect("ito coefficients were materialized"),
+            &self.levels[level].state.geom,
+            self.levels[level].state.boundaries,
+        )
+        .unwrap_or_else(|detail| panic!("ito coefficient boundaries: {detail}"));
+        if level > 0 {
+            self.prolong_ito_cf(level);
+        }
+    }
+
+    /// prolong accepted parent coefficients into a fine level's coarse/fine
+    /// ghost slabs. the coefficients are fixed over the enclosing parent step.
+    fn prolong_ito_cf(&self, level: usize) {
+        let parent = &self.levels[level - 1];
+        let fine = &self.levels[level];
+        let parent_coefficients = parent
+            .state
+            .ito_coefficients
+            .as_ref()
+            .expect("the parent coefficients precede fine subcycling");
+        let fine_coefficients = fine
+            .state
+            .ito_coefficients
+            .as_ref()
+            .expect("fine coefficients were materialized");
+        let zero = Field::<f64, NDIM, Mem>::zeros(&parent.state.geom.allocated)
+            .expect("ito coefficient prolongation scratch allocation failed");
+        for slab in cf_ghost_slabs(
+            &fine.state.geom.allocated,
+            &fine.state.geom.interior,
+            &fine.state.boundaries,
+        ) {
+            for dd in 0..NDIM {
+                prolong_field(
+                    &parent_coefficients.drift[dd],
+                    &zero,
+                    &fine_coefficients.drift[dd],
+                    &slab,
+                    self.prolong_order,
+                    0.0,
+                );
+                prolong_field(
+                    &parent_coefficients.variance[dd],
+                    &zero,
+                    &fine_coefficients.variance[dd],
+                    &slab,
+                    self.prolong_order,
+                    0.0,
+                );
+                prolong_field(
+                    &parent_coefficients.third[dd],
+                    &zero,
+                    &fine_coefficients.third[dd],
+                    &slab,
+                    self.prolong_order,
+                    0.0,
+                );
+            }
+        }
+    }
+
+    /// advance particles owned by one level over exactly that level's accepted
+    /// interval. hierarchy ownership remains frozen until the root step ends.
+    fn advance_level_continuous_tracers(&mut self, level: usize, dt: f64) {
+        let mut tracers = self.levels[level]
+            .state
+            .continuous_tracers
+            .take()
+            .expect("continuous tracers remain attached through the level step");
+        let (scale_start, scale_end, offset_start, offset_end) =
+            symbi_sim::tracers::continuous_tracer_mesh_step(
+                &self.levels[level].state.store,
+                dt,
+            );
+        symbi_sim::tracers::advance_continuous_tracers_affine_mesh_host(
+            &mut tracers,
+            self.levels[level]
+                .state
+                .ito_coefficients
+                .as_ref()
+                .expect("ito coefficients were materialized"),
+            &self.levels[level].state.geom,
+            scale_start,
+            scale_end,
+            offset_start,
+            offset_end,
+            dt,
+        )
+        .unwrap_or_else(|detail| panic!("ito tracer advancement: {detail}"));
+        let root_bounds = symbi_sim::tracers::map_continuous_tracer_bounds(
+            symbi_sim::tracers::partition_physical_bounds(&self.levels[0].state.geom),
+            scale_end,
+            offset_end,
+        );
+        symbi_sim::tracers::apply_continuous_boundaries_host(
+            &mut tracers,
+            root_bounds,
+            self.levels[0].state.boundaries,
+        )
+        .unwrap_or_else(|detail| panic!("ito tracer boundaries: {detail}"));
+        self.levels[level].state.continuous_tracers = Some(tracers);
     }
 
     /// emf register bookkeeping (mhd) after the stage loop: the efield buffers hold the EFFECTIVE

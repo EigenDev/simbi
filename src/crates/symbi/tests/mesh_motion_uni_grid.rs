@@ -28,7 +28,7 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
-use symbi::sim::tracers::{TracerSet, cell_container_id};
+use symbi::sim::tracers::{ContinuousTracerSet, TracerSet, cell_container_id};
 use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, MotionState, Spherical};
 use symbi_hydro::eos::{IdealGas, Isothermal};
@@ -38,6 +38,7 @@ use symbi_hydro::regime::Regime;
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
+use symbi_sim::mass_transport::ItoOrder;
 
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.4;
@@ -305,6 +306,13 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
         .unwrap();
     sim.motion = MotionState::uniform(1.0, vtrans);
     fill(&sim);
+    let seed = TracerSet::<3>::seed_stratified(&[([-0.25; 3], [0.5; 3])], &[512], 1.0);
+    let continuous =
+        ContinuousTracerSet::<3, HostMemory>::from_discrete(&seed, ItoOrder::Two).unwrap();
+    let continuous_initial: [Vec<f64>; 3] = std::array::from_fn(|dd| unsafe {
+        std::slice::from_raw_parts(continuous.x[dd].as_ptr::<f64>(), continuous.len).to_vec()
+    });
+    sim.continuous_tracers = Some(continuous);
     let rho0: Vec<f64> = sim.geom.interior.iter()
         .map(|c| *sim.fields.cons.den.view().at(c))
         .collect();
@@ -327,6 +335,30 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
         "the comoving contact diffused ({worst:.3e}) — hllc at zero relative speed \
          must be exact to accumulated roundoff"
     );
+    let continuous = sim.continuous_tracers.as_ref().unwrap();
+    for dd in 0..3 {
+        let accepted = unsafe {
+            std::slice::from_raw_parts(continuous.x[dd].as_ptr::<f64>(), continuous.len)
+        };
+        let shift = if dd == 0 { vtrans * sim.time } else { 0.0 };
+        let residuals: Vec<_> = accepted
+            .iter()
+            .zip(&continuous_initial[dd])
+            .map(|(actual, initial)| actual - initial - shift)
+            .collect();
+        let mean = residuals.iter().sum::<f64>() / residuals.len() as f64;
+        let variance = residuals
+            .iter()
+            .map(|value| (value - mean) * (value - mean))
+            .sum::<f64>()
+            / (residuals.len() - 1) as f64;
+        let standard_error = (variance / residuals.len() as f64).sqrt();
+        assert!(
+            mean.abs() <= 8.0 * standard_error + 1.0e-12,
+            "continuous tracer ensemble drifted from the translating mesh: \
+             mean={mean:.3e}, stderr={standard_error:.3e}"
+        );
+    }
 }
 
 /// spherical homologous free expansion: the same coasting solution in

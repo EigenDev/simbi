@@ -226,11 +226,51 @@ pub fn advance_continuous_tracers_host<const D: usize, Mem: symbi_xpu::MemorySpa
     geometry: &crate::state::PartitionGeometry<D>,
     dt: f64,
 ) -> Result<(), String> {
+    advance_continuous_tracers_affine_mesh_host(
+        tracers,
+        coefficients,
+        geometry,
+        1.0,
+        1.0,
+        [0.0; D],
+        [0.0; D],
+        dt,
+    )
+}
+
+/// advance continuous tracers while an affine mesh map changes over the step.
+///
+/// physical positions satisfy `x = scale * q + offset`, where `q` is the
+/// fixed logical coordinate used by cic. accepted ito displacements are
+/// relative to the moving faces and are added after mapping `q` to the new
+/// mesh geometry.
+pub fn advance_continuous_tracers_affine_mesh_host<
+    const D: usize,
+    Mem: symbi_xpu::MemorySpace,
+>(
+    tracers: &mut ContinuousTracerSet<D, Mem>,
+    coefficients: &ItoCoefficientFields<D, Mem>,
+    geometry: &crate::state::PartitionGeometry<D>,
+    scale_start: f64,
+    scale_end: f64,
+    offset_start: [f64; D],
+    offset_end: [f64; D],
+    dt: f64,
+) -> Result<(), String> {
     if !Mem::IS_HOST_ACCESSIBLE {
         return Err("host tracer advancement requires host-accessible memory".to_string());
     }
     if !dt.is_finite() || dt <= 0.0 {
         return Err("ito tracer timestep must be positive and finite".to_string());
+    }
+    if !scale_start.is_finite()
+        || !scale_end.is_finite()
+        || scale_start <= 0.0
+        || scale_end <= 0.0
+        || offset_start.iter().any(|value| !value.is_finite())
+        || offset_end.iter().any(|value| !value.is_finite())
+    {
+        return Err("continuous tracer mesh map must be finite with positive scales".to_string());
     }
     unsafe {
         let ids = std::slice::from_raw_parts(tracers.id.as_ptr::<u64>(), tracers.len);
@@ -243,12 +283,14 @@ pub fn advance_continuous_tracers_host<const D: usize, Mem: symbi_xpu::MemorySpa
             if escaped[ii] != 0 {
                 continue;
             }
-            let position =
+            let position: [f64; D] =
                 std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii));
             for dd in 0..D {
                 *tracers.step_x[dd].as_mut_ptr::<f64>().add(ii) = position[dd];
             }
-            let rates = coefficients.interpolate(geometry, position)?;
+            let logical: [f64; D] =
+                std::array::from_fn(|dd| (position[dd] - offset_start[dd]) / scale_start);
+            let rates = coefficients.interpolate(geometry, logical)?;
             for dd in 0..D {
                 let unit = crate::mass_transport::ito_unit_sample(
                     tracers.run_seed,
@@ -264,12 +306,56 @@ pub fn advance_continuous_tracers_host<const D: usize, Mem: symbi_xpu::MemorySpa
                         crate::mass_transport::ito3_displacement(rates[dd], dt, unit)?
                     }
                 };
-                *tracers.x[dd].as_mut_ptr::<f64>().add(ii) = position[dd] + displacement;
+                let mapped = scale_end * logical[dd] + offset_end[dd];
+                *tracers.x[dd].as_mut_ptr::<f64>().add(ii) = mapped + displacement;
             }
             counters[ii] = counters[ii].wrapping_add(1);
         }
     }
     Ok(())
+}
+
+/// affine logical-to-physical maps at the endpoints of one accepted step.
+pub fn continuous_tracer_mesh_step<const D: usize, const DOF: usize, Mem>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+    dt: f64,
+) -> (f64, f64, [f64; D], [f64; D])
+where
+    Mem: MemorySpace,
+{
+    if sim.motion.homologous {
+        let scale_end = sim
+            .motion_law
+            .as_ref()
+            .map_or(sim.motion.a + sim.motion.a_dot * dt, |law| {
+                law.a_at(sim.time + dt)
+            });
+        (sim.motion.a, scale_end, [0.0; D], [0.0; D])
+    } else {
+        let offset_start =
+            std::array::from_fn(|dd| if dd == 0 { sim.motion.a_dot * sim.time } else { 0.0 });
+        let offset_end = std::array::from_fn(|dd| {
+            if dd == 0 {
+                sim.motion.a_dot * (sim.time + dt)
+            } else {
+                0.0
+            }
+        });
+        (1.0, 1.0, offset_start, offset_end)
+    }
+}
+
+pub fn map_continuous_tracer_bounds<const D: usize>(
+    bounds: [(f64, f64); D],
+    scale: f64,
+    offset: [f64; D],
+) -> [(f64, f64); D] {
+    std::array::from_fn(|dd| {
+        (
+            scale * bounds[dd].0 + offset[dd],
+            scale * bounds[dd].1 + offset[dd],
+        )
+    })
 }
 
 /// apply physical face laws to each accepted continuous trajectory segment.
@@ -1163,6 +1249,7 @@ where
         run_seed: tracers.run_seed,
         epoch: sim.iteration | (1 << 62),
     };
+    let (_, scale_end, _, offset_end) = continuous_tracer_mesh_step(sim, sim.dt);
     let count = spawn_continuous_injected_tracers(
         &mut tracers,
         ledger
@@ -1174,12 +1261,16 @@ where
         |owner| {
             let coord = container_cell(owner, &interior, layout)
                 .expect("boundary injection destination belongs to this grid");
-            let lo = std::array::from_fn(|dd| match sim.geom.maps {
+            let lo: [f64; D] = std::array::from_fn(|dd| match sim.geom.maps {
                 Some(maps) => maps[dd].face(coord[dd]),
                 None => sim.geom.x_lo[dd] + coord[dd] as f64 * sim.geom.dx[dd],
             });
-            let width = std::array::from_fn(|dd| geometry.cell_width(coord, dd));
-            (lo, width)
+            let width: [f64; D] =
+                std::array::from_fn(|dd| geometry.cell_width(coord, dd));
+            (
+                std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]),
+                width.map(|value| scale_end * value),
+            )
         },
         key,
     )?;
@@ -1657,6 +1748,67 @@ mod tests {
                 std::slice::from_raw_parts(tracers.random_counter.as_ptr::<u64>(), 2);
             assert_eq!(position, [0.75, 0.75]);
             assert_eq!(counters, [1, 0]);
+        }
+    }
+
+    #[test]
+    fn continuous_affine_mesh_step_maps_physical_position_once() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        let coefficients =
+            ItoCoefficientFields::<1, HostMemory>::zeros(&sim.geom.allocated).unwrap();
+        let mut tracers =
+            ContinuousTracerSet::<1, HostMemory>::allocate(1, crate::mass_transport::ItoOrder::Two)
+                .unwrap();
+        tracers
+            .push_host(ContinuousTracerRecord {
+                x: [2.0],
+                step_x: [2.0],
+                id: 3,
+                cohort: 0,
+                owner: crate::mass_transport::ContainerId(0),
+                escaped: 0,
+                crossed_sink: 0,
+                crossing_time: 0.0,
+                random_counter: 7,
+            })
+            .unwrap();
+
+        advance_continuous_tracers_affine_mesh_host(
+            &mut tracers,
+            &coefficients,
+            &sim.geom,
+            2.0,
+            3.0,
+            [1.0],
+            [2.0],
+            0.25,
+        )
+        .unwrap();
+
+        unsafe {
+            assert_eq!(*tracers.step_x[0].as_ptr::<f64>(), 2.0);
+            assert_eq!(*tracers.x[0].as_ptr::<f64>(), 3.5);
+            assert_eq!(*tracers.random_counter.as_ptr::<u64>(), 8);
         }
     }
 
