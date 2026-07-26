@@ -13,7 +13,7 @@
 # reconstruction generates S_phi off the dragging manifold and fails to converge).
 #
 # usage:
-#   simbi run gr_rotating_equilibrium_mhd.py --kerr-spin 0.9
+#   imported by test_kerr_grmhd.py
 # =============================================================================
 
 from functools import partial
@@ -23,7 +23,9 @@ from simbi import ProblemParam
 from simbi.types import Regime, Solver, CtMethod
 from simbi.types.typing import InitialStateType, StaggeredBFieldGenerator
 
-from simbi_configs.examples.grhd.gr_rotating_equilibrium import GrRotatingEquilibrium
+from simbi.simulation.tests.fixtures.gr_rotating_equilibrium import (
+    GrRotatingEquilibrium,
+)
 
 
 class GrRotatingEquilibriumMhd(GrRotatingEquilibrium):
@@ -34,7 +36,8 @@ class GrRotatingEquilibriumMhd(GrRotatingEquilibrium):
     ]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, cli=True, description="solver")]
     ct_method: Annotated[
-        CtMethod, ProblemParam(CtMethod.CONTACT, cli=True, description="CT edge-EMF method")
+        CtMethod,
+        ProblemParam(CtMethod.CONTACT, cli=True, description="CT edge-EMF method"),
     ]
 
     def _boundary_prescription(self) -> dict:

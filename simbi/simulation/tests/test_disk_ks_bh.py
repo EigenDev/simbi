@@ -27,7 +27,7 @@ _NR, _NPHI = 48, 24  # distinct so the phi-axis (nphi) is identifiable by shape
 
 
 def _run(data_dir: str):
-    from simbi_configs.examples.grhd.gr_disk_ks_bh import GrDiskKsBH
+    from simbi.simulation.tests.fixtures.gr_disk_ks_bh import GrDiskKsBH
 
     p = GrDiskKsBH.from_cli([])
     p.resolution = (_NR, _NPHI)
@@ -64,17 +64,23 @@ def test_disk_ks_bh_runs_stably_and_is_axisymmetric() -> None:
         rho, pre, v_r = _run(d + "/")
 
     # stability: horizon-penetrating, positive, finite (no floors).
-    assert np.isfinite(rho).all() and np.isfinite(pre).all(), "NaN/inf in the evolved state"
+    assert np.isfinite(rho).all() and np.isfinite(pre).all(), (
+        "NaN/inf in the evolved state"
+    )
     assert pre.min() > 0.0, f"pressure went non-positive: {pre.min():.3e}"
     assert rho.min() > 0.0, f"density went non-positive: {rho.min():.3e}"
 
     # axisymmetry: the metric never reads phi, so a phi-uniform state stays phi-uniform (each
     # R-ring constant along phi = axis 0). the radial infall varies with R (axis 1).
     def phi_var(a: np.ndarray) -> float:
-        return float(np.abs(a - a.mean(axis=0, keepdims=True)).max() / (np.abs(a).max() + 1e-300))
+        return float(
+            np.abs(a - a.mean(axis=0, keepdims=True)).max() / (np.abs(a).max() + 1e-300)
+        )
 
     assert phi_var(rho) < 1e-10, f"rho not phi-uniform: {phi_var(rho):.3e}"
     assert phi_var(pre) < 1e-10, f"pre not phi-uniform: {phi_var(pre):.3e}"
     assert phi_var(v_r) < 1e-10, f"v_R not phi-uniform: {phi_var(v_r):.3e}"
     # a sanity check that the flow actually developed (radial infall broke the R-uniformity).
-    assert float(np.abs(rho - rho.mean(axis=1, keepdims=True)).max()) > 1e-6, "no radial evolution"
+    assert float(np.abs(rho - rho.mean(axis=1, keepdims=True)).max()) > 1e-6, (
+        "no radial evolution"
+    )

@@ -40,28 +40,48 @@ from simbi.types.typing import (
 class GrKerrDragging(SimbiProblem):
     """uniform gas on the zero-angular-momentum kerr dragging manifold — the w-reconstruction probe."""
 
-    adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0, description="adiabatic index")]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS, description="background spacetime")]
-    schwarzschild_mass: Annotated[float, ProblemParam(1.0, cli=True, description="black-hole mass M")]
-    kerr_spin: Annotated[float, ProblemParam(0.9, cli=True, description="dimensionless spin a")]
-    inflow: Annotated[float, ProblemParam(0.15, cli=True, description="radial inflow speed |v^r|")]
-    b_ref: Annotated[float, ProblemParam(1.0e-3, cli=True, description="weak seed field amplitude")]
+    adiabatic_index: Annotated[
+        float, ProblemParam(4.0 / 3.0, description="adiabatic index")
+    ]
+    spacetime: Annotated[
+        Spacetime, ProblemParam(Spacetime.KERR_KS, description="background spacetime")
+    ]
+    schwarzschild_mass: Annotated[
+        float, ProblemParam(1.0, cli=True, description="black-hole mass M")
+    ]
+    kerr_spin: Annotated[
+        float, ProblemParam(0.9, cli=True, description="dimensionless spin a")
+    ]
+    inflow: Annotated[
+        float, ProblemParam(0.15, cli=True, description="radial inflow speed |v^r|")
+    ]
+    b_ref: Annotated[
+        float, ProblemParam(1.0e-3, cli=True, description="weak seed field amplitude")
+    ]
     rho_ambient: Annotated[float, ProblemParam(1.0, description="uniform density")]
     p_ambient: Annotated[float, ProblemParam(0.1, description="uniform pressure")]
 
     nr: Annotated[int, ProblemParam(128, cli=True, description="radial resolution")]
     npolar: Annotated[int, ProblemParam(64, cli=True, description="polar resolution")]
     resolution: Annotated[tuple[int, int], ProblemParam((0, 0), description="computed")]
-    theta_halfwidth: Annotated[float, ProblemParam(0.4, description="polar wedge half-width (rad)")]
+    theta_halfwidth: Annotated[
+        float, ProblemParam(0.4, description="polar wedge half-width (rad)")
+    ]
     bounds: Annotated[
         list[tuple[float, float]],
         ProblemParam([(0.0, 0.0), (0.0, 0.0)], description="computed"),
     ]
-    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.SPHERICAL, description="coords")]
+    coord_system: Annotated[
+        CoordSystem, ProblemParam(CoordSystem.SPHERICAL, description="coords")
+    ]
     regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, cli=True, description="solver")]
-    ct_method: Annotated[CtMethod, ProblemParam(CtMethod.CONTACT, cli=True, description="CT method")]
-    x1_spacing: Annotated[CellSpacing, ProblemParam(CellSpacing.LINEAR, description="radial spacing")]
+    ct_method: Annotated[
+        CtMethod, ProblemParam(CtMethod.CONTACT, cli=True, description="CT method")
+    ]
+    x1_spacing: Annotated[
+        CellSpacing, ProblemParam(CellSpacing.LINEAR, description="radial spacing")
+    ]
     boundary_conditions: Annotated[
         list[str],
         ProblemParam(
@@ -74,7 +94,9 @@ class GrKerrDragging(SimbiProblem):
             description="outflow radial; reflecting theta walls",
         ),
     ]
-    end_time: Annotated[float, ProblemParam(2.0, cli=True, checkpoint_safe=True, description="end time")]
+    end_time: Annotated[
+        float, ProblemParam(2.0, cli=True, checkpoint_safe=True, description="end time")
+    ]
 
     @model_validator(mode="after")
     def compute_defaults(self) -> "GrKerrDragging":
@@ -140,4 +162,9 @@ class GrKerrDragging(SimbiProblem):
                     for _ii in range(nr):
                         yield 0.0
 
-        return (gas_state, partial(b_field, "b1"), partial(b_field, "b2"), partial(b_field, "b3"))
+        return (
+            gas_state,
+            partial(b_field, "b1"),
+            partial(b_field, "b2"),
+            partial(b_field, "b3"),
+        )

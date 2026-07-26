@@ -649,6 +649,11 @@ for dashes; underscores also work).
 | `tabulated_source_2d.py` | `tabulated-source-2d` | Bilinear tabulated energy source |
 | `geometric_boundaries.py` | `geometric-boundaries` | Geometric cell concentration at either boundary |
 | `decomposed_tabulated_geometric.py` | `decomposed-tabulated-geometric` | Geometric mesh and tabulated source on one or several devices |
+| `gr_fishbone_moncrief.py` | `gr-fishbone-moncrief` | GRHD Fishbone-Moncrief torus over nearly the full meridional domain |
+| `gr_fishbone_moncrief_cartesian.py` | `gr-fishbone-moncrief-cartesian` | Pole-free 3D Cartesian Kerr-Schild torus |
+| `gr_fishbone_moncrief_mhd.py` | `gr-fishbone-moncrief-mhd` | Spinning-hole GRMHD torus with a divergence-free MRI seed field |
+| `gr_fishbone_moncrief_mhd_cartesian.py` | `gr-fishbone-moncrief-mhd-cartesian` | Pole-free 3D Cartesian GRMHD torus |
+| `gr_kerr_dragging.py` | `gr-kerr-dragging` | Kerr frame dragging of a weak magnetic field |
 
 Run any of them:
 

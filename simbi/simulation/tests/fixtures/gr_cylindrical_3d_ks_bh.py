@@ -13,7 +13,7 @@
 # path treats the resolved azimuth right. horizon-penetrating, no floors.
 #
 # usage:
-#   simbi run gr_cylindrical_3d_ks_bh.py --end-time 0.5
+#   imported by test_cylindrical_3d_ks_bh.py
 # =============================================================================
 
 import math
@@ -32,7 +32,9 @@ class GrCylindrical3DKsBH(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="cylindrical kerr-schild background"),
+        ProblemParam(
+            Spacetime.SCHWARZSCHILD_KS, description="cylindrical kerr-schild background"
+        ),
     ]
     schwarzschild_mass: Annotated[
         float, ProblemParam(1.0, cli=True, description="black-hole mass M (G=c=1)")
@@ -54,22 +56,25 @@ class GrCylindrical3DKsBH(SimbiProblem):
     ]
     resolution: Annotated[
         tuple[int, int, int],
-        ProblemParam((20, 12, 16), cli=True, description="grid resolution (nR, nphi, nz)"),
+        ProblemParam(
+            (20, 12, 16), cli=True, description="grid resolution (nR, nphi, nz)"
+        ),
     ]
     coord_system: Annotated[
-        CoordSystem, ProblemParam(CoordSystem.CYLINDRICAL, description="cylindrical (R, phi, z)")
+        CoordSystem,
+        ProblemParam(CoordSystem.CYLINDRICAL, description="cylindrical (R, phi, z)"),
     ]
     regime: Annotated[Regime, ProblemParam(Regime.RHD, description="physics regime")]
     boundary_conditions: Annotated[
         list[str],
         ProblemParam(
             [
-                BoundaryCondition.OUTFLOW,   # R inner
-                BoundaryCondition.OUTFLOW,   # R outer
+                BoundaryCondition.OUTFLOW,  # R inner
+                BoundaryCondition.OUTFLOW,  # R outer
                 BoundaryCondition.PERIODIC,  # phi lo
                 BoundaryCondition.PERIODIC,  # phi hi
-                BoundaryCondition.OUTFLOW,   # z lo
-                BoundaryCondition.OUTFLOW,   # z hi
+                BoundaryCondition.OUTFLOW,  # z lo
+                BoundaryCondition.OUTFLOW,  # z hi
             ],
             description="R outflow, phi periodic, z outflow",
         ),
@@ -77,7 +82,9 @@ class GrCylindrical3DKsBH(SimbiProblem):
 
     end_time: Annotated[
         float,
-        ProblemParam(0.5, cli=True, checkpoint_safe=True, description="simulation end time"),
+        ProblemParam(
+            0.5, cli=True, checkpoint_safe=True, description="simulation end time"
+        ),
     ]
 
     def initial_primitive_state(self) -> InitialStateType:
