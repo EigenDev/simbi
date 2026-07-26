@@ -474,18 +474,18 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
                 )
                 .unwrap_or_else(|detail| panic!("ito transport accumulation: {detail}"));
             }
+            let mut injections = symbi_sim::tracers::boundary_injection_transfers(sim);
+            injections.extend(symbi_sim::tracers::source_injection_transfers(
+                sim,
+                stage.a0,
+                stage.ac,
+            ));
+            symbi_sim::tracers::fold_injection_ledger(
+                &mut injection_ledger,
+                injections,
+                stage.ac,
+            );
             if sim.tracers.is_some() {
-                let mut injections = symbi_sim::tracers::boundary_injection_transfers(sim);
-                injections.extend(symbi_sim::tracers::source_injection_transfers(
-                    sim,
-                    stage.a0,
-                    stage.ac,
-                ));
-                symbi_sim::tracers::fold_injection_ledger(
-                    &mut injection_ledger,
-                    injections,
-                    stage.ac,
-                );
                 prof("tracers", || {
                     symbi_sim::tracers::advance_stage_mass_transport(
                         sim,
@@ -499,11 +499,12 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         }
     }
     if sim.tracers.is_some() {
-        symbi_sim::tracers::spawn_boundary_injection(sim, injection_ledger)
+        symbi_sim::tracers::spawn_boundary_injection(sim, injection_ledger.clone())
             .unwrap_or_else(|detail| panic!("tracer boundary injection: {detail}"));
     }
     if sim.continuous_tracers.is_some() {
         let geometry = sim.geom.block_geometry(sim.physics.metric);
+        let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
         symbi_sim::tracers::materialize_ito_coefficients_store(&mut sim.store, &geometry)
             .unwrap_or_else(|detail| panic!("ito coefficient materialization: {detail}"));
         symbi_sim::tracers::fill_ito_coefficient_boundaries_host(
@@ -537,6 +538,13 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         )
         .unwrap_or_else(|detail| panic!("ito tracer boundaries: {detail}"));
         sim.continuous_tracers = Some(tracers);
+        symbi_sim::tracers::spawn_continuous_boundary_injection_store(
+            &mut sim.store,
+            &geometry,
+            layout,
+            injection_ledger,
+        )
+        .unwrap_or_else(|detail| panic!("continuous tracer boundary injection: {detail}"));
     }
     sim.motion.a = a_n;
 }
