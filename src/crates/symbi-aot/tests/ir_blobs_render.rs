@@ -15,8 +15,8 @@
 // =============================================================================
 
 use symbi_aot::{
-    ISO_C2P_1D_IR, RMHD_C2P_3D_IR, RMHD_FACE_FLUX_3D_0_IR, RMHD_GHOST_FILL_3D_IR, RHD_C2P_1D_IR,
-    RHD_C2P_2D_IR, RHD_FACE_FLUX_2D_0_IR, RHD_GODUNOV_STAGE_2D_IR,
+    ISO_C2P_1D_IR, RHD_C2P_1D_IR, RHD_C2P_2D_IR, RHD_FACE_FLUX_2D_0_IR, RHD_GODUNOV_STAGE_2D_IR,
+    RMHD_C2P_3D_IR, RMHD_FACE_FLUX_3D_0_IR, RMHD_GHOST_FILL_3D_IR,
 };
 use symbi_ir::emit::{Precision, Target};
 use symbi_ir::render_from_ir;
@@ -25,9 +25,20 @@ use symbi_ir::render_from_ir;
 fn renders(ir: &str, name: &str) {
     let desc = render_from_ir(ir, Target::Cuda, Precision::F64);
     assert_eq!(desc.kernel_name, name, "kernel name mismatch");
-    assert!(desc.source.contains(name), "{name}: source missing the kernel name:\n{}", desc.source);
-    assert!(desc.source.contains("__global__"), "{name}: not a CUDA __global__:\n{}", desc.source);
-    assert!(!desc.field_bindings.is_empty(), "{name}: no buffer bindings");
+    assert!(
+        desc.source.contains(name),
+        "{name}: source missing the kernel name:\n{}",
+        desc.source
+    );
+    assert!(
+        desc.source.contains("__global__"),
+        "{name}: not a CUDA __global__:\n{}",
+        desc.source
+    );
+    assert!(
+        !desc.field_bindings.is_empty(),
+        "{name}: no buffer bindings"
+    );
 }
 
 #[test]

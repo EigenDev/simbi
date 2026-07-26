@@ -42,9 +42,21 @@ const WIND: f64 = 0.5;
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
 fn fragment(x: f64, y: f64, mobile: bool) -> Body<f64, 2> {
-    Body::rigid_sphere(0, Tensor::new([x, y]), Tensor::zeros(), FRAG_MASS, FRAG_RADIUS, 1e-3, true)
-        .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-        .with_two_way_coupling(mobile)
+    Body::rigid_sphere(
+        0,
+        Tensor::new([x, y]),
+        Tensor::zeros(),
+        FRAG_MASS,
+        FRAG_RADIUS,
+        1e-3,
+        true,
+    )
+    .with_surface(SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 50.0,
+    })
+    .with_two_way_coupling(mobile)
 }
 
 fn wind_sim(bodies: BodyCollection<f64, 2>) -> Sim {
@@ -56,7 +68,11 @@ fn wind_sim(bodies: BodyCollection<f64, 2>) -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([WIND, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([WIND, 0.0]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(bodies)
 }
@@ -66,10 +82,18 @@ fn bonded_pair_rides_the_wind_as_a_cluster() {
     let coll = BodyCollection::new()
         .add_fragment(fragment(0.0, -0.35, true))
         .add_fragment(fragment(0.0, 0.35, true));
-    let mat = BondMaterial { k_n: 50.0, gamma: 0.5, ..BondMaterial::rigid() };
+    let mat = BondMaterial {
+        k_n: 50.0,
+        gamma: 0.5,
+        ..BondMaterial::rigid()
+    };
     let bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
     let mut sim = wind_sim(coll);
-    sim.attach_fragment_physics(FragmentPhysics { bonds, contacts: None, gravity: None });
+    sim.attach_fragment_physics(FragmentPhysics {
+        bonds,
+        contacts: None,
+        gravity: None,
+    });
 
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
@@ -124,7 +148,11 @@ fn wind_drag_snaps_a_tethered_fragment() {
     };
     let bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), weak)];
     let mut sim = wind_sim(coll);
-    sim.attach_fragment_physics(FragmentPhysics { bonds, contacts: None, gravity: None });
+    sim.attach_fragment_physics(FragmentPhysics {
+        bonds,
+        contacts: None,
+        gravity: None,
+    });
 
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);

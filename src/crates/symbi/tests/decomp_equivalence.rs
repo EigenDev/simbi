@@ -42,18 +42,18 @@
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
 #[cfg(feature = "gpu")]
 use symbi::sim::decomp::{DeviceCopy, PeerCopy, StagedCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_xpu::{with_device, CpuSpace, HostMemory};
+use symbi_xpu::{CpuSpace, HostMemory, with_device};
 #[cfg(feature = "gpu")]
-use symbi_xpu::{DeviceSpace, DeviceMemory};
+use symbi_xpu::{DeviceMemory, DeviceSpace};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;

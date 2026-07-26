@@ -10,31 +10,24 @@
 //   collection.snapshot(&advanced);
 // =============================================================================
 
-use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
 use crate::body::{Body, BodyKind};
 use crate::body_delta::BodyDelta;
 use crate::collection::{BodyCollection, ReferenceFrame};
+use symbi_algebra::Tensor;
+use symbi_ir::algebra::Scalar;
 
 /// rotate a 2D vector by angle theta (radians) in the xy-plane.
 pub fn rotate_2d<S: Scalar>(v: Tensor<S, 2>, theta: S) -> Tensor<S, 2> {
     let c = theta.cos();
     let s = theta.sin();
-    Tensor::new([
-        v[0] * c - v[1] * s,
-        v[0] * s + v[1] * c,
-    ])
+    Tensor::new([v[0] * c - v[1] * s, v[0] * s + v[1] * c])
 }
 
 /// rotate a 3D vector by angle theta (radians) about the z-axis.
 pub fn rotate_3d<S: Scalar>(v: Tensor<S, 3>, theta: S) -> Tensor<S, 3> {
     let c = theta.cos();
     let s = theta.sin();
-    Tensor::new([
-        v[0] * c - v[1] * s,
-        v[0] * s + v[1] * c,
-        v[2],
-    ])
+    Tensor::new([v[0] * c - v[1] * s, v[0] * s + v[1] * c, v[2]])
 }
 
 /// compute advanced body positions for an inertial binary system.
@@ -46,9 +39,15 @@ pub fn advance_binary<S: Scalar, const D: usize>(
     coll: &BodyCollection<S, D>,
     dt: S,
 ) -> Option<Vec<Body<S, D>>> {
-    if D < 2 { return None; }
-    if !coll.is_binary() { return None; }
-    if coll.frame != ReferenceFrame::Inertial { return None; }
+    if D < 2 {
+        return None;
+    }
+    if !coll.is_binary() {
+        return None;
+    }
+    if coll.frame != ReferenceFrame::Inertial {
+        return None;
+    }
 
     let bp = coll.binary_params.as_ref()?;
     let omega = (bp.total_mass / (bp.semi_major * bp.semi_major * bp.semi_major)).sqrt();
@@ -97,20 +96,33 @@ pub fn apply_body_deltas<const D: usize>(
                     body.velocity[a] = body.velocity[a] + delta.force_delta[a] * dt / m;
                 }
             }
-            if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &mut body.kind {
+            if let BodyKind::BlackHole {
+                total_accreted_mass,
+                accretion_rate,
+                ..
+            } = &mut body.kind
+            {
                 *total_accreted_mass += delta.mass_delta;
                 *accretion_rate = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
             }
             // the GR horizon books BOTH the accreted rest mass AND the covariant energy the shell-flux
             // reduction measured this step (the energy is exactly conserved, so edot is well-defined).
             if let BodyKind::Horizon {
-                total_accreted_mass, total_accreted_energy, mdot, edot, ..
+                total_accreted_mass,
+                total_accreted_energy,
+                mdot,
+                edot,
+                ..
             } = &mut body.kind
             {
                 *total_accreted_mass += delta.mass_delta;
                 *total_accreted_energy += delta.energy_delta;
                 *mdot = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
-                *edot = if dt > 0.0 { delta.energy_delta / dt } else { 0.0 };
+                *edot = if dt > 0.0 {
+                    delta.energy_delta / dt
+                } else {
+                    0.0
+                };
             }
         }
     }
@@ -135,7 +147,11 @@ pub fn apply_body_deltas<const D: usize>(
         // advance the full rigid-body rotation (Euler's equations + orientation roll). a two-way
         // body feels the reaction torque (world-frame per-step angular momentum on `body.torque`); a
         // prescribed body evolves torque-free, still precessing if its inertia is anisotropic.
-        let torque = if body.two_way_coupling { body.torque } else { Tensor::zeros() };
+        let torque = if body.two_way_coupling {
+            body.torque
+        } else {
+            Tensor::zeros()
+        };
         body.advance_rotation(torque, dt);
     }
 }
@@ -143,7 +159,9 @@ pub fn apply_body_deltas<const D: usize>(
 /// rotate an N-dimensional vector by theta in the xy-plane.
 /// D=1: identity. D=2: rotate_2d. D>=3: rotate about z-axis.
 fn rotate_nd<S: Scalar, const D: usize>(v: Tensor<S, D>, theta: S) -> Tensor<S, D> {
-    if D < 2 { return v; }
+    if D < 2 {
+        return v;
+    }
 
     let c = theta.cos();
     let s = theta.sin();
@@ -244,17 +262,31 @@ mod tests {
         // FULL torque vector, so omega tilts off z (gains an x component). a fixed-axis rotor could
         // not — this is what lets an asymmetric body tumble.
         let mut coll = BodyCollection::new().add(
-            crate::Body::<f64, 3>::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1, 1.0, true)
-                .with_angular_velocity(Tensor::new([0.0, 0.0, 5.0]))
-                .with_two_way_coupling(true),
+            crate::Body::<f64, 3>::rigid_sphere(
+                0,
+                Tensor::zeros(),
+                Tensor::zeros(),
+                1.0,
+                0.1,
+                1.0,
+                true,
+            )
+            .with_angular_velocity(Tensor::new([0.0, 0.0, 5.0]))
+            .with_two_way_coupling(true),
         );
         let mut delta = crate::BodyDelta::<f64, 3>::new(0);
         delta.torque_delta = Tensor::new([2.0, 0.0, 0.0]); // torque about x; I = 1, dt = 1e-3
         apply_body_deltas(&mut coll, &[delta], 1e-3);
         let w = coll.get(0).omega;
         // Euler integrates I domega = torque dt, so domega_x = 2 * 1e-3 = 2e-3; z spin untouched.
-        assert!(approx(w[0], 2e-3), "omega should tilt toward x (free tumbling): {w:?}");
-        assert!(approx(w[2], 5.0), "the z spin is unchanged by the x torque: {w:?}");
+        assert!(
+            approx(w[0], 2e-3),
+            "omega should tilt toward x (free tumbling): {w:?}"
+        );
+        assert!(
+            approx(w[2], 5.0),
+            "the z spin is unchanged by the x torque: {w:?}"
+        );
     }
 
     #[test]
@@ -262,14 +294,26 @@ mod tests {
         // force_delta is the drag FORCE; the body gains the impulse over the step, dv = F dt / mass.
         // a large force over a tiny step is a small velocity kick.
         let mut coll = BodyCollection::new().add(
-            crate::Body::<f64, 3>::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 4.0, 0.1, 1.0, true)
-                .with_two_way_coupling(true),
+            crate::Body::<f64, 3>::rigid_sphere(
+                0,
+                Tensor::zeros(),
+                Tensor::zeros(),
+                4.0,
+                0.1,
+                1.0,
+                true,
+            )
+            .with_two_way_coupling(true),
         );
         let mut delta = crate::BodyDelta::<f64, 3>::new(0);
         delta.force_delta = Tensor::new([8.0, 0.0, 0.0]); // F = 8, mass = 4, dt = 1e-3
         apply_body_deltas(&mut coll, &[delta], 1e-3);
         // dv = F dt / m = 8 * 1e-3 / 4 = 2e-3.
-        assert!(approx(coll.get(0).velocity[0], 2e-3), "{:?}", coll.get(0).velocity);
+        assert!(
+            approx(coll.get(0).velocity[0], 2e-3),
+            "{:?}",
+            coll.get(0).velocity
+        );
     }
 
     #[test]
@@ -278,7 +322,13 @@ mod tests {
         // gyroscopic term `omega x (I omega)` makes omega precess — it develops a z component it did
         // not start with. an ISOTROPIC body (equal moments) has a zero gyroscopic term and does not.
         let mut aniso = crate::Body::<f64, 3>::rigid_sphere(
-            0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1, 1.0, true,
+            0,
+            Tensor::zeros(),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+            1.0,
+            true,
         )
         .with_inertia_principal([1.0, 2.0, 3.0])
         .with_angular_velocity(Tensor::new([1.0, 1.0, 0.0]));
@@ -290,7 +340,13 @@ mod tests {
         );
 
         let mut iso = crate::Body::<f64, 3>::rigid_sphere(
-            0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1, 1.0, true,
+            0,
+            Tensor::zeros(),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+            1.0,
+            true,
         )
         .with_angular_velocity(Tensor::new([1.0, 1.0, 0.0])); // isotropic default (1,1,1)
         iso.advance_rotation(Tensor::zeros(), 0.05);
@@ -330,16 +386,35 @@ mod tests {
 
     #[test]
     fn advance_binary_returns_none_for_non_binary() {
-        let coll = BodyCollection::<f64, 2>::new()
-            .add(Body::passive(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1));
+        let coll = BodyCollection::<f64, 2>::new().add(Body::passive(
+            0,
+            Tensor::zeros(),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+        ));
         assert!(advance_binary(&coll, 0.01).is_none());
     }
 
     #[test]
     fn advance_binary_returns_none_for_corotating() {
         let coll = BodyCollection::<f64, 2>::new()
-            .add(Body::gravitational(0, Tensor::new([0.5, 0.0]), Tensor::zeros(), 1.0, 0.1, 0.04))
-            .add(Body::gravitational(1, Tensor::new([-0.5, 0.0]), Tensor::zeros(), 1.0, 0.1, 0.04))
+            .add(Body::gravitational(
+                0,
+                Tensor::new([0.5, 0.0]),
+                Tensor::zeros(),
+                1.0,
+                0.1,
+                0.04,
+            ))
+            .add(Body::gravitational(
+                1,
+                Tensor::new([-0.5, 0.0]),
+                Tensor::zeros(),
+                1.0,
+                0.1,
+                0.04,
+            ))
             .with_name("binary_system")
             .as_binary()
             .with_frame(ReferenceFrame::Corotating)
@@ -350,8 +425,22 @@ mod tests {
     #[test]
     fn advance_binary_rotates() {
         let coll = BodyCollection::new()
-            .add(Body::gravitational(0, Tensor::new([0.5, 0.0]), Tensor::new([0.0, 1.0]), 1.0, 0.1, 0.04))
-            .add(Body::gravitational(1, Tensor::new([-0.5, 0.0]), Tensor::new([0.0, -1.0]), 1.0, 0.1, 0.04))
+            .add(Body::gravitational(
+                0,
+                Tensor::new([0.5, 0.0]),
+                Tensor::new([0.0, 1.0]),
+                1.0,
+                0.1,
+                0.04,
+            ))
+            .add(Body::gravitational(
+                1,
+                Tensor::new([-0.5, 0.0]),
+                Tensor::new([0.0, -1.0]),
+                1.0,
+                0.1,
+                0.04,
+            ))
             .with_name("binary_system")
             .as_binary()
             .with_frame(ReferenceFrame::Inertial)

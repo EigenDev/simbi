@@ -16,9 +16,9 @@
 //   coll.visit_gravitational(|b| { ... });
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
 use crate::body::{Body, BodyKind};
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 /// number of body slots statically unrolled into the baked gravity/accretion
 /// source kernels. 2 covers binary systems. only SOURCE bodies (gravity-on-gas
@@ -45,8 +45,13 @@ impl<S: Scalar + OrderedNumeric> BinaryParams<S> {
         let orbital_period = two_pi * (a3 / total_mass).sqrt();
         let is_circular = eccentricity < S::from_f64(1e-10);
         Self {
-            total_mass, semi_major, eccentricity, mass_ratio,
-            orbital_period, is_circular, prescribed_motion: true,
+            total_mass,
+            semi_major,
+            eccentricity,
+            mass_ratio,
+            orbital_period,
+            is_circular,
+            prescribed_motion: true,
         }
     }
 }
@@ -156,8 +161,12 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
 
     // -- accessors --
 
-    pub fn len(&self) -> usize { self.bodies.len() }
-    pub fn is_empty(&self) -> bool { self.bodies.is_empty() }
+    pub fn len(&self) -> usize {
+        self.bodies.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.bodies.is_empty()
+    }
 
     /// whether ANY body needs the backward feedback reduction: a two-way-coupled
     /// body (it moves in response to the gas) or a black-hole sink (its accreted
@@ -270,34 +279,40 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
     /// set bodies to lerp between t^n and t^{n+1}.
     /// alpha=0 -> t^n, alpha=1 -> t^{n+1}.
     pub fn interpolate_to(&mut self, alpha: S) {
-        if !self.has_snapshot { return; }
+        if !self.has_snapshot {
+            return;
+        }
         let one_minus = S::ONE - alpha;
         for ii in 0..self.bodies.len() {
-            self.bodies[ii].position =
-                self.bodies_n[ii].position.scale(one_minus) +
-                self.bodies_next[ii].position.scale(alpha);
-            self.bodies[ii].velocity =
-                self.bodies_n[ii].velocity.scale(one_minus) +
-                self.bodies_next[ii].velocity.scale(alpha);
+            self.bodies[ii].position = self.bodies_n[ii].position.scale(one_minus)
+                + self.bodies_next[ii].position.scale(alpha);
+            self.bodies[ii].velocity = self.bodies_n[ii].velocity.scale(one_minus)
+                + self.bodies_next[ii].velocity.scale(alpha);
         }
     }
 
     /// finalize to t^{n+1} state, clear snapshot.
     pub fn finalize_advance(&mut self) {
-        if !self.has_snapshot { return; }
+        if !self.has_snapshot {
+            return;
+        }
         self.bodies = self.bodies_next.clone();
         self.has_snapshot = false;
     }
 
     /// restore to t^n state.
     pub fn restore_from_snapshot(&mut self) {
-        if !self.has_snapshot { return; }
+        if !self.has_snapshot {
+            return;
+        }
         self.bodies = self.bodies_n.clone();
     }
 }
 
 impl<S: Scalar, const D: usize> Default for BodyCollection<S, D> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // -- binary system factory --
@@ -306,11 +321,22 @@ impl<S: Scalar, const D: usize> Default for BodyCollection<S, D> {
 /// dispatches to black_hole or gravitational body based on sink rates.
 #[allow(clippy::too_many_arguments)]
 pub fn create_binary_system<S: Scalar + OrderedNumeric, const D: usize>(
-    pos1: Tensor<S, D>, vel1: Tensor<S, D>, mass1: S, radius1: S, softening1: S,
-    pos2: Tensor<S, D>, vel2: Tensor<S, D>, mass2: S, radius2: S, softening2: S,
-    sink_rate1: S, sink_rate2: S,
-    accr_radius1: S, accr_radius2: S,
-    sink_delta1: S, sink_delta2: S,
+    pos1: Tensor<S, D>,
+    vel1: Tensor<S, D>,
+    mass1: S,
+    radius1: S,
+    softening1: S,
+    pos2: Tensor<S, D>,
+    vel2: Tensor<S, D>,
+    mass2: S,
+    radius2: S,
+    softening2: S,
+    sink_rate1: S,
+    sink_rate2: S,
+    accr_radius1: S,
+    accr_radius2: S,
+    sink_delta1: S,
+    sink_delta2: S,
 ) -> BodyCollection<S, D> {
     let make = |idx, pos, vel, mass, radius, softening, sr, sd, ar| {
         if sr > S::ZERO {
@@ -320,8 +346,28 @@ pub fn create_binary_system<S: Scalar + OrderedNumeric, const D: usize>(
         }
     };
 
-    let b1 = make(0, pos1, vel1, mass1, radius1, softening1, sink_rate1, sink_delta1, accr_radius1);
-    let b2 = make(1, pos2, vel2, mass2, radius2, softening2, sink_rate2, sink_delta2, accr_radius2);
+    let b1 = make(
+        0,
+        pos1,
+        vel1,
+        mass1,
+        radius1,
+        softening1,
+        sink_rate1,
+        sink_delta1,
+        accr_radius1,
+    );
+    let b2 = make(
+        1,
+        pos2,
+        vel2,
+        mass2,
+        radius2,
+        softening2,
+        sink_rate2,
+        sink_delta2,
+        accr_radius2,
+    );
 
     BodyCollection::new()
         .add(b1)
@@ -422,10 +468,7 @@ mod tests {
         let b1 = grav(1, 2.0, 0.0);
         let mut coll = BodyCollection::new().add(b0).add(b1);
 
-        let advanced = vec![
-            grav(0, 1.0, 0.0),
-            grav(1, 3.0, 0.0),
-        ];
+        let advanced = vec![grav(0, 1.0, 0.0), grav(1, 3.0, 0.0)];
         coll.snapshot(&advanced);
         assert!(coll.has_snapshot());
 
@@ -460,11 +503,22 @@ mod tests {
     #[test]
     fn create_binary_system_mixed() {
         let coll = create_binary_system(
-            V2::new([0.5, 0.0]), V2::new([0.0, 1.0]), 0.5, 0.1, 0.04,
-            V2::new([-0.5, 0.0]), V2::new([0.0, -1.0]), 0.5, 0.1, 0.04,
-            10.0, 0.0,     // body 0 accretes, body 1 doesn't
-            0.2, 0.0,
-            0.0, 0.0,
+            V2::new([0.5, 0.0]),
+            V2::new([0.0, 1.0]),
+            0.5,
+            0.1,
+            0.04,
+            V2::new([-0.5, 0.0]),
+            V2::new([0.0, -1.0]),
+            0.5,
+            0.1,
+            0.04,
+            10.0,
+            0.0, // body 0 accretes, body 1 doesn't
+            0.2,
+            0.0,
+            0.0,
+            0.0,
         );
         assert_eq!(coll.len(), 2);
         assert!(coll.get(0).has_accretion());

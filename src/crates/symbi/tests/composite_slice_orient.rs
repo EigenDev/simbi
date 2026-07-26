@@ -36,11 +36,18 @@ fn composite_reads_fine_data_through_the_y_orientation() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .unwrap()
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     let ck = Kset::new(GAMMA, 0.3, &coarse.geom.allocated);
     // the refined box covers the y mid-plane in its center octant.
-    let region = RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] };
+    let region = RefinementRegion {
+        x_lo: [0.25; 3],
+        x_hi: [0.75; 3],
+    };
     let hier = Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, 0.3, &s.geom.allocated)
     })
@@ -55,18 +62,31 @@ fn composite_reads_fine_data_through_the_y_orientation() {
         hier.levels[0].state.fields.prim.rho.set(c, 1.0);
     }
 
-    let sl = hier.field_slice_composite(64, 0, 1, 0).expect("composite y-slice");
+    let sl = hier
+        .field_slice_composite(64, 0, 1, 0)
+        .expect("composite y-slice");
     // the y mid-plane (y = 0.5) intersects the refined box: samples with
     // (x, z) inside [0.25, 0.75]^2 must carry the FINE sentinel; the far
     // corner stays coarse.
-    let sent = sl.data.iter().filter(|v| (**v as f64 - SENTINEL).abs() < 1e-3).count();
-    let coarse_n = sl.data.iter().filter(|v| (**v as f64 - 1.0).abs() < 1e-3).count();
+    let sent = sl
+        .data
+        .iter()
+        .filter(|v| (**v as f64 - SENTINEL).abs() < 1e-3)
+        .count();
+    let coarse_n = sl
+        .data
+        .iter()
+        .filter(|v| (**v as f64 - 1.0).abs() < 1e-3)
+        .count();
     assert!(
         sent > 0,
         "no fine-sentinel samples in the y-orientation composite: the descent \
          never reached the fine level off the z plane"
     );
-    assert!(coarse_n > 0, "no coarse samples: the mask geometry is wrong");
+    assert!(
+        coarse_n > 0,
+        "no coarse samples: the mask geometry is wrong"
+    );
     // roughly a quarter of the picture is refined footprint (half-extent square).
     let frac = sent as f64 / sl.data.len() as f64;
     assert!(

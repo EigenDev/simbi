@@ -109,7 +109,10 @@ pub fn onion_fill_cell_3d<S: Scalar, const NF: usize>(
 /// `extent` is the region's largest semi-axis — r_exc for the a = 0 sphere,
 /// sqrt(r_exc^2 + a^2) for the spinning spheroid's equatorial semi-major axis.
 pub fn onion_pass_count(extent: f64, min_dx: f64) -> usize {
-    assert!(extent > 0.0 && min_dx > 0.0, "onion_pass_count: positive extent and width");
+    assert!(
+        extent > 0.0 && min_dx > 0.0,
+        "onion_pass_count: positive extent and width"
+    );
     (extent / min_dx).ceil() as usize + 2
 }
 
@@ -120,7 +123,9 @@ mod tests {
     // a synthetic even-resolution grid centered on the origin: cell centers at
     // (ii + 0.5 - n/2) dx straddle the origin and never sit on an axis.
     fn centers(n: usize, dx: f64) -> Vec<f64> {
-        (0..n).map(|ii| (ii as f64 + 0.5 - n as f64 / 2.0) * dx).collect()
+        (0..n)
+            .map(|ii| (ii as f64 + 0.5 - n as f64 / 2.0) * dx)
+            .collect()
     }
 
     fn sweep_grid(vals: &[Vec<f64>], xs: &[f64], r_exc: f64) -> Vec<Vec<f64>> {
@@ -171,8 +176,15 @@ mod tests {
     #[test]
     fn live_cell_keeps_its_own_state() {
         let own = [7.7_f64];
-        let got =
-            onion_fill_cell(own, [1.0], [2.0], [3.0], [4.0], [3.0, 4.0], ks_excised(&[3.0, 4.0], 0.0, 1.4));
+        let got = onion_fill_cell(
+            own,
+            [1.0],
+            [2.0],
+            [3.0],
+            [4.0],
+            [3.0, 4.0],
+            ks_excised(&[3.0, 4.0], 0.0, 1.4),
+        );
         assert_eq!(got, own, "|x| = 5 > r_exc = 1.4 is live");
     }
 
@@ -193,13 +205,19 @@ mod tests {
             })
             .collect();
         let n_excised = vals.iter().flatten().filter(|&&v| v == 0.0).count();
-        assert!(n_excised > 100, "the excised ball must be deep (got {n_excised} cells)");
+        assert!(
+            n_excised > 100,
+            "the excised ball must be deep (got {n_excised} cells)"
+        );
         for _ in 0..onion_pass_count(r_exc, dx) {
             vals = sweep_grid(&vals, &xs, r_exc);
         }
         for ii in 1..n - 1 {
             for jj in 1..n - 1 {
-                assert_eq!(vals[ii][jj], 1.0, "cell ({ii},{jj}) never received a rim value");
+                assert_eq!(
+                    vals[ii][jj], 1.0,
+                    "cell ({ii},{jj}) never received a rim value"
+                );
             }
         }
     }
@@ -212,7 +230,11 @@ mod tests {
         let (n, dx, r_exc) = (16, 0.2, 1.4);
         let xs = centers(n, dx);
         let vals: Vec<Vec<f64>> = (0..n)
-            .map(|ii| (0..n).map(|jj| xs[ii] * xs[jj] + 0.3 * (xs[ii] + xs[jj])).collect())
+            .map(|ii| {
+                (0..n)
+                    .map(|jj| xs[ii] * xs[jj] + 0.3 * (xs[ii] + xs[jj]))
+                    .collect()
+            })
             .collect();
         let out = sweep_grid(&vals, &xs, r_exc);
         for ii in 0..n {
@@ -242,7 +264,8 @@ mod tests_3d {
         // donor values encode their corner: 100*sx + 10*sy + sz with s in {1(+), 2(-)}.
         let own = [0.0_f64];
         let val = |sx: i32, sy: i32, sz: i32| -> [f64; 1] {
-            [(100 * if sx > 0 { 1 } else { 2 } + 10 * if sy > 0 { 1 } else { 2 }
+            [(100 * if sx > 0 { 1 } else { 2 }
+                + 10 * if sy > 0 { 1 } else { 2 }
                 + if sz > 0 { 1 } else { 2 }) as f64]
         };
         // z-fastest sign order: mmm, mmp, mpm, mpp, pmm, pmp, ppm, ppp.
@@ -270,7 +293,10 @@ mod tests_3d {
             let got =
                 onion_fill_cell_3d(own, &diags, [x, y, z], ks_excised(&[x, y, z], 0.0, r_exc))[0];
             let want = val(x.signum() as i32, y.signum() as i32, z.signum() as i32)[0];
-            assert_eq!(got, want, "octant ({x},{y},{z}) picked the wrong corner donor");
+            assert_eq!(
+                got, want,
+                "octant ({x},{y},{z}) picked the wrong corner donor"
+            );
         }
         // a live cell (outside r_exc) keeps its own state.
         let live = onion_fill_cell_3d(
@@ -295,7 +321,12 @@ mod predicate_tests {
     #[test]
     fn zero_spin_is_the_sphere() {
         let r = 1.4;
-        for &(x, y, z) in &[(0.5_f64, 0.5, 0.5), (1.0, 0.9, 0.1), (1.0, 1.0, 1.0), (0.0, 0.0, 1.39)] {
+        for &(x, y, z) in &[
+            (0.5_f64, 0.5, 0.5),
+            (1.0, 0.9, 0.1),
+            (1.0, 1.0, 1.0),
+            (0.0, 0.0, 1.39),
+        ] {
             let want = (x * x + y * y + z * z).sqrt() < r;
             assert_eq!(is_excised_3d([x, y, z], 0.0, r), want, "at ({x},{y},{z})");
         }
@@ -342,7 +373,10 @@ mod predicate_tests {
             let next: [f64; 3] = std::array::from_fn(|kk| x[kk] + step[kk]);
             let was = is_excised_3d(x, a, r);
             let now = is_excised_3d(next, a, r);
-            assert!(!(now && !was), "outward step re-entered the excised region at {next:?}");
+            assert!(
+                !(now && !was),
+                "outward step re-entered the excised region at {next:?}"
+            );
             inside = now;
             x = next;
         }

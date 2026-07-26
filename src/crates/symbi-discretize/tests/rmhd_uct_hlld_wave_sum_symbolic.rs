@@ -32,9 +32,9 @@ const SCALARS: &[&str] = &["alam_l", "aalf_l", "aalf_r", "alam_r"];
 
 // the symbolic param leaves carry no LoadAt, so every field read resolves to the offset-free key.
 fn coeff<'a>(lf: &'a LinForm, key: &str) -> &'a Poly {
-    lf.terms
-        .get(&(key.to_string(), vec![]))
-        .unwrap_or_else(|| panic!("wave-sum has no coefficient for field `{key}` — extraction changed shape"))
+    lf.terms.get(&(key.to_string(), vec![])).unwrap_or_else(|| {
+        panic!("wave-sum has no coefficient for field `{key}` — extraction changed shape")
+    })
 }
 
 #[test]
@@ -45,22 +45,62 @@ fn hlld_wave_sum_dissipation_pairing_symbolic() {
     // the FAST-WAVE ENDPOINT PAIRING (the dissipation sign): each staggered endpoint is diffused by
     // the fast wave on ITS OWN side, and by no other.
     let btl = coeff(&lf, "bt_l");
-    assert_eq!(btl.coefficient_of(&["alam_l"]), -1, "bt_l must be diffused by the LEFT fast wave");
-    assert_eq!(btl.coefficient_of(&["alam_r"]), 0, "bt_l must NOT be diffused by the RIGHT fast wave");
+    assert_eq!(
+        btl.coefficient_of(&["alam_l"]),
+        -1,
+        "bt_l must be diffused by the LEFT fast wave"
+    );
+    assert_eq!(
+        btl.coefficient_of(&["alam_r"]),
+        0,
+        "bt_l must NOT be diffused by the RIGHT fast wave"
+    );
     let btr = coeff(&lf, "bt_r");
-    assert_eq!(btr.coefficient_of(&["alam_r"]), 1, "bt_r must be diffused by the RIGHT fast wave");
-    assert_eq!(btr.coefficient_of(&["alam_l"]), 0, "bt_r must NOT be diffused by the LEFT fast wave");
+    assert_eq!(
+        btr.coefficient_of(&["alam_r"]),
+        1,
+        "bt_r must be diffused by the RIGHT fast wave"
+    );
+    assert_eq!(
+        btr.coefficient_of(&["alam_l"]),
+        0,
+        "bt_r must NOT be diffused by the LEFT fast wave"
+    );
 
     // the intermediate states telescope, each bracketed by its two adjacent wave speeds.
     let bsl = coeff(&lf, "bstar_l");
-    assert_eq!(bsl.coefficient_of(&["alam_l"]), 1, "bstar_l telescopes with the LEFT fast wave");
-    assert_eq!(bsl.coefficient_of(&["aalf_l"]), -1, "bstar_l telescopes with the LEFT Alfven wave");
+    assert_eq!(
+        bsl.coefficient_of(&["alam_l"]),
+        1,
+        "bstar_l telescopes with the LEFT fast wave"
+    );
+    assert_eq!(
+        bsl.coefficient_of(&["aalf_l"]),
+        -1,
+        "bstar_l telescopes with the LEFT Alfven wave"
+    );
     let bcc = coeff(&lf, "bc");
-    assert_eq!(bcc.coefficient_of(&["aalf_l"]), 1, "bc telescopes with the LEFT Alfven wave");
-    assert_eq!(bcc.coefficient_of(&["aalf_r"]), -1, "bc telescopes with the RIGHT Alfven wave");
+    assert_eq!(
+        bcc.coefficient_of(&["aalf_l"]),
+        1,
+        "bc telescopes with the LEFT Alfven wave"
+    );
+    assert_eq!(
+        bcc.coefficient_of(&["aalf_r"]),
+        -1,
+        "bc telescopes with the RIGHT Alfven wave"
+    );
     let bsr = coeff(&lf, "bstar_r");
-    assert_eq!(bsr.coefficient_of(&["aalf_r"]), 1, "bstar_r telescopes with the RIGHT Alfven wave");
-    assert_eq!(bsr.coefficient_of(&["alam_r"]), -1, "bstar_r telescopes with the RIGHT fast wave");
+    assert_eq!(
+        bsr.coefficient_of(&["aalf_r"]),
+        1,
+        "bstar_r telescopes with the RIGHT Alfven wave"
+    );
+    assert_eq!(
+        bsr.coefficient_of(&["alam_r"]),
+        -1,
+        "bstar_r telescopes with the RIGHT fast wave"
+    );
 }
 
 // NEGATIVE control: mispair the two fast-wave endpoints (|lam_L| <-> |lam_R|) — the anti-diffusive
@@ -71,6 +111,14 @@ fn hlld_wave_sum_symbolic_detects_swapped_fast_waves() {
     let (kernel, writes) = hlld_wave_sum_proof_kernel(true);
     let lf = LinForm::extract(&kernel.graph, writes[0].2, FIELDS, SCALARS);
     let btl = coeff(&lf, "bt_l");
-    assert_eq!(btl.coefficient_of(&["alam_l"]), 0, "bug: bt_l no longer on the LEFT fast wave");
-    assert_eq!(btl.coefficient_of(&["alam_r"]), -1, "bug: bt_l wrongly diffused by the RIGHT fast wave");
+    assert_eq!(
+        btl.coefficient_of(&["alam_l"]),
+        0,
+        "bug: bt_l no longer on the LEFT fast wave"
+    );
+    assert_eq!(
+        btl.coefficient_of(&["alam_r"]),
+        -1,
+        "bug: bt_l wrongly diffused by the RIGHT fast wave"
+    );
 }

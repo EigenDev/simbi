@@ -179,17 +179,25 @@ pub(crate) fn motion_scalar(
     ndim: usize,
     sref: ScalarRef,
 ) -> Option<f64> {
-    let hubble = if motion.homologous { motion.a_dot / motion.a } else { 0.0 };
+    let hubble = if motion.homologous {
+        motion.a_dot / motion.a
+    } else {
+        0.0
+    };
     let vtrans = if motion.homologous { 0.0 } else { motion.a_dot };
     // resolve via the typed `MeshScalar` (the SAME family the trace declares with), so the
     // per-axis convention is shared and the match is exhaustive — a new mesh scalar cannot be
     // added without a binding here. a non-mesh ref is `None` (the caller handles it).
-    let ScalarRef::Mesh(m) = sref else { return None };
+    let ScalarRef::Mesh(m) = sref else {
+        return None;
+    };
     match m {
         symbi_ir::MeshScalar::Hdil => Some(dilution_power(coords, ndim) * hubble),
-        symbi_ir::MeshScalar::Adot(ax) => {
-            Some(if axis_expands(coords, ax as usize) { hubble } else { 0.0 })
-        }
+        symbi_ir::MeshScalar::Adot(ax) => Some(if axis_expands(coords, ax as usize) {
+            hubble
+        } else {
+            0.0
+        }),
         symbi_ir::MeshScalar::Vtrans(ax) => Some(if ax == 0 { vtrans } else { 0.0 }),
     }
 }
@@ -209,16 +217,24 @@ pub(crate) fn body_scalar<const D: usize>(
     let body = match bodies {
         Some(bs) if b < bs.len() => bs.get(b),
         // inactive slot: gravity + accretion both masked.
-        _ => return match field {
-            BodyScalar::Soft | BodyScalar::Racc | BodyScalar::Delta => 1.0,
-            _ => 0.0,
-        },
+        _ => {
+            return match field {
+                BodyScalar::Soft | BodyScalar::Racc | BodyScalar::Delta => 1.0,
+                _ => 0.0,
+            };
+        }
     };
     match field {
         BodyScalar::Pos(ax) => body.position[ax as usize],
         BodyScalar::Vel(ax) => body.velocity[ax as usize],
         // gravity: mass=0 for a non-gravitating body so it exerts no pull.
-        BodyScalar::Mass => if body.has_gravity() { body.mass } else { 0.0 },
+        BodyScalar::Mass => {
+            if body.has_gravity() {
+                body.mass
+            } else {
+                0.0
+            }
+        }
         BodyScalar::Soft => body.softening().unwrap_or(1.0),
         // the penalization mask radius: the accretor's accretion radius or the rigid
         // body's physical radius; 1.0 for a body with no mask (never penalized).

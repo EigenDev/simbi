@@ -13,14 +13,14 @@
 // =============================================================================
 
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::WithExcision;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 4.0 / 3.0;
@@ -36,16 +36,24 @@ type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpa
 type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
-    let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells(cells)
-        .spacing([DX; 2])
-        .origin(origin)
-        .boundaries(bnd)
-        .timestepping(Timestepping::Rk2)
-        .allocate()
-        .expect("sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 2]), pre: 0.1 })
-        .build();
+    let sim = Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells(cells)
+    .spacing([DX; 2])
+    .origin(origin)
+    .boundaries(bnd)
+    .timestepping(Timestepping::Rk2)
+    .allocate()
+    .expect("sim construction failed")
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0; 2]),
+        pre: 0.1,
+    })
+    .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC);
     (sim, k)
 }
@@ -64,7 +72,11 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 let hi = if tc[a] == counts[a] - 1 {
                     BoundaryType::Outflow
                 } else {
@@ -146,11 +158,17 @@ fn assert_matches(counts: [usize; 2]) {
     // non-vacuous: the infall genuinely developed AND the excision genuinely acted
     // (the deep excised cells hold rebuilt, non-initial values).
     let den_max = mden.iter().cloned().fold(0.0_f64, f64::max);
-    assert!(den_max > 1.05, "no accretion developed (max den {den_max:.3})");
+    assert!(
+        den_max > 1.05,
+        "no accretion developed (max den {den_max:.3})"
+    );
 
     for (name, a, b) in [("den", &mden, &dden), ("nrg", &mnrg, &dnrg)] {
-        let max_err =
-            a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max);
+        let max_err = a
+            .iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0_f64, f64::max);
         assert!(
             max_err < 1e-12,
             "excised decomposition {counts:?} vs monolithic {name} max err {max_err:e}"

@@ -55,7 +55,11 @@ fn make_sim() -> Sim {
             let bx = -b0 * (2.0 * PI * y).sin();
             let by = b0 * (4.0 * PI * x).sin();
             MhdPrim {
-                hydro: Prim { rho: rho0, vel: Tensor::new([vx, vy, 0.0]), pre: p0 },
+                hydro: Prim {
+                    rho: rho0,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: p0,
+                },
                 mag: Tensor::new([bx, by, 0.0]),
             }
         })
@@ -71,8 +75,10 @@ fn make_sim() -> Sim {
 // seen, and the first negative-pressure step. returns (worst_pmin, max_rho, first_neg_iter).
 fn run_solver(solver: Solver) -> (f64, f64, Option<u64>) {
     let mut sim = make_sim();
-    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, 0.4, 1.0, &sim.geom.allocated)
-        .with_solver(solver).expect("valid solver/regime pair");
+    let sub =
+        NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, 0.4, 1.0, &sim.geom.allocated)
+            .with_solver(solver)
+            .expect("valid solver/regime pair");
     let (mut worst_p, mut max_r, mut first_neg) = (f64::MAX, f64::MIN, None);
     evolve_with_callback(&mut sim, &sub, 0.3, 1, |s| {
         let (_, mx, pmin) = rho_stats(s);
@@ -81,7 +87,8 @@ fn run_solver(solver: Solver) -> (f64, f64, Option<u64>) {
         if pmin <= 0.0 && first_neg.is_none() {
             first_neg = Some(s.iteration);
         }
-    }).ok();
+    })
+    .ok();
     (worst_p, max_r, first_neg)
 }
 
@@ -91,12 +98,22 @@ fn run_solver(solver: Solver) -> (f64, f64, Option<u64>) {
 fn nmhd_ot_solver_comparison() {
     eprintln!("[repro] OT {NX}x{NY} to t=0.3, canonical Athena IC — per-solver pressure/density:");
     let mut results = Vec::new();
-    for (label, sv) in [("HLLE", Solver::Hlle), ("HLLC", Solver::Hllc), ("HLLD", Solver::Hlld)] {
+    for (label, sv) in [
+        ("HLLE", Solver::Hlle),
+        ("HLLC", Solver::Hllc),
+        ("HLLD", Solver::Hlld),
+    ] {
         let (wp, mr, fn_) = run_solver(sv);
-        eprintln!("  {label}: worst pmin = {wp:.3e}  max rho = {mr:.3e}  first neg-p iter = {fn_:?}");
+        eprintln!(
+            "  {label}: worst pmin = {wp:.3e}  max rho = {mr:.3e}  first neg-p iter = {fn_:?}"
+        );
         results.push((label, wp, mr));
     }
     // diagnostic: if only one solver goes negative-pressure, the bug is solver-specific.
-    let healthy: Vec<&str> = results.iter().filter(|(_, wp, _)| *wp > 0.0).map(|(l, _, _)| *l).collect();
+    let healthy: Vec<&str> = results
+        .iter()
+        .filter(|(_, wp, _)| *wp > 0.0)
+        .map(|(l, _, _)| *l)
+        .collect();
     eprintln!("[repro] solvers that stayed positive-pressure: {healthy:?}");
 }

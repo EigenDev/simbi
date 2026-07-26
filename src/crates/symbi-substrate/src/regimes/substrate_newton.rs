@@ -22,28 +22,26 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_grid::Field;
 use symbi_hydro::source_spec::BuiltSource;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::{Arc, OnceLock};
 
-use crate::kernels::support::{to_bc_array, GhostFillDriver};
+use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    cfl_wave_speed, dispatch_body_feedback, dispatch_body_source, dispatch_fields, dispatch_flux,
-    dispatch_penalize, geom_scalar,
-    dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_gradient_boundaries,
-    dispatch_godunov_maybe_fused,
-    dispatch_named, dispatch_runtime_source, dispatch_source_apply, body_fused_in, fused_runtime_cpu_kernel,
-    resolve_body_only_fused, FusedCpuKernel,
-    geom_suffix, resolve_params, scalars_for, FusedSourceBinding, GradientBc, RuntimeSource,
-    ScalarBind, Solver,
+    FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
+    body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
+    dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
+    dispatch_godunov_maybe_fused, dispatch_gradient_boundaries, dispatch_named, dispatch_penalize,
+    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, geom_scalar,
+    geom_suffix, resolve_body_only_fused, resolve_params, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
-use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 use symbi_sim::state::FieldStore;
+use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
 // the ADIABATIC viscous operator books BOTH the Navier-Stokes shear force AND the viscous heating
@@ -75,7 +73,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
 {
 }
 
-pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
+pub struct AdiabaticSubstrateKernelSet<
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    const D: usize,
+> {
     pub gamma: f64,
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
@@ -132,12 +134,31 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     pub alpha: f64,
 }
 
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSubstrateKernelSet<Mem, Sc, D> {
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
     pub fn new(gamma: f64, cfl_number: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0), viscosity: 0.0, alpha: 0.0 }
+        Self {
+            gamma,
+            cfl_number,
+            theta: 1.0,
+            cfl_scratch,
+            fused_source: None,
+            additive_source: None,
+            runtime_source: None,
+            fuse_runtime: false,
+            c_drain: 1.0,
+            fused_rhs: OnceLock::new(),
+            boundary_dags: Vec::new(),
+            gradient_bcs: Vec::new(),
+            solver: Solver::Hlle,
+            freeze_streak: std::sync::atomic::AtomicU32::new(0),
+            viscosity: 0.0,
+            alpha: 0.0,
+        }
     }
 
     /// attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -148,7 +169,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     /// NVRTC-JIT kernel, both from the same DAG, no recompile. `params` are the DAG's `p{i}` knobs.
     /// `let built = build_user_source(&cfg, has_energy)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
-    pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+    pub fn with_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
         // has_energy = true is the AUTHORITY here (Newtonian's RegimeSpec) —
         // the set IS the regime. validation of the source vs the regime happened at
         // `build_user_source(cfg, &NEWTONIAN_SPEC)`.
@@ -161,7 +186,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     /// same source, faster execution; bit-for-bit identical to `with_runtime_source` (the two-pass).
     /// host + f64 only; otherwise it transparently falls back
     /// to the two-pass.
-    pub fn with_fused_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+    pub fn with_fused_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
         self.fuse_runtime = true;
         self
@@ -192,10 +221,15 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     /// prim prescription `[rho, vel.., pre]`). after the standard ghost-fill skips the driven faces,
     /// `ghost_fill` prescribes their ghost state from this DAG.
     /// `let sub = sim.substrate().with_driven_boundary(built, cfg.params.clone()).0;`
-    pub fn with_driven_boundary(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> (Self, u16) {
+    pub fn with_driven_boundary(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
         // has_energy = true (Newtonian) — the boundary prescribes prim.pre as well as rho/vel.
-        self.boundary_dags.push(RuntimeSource::new(built, params, true));
+        self.boundary_dags
+            .push(RuntimeSource::new(built, params, true));
         (self, id)
     }
 
@@ -231,7 +265,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
     /// routes to the `adiabatic_face_flux_hllc_*` AOT variants. fluent builder.
     /// rejects a solver that is invalid for the Newtonian regime (e.g., HLLD).
     pub fn with_solver(mut self, solver: Solver) -> Result<Self, symbi_sim::state::ConfigError> {
-        let regime = crate::regimes::substrate_kernels::RegimeKind::of::<Sc, D, symbi_hydro::newtonian::Newtonian>();
+        let regime = crate::regimes::substrate_kernels::RegimeKind::of::<
+            Sc,
+            D,
+            symbi_hydro::newtonian::Newtonian,
+        >();
         if !solver.valid_for(regime) {
             return Err(symbi_sim::state::ConfigError::SolverRegimeMismatch { solver, regime });
         }
@@ -247,19 +285,39 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
 }
 
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
-    KernelSet<D, DOF, Mem, Sc>
-    for AdiabaticSubstrateKernelSet<Mem, Sc, D>
+    KernelSet<D, DOF, Mem, Sc> for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
     fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.theta, self.solver, false);
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
+        dispatch_flux(
+            sim,
+            pre,
+            "adiabatic",
+            dir,
+            self.gamma,
+            self.theta,
+            self.solver,
+            false,
+        );
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // cons -> prim, all DOF velocities; the manifest binds cons.* -> prim.* (the cyl
         // c2p writes prim.vel_0..2, automatic). "prim.pre" resolves to the prim pressure.
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
+        let sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         let name = format!("adiabatic_c2p{sfx}_{D}d");
         let scalars = scalars_for(&name, |bind| match bind {
             ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
@@ -269,7 +327,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
         // the FUSED runtime-source path: one Cranelift-JIT'd godunov+source launch, replacing
         // (plain godunov + the separate `apply_runtime_source` pass). gated host+f64; the source's
         // own pass is skipped in `source_apply` under the SAME predicate. geo = Hydro{inertial:true}
@@ -292,14 +354,36 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 }
             }
         }
-        dispatch_godunov_maybe_fused(sim, pre, "adiabatic", dt, a0, ac, self.gamma, self.fused_source.as_ref());
+        dispatch_godunov_maybe_fused(
+            sim,
+            pre,
+            "adiabatic",
+            dt,
+            a0,
+            ac,
+            self.gamma,
+            self.fused_source.as_ref(),
+        );
     }
 
     fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
         // adiabatic shares the iso wave-speed map (cs = sqrt(gamma*p/rho), gamma=1.4 vs 1);
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        let dt = cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number, None, 0.0);
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
+        let dt = cfl_wave_speed(
+            sim,
+            pre,
+            &self.cfl_scratch,
+            "iso",
+            self.gamma,
+            self.cfl_number,
+            None,
+            0.0,
+        );
         // the parabolic viscous cap: an explicit momentum-diffusion step is stable for
         // dt <= C_visc dx^2 / nu (C_visc = 0.1 below the ~0.21 von-Neumann limit of the 4/3 normal
         // stress). cartesian 2D only, so the coordinate dx IS the physical cell width. inert inviscid.
@@ -342,28 +426,40 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // bound by manifest. (DOF>NDIM: the cyl ghost manifest is pending axis-BC work,
         // but the dispatch path is regime-uniform.)
         let bc = to_bc_array::<D>(&sim.boundaries);
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
+        let sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         let name = format!("iso_ghost_fill{sfx}_{D}d");
 
-        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
-            // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes (the
-            // `ints` tail), vel_sign FLOAT (the `scalars` tail) — each routed by the kernel's
-            // declared sort. the int ⊔ float coproduct that defeated positional scalars_for.
-            let (ints, scalars) = resolve_params(
-                &name,
-                |bind| match bind {
-                    ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
-                    ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
-                    o => panic!("ghost_fill: unexpected int param {o:?}"),
-                },
-                |bind| match bind {
-                    ScalarBind::Ref(ScalarRef::VelSign(ax)) => Sc::from_f64(p.vel_sign[*ax as usize]),
-                    o => panic!("ghost_fill: unexpected scalar {o:?}"),
-                },
-            );
-            dispatch_named(sim, pre, None, 0, &name, &region.domain, &ints, &scalars);
-        });
+        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+            |region, p| {
+                // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes (the
+                // `ints` tail), vel_sign FLOAT (the `scalars` tail) — each routed by the kernel's
+                // declared sort. the int ⊔ float coproduct that defeated positional scalars_for.
+                let (ints, scalars) = resolve_params(
+                    &name,
+                    |bind| match bind {
+                        ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
+                        ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        o => panic!("ghost_fill: unexpected int param {o:?}"),
+                    },
+                    |bind| match bind {
+                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
+                            Sc::from_f64(p.vel_sign[*ax as usize])
+                        }
+                        o => panic!("ghost_fill: unexpected scalar {o:?}"),
+                    },
+                );
+                dispatch_named(sim, pre, None, 0, &name, &region.domain, &ints, &scalars);
+            },
+        );
 
         // the standard pullback skips any Driven faces (Driven -> BcType::Skip);
         // prescribe their ghost prim state from the registered boundary DAGs.
@@ -383,8 +479,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // u_n = cons (all DOF components), bound by manifest over the full allocated domain.
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
+        let sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_named(sim, pre, None, 0, &name, &sim.geom.allocated, &[], &[]);
         // the dye snapshot rides alongside: u_n.chi = cons.chi, the rk combine's
@@ -399,7 +503,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         if !sim.has_passive_scalar() {
             return;
         }
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
         let name = format!("chi_godunov_{D}d");
         let scalars = scalars_for(&name, |bind| {
             let ScalarBind::Ref(sref) = bind else {
@@ -439,7 +547,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
         // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
         // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
-        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "adiabatic",
@@ -448,11 +560,26 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             &self.cfl_scratch,
             pre,
             &self.freeze_streak,
-            |dir| dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, 0.0, Solver::Hlle, false),
+            |dir| {
+                dispatch_flux(
+                    sim,
+                    pre,
+                    "adiabatic",
+                    dir,
+                    self.gamma,
+                    0.0,
+                    Solver::Hlle,
+                    false,
+                )
+            },
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
-            || if sim.immersed.is_some() { self.body_source(sim, ac * dt) },
+            || {
+                if sim.immersed.is_some() {
+                    self.body_source(sim, ac * dt)
+                }
+            },
             || {}, // newtonian: no admissible-boundary projection (keeps the freeze parachute)
             // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
             sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
@@ -479,10 +606,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             outputs.push(&sim.workspace.u_stage.mom[k]);
         }
         outputs.push(u_nrg);
-        let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.interior, &inputs, &outputs, &[], &[],
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &[],
         );
     }
 
@@ -494,7 +631,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             // when the fused path is live (same predicate godunov_stage used), the source already
             // rode inside the godunov launch — skip the separate pass to avoid double-counting.
             if self.fuse_runtime
-                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, true).is_some()
+                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, true)
+                    .is_some()
             {
                 return;
             }

@@ -12,8 +12,8 @@
 //   let (instrs, output_regs) = linearize(dag.nodes(), &[root_idx]);
 // =============================================================================
 
-use crate::op::Op;
 use crate::dag::{Node, Payload};
+use crate::op::Op;
 
 /// a single VM instruction. the evaluator executes these sequentially.
 #[derive(Clone, Copy, Debug)]
@@ -39,7 +39,9 @@ fn find_reachable(nodes: &[Node], outputs: &[usize]) -> Vec<bool> {
     let mut stack: Vec<usize> = outputs.to_vec();
 
     while let Some(idx) = stack.pop() {
-        if reachable[idx] { continue; }
+        if reachable[idx] {
+            continue;
+        }
         reachable[idx] = true;
         nodes[idx].for_each_child(|child| {
             if !reachable[child] {
@@ -69,8 +71,14 @@ fn dfs_visit(
     color: &mut [u8],
     result: &mut Vec<usize>,
 ) {
-    if !reachable[idx] || color[idx] == 2 { return; }
-    assert!(color[idx] != 1, "cycle detected in expression DAG at node {}", idx);
+    if !reachable[idx] || color[idx] == 2 {
+        return;
+    }
+    assert!(
+        color[idx] != 1,
+        "cycle detected in expression DAG at node {}",
+        idx
+    );
 
     color[idx] = 1;
 
@@ -116,7 +124,9 @@ pub fn linearize(nodes: &[Node], outputs: &[usize]) -> (Vec<Instr>, Vec<usize>) 
 
     for &idx in &order {
         let node = &nodes[idx];
-        if node.op.is_variable() { continue; }
+        if node.op.is_variable() {
+            continue;
+        }
 
         let dst = reg_map[idx].unwrap();
 

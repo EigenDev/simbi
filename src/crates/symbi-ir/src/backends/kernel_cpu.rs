@@ -391,7 +391,10 @@ impl KernelRenderer for RustRenderer {
                     ));
                     v.push(format!("        _rem /= grid_size_{aa} as usize;"));
                 }
-                v.push(format!("        let _i{}: i32 = _rem as i32;", peel[ndim - 1]));
+                v.push(format!(
+                    "        let _i{}: i32 = _rem as i32;",
+                    peel[ndim - 1]
+                ));
             }
             for aa in 0..ndim {
                 v.push(format!(
@@ -444,7 +447,10 @@ impl KernelRenderer for RustRenderer {
                     v.push(format!("        let _tc{aa}: usize = _trem % _nt_{aa};"));
                     v.push(format!("        _trem /= _nt_{aa};"));
                 }
-                v.push(format!("        let _tc{}: usize = _trem;", peel[peel.len() - 1]));
+                v.push(format!(
+                    "        let _tc{}: usize = _trem;",
+                    peel[peel.len() - 1]
+                ));
             }
             // nested cell loops within the tile; declare each axis's coord right
             // after its index. `break` on the boundary handles partial tiles
@@ -454,7 +460,9 @@ impl KernelRenderer for RustRenderer {
             // the untiled contiguous axis is a plain full-extent loop.
             for aa in symbi_algebra::nest_order(ndim) {
                 if !tiled_axes.contains(&aa) {
-                    v.push(format!("        for _i{aa} in 0..(grid_size_{aa} as i32) {{"));
+                    v.push(format!(
+                        "        for _i{aa} in 0..(grid_size_{aa} as i32) {{"
+                    ));
                     v.push(format!(
                         "        let {}: i32 = _i{aa} + dom_lo_{aa};",
                         COORD_VARS[aa]
@@ -631,41 +639,37 @@ fn emit_kernel_cpu_with(
     // mask_form's arm-cost gate applies per branch (the division-heavy
     // van-Leer body keeps bool/if; the cheap-arm minmod body vectorizes).
     // specialization is bit-identical: select(true, t, f) == t by definition.
-    let scalar_names: std::collections::HashSet<String> = prepared
-        .scalar_params
-        .iter()
-        .map(|b| b.name())
-        .collect();
-    let mut desc = if let Some(cand) =
-        crate::passes::unswitch::find(&prepared.scalarized, &scalar_names)
-    {
-        let fresh = || {
-            if renderer.serial {
-                RustRenderer::serial()
-            } else {
-                RustRenderer::new()
+    let scalar_names: std::collections::HashSet<String> =
+        prepared.scalar_params.iter().map(|b| b.name()).collect();
+    let mut desc =
+        if let Some(cand) = crate::passes::unswitch::find(&prepared.scalarized, &scalar_names) {
+            let fresh = || {
+                if renderer.serial {
+                    RustRenderer::serial()
+                } else {
+                    RustRenderer::new()
+                }
+            };
+            let mut p_t = prepared.clone();
+            p_t.kernel_name = format!("{}__uswt", prepared.kernel_name);
+            crate::passes::unswitch::specialize(&mut p_t.scalarized, &cand.cond_let, true);
+            let mut p_f = prepared.clone();
+            p_f.kernel_name = format!("{}__uswf", prepared.kernel_name);
+            crate::passes::unswitch::specialize(&mut p_f.scalarized, &cand.cond_let, false);
+            let dispatcher = unswitch_dispatcher(&prepared, &cand);
+            let d_t = crate::backends::render::render(p_t, &fresh());
+            let d_f = crate::backends::render::render(p_f, &fresh());
+            KernelDescriptor {
+                source: format!("{}\n{}\n{}", d_t.source, d_f.source, dispatcher),
+                kernel_name: prepared.kernel_name,
+                field_bindings: d_t.field_bindings,
+                param_names: d_t.param_names,
+                scalar_is_int: d_t.scalar_is_int,
+                tile_spec: d_t.tile_spec,
             }
+        } else {
+            crate::backends::render::render(prepared, renderer)
         };
-        let mut p_t = prepared.clone();
-        p_t.kernel_name = format!("{}__uswt", prepared.kernel_name);
-        crate::passes::unswitch::specialize(&mut p_t.scalarized, &cand.cond_let, true);
-        let mut p_f = prepared.clone();
-        p_f.kernel_name = format!("{}__uswf", prepared.kernel_name);
-        crate::passes::unswitch::specialize(&mut p_f.scalarized, &cand.cond_let, false);
-        let dispatcher = unswitch_dispatcher(&prepared, &cand);
-        let d_t = crate::backends::render::render(p_t, &fresh());
-        let d_f = crate::backends::render::render(p_f, &fresh());
-        KernelDescriptor {
-            source: format!("{}\n{}\n{}", d_t.source, d_f.source, dispatcher),
-            kernel_name: prepared.kernel_name,
-            field_bindings: d_t.field_bindings,
-            param_names: d_t.param_names,
-            scalar_is_int: d_t.scalar_is_int,
-            tile_spec: d_t.tile_spec,
-        }
-    } else {
-        crate::backends::render::render(prepared, renderer)
-    };
     // which scalar params are integer (i32/u32) — they come from the wrapper's
     // `ints: &[i32]` lane; float params from `scalars: &[f64]`.
     let scalar_is_int: Vec<bool> = inputs
@@ -971,10 +975,15 @@ mod tests {
         assert!(desc.source.contains("for _d0 in 0.._ts {"));
         assert!(desc.source.contains("let _i0: i32 = _c0 as i32;"));
         assert!(desc.source.contains("let ii: i32 = _i0 + dom_lo_0;"));
-        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"));
-        assert!(desc.source.contains(
-            "field1.data[(__idx_cell_buf1 + ((ii) - ii)) as usize] = cons_den;"
-        ));
+        assert!(
+            desc.source.contains(
+                "let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"
+            )
+        );
+        assert!(
+            desc.source
+                .contains("field1.data[(__idx_cell_buf1 + ((ii) - ii)) as usize] = cons_den;")
+        );
         // no float-routed indices.
         assert!(
             !desc.source.contains("as f64 + dom_lo"),
@@ -1014,7 +1023,11 @@ mod tests {
             },
         );
         assert_eq!(desc.field_bindings.len(), 3);
-        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"));
+        assert!(
+            desc.source.contains(
+                "let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"
+            )
+        );
         // the f64-built ConstValue(2.0) renders scalar-parametric via Scalar::from_f64.
         assert!(
             desc.source
@@ -1066,7 +1079,11 @@ mod tests {
             "src:\n{}",
             desc.source
         );
-        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"));
+        assert!(
+            desc.source.contains(
+                "let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"
+            )
+        );
         assert!(
             desc.source
                 .contains("] = ((cons_den * S::from_f64(2.0)) + cons_nrg);"),
@@ -1248,7 +1265,9 @@ mod tests {
             desc.source
         );
         assert!(
-            desc.source.contains("limiter_pick_1d__uswt__raw(field0, field1, grid_size_0, dom_lo_0, theta);"),
+            desc.source.contains(
+                "limiter_pick_1d__uswt__raw(field0, field1, grid_size_0, dom_lo_0, theta);"
+            ),
             "src:\n{}",
             desc.source
         );

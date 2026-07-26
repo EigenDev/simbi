@@ -16,9 +16,7 @@
 // methods work over that carrier.
 // =============================================================================
 
-use std::ops::{
-    Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Div, DivAssign, Neg,
-};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
 /// structural numeric bag: what the in-crate `Tensor` / `Matrix` / `Indexed`
 /// methods need from a scalar. NOT a production trait — `symbi_ir::algebra::Scalar`
@@ -34,21 +32,28 @@ use std::ops::{
 /// by host numeric types (f64/f32). tracing carriers (Gv) cannot be smuggled
 /// into those methods — preserving "no silent A1 violation on Gv."
 pub trait Numeric:
-    Copy + 'static + Default
-    + Add<Output = Self> + Sub<Output = Self>
-    + Mul<Output = Self> + Div<Output = Self>
+    Copy
+    + 'static
+    + Default
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
     + Neg<Output = Self>
-    + AddAssign + SubAssign + MulAssign + DivAssign
+    + AddAssign
+    + SubAssign
+    + MulAssign
+    + DivAssign
 {
     const ZERO: Self;
-    const ONE:  Self;
+    const ONE: Self;
 
     fn from_f64(v: f64) -> Self;
 
     fn sqrt(self) -> Self;
-    fn abs (self) -> Self;
-    fn min (self, other: Self) -> Self;
-    fn max (self, other: Self) -> Self;
+    fn abs(self) -> Self;
+    fn min(self, other: Self) -> Self;
+    fn max(self, other: Self) -> Self;
 }
 
 /// `Numeric` + host-side ordering. impl'd only by concrete host numeric types
@@ -62,29 +67,59 @@ pub trait OrderedNumeric: Numeric + PartialOrd {}
 
 impl Numeric for f64 {
     const ZERO: Self = 0.0;
-    const ONE:  Self = 1.0;
-    #[inline(always)] fn from_f64(v: f64) -> Self { v }
-    #[inline(always)] fn sqrt(self) -> Self { f64::sqrt(self) }
+    const ONE: Self = 1.0;
+    #[inline(always)]
+    fn from_f64(v: f64) -> Self {
+        v
+    }
+    #[inline(always)]
+    fn sqrt(self) -> Self {
+        f64::sqrt(self)
+    }
     // ternary form `x < 0 ? -x : x` / `a < b ? a : b` / `a > b ? a : b` — NOT
     // f64::abs/min/max. the std methods are NaN-symmetric and normalize signed
     // zero; the ternary is order-asymmetric. the traced IR lowers Min/Max/Abs to
     // exactly this select (scalarize), so the host carrier MUST match it bit-for-
     // bit or carrier equivalence breaks at NaN / signed-zero cells (tier-1 #2b).
-    #[inline(always)] fn abs (self) -> Self { if self < 0.0 { -self } else { self } }
-    #[inline(always)] fn min (self, other: Self) -> Self { if self < other { self } else { other } }
-    #[inline(always)] fn max (self, other: Self) -> Self { if self > other { self } else { other } }
+    #[inline(always)]
+    fn abs(self) -> Self {
+        if self < 0.0 { -self } else { self }
+    }
+    #[inline(always)]
+    fn min(self, other: Self) -> Self {
+        if self < other { self } else { other }
+    }
+    #[inline(always)]
+    fn max(self, other: Self) -> Self {
+        if self > other { self } else { other }
+    }
 }
 impl OrderedNumeric for f64 {}
 
 impl Numeric for f32 {
     const ZERO: Self = 0.0;
-    const ONE:  Self = 1.0;
-    #[inline(always)] fn from_f64(v: f64) -> Self { v as f32 }
-    #[inline(always)] fn sqrt(self) -> Self { f32::sqrt(self) }
+    const ONE: Self = 1.0;
+    #[inline(always)]
+    fn from_f64(v: f64) -> Self {
+        v as f32
+    }
+    #[inline(always)]
+    fn sqrt(self) -> Self {
+        f32::sqrt(self)
+    }
     // ternary form (see the f64 impl) — matches the traced IR's Min/Max/Abs
     // select lowering, whose NaN behavior differs from f32::abs/min/max.
-    #[inline(always)] fn abs (self) -> Self { if self < 0.0 { -self } else { self } }
-    #[inline(always)] fn min (self, other: Self) -> Self { if self < other { self } else { other } }
-    #[inline(always)] fn max (self, other: Self) -> Self { if self > other { self } else { other } }
+    #[inline(always)]
+    fn abs(self) -> Self {
+        if self < 0.0 { -self } else { self }
+    }
+    #[inline(always)]
+    fn min(self, other: Self) -> Self {
+        if self < other { self } else { other }
+    }
+    #[inline(always)]
+    fn max(self, other: Self) -> Self {
+        if self > other { self } else { other }
+    }
 }
 impl OrderedNumeric for f32 {}

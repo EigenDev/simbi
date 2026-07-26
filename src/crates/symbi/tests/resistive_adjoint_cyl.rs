@@ -29,7 +29,8 @@ use symbi_substrate::regimes::mhd_substrate::{apply_resistive_emf, ct_curl};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 // 2.5D cylindrical r-z MHD: D=2 spatial (r, z), DOF=3 (the out-of-plane B_phi/v_phi).
-type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory, f64>;
+type Sim =
+    SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 
 const N: usize = 24;
 const GAMMA: f64 = 5.0 / 3.0;
@@ -57,8 +58,20 @@ fn in_window(c: [isize; 2]) -> bool {
 }
 
 // the random poloidal face field on the interior window (zero elsewhere, incl. ghosts).
-fn br_seed(c: [isize; 2]) -> f64 { if in_window(c) { rnd(c[0], c[1], 1) } else { 0.0 } }
-fn bz_seed(c: [isize; 2]) -> f64 { if in_window(c) { rnd(c[0], c[1], 2) } else { 0.0 } }
+fn br_seed(c: [isize; 2]) -> f64 {
+    if in_window(c) {
+        rnd(c[0], c[1], 1)
+    } else {
+        0.0
+    }
+}
+fn bz_seed(c: [isize; 2]) -> f64 {
+    if in_window(c) {
+        rnd(c[0], c[1], 2)
+    } else {
+        0.0
+    }
+}
 
 fn make_sim() -> Sim {
     SimStateGeneric::<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
@@ -93,9 +106,15 @@ fn cyl_rz_resistive_current_is_the_curl_adjoint() {
     // seed the random poloidal face field B and zero the corner EMF.
     {
         let m = sim.fields.mhd.as_ref().unwrap();
-        for c in m.bface[0].domain().iter() { m.bface[0].set(c, br_seed(c)); }
-        for c in m.bface[1].domain().iter() { m.bface[1].set(c, bz_seed(c)); }
-        for c in m.efield[0].domain().iter() { m.efield[0].set(c, 0.0); }
+        for c in m.bface[0].domain().iter() {
+            m.bface[0].set(c, br_seed(c));
+        }
+        for c in m.bface[1].domain().iter() {
+            m.bface[1].set(c, bz_seed(c));
+        }
+        for c in m.efield[0].domain().iter() {
+            m.efield[0].set(c, 0.0);
+        }
     }
 
     // J: efield[0] <- eta * J_phi(B), eta = 1. after this efield[0] IS J.B on the corners.
@@ -115,8 +134,12 @@ fn cyl_rz_resistive_current_is_the_curl_adjoint() {
     // ct_curl writes bface <- bface - dt*curl(efield), so with bface = 0 the result is -curl(J B).
     {
         let m = sim.fields.mhd.as_ref().unwrap();
-        for c in m.bface[0].domain().iter() { m.bface[0].set(c, 0.0); }
-        for c in m.bface[1].domain().iter() { m.bface[1].set(c, 0.0); }
+        for c in m.bface[0].domain().iter() {
+            m.bface[0].set(c, 0.0);
+        }
+        for c in m.bface[1].domain().iter() {
+            m.bface[1].set(c, 0.0);
+        }
     }
     ct_curl::<2, 3, HostMemory, f64>(&sim, 1.0);
 
@@ -186,15 +209,25 @@ fn make_decay_sim() -> Sim {
 // cell B in coordinate order [B_r, B_phi, B_z], so B_z is component 2 (component 1 is out-of-plane).
 fn bz_amplitude(s: &Sim) -> f64 {
     let m = s.fields.mhd.as_ref().unwrap();
-    s.geom.interior.iter().map(|c| m.bcell[2].view().at(c).abs()).fold(0.0_f64, f64::max)
+    s.geom
+        .interior
+        .iter()
+        .map(|c| m.bcell[2].view().at(c).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn evolve_decay(eta: f64) -> f64 {
     let mut sim = make_decay_sim();
     let a0 = bz_amplitude(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_resistivity(eta);
-    evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {}).expect("cyl decay evolve failed");
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_resistivity(eta);
+    evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {})
+        .expect("cyl decay evolve failed");
     bz_amplitude(&sim) / a0
 }
 

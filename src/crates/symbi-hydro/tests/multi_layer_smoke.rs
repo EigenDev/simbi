@@ -28,10 +28,10 @@
 
 use symbi_algebra::Tensor;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::regime_spec::{law_params, NEWTONIAN_SPEC, ISO_NEWTONIAN_SPEC};
+use symbi_hydro::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
 use symbi_hydro::source_spec::{
-    gravity_params, point_mass_gravity_sources, source_params, user_params,
-    uniform_acceleration_sources,
+    gravity_params, point_mass_gravity_sources, source_params, uniform_acceleration_sources,
+    user_params,
 };
 use symbi_hydro::state::{Cons, Prim};
 use symbi_hydro::{IsoNewtonian, Newtonian, SimulationLaws, SourceEvaluator};
@@ -60,8 +60,7 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
     let g_ext = [0.1_f64, -0.2, 0.05];
 
     // ----- setup the composition -----
-    let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-        .with_user(uniform_acceleration_sources(3, true)); // mom + nrg
+    let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(uniform_acceleration_sources(3, true)); // mom + nrg
     let evaluator = SourceEvaluator::new(&sim, 3).expect("composes");
 
     // ----- initial state: uniform at rest -----
@@ -81,26 +80,36 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
         let prim = prim_from_cons(&cons, GAMMA);
 
         // momentum source.
-        let s_mom = evaluator.eval("mom", &[
-            (law_params::RHO, prim.rho),
-            (law_params::vel(0).as_str(), prim.vel[0]),
-            (law_params::vel(1).as_str(), prim.vel[1]),
-            (law_params::vel(2).as_str(), prim.vel[2]),
-            (user_params::g_ext(0).as_str(), g_ext[0]),
-            (user_params::g_ext(1).as_str(), g_ext[1]),
-            (user_params::g_ext(2).as_str(), g_ext[2]),
-        ]).expect("mom has overlay");
+        let s_mom = evaluator
+            .eval(
+                "mom",
+                &[
+                    (law_params::RHO, prim.rho),
+                    (law_params::vel(0).as_str(), prim.vel[0]),
+                    (law_params::vel(1).as_str(), prim.vel[1]),
+                    (law_params::vel(2).as_str(), prim.vel[2]),
+                    (user_params::g_ext(0).as_str(), g_ext[0]),
+                    (user_params::g_ext(1).as_str(), g_ext[1]),
+                    (user_params::g_ext(2).as_str(), g_ext[2]),
+                ],
+            )
+            .expect("mom has overlay");
 
         // energy source.
-        let s_nrg = evaluator.eval("nrg", &[
-            (law_params::RHO, prim.rho),
-            (law_params::vel(0).as_str(), prim.vel[0]),
-            (law_params::vel(1).as_str(), prim.vel[1]),
-            (law_params::vel(2).as_str(), prim.vel[2]),
-            (user_params::g_ext(0).as_str(), g_ext[0]),
-            (user_params::g_ext(1).as_str(), g_ext[1]),
-            (user_params::g_ext(2).as_str(), g_ext[2]),
-        ]).expect("nrg has overlay");
+        let s_nrg = evaluator
+            .eval(
+                "nrg",
+                &[
+                    (law_params::RHO, prim.rho),
+                    (law_params::vel(0).as_str(), prim.vel[0]),
+                    (law_params::vel(1).as_str(), prim.vel[1]),
+                    (law_params::vel(2).as_str(), prim.vel[2]),
+                    (user_params::g_ext(0).as_str(), g_ext[0]),
+                    (user_params::g_ext(1).as_str(), g_ext[1]),
+                    (user_params::g_ext(2).as_str(), g_ext[2]),
+                ],
+            )
+            .expect("nrg has overlay");
 
         // Euler update.
         for k in 0..3 {
@@ -117,7 +126,8 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
 
     assert!(
         (final_prim.rho - RHO_0).abs() < 1e-12,
-        "density must be preserved exactly (no mass source); got {}", final_prim.rho,
+        "density must be preserved exactly (no mass source); got {}",
+        final_prim.rho,
     );
 
     for k in 0..3 {
@@ -160,36 +170,35 @@ fn additive_composition_holds_under_time_evolution() {
     let x_cell = [2.0_f64, 0.0, 0.0]; // cell is 2 units away from mass on +x axis
 
     // ----- run with overlay A only -----
-    let sim_a = SimulationLaws::new(&NEWTONIAN_SPEC)
-        .with_user(uniform_acceleration_sources(3, false)); // mom-only for simplicity
+    let sim_a =
+        SimulationLaws::new(&NEWTONIAN_SPEC).with_user(uniform_acceleration_sources(3, false)); // mom-only for simplicity
     let eval_a = SourceEvaluator::new(&sim_a, 3).expect("a");
-    let final_mom_a = evolve_uniform(
-        &eval_a, RHO_0, GAMMA, N_STEPS, DT,
-        |prim| eval_a.eval("mom", &uniform_accel_vals(prim, g_ext)).unwrap(),
-    );
+    let final_mom_a = evolve_uniform(&eval_a, RHO_0, GAMMA, N_STEPS, DT, |prim| {
+        eval_a
+            .eval("mom", &uniform_accel_vals(prim, g_ext))
+            .unwrap()
+    });
 
     // ----- run with overlay B only -----
-    let sim_b = SimulationLaws::new(&NEWTONIAN_SPEC)
-        .with_gravity(point_mass_gravity_sources(3, false));
+    let sim_b =
+        SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
     let eval_b = SourceEvaluator::new(&sim_b, 3).expect("b");
-    let final_mom_b = evolve_uniform(
-        &eval_b, RHO_0, GAMMA, N_STEPS, DT,
-        |prim| eval_b.eval("mom", &gravity_vals(prim, x_cell, xm, gm)).unwrap(),
-    );
+    let final_mom_b = evolve_uniform(&eval_b, RHO_0, GAMMA, N_STEPS, DT, |prim| {
+        eval_b
+            .eval("mom", &gravity_vals(prim, x_cell, xm, gm))
+            .unwrap()
+    });
 
     // ----- run with COMPOSED A + B -----
     let sim_c = SimulationLaws::new(&NEWTONIAN_SPEC)
         .with_user(uniform_acceleration_sources(3, false))
         .with_gravity(point_mass_gravity_sources(3, false));
     let eval_c = SourceEvaluator::new(&sim_c, 3).expect("composes");
-    let final_mom_c = evolve_uniform(
-        &eval_c, RHO_0, GAMMA, N_STEPS, DT,
-        |prim| {
-            let mut vals = uniform_accel_vals(prim, g_ext);
-            vals.extend(gravity_vals(prim, x_cell, xm, gm));
-            eval_c.eval("mom", &vals).unwrap()
-        },
-    );
+    let final_mom_c = evolve_uniform(&eval_c, RHO_0, GAMMA, N_STEPS, DT, |prim| {
+        let mut vals = uniform_accel_vals(prim, g_ext);
+        vals.extend(gravity_vals(prim, x_cell, xm, gm));
+        eval_c.eval("mom", &vals).unwrap()
+    });
 
     // ----- analytical assertion -----
     //
@@ -209,7 +218,8 @@ fn additive_composition_holds_under_time_evolution() {
             (sum - composed).abs() < 1e-12,
             "component {k}: composed momentum {composed} != \
              A({}) + B({}) = {sum} (additive composition under evolution)",
-            final_mom_a[k], final_mom_b[k],
+            final_mom_a[k],
+            final_mom_b[k],
         );
     }
 }
@@ -234,13 +244,14 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
 
     // iso + gravity with has_energy=false. SourceEvaluator.fields() must
     // return ONLY "mom" (no "nrg" — iso has no energy equation).
-    let sim = SimulationLaws::new(&ISO_NEWTONIAN_SPEC)
-        .with_user(uniform_acceleration_sources(1, false));
+    let sim =
+        SimulationLaws::new(&ISO_NEWTONIAN_SPEC).with_user(uniform_acceleration_sources(1, false));
     let evaluator = SourceEvaluator::new(&sim, 1).expect("iso composes");
 
     let fields: Vec<&str> = evaluator.fields().collect();
     assert_eq!(
-        fields, vec!["mom"],
+        fields,
+        vec!["mom"],
         "iso evaluator must expose ONLY 'mom' (has_energy=false drops 'nrg')",
     );
 
@@ -249,11 +260,16 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
     let rho = RHO_0;
     let mut vx = 0.0_f64;
     for _step in 0..N_STEPS {
-        let s_mom = evaluator.eval("mom", &[
-            (law_params::RHO, rho),
-            (law_params::vel(0).as_str(), vx),
-            (user_params::g_ext(0).as_str(), g_ext[0]),
-        ]).expect("mom has overlay");
+        let s_mom = evaluator
+            .eval(
+                "mom",
+                &[
+                    (law_params::RHO, rho),
+                    (law_params::vel(0).as_str(), vx),
+                    (user_params::g_ext(0).as_str(), g_ext[0]),
+                ],
+            )
+            .expect("mom has overlay");
 
         // Euler update on momentum density (= ρ * v in 1D).
         let mom_density = rho * vx + DT * s_mom[0];
@@ -315,29 +331,52 @@ fn evolve_uniform(
 
 fn uniform_accel_vals<'a>(prim: &'a Prim<f64, 3>, g_ext: [f64; 3]) -> Vec<(&'a str, f64)> {
     static RHO: &str = "rho";
-    static V0: &str = "vel_0"; static V1: &str = "vel_1"; static V2: &str = "vel_2";
-    static G0: &str = "g_ext_0"; static G1: &str = "g_ext_1"; static G2: &str = "g_ext_2";
+    static V0: &str = "vel_0";
+    static V1: &str = "vel_1";
+    static V2: &str = "vel_2";
+    static G0: &str = "g_ext_0";
+    static G1: &str = "g_ext_1";
+    static G2: &str = "g_ext_2";
     vec![
         (RHO, prim.rho),
-        (V0, prim.vel[0]), (V1, prim.vel[1]), (V2, prim.vel[2]),
-        (G0, g_ext[0]), (G1, g_ext[1]), (G2, g_ext[2]),
+        (V0, prim.vel[0]),
+        (V1, prim.vel[1]),
+        (V2, prim.vel[2]),
+        (G0, g_ext[0]),
+        (G1, g_ext[1]),
+        (G2, g_ext[2]),
     ]
 }
 
 fn gravity_vals<'a>(
-    prim: &'a Prim<f64, 3>, x: [f64; 3], xm: [f64; 3], gm: f64,
+    prim: &'a Prim<f64, 3>,
+    x: [f64; 3],
+    xm: [f64; 3],
+    gm: f64,
 ) -> Vec<(&'a str, f64)> {
     static RHO: &str = "rho";
-    static V0: &str = "vel_0"; static V1: &str = "vel_1"; static V2: &str = "vel_2";
-    static X0: &str = "x_0"; static X1: &str = "x_1"; static X2: &str = "x_2";
-    static XM0: &str = "xm_0"; static XM1: &str = "xm_1"; static XM2: &str = "xm_2";
+    static V0: &str = "vel_0";
+    static V1: &str = "vel_1";
+    static V2: &str = "vel_2";
+    static X0: &str = "x_0";
+    static X1: &str = "x_1";
+    static X2: &str = "x_2";
+    static XM0: &str = "xm_0";
+    static XM1: &str = "xm_1";
+    static XM2: &str = "xm_2";
     static GM: &str = "gm";
     static EPS: &str = "eps";
     vec![
         (RHO, prim.rho),
-        (V0, prim.vel[0]), (V1, prim.vel[1]), (V2, prim.vel[2]),
-        (X0, x[0]), (X1, x[1]), (X2, x[2]),
-        (XM0, xm[0]), (XM1, xm[1]), (XM2, xm[2]),
+        (V0, prim.vel[0]),
+        (V1, prim.vel[1]),
+        (V2, prim.vel[2]),
+        (X0, x[0]),
+        (X1, x[1]),
+        (X2, x[2]),
+        (XM0, xm[0]),
+        (XM1, xm[1]),
+        (XM2, xm[2]),
         (GM, gm),
         (EPS, 0.0), // bare 1/r^3 reference
     ]
@@ -360,5 +399,6 @@ fn param_name_constants_match_module_helpers() {
     assert_eq!("gm", gravity_params::GM);
     assert_eq!("eps", gravity_params::EPS);
     // unused imports trip up clippy; pull them in via assertions.
-    let _ = Newtonian; let _ = IsoNewtonian;
+    let _ = Newtonian;
+    let _ = IsoNewtonian;
 }

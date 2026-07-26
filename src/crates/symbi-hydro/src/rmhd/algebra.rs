@@ -8,16 +8,19 @@
 // carrier-generic (S: Scalar) single source.
 // =============================================================================
 
-use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::mhd_state::MhdPrim;
 use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
+use symbi_algebra::Tensor;
+use symbi_ir::algebra::Scalar;
 
 /// magnetic pressure p_mag = 0.5*(B^2/W^2 + (v . B)^2) (= 0.5 * b^mu b_mu spatial).
 #[inline]
-pub fn magnetic_pressure<S: Scalar, const D: usize>(prim: &MhdPrim<S, D>, metric: &SpatialMetric<S, D>) -> S {
+pub fn magnetic_pressure<S: Scalar, const D: usize>(
+    prim: &MhdPrim<S, D>,
+    metric: &SpatialMetric<S, D>,
+) -> S {
     let bsq = metric.norm_sq_contra(&prim.mag); // |B|^2 = gamma_{ij} B^i B^j
     let vsq = metric.norm_sq_contra(&prim.vel); // |v|^2
     let vdb = metric.contract_contra(&prim.vel, &prim.mag); // v.B = gamma_{ij} v^i B^j
@@ -27,7 +30,10 @@ pub fn magnetic_pressure<S: Scalar, const D: usize>(prim: &MhdPrim<S, D>, metric
 
 /// total pressure: p_gas + p_mag.
 #[inline]
-pub fn total_pressure<S: Scalar, const D: usize>(prim: &MhdPrim<S, D>, metric: &SpatialMetric<S, D>) -> S {
+pub fn total_pressure<S: Scalar, const D: usize>(
+    prim: &MhdPrim<S, D>,
+    metric: &SpatialMetric<S, D>,
+) -> S {
     prim.pre + magnetic_pressure(prim, metric)
 }
 
@@ -35,7 +41,10 @@ pub fn total_pressure<S: Scalar, const D: usize>(prim: &MhdPrim<S, D>, metric: &
 /// covariant four-vector b^mu. the SINGLE source for both the RMHD flux's magnetic tension
 /// and the curvilinear geometric source's stress tension (T^{jk} = ... - b^j b^k).
 #[inline]
-pub fn magnetic_four_vector_spatial<S: Scalar, const D: usize>(prim: &MhdPrim<S, D>, metric: &SpatialMetric<S, D>) -> Tensor<S, D> {
+pub fn magnetic_four_vector_spatial<S: Scalar, const D: usize>(
+    prim: &MhdPrim<S, D>,
+    metric: &SpatialMetric<S, D>,
+) -> Tensor<S, D> {
     let ww = rhd::lorentz_factor(metric.norm_sq_contra(&prim.vel));
     let vdb = metric.contract_contra(&prim.vel, &prim.mag);
     prim.mag.scale(S::ONE / ww) + prim.vel.scale(ww * vdb)
@@ -56,5 +65,9 @@ pub fn rmhd_source_quantities<S: Scalar, const D: usize>(
 ) -> (S, Tensor<S, D>, S) {
     let v_sq = metric.norm_sq_contra(&prim.vel);
     let wgam2 = rhd::enthalpy_density(eos, prim.rho, prim.pre, v_sq); // rho h W^2
-    (wgam2, magnetic_four_vector_spatial(prim, metric), total_pressure(prim, metric))
+    (
+        wgam2,
+        magnetic_four_vector_spatial(prim, metric),
+        total_pressure(prim, metric),
+    )
 }

@@ -6,11 +6,11 @@
 // all fallible operations return Result<T, XpuError>.
 // =============================================================================
 
-use crate::space::ExecutionSpace;
 use crate::args::KernelArgs;
 use crate::config::LaunchConfig;
-use crate::token::Token;
 use crate::error::Result;
+use crate::space::ExecutionSpace;
+use crate::token::Token;
 
 /// owns a stream, launches kernels, synchronizes. move-only.
 pub struct Executor<S: ExecutionSpace> {
@@ -35,7 +35,9 @@ impl<S: ExecutionSpace> Executor<S> {
         config: LaunchConfig,
         args: &mut KernelArgs,
     ) -> Result<Token<S>> {
-        unsafe { S::launch(&self.stream, kernel, config, args.as_mut_slice())?; }
+        unsafe {
+            S::launch(&self.stream, kernel, config, args.as_mut_slice())?;
+        }
         let mut token = Token::create()?;
         token.record(&self.stream)?;
         Ok(token)

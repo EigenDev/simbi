@@ -133,7 +133,11 @@ mod tests {
         let r = ParamExpr::param("racc")
             + ParamExpr::constant(20.0)
                 * ParamExpr::min_of(vec![ParamExpr::param("dx_0"), ParamExpr::param("dx_1")]);
-        let v = r.eval(&resolver(&[("racc", 0.15), ("dx_0", 0.0625), ("dx_1", 0.125)]));
+        let v = r.eval(&resolver(&[
+            ("racc", 0.15),
+            ("dx_0", 0.0625),
+            ("dx_1", 0.125),
+        ]));
         assert_eq!(v, 0.15 + 20.0 * 0.0625);
     }
 

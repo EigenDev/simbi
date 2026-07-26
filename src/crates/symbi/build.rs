@@ -50,7 +50,10 @@ fn compile_stub_ptx(out_dir: &str) {
         if let Some(retry) = symbi_xpu::compile_cuda::ccbin_retry_candidate() {
             let r = run(Some(&retry.gxx));
             if r.status.success() {
-                println!("cargo:warning=symbi: {}; retried with -ccbin {}", retry.reason, retry.gxx);
+                println!(
+                    "cargo:warning=symbi: {}; retried with -ccbin {}",
+                    retry.reason, retry.gxx
+                );
                 output = r;
             }
         }

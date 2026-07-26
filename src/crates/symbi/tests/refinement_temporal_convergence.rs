@@ -74,7 +74,10 @@ fn evolved(cfl: f64) -> Hier {
         })
         .build();
     let ck = Kset::new(GAMMA, cfl, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25; 2], x_hi: [0.75; 2] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 2],
+        x_hi: [0.75; 2],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, cfl, &s.geom.allocated)
     })
@@ -92,16 +95,11 @@ fn near_interface(hier: &Hier, ll: usize, c: [isize; 2], width: isize) -> bool {
         if cov.contains(c) {
             return false;
         }
-        (0..2).all(|ax| {
-            c[ax] >= cov.spaces[ax].lo - width && c[ax] < cov.spaces[ax].hi + width
-        }) && (0..2).any(|ax| {
-            c[ax] < cov.spaces[ax].lo || c[ax] >= cov.spaces[ax].hi
-        })
+        (0..2).all(|ax| c[ax] >= cov.spaces[ax].lo - width && c[ax] < cov.spaces[ax].hi + width)
+            && (0..2).any(|ax| c[ax] < cov.spaces[ax].lo || c[ax] >= cov.spaces[ax].hi)
     } else {
         let int = &hier.levels[1].state.geom.interior;
-        (0..2).any(|ax| {
-            c[ax] < int.spaces[ax].lo + width || c[ax] >= int.spaces[ax].hi - width
-        })
+        (0..2).any(|ax| c[ax] < int.spaces[ax].lo + width || c[ax] >= int.spaces[ax].hi - width)
     }
 }
 
@@ -133,7 +131,9 @@ fn cf_ghost_coupling_is_second_order_in_time() {
     let e1 = skin_error(&coarse_dt, &reference);
     let e2 = skin_error(&half_dt, &reference);
     let order = (e1 / e2).log2();
-    eprintln!("[amr-temporal] skin l1: e(cfl 0.4) = {e1:.3e}, e(cfl 0.2) = {e2:.3e}, order = {order:.2}");
+    eprintln!(
+        "[amr-temporal] skin l1: e(cfl 0.4) = {e1:.3e}, e(cfl 0.2) = {e2:.3e}, order = {order:.2}"
+    );
     // measured baselines on this problem: substep-start-frozen ghosts give
     // 1.14 (and 4-14x larger absolute errors); stage-correct interpolation
     // gives 1.62 at this cfl pair. the deep-dt slope saturates near 1.3 — a

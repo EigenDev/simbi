@@ -23,11 +23,15 @@ pub mod variance;
 pub use algebra::{Numeric, OrderedNumeric};
 pub use block::BlockGrid;
 pub use boundary::{self as bc, IndexMap};
+pub use domain::{
+    Axis, Domain, DomainId, IndexName, IntoAxis, IntoRange, Side, Space, Split, domain, index,
+};
 pub use element::FieldElement;
-pub use domain::{Domain, DomainId, Space, Side, Axis, IntoAxis, domain, index, IndexName, IntoRange, Split};
-pub use layout::{flat_offset, nest_order, strides_from_extent, unflatten, Layout, CONTIGUOUS_AXIS};
+pub use layout::{
+    CONTIGUOUS_AXIS, Layout, flat_offset, nest_order, strides_from_extent, unflatten,
+};
 pub use matrix::{Matrix, outer};
-pub use tensor::{Tensor, dot, cross, norm, normalize, vec2, vec3, vec4, VecN, Vec2, Vec3, Vec4};
+pub use tensor::{Tensor, Vec2, Vec3, Vec4, VecN, cross, dot, norm, normalize, vec2, vec3, vec4};
 pub use variance::{
-    Indexed, Upper, Lower, Ortho, Cart, Contravariant, Covariant, Physical, Embedded, contract,
+    Cart, Contravariant, Covariant, Embedded, Indexed, Lower, Ortho, Physical, Upper, contract,
 };

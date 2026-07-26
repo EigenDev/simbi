@@ -35,8 +35,16 @@ fn divb_2d_cartesian_symbolic_telescoping() {
     for (dir, id_div, e_dir) in [(0usize, "idx", [1i32, 0]), (1usize, "idy", [0i32, 1])] {
         let (kernel, writes) = rmhd_ct_curl_2d_dir_gv(dir);
         assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
-        let curl = curl_only(LinForm::extract(&kernel.graph, writes[0].2, FIELDS, SCALARS));
-        assert!(!curl.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+        let curl = curl_only(LinForm::extract(
+            &kernel.graph,
+            writes[0].2,
+            FIELDS,
+            SCALARS,
+        ));
+        assert!(
+            !curl.is_zero(),
+            "dir {dir}: curl is empty — extractor saw no emf reads"
+        );
         let mut diff = curl.shifted(&e_dir);
         diff.add(&curl.shifted(&[0, 0]).neg_form());
         div.add(&diff.scale_var(id_div));
@@ -53,8 +61,14 @@ fn divb_2d_cartesian_symbolic_telescoping() {
 #[test]
 fn divb_2d_cartesian_symbolic_detects_broken() {
     let mut lf = LinForm::default();
-    lf.add(&LinForm::single(("ez".into(), vec![0, 0]), Poly::var("idx")));
-    lf.add(&LinForm::single(("ez".into(), vec![1, 0]), Poly::var("idy")));
+    lf.add(&LinForm::single(
+        ("ez".into(), vec![0, 0]),
+        Poly::var("idx"),
+    ));
+    lf.add(&LinForm::single(
+        ("ez".into(), vec![1, 0]),
+        Poly::var("idy"),
+    ));
     assert!(!lf.is_zero(), "mismatched coefficients must NOT cancel");
     assert_eq!(lf.residual().len(), 2);
 }

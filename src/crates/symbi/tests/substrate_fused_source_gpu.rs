@@ -61,14 +61,18 @@ fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(
         let (h, g) = (*host.view().at(c), *dev.view().at(c));
         assert!(g.is_finite(), "{what} at {c:?} went non-finite on GPU: {g}");
         let rel = (g - h).abs() / h.abs().max(1.0);
-        assert!(rel < 1e-9, "{what} at {c:?}: gpu {g} != cpu {h} (rel {rel:e})");
+        assert!(
+            rel < 1e-9,
+            "{what} at {c:?}: gpu {g} != cpu {h} (rel {rel:e})"
+        );
     }
 }
 
 // ---- adiabatic Newton sim with a smooth nonzero state on both backends ------
-fn build_adiabatic<S: ExecutionSpace, Mem: MemorySpace, const D: usize>(
-) -> SimState<Newtonian, D, Cartesian, IdealGas<f64>, S, Mem>
-where Cartesian: Metric<f64, D>,
+fn build_adiabatic<S: ExecutionSpace, Mem: MemorySpace, const D: usize>()
+-> SimState<Newtonian, D, Cartesian, IdealGas<f64>, S, Mem>
+where
+    Cartesian: Metric<f64, D>,
 {
     let dx = 1.0 / N as f64;
     SimState::<Newtonian, D, Cartesian, IdealGas<f64>, S, Mem>::build(
@@ -92,14 +96,19 @@ where Cartesian: Metric<f64, D>,
         let vel: [f64; D] = std::array::from_fn(|k| 0.02 * (k as f64 + 1.0) / rho);
         let vsq: f64 = (0..D).map(|k| vel[k] * vel[k]).sum();
         let pre = (GAMMA - 1.0) * (nrg - 0.5 * rho * vsq);
-        Prim { rho, vel: Tensor::new(vel), pre }
+        Prim {
+            rho,
+            vel: Tensor::new(vel),
+            pre,
+        }
     })
     .build()
 }
 
-fn build_iso<S: ExecutionSpace, Mem: MemorySpace, const D: usize>(
-) -> SimState<IsoNewtonian, D, Cartesian, Isothermal<f64>, S, Mem>
-where Cartesian: Metric<f64, D>,
+fn build_iso<S: ExecutionSpace, Mem: MemorySpace, const D: usize>()
+-> SimState<IsoNewtonian, D, Cartesian, Isothermal<f64>, S, Mem>
+where
+    Cartesian: Metric<f64, D>,
 {
     let dx = 1.0 / N as f64;
     SimState::<IsoNewtonian, D, Cartesian, Isothermal<f64>, S, Mem>::build(
@@ -118,7 +127,11 @@ where Cartesian: Metric<f64, D>,
         let r2: f64 = (0..D).map(|k| (x[k] - 0.5).powi(2)).sum();
         let rho = 1.0 + 0.4 * (-r2 / 0.05).exp();
         let vel: [f64; D] = std::array::from_fn(|k| 0.02 * (k as f64 + 1.0) / rho);
-        PrimG::<f64, D, IsoModel> { rho, vel: Tensor::new(vel), pre: Default::default() }
+        PrimG::<f64, D, IsoModel> {
+            rho,
+            vel: Tensor::new(vel),
+            pre: Default::default(),
+        }
     })
     .build()
 }
@@ -129,19 +142,24 @@ where Cartesian: Metric<f64, D>,
 // fused source's spec contribution is then the load-bearing diff between the
 // unfused output and the new output. asserts the FULL substrate path closes.
 fn check_adiabatic_fused<const D: usize>(binding: FusedSourceBinding)
-where Cartesian: Metric<f64, D>,
+where
+    Cartesian: Metric<f64, D>,
 {
     let host = build_adiabatic::<CpuSpace, HostMemory, D>();
-    let dev  = build_adiabatic::<CudaSpace, UnifiedMemory, D>();
-    let hset = AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated)
-        .with_fused_source(binding.clone());
-    let dset = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
-        .with_fused_source(binding);
+    let dev = build_adiabatic::<CudaSpace, UnifiedMemory, D>();
+    let hset =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated)
+            .with_fused_source(binding.clone());
+    let dset =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
+            .with_fused_source(binding);
     let interior = &host.geom.interior;
 
     // primitive + ghost + flux on both backends (the prerequisites godunov reads).
-    hset.c2p(&host);        dset.c2p(&dev);
-    hset.ghost_fill(&host); dset.ghost_fill(&dev);
+    hset.c2p(&host);
+    dset.c2p(&dev);
+    hset.ghost_fill(&host);
+    dset.ghost_fill(&dev);
     for dir in 0..D {
         hset.flux(&host, dir);
         dset.flux(&dev, dir);
@@ -150,40 +168,65 @@ where Cartesian: Metric<f64, D>,
     // **the load-bearing step**: the FUSED godunov on BOTH backends.
     hset.godunov_stage(&host, 0.01, 0.0, 1.0);
     dset.godunov_stage(&dev, 0.01, 0.0, 1.0);
-    cmp(interior, &host.fields.cons.den, &dev.fields.cons.den, "adiabatic fused cons.den (euler)");
+    cmp(
+        interior,
+        &host.fields.cons.den,
+        &dev.fields.cons.den,
+        "adiabatic fused cons.den (euler)",
+    );
     for k in 0..D {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k],
-            &format!("adiabatic fused cons.mom_{k} (euler)"));
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            &format!("adiabatic fused cons.mom_{k} (euler)"),
+        );
     }
-    let (hnrg, dnrg) = (host.fields.cons.nrg_field().unwrap(), dev.fields.cons.nrg_field().unwrap());
+    let (hnrg, dnrg) = (
+        host.fields.cons.nrg_field().unwrap(),
+        dev.fields.cons.nrg_field().unwrap(),
+    );
     cmp(interior, hnrg, dnrg, "adiabatic fused cons.nrg (euler)");
 
     // the rk2 integrator path (snapshot + euler-half + average) — a different
     // kernel name; proves dispatching `_rk2_with_{slug}` routes correctly on GPU.
-    hset.snapshot(&host); dset.snapshot(&dev);
+    hset.snapshot(&host);
+    dset.snapshot(&dev);
     hset.godunov_stage(&host, 0.01, 0.5, 0.5);
     dset.godunov_stage(&dev, 0.01, 0.5, 0.5);
-    cmp(interior, &host.fields.cons.den, &dev.fields.cons.den, "adiabatic fused cons.den (rk2)");
+    cmp(
+        interior,
+        &host.fields.cons.den,
+        &dev.fields.cons.den,
+        "adiabatic fused cons.den (rk2)",
+    );
     for k in 0..D {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k],
-            &format!("adiabatic fused cons.mom_{k} (rk2)"));
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            &format!("adiabatic fused cons.mom_{k} (rk2)"),
+        );
     }
     cmp(interior, hnrg, dnrg, "adiabatic fused cons.nrg (rk2)");
 }
 
 fn check_iso_fused<const D: usize>(binding: FusedSourceBinding)
-where Cartesian: Metric<f64, D>,
+where
+    Cartesian: Metric<f64, D>,
 {
     let host = build_iso::<CpuSpace, HostMemory, D>();
-    let dev  = build_iso::<CudaSpace, UnifiedMemory, D>();
+    let dev = build_iso::<CudaSpace, UnifiedMemory, D>();
     let hset = IsoSubstrateKernelSet::<HostMemory, f64, D>::new(CS, CFL, &host.geom.allocated)
         .with_fused_source(binding.clone());
     let dset = IsoSubstrateKernelSet::<UnifiedMemory, f64, D>::new(CS, CFL, &dev.geom.allocated)
         .with_fused_source(binding);
     let interior = &host.geom.interior;
 
-    hset.c2p(&host);        dset.c2p(&dev);
-    hset.ghost_fill(&host); dset.ghost_fill(&dev);
+    hset.c2p(&host);
+    dset.c2p(&dev);
+    hset.ghost_fill(&host);
+    dset.ghost_fill(&dev);
     for dir in 0..D {
         hset.flux(&host, dir);
         dset.flux(&dev, dir);
@@ -191,19 +234,38 @@ where Cartesian: Metric<f64, D>,
 
     hset.godunov_stage(&host, 0.01, 0.0, 1.0);
     dset.godunov_stage(&dev, 0.01, 0.0, 1.0);
-    cmp(interior, &host.fields.cons.den, &dev.fields.cons.den, "iso fused cons.den (euler)");
+    cmp(
+        interior,
+        &host.fields.cons.den,
+        &dev.fields.cons.den,
+        "iso fused cons.den (euler)",
+    );
     for k in 0..D {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k],
-            &format!("iso fused cons.mom_{k} (euler)"));
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            &format!("iso fused cons.mom_{k} (euler)"),
+        );
     }
 
-    hset.snapshot(&host); dset.snapshot(&dev);
+    hset.snapshot(&host);
+    dset.snapshot(&dev);
     hset.godunov_stage(&host, 0.01, 0.5, 0.5);
     dset.godunov_stage(&dev, 0.01, 0.5, 0.5);
-    cmp(interior, &host.fields.cons.den, &dev.fields.cons.den, "iso fused cons.den (rk2)");
+    cmp(
+        interior,
+        &host.fields.cons.den,
+        &dev.fields.cons.den,
+        "iso fused cons.den (rk2)",
+    );
     for k in 0..D {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k],
-            &format!("iso fused cons.mom_{k} (rk2)"));
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            &format!("iso fused cons.mom_{k} (rk2)"),
+        );
     }
 }
 
@@ -220,12 +282,30 @@ fn accel_binding<const D: usize>(g: &[f64]) -> FusedSourceBinding {
     FusedSourceBinding::new("uniform_accel", &pairs)
 }
 
-#[test] fn adiabatic_uniform_accel_gpu_1d() { check_adiabatic_fused::<1>(accel_binding::<1>(&[-9.81])); }
-#[test] fn adiabatic_uniform_accel_gpu_2d() { check_adiabatic_fused::<2>(accel_binding::<2>(&[-9.81, 0.5])); }
-#[test] fn adiabatic_uniform_accel_gpu_3d() { check_adiabatic_fused::<3>(accel_binding::<3>(&[-9.81, 0.5, 0.3])); }
-#[test] fn iso_uniform_accel_gpu_1d() { check_iso_fused::<1>(accel_binding::<1>(&[-9.81])); }
-#[test] fn iso_uniform_accel_gpu_2d() { check_iso_fused::<2>(accel_binding::<2>(&[-9.81, 0.5])); }
-#[test] fn iso_uniform_accel_gpu_3d() { check_iso_fused::<3>(accel_binding::<3>(&[-9.81, 0.5, 0.3])); }
+#[test]
+fn adiabatic_uniform_accel_gpu_1d() {
+    check_adiabatic_fused::<1>(accel_binding::<1>(&[-9.81]));
+}
+#[test]
+fn adiabatic_uniform_accel_gpu_2d() {
+    check_adiabatic_fused::<2>(accel_binding::<2>(&[-9.81, 0.5]));
+}
+#[test]
+fn adiabatic_uniform_accel_gpu_3d() {
+    check_adiabatic_fused::<3>(accel_binding::<3>(&[-9.81, 0.5, 0.3]));
+}
+#[test]
+fn iso_uniform_accel_gpu_1d() {
+    check_iso_fused::<1>(accel_binding::<1>(&[-9.81]));
+}
+#[test]
+fn iso_uniform_accel_gpu_2d() {
+    check_iso_fused::<2>(accel_binding::<2>(&[-9.81, 0.5]));
+}
+#[test]
+fn iso_uniform_accel_gpu_3d() {
+    check_iso_fused::<3>(accel_binding::<3>(&[-9.81, 0.5, 0.3]));
+}
 
 // ----- point_mass_grav: POSITION-DEPENDENT fused source ---------------------
 //
@@ -244,9 +324,27 @@ fn grav_binding<const D: usize>(gm: f64, xm: &[f64]) -> FusedSourceBinding {
     FusedSourceBinding::new("point_mass_grav", &pairs)
 }
 
-#[test] fn adiabatic_point_mass_grav_gpu_1d() { check_adiabatic_fused::<1>(grav_binding::<1>(1.0, &[0.1])); }
-#[test] fn adiabatic_point_mass_grav_gpu_2d() { check_adiabatic_fused::<2>(grav_binding::<2>(1.0, &[0.1, 0.1])); }
-#[test] fn adiabatic_point_mass_grav_gpu_3d() { check_adiabatic_fused::<3>(grav_binding::<3>(1.0, &[0.1, 0.1, 0.1])); }
-#[test] fn iso_point_mass_grav_gpu_1d() { check_iso_fused::<1>(grav_binding::<1>(1.0, &[0.1])); }
-#[test] fn iso_point_mass_grav_gpu_2d() { check_iso_fused::<2>(grav_binding::<2>(1.0, &[0.1, 0.1])); }
-#[test] fn iso_point_mass_grav_gpu_3d() { check_iso_fused::<3>(grav_binding::<3>(1.0, &[0.1, 0.1, 0.1])); }
+#[test]
+fn adiabatic_point_mass_grav_gpu_1d() {
+    check_adiabatic_fused::<1>(grav_binding::<1>(1.0, &[0.1]));
+}
+#[test]
+fn adiabatic_point_mass_grav_gpu_2d() {
+    check_adiabatic_fused::<2>(grav_binding::<2>(1.0, &[0.1, 0.1]));
+}
+#[test]
+fn adiabatic_point_mass_grav_gpu_3d() {
+    check_adiabatic_fused::<3>(grav_binding::<3>(1.0, &[0.1, 0.1, 0.1]));
+}
+#[test]
+fn iso_point_mass_grav_gpu_1d() {
+    check_iso_fused::<1>(grav_binding::<1>(1.0, &[0.1]));
+}
+#[test]
+fn iso_point_mass_grav_gpu_2d() {
+    check_iso_fused::<2>(grav_binding::<2>(1.0, &[0.1, 0.1]));
+}
+#[test]
+fn iso_point_mass_grav_gpu_3d() {
+    check_iso_fused::<3>(grav_binding::<3>(1.0, &[0.1, 0.1, 0.1]));
+}

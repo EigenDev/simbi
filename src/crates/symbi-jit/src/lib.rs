@@ -630,10 +630,18 @@ fn translate_expr(
                 // no-op when the source already carries the target type: `_coord_N` is pre-converted
                 // to f64 in the kernel var seed, so an int->f64 cast of it would re-convert an f64.
                 ElementTy::F64 | ElementTy::F32 => {
-                    if vty == fty { v } else { b.ins().fcvt_from_sint(fty, v) }
+                    if vty == fty {
+                        v
+                    } else {
+                        b.ins().fcvt_from_sint(fty, v)
+                    }
                 }
                 ElementTy::I32 | ElementTy::U32 => {
-                    if vty.is_int() { v } else { b.ins().fcvt_to_sint(types::I32, v) }
+                    if vty.is_int() {
+                        v
+                    } else {
+                        b.ins().fcvt_to_sint(types::I32, v)
+                    }
                 }
                 ElementTy::Bool => return Err(JitError::Unsupported("cast to bool".into())),
             }
@@ -858,7 +866,12 @@ fn translate_stmts(
                 let v = translate_expr(b, result, vars, shims, Some(stencil))?;
                 vars.insert(name.clone(), LocalSlot::Val(v));
             }
-            ScalarStmt::IfElse { outs, cond, then_body, else_body } => {
+            ScalarStmt::IfElse {
+                outs,
+                cond,
+                then_body,
+                else_body,
+            } => {
                 // a data-dependent branch where ONLY the taken arm runs. each result slot is a mutable
                 // `Variable` declared BEFORE the branch; every arm ends with `Assign { outs[j], .. }`, so
                 // the slot is defined on both paths and live at the merge (Cranelift inserts the phi on
@@ -877,14 +890,16 @@ fn translate_stmts(
 
                 b.seal_block(then_blk);
                 b.switch_to_block(then_blk);
-                let tflow = translate_stmts(b, then_body, vars, shims, stencil, next_var, loop_exit)?;
+                let tflow =
+                    translate_stmts(b, then_body, vars, shims, stencil, next_var, loop_exit)?;
                 if tflow == Flow::Fallthrough {
                     b.ins().jump(merge, &[]);
                 }
 
                 b.seal_block(else_blk);
                 b.switch_to_block(else_blk);
-                let eflow = translate_stmts(b, else_body, vars, shims, stencil, next_var, loop_exit)?;
+                let eflow =
+                    translate_stmts(b, else_body, vars, shims, stencil, next_var, loop_exit)?;
                 if eflow == Flow::Fallthrough {
                     b.ins().jump(merge, &[]);
                 }
@@ -965,8 +980,9 @@ impl CompiledKernel {
         for flat in 0..total {
             // the canonical flat -> coord map, owned by `symbi_algebra::unflatten`.
             symbi_algebra::unflatten(flat, &ext, &mut idx);
-            let coord: Vec<i64> =
-                (0..ndim).map(|ax| dom_los[ax] as i64 + idx[ax] as i64).collect();
+            let coord: Vec<i64> = (0..ndim)
+                .map(|ax| dom_los[ax] as i64 + idx[ax] as i64)
+                .collect();
             // SAFETY: the kernel reads n_in bases + n_scalar scalars and writes n_out bases at the
             // flat index of `coord` within the shared (lo, extent) layout; the asserts size them.
             unsafe {
@@ -1120,11 +1136,18 @@ impl CompiledKernel {
         assert_eq!(out_bases.len(), self.n_out);
         assert_eq!(scalars.len(), self.n_scalar);
         const MAX_NDIM: usize = 8;
-        assert!(self.ndim <= MAX_NDIM, "run_cover: ndim {} exceeds {MAX_NDIM}", self.ndim);
+        assert!(
+            self.ndim <= MAX_NDIM,
+            "run_cover: ndim {} exceeds {MAX_NDIM}",
+            self.ndim
+        );
         let ndim = self.ndim;
         let lo_i: Vec<i64> = lo.iter().map(|&x| x as i64).collect();
         let ext_i: Vec<i64> = extent.iter().map(|&x| x as i64).collect();
-        let shared = SharedBufs { in_ptrs: in_bases.to_vec(), out_ptrs: out_bases.to_vec() };
+        let shared = SharedBufs {
+            in_ptrs: in_bases.to_vec(),
+            out_ptrs: out_bases.to_vec(),
+        };
 
         // blocks per axis (ceil-div); their product is the fork-join width.
         let mut nblk = [1usize; MAX_NDIM];
@@ -1194,7 +1217,14 @@ pub fn compile_kernel(
     field_writes: &[(String, symbi_ir::graph::NodeId)],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
-    compile_kernel_prec(graph, field_inputs, scalar_params, field_writes, ndim, symbi_ir::emit::Precision::F64)
+    compile_kernel_prec(
+        graph,
+        field_inputs,
+        scalar_params,
+        field_writes,
+        ndim,
+        symbi_ir::emit::Precision::F64,
+    )
 }
 
 /// compile a kernel at the given precision. the runtime float type (F64/F32) overrides the graph's
@@ -1242,7 +1272,11 @@ pub fn compile_kernel_prec(
     // the transcendental shims at the runtime precision (f32 kernel -> native f32 libm shims, so
     // no promote/demote around the call). one JITModule per compile, so same-named f32/f64 symbols
     // never collide.
-    let shims = if fty == types::F32 { shim_table_f32() } else { shim_table() };
+    let shims = if fty == types::F32 {
+        shim_table_f32()
+    } else {
+        shim_table()
+    };
     let mut jb = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
     for (name, _, ptr) in shims {
         jb.symbol(*name, *ptr);
@@ -1339,7 +1373,11 @@ pub fn compile_kernel_prec(
         let raw = b
             .ins()
             .load(types::F64, MemFlags::trusted(), scalars_ptr, (i * 8) as i32);
-        let v = if fty == types::F32 { b.ins().fdemote(types::F32, raw) } else { raw };
+        let v = if fty == types::F32 {
+            b.ins().fdemote(types::F32, raw)
+        } else {
+            raw
+        };
         vars.insert(name.clone(), LocalSlot::Val(v));
     }
     for ax in 0..ndim {
@@ -2140,8 +2178,12 @@ mod tests {
         let win = [13u32, 11, 7];
         let ext = [win[0] + 1, win[1] + 1, win[2] + 1];
         let n: usize = ext.iter().map(|&e| e as usize).product();
-        let x0: Vec<f64> = (0..n).map(|i| 0.5 + 1.3 * ((i as f64) * 0.071).fract()).collect();
-        let f0: Vec<f64> = (0..n).map(|i| 0.2 + 0.9 * ((i as f64) * 0.053).fract()).collect();
+        let x0: Vec<f64> = (0..n)
+            .map(|i| 0.5 + 1.3 * ((i as f64) * 0.071).fract())
+            .collect();
+        let f0: Vec<f64> = (0..n)
+            .map(|i| 0.2 + 0.9 * ((i as f64) * 0.053).fract())
+            .collect();
 
         let kernel = compile_kernel(&g, &["x".into(), "f".into()], &[], &[("x".into(), out)], 3)
             .expect("jit compile_kernel (3d cover)");
@@ -2153,12 +2195,20 @@ mod tests {
         unsafe {
             let p = buf_par.as_mut_ptr();
             kernel.run_parallel_raw(
-                &win, &[0, 0, 0], &[0, 0, 0], &ext,
-                &[p as *const f64, f0.as_ptr()], &[], &[p],
+                &win,
+                &[0, 0, 0],
+                &[0, 0, 0],
+                &ext,
+                &[p as *const f64, f0.as_ptr()],
+                &[],
+                &[p],
             );
         }
         assert!(
-            buf_par.iter().zip(&x0).any(|(a, b)| a.to_bits() != b.to_bits()),
+            buf_par
+                .iter()
+                .zip(&x0)
+                .any(|(a, b)| a.to_bits() != b.to_bits()),
             "kernel left the buffer unchanged — the comparison would be vacuous",
         );
 
@@ -2170,15 +2220,23 @@ mod tests {
             unsafe {
                 let c = buf_cov.as_mut_ptr();
                 kernel.run_cover_raw(
-                    &win, &[0, 0, 0], &[0, 0, 0], &ext, &block,
-                    &[c as *const f64, f0.as_ptr()], &[], &[c],
+                    &win,
+                    &[0, 0, 0],
+                    &[0, 0, 0],
+                    &ext,
+                    &block,
+                    &[c as *const f64, f0.as_ptr()],
+                    &[],
+                    &[c],
                 );
             }
             for i in 0..n {
                 assert_eq!(
-                    buf_par[i].to_bits(), buf_cov[i].to_bits(),
+                    buf_par[i].to_bits(),
+                    buf_cov[i].to_bits(),
                     "cover{block:?} != parallel at flat {i}: par={} cov={}",
-                    buf_par[i], buf_cov[i],
+                    buf_par[i],
+                    buf_cov[i],
                 );
             }
         }

@@ -20,16 +20,16 @@
 
 use symbi_ir::graph::NodeId;
 
+use symbi_algebra::algebra::Numeric;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::{FieldBind, FieldRef};
-use symbi_algebra::algebra::Numeric;
 
 use super::coords::{Coords, Spacing};
-use super::gv::{cell_geometry_gv, CellGeometryGv};
-use symbi_ir::{begin_trace, end_trace, Gv, GvKernel};
+use super::gv::{CellGeometryGv, cell_geometry_gv};
+use symbi_ir::{Gv, GvKernel, begin_trace, end_trace};
 
 use symbi_hydro::regime_spec::law_params;
-use symbi_hydro::source_spec::{lift_to_built, source_params, BuiltSource};
+use symbi_hydro::source_spec::{BuiltSource, lift_to_built, source_params};
 use symbi_hydro::source_term::BodySource;
 
 type Writes = Vec<(String, FieldBind, NodeId)>;
@@ -97,11 +97,21 @@ fn basis_vec_gv(coords: Coords, coord: &[Gv; 3], comp: usize) -> [Gv; 3] {
         (Coords::Cylindrical, 1) => [-coord[1].sin(), coord[1].cos(), z], // phi_hat
         (Coords::Cylindrical, _) => [z, z, o],                           // z_hat
         (Coords::Spherical, 0) => {
-            let (st, ct, cp, sp) = (coord[1].sin(), coord[1].cos(), coord[2].cos(), coord[2].sin());
+            let (st, ct, cp, sp) = (
+                coord[1].sin(),
+                coord[1].cos(),
+                coord[2].cos(),
+                coord[2].sin(),
+            );
             [st * cp, st * sp, ct] // r_hat
         }
         (Coords::Spherical, 1) => {
-            let (st, ct, cp, sp) = (coord[1].sin(), coord[1].cos(), coord[2].cos(), coord[2].sin());
+            let (st, ct, cp, sp) = (
+                coord[1].sin(),
+                coord[1].cos(),
+                coord[2].cos(),
+                coord[2].sin(),
+            );
             [ct * cp, ct * sp, -st] // theta_hat
         }
         (Coords::Spherical, _) => [-coord[2].sin(), coord[2].cos(), z], // phi_hat
@@ -229,7 +239,11 @@ fn body_contribution(
         || Gv::ZERO,
     );
     let _ = (tiny, eps_r, inv_dt, vel_cart, den); // unused by the drain (kept for the shared signature)
-    BodyContributionGv { g, drain_rate, rvec }
+    BodyContributionGv {
+        g,
+        drain_rate,
+        rvec,
+    }
 }
 
 /// FORWARD source: `cons += dt * (S_grav + S_accretion)`, generic over coordinate system.
@@ -265,7 +279,9 @@ pub(crate) fn body_evolved_gv(
     let mut d_nrg = Gv::ZERO;
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
-        let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let bc = body_contribution(
+            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+        );
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
             d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity force
@@ -284,7 +300,9 @@ pub(crate) fn body_evolved_gv(
         || Gv::ONE,
     );
     let den_new = den * f;
-    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
+    let mom_new: Vec<Gv> = (0..ncomp)
+        .map(|comp| (mom[comp] + dt * d_mom[comp]) * f)
+        .collect();
     let nrg_new = (nrg + dt * d_nrg) * f;
     (den_new, mom_new, nrg_new)
 }
@@ -304,14 +322,27 @@ pub fn body_source_gv(
         .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    let (den_new, mom_new, nrg_new) =
-        body_evolved_gv(den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes);
+    let (den_new, mom_new, nrg_new) = body_evolved_gv(
+        den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
+    );
 
-    let mut writes = vec![("den_new".to_string(), FieldRef::cons_den().into(), den_new.node())];
+    let mut writes = vec![(
+        "den_new".to_string(),
+        FieldRef::cons_den().into(),
+        den_new.node(),
+    )];
     for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((format!("mom_{comp}_new"), FieldRef::cons_mom(comp as u8).into(), m.node()));
+        writes.push((
+            format!("mom_{comp}_new"),
+            FieldRef::cons_mom(comp as u8).into(),
+            m.node(),
+        ));
     }
-    writes.push(("nrg_new".to_string(), FieldRef::cons_nrg().into(), nrg_new.node()));
+    writes.push((
+        "nrg_new".to_string(),
+        FieldRef::cons_nrg().into(),
+        nrg_new.node(),
+    ));
     (end_trace(), writes)
 }
 
@@ -321,11 +352,7 @@ pub fn body_source_gv(
 /// the full interior. reads only `cons.den` (no velocity / energy / sound speed), so
 /// the pass streams a single field. slot-0 scalar names (`body_0_*`); the
 /// dispatch rebinds them per ACTIVE body.
-pub fn body_feedback_grav_gv(
-    coords: Coords,
-    ndim: usize,
-    axes: &[usize],
-) -> (GvKernel, Writes) {
+pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> (GvKernel, Writes) {
     begin_trace();
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let den = Gv::field("den", FieldRef::cons_den());
@@ -346,7 +373,11 @@ pub fn body_feedback_grav_gv(
     let mut writes: Writes = Vec::new();
     for ax in 0..ndim {
         let fc = -(den * g[cart_axes[ax]]) * dv;
-        writes.push((format!("b0_f{ax}"), format!("fb_0_force_{ax}").into(), fc.node()));
+        writes.push((
+            format!("b0_f{ax}"),
+            format!("fb_0_force_{ax}").into(),
+            fc.node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -380,7 +411,9 @@ pub fn body_feedback_drain_gv(
     let dv = Gv::ONE / geo.inv_volume;
     let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
-    let bc = body_contribution(0, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+    let bc = body_contribution(
+        0, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+    );
     // the saturation lemma at the drain seam: the cond-gated rate is exactly
     // zero outside |x - body_pos| > racc + DRAIN_SUPPORT_WIDTHS*min(dx) (the
     // gate radius IS the tanh saturation radius), so every feedback write —
@@ -396,7 +429,9 @@ pub fn body_feedback_drain_gv(
             ParamExpr::param("body_0_racc")
                 + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
                     * ParamExpr::min_of(
-                        (0..ndim).map(|ax| ParamExpr::param(&format!("dx_{ax}"))).collect(),
+                        (0..ndim)
+                            .map(|ax| ParamExpr::param(&format!("dx_{ax}")))
+                            .collect(),
                     ),
         );
     }
@@ -411,14 +446,33 @@ pub fn body_feedback_drain_gv(
     }
     let mut writes: Writes = Vec::new();
     for ax in 0..ndim {
-        writes.push((format!("b0_f{ax}"), format!("fb_0_force_{ax}").into(), fa[cart_axes[ax]].node()));
+        writes.push((
+            format!("b0_f{ax}"),
+            format!("fb_0_force_{ax}").into(),
+            fa[cart_axes[ax]].node(),
+        ));
     }
     let cross = |a: usize, bb: usize| bc.rvec[a] * fa[bb] - bc.rvec[bb] * fa[a];
-    for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
-        writes.push((format!("b0_t{t}"), format!("fb_0_torque_{t}").into(), tc.node()));
+    for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)]
+        .into_iter()
+        .enumerate()
+    {
+        writes.push((
+            format!("b0_t{t}"),
+            format!("fb_0_torque_{t}").into(),
+            tc.node(),
+        ));
     }
-    writes.push(("b0_m".to_string(), "fb_0_mass".into(), (den * frac * dv).node()));
-    writes.push(("b0_e".to_string(), "fb_0_energy".into(), (nrg * frac * dv).node()));
+    writes.push((
+        "b0_m".to_string(),
+        "fb_0_mass".into(),
+        (den * frac * dv).node(),
+    ));
+    writes.push((
+        "b0_e".to_string(),
+        "fb_0_energy".into(),
+        (nrg * frac * dv).node(),
+    ));
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
@@ -458,7 +512,9 @@ pub fn body_feedback_gv(
 
     let mut writes: Writes = Vec::new();
     for b in 0..n_bodies {
-        let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let bc = body_contribution(
+            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+        );
         // the fraction of this cell drained by body b this step: frac = 1 - exp(-rate*dt). exact for
         // NON-overlapping masks (each cell in at most one mask -> matches the forward's total-rate
         // factor); overlapping masks slightly over-attribute in this DIAGNOSTIC reduction.
@@ -478,18 +534,37 @@ pub fn body_feedback_gv(
         // the body's ndim force components live at its cartesian axes.
         for ax in 0..ndim {
             let fc = force_cart[cart_axes[ax]];
-            writes.push((format!("b{b}_f{ax}"), format!("fb_{b}_force_{ax}").into(), fc.node()));
+            writes.push((
+                format!("b{b}_f{ax}"),
+                format!("fb_{b}_force_{ax}").into(),
+                fc.node(),
+            ));
         }
         // torque = r x F_drag (full 3D cross; 2D yields (0,0,tz) automatically).
         let cross = |a: usize, bb: usize| bc.rvec[a] * fa[bb] - bc.rvec[bb] * fa[a];
-        for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
-            writes.push((format!("b{b}_t{t}"), format!("fb_{b}_torque_{t}").into(), tc.node()));
+        for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)]
+            .into_iter()
+            .enumerate()
+        {
+            writes.push((
+                format!("b{b}_t{t}"),
+                format!("fb_{b}_torque_{t}").into(),
+                tc.node(),
+            ));
         }
         // absorbed mass = den * frac * dv (the emergent accretion, a functional of the flow).
-        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (den * frac * dv).node()));
+        writes.push((
+            format!("b{b}_m"),
+            format!("fb_{b}_mass").into(),
+            (den * frac * dv).node(),
+        ));
         // absorbed total (internal + kinetic) energy = nrg * frac * dv -- the accretion power,
         // closing the gas+body ENERGY ledger. adiabatic only (the iso kernel has no energy slot).
-        writes.push((format!("b{b}_e"), format!("fb_{b}_energy").into(), (nrg * frac * dv).node()));
+        writes.push((
+            format!("b{b}_e"),
+            format!("fb_{b}_energy").into(),
+            (nrg * frac * dv).node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -568,9 +643,17 @@ pub fn body_source_iso_gv(
     let (den_new, mom_new) =
         body_evolved_iso_gv(den, &mom, pre, dt, n_bodies, coords, ndim, ncomp, axes);
 
-    let mut writes = vec![("den_new".to_string(), FieldRef::cons_den().into(), den_new.node())];
+    let mut writes = vec![(
+        "den_new".to_string(),
+        FieldRef::cons_den().into(),
+        den_new.node(),
+    )];
     for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((format!("mom_{comp}_new"), FieldRef::cons_mom(comp as u8).into(), m.node()));
+        writes.push((
+            format!("mom_{comp}_new"),
+            FieldRef::cons_mom(comp as u8).into(),
+            m.node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -601,7 +684,9 @@ pub(crate) fn body_evolved_iso_gv(
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
-        let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let bc = body_contribution(
+            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+        );
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
             d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity force
@@ -615,7 +700,9 @@ pub(crate) fn body_evolved_iso_gv(
         || Gv::ONE,
     );
     let den_new = den * f;
-    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
+    let mom_new: Vec<Gv> = (0..ncomp)
+        .map(|comp| (mom[comp] + dt * d_mom[comp]) * f)
+        .collect();
     (den_new, mom_new)
 }
 
@@ -646,7 +733,9 @@ pub fn body_feedback_iso_gv(
 
     let mut writes: Writes = Vec::new();
     for b in 0..n_bodies {
-        let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let bc = body_contribution(
+            b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt,
+        );
         let frac = Gv::cond(
             bc.drain_rate.cmp_gt(Gv::ZERO),
             || Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp(),
@@ -660,13 +749,28 @@ pub fn body_feedback_iso_gv(
         }
         for ax in 0..ndim {
             let fc = force_cart[cart_axes[ax]];
-            writes.push((format!("b{b}_f{ax}"), format!("fb_{b}_force_{ax}").into(), fc.node()));
+            writes.push((
+                format!("b{b}_f{ax}"),
+                format!("fb_{b}_force_{ax}").into(),
+                fc.node(),
+            ));
         }
         let cross = |a: usize, bb: usize| bc.rvec[a] * fa[bb] - bc.rvec[bb] * fa[a];
-        for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
-            writes.push((format!("b{b}_t{t}"), format!("fb_{b}_torque_{t}").into(), tc.node()));
+        for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)]
+            .into_iter()
+            .enumerate()
+        {
+            writes.push((
+                format!("b{b}_t{t}"),
+                format!("fb_{b}_torque_{t}").into(),
+                tc.node(),
+            ));
         }
-        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (den * frac * dv).node()));
+        writes.push((
+            format!("b{b}_m"),
+            format!("fb_{b}_mass").into(),
+            (den * frac * dv).node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -695,7 +799,9 @@ fn body_scaffold(
     has_energy: bool,
 ) -> (Gv, [Gv; 3], [Gv; 3], Gv, Gv, Gv, [Gv; 3]) {
     let rho = Gv::scalar(law_params::RHO);
-    let vel_phys: Vec<Gv> = (0..ncomp).map(|k| Gv::scalar(&law_params::vel(k))).collect();
+    let vel_phys: Vec<Gv> = (0..ncomp)
+        .map(|k| Gv::scalar(&law_params::vel(k)))
+        .collect();
     let mut coord3 = [Gv::ZERO; 3];
     for (g, &coord_idx) in axes.iter().enumerate() {
         if coord_idx < 3 {

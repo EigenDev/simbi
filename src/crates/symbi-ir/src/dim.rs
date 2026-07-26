@@ -106,7 +106,9 @@ mod tests {
     use super::*;
 
     // helpers
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
 
     // ---- equality ----
 

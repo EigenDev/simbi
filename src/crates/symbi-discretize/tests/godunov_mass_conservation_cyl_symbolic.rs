@@ -21,8 +21,8 @@
 // transverse factor dphi*dz is c_0-independent, so the r-shift leaves it unchanged.
 // =============================================================================
 
-use symbi_discretize::{geometry_probe_gv, Coords, Spacing};
-use symbi_ir::proof::{extract_scalar, RatFun};
+use symbi_discretize::{Coords, Spacing, geometry_probe_gv};
+use symbi_ir::proof::{RatFun, extract_scalar};
 
 const NDIM: usize = 3;
 // the geometry factors are field-free; the only symbols are the grid scalars

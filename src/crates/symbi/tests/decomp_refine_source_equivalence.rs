@@ -11,9 +11,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -22,7 +22,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_user_source;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -53,7 +53,10 @@ fn bump(x: f64, y: f64) -> f64 {
 }
 
 fn patch() -> RefinementRegion<2> {
-    RefinementRegion { x_lo: [0.125, 0.125], x_hi: [0.375, 0.375] }
+    RefinementRegion {
+        x_lo: [0.125, 0.125],
+        x_hi: [0.375, 0.375],
+    }
 }
 
 fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
@@ -68,16 +71,24 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
         .expect("root sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim { rho: 1.0 + b, vel: Tensor::new([0.0, 0.0]), pre: 1.0 + b }
+            Prim {
+                rho: 1.0 + b,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: 1.0 + b,
+            }
         })
         .build()
 }
 
 fn build_mono() -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow));
+    let root = build_root(
+        [N, N],
+        [0.0, 0.0],
+        Boundaries::uniform(BoundaryType::Outflow),
+    );
     let k = kset(&root);
-    let mut h =
-        Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset).expect("mono hierarchy");
+    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+        .expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -91,13 +102,22 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
-            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+            let lo = if tc[a] == 0 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
+            let hi = if tc[a] == counts[a] - 1 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
             [lo, hi]
         }));
         let root = build_root(m, origin, bnd);
-        let owns_patch = (0..2)
-            .all(|a| origin[a] <= patch().x_lo[a] && origin[a] + m[a] as f64 * DX >= patch().x_hi[a]);
+        let owns_patch = (0..2).all(|a| {
+            origin[a] <= patch().x_lo[a] && origin[a] + m[a] as f64 * DX >= patch().x_hi[a]
+        });
         let mut h = if owns_patch {
             let k = kset(&root);
             let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
@@ -129,7 +149,11 @@ fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2]) {
     );
 }
 
-fn composite_fine(tiles: &[Hier], counts: [usize; 2], pick: impl Fn(&Sim, [isize; 2]) -> f64) -> Vec<f64> {
+fn composite_fine(
+    tiles: &[Hier],
+    counts: [usize; 2],
+    pick: impl Fn(&Sim, [isize; 2]) -> f64,
+) -> Vec<f64> {
     let fn_n = 2 * N;
     let mut out = vec![f64::NAN; fn_n * fn_n];
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
@@ -185,12 +209,29 @@ fn assert_matches(counts: [usize; 2]) {
     );
     // the position force accelerates every cell: total |mom_x| well above zero, else vacuous.
     let total: f64 = mono_momx.iter().map(|v| v.abs()).sum();
-    assert!(total > 1e-3, "source produced no momentum ({total:e}); test is vacuous");
+    assert!(
+        total > 1e-3,
+        "source produced no momentum ({total:e}); test is vacuous"
+    );
 
-    let de = mono_den.iter().zip(&dec_den).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
-    let me = mono_momx.iter().zip(&dec_momx).map(|(a, b)| (a - b).abs()).fold(0.0_f64, f64::max);
-    assert!(de < 1e-12, "{counts:?}: density diverged under refined+decomposed source: {de:e}");
-    assert!(me < 1e-12, "{counts:?}: mom_x diverged under refined+decomposed source: {me:e}");
+    let de = mono_den
+        .iter()
+        .zip(&dec_den)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    let me = mono_momx
+        .iter()
+        .zip(&dec_momx)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        de < 1e-12,
+        "{counts:?}: density diverged under refined+decomposed source: {de:e}"
+    );
+    assert!(
+        me < 1e-12,
+        "{counts:?}: mom_x diverged under refined+decomposed source: {me:e}"
+    );
 }
 
 #[test]

@@ -8,7 +8,7 @@
 
 use symbi::prelude::*;
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_hydro::state::PrimG;
@@ -18,15 +18,7 @@ const CS: f64 = 1.0;
 const CFL: f64 = 0.35;
 const T_FINAL: f64 = 0.05;
 
-type Sim = SimStateGeneric<
-    IsothermalMhd,
-    2,
-    3,
-    Cartesian,
-    Isothermal<f64>,
-    CpuSpace,
-    HostMemory,
->;
+type Sim = SimStateGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
 type Kern = IsothermalMhdSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn make() -> (Sim, Kern) {

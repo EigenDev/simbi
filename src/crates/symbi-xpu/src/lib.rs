@@ -18,15 +18,15 @@
 //   7. leaf crate (no symbi dependencies)
 // =============================================================================
 
-mod space;
-mod memory;
-mod handle;
-mod executor;
-mod token;
 mod args;
 mod config;
 pub mod error;
+mod executor;
+mod handle;
+mod memory;
 pub mod runtime;
+mod space;
+mod token;
 // nvcc AOT compilation (CUDA source -> PTX). pure std (shells nvcc); always
 // available so symbi/build.rs can share the host-compiler probe without cuda.
 pub mod compile_cuda;
@@ -50,16 +50,16 @@ pub mod hiprtc;
 compile_error!("features `cuda` and `hip` are mutually exclusive: enable exactly one gpu backend");
 
 // traits
+pub use memory::{HostMemory, MemoryBlock, MemorySpace};
 pub use space::ExecutionSpace;
-pub use memory::{MemorySpace, MemoryBlock, HostMemory};
 
 // types
-pub use handle::SharedHandle;
-pub use executor::Executor;
-pub use token::Token;
 pub use args::{KernelArgs, with_pooled_args};
 pub use config::{LaunchConfig, block_dims, block_for, extent_aware_block};
-pub use error::{XpuError, Result};
+pub use error::{Result, XpuError};
+pub use executor::Executor;
+pub use handle::SharedHandle;
+pub use token::Token;
 
 // the active gpu backend module, aliased neutrally so the crate's neutral surface binds to it
 // without naming cuda/hip. cuda wins if both are somehow set (the hip arm is `not(cuda)`).
@@ -72,8 +72,8 @@ use hip as gpu_backend;
 // `symbi_xpu::memcpy_peer`, etc. without naming a backend module.
 #[cfg(feature = "gpu")]
 pub use gpu_backend::{
-    can_access_peer, ctx_sync, current_device, device_count, device_info, enable_peer_access,
-    memcpy_peer, DeviceInfo, MAX_GPUS,
+    DeviceInfo, MAX_GPUS, can_access_peer, ctx_sync, current_device, device_count, device_info,
+    enable_peer_access, memcpy_peer,
 };
 
 // neutral device space/memory aliases. the concrete `CudaSpace`/`UnifiedMemory` (and the hip
@@ -126,20 +126,40 @@ impl ExecutionSpace for CpuSpace {
     const IS_DEVICE: bool = false;
     const SUPPORTS_ASYNC: bool = false;
 
-    fn create_stream(_device_id: i64) -> error::Result<()> { Ok(()) }
+    fn create_stream(_device_id: i64) -> error::Result<()> {
+        Ok(())
+    }
     fn destroy_stream(_stream: &mut ()) {}
-    fn sync_stream(_stream: &()) -> error::Result<()> { Ok(()) }
-    fn stream_ready(_stream: &()) -> error::Result<bool> { Ok(true) }
+    fn sync_stream(_stream: &()) -> error::Result<()> {
+        Ok(())
+    }
+    fn stream_ready(_stream: &()) -> error::Result<bool> {
+        Ok(true)
+    }
 
-    fn create_event() -> error::Result<()> { Ok(()) }
+    fn create_event() -> error::Result<()> {
+        Ok(())
+    }
     fn destroy_event(_event: ()) {}
-    fn record_event(_event: &(), _stream: &()) -> error::Result<()> { Ok(()) }
-    fn event_ready(_event: &()) -> error::Result<bool> { Ok(true) }
-    fn sync_event(_event: &()) -> error::Result<()> { Ok(()) }
-    fn stream_wait_event(_stream: &(), _event: &()) -> error::Result<()> { Ok(()) }
+    fn record_event(_event: &(), _stream: &()) -> error::Result<()> {
+        Ok(())
+    }
+    fn event_ready(_event: &()) -> error::Result<bool> {
+        Ok(true)
+    }
+    fn sync_event(_event: &()) -> error::Result<()> {
+        Ok(())
+    }
+    fn stream_wait_event(_stream: &(), _event: &()) -> error::Result<()> {
+        Ok(())
+    }
 
-    fn load_module(_bytes: &[u8]) -> error::Result<()> { Ok(()) }
-    fn get_function(_module: &(), _name: &str) -> error::Result<()> { Ok(()) }
+    fn load_module(_bytes: &[u8]) -> error::Result<()> {
+        Ok(())
+    }
+    fn get_function(_module: &(), _name: &str) -> error::Result<()> {
+        Ok(())
+    }
 
     unsafe fn launch(
         _stream: &(),

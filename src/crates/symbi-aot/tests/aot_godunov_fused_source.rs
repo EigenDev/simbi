@@ -25,7 +25,7 @@
 // run: cargo test -p symbi-aot --test aot_godunov_fused_source
 // =============================================================================
 
-use symbi_aot::{kernel_by_name, NamedKernel};
+use symbi_aot::{NamedKernel, kernel_by_name};
 
 // the godunov-stage kernel reads the u_n snapshot + the SSP (a0, ac) coefficients. these wrappers
 // drive the forward-Euler stage (a0=0, ac=1): u_n is multiplied by 0, so it is set to the current
@@ -33,34 +33,61 @@ use symbi_aot::{kernel_by_name, NamedKernel};
 // callers assert against. all buffers use lo=0 and extent = data.len().
 #[allow(clippy::too_many_arguments, dead_code)]
 fn iso_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
-    mass_flux: &[S], mom_flux: &[S],
-    rho_out: &mut [S], mom_out: &mut [S],
-    grid_size_0: i32, dom_lo_0: i32,
-    _: i32, _: i32, _: i32, _: i32,
-    dt: S, g_ext_0: S, dx_0: S,
+    mass_flux: &[S],
+    mom_flux: &[S],
+    rho_out: &mut [S],
+    mom_out: &mut [S],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    dt: S,
+    g_ext_0: S,
+    dx_0: S,
 ) {
     let u_n_den = rho_out.to_vec(); // start-of-step snapshot (a0 = 0 -> contributes nothing)
     let u_n_mom = mom_out.to_vec();
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("iso_godunov_stage_with_uniform_accel_1d")
-        .input("u_n.den", &u_n_den).input("mass_flux[0]", mass_flux)
-        .input("u_n.mom_0", &u_n_mom).input("mom_flux_0[0]", mom_flux)
-        .output("cons.den", rho_out).output("cons.mom_0", mom_out)
-        .grid(&grid).dom_lo(&dom)
-        .scalar("dt", dt).scalar("a0", S::ZERO).scalar("ac", S::ONE)
-        .scalar("g_ext_0", g_ext_0).scalar("dx_0", dx_0)
+        .input("u_n.den", &u_n_den)
+        .input("mass_flux[0]", mass_flux)
+        .input("u_n.mom_0", &u_n_mom)
+        .input("mom_flux_0[0]", mom_flux)
+        .output("cons.den", rho_out)
+        .output("cons.mom_0", mom_out)
+        .grid(&grid)
+        .dom_lo(&dom)
+        .scalar("dt", dt)
+        .scalar("a0", S::ZERO)
+        .scalar("ac", S::ONE)
+        .scalar("g_ext_0", g_ext_0)
+        .scalar("dx_0", dx_0)
         .scalar("mesh_hdil", S::ZERO) // static mesh: the homologous-dilution term is an exact zero
         .run();
 }
 
 #[allow(clippy::too_many_arguments, dead_code)]
 fn adi_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
-    mass_flux: &[S], mom_flux: &[S], nrg_flux: &[S],
-    rho_out: &mut [S], mom_out: &mut [S], nrg_out: &mut [S],
-    grid_size_0: i32, dom_lo_0: i32,
-    _: i32, _: i32, _: i32, _: i32, _: i32, _: i32,
-    dt: S, g_ext_0: S, dx_0: S,
+    mass_flux: &[S],
+    mom_flux: &[S],
+    nrg_flux: &[S],
+    rho_out: &mut [S],
+    mom_out: &mut [S],
+    nrg_out: &mut [S],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    dt: S,
+    g_ext_0: S,
+    dx_0: S,
 ) {
     let u_n_den = rho_out.to_vec(); // start-of-step snapshot (a0 = 0 -> contributes nothing)
     let u_n_mom = mom_out.to_vec();
@@ -68,13 +95,22 @@ fn adi_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("adiabatic_godunov_stage_with_uniform_accel_1d")
-        .input("u_n.den", &u_n_den).input("mass_flux[0]", mass_flux)
-        .input("u_n.mom_0", &u_n_mom).input("mom_flux_0[0]", mom_flux)
-        .input("u_n.nrg", &u_n_nrg).input("nrg_flux[0]", nrg_flux)
-        .output("cons.den", rho_out).output("cons.mom_0", mom_out).output("cons.nrg", nrg_out)
-        .grid(&grid).dom_lo(&dom)
-        .scalar("dt", dt).scalar("a0", S::ZERO).scalar("ac", S::ONE)
-        .scalar("g_ext_0", g_ext_0).scalar("dx_0", dx_0)
+        .input("u_n.den", &u_n_den)
+        .input("mass_flux[0]", mass_flux)
+        .input("u_n.mom_0", &u_n_mom)
+        .input("mom_flux_0[0]", mom_flux)
+        .input("u_n.nrg", &u_n_nrg)
+        .input("nrg_flux[0]", nrg_flux)
+        .output("cons.den", rho_out)
+        .output("cons.mom_0", mom_out)
+        .output("cons.nrg", nrg_out)
+        .grid(&grid)
+        .dom_lo(&dom)
+        .scalar("dt", dt)
+        .scalar("a0", S::ZERO)
+        .scalar("ac", S::ONE)
+        .scalar("g_ext_0", g_ext_0)
+        .scalar("dx_0", dx_0)
         .scalar("mesh_hdil", S::ZERO) // static mesh: the homologous-dilution term is an exact zero
         .run();
 }
@@ -86,17 +122,29 @@ fn iso_fused_kernel_registered_by_name() {
     // emit_gv -> write_both -> REGISTRY -> kernel_by_name) closed for the
     // fused-source variant.
     let resolved = kernel_by_name::<f64>("iso_godunov_stage_with_uniform_accel_1d");
-    assert!(resolved.is_some(), "iso fused kernel must register through kernel_by_name");
+    assert!(
+        resolved.is_some(),
+        "iso fused kernel must register through kernel_by_name"
+    );
     let (_kfn, ir_blob) = resolved.unwrap();
-    assert!(!ir_blob.is_empty(), "fused kernel must expose a non-empty IR blob");
+    assert!(
+        !ir_blob.is_empty(),
+        "fused kernel must expose a non-empty IR blob"
+    );
 }
 
 #[test]
 fn adiabatic_fused_kernel_registered_by_name() {
     let resolved = kernel_by_name::<f64>("adiabatic_godunov_stage_with_uniform_accel_1d");
-    assert!(resolved.is_some(), "adiabatic fused kernel must register through kernel_by_name");
+    assert!(
+        resolved.is_some(),
+        "adiabatic fused kernel must register through kernel_by_name"
+    );
     let (_kfn, ir_blob) = resolved.unwrap();
-    assert!(!ir_blob.is_empty(), "fused kernel must expose a non-empty IR blob");
+    assert!(
+        !ir_blob.is_empty(),
+        "fused kernel must expose a non-empty IR blob"
+    );
 }
 
 #[test]
@@ -118,7 +166,7 @@ fn iso_aot_fused_step_matches_analytical_source_update() {
     let rho_in: Vec<f64> = (0..n).map(|i| 1.0 + 0.1 * i as f64).collect();
     let mom_in: Vec<f64> = (0..n).map(|i| 0.3 - 0.05 * i as f64).collect();
     let mass_flux = vec![0.7_f64; n + 1]; // uniform => zero divergence
-    let mom_flux  = vec![0.4_f64; n + 1];
+    let mom_flux = vec![0.4_f64; n + 1];
 
     let mut rho_out = rho_in.clone();
     let mut mom_out = mom_in.clone();
@@ -132,21 +180,28 @@ fn iso_aot_fused_step_matches_analytical_source_update() {
         &mut mom_out,
         n as i32,
         0, // dom_lo
-        0, 0, 0, 0, // buf_lo for each of the 4 buffers
-        dt, g_ext_0, dx,
+        0,
+        0,
+        0,
+        0, // buf_lo for each of the 4 buffers
+        dt,
+        g_ext_0,
+        dx,
     );
 
     for i in 0..n {
         assert!(
             (rho_out[i] - rho_in[i]).abs() < 1e-15,
             "cell {i}: rho_new {} ≠ rho_in {} (mass should be invariant)",
-            rho_out[i], rho_in[i],
+            rho_out[i],
+            rho_in[i],
         );
         let mom_expected = mom_in[i] + dt * rho_in[i] * g_ext_0;
         assert!(
             (mom_out[i] - mom_expected).abs() < 1e-13,
             "cell {i}: mom_new {} ≠ analytical {}",
-            mom_out[i], mom_expected,
+            mom_out[i],
+            mom_expected,
         );
     }
 }
@@ -172,8 +227,8 @@ fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
     let mom_in: Vec<f64> = (0..n).map(|i| 0.3 - 0.05 * i as f64).collect();
     let nrg_in: Vec<f64> = (0..n).map(|i| 5.0 + 0.2 * i as f64).collect();
     let mass_flux = vec![0.7_f64; n + 1];
-    let mom_flux  = vec![0.4_f64; n + 1];
-    let nrg_flux  = vec![1.1_f64; n + 1];
+    let mom_flux = vec![0.4_f64; n + 1];
+    let nrg_flux = vec![1.1_f64; n + 1];
 
     let mut rho_out = rho_in.clone();
     let mut mom_out = mom_in.clone();
@@ -183,24 +238,38 @@ fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
     //                   cons.den, cons.mom_0, cons.nrg,
     //                   grid, dom_lo, buf_lo_{0..5}_0, dt, g_ext_0, dx_0)
     adi_fused(
-        &mass_flux, &mom_flux, &nrg_flux,
-        &mut rho_out, &mut mom_out, &mut nrg_out,
-        n as i32, 0,
-        0, 0, 0, 0, 0, 0,
-        dt, g_ext_0, dx,
+        &mass_flux,
+        &mom_flux,
+        &nrg_flux,
+        &mut rho_out,
+        &mut mom_out,
+        &mut nrg_out,
+        n as i32,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        dt,
+        g_ext_0,
+        dx,
     );
 
     for i in 0..n {
         assert!(
             (rho_out[i] - rho_in[i]).abs() < 1e-15,
             "cell {i}: rho_new {} ≠ rho_in {}",
-            rho_out[i], rho_in[i],
+            rho_out[i],
+            rho_in[i],
         );
         let mom_expected = mom_in[i] + dt * rho_in[i] * g_ext_0;
         assert!(
             (mom_out[i] - mom_expected).abs() < 1e-13,
             "cell {i}: mom_new {} ≠ analytical {}",
-            mom_out[i], mom_expected,
+            mom_out[i],
+            mom_expected,
         );
         // energy overlay: S_nrg = ρ · v · g_ext = ρ · (mom/ρ) · g_ext = mom · g_ext
         let v_in = mom_in[i] / rho_in[i];
@@ -208,7 +277,8 @@ fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
         assert!(
             (nrg_out[i] - nrg_expected).abs() < 1e-13,
             "cell {i}: nrg_new {} ≠ analytical {} (the energy overlay must fuse too)",
-            nrg_out[i], nrg_expected,
+            nrg_out[i],
+            nrg_expected,
         );
     }
 }
@@ -227,13 +297,24 @@ fn iso_aot_fused_runs_at_f32() {
     let rho_in: Vec<f32> = (0..n).map(|i| 1.0 + 0.1 * i as f32).collect();
     let mom_in: Vec<f32> = (0..n).map(|i| 0.3 - 0.05 * i as f32).collect();
     let mass_flux = vec![0.7_f32; n + 1];
-    let mom_flux  = vec![0.4_f32; n + 1];
+    let mom_flux = vec![0.4_f32; n + 1];
     let mut rho_out = rho_in.clone();
     let mut mom_out = mom_in.clone();
 
     iso_fused(
-        &mass_flux, &mom_flux, &mut rho_out, &mut mom_out,
-        n as i32, 0, 0, 0, 0, 0, dt, g_ext_0, dx,
+        &mass_flux,
+        &mom_flux,
+        &mut rho_out,
+        &mut mom_out,
+        n as i32,
+        0,
+        0,
+        0,
+        0,
+        0,
+        dt,
+        g_ext_0,
+        dx,
     );
 
     for i in 0..n {
@@ -241,7 +322,8 @@ fn iso_aot_fused_runs_at_f32() {
         assert!(
             (mom_out[i] - mom_expected).abs() < 1e-5,
             "cell {i} (f32): mom_new {} ≠ analytical {}",
-            mom_out[i], mom_expected,
+            mom_out[i],
+            mom_expected,
         );
     }
 }

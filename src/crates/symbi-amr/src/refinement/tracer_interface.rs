@@ -10,13 +10,13 @@
 //  let faces = interface_faces(&coverage, root_cells, coarse_level);
 // =============================================================================
 
+use std::collections::BTreeMap;
 use symbi_algebra::Domain;
 use symbi_geometry::{BlockGeometry, Metric};
 use symbi_sim::mass_transport::{ContainerId, MassTransfer, TransportKernel};
 use symbi_sim::state::ConsFieldsGeneric;
 use symbi_sim::tracers::cell_container_id;
 use symbi_xpu::MemorySpace;
-use std::collections::BTreeMap;
 
 const RATIO: isize = 2;
 
@@ -54,13 +54,7 @@ pub fn interface_faces<const D: usize>(
     root_cells: [usize; D],
     coarse_level: u8,
 ) -> Vec<InterfaceFace<D>> {
-    interface_faces_with_layout(
-        coverage,
-        root_cells,
-        [0; D],
-        root_cells,
-        coarse_level,
-    )
+    interface_faces_with_layout(coverage, root_cells, [0; D], root_cells, coarse_level)
 }
 
 pub fn interface_faces_with_layout<const D: usize>(
@@ -72,10 +66,8 @@ pub fn interface_faces_with_layout<const D: usize>(
 ) -> Vec<InterfaceFace<D>> {
     assert!(coarse_level < 63, "tracer refinement level exceeds 63");
     let coarse_scale = 1usize << coarse_level;
-    let coarse_cells: [usize; D] =
-        std::array::from_fn(|aa| root_global_cells[aa] * coarse_scale);
-    let fine_cells: [usize; D] =
-        std::array::from_fn(|aa| coarse_cells[aa] * RATIO as usize);
+    let coarse_cells: [usize; D] = std::array::from_fn(|aa| root_global_cells[aa] * coarse_scale);
+    let fine_cells: [usize; D] = std::array::from_fn(|aa| coarse_cells[aa] * RATIO as usize);
     let mut result = Vec::new();
 
     for axis in 0..D {
@@ -119,12 +111,10 @@ pub fn interface_faces_with_layout<const D: usize>(
                     }
                 });
                 let coarse_global: [isize; D] = std::array::from_fn(|aa| {
-                    coarse_cell_coord[aa]
-                        + (root_offset[aa] * coarse_scale) as isize
+                    coarse_cell_coord[aa] + (root_offset[aa] * coarse_scale) as isize
                 });
                 let fine_global: [isize; D] = std::array::from_fn(|aa| {
-                    fine_cell_coord[aa]
-                        + (root_offset[aa] * coarse_scale * RATIO as usize) as isize
+                    fine_cell_coord[aa] + (root_offset[aa] * coarse_scale * RATIO as usize) as isize
                 });
                 result.push(InterfaceFace {
                     axis,
@@ -134,10 +124,7 @@ pub fn interface_faces_with_layout<const D: usize>(
                         linear(coarse_global, coarse_cells),
                         coarse_level,
                     ),
-                    fine_cell: cell_container_id(
-                        linear(fine_global, fine_cells),
-                        coarse_level + 1,
-                    ),
+                    fine_cell: cell_container_id(linear(fine_global, fine_cells), coarse_level + 1),
                 });
 
                 let mut advanced = false;
@@ -182,11 +169,7 @@ where
         if signed_mass == 0.0 {
             continue;
         }
-        let outward_mass = if face.high {
-            signed_mass
-        } else {
-            -signed_mass
-        };
+        let outward_mass = if face.high { signed_mass } else { -signed_mass };
         let (source, destination) = if outward_mass > 0.0 {
             (face.fine_cell, face.coarse_cell)
         } else {
@@ -264,7 +247,10 @@ mod tests {
             .collect();
         assert_eq!(low_x.len(), 4);
         assert_eq!(
-            low_x.iter().map(|face| face.fine_face[1]).collect::<Vec<_>>(),
+            low_x
+                .iter()
+                .map(|face| face.fine_face[1])
+                .collect::<Vec<_>>(),
             [2, 3, 4, 5]
         );
         assert!(

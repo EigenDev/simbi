@@ -33,8 +33,8 @@ use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet3D;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D;
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
-use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::sim::evolve::KernelSet;
+use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -87,9 +87,12 @@ where
         .unwrap();
     fill(&coarse);
     let ck = make_kernels(&coarse);
-    let regions = [RefinementRegion { x_lo: [-0.25; 3], x_hi: [0.25; 3] }];
-    let hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, &make_kernels)
-        .unwrap();
+    let regions = [RefinementRegion {
+        x_lo: [-0.25; 3],
+        x_hi: [0.25; 3],
+    }];
+    let hier =
+        Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, &make_kernels).unwrap();
     fill(&hier.levels[1].state);
     hier
 }
@@ -101,7 +104,11 @@ where
     R: Regime<f64, 3>,
     E: Eos<f64>,
 {
-    let mhd = sim.fields.mhd.as_ref().expect("mhd regime must allocate mhd fields");
+    let mhd = sim
+        .fields
+        .mhd
+        .as_ref()
+        .expect("mhd regime must allocate mhd fields");
     for c in &sim.geom.interior.extend(0, 0, 1) {
         mhd.bface[0].view_mut().set(c, b0);
     }
@@ -187,7 +194,9 @@ fn isothermal_shear_tangent_to_cf_faces_stays_bounded() {
         |s| {
             for c in s.geom.interior.iter() {
                 s.fields.cons.den.view_mut().set(c, 1.0);
-                s.fields.cons.mom[0].view_mut().set(c, vx(s.geom.centroid(c)[1]));
+                s.fields.cons.mom[0]
+                    .view_mut()
+                    .set(c, vx(s.geom.centroid(c)[1]));
                 s.fields.cons.mom[1].view_mut().set(c, 0.0);
                 s.fields.cons.mom[2].view_mut().set(c, 0.0);
             }
@@ -204,7 +213,14 @@ fn nmhd_shear_tangent_to_cf_faces_stays_bounded() {
     let mut hier = two_level(
         NewtonianMhd,
         IdealGas { gamma: GAMMA },
-        |s| NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &s.geom.allocated),
+        |s| {
+            NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(
+                GAMMA,
+                CFL,
+                1.0,
+                &s.geom.allocated,
+            )
+        },
         |s| {
             fill_uniform_bx(s, b0);
             for c in s.geom.interior.iter() {
@@ -217,7 +233,14 @@ fn nmhd_shear_tangent_to_cf_faces_stays_bounded() {
                     mag: Tensor::new([b0, 0.0, 0.0]),
                 };
                 let cons = s.physics.regime.to_conserved(&s.physics.eos, &prim);
-                s.fields.cons.scatter(c, Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg });
+                s.fields.cons.scatter(
+                    c,
+                    Cons {
+                        den: cons.den,
+                        mom: cons.mom,
+                        nrg: cons.nrg,
+                    },
+                );
             }
         },
     );
@@ -232,12 +255,21 @@ fn imhd_shear_tangent_to_cf_faces_stays_bounded() {
     let mut hier = two_level(
         IsothermalMhd,
         Isothermal { cs: CS },
-        |s| IsothermalMhdSubstrateKernelSet3D::<HostMemory, f64>::new(CS, CFL, 1.0, &s.geom.allocated),
+        |s| {
+            IsothermalMhdSubstrateKernelSet3D::<HostMemory, f64>::new(
+                CS,
+                CFL,
+                1.0,
+                &s.geom.allocated,
+            )
+        },
         |s| {
             fill_uniform_bx(s, b0);
             for c in s.geom.interior.iter() {
                 s.fields.cons.den.view_mut().set(c, 1.0);
-                s.fields.cons.mom[0].view_mut().set(c, vx(s.geom.centroid(c)[1]));
+                s.fields.cons.mom[0]
+                    .view_mut()
+                    .set(c, vx(s.geom.centroid(c)[1]));
                 s.fields.cons.mom[1].view_mut().set(c, 0.0);
                 s.fields.cons.mom[2].view_mut().set(c, 0.0);
             }
@@ -270,7 +302,14 @@ fn rmhd_shear_tangent_to_cf_faces_stays_bounded() {
                     mag: Tensor::new([b0, 0.0, 0.0]),
                 };
                 let cons = s.physics.regime.to_conserved(&s.physics.eos, &prim);
-                s.fields.cons.scatter(c, Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg });
+                s.fields.cons.scatter(
+                    c,
+                    Cons {
+                        den: cons.den,
+                        mom: cons.mom,
+                        nrg: cons.nrg,
+                    },
+                );
             }
         },
     );

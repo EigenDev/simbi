@@ -77,14 +77,27 @@ fn fofc_select_freezes_nonfinite_momentum_adiabatic() {
         prim.vel[1].view_mut().set(c, 0.0);
     }
 
-    fofc_select(&s, "adiabatic", "", &s.workspace.u_stage, &s.fields.cons, &s.fields.prim);
+    fofc_select(
+        &s,
+        "adiabatic",
+        "",
+        &s.workspace.u_stage,
+        &s.fields.cons,
+        &s.fields.prim,
+    );
 
     let mut band = 0usize;
     for c in s.geom.interior.iter() {
         let m0 = *s.fields.cons.mom[0].view().at(c);
-        assert!(m0.is_finite(), "fofc_select kept a non-finite momentum at {c:?}");
+        assert!(
+            m0.is_finite(),
+            "fofc_select kept a non-finite momentum at {c:?}"
+        );
         if nan_band(c[0]) {
-            assert_eq!(m0, 0.0, "a NaN-velocity cell must freeze to the stage input at {c:?}");
+            assert_eq!(
+                m0, 0.0,
+                "a NaN-velocity cell must freeze to the stage input at {c:?}"
+            );
             band += 1;
         }
     }
@@ -128,14 +141,27 @@ fn fofc_select_freezes_nonfinite_momentum_iso() {
         prim.vel[1].view_mut().set(c, 0.0);
     }
 
-    fofc_select(&s, "iso", "", &s.workspace.u_stage, &s.fields.cons, &s.fields.prim);
+    fofc_select(
+        &s,
+        "iso",
+        "",
+        &s.workspace.u_stage,
+        &s.fields.cons,
+        &s.fields.prim,
+    );
 
     let mut band = 0usize;
     for c in s.geom.interior.iter() {
         let m0 = *s.fields.cons.mom[0].view().at(c);
-        assert!(m0.is_finite(), "iso fofc_select kept a non-finite momentum at {c:?}");
+        assert!(
+            m0.is_finite(),
+            "iso fofc_select kept a non-finite momentum at {c:?}"
+        );
         if nan_band(c[0]) {
-            assert_eq!(m0, 0.0, "a NaN-velocity iso cell must freeze to the stage input at {c:?}");
+            assert_eq!(
+                m0, 0.0,
+                "a NaN-velocity iso cell must freeze to the stage input at {c:?}"
+            );
             band += 1;
         }
     }

@@ -89,7 +89,9 @@ impl<T> SharedHandle<T> {
 // clone = shallow (Arc increment)
 impl<T> Clone for SharedHandle<T> {
     fn clone(&self) -> Self {
-        SharedHandle { inner: Arc::clone(&self.inner) }
+        SharedHandle {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 

@@ -18,26 +18,27 @@ use harness::{KernelRun, Out};
 
 use symbi_algebra::Tensor;
 use symbi_discretize::{
-    adiabatic_c2p_gv, adiabatic_flux_gv, adiabatic_hllc_flux_gv, imhd_c2p_gv, imhd_flux_gv,
-    imhd_hlld_flux_gv, imhd_wave_speed_map_gv, iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv,
-    nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv,
-    rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv, rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
-    rhd_c2p_gv, rhd_flux_gv, rhd_flux_gr_gv, rhd_hllc_flux_gv, rhd_wave_speed_map_gv, Coords, GvKernel, Spacing, Spacetime,
+    Coords, GvKernel, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
+    adiabatic_hllc_flux_gv, imhd_c2p_gv, imhd_flux_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
+    iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv, nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv,
+    nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv, rhd_c2p_gv, rhd_flux_gr_gv, rhd_flux_gv,
+    rhd_hllc_flux_gv, rhd_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv,
+    rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
 };
-use symbi_hydro::eos::{IdealGas, Isothermal};
+use symbi_hydro::dissipation::ShockwaveLimiter;
 use symbi_hydro::energy::Zero;
-use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
+use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal_mhd::IsothermalMhd;
+use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{hllc, hllc_rmhd, hllc_rhd, hlld_rmhd, hlle};
-use symbi_hydro::dissipation::ShockwaveLimiter;
-use symbi_hydro::state::PrimG;
-use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds};
 use symbi_hydro::rhd::Rhd;
+use symbi_hydro::riemann::{hllc, hllc_rhd, hllc_rmhd, hlld_rmhd, hlle};
+use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds};
+use symbi_hydro::state::PrimG;
 use symbi_hydro::state::{Cons, Prim};
-use symbi_ir::graph::NodeId;
 use symbi_ir::MeshScalar;
+use symbi_ir::graph::NodeId;
 
 const N: usize = 6;
 const GAMMA: f64 = 1.4;
@@ -51,7 +52,11 @@ fn prim_at(i: usize) -> Prim<f64, NCOMP> {
     let mut vel = Tensor::zeros();
     vel[0] = 0.1 + 0.05 * x;
     vel[1] = -0.2 + 0.03 * x;
-    Prim { rho: 1.0 + 0.1 * x, vel, pre: 0.5 + 0.15 * x }
+    Prim {
+        rho: 1.0 + 0.1 * x,
+        vel,
+        pre: 0.5 + 0.15 * x,
+    }
 }
 
 // the conserved state that prim_at(i) maps to, via the native f64 physics (the single source).
@@ -95,7 +100,11 @@ fn adiabatic_c2p_matches_native_carrier() {
         let mut mom = Tensor::zeros();
         mom[0] = 0.3 + 0.1 * x;
         mom[1] = -0.15 + 0.05 * x;
-        Cons { den: 1.2 + 0.2 * x, mom, nrg: 2.0 + 0.3 * x }
+        Cons {
+            den: 1.2 + 0.2 * x,
+            mom,
+            nrg: 2.0 + 0.3 * x,
+        }
     }
 
     let out = KernelRun::new(adiabatic_c2p_gv::<NCOMP>())
@@ -142,7 +151,14 @@ fn iso_prim_at(i: usize) -> (Prim<f64, ISO_NCOMP>, f64) {
     vel[1] = -0.1 + 0.02 * x;
     let rho = 1.0 + 0.1 * x;
     let cs2 = 0.6 + 0.05 * x; // the local temperature (sound-speed-squared)
-    (Prim { rho, vel, pre: cs2 * rho }, cs2)
+    (
+        Prim {
+            rho,
+            vel,
+            pre: cs2 * rho,
+        },
+        cs2,
+    )
 }
 
 // the conserved iso state carrying cs2 in the nrg slot — built by the native f64 physics.
@@ -191,7 +207,11 @@ fn iso_c2p_matches_native_carrier() {
         let mut mom = Tensor::zeros();
         mom[0] = 0.3 + 0.1 * x;
         mom[1] = -0.12 + 0.04 * x;
-        Cons { den: 1.2 + 0.2 * x, mom, nrg: 0.5 + 0.05 * x } // nrg = the prescribed cs^2
+        Cons {
+            den: 1.2 + 0.2 * x,
+            mom,
+            nrg: 0.5 + 0.05 * x,
+        } // nrg = the prescribed cs^2
     }
 
     let out = KernelRun::new(iso_c2p_gv::<ISO_NCOMP>())
@@ -237,7 +257,11 @@ fn rhd_prim_at(i: usize) -> Prim<f64, 3> {
     vel[0] = 0.2 + 0.05 * x; // |v| stays well below 1 across the grid
     vel[1] = -0.15 + 0.02 * x;
     vel[2] = 0.1;
-    Prim { rho: 1.0 + 0.1 * x, vel, pre: 0.5 + 0.15 * x }
+    Prim {
+        rho: 1.0 + 0.1 * x,
+        vel,
+        pre: 0.5 + 0.15 * x,
+    }
 }
 
 fn rhd_cons_at(i: usize) -> Cons<f64, 3> {
@@ -295,7 +319,14 @@ fn rmhd_prim_at(i: usize) -> MhdPrim<f64, 3> {
     mag[0] = 0.2;
     mag[1] = 0.3 + 0.02 * x;
     mag[2] = -0.1;
-    MhdPrim { hydro: Prim { rho: 1.0 + 0.1 * x, vel, pre: 0.5 + 0.1 * x }, mag }
+    MhdPrim {
+        hydro: Prim {
+            rho: 1.0 + 0.1 * x,
+            vel,
+            pre: 0.5 + 0.1 * x,
+        },
+        mag,
+    }
 }
 
 fn rmhd_cons_at(i: usize) -> MhdCons<f64, 3> {
@@ -395,9 +426,12 @@ fn run_uniform_euler_flux<const D: usize>(
         .compute_window(lo, size)
         .fields(&fields)
         .scalars(&[
-            ("gamma", gamma), ("theta", 1.0),
-            (adot.as_str(), 0.0), (vtrans.as_str(), 0.0),
-            (x_lo.as_str(), 0.0), (dx.as_str(), 1.0),
+            ("gamma", gamma),
+            ("theta", 1.0),
+            (adot.as_str(), 0.0),
+            (vtrans.as_str(), 0.0),
+            (x_lo.as_str(), 0.0),
+            (dx.as_str(), 1.0),
         ])
         .run()
 }
@@ -406,13 +440,22 @@ fn run_uniform_euler_flux<const D: usize>(
 fn adiabatic_flux_matches_native_physics() {
     // reference = `Newtonian::to_flux::<f64>(prim, unit(0), IdealGas)`; impl = the Gv flux kernel
     // on a uniform state. the HLLE of L==R IS the physical flux — the single source.
-    let prim = Prim::<f64, 2> { rho: 1.3, vel: Tensor::new([0.4, -0.2]), pre: 0.7 };
+    let prim = Prim::<f64, 2> {
+        rho: 1.3,
+        vel: Tensor::new([0.4, -0.2]),
+        pre: 0.7,
+    };
     let eos = IdealGas { gamma: GAMMA };
     let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
     let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
-        &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
+        &[
+            ("flux_den", f.den),
+            ("flux_mom_0", f.mom[0]),
+            ("flux_mom_1", f.mom[1]),
+            ("flux_nrg", f.nrg),
+        ],
         1e-12,
     );
 }
@@ -426,14 +469,22 @@ fn iso_flux_matches_native_physics() {
     let iso_gamma = 1.0;
     let cs2 = 0.6;
     let rho = 1.3;
-    let prim = Prim::<f64, 2> { rho, vel: Tensor::new([0.4, -0.2]), pre: cs2 * rho };
+    let prim = Prim::<f64, 2> {
+        rho,
+        vel: Tensor::new([0.4, -0.2]),
+        pre: cs2 * rho,
+    };
     let eos = IdealGas { gamma: iso_gamma };
     let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
     let out = run_uniform_euler_flux::<2>(iso_flux_gv::<2>(0), &prim, iso_gamma, 0);
     // no flux_nrg write for iso.
     out.expect(
         flux_cell::<2>(0),
-        &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1])],
+        &[
+            ("flux_den", f.den),
+            ("flux_mom_0", f.mom[0]),
+            ("flux_mom_1", f.mom[1]),
+        ],
         1e-12,
     );
 }
@@ -442,13 +493,22 @@ fn iso_flux_matches_native_physics() {
 fn rhd_flux_matches_native_physics() {
     // reference = `Rhd::to_flux::<f64>(prim, unit(0), IdealGas)`. the RHD to_flux is algebraic
     // (no iteration) given a prim, so the uniform-state HLLE reproduces it to ~1e-12.
-    let prim = Prim::<f64, 2> { rho: 1.0, vel: Tensor::new([0.3, -0.1]), pre: 1.0 };
+    let prim = Prim::<f64, 2> {
+        rho: 1.0,
+        vel: Tensor::new([0.3, -0.1]),
+        pre: 1.0,
+    };
     let eos = IdealGas { gamma: RHD_GAMMA };
     let f = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
     let out = run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
-        &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
+        &[
+            ("flux_den", f.den),
+            ("flux_mom_0", f.mom[0]),
+            ("flux_mom_1", f.mom[1]),
+            ("flux_nrg", f.nrg),
+        ],
         1e-12,
     );
 }
@@ -459,7 +519,11 @@ fn rmhd_flux_matches_native_physics() {
     // wave speeds the HLLE uses ARE the quartic, but to_flux itself is closed-form). impl = the
     // Gv rmhd flux on a uniform 3-component state. writes 8 fluxes (D, S_{0,1,2}, tau, B_{0,1,2}).
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.2, -0.1, 0.05]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
@@ -526,7 +590,11 @@ fn iso_wave_speed_map_matches_native_physics() {
     // at gamma=1; it is exercised carrier-generically against the Newtonian f64 reference.)
     let (rho, v0, pre) = (1.3_f64, 0.4_f64, 0.7_f64);
     let eos = IdealGas { gamma: GAMMA };
-    let prim = Prim::<f64, 3> { rho, vel: Tensor::new([v0, 0.0, 0.0]), pre };
+    let prim = Prim::<f64, 3> {
+        rho,
+        vel: Tensor::new([v0, 0.0, 0.0]),
+        pre,
+    };
     let (sl, sr) = symbi_hydro::newtonian::Newtonian.wave_speeds_axis(&eos, &prim, 0);
     let want = sl.abs().max(sr.abs()); // inv_dx_0 = 1
     // static mesh: per-axis grid velocity v_g = mesh_adot_0*xc + mesh_vtrans_0
@@ -534,12 +602,23 @@ fn iso_wave_speed_map_matches_native_physics() {
     // bit-identical to the static reference; x_lo_0/dx_0 are then immaterial. mesh
     // names from `MeshScalar` (the same source the trace uses).
     let (adot0, vtrans0) = (MeshScalar::Adot(0).name(), MeshScalar::Vtrans(0).name());
-    let out = KernelRun::new(iso_wave_speed_map_gv(Coords::Cartesian, &CART_1D, &AXES_1D, 1))
-        .grid([N])
-        .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
-        .scalars(&[("gamma", GAMMA), ("inv_dx_0", 1.0),
-            (adot0.as_str(), 0.0), (vtrans0.as_str(), 0.0), ("x_lo_0", 0.0), ("dx_0", 1.0)])
-        .run();
+    let out = KernelRun::new(iso_wave_speed_map_gv(
+        Coords::Cartesian,
+        &CART_1D,
+        &AXES_1D,
+        1,
+    ))
+    .grid([N])
+    .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
+    .scalars(&[
+        ("gamma", GAMMA),
+        ("inv_dx_0", 1.0),
+        (adot0.as_str(), 0.0),
+        (vtrans0.as_str(), 0.0),
+        ("x_lo_0", 0.0),
+        ("dx_0", 1.0),
+    ])
+    .run();
     out.expect([2], &[("lambda", want)], 1e-12);
 }
 
@@ -549,17 +628,33 @@ fn rhd_wave_speed_map_matches_native_physics() {
     // IS `max(|sl|,|sr|)`. the SAME core the RHD flux's HLLE consumes.
     let (rho, v0, pre) = (1.0_f64, 0.3_f64, 1.0_f64);
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let prim = Prim::<f64, 3> { rho, vel: Tensor::new([v0, 0.0, 0.0]), pre };
+    let prim = Prim::<f64, 3> {
+        rho,
+        vel: Tensor::new([v0, 0.0, 0.0]),
+        pre,
+    };
     let (sl, sr) = Rhd.wave_speeds_axis(&eos, &prim, 0);
     let want = sl.abs().max(sr.abs());
     // static mesh: zero grid velocity (see iso_wave_speed_map test above).
     let (adot0, vtrans0) = (MeshScalar::Adot(0).name(), MeshScalar::Vtrans(0).name());
-    let out = KernelRun::new(rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &CART_1D, &AXES_1D, 1))
-        .grid([N])
-        .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
-        .scalars(&[("gamma", RHD_GAMMA), ("inv_dx_0", 1.0),
-            (adot0.as_str(), 0.0), (vtrans0.as_str(), 0.0), ("x_lo_0", 0.0), ("dx_0", 1.0)])
-        .run();
+    let out = KernelRun::new(rhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &CART_1D,
+        &AXES_1D,
+        1,
+    ))
+    .grid([N])
+    .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
+    .scalars(&[
+        ("gamma", RHD_GAMMA),
+        ("inv_dx_0", 1.0),
+        (adot0.as_str(), 0.0),
+        (vtrans0.as_str(), 0.0),
+        ("x_lo_0", 0.0),
+        ("dx_0", 1.0),
+    ])
+    .run();
     out.expect([2], &[("lambda", want)], 1e-12);
 }
 
@@ -571,27 +666,36 @@ fn rmhd_wave_speed_map_matches_native_physics() {
     // `wave_speeds_axis` characteristic over-tightens to the exact value and disagrees by ~2%.
     // dx=1 -> the map IS `max(|sl|,|sr|)`; the bound reads the full 3-velocity + 3-B-field.
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.2, -0.1, 0.05]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
     let nhat = Tensor::<f64, 3>::unit(0);
     let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
     let want = sl.abs().max(sr.abs());
-    let out = KernelRun::new(rmhd_wave_speed_map_gv(Coords::Cartesian, &CART_1D, &AXES_1D, 1))
-        .grid([N])
-        .fields(&[
-            ("prim_rho", prim.rho),
-            ("prim_v0", prim.vel[0]),
-            ("prim_v1", prim.vel[1]),
-            ("prim_v2", prim.vel[2]),
-            ("prim_pre", prim.pre),
-            ("prim_b0", prim.mag[0]),
-            ("prim_b1", prim.mag[1]),
-            ("prim_b2", prim.mag[2]),
-        ])
-        .scalars(&[("gamma", RMHD_GAMMA), ("inv_dx_0", 1.0)])
-        .run();
+    let out = KernelRun::new(rmhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        &CART_1D,
+        &AXES_1D,
+        1,
+    ))
+    .grid([N])
+    .fields(&[
+        ("prim_rho", prim.rho),
+        ("prim_v0", prim.vel[0]),
+        ("prim_v1", prim.vel[1]),
+        ("prim_v2", prim.vel[2]),
+        ("prim_pre", prim.pre),
+        ("prim_b0", prim.mag[0]),
+        ("prim_b1", prim.mag[1]),
+        ("prim_b2", prim.mag[2]),
+    ])
+    .scalars(&[("gamma", RMHD_GAMMA), ("inv_dx_0", 1.0)])
+    .run();
     out.expect([2], &[("lambda", want)], 1e-12);
 }
 
@@ -620,7 +724,14 @@ fn nmhd_prim_at(i: usize) -> MhdPrim<f64, 3> {
     mag[0] = 0.2;
     mag[1] = 0.3 + 0.02 * x;
     mag[2] = -0.1;
-    MhdPrim { hydro: Prim { rho: 1.0 + 0.1 * x, vel, pre: 0.5 + 0.1 * x }, mag }
+    MhdPrim {
+        hydro: Prim {
+            rho: 1.0 + 0.1 * x,
+            vel,
+            pre: 0.5 + 0.1 * x,
+        },
+        mag,
+    }
 }
 
 fn nmhd_cons_at(i: usize) -> MhdCons<f64, 3> {
@@ -665,7 +776,11 @@ fn nmhd_flux_matches_native_physics() {
     // prim. impl = the Gv nmhd flux on a uniform 3-component state (HLLE of L==R IS the physical
     // flux). writes 8 fluxes (D, S_{0,1,2}, nrg, B_{0,1,2}).
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.2, -0.1, 0.05]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: NMHD_GAMMA };
@@ -708,27 +823,36 @@ fn nmhd_wave_speed_map_matches_native_physics() {
     // the CFL map traces the EXACT closed-form magnetosonic `NewtonianMhd::wave_speeds` (cheap,
     // so no separate bound is needed — unlike RMHD). dx=1 -> the map IS `max(|sl|,|sr|)`.
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.2, -0.1, 0.05]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: NMHD_GAMMA };
     let nhat = Tensor::<f64, 3>::unit(0);
     let (sl, sr) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
     let want = sl.abs().max(sr.abs());
-    let out = KernelRun::new(nmhd_wave_speed_map_gv(Coords::Cartesian, &CART_1D, &AXES_1D, 1))
-        .grid([N])
-        .fields(&[
-            ("prim_rho", prim.rho),
-            ("prim_v0", prim.vel[0]),
-            ("prim_v1", prim.vel[1]),
-            ("prim_v2", prim.vel[2]),
-            ("prim_pre", prim.pre),
-            ("prim_b0", prim.mag[0]),
-            ("prim_b1", prim.mag[1]),
-            ("prim_b2", prim.mag[2]),
-        ])
-        .scalars(&[("gamma", NMHD_GAMMA), ("inv_dx_0", 1.0)])
-        .run();
+    let out = KernelRun::new(nmhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        &CART_1D,
+        &AXES_1D,
+        1,
+    ))
+    .grid([N])
+    .fields(&[
+        ("prim_rho", prim.rho),
+        ("prim_v0", prim.vel[0]),
+        ("prim_v1", prim.vel[1]),
+        ("prim_v2", prim.vel[2]),
+        ("prim_pre", prim.pre),
+        ("prim_b0", prim.mag[0]),
+        ("prim_b1", prim.mag[1]),
+        ("prim_b2", prim.mag[2]),
+    ])
+    .scalars(&[("gamma", NMHD_GAMMA), ("inv_dx_0", 1.0)])
+    .run();
     out.expect([2], &[("lambda", want)], 1e-12);
 }
 
@@ -738,12 +862,23 @@ fn nmhd_builders_render_to_cpu_and_cuda() {
     // builders must emit non-empty CPU (rust) AND CUDA source — write-once-run-
     // everywhere at the source level. the GPU emit is the whole point of NMHD.
     KernelRun::new(nmhd_c2p_gv()).grid([N]).assert_lowers();
-    KernelRun::new(nmhd_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
-    KernelRun::new(nmhd_hllc_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
-    KernelRun::new(nmhd_hlld_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
-    KernelRun::new(nmhd_wave_speed_map_gv(Coords::Cartesian, &CART_1D, &AXES_1D, 1))
-        .grid([N])
+    KernelRun::new(nmhd_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
         .assert_lowers();
+    KernelRun::new(nmhd_hllc_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
+        .assert_lowers();
+    KernelRun::new(nmhd_hlld_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
+        .assert_lowers();
+    KernelRun::new(nmhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        &CART_1D,
+        &AXES_1D,
+        1,
+    ))
+    .grid([N])
+    .assert_lowers();
 }
 
 #[test]
@@ -752,7 +887,11 @@ fn nmhd_hllc_hlld_flux_match_native_physics_on_uniform_state() {
     // exactly like HLLE. validates that the select-heavy solvers TRACE + lower + interp
     // and bit-match the native f64 physics through the Gv carrier.
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.2, -0.1, 0.05]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = IdealGas { gamma: NMHD_GAMMA };
@@ -778,7 +917,10 @@ fn nmhd_hllc_hlld_flux_match_native_physics_on_uniform_state() {
         ("flux_mag_1", f.mag[1]),
         ("flux_mag_2", f.mag[2]),
     ];
-    for (label, kernel) in [("hllc", nmhd_hllc_flux_gv(1, 0, 0)), ("hlld", nmhd_hlld_flux_gv(1, 0, 0))] {
+    for (label, kernel) in [
+        ("hllc", nmhd_hllc_flux_gv(1, 0, 0)),
+        ("hlld", nmhd_hlld_flux_gv(1, 0, 0)),
+    ] {
         let out = KernelRun::new(kernel)
             .grid([NSWEEP])
             .compute_window([FCELL as i32], [1])
@@ -807,7 +949,14 @@ fn imhd_prim_at(i: usize) -> IsoMhdPrim<f64, 3> {
     mag[0] = 0.2;
     mag[1] = 0.3 + 0.02 * x;
     mag[2] = -0.1;
-    IsoMhdPrim { hydro: PrimG { rho: 1.0 + 0.1 * x, vel, pre: Zero::default() }, mag }
+    IsoMhdPrim {
+        hydro: PrimG {
+            rho: 1.0 + 0.1 * x,
+            vel,
+            pre: Zero::default(),
+        },
+        mag,
+    }
 }
 
 fn imhd_cons_at(i: usize) -> IsoMhdCons<f64, 3> {
@@ -847,7 +996,11 @@ fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
     // uniform state: HLLE / the 3-state HLLD collapse to F(U) = to_flux, bit-matching native
     // f64 physics through the Gv carrier. bface_n = the normal mag (the staggered coupling).
     let prim = IsoMhdPrim::<f64, 3> {
-        hydro: PrimG { rho: 1.0, vel: Tensor::new([0.2, -0.1, 0.05]), pre: Zero::default() },
+        hydro: PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.2, -0.1, 0.05]),
+            pre: Zero::default(),
+        },
         mag: Tensor::new([0.3, 0.2, -0.1]),
     };
     let eos = Isothermal { cs: IMHD_CS };
@@ -871,7 +1024,10 @@ fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
         ("flux_mag_1", f.mag[1]),
         ("flux_mag_2", f.mag[2]),
     ];
-    for (label, kernel) in [("hlle", imhd_flux_gv(1, 0, 0)), ("hlld", imhd_hlld_flux_gv(1, 0, 0))] {
+    for (label, kernel) in [
+        ("hlle", imhd_flux_gv(1, 0, 0)),
+        ("hlld", imhd_hlld_flux_gv(1, 0, 0)),
+    ] {
         let out = KernelRun::new(kernel)
             .grid([NSWEEP])
             .compute_window([FCELL as i32], [1])
@@ -886,11 +1042,20 @@ fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
 #[test]
 fn imhd_builders_render_to_cpu_and_cuda() {
     KernelRun::new(imhd_c2p_gv()).grid([N]).assert_lowers();
-    KernelRun::new(imhd_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
-    KernelRun::new(imhd_hlld_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
-    KernelRun::new(imhd_wave_speed_map_gv(Coords::Cartesian, &CART_1D, &AXES_1D, 1))
-        .grid([N])
+    KernelRun::new(imhd_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
         .assert_lowers();
+    KernelRun::new(imhd_hlld_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
+        .assert_lowers();
+    KernelRun::new(imhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        &CART_1D,
+        &AXES_1D,
+        1,
+    ))
+    .grid([N])
+    .assert_lowers();
 }
 
 // =============================================================================
@@ -908,13 +1073,29 @@ fn imhd_builders_render_to_cpu_and_cuda() {
 #[test]
 fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
     // uniform state: hllc(L == R) collapses to F(U), bit-matching the native hllc at f64.
-    let prim = Prim::<f64, 2> { rho: 1.3, vel: Tensor::new([0.4, -0.2]), pre: 0.7 };
+    let prim = Prim::<f64, 2> {
+        rho: 1.3,
+        vel: Tensor::new([0.4, -0.2]),
+        pre: 0.7,
+    };
     let eos = IdealGas { gamma: GAMMA };
-    let f = hllc(&eos, &prim, &prim, &Tensor::unit(0), 0.0, ShockwaveLimiter::Standard);
+    let f = hllc(
+        &eos,
+        &prim,
+        &prim,
+        &Tensor::unit(0),
+        0.0,
+        ShockwaveLimiter::Standard,
+    );
     let out = run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
-        &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
+        &[
+            ("flux_den", f.den),
+            ("flux_mom_0", f.mom[0]),
+            ("flux_mom_1", f.mom[1]),
+            ("flux_nrg", f.nrg),
+        ],
         1e-12,
     );
 }
@@ -923,13 +1104,29 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
 fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
     // a grazing v^2 -> 1 state stresses the relativistic Lorentz factor + Mignone-Bodo
     // contact quadratic (the select-heavy region) at both carriers.
-    let prim = Prim::<f64, 2> { rho: 1.0, vel: Tensor::new([0.9, -0.2]), pre: 1.0 };
+    let prim = Prim::<f64, 2> {
+        rho: 1.0,
+        vel: Tensor::new([0.9, -0.2]),
+        pre: 1.0,
+    };
     let eos = IdealGas { gamma: RHD_GAMMA };
-    let f = hllc_rhd(&eos, &prim, &prim, &Tensor::unit(0), 0.0, ShockwaveLimiter::Standard);
+    let f = hllc_rhd(
+        &eos,
+        &prim,
+        &prim,
+        &Tensor::unit(0),
+        0.0,
+        ShockwaveLimiter::Standard,
+    );
     let out = run_uniform_euler_flux::<2>(rhd_hllc_flux_gv::<2>(0), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
-        &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
+        &[
+            ("flux_den", f.den),
+            ("flux_mom_0", f.mom[0]),
+            ("flux_mom_1", f.mom[1]),
+            ("flux_nrg", f.nrg),
+        ],
         1e-12,
     );
 }
@@ -968,11 +1165,23 @@ fn rmhd_hllc_flux_matches_native_physics_on_uniform_state() {
     // strongly magnetized, relativistic uniform state: hllc_rmhd(L == R) -> F(U), bit-matching
     // the native hllc_rmhd at f64 (the null vs non-null normal-B branch is taken identically).
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.4, -0.2, 0.1]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.4, -0.2, 0.1]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.6, 0.3, -0.2]),
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
-    let f = hllc_rmhd(&Rmhd, &eos, &prim, &prim, &Tensor::unit(0), 0.0, ShockwaveLimiter::Standard);
+    let f = hllc_rmhd(
+        &Rmhd,
+        &eos,
+        &prim,
+        &prim,
+        &Tensor::unit(0),
+        0.0,
+        ShockwaveLimiter::Standard,
+    );
     let out = KernelRun::new(rmhd_hllc_flux_gv(1, 0, 0))
         .grid([NSWEEP])
         .compute_window([FCELL as i32], [1])
@@ -988,11 +1197,23 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
     // eager HLLE fallback, success-mask select). uniform state: hlld_rmhd(L == R) collapses
     // to F(U), bit-matching the native hlld_rmhd at f64 through the Gv carrier.
     let prim = MhdPrim::<f64, 3> {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.3, -0.15, 0.05]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3, -0.15, 0.05]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.5, 0.3, -0.2]),
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
-    let f = hlld_rmhd(&Rmhd, &eos, &prim, &prim, &Tensor::unit(0), 0.0, &symbi_hydro::spatial_metric::SpatialMetric::flat());
+    let f = hlld_rmhd(
+        &Rmhd,
+        &eos,
+        &prim,
+        &prim,
+        &Tensor::unit(0),
+        0.0,
+        &symbi_hydro::spatial_metric::SpatialMetric::flat(),
+    );
     let out = KernelRun::new(rmhd_hlld_flux_gv(1, 0, 0))
         .grid([NSWEEP])
         .compute_window([FCELL as i32], [1])
@@ -1006,10 +1227,18 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
 fn hllc_hlld_builders_render_to_cpu_and_cuda() {
     // the lowerability half of the carrier gate: every HLLC/HLLD builder
     // must emit non-empty CPU (rust) AND CUDA source. an unlowerable op panics here.
-    KernelRun::new(adiabatic_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
-    KernelRun::new(rhd_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
-    KernelRun::new(rmhd_hllc_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
-    KernelRun::new(rmhd_hlld_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
+    KernelRun::new(adiabatic_hllc_flux_gv::<2>(0))
+        .grid([1, NSWEEP])
+        .assert_lowers();
+    KernelRun::new(rhd_hllc_flux_gv::<2>(0))
+        .grid([1, NSWEEP])
+        .assert_lowers();
+    KernelRun::new(rmhd_hllc_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
+        .assert_lowers();
+    KernelRun::new(rmhd_hlld_flux_gv(1, 0, 0))
+        .grid([NSWEEP])
+        .assert_lowers();
 }
 
 // =============================================================================
@@ -1076,11 +1305,32 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
     // guard that the designed clamp-to-zero arm is actually taken (a zero slope leaves the
     // RIGHT face value equal to the cell value) — else the test would silently stop exercising
     // the limiter branch it exists to cover.
-    assert_eq!(v0_r, v0[FCELL], "v0 right slope must clamp to 0 (sign-mixed local extremum)");
-    assert_eq!(pre_r, pre[FCELL], "pre right slope must clamp to 0 (sign-mixed local extremum)");
-    let left = Prim::<f64, 2> { rho: rho_l, vel: Tensor::new([v0_l, v1_l]), pre: pre_l };
-    let right = Prim::<f64, 2> { rho: rho_r, vel: Tensor::new([v0_r, v1_r]), pre: pre_r };
-    let f = hlle::<f64, 2, _>(&symbi_hydro::newtonian::Newtonian, &eos, &left, &right, &Tensor::unit(0), 0.0);
+    assert_eq!(
+        v0_r, v0[FCELL],
+        "v0 right slope must clamp to 0 (sign-mixed local extremum)"
+    );
+    assert_eq!(
+        pre_r, pre[FCELL],
+        "pre right slope must clamp to 0 (sign-mixed local extremum)"
+    );
+    let left = Prim::<f64, 2> {
+        rho: rho_l,
+        vel: Tensor::new([v0_l, v1_l]),
+        pre: pre_l,
+    };
+    let right = Prim::<f64, 2> {
+        rho: rho_r,
+        vel: Tensor::new([v0_r, v1_r]),
+        pre: pre_r,
+    };
+    let f = hlle::<f64, 2, _>(
+        &symbi_hydro::newtonian::Newtonian,
+        &eos,
+        &left,
+        &right,
+        &Tensor::unit(0),
+        0.0,
+    );
 
     // Gv kernel: the SAME adiabatic flux on the per-cell series, evaluated on the f64
     // interpreter. the kernel reconstructs internally (its select-branches now driven by
@@ -1093,13 +1343,22 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
         .field_with("prim_v1", move |c| v1[c[0]])
         .field_with("prim_pre", move |c| pre[c[0]])
         .scalars(&[
-            ("gamma", GAMMA), ("theta", theta),
-            ("mesh_adot_0", 0.0), ("mesh_vtrans_0", 0.0), ("x_lo_0", 0.0), ("dx_0", 1.0),
+            ("gamma", GAMMA),
+            ("theta", theta),
+            ("mesh_adot_0", 0.0),
+            ("mesh_vtrans_0", 0.0),
+            ("x_lo_0", 0.0),
+            ("dx_0", 1.0),
         ])
         .run();
     out.expect(
         [FCELL, 0],
-        &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
+        &[
+            ("flux_den", f.den),
+            ("flux_mom_0", f.mom[0]),
+            ("flux_mom_1", f.mom[1]),
+            ("flux_nrg", f.nrg),
+        ],
         1e-12,
     );
 }
@@ -1124,21 +1383,35 @@ fn cartesian_ks_flux_is_x_y_symmetric() {
     let vy = |c: &[usize]| 0.02 * (c[1] as f64) - 0.01 * (c[0] as f64);
 
     let run_flux = |dir: u8| {
-        KernelRun::new(rhd_flux_gr_gv::<2>(dir, Spacetime::KerrSchild, Coords::Cartesian, &cart2, &axes, false))
-            .grid([N, N])
-            // interior only: the 4-wide PLM stencil (i-2..i+1) is in-bounds for i,j in [2, N-2].
-            .compute_window([2i32, 2], [N - 3, N - 3])
-            .field_with("prim_rho", rho)
-            .field_with("prim_v0", vx)
-            .field_with("prim_v1", vy)
-            .field_with("prim_pre", pre)
-            .scalars(&[
-                ("gamma", 4.0 / 3.0), ("theta", 1.0), ("schwarzschild_mass", 1.0),
-                ("x_lo_0", x_lo), ("dx_0", dx), ("x_lo_1", x_lo), ("dx_1", dx),
-                (MeshScalar::Adot(0).name().as_str(), 0.0), (MeshScalar::Vtrans(0).name().as_str(), 0.0),
-                (MeshScalar::Adot(1).name().as_str(), 0.0), (MeshScalar::Vtrans(1).name().as_str(), 0.0),
-            ])
-            .run()
+        KernelRun::new(rhd_flux_gr_gv::<2>(
+            dir,
+            Spacetime::KerrSchild,
+            Coords::Cartesian,
+            &cart2,
+            &axes,
+            false,
+        ))
+        .grid([N, N])
+        // interior only: the 4-wide PLM stencil (i-2..i+1) is in-bounds for i,j in [2, N-2].
+        .compute_window([2i32, 2], [N - 3, N - 3])
+        .field_with("prim_rho", rho)
+        .field_with("prim_v0", vx)
+        .field_with("prim_v1", vy)
+        .field_with("prim_pre", pre)
+        .scalars(&[
+            ("gamma", 4.0 / 3.0),
+            ("theta", 1.0),
+            ("schwarzschild_mass", 1.0),
+            ("x_lo_0", x_lo),
+            ("dx_0", dx),
+            ("x_lo_1", x_lo),
+            ("dx_1", dx),
+            (MeshScalar::Adot(0).name().as_str(), 0.0),
+            (MeshScalar::Vtrans(0).name().as_str(), 0.0),
+            (MeshScalar::Adot(1).name().as_str(), 0.0),
+            (MeshScalar::Vtrans(1).name().as_str(), 0.0),
+        ])
+        .run()
     };
     let fx = run_flux(0);
     let fy = run_flux(1);
@@ -1147,14 +1420,30 @@ fn cartesian_ks_flux_is_x_y_symmetric() {
     let (i, j) = (3usize, 2usize);
     let close = |a: f64, b: f64| (a - b).abs() < 1e-12 * (1.0 + a.abs().max(b.abs()));
     let (fxc, fyc) = ([i, j], [j, i]);
-    assert!(close(fx.get(fxc, "flux_den"), fy.get(fyc, "flux_den")),
-        "den: {} vs {}", fx.get(fxc, "flux_den"), fy.get(fyc, "flux_den"));
-    assert!(close(fx.get(fxc, "flux_mom_0"), fy.get(fyc, "flux_mom_1")),
-        "S_x-flux {} vs S_y-flux {}", fx.get(fxc, "flux_mom_0"), fy.get(fyc, "flux_mom_1"));
-    assert!(close(fx.get(fxc, "flux_mom_1"), fy.get(fyc, "flux_mom_0")),
-        "S_y-flux {} vs S_x-flux {}", fx.get(fxc, "flux_mom_1"), fy.get(fyc, "flux_mom_0"));
-    assert!(close(fx.get(fxc, "flux_nrg"), fy.get(fyc, "flux_nrg")),
-        "nrg: {} vs {}", fx.get(fxc, "flux_nrg"), fy.get(fyc, "flux_nrg"));
+    assert!(
+        close(fx.get(fxc, "flux_den"), fy.get(fyc, "flux_den")),
+        "den: {} vs {}",
+        fx.get(fxc, "flux_den"),
+        fy.get(fyc, "flux_den")
+    );
+    assert!(
+        close(fx.get(fxc, "flux_mom_0"), fy.get(fyc, "flux_mom_1")),
+        "S_x-flux {} vs S_y-flux {}",
+        fx.get(fxc, "flux_mom_0"),
+        fy.get(fyc, "flux_mom_1")
+    );
+    assert!(
+        close(fx.get(fxc, "flux_mom_1"), fy.get(fyc, "flux_mom_0")),
+        "S_y-flux {} vs S_x-flux {}",
+        fx.get(fxc, "flux_mom_1"),
+        fy.get(fyc, "flux_mom_0")
+    );
+    assert!(
+        close(fx.get(fxc, "flux_nrg"), fy.get(fyc, "flux_nrg")),
+        "nrg: {} vs {}",
+        fx.get(fxc, "flux_nrg"),
+        fy.get(fyc, "flux_nrg")
+    );
 }
 
 // the cartesian kerr-schild c2p x<->y symmetry: a transpose-symmetric conserved state
@@ -1171,25 +1460,45 @@ fn cartesian_ks_c2p_is_x_y_symmetric() {
     let nrg = |c: &[usize]| 0.5 + 0.02 * (c[0] as f64 + c[1] as f64);
     let sx = |c: &[usize]| 0.010 * (c[0] as f64) + 0.005 * (c[1] as f64);
     let sy = |c: &[usize]| 0.010 * (c[1] as f64) + 0.005 * (c[0] as f64);
-    let out = KernelRun::new(rhd_c2p_gr_gv::<2>(Coords::Cartesian, Spacetime::KerrSchild, &cart2, &axes, 20))
-        .grid([N, N])
-        .field_with("cons_den", den)
-        .field_with("cons_mom_0", sx)
-        .field_with("cons_mom_1", sy)
-        .field_with("cons_nrg", nrg)
-        .scalars(&[
-            ("gamma", 4.0 / 3.0), ("schwarzschild_mass", 1.0),
-            ("x_lo_0", 4.0), ("dx_0", 1.0), ("x_lo_1", 4.0), ("dx_1", 1.0),
-        ])
-        .run();
+    let out = KernelRun::new(rhd_c2p_gr_gv::<2>(
+        Coords::Cartesian,
+        Spacetime::KerrSchild,
+        &cart2,
+        &axes,
+        20,
+    ))
+    .grid([N, N])
+    .field_with("cons_den", den)
+    .field_with("cons_mom_0", sx)
+    .field_with("cons_mom_1", sy)
+    .field_with("cons_nrg", nrg)
+    .scalars(&[
+        ("gamma", 4.0 / 3.0),
+        ("schwarzschild_mass", 1.0),
+        ("x_lo_0", 4.0),
+        ("dx_0", 1.0),
+        ("x_lo_1", 4.0),
+        ("dx_1", 1.0),
+    ])
+    .run();
     let close = |a: f64, b: f64| (a - b).abs() < 1e-11 * (1.0 + a.abs().max(b.abs()));
     for i in 0..N {
         for j in 0..N {
             let g = |name: &str, c: [usize; 2]| out.get(c, name);
-            assert!(close(g("prim_rho", [i, j]), g("prim_rho", [j, i])), "rho ({i},{j})");
-            assert!(close(g("prim_pre", [i, j]), g("prim_pre", [j, i])), "pre ({i},{j})");
-            assert!(close(g("prim_vel_0", [i, j]), g("prim_vel_1", [j, i])),
-                "v_x({i},{j})={} != v_y({j},{i})={}", g("prim_vel_0", [i, j]), g("prim_vel_1", [j, i]));
+            assert!(
+                close(g("prim_rho", [i, j]), g("prim_rho", [j, i])),
+                "rho ({i},{j})"
+            );
+            assert!(
+                close(g("prim_pre", [i, j]), g("prim_pre", [j, i])),
+                "pre ({i},{j})"
+            );
+            assert!(
+                close(g("prim_vel_0", [i, j]), g("prim_vel_1", [j, i])),
+                "v_x({i},{j})={} != v_y({j},{i})={}",
+                g("prim_vel_0", [i, j]),
+                g("prim_vel_1", [j, i])
+            );
         }
     }
 }
@@ -1201,12 +1510,18 @@ fn cartesian_ks_c2p_is_x_y_symmetric() {
 // assembly from the driver (RK / ghosts / dt).
 #[test]
 fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
-    use symbi_discretize::{godunov_stage_gv, GeoSource};
+    use symbi_discretize::{GeoSource, godunov_stage_gv};
     const N: usize = 4;
     let sp = [Spacing::Uniform, Spacing::Uniform];
     let axes = [0usize, 1];
     let kernel = godunov_stage_gv(
-        Coords::Cartesian, Spacetime::KerrSchild, &sp, &axes, 2, 2, true,
+        Coords::Cartesian,
+        Spacetime::KerrSchild,
+        &sp,
+        &axes,
+        2,
+        2,
+        true,
         GeoSource::Hydro { inertial: false },
     );
     // symmetric scalar fields s(i,j) and swap-paired vector/flux fields.
@@ -1219,25 +1534,42 @@ fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
         .grid([N, N])
         .compute_window([1i32, 1], [2usize, 2])
         // cons (current) — for the geodesic source's e = rho + nrg + pre.
-        .field_with("rho", s(1.0, 0.02)).field_with("nrg", s(3.0, 0.02))
-        .field_with("mom_0", f(0.02, 0.01)).field_with("mom_1", ft(0.02, 0.01))
+        .field_with("rho", s(1.0, 0.02))
+        .field_with("nrg", s(3.0, 0.02))
+        .field_with("mom_0", f(0.02, 0.01))
+        .field_with("mom_1", ft(0.02, 0.01))
         // u_n snapshot (RK) — symmetric.
-        .field_with("u_n_rho", s(1.0, 0.02)).field_with("u_n_nrg", s(3.0, 0.02))
-        .field_with("u_n_mom_0", f(0.02, 0.01)).field_with("u_n_mom_1", ft(0.02, 0.01))
+        .field_with("u_n_rho", s(1.0, 0.02))
+        .field_with("u_n_nrg", s(3.0, 0.02))
+        .field_with("u_n_mom_0", f(0.02, 0.01))
+        .field_with("u_n_mom_1", ft(0.02, 0.01))
         // prims — for the source (v swaps, rho/pre symmetric).
-        .field_with("prim_rho", s(1.0, 0.02)).field_with("pre", s(0.1, 0.01))
-        .field_with("prim_v0", f(0.01, -0.005)).field_with("prim_v1", ft(0.01, -0.005))
+        .field_with("prim_rho", s(1.0, 0.02))
+        .field_with("pre", s(0.1, 0.01))
+        .field_with("prim_v0", f(0.01, -0.005))
+        .field_with("prim_v1", ft(0.01, -0.005))
         // per-direction fluxes: F^i_{S_k}. diagonal (0_0 <-> 1_1), cross (0_1 <-> 1_0).
-        .field_with("mass_flux_0", f(0.03, 0.01)).field_with("mass_flux_1", ft(0.03, 0.01))
-        .field_with("nrg_flux_0", f(0.04, 0.02)).field_with("nrg_flux_1", ft(0.04, 0.02))
-        .field_with("mom_flux_0_0", f(0.05, 0.02)).field_with("mom_flux_1_1", ft(0.05, 0.02))
-        .field_with("mom_flux_0_1", f(0.03, 0.06)).field_with("mom_flux_1_0", ft(0.03, 0.06))
+        .field_with("mass_flux_0", f(0.03, 0.01))
+        .field_with("mass_flux_1", ft(0.03, 0.01))
+        .field_with("nrg_flux_0", f(0.04, 0.02))
+        .field_with("nrg_flux_1", ft(0.04, 0.02))
+        .field_with("mom_flux_0_0", f(0.05, 0.02))
+        .field_with("mom_flux_1_1", ft(0.05, 0.02))
+        .field_with("mom_flux_0_1", f(0.03, 0.06))
+        .field_with("mom_flux_1_0", ft(0.03, 0.06))
         .scalars(&[
-            ("dt", 0.01), ("a0", 0.0), ("ac", 1.0), ("mesh_hdil", 0.0),
-            ("dx_0", 0.125), ("dx_1", 0.125), ("x_lo_0", 4.0), ("x_lo_1", 4.0),
+            ("dt", 0.01),
+            ("a0", 0.0),
+            ("ac", 1.0),
+            ("mesh_hdil", 0.0),
+            ("dx_0", 0.125),
+            ("dx_1", 0.125),
+            ("x_lo_0", 4.0),
+            ("x_lo_1", 4.0),
             // the covariant-energy godunov reconstructs the geodesic-source inertia rho h W^2 =
             // h D^2/rho, so the stage now binds the EOS gamma.
-            ("schwarzschild_mass", 1.0), ("gamma", 5.0 / 3.0),
+            ("schwarzschild_mass", 1.0),
+            ("gamma", 5.0 / 3.0),
         ])
         .run();
     let close = |a: f64, b: f64| (a - b).abs() < 1e-11 * (1.0 + a.abs().max(b.abs()));
@@ -1245,7 +1577,11 @@ fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
         let g = |n: &str, c: [usize; 2]| out.get(c, n);
         assert!(close(g("rho", [i, j]), g("rho", [j, i])), "rho ({i},{j})");
         assert!(close(g("nrg", [i, j]), g("nrg", [j, i])), "nrg ({i},{j})");
-        assert!(close(g("mom_0", [i, j]), g("mom_1", [j, i])),
-            "mom_x({i},{j})={} != mom_y({j},{i})={}", g("mom_0", [i, j]), g("mom_1", [j, i]));
+        assert!(
+            close(g("mom_0", [i, j]), g("mom_1", [j, i])),
+            "mom_x({i},{j})={} != mom_y({j},{i})={}",
+            g("mom_0", [i, j]),
+            g("mom_1", [j, i])
+        );
     }
 }

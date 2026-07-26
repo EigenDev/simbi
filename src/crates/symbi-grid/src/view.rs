@@ -42,7 +42,12 @@ impl<T, const D: usize> View<T, D> {
         strides: [usize; D],
         len: usize,
     ) -> Self {
-        View { ptr, start, strides, len }
+        View {
+            ptr,
+            start,
+            strides,
+            len,
+        }
     }
 
     /// create a view from a domain and a pointer to the base of the allocation.
@@ -52,14 +57,24 @@ impl<T, const D: usize> View<T, D> {
         let strides = Self::row_major_strides(&shape);
         let start = std::array::from_fn(|ax| domain.spaces[ax].lo);
         let len = domain.volume();
-        View { ptr, start, strides, len }
+        View {
+            ptr,
+            start,
+            strides,
+            len,
+        }
     }
 
     /// read the value at the given coordinate.
     #[inline]
     pub fn at(&self, coord: [isize; D]) -> &T {
         let idx = self.flat_index(coord);
-        debug_assert!(idx < self.len, "view: index {} out of bounds (len {})", idx, self.len);
+        debug_assert!(
+            idx < self.len,
+            "view: index {} out of bounds (len {})",
+            idx,
+            self.len
+        );
         unsafe { &*self.ptr.add(idx) }
     }
 
@@ -110,7 +125,12 @@ impl<T, const D: usize> ViewMut<T, D> {
         let strides = View::<T, D>::row_major_strides(&shape);
         let start = std::array::from_fn(|ax| domain.spaces[ax].lo);
         let len = domain.volume();
-        ViewMut { ptr, start, strides, len }
+        ViewMut {
+            ptr,
+            start,
+            strides,
+            len,
+        }
     }
 
     #[inline]
@@ -131,7 +151,9 @@ impl<T, const D: usize> ViewMut<T, D> {
     pub fn set(&self, coord: [isize; D], val: T) {
         let idx = self.flat_index(coord);
         debug_assert!(idx < self.len);
-        unsafe { *self.ptr.add(idx) = val; }
+        unsafe {
+            *self.ptr.add(idx) = val;
+        }
     }
 
     #[inline]
@@ -156,12 +178,16 @@ impl<T, const D: usize> ViewMut<T, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{Space, Domain};
+    use symbi_algebra::{Domain, Space};
 
     #[test]
     fn view_1d() {
         let data: Vec<f64> = (0..10).map(|ii| ii as f64).collect();
-        let dom = Domain::new([Space { name: "x", lo: 0, hi: 10 }]);
+        let dom = Domain::new([Space {
+            name: "x",
+            lo: 0,
+            hi: 10,
+        }]);
         let view = View::from_domain(data.as_ptr(), &dom);
         assert_eq!(*view.at([0]), 0.0);
         assert_eq!(*view.at([5]), 5.0);
@@ -173,13 +199,21 @@ mod tests {
         // 3x4 axis-0-fastest: strides [1, 3], data[i + j*3]
         let data: Vec<f64> = (0..12).map(|ii| ii as f64).collect();
         let dom = Domain::new([
-            Space { name: "i", lo: 0, hi: 3 },
-            Space { name: "j", lo: 0, hi: 4 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 3,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 4,
+            },
         ]);
         let view = View::from_domain(data.as_ptr(), &dom);
-        assert_eq!(*view.at([0, 0]),  0.0);
-        assert_eq!(*view.at([1, 0]),  1.0);   // step axis 0 → stride 1
-        assert_eq!(*view.at([0, 3]),  9.0);   // step axis 1 → 3*3 = 9
+        assert_eq!(*view.at([0, 0]), 0.0);
+        assert_eq!(*view.at([1, 0]), 1.0); // step axis 0 → stride 1
+        assert_eq!(*view.at([0, 3]), 9.0); // step axis 1 → 3*3 = 9
         assert_eq!(*view.at([2, 3]), 11.0);
     }
 
@@ -188,20 +222,32 @@ mod tests {
         // 4x4 axis-0-fastest: strides [1, 4], data[(i+2) + (j+2)*4]
         let data: Vec<f64> = (0..16).map(|ii| ii as f64).collect();
         let dom = Domain::new([
-            Space { name: "i", lo: -2, hi: 2 },
-            Space { name: "j", lo: -2, hi: 2 },
+            Space {
+                name: "i",
+                lo: -2,
+                hi: 2,
+            },
+            Space {
+                name: "j",
+                lo: -2,
+                hi: 2,
+            },
         ]);
         let view = View::from_domain(data.as_ptr(), &dom);
-        assert_eq!(*view.at([-2, -2]),  0.0);
-        assert_eq!(*view.at([-2,  1]), 12.0);   // (0) + (3)*4 = 12
-        assert_eq!(*view.at([ 1,  1]), 15.0);   // (3) + (3)*4 = 15
+        assert_eq!(*view.at([-2, -2]), 0.0);
+        assert_eq!(*view.at([-2, 1]), 12.0); // (0) + (3)*4 = 12
+        assert_eq!(*view.at([1, 1]), 15.0); // (3) + (3)*4 = 15
     }
 
     #[test]
     fn view_mut_write_read() {
         let mut data = vec![0.0f64; 10];
-        let dom = Domain::new([Space { name: "x", lo: 0, hi: 10 }]);
-        let  view = ViewMut::from_domain(data.as_mut_ptr(), &dom);
+        let dom = Domain::new([Space {
+            name: "x",
+            lo: 0,
+            hi: 10,
+        }]);
+        let view = ViewMut::from_domain(data.as_mut_ptr(), &dom);
         for ii in 0..10 {
             view.set([ii as isize], ii as f64 * ii as f64);
         }
@@ -214,17 +260,29 @@ mod tests {
         // 2x3x4 axis-0-fastest: strides [1, 2, 6], data[i + j*2 + k*6]
         let data: Vec<f64> = (0..24).map(|ii| ii as f64).collect();
         let dom = Domain::new([
-            Space { name: "i", lo: 0, hi: 2 },
-            Space { name: "j", lo: 0, hi: 3 },
-            Space { name: "k", lo: 0, hi: 4 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 2,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 3,
+            },
+            Space {
+                name: "k",
+                lo: 0,
+                hi: 4,
+            },
         ]);
         let view = View::from_domain(data.as_ptr(), &dom);
-        assert_eq!(*view.at([0, 0, 0]),  0.0);
-        assert_eq!(*view.at([1, 0, 0]),  1.0);   // step axis 0
-        assert_eq!(*view.at([0, 1, 0]),  2.0);   // step axis 1
-        assert_eq!(*view.at([0, 0, 3]), 18.0);   // step axis 2: 3*6
-        assert_eq!(*view.at([0, 2, 3]), 22.0);   // 2*2 + 3*6
-        assert_eq!(*view.at([1, 2, 3]), 23.0);   // 1 + 2*2 + 3*6
+        assert_eq!(*view.at([0, 0, 0]), 0.0);
+        assert_eq!(*view.at([1, 0, 0]), 1.0); // step axis 0
+        assert_eq!(*view.at([0, 1, 0]), 2.0); // step axis 1
+        assert_eq!(*view.at([0, 0, 3]), 18.0); // step axis 2: 3*6
+        assert_eq!(*view.at([0, 2, 3]), 22.0); // 2*2 + 3*6
+        assert_eq!(*view.at([1, 2, 3]), 23.0); // 1 + 2*2 + 3*6
     }
 
     #[test]
@@ -256,9 +314,21 @@ mod tests {
     fn view_3d_stencil_access() {
         // verify that stencil-like access patterns work with coordinate offsets
         let dom = Domain::new([
-            Space { name: "i", lo: 0, hi: 10 },
-            Space { name: "j", lo: 0, hi: 10 },
-            Space { name: "k", lo: 0, hi: 10 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 10,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 10,
+            },
+            Space {
+                name: "k",
+                lo: 0,
+                hi: 10,
+            },
         ]);
         let data: Vec<f64> = (0..1000).map(|ii| ii as f64).collect();
         let view = View::from_domain(data.as_ptr(), &dom);
@@ -276,8 +346,8 @@ mod tests {
 
         // axis-0-fastest: strides [1, 10, 100]. neighbour differences scale
         // by 2 × the per-axis stride.
-        assert_eq!(xp - xm, 2.0);   // 2 * stride_i = 2
-        assert_eq!(yp - ym, 20.0);  // 2 * stride_j = 20
+        assert_eq!(xp - xm, 2.0); // 2 * stride_i = 2
+        assert_eq!(yp - ym, 20.0); // 2 * stride_j = 20
         assert_eq!(zp - zm, 200.0); // 2 * stride_k = 200
     }
 }

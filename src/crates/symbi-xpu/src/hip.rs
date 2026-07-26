@@ -20,7 +20,7 @@ use crate::error::{self, XpuError};
 use crate::memory::MemorySpace;
 use crate::space::ExecutionSpace;
 use std::cell::Cell;
-use std::ffi::{c_char, c_int, c_uint, c_void, CString};
+use std::ffi::{CString, c_char, c_int, c_uint, c_void};
 use std::sync::OnceLock;
 
 // =============================================================================
@@ -153,11 +153,7 @@ fn cached_device_count() -> i32 {
 /// hip is cluster-validated anyway, where the mapping is identity.
 fn physical(ord: i32) -> i32 {
     let count = cached_device_count();
-    if count > 0 {
-        ord % count
-    } else {
-        0
-    }
+    if count > 0 { ord % count } else { 0 }
 }
 
 /// number of hip devices visible to the process.
@@ -172,7 +168,10 @@ pub fn device_count() -> error::Result<i32> {
 
 /// ensure hip is initialized and device `ord` (mapped to a physical device) is current.
 fn ensure_init_device(ord: i32) -> error::Result<()> {
-    assert!((ord as usize) < MAX_GPUS, "device ordinal {ord} exceeds MAX_GPUS");
+    assert!(
+        (ord as usize) < MAX_GPUS,
+        "device ordinal {ord} exceeds MAX_GPUS"
+    );
     ensure_hip_init();
     unsafe { check(hipSetDevice(physical(ord)), "hipSetDevice") }
 }
@@ -239,7 +238,13 @@ pub fn enable_peer_access(ord: i32, peer: i32) -> error::Result<()> {
 /// copy `bytes` from `src` (resident on `src_ord`) to `dst` (resident on `dst_ord`),
 /// synchronously, over the peer link. the one new primitive in the multi-gpu transport; the
 /// gather/scatter halves are shared with `StagedCopy`.
-pub fn memcpy_peer(dst: u64, dst_ord: i32, src: u64, src_ord: i32, bytes: usize) -> error::Result<()> {
+pub fn memcpy_peer(
+    dst: u64,
+    dst_ord: i32,
+    src: u64,
+    src_ord: i32,
+    bytes: usize,
+) -> error::Result<()> {
     ensure_hip_init();
     unsafe {
         check(
@@ -274,7 +279,11 @@ pub fn device_info() -> error::Result<DeviceInfo> {
     let mut name_buf = [0_i8; 256];
     unsafe {
         check(
-            hipDeviceGetName(name_buf.as_mut_ptr(), name_buf.len() as c_int, physical(current_device())),
+            hipDeviceGetName(
+                name_buf.as_mut_ptr(),
+                name_buf.len() as c_int,
+                physical(current_device()),
+            ),
             "hipDeviceGetName",
         )?;
     }
@@ -421,7 +430,12 @@ impl ExecutionSpace for HipSpace {
     }
 
     fn stream_wait_event(stream: &HipStream, event: &HipEvent) -> error::Result<()> {
-        unsafe { check(hipStreamWaitEvent(stream.0, event.0, 0), "hipStreamWaitEvent") }
+        unsafe {
+            check(
+                hipStreamWaitEvent(stream.0, event.0, 0),
+                "hipStreamWaitEvent",
+            )
+        }
     }
 
     fn load_module(bytes: &[u8]) -> error::Result<HipModule> {

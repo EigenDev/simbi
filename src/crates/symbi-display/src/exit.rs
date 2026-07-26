@@ -67,7 +67,9 @@ pub fn render_exit_frame(kind: ExitKind, summary: &str, term_width: u16) -> Stri
     // measure the wrapped height with ratatui's own wrap (its line_count is gated
     // behind an unstable feature): render into a scratch buffer at the inner width
     // and count the non-blank rows.
-    let measure = Paragraph::new(summary.to_string()).style(body_style).wrap(wrap);
+    let measure = Paragraph::new(summary.to_string())
+        .style(body_style)
+        .wrap(wrap);
     let cap = (summary.chars().count() as u16).clamp(1, 256);
     let mut scratch = Buffer::empty(Rect::new(0, 0, inner_w, cap));
     measure.render(Rect::new(0, 0, inner_w, cap), &mut scratch);
@@ -81,7 +83,9 @@ pub fn render_exit_frame(kind: ExitKind, summary: &str, term_width: u16) -> Stri
             format!(" {} ", exit_heading(kind)),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         ));
-    let para = Paragraph::new(summary.to_string()).style(body_style).wrap(wrap);
+    let para = Paragraph::new(summary.to_string())
+        .style(body_style)
+        .wrap(wrap);
 
     let height = body_h + 2; // top + bottom border
     let area = Rect::new(0, 0, width, height);
@@ -152,7 +156,11 @@ mod tests {
         for line in &lines {
             assert!(strip_ansi(line).chars().count() <= 76);
         }
-        let stripped: String = lines.iter().map(|l| strip_ansi(l)).collect::<Vec<_>>().join("\n");
+        let stripped: String = lines
+            .iter()
+            .map(|l| strip_ansi(l))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(stripped.contains("INTERRUPTED"));
         assert!(stripped.contains("michel.interrupted.h5"));
         assert!(lines.len() > 3);

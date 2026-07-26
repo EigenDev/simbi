@@ -204,11 +204,7 @@ where
         if sim.has_tracers() {
             let geometry = sim.geom.block_geometry(sim.physics.metric);
             let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
-            symbi_sim::tracers::refresh_derived_positions_store(
-                &mut sim.store,
-                &geometry,
-                layout,
-            );
+            symbi_sim::tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
         }
 
         if let Some(c) = trace_coord {
@@ -262,8 +258,7 @@ where
                     .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
                 if sim.continuous_tracers.is_some() {
                     let geometry = sim.geom.block_geometry(sim.physics.metric);
-                    let layout =
-                        symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
+                    let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
                     let crossing_time = sim.time;
                     symbi_sim::tracers::advance_continuous_accretion_transport_store(
                         &mut sim.store,
@@ -476,15 +471,9 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             }
             let mut injections = symbi_sim::tracers::boundary_injection_transfers(sim);
             injections.extend(symbi_sim::tracers::source_injection_transfers(
-                sim,
-                stage.a0,
-                stage.ac,
+                sim, stage.a0, stage.ac,
             ));
-            symbi_sim::tracers::fold_injection_ledger(
-                &mut injection_ledger,
-                injections,
-                stage.ac,
-            );
+            symbi_sim::tracers::fold_injection_ledger(&mut injection_ledger, injections, stage.ac);
             if sim.tracers.is_some() {
                 prof("tracers", || {
                     symbi_sim::tracers::advance_stage_mass_transport(
@@ -541,12 +530,8 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             scale_end,
             offset_end,
         );
-        symbi_sim::tracers::apply_continuous_boundaries_host(
-            &mut tracers,
-            bounds,
-            sim.boundaries,
-        )
-        .unwrap_or_else(|detail| panic!("ito tracer boundaries: {detail}"));
+        symbi_sim::tracers::apply_continuous_boundaries_host(&mut tracers, bounds, sim.boundaries)
+            .unwrap_or_else(|detail| panic!("ito tracer boundaries: {detail}"));
         sim.continuous_tracers = Some(tracers);
         symbi_sim::tracers::spawn_continuous_boundary_injection_store(
             &mut sim.store,

@@ -59,9 +59,15 @@ fn measures(s: &Sim) -> (f64, f64) {
         let rho = *den.view().at(c);
         let mz = *s.fields.cons.mom[2].view().at(c);
         let mut msq = 0.0;
-        for k in 0..3 { let mo = *s.fields.cons.mom[k].view().at(c); msq += mo * mo; }
+        for k in 0..3 {
+            let mo = *s.fields.cons.mom[k].view().at(c);
+            msq += mo * mo;
+        }
         let mut bsq = 0.0;
-        for k in 0..3 { let b = *m.bcell[k].view().at(c); bsq += b * b; }
+        for k in 0..3 {
+            let b = *m.bcell[k].view().at(c);
+            bsq += b * b;
+        }
         kz += 0.5 * mz * mz / rho;
         ie += *nrg.view().at(c) - 0.5 * msq / rho - 0.5 * bsq;
     }
@@ -71,9 +77,15 @@ fn measures(s: &Sim) -> (f64, f64) {
 fn run(nu: f64) -> (f64, f64, f64, f64) {
     let mut sim = make();
     let (kz0, ie0) = measures(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_viscosity(nu);
-    evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {}).expect("2.5d mhd viscous evolve failed");
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_viscosity(nu);
+    evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {})
+        .expect("2.5d mhd viscous evolve failed");
     let (kz1, ie1) = measures(&sim);
     (kz0, ie0, kz1, ie1)
 }
@@ -94,5 +106,8 @@ fn viscosity_diffuses_the_out_of_plane_velocity() {
          vs inviscid {loss_ideal:.3e}"
     );
     // and the dissipated toroidal motion heated the gas.
-    assert!(ie1 > ie0, "out-of-plane viscous dissipation did not heat the gas: {ie0} -> {ie1}");
+    assert!(
+        ie1 > ie0,
+        "out-of-plane viscous dissipation did not heat the gas: {ie0} -> {ie1}"
+    );
 }

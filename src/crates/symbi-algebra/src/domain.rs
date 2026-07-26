@@ -19,13 +19,22 @@ impl Space {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Side { Lo, Hi }
+pub enum Side {
+    Lo,
+    Hi,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Axis { X = 0, Y = 1, Z = 2 }
+pub enum Axis {
+    X = 0,
+    Y = 1,
+    Z = 2,
+}
 
 impl Axis {
-    pub fn index(self) -> usize { self as usize }
+    pub fn index(self) -> usize {
+        self as usize
+    }
 }
 
 /// trait so methods accept both `Axis` and `usize`.
@@ -34,11 +43,15 @@ pub trait IntoAxis {
 }
 
 impl IntoAxis for Axis {
-    fn into_axis(self) -> usize { self as usize }
+    fn into_axis(self) -> usize {
+        self as usize
+    }
 }
 
 impl IntoAxis for usize {
-    fn into_axis(self) -> usize { self }
+    fn into_axis(self) -> usize {
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -66,7 +79,9 @@ impl<const R: usize> Domain<R> {
             assert!(
                 spaces[ii].hi >= spaces[ii].lo,
                 "Domain: empty space '{}' has hi ({}) < lo ({})",
-                spaces[ii].name, spaces[ii].hi, spaces[ii].lo,
+                spaces[ii].name,
+                spaces[ii].hi,
+                spaces[ii].lo,
             );
         }
         let strides = Self::compute_strides(&spaces);
@@ -131,7 +146,11 @@ impl<const R: usize> Domain<R> {
         let (lo, hi) = range.into_range();
         Domain::new(std::array::from_fn(|a| {
             if a == axis {
-                Space { name: self.spaces[a].name, lo, hi }
+                Space {
+                    name: self.spaces[a].name,
+                    lo,
+                    hi,
+                }
             } else {
                 self.spaces[a].clone()
             }
@@ -143,13 +162,21 @@ impl<const R: usize> Domain<R> {
         Domain::new(std::array::from_fn(|a| {
             let lo = self.spaces[a].lo.max(other.spaces[a].lo);
             let hi = self.spaces[a].hi.min(other.spaces[a].hi);
-            assert!(hi > lo,
+            assert!(
+                hi > lo,
                 "intersect: empty result on axis {} ('{}'), [{}, {}) ^ [{}, {})",
-                a, self.spaces[a].name,
-                self.spaces[a].lo, self.spaces[a].hi,
-                other.spaces[a].lo, other.spaces[a].hi,
+                a,
+                self.spaces[a].name,
+                self.spaces[a].lo,
+                self.spaces[a].hi,
+                other.spaces[a].lo,
+                other.spaces[a].hi,
             );
-            Space { name: self.spaces[a].name, lo, hi }
+            Space {
+                name: self.spaces[a].name,
+                lo,
+                hi,
+            }
         }))
     }
 
@@ -158,14 +185,19 @@ impl<const R: usize> Domain<R> {
         Domain::new(std::array::from_fn(|a| {
             let lo = self.spaces[a].lo.min(other.spaces[a].lo);
             let hi = self.spaces[a].hi.max(other.spaces[a].hi);
-            Space { name: self.spaces[a].name, lo, hi }
+            Space {
+                name: self.spaces[a].name,
+                lo,
+                hi,
+            }
         }))
     }
 
     /// true if self and other overlap on every axis.
     pub fn overlaps(&self, other: &Domain<R>) -> bool {
-        (0..R).all(|a| self.spaces[a].lo < other.spaces[a].hi
-                    && other.spaces[a].lo < self.spaces[a].hi)
+        (0..R).all(|a| {
+            self.spaces[a].lo < other.spaces[a].hi && other.spaces[a].lo < self.spaces[a].hi
+        })
     }
 
     /// set difference: self \ other.
@@ -181,14 +213,15 @@ impl<const R: usize> Domain<R> {
 
         // compute the overlap region (clamped intersection)
         let overlap: [(isize, isize); R] = std::array::from_fn(|a| {
-            (self.spaces[a].lo.max(other.spaces[a].lo),
-             self.spaces[a].hi.min(other.spaces[a].hi))
+            (
+                self.spaces[a].lo.max(other.spaces[a].lo),
+                self.spaces[a].hi.min(other.spaces[a].hi),
+            )
         });
 
         // if overlap covers all of self, nothing remains
-        let full_cover = (0..R).all(|a| {
-            overlap[a].0 <= self.spaces[a].lo && overlap[a].1 >= self.spaces[a].hi
-        });
+        let full_cover =
+            (0..R).all(|a| overlap[a].0 <= self.spaces[a].lo && overlap[a].1 >= self.spaces[a].hi);
         if full_cover {
             return vec![];
         }
@@ -198,9 +231,9 @@ impl<const R: usize> Domain<R> {
         let intervals: [[(isize, isize, bool); 3]; R] = std::array::from_fn(|a| {
             let s = &self.spaces[a];
             [
-                (s.lo, overlap[a].0, s.lo < overlap[a].0),      // before
-                (overlap[a].0, overlap[a].1, true),              // overlap
-                (overlap[a].1, s.hi, overlap[a].1 < s.hi),      // after
+                (s.lo, overlap[a].0, s.lo < overlap[a].0), // before
+                (overlap[a].0, overlap[a].1, true),        // overlap
+                (overlap[a].1, s.hi, overlap[a].1 < s.hi), // after
             ]
         });
 
@@ -217,7 +250,11 @@ impl<const R: usize> Domain<R> {
                 if valid {
                     let dom = Domain::new(std::array::from_fn(|a| {
                         let (lo, hi, _) = intervals[a][idx[a]];
-                        Space { name: self.spaces[a].name, lo, hi }
+                        Space {
+                            name: self.spaces[a].name,
+                            lo,
+                            hi,
+                        }
                     }));
                     if dom.volume() > 0 {
                         result.push(dom);
@@ -237,7 +274,9 @@ impl<const R: usize> Domain<R> {
                     }
                 }
             }
-            if carry { break; }
+            if carry {
+                break;
+            }
         }
 
         result
@@ -265,8 +304,10 @@ impl<const R: usize> Domain<R> {
         }
         // the clamped overlap self ∩ other (per axis).
         let ov: [(isize, isize); R] = std::array::from_fn(|a| {
-            (self.spaces[a].lo.max(other.spaces[a].lo),
-             self.spaces[a].hi.min(other.spaces[a].hi))
+            (
+                self.spaces[a].lo.max(other.spaces[a].lo),
+                self.spaces[a].hi.min(other.spaces[a].hi),
+            )
         });
         // overlap covers all of self -> nothing remains.
         if (0..R).all(|a| ov[a].0 <= self.spaces[a].lo && ov[a].1 >= self.spaces[a].hi) {
@@ -292,7 +333,11 @@ impl<const R: usize> Domain<R> {
                         // higher axes: full self extent.
                         Ordering::Greater => (self.spaces[aa].lo, self.spaces[aa].hi),
                     };
-                    Space { name: self.spaces[aa].name, lo, hi }
+                    Space {
+                        name: self.spaces[aa].name,
+                        lo,
+                        hi,
+                    }
                 })));
             }
         }
@@ -302,7 +347,12 @@ impl<const R: usize> Domain<R> {
     /// boundary slab: the `width`-thick layer at the lo or hi end of `axis`.
     pub fn boundary(&self, axis: impl IntoAxis, side: Side, width: isize) -> Domain<R> {
         let axis = axis.into_axis();
-        assert!(axis < R, "boundary: axis {} out of range for rank {}", axis, R);
+        assert!(
+            axis < R,
+            "boundary: axis {} out of range for rank {}",
+            axis,
+            R
+        );
         let (lo, hi) = match side {
             Side::Lo => (self.spaces[axis].lo, self.spaces[axis].lo + width),
             Side::Hi => (self.spaces[axis].hi - width, self.spaces[axis].hi),
@@ -313,7 +363,12 @@ impl<const R: usize> Domain<R> {
     /// contract a single axis by `width` on each side.
     pub fn contract_axis(&self, axis: impl IntoAxis, width: isize) -> Domain<R> {
         let axis = axis.into_axis();
-        assert!(axis < R, "contract_axis: axis {} out of range for rank {}", axis, R);
+        assert!(
+            axis < R,
+            "contract_axis: axis {} out of range for rank {}",
+            axis,
+            R
+        );
         Domain::new(std::array::from_fn(|a| {
             if a == axis {
                 Space {
@@ -333,7 +388,12 @@ impl<const R: usize> Domain<R> {
     /// `dom.extend(1, -1, 1)` adds one cell on each side of axis 1.
     pub fn extend(&self, axis: impl IntoAxis, lo_delta: isize, hi_delta: isize) -> Domain<R> {
         let axis = axis.into_axis();
-        assert!(axis < R, "extend: axis {} out of range for rank {}", axis, R);
+        assert!(
+            axis < R,
+            "extend: axis {} out of range for rank {}",
+            axis,
+            R
+        );
         Domain::new(std::array::from_fn(|a| {
             if a == axis {
                 Space {
@@ -359,12 +419,18 @@ impl<const R: usize> Domain<R> {
     }
 
     /// precomputed row-major strides.
-    pub fn strides(&self) -> &[usize; R] { &self.strides }
+    pub fn strides(&self) -> &[usize; R] {
+        &self.strides
+    }
 
     /// convert domain-coordinate point to flat index, via the one [`crate::layout::flat_offset`]
     /// value-path formula.
     pub fn flat_index(&self, point: [isize; R]) -> usize {
-        crate::layout::flat_offset(point, std::array::from_fn(|a| self.spaces[a].lo), self.strides)
+        crate::layout::flat_offset(
+            point,
+            std::array::from_fn(|a| self.spaces[a].lo),
+            self.strides,
+        )
     }
 
     /// convert flat index back to domain coordinates via divmod on strides.
@@ -401,7 +467,9 @@ impl<const R: usize> Iterator for DomainIter<R> {
 
     #[inline]
     fn next(&mut self) -> Option<[isize; R]> {
-        if self.done { return None; }
+        if self.done {
+            return None;
+        }
         let result = self.current;
         // advance in row-major order (last axis fastest)
         let mut carry = true;
@@ -415,12 +483,16 @@ impl<const R: usize> Iterator for DomainIter<R> {
                 }
             }
         }
-        if carry { self.done = true; }
+        if carry {
+            self.done = true;
+        }
         Some(result)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.done { return (0, Some(0)); }
+        if self.done {
+            return (0, Some(0));
+        }
         let mut remaining = 1usize;
         for ax in 0..R {
             remaining *= (self.hi[ax] - self.lo[ax]) as usize;
@@ -435,14 +507,21 @@ impl<const R: usize> Domain<R> {
         let lo = std::array::from_fn(|ax| self.spaces[ax].lo);
         let hi = std::array::from_fn(|ax| self.spaces[ax].hi);
         let done = self.volume() == 0;
-        DomainIter { lo, hi, current: lo, done }
+        DomainIter {
+            lo,
+            hi,
+            current: lo,
+            done,
+        }
     }
 }
 
 impl<const R: usize> IntoIterator for &Domain<R> {
     type Item = [isize; R];
     type IntoIter = DomainIter<R>;
-    fn into_iter(self) -> DomainIter<R> { self.iter() }
+    fn into_iter(self) -> DomainIter<R> {
+        self.iter()
+    }
 }
 
 pub fn domain<const R: usize>(spaces: [Space; R]) -> Domain<R> {
@@ -461,7 +540,11 @@ impl IndexName {
     pub fn over(self, args: impl IntoRange) -> Space {
         let (lo, hi) = args.into_range();
         assert!(hi >= lo, "IndexName::over: hi ({}) < lo ({})", hi, lo);
-        Space { name: self.name, lo, hi }
+        Space {
+            name: self.name,
+            lo,
+            hi,
+        }
     }
 }
 
@@ -475,31 +558,45 @@ pub trait IntoRange {
 }
 
 impl IntoRange for usize {
-    fn into_range(self) -> (isize, isize) { (0, self as isize) }
+    fn into_range(self) -> (isize, isize) {
+        (0, self as isize)
+    }
 }
 
 impl IntoRange for isize {
-    fn into_range(self) -> (isize, isize) { (0, self) }
+    fn into_range(self) -> (isize, isize) {
+        (0, self)
+    }
 }
 
 impl IntoRange for (usize, usize) {
-    fn into_range(self) -> (isize, isize) { (self.0 as isize, self.1 as isize) }
+    fn into_range(self) -> (isize, isize) {
+        (self.0 as isize, self.1 as isize)
+    }
 }
 
 impl IntoRange for (isize, isize) {
-    fn into_range(self) -> (isize, isize) { self }
+    fn into_range(self) -> (isize, isize) {
+        self
+    }
 }
 
 impl IntoRange for i32 {
-    fn into_range(self) -> (isize, isize) { (0, self as isize) }
+    fn into_range(self) -> (isize, isize) {
+        (0, self as isize)
+    }
 }
 
 impl IntoRange for u32 {
-    fn into_range(self) -> (isize, isize) { (0, self as isize) }
+    fn into_range(self) -> (isize, isize) {
+        (0, self as isize)
+    }
 }
 
 impl IntoRange for (i32, i32) {
-    fn into_range(self) -> (isize, isize) { (self.0 as isize, self.1 as isize) }
+    fn into_range(self) -> (isize, isize) {
+        (self.0 as isize, self.1 as isize)
+    }
 }
 
 /// decompose index arrays into named components.
@@ -511,17 +608,23 @@ pub trait Split {
 
 impl Split for [isize; 1] {
     type Output = isize;
-    fn split(self) -> isize { self[0] }
+    fn split(self) -> isize {
+        self[0]
+    }
 }
 
 impl Split for [isize; 2] {
     type Output = (isize, isize);
-    fn split(self) -> (isize, isize) { (self[0], self[1]) }
+    fn split(self) -> (isize, isize) {
+        (self[0], self[1])
+    }
 }
 
 impl Split for [isize; 3] {
     type Output = (isize, isize, isize);
-    fn split(self) -> (isize, isize, isize) { (self[0], self[1], self[2]) }
+    fn split(self) -> (isize, isize, isize) {
+        (self[0], self[1], self[2])
+    }
 }
 
 #[cfg(test)]
@@ -635,20 +738,23 @@ mod tests {
         // shape [3, 4], strides [1, 3]: flat = i*1 + j*3.
         let d = domain([index("i").over(3), index("j").over(4)]);
         assert_eq!(d.flat_index([0, 0]), 0);
-        assert_eq!(d.flat_index([1, 0]), 1);  // step in axis 0 → +1 (fastest)
-        assert_eq!(d.flat_index([0, 1]), 3);  // step in axis 1 → +3
+        assert_eq!(d.flat_index([1, 0]), 1); // step in axis 0 → +1 (fastest)
+        assert_eq!(d.flat_index([0, 1]), 3); // step in axis 1 → +3
         assert_eq!(d.flat_index([2, 3]), 11);
     }
 
     #[test]
     fn test_flat_index_with_offset() {
-        let d = domain([index("i").over((-2_isize, 3_isize)), index("j").over((5_isize, 9_isize))]);
+        let d = domain([
+            index("i").over((-2_isize, 3_isize)),
+            index("j").over((5_isize, 9_isize)),
+        ]);
         // shape [5, 4], strides [1, 5]
         assert_eq!(d.strides(), &[1, 5]);
         assert_eq!(d.flat_index([-2, 5]), 0);
-        assert_eq!(d.flat_index([-1, 5]), 1);  // step axis 0
-        assert_eq!(d.flat_index([-2, 6]), 5);  // step axis 1
-        assert_eq!(d.flat_index([2, 8]), 19);  // (2-(-2))*1 + (8-5)*5 = 4 + 15
+        assert_eq!(d.flat_index([-1, 5]), 1); // step axis 0
+        assert_eq!(d.flat_index([-2, 6]), 5); // step axis 1
+        assert_eq!(d.flat_index([2, 8]), 19); // (2-(-2))*1 + (8-5)*5 = 4 + 15
     }
 
     #[test]
@@ -663,20 +769,23 @@ mod tests {
     fn test_unflatten_2d() {
         // shape [3, 4], strides [1, 3]: flat = i + j*3.
         let d = domain([index("i").over(3), index("j").over(4)]);
-        assert_eq!(d.unflatten(0),  [0, 0]);
-        assert_eq!(d.unflatten(1),  [1, 0]);  // step axis 0
-        assert_eq!(d.unflatten(3),  [0, 1]);  // step axis 1
+        assert_eq!(d.unflatten(0), [0, 0]);
+        assert_eq!(d.unflatten(1), [1, 0]); // step axis 0
+        assert_eq!(d.unflatten(3), [0, 1]); // step axis 1
         assert_eq!(d.unflatten(11), [2, 3]);
     }
 
     #[test]
     fn test_unflatten_with_offset() {
         // shape [5, 4], strides [1, 5]: flat = (i+2) + (j-5)*5.
-        let d = domain([index("i").over((-2_isize, 3_isize)), index("j").over((5_isize, 9_isize))]);
-        assert_eq!(d.unflatten(0),  [-2, 5]);
-        assert_eq!(d.unflatten(1),  [-1, 5]);
-        assert_eq!(d.unflatten(5),  [-2, 6]);
-        assert_eq!(d.unflatten(19), [ 2, 8]);
+        let d = domain([
+            index("i").over((-2_isize, 3_isize)),
+            index("j").over((5_isize, 9_isize)),
+        ]);
+        assert_eq!(d.unflatten(0), [-2, 5]);
+        assert_eq!(d.unflatten(1), [-1, 5]);
+        assert_eq!(d.unflatten(5), [-2, 6]);
+        assert_eq!(d.unflatten(19), [2, 8]);
     }
 
     #[test]
@@ -684,7 +793,12 @@ mod tests {
         let d = domain([index("i").over(3), index("j").over(4), index("k").over(5)]);
         for flat in 0..d.volume() {
             let point: [isize; 3] = d.unflatten(flat);
-            assert_eq!(d.flat_index(point), flat, "roundtrip failed for flat={}", flat);
+            assert_eq!(
+                d.flat_index(point),
+                flat,
+                "roundtrip failed for flat={}",
+                flat
+            );
         }
     }
 
@@ -709,7 +823,11 @@ mod tests {
 
     #[test]
     fn test_slab_3d_axis_2() {
-        let d = domain([index("i").over(10), index("j").over(10), index("k").over(10)]);
+        let d = domain([
+            index("i").over(10),
+            index("j").over(10),
+            index("k").over(10),
+        ]);
         let s = d.slab(2, (0, 2));
         assert_eq!(s.spaces[0].lo, 0);
         assert_eq!(s.spaces[0].hi, 10);
@@ -820,7 +938,11 @@ mod tests {
     #[test]
     fn test_ct_face_domain() {
         // face domain: one extra cell in normal direction
-        let interior = domain([index("i").over(64), index("j").over(64), index("k").over(64)]);
+        let interior = domain([
+            index("i").over(64),
+            index("j").over(64),
+            index("k").over(64),
+        ]);
         let x_face = interior.extend(0, 0, 1);
         assert_eq!(x_face.shape(), [65, 64, 64]);
         let y_face = interior.extend(1, 0, 1);
@@ -830,7 +952,11 @@ mod tests {
     #[test]
     fn test_ct_edge_domain() {
         // edge domain: extra in both transverse directions
-        let interior = domain([index("i").over(64), index("j").over(64), index("k").over(64)]);
+        let interior = domain([
+            index("i").over(64),
+            index("j").over(64),
+            index("k").over(64),
+        ]);
         // E_x at x-edges: extra in y AND z
         let x_edge = interior.extend(1, 0, 1).extend(2, 0, 1);
         assert_eq!(x_edge.shape(), [64, 65, 65]);
@@ -842,7 +968,11 @@ mod tests {
     #[test]
     fn test_ct_mhd_flux_domain() {
         // MHD flux domain: face + transverse ghost expansion
-        let interior = domain([index("i").over(64), index("j").over(64), index("k").over(64)]);
+        let interior = domain([
+            index("i").over(64),
+            index("j").over(64),
+            index("k").over(64),
+        ]);
         // flux[0] (x-face): +1 in x, +1 ghost on each side of y and z
         let x_flux = interior.extend(0, 0, 1).expand(1, 1).expand(2, 1);
         assert_eq!(x_flux.shape(), [65, 66, 66]);
@@ -1009,7 +1139,11 @@ mod laws {
             Domain::new(std::array::from_fn(|a| {
                 let lo = self.in_range(-4, 4);
                 let size = self.in_range(1, 5);
-                Space { name: names[a], lo, hi: lo + size }
+                Space {
+                    name: names[a],
+                    lo,
+                    hi: lo + size,
+                }
             }))
         }
         fn point_near<const R: usize>(&mut self) -> [isize; R] {
@@ -1041,7 +1175,10 @@ mod laws {
             } else {
                 // disjoint boxes do not overlap — and `overlaps` agrees with the
                 // set predicate exactly.
-                assert!((&cells(&a) & &cells(&b)).is_empty(), "overlaps() lied: sets DO meet");
+                assert!(
+                    (&cells(&a) & &cells(&b)).is_empty(),
+                    "overlaps() lied: sets DO meet"
+                );
             }
         }
     }
@@ -1100,7 +1237,11 @@ mod laws {
 
             // RECONSTRUCTION: (A \ B) ⊎ (A ∩ B) == A.
             let inter = &cells(&a) & &cells(&b);
-            assert_eq!(&union | &inter, cells(&a), "A\\B and A∩B do not reconstruct A");
+            assert_eq!(
+                &union | &inter,
+                cells(&a),
+                "A\\B and A∩B do not reconstruct A"
+            );
         }
     }
 
@@ -1115,7 +1256,11 @@ mod laws {
             let parts = a.guillotine_difference(&b);
 
             // at most 2*R boxes (the minimality claim).
-            assert!(parts.len() <= 2 * 3, "guillotine produced {} > 2R boxes", parts.len());
+            assert!(
+                parts.len() <= 2 * 3,
+                "guillotine produced {} > 2R boxes",
+                parts.len()
+            );
 
             // pairwise disjoint.
             for ii in 0..parts.len() {
@@ -1125,7 +1270,11 @@ mod laws {
             }
             let union: HashSet<[isize; 3]> = parts.iter().flat_map(|d| d.iter()).collect();
             let vol_sum: usize = parts.iter().map(|d| d.volume()).sum();
-            assert_eq!(union.len(), vol_sum, "guillotine parts not disjoint by volume");
+            assert_eq!(
+                union.len(),
+                vol_sum,
+                "guillotine parts not disjoint by volume"
+            );
 
             // SAME cell set as the maximal `difference` (both are A \ B).
             let expected: HashSet<[isize; 3]> = &cells(&a) - &cells(&b);
@@ -1145,7 +1294,11 @@ mod laws {
             for ax in 0..2 {
                 for n in 1..=3isize {
                     let round = d.expand(ax, n).contract_axis(ax, n);
-                    assert_eq!(cells(&round), cells(&d), "expand∘contract != id (axis {ax}, n {n})");
+                    assert_eq!(
+                        cells(&round),
+                        cells(&d),
+                        "expand∘contract != id (axis {ax}, n {n})"
+                    );
                 }
             }
         }
@@ -1159,7 +1312,11 @@ mod laws {
             let d = rng.box_r(N3);
             let set = cells(&d);
             let p = rng.point_near::<3>();
-            assert_eq!(d.contains(p), set.contains(&p), "contains != membership at {p:?}");
+            assert_eq!(
+                d.contains(p),
+                set.contains(&p),
+                "contains != membership at {p:?}"
+            );
         }
     }
 
@@ -1202,6 +1359,10 @@ mod laws {
         );
         // but it is still a bijection onto [0, volume): every offset visited once.
         let seen: HashSet<usize> = order.iter().copied().collect();
-        assert_eq!(seen.len(), d.volume(), "iter() must still visit every cell exactly once");
+        assert_eq!(
+            seen.len(),
+            d.volume(),
+            "iter() must still visit every cell exactly once"
+        );
     }
 }

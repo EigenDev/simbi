@@ -17,7 +17,7 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -47,7 +47,11 @@ fn ic(x: f64, y: f64) -> MhdPrim<f64, 3> {
     let r2 = (x - 0.75).powi(2) + (y - 0.5).powi(2);
     let dip = 0.9 * (-(r2 / 0.01)).exp();
     MhdPrim {
-        hydro: Prim { rho: 1.0 - dip, vel: Tensor::new([V_INF, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0 - dip,
+            vel: Tensor::new([V_INF, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new(B0),
     }
 }
@@ -65,13 +69,28 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .set_initial(|[x, y]| ic(x, y))
         .seed_faces_uniform([B0[0], B0[1]])
         .build()
-        .with_bodies(BodyCollection::new().add(
-            // a sealed shaped wall on the x = 0.5 cut; moderate k_eta so the c_a2-dependent
-            // relaxation rate (not a saturated stiff limit) drives the near-wall momentum.
-            Body::rigid_sphere(0, Tensor::new([0.5, 0.5]), Tensor::zeros(), 1.0, R_BODY, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 20.0, k_eta_t: 20.0 }),
-        ));
-    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
+        .with_bodies(
+            BodyCollection::new().add(
+                // a sealed shaped wall on the x = 0.5 cut; moderate k_eta so the c_a2-dependent
+                // relaxation rate (not a saturated stiff limit) drives the near-wall momentum.
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.5, 0.5]),
+                    Tensor::zeros(),
+                    1.0,
+                    R_BODY,
+                    1.0,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 20.0,
+                    k_eta_t: 20.0,
+                }),
+            ),
+        );
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
     let k = Kern::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
     (sim, k)
 }
@@ -87,8 +106,16 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd)
@@ -105,12 +132,24 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
         kernels.push(&*k);
     }
     evolve_decomposed(
-        &mut stores, &kernels, counts, &devices, Timestepping::Rk2, 0.0, T_FINAL, u64::MAX, &LocalCopy,
+        &mut stores,
+        &kernels,
+        counts,
+        &devices,
+        Timestepping::Rk2,
+        0.0,
+        T_FINAL,
+        u64::MAX,
+        &LocalCopy,
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
 }
 
-fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [isize; 2]) -> f64) -> Vec<f64> {
+fn global_field(
+    tiles: &[(Sim, Kern)],
+    counts: [usize; 2],
+    pick: impl Fn(&Sim, [isize; 2]) -> f64,
+) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let mut out = vec![f64::NAN; N * N];
     for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
@@ -125,7 +164,10 @@ fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_decomposed_matches(counts: [usize; 2]) {
@@ -147,9 +189,15 @@ fn assert_decomposed_matches(counts: [usize; 2]) {
     ] {
         let mv = global_field(&mono, [1, 1], &pick);
         let dv = global_field(&dec, counts, &pick);
-        assert!(mv.iter().all(|v| v.is_finite()) && dv.iter().all(|v| v.is_finite()), "unwritten cells");
+        assert!(
+            mv.iter().all(|v| v.is_finite()) && dv.iter().all(|v| v.is_finite()),
+            "unwritten cells"
+        );
         let e = max_err(&mv, &dv);
-        assert!(e < 1e-11, "{counts:?} {name} decomposed!=mono under mhd wall (c_a2 divergence): err {e:e}");
+        assert!(
+            e < 1e-11,
+            "{counts:?} {name} decomposed!=mono under mhd wall (c_a2 divergence): err {e:e}"
+        );
     }
 }
 

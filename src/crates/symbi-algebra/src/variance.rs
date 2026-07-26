@@ -21,10 +21,12 @@
 
 use std::fmt;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
+use std::ops::{
+    Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign,
+};
 
-use crate::algebra::Numeric as Scalar;
 use crate::Tensor;
+use crate::algebra::Numeric as Scalar;
 
 // ============================================================
 // variance markers
@@ -84,7 +86,10 @@ pub type Embedded<S, const D: usize> = Indexed<Cart, S, D>;
 
 impl<V, S: Copy, const D: usize> Indexed<V, S, D> {
     pub fn new(data: Tensor<S, D>) -> Self {
-        Self { data, _variance: PhantomData }
+        Self {
+            data,
+            _variance: PhantomData,
+        }
     }
 
     pub fn from_array(data: [S; D]) -> Self {
@@ -234,10 +239,7 @@ impl<S: Scalar, const D: usize> Physical<S, D> {
 }
 
 /// free function: contract v^i w_i.
-pub fn contract<S: Scalar, const D: usize>(
-    v: &Contravariant<S, D>,
-    w: &Covariant<S, D>,
-) -> S {
+pub fn contract<S: Scalar, const D: usize>(v: &Contravariant<S, D>, w: &Covariant<S, D>) -> S {
     v.contract(w)
 }
 

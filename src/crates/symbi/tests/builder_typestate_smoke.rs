@@ -27,7 +27,11 @@ fn hydro_builder_reaches_ready_and_builds() {
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
         .allocate()
         .expect("valid grid config allocates")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
 
     assert_eq!(sim.geom.interior.volume(), 16 * 16);
@@ -49,7 +53,11 @@ fn mhd_builder_requires_faces_then_builds() {
         .allocate()
         .expect("valid grid config allocates")
         .set_initial(|_x| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.1, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.2, 0.2, 0.0]),
         })
         .seed_faces_uniform([0.2, 0.2])
@@ -59,12 +67,17 @@ fn mhd_builder_requires_faces_then_builds() {
     // the staggered faces are seeded -> the CT guard would pass (bface_initialized set).
     let mhd = sim.fields.mhd.as_ref().expect("rmhd allocates mhd fields");
     assert!(
-        mhd.bface_initialized.load(std::sync::atomic::Ordering::Relaxed),
+        mhd.bface_initialized
+            .load(std::sync::atomic::Ordering::Relaxed),
         "seed_faces must arm bface_initialized for the CT ground truth"
     );
     for c in sim.geom.interior.iter() {
         let p = sim.prim_at(c);
-        assert!(p.rho.is_finite() && p.rho > 0.0, "cell {c:?}: rho={}", p.rho);
+        assert!(
+            p.rho.is_finite() && p.rho > 0.0,
+            "cell {c:?}: rho={}",
+            p.rho
+        );
     }
 }
 

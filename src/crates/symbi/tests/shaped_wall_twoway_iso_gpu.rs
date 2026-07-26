@@ -19,13 +19,13 @@ use symbi::regimes::substrate_kernels::dispatch_penalize;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::energy::IsoModel;
+use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_ib::sdf::SdfExpr;
-use symbi_ib::{apply_body_deltas, Body, BodyCollection, SurfaceSpec};
+use symbi_ib::{Body, BodyCollection, SurfaceSpec, apply_body_deltas};
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 
@@ -49,14 +49,24 @@ fn build_twoway<S: ExecutionSpace, Mem: MemorySpace>() -> TwSim<S, Mem> {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, INERTIA, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-                .with_spin(OMEGA0)
-                .with_two_way_coupling(true),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, INERTIA, true)
+                    .with_surface(SurfaceSpec::Porous {
+                        porosity: 0.0,
+                        k_eta_n: 50.0,
+                        k_eta_t: 50.0,
+                    })
+                    .with_spin(OMEGA0)
+                    .with_two_way_coupling(true),
+            ),
+        );
     // an asymmetric shape so the omega x r drag produces a real reaction torque.
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.1, 1.0]));
@@ -68,7 +78,10 @@ fn build_twoway<S: ExecutionSpace, Mem: MemorySpace>() -> TwSim<S, Mem> {
 // device block-order folds (allowed by the deterministic-fold contract).
 fn close(a: f64, b: f64, scale: f64, tag: &str) {
     let diff = (a - b).abs();
-    assert!(diff < 1e-9 * scale + 1e-11, "{tag}: host {a} != device {b} (abs diff {diff:e}, scale {scale:e})");
+    assert!(
+        diff < 1e-9 * scale + 1e-11,
+        "{tag}: host {a} != device {b} (abs diff {diff:e}, scale {scale:e})"
+    );
 }
 
 #[test]
@@ -82,7 +95,9 @@ fn two_way_spin_torque_matches_cpu_on_device() {
 
     // the penalized cons fields agree cell-by-cell.
     let mut gap = 0.0_f64;
-    let cmp = |hf: &symbi_grid::Field<f64, 2, HostMemory>, df: &symbi_grid::Field<f64, 2, UnifiedMemory>, gap: &mut f64| {
+    let cmp = |hf: &symbi_grid::Field<f64, 2, HostMemory>,
+               df: &symbi_grid::Field<f64, 2, UnifiedMemory>,
+               gap: &mut f64| {
         for c in h.geom.interior.iter() {
             let (a, b) = (*hf.view().at(c), *df.view().at(c));
             assert!(b.is_finite(), "non-finite device cons at {c:?}");
@@ -93,14 +108,22 @@ fn two_way_spin_torque_matches_cpu_on_device() {
     for k in 0..2 {
         cmp(&h.fields.cons.mom[k], &d.fields.cons.mom[k], &mut gap);
     }
-    assert!(gap < 1e-9, "two-way spinner cons host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-9,
+        "two-way spinner cons host!=device: rel gap {gap:e}"
+    );
 
     // the reaction-torque diagnostic (the spinning kernel's z-moment) agrees, then the
     // host-side apply_body_deltas integrates the SAME torque to the SAME omega on both.
     let dh = h.immersed.as_ref().unwrap().diagnostics.consolidate();
     let dd = d.immersed.as_ref().unwrap().diagnostics.consolidate();
     let scale = dh[0].torque_delta[2].abs().max(1e-12);
-    close(dh[0].torque_delta[2], dd[0].torque_delta[2], scale, "two-way torque_z");
+    close(
+        dh[0].torque_delta[2],
+        dd[0].torque_delta[2],
+        scale,
+        "two-way torque_z",
+    );
     apply_body_deltas(&mut h.immersed.as_mut().unwrap().bodies, &dh, dt);
     apply_body_deltas(&mut d.immersed.as_mut().unwrap().bodies, &dd, dt);
     let (ho, dvo) = (
@@ -109,7 +132,10 @@ fn two_way_spin_torque_matches_cpu_on_device() {
     );
     close(ho, dvo, OMEGA0, "two-way omega_z");
     // the physics still holds through the device path: drag decelerates, one step does not reverse.
-    assert!(dvo < OMEGA0 && dvo > 0.0, "device two-way spinner not dragged toward rest: {OMEGA0} -> {dvo}");
+    assert!(
+        dvo < OMEGA0 && dvo > 0.0,
+        "device two-way spinner not dragged toward rest: {OMEGA0} -> {dvo}"
+    );
 }
 
 // ----- iso shaped wall ----------------------------------------------------------
@@ -130,12 +156,28 @@ fn build_iso<S: ExecutionSpace, Mem: MemorySpace>() -> IsoSim<S, Mem> {
             pre: Default::default(),
         })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.2, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
-        ));
-    sim.immersed.as_mut().unwrap().shapes[0] =
-        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.15, 0.15, 1.0]));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.1, -0.05]),
+                    Tensor::zeros(),
+                    1.0,
+                    0.2,
+                    1.0,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 50.0,
+                    k_eta_t: 50.0,
+                }),
+            ),
+        );
+    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::cuboid(
+        [0.0, 0.0, 0.0],
+        [0.15, 0.15, 1.0],
+    ));
     sim
 }
 
@@ -149,7 +191,9 @@ fn iso_shaped_wall_matches_cpu_on_device() {
 
     // the iso kernel drops the nrg channel: compare den + mom only.
     let mut gap = 0.0_f64;
-    let cmp = |hf: &symbi_grid::Field<f64, 2, HostMemory>, df: &symbi_grid::Field<f64, 2, UnifiedMemory>, gap: &mut f64| {
+    let cmp = |hf: &symbi_grid::Field<f64, 2, HostMemory>,
+               df: &symbi_grid::Field<f64, 2, UnifiedMemory>,
+               gap: &mut f64| {
         for c in h.geom.interior.iter() {
             let (a, b) = (*hf.view().at(c), *df.view().at(c));
             assert!(b.is_finite(), "non-finite device iso cons at {c:?}");
@@ -160,7 +204,10 @@ fn iso_shaped_wall_matches_cpu_on_device() {
     for k in 0..2 {
         cmp(&h.fields.cons.mom[k], &d.fields.cons.mom[k], &mut gap);
     }
-    assert!(gap < 1e-9, "iso shaped-wall cons host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-9,
+        "iso shaped-wall cons host!=device: rel gap {gap:e}"
+    );
 
     let hf = h.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let df = d.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;

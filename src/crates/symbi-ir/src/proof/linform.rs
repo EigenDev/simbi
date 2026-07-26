@@ -27,7 +27,9 @@ pub struct LinFormR {
 
 impl LinFormR {
     pub(crate) fn empty() -> Self {
-        LinFormR { terms: BTreeMap::new() }
+        LinFormR {
+            terms: BTreeMap::new(),
+        }
     }
 
     pub(crate) fn insert(&mut self, term: FieldTerm, coeff: RatFun) {
@@ -92,7 +94,8 @@ impl LinFormR {
         let mut out = LinFormR::empty();
         for ((key, off), coeff) in &self.terms {
             let new_off: Vec<i32> = off.iter().zip(delta).map(|(a, b)| a + b).collect();
-            out.terms.insert((key.clone(), new_off), coeff.shift_coords(&dl));
+            out.terms
+                .insert((key.clone(), new_off), coeff.shift_coords(&dl));
         }
         out
     }
@@ -102,7 +105,10 @@ impl LinFormR {
     /// per-dir generic SCALAR widths do not appear in the curvilinear coefficients
     /// (the geometry is built from the absolute axis scalars x_lo_N/dx_N, NOT
     /// per-dir id_pN), so only the field keys are renamed here.
-    pub fn canonicalize_keys(&self, rename: &std::collections::HashMap<String, String>) -> LinFormR {
+    pub fn canonicalize_keys(
+        &self,
+        rename: &std::collections::HashMap<String, String>,
+    ) -> LinFormR {
         let mut out = LinFormR::empty();
         for ((key, off), coeff) in &self.terms {
             let new_key = rename.get(key).cloned().unwrap_or_else(|| key.clone());
@@ -147,7 +153,9 @@ pub struct LinForm {
 
 impl LinForm {
     pub(crate) fn empty() -> Self {
-        LinForm { terms: BTreeMap::new() }
+        LinForm {
+            terms: BTreeMap::new(),
+        }
     }
 
     pub(crate) fn from_term(term: FieldTerm, coeff: Poly) -> Self {
@@ -182,7 +190,10 @@ impl LinForm {
         for ((key, off), poly) in &self.terms {
             let new_key = rename.get(key).cloned().unwrap_or_else(|| key.clone());
             let new_poly = poly.rename_vars(rename);
-            let e = out.terms.entry((new_key, off.clone())).or_insert_with(Poly::zero);
+            let e = out
+                .terms
+                .entry((new_key, off.clone()))
+                .or_insert_with(Poly::zero);
             e.add_assign(&new_poly);
             if e.is_zero() {
                 // leave for the final retain below.

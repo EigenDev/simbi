@@ -5,8 +5,11 @@
 // =============================================================================
 
 use super::*;
+use symbi_geometry::{
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
+};
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -26,19 +29,34 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
 
     // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-    let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom_arr), nrg };
+    let cons = Cons::<Gv, D> {
+        den,
+        mom: Tensor::new(mom_arr),
+        nrg,
+    };
     let prim: Prim<Gv, D> = cons.to_primitive(&IdealGas { gamma });
 
     // decompose the recovered primitive into field writes.
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..D {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
 
     (end_trace(), writes)
 }
-
 
 /// trace the REAL isothermal c2p — symbi-hydro's `IsoNewtonian::to_primitive` (the pure
 /// `rho = den`, `vel = mom / rho` kinematics) plus the `Isothermal::pressure` closure
@@ -67,18 +85,33 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
     // cs^2 from the nrg slot: rho = den, vel = mom/rho, p = recover_pressure = cs2 * rho.
     // the cs2 is the separate prescribed field, fed through the compute struct's nrg slot.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-    let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom_arr), nrg: cs2 };
+    let cons = Cons::<Gv, D> {
+        den,
+        mom: Tensor::new(mom_arr),
+        nrg: cs2,
+    };
     let prim = cons.to_primitive(&Isothermal { cs: Gv::ONE }); // cs unused: recover reads nrg
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..D {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
 
     (end_trace(), writes)
 }
-
 
 /// the isothermal eos law `p = cs^2(x) * rho` as a standalone pointwise kernel, from the
 /// PRIMITIVE density. c2p derives the substrate pressure from the conserved state over
@@ -98,7 +131,6 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     )
 }
 
-
 /// trace the REAL RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
 /// relativistic cons->prim: a carrier-generic Newton on the pressure root, then the
 /// algebraic velocity/Lorentz/density recovery) at `S = Gv`. the Newton lowers to one
@@ -110,7 +142,9 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// `eos.pressure`/`sound_speed_sq`/explicit `h`.
 /// the host wrapper's input guard + post-hoc diagnostics are host-only — the kernel
 /// computes the raw recovery, exactly as the substrate already does.
-pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_c2p_gv<const D: usize>(
+    max_iters: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding: the conserved fields + the eos scalar, as Gv leaves.
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -122,20 +156,40 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, F
 
     // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
-    let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom_arr), nrg };
+    let cons = Cons::<Gv, D> {
+        den,
+        mom: Tensor::new(mom_arr),
+        nrg,
+    };
     // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
     // traced/compiled kernel is bit-identical). the GR metric threads in here.
-    let prim = rhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
+    let prim = rhd_recover(
+        &IdealGas { gamma },
+        &cons,
+        &SpatialMetric::flat(),
+        max_iters,
+    );
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..D {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
 
     (end_trace(), writes)
 }
-
 
 /// the RHD cons->prim on a curved spacetime — the `_schw`/`_ks` GR path. it undensitizes the
 /// evolved state by the known measure `sqrt(-g)(x)` and then runs the recovery contracted with the
@@ -164,7 +218,8 @@ where
 {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
-    let mom: [Gv; D] = std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
+    let mom: [Gv; D] =
+        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
     let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
     let gamma = Gv::scalar("gamma");
 
@@ -192,37 +247,90 @@ where
     let (gm, gm_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::Kerr, Coords::Cartesian) => {
-            let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            let m = KerrKSCartesian {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::Kerr, Coords::Cylindrical) => {
-            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            let m = KerrKSCylindrical {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} — only the azimuthal-momentum (swirl,
             // D = 3) instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
-            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            let m = KerrKS {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
-        (Spacetime::Minkowski, _) => unreachable!("the GR c2p is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GR c2p is baked only for a curved spacetime")
+        }
     };
     let metric = SpatialMetric::<Gv, D>::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
@@ -231,17 +339,32 @@ where
     let nrg = nrg * inv_dens;
     let mom_t = Tensor::new(mom).scale(inv_dens);
     let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
-    let cons = Cons::<Gv, D> { den, mom: mom_t, nrg: tau };
+    let cons = Cons::<Gv, D> {
+        den,
+        mom: mom_t,
+        nrg: tau,
+    };
     let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..D {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
     (end_trace(), writes)
 }
-
 
 /// trace the REAL RMHD c2p — symbi-hydro's branch-free `rmhd_recover` (the KKC
 /// false-position: a 6-state bracketed iterate over `kkc_fmu44` + `find_mu_plus`,
@@ -266,20 +389,40 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
 
     // the SINGLE-SOURCE physics at the tracing carrier (3-component RMHD state).
     let cons = MhdCons::<Gv, 3> {
-        hydro: Cons { den, mom: Tensor::new(mom), nrg },
+        hydro: Cons {
+            den,
+            mom: Tensor::new(mom),
+            nrg,
+        },
         mag: Tensor::new(mag),
     };
-    let prim = rmhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
+    let prim = rmhd_recover(
+        &IdealGas { gamma },
+        &cons,
+        &SpatialMetric::flat(),
+        max_iters,
+    );
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
 
     (end_trace(), writes)
 }
-
 
 /// the RMHD cons->prim on a curved SPATIAL metric — the metric-aware KKC recovery
 /// (`|r|^2 = gamma^{ij} r_i r_j`, `B^2 = gamma_ij h^i h^j`, contravariant `v^i` raised) with
@@ -319,19 +462,39 @@ pub fn rmhd_c2p_gr_gv(
     let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
@@ -339,44 +502,85 @@ pub fn rmhd_c2p_gr_gv(
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-            let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            let m = KerrKSCartesian {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
-(Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::Kerr, Coords::Cylindrical) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            let m = KerrKSCylindrical {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+            let m = KerrKS {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+            )
         }
-        (Spacetime::Minkowski, _) => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GRMHD c2p is baked only for a curved spacetime")
+        }
     };
     let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
     let mom_t = Tensor::new(mom);
     let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
     let cons = MhdCons::<Gv, 3> {
-        hydro: Cons { den, mom: mom_t, nrg: tau },
+        hydro: Cons {
+            den,
+            mom: mom_t,
+            nrg: tau,
+        },
         mag: Tensor::new(mag),
     };
     let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
 
     (end_trace(), writes)
 }
-
 
 // =============================================================================
 // newtonian MHD — the non-relativistic ideal-MHD regime. ALGEBRAIC c2p (no
@@ -403,20 +607,35 @@ pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     let gamma = Gv::scalar("gamma");
 
     let cons = MhdCons::<Gv, 3> {
-        hydro: Cons { den, mom: Tensor::new(mom), nrg },
+        hydro: Cons {
+            den,
+            mom: Tensor::new(mom),
+            nrg,
+        },
         mag: Tensor::new(mag),
     };
     let prim = nmhd_recover(&IdealGas { gamma }, &cons);
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
-    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+    writes.push((
+        "prim_pre".to_string(),
+        FieldRef::PrimPre.into(),
+        prim.pre.node(),
+    ));
 
     (end_trace(), writes)
 }
-
 
 // =============================================================================
 // ISOTHERMAL MHD gv builders — the same shapes as the NMHD ones, but over the
@@ -437,15 +656,27 @@ pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
         std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
 
     let cons = IsoMhdCons::<Gv, 3> {
-        hydro: ConsG { den, mom: Tensor::new(mom), nrg: Zero::default() },
+        hydro: ConsG {
+            den,
+            mom: Tensor::new(mom),
+            nrg: Zero::default(),
+        },
         mag: Tensor::new(mag),
     };
     // imhd_recover ignores the EOS (pure kinematics); Gv::ZERO -> no `cs` param.
     let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
 
-    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        prim.rho.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+        writes.push((
+            format!("prim_vel_{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            prim.vel[k].node(),
+        ));
     }
     // no prim.pre — the isothermal closure has no independent pressure.
     (end_trace(), writes)

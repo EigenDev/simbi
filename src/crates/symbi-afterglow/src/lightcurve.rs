@@ -61,7 +61,11 @@ pub fn light_curve(
 
     // on-axis observer (|cos theta_obs| == 1) is axisymmetric: one phi cell spanning 2 pi.
     let at_pole = cond.theta_obs.cos().abs() == 1.0;
-    let (nk, x3) = if at_pole { (1usize, None) } else { (mesh.x3.map_or(1, |a| a.len()), mesh.x3) };
+    let (nk, x3) = if at_pole {
+        (1usize, None)
+    } else {
+        (mesh.x3.map_or(1, |a| a.len()), mesh.x3)
+    };
     let (x3min, x3max) = match x3 {
         Some(a) if a.len() > 1 => (a[0], a[a.len() - 1]),
         _ => (0.0, 0.0),
@@ -84,8 +88,16 @@ pub fn light_curve(
             let a3 = x3.expect("off-axis run requires an x3 (phi) mesh");
             let dphi = (x3max - x3min) / (a3.len() as f64 - 1.0).max(1.0);
             // half-cell at the phi boundaries, full cell interior.
-            let x3l = if kk > 0 { x3min + (kk as f64 - 0.5) * dphi } else { x3min };
-            let x3r = if kk < nk - 1 { x3l + dphi * if kk == 0 { 0.5 } else { 1.0 } } else { x3max };
+            let x3l = if kk > 0 {
+                x3min + (kk as f64 - 0.5) * dphi
+            } else {
+                x3min
+            };
+            let x3r = if kk < nk - 1 {
+                x3l + dphi * if kk == 0 { 0.5 } else { 1.0 }
+            } else {
+                x3max
+            };
             sin_phi = a3[kk].sin();
             cos_phi = a3[kk].cos();
             dx3 = x3r - x3l;
@@ -95,8 +107,16 @@ pub fn light_curve(
         let kreal = if mesh.data_dim > 2 { kk } else { 0 };
 
         for jj in 0..nj {
-            let x2l = if jj > 0 { x2min + (jj as f64 - 0.5) * dx2 } else { x2min };
-            let x2r = if jj < nj - 1 { x2l + dx2 * if jj == 0 { 0.5 } else { 1.0 } } else { x2max };
+            let x2l = if jj > 0 {
+                x2min + (jj as f64 - 0.5) * dx2
+            } else {
+                x2min
+            };
+            let x2r = if jj < nj - 1 {
+                x2l + dx2 * if jj == 0 { 0.5 } else { 1.0 }
+            } else {
+                x2max
+            };
             let dcos = x2l.cos() - x2r.cos();
 
             // radial unit vector for this (theta, phi).
@@ -122,7 +142,11 @@ pub fn light_curve(
 
                 // log-spaced radial cell edges -> shell volume (cm^3): the code-length edges are
                 // bare f64; multiplying by `length3` (cm^3 per code-length^3) yields a Volume.
-                let x1l = if ii > 0 { x1min * 10.0_f64.powf((ii as f64 - 0.5) * dlogx1) } else { x1min };
+                let x1l = if ii > 0 {
+                    x1min * 10.0_f64.powf((ii as f64 - 0.5) * dlogx1)
+                } else {
+                    x1min
+                };
                 let x1r = if ii < ni - 1 {
                     x1l * 10.0_f64.powf(dlogx1 * if ii == 0 { 0.5 } else { 1.0 })
                 } else {
@@ -158,7 +182,11 @@ pub fn light_curve(
                             // weight by the cell's effective observed lifetime / bin width once a
                             // sequence of snapshots is being integrated (checkpoint_index > 0).
                             let dt_day = (dt / SECONDS_PER_DAY).value();
-                            let trat = if checkpoint_index > 0 { dt_day / (t2 - t1) } else { 1.0 };
+                            let trat = if checkpoint_index > 0 {
+                                dt_day / (t2 - t1)
+                            } else {
+                                1.0
+                            };
                             flux[fidx * (nt - 1) + tidx] += trat * f_nu;
                             break;
                         }
@@ -178,20 +206,21 @@ mod tests {
 
     // a minimal on-axis uniform radial shell fixture: log-spaced radii, gamma*beta=10, ~1 p/cc.
     struct Case {
-        cond:   SimConditions,
+        cond: SimConditions,
         scales: QuantScales,
-        x1:     Vec<f64>,
-        x2:     Vec<f64>,
-        rho:    Vec<f64>,
-        gb:     Vec<f64>,
-        pre:    Vec<f64>,
+        x1: Vec<f64>,
+        x2: Vec<f64>,
+        rho: Vec<f64>,
+        gb: Vec<f64>,
+        pre: Vec<f64>,
     }
 
     fn uniform_shell() -> Case {
         let ni = 8;
         // log-spaced radii ~1e16..1e17 cm (length scale 1).
-        let x1: Vec<f64> =
-            (0..ni).map(|i| 1.0e16 * 10.0_f64.powf(i as f64 / (ni as f64 - 1.0))).collect();
+        let x1: Vec<f64> = (0..ni)
+            .map(|i| 1.0e16 * 10.0_f64.powf(i as f64 / (ni as f64 - 1.0)))
+            .collect();
         Case {
             cond: SimConditions {
                 dt: 1.0,
@@ -206,18 +235,18 @@ mod tests {
                 nus: vec![Frequency::new(1.0e9), Frequency::new(1.0e15)], // radio + X-ray-ish
             },
             scales: QuantScales {
-                time:     Time::new(1.0),
-                pre:      EnergyDensity::new(1.0),
-                rho:      MassDensity::new(1.0),
+                time: Time::new(1.0),
+                pre: EnergyDensity::new(1.0),
+                rho: MassDensity::new(1.0),
                 velocity: Velocity::new(1.0),
-                length:   Length::new(1.0),
+                length: Length::new(1.0),
             },
             x1,
             // several theta cells (1D radial data broadcasts over them); a single cell would have
             // zero solid angle (dcos = cos(theta) - cos(theta) = 0) and emit nothing.
             x2: vec![0.2, 0.4, 0.6, 0.8],
-            rho: vec![1.0e-24; ni],       // ~1 proton/cc in g/cm^3
-            gb: vec![10.0; ni],           // gamma*beta = 10
+            rho: vec![1.0e-24; ni], // ~1 proton/cc in g/cm^3
+            gb: vec![10.0; ni],     // gamma*beta = 10
             pre: vec![1.0e-6; ni],
         }
     }
@@ -228,14 +257,26 @@ mod tests {
     #[test]
     fn light_curve_produces_finite_positive_flux() {
         let c = uniform_shell();
-        let fields = HydroFields { rho: &c.rho, gamma_beta: &c.gb, pre: &c.pre };
-        let mesh = Mesh { x1: &c.x1, x2: &c.x2, x3: None, data_dim: 1 };
+        let fields = HydroFields {
+            rho: &c.rho,
+            gamma_beta: &c.gb,
+            pre: &c.pre,
+        };
+        let mesh = Mesh {
+            x1: &c.x1,
+            x2: &c.x2,
+            x3: None,
+            data_dim: 1,
+        };
         let tbins: Vec<f64> = (0..=20).map(|i| i as f64 * 2.0).collect();
 
         let flux = light_curve(&c.cond, &c.scales, &fields, &mesh, &tbins, 0);
         assert_eq!(flux.len(), c.cond.nus.len() * (tbins.len() - 1));
         assert!(flux.iter().all(|f| f.is_finite()), "all fluxes finite");
-        assert!(flux.iter().any(|&f| f > 0.0), "some bin received positive flux");
+        assert!(
+            flux.iter().any(|&f| f > 0.0),
+            "some bin received positive flux"
+        );
     }
 
     // for this slow-cooling setup the X-ray band is on a steeper segment than radio, so its
@@ -243,13 +284,25 @@ mod tests {
     #[test]
     fn higher_frequency_is_not_brighter() {
         let c = uniform_shell();
-        let fields = HydroFields { rho: &c.rho, gamma_beta: &c.gb, pre: &c.pre };
-        let mesh = Mesh { x1: &c.x1, x2: &c.x2, x3: None, data_dim: 1 };
+        let fields = HydroFields {
+            rho: &c.rho,
+            gamma_beta: &c.gb,
+            pre: &c.pre,
+        };
+        let mesh = Mesh {
+            x1: &c.x1,
+            x2: &c.x2,
+            x3: None,
+            data_dim: 1,
+        };
         let tbins: Vec<f64> = (0..=20).map(|i| i as f64 * 2.0).collect();
         let flux = light_curve(&c.cond, &c.scales, &fields, &mesh, &tbins, 0);
         let nb = tbins.len() - 1;
         let radio: f64 = (0..nb).map(|t| flux[t]).sum();
         let xray: f64 = (0..nb).map(|t| flux[nb + t]).sum();
-        assert!(radio >= xray, "radio {radio} should be >= x-ray {xray} (slow cooling)");
+        assert!(
+            radio >= xray,
+            "radio {radio} should be >= x-ray {xray} (slow cooling)"
+        );
     }
 }

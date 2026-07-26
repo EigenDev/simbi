@@ -134,7 +134,11 @@ mod tests {
         let v = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7; // specific internal energy
         let nrg = den * (e_int + 0.5 * v.dot(&v));
-        ConsG { den, mom: v.scale(den), nrg }
+        ConsG {
+            den,
+            mom: v.scale(den),
+            nrg,
+        }
     }
 
     // the DESIGN INVARIANT (accretor.md §2.2): uniform scaling leaves the intensive
@@ -147,14 +151,24 @@ mod tests {
         for k in 0..3 {
             let v0 = cons.mom[k] / cons.den;
             let v1 = drained.mom[k] / drained.den;
-            assert!((v0 - v1).abs() < 1e-14, "velocity {k} changed: {v0} -> {v1}");
+            assert!(
+                (v0 - v1).abs() < 1e-14,
+                "velocity {k} changed: {v0} -> {v1}"
+            );
         }
         // specific internal energy e_int = nrg/den - 0.5|v|^2: unchanged.
-        let vsq0 = (0..3).map(|k| (cons.mom[k] / cons.den).powi(2)).sum::<f64>();
-        let vsq1 = (0..3).map(|k| (drained.mom[k] / drained.den).powi(2)).sum::<f64>();
+        let vsq0 = (0..3)
+            .map(|k| (cons.mom[k] / cons.den).powi(2))
+            .sum::<f64>();
+        let vsq1 = (0..3)
+            .map(|k| (drained.mom[k] / drained.den).powi(2))
+            .sum::<f64>();
         let e0 = cons.nrg / cons.den - 0.5 * vsq0;
         let e1 = drained.nrg / drained.den - 0.5 * vsq1;
-        assert!((e0 - e1).abs() < 1e-14, "specific internal energy changed: {e0} -> {e1}");
+        assert!(
+            (e0 - e1).abs() < 1e-14,
+            "specific internal energy changed: {e0} -> {e1}"
+        );
     }
 
     // exact gas+body conservation: the body's gain is exactly what the gas lost.
@@ -185,8 +199,11 @@ mod tests {
         let cons = sample_cons();
         for &dt in &[0.1, 10.0, 1e6, 1e12] {
             let (drained, _) = drain_cell(&cons, 1.0, 1e-3, dt, 1.0, 0);
-            assert!(drained.den >= 0.0 && drained.den.is_finite(),
-                "density non-physical at dt={dt}: {}", drained.den);
+            assert!(
+                drained.den >= 0.0 && drained.den.is_finite(),
+                "density non-physical at dt={dt}: {}",
+                drained.den
+            );
             assert!(drained.den <= cons.den, "drain must not increase density");
         }
     }
@@ -212,16 +229,28 @@ mod tests {
         let mom_sq = v.scale(rho).dot(&v.scale(rho));
         let cs = sound_speed_from_cons(rho, mom_sq, nrg, gamma);
         let cs_analytic = (gamma * p / rho).sqrt();
-        assert!((cs - cs_analytic).abs() < 1e-13, "c_s {cs} != analytic {cs_analytic}");
+        assert!(
+            (cs - cs_analytic).abs() < 1e-13,
+            "c_s {cs} != analytic {cs_analytic}"
+        );
     }
 
     // the mask limits: fully inside -> 1, fully outside -> 0, on the surface -> 1/2.
     #[test]
     fn mask_ramps_from_one_to_zero() {
         let (r_mask, w) = (6.0f64, 1.0f64);
-        assert!(drain_mask(0.0, r_mask, w) > 1.0 - 1e-4, "deep interior should be ~1");
-        assert!(drain_mask(20.0, r_mask, w) < 1e-4, "far exterior should be ~0");
-        assert!((drain_mask(r_mask, r_mask, w) - 0.5).abs() < 1e-14, "surface should be 1/2");
+        assert!(
+            drain_mask(0.0, r_mask, w) > 1.0 - 1e-4,
+            "deep interior should be ~1"
+        );
+        assert!(
+            drain_mask(20.0, r_mask, w) < 1e-4,
+            "far exterior should be ~0"
+        );
+        assert!(
+            (drain_mask(r_mask, r_mask, w) - 0.5).abs() < 1e-14,
+            "surface should be 1/2"
+        );
     }
 
     // the EMERGENT-RATE mechanics the post-godunov pass performs: reduce the per-cell
@@ -242,28 +271,44 @@ mod tests {
                 let dist = 2.0 * i as f64;
                 let rho = scale * (1.0 + 1.0 / (1.0 + dist));
                 let cons = ConsG::<f64, 3, Adiabatic> {
-                    den: rho, mom: Tensor::new([0.1 * rho, 0.0, 0.0]), nrg: 2.0 * rho,
+                    den: rho,
+                    mom: Tensor::new([0.1 * rho, 0.0, 0.0]),
+                    nrg: 2.0 * rho,
                 };
                 let (drained, delta) =
                     drain_body_cell(&cons, dist, r_mask, w, dx, c_s, c_drain, dt, vol, 0);
                 let removed = (cons.den - drained.den) * vol;
                 gas_lost += removed;
-                if i == 0 { inner_removed = removed; }
-                if i == 9 { outer_removed = removed; }
+                if i == 0 {
+                    inner_removed = removed;
+                }
+                if i == 9 {
+                    outer_removed = removed;
+                }
                 body += delta;
             }
             (body.mass_delta, gas_lost, inner_removed, outer_removed)
         };
         let (mdot_mass, gas_lost, inner, outer) = field(1.0);
         // (2) exact conservation across the reduction: body gained exactly what the gas lost.
-        assert!((mdot_mass - gas_lost).abs() < 1e-13, "reduction non-conservative");
+        assert!(
+            (mdot_mass - gas_lost).abs() < 1e-13,
+            "reduction non-conservative"
+        );
         // (1) the mask LOCALIZES the drain: the deep-interior cell (chi~1) drains O(1e8)x more
         // mass than a cell at ~3 r_mask (chi~0) -- the far field is untouched.
-        assert!(outer / inner < 1e-6, "drain not localized: outer/inner = {}", outer / inner);
+        assert!(
+            outer / inner < 1e-6,
+            "drain not localized: outer/inner = {}",
+            outer / inner
+        );
         // Mdot = absorbed mass / dt is a positive functional of the flow.
         assert!(mdot_mass / dt > 0.0);
         // (3) emergent: doubling the density field doubles the absorbed mass.
         let (mdot_mass_2x, ..) = field(2.0);
-        assert!((mdot_mass_2x - 2.0 * mdot_mass).abs() < 1e-13, "rate is not a linear flow-functional");
+        assert!(
+            (mdot_mass_2x - 2.0 * mdot_mass).abs() < 1e-13,
+            "rate is not a linear flow-functional"
+        );
     }
 }

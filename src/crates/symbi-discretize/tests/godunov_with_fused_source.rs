@@ -25,9 +25,9 @@
 mod harness;
 
 use harness::KernelRun;
-use symbi_discretize::coords::{Coords, Spacing, Spacetime};
+use symbi_discretize::coords::{Coords, Spacetime, Spacing};
 use symbi_discretize::gv::{
-    godunov_stage_gv, godunov_stage_gv_with_fused_sources, source_apply_gv, GeoSource,
+    GeoSource, godunov_stage_gv, godunov_stage_gv_with_fused_sources, source_apply_gv,
 };
 
 // the godunov-stage kernel reads the u_n snapshot + the (a0, ac) SSP coefficients. these tests
@@ -40,7 +40,9 @@ const EULER_AC: [(&str, f64); 2] = [("a0", 0.0), ("ac", 1.0)];
 fn u_n_fields(rho: f64, mom: [f64; 3], nrg: f64) -> Vec<(&'static str, f64)> {
     vec![
         ("u_n_rho", rho),
-        ("u_n_mom_0", mom[0]), ("u_n_mom_1", mom[1]), ("u_n_mom_2", mom[2]),
+        ("u_n_mom_0", mom[0]),
+        ("u_n_mom_1", mom[1]),
+        ("u_n_mom_2", mom[2]),
         ("u_n_nrg", nrg),
     ]
 }
@@ -58,17 +60,39 @@ fn user_source_none_matches_writes_of_plain_godunov() {
     let spacing = vec![Spacing::Uniform; 3];
     let axes = vec![0, 1, 2];
     let (_k_plain, w_plain) = godunov_stage_gv(
-        coords, Spacetime::Minkowski, &spacing, &axes, 3, 3, true, GeoSource::Hydro { inertial: false },
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        3,
+        3,
+        true,
+        GeoSource::Hydro { inertial: false },
     );
     let (_k_fused, w_fused) = godunov_stage_gv_with_fused_sources(
-        coords, Spacetime::Minkowski, &spacing, &axes, 3, 3, true, GeoSource::Hydro { inertial: false }, &[], false
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        3,
+        3,
+        true,
+        GeoSource::Hydro { inertial: false },
+        &[],
+        false,
     );
     let names_plain: Vec<&str> = w_plain.iter().map(|(n, _, _)| n.as_str()).collect();
     let names_fused: Vec<&str> = w_fused.iter().map(|(n, _, _)| n.as_str()).collect();
-    assert_eq!(names_plain, names_fused, "writes name list must match plain godunov when user_source=None");
+    assert_eq!(
+        names_plain, names_fused,
+        "writes name list must match plain godunov when user_source=None"
+    );
     let dests_plain: Vec<String> = w_plain.iter().map(|(_, d, _)| d.name()).collect();
     let dests_fused: Vec<String> = w_fused.iter().map(|(_, d, _)| d.name()).collect();
-    assert_eq!(dests_plain, dests_fused, "writes dest list must match plain godunov when user_source=None");
+    assert_eq!(
+        dests_plain, dests_fused,
+        "writes dest list must match plain godunov when user_source=None"
+    );
 }
 
 #[test]
@@ -96,11 +120,23 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
     // `uniform_acceleration_sources(D, false)[0]` is the momentum SourceSpec.
     let specs = uniform_acceleration_sources(D, false);
     let user_source = &specs[0];
-    assert_eq!(user_source.target_field, "mom", "expecting momentum-targeting overlay");
+    assert_eq!(
+        user_source.target_field, "mom",
+        "expecting momentum-targeting overlay"
+    );
 
     // build the fused-source kernel: Newtonian 3D + user momentum overlay.
     let kernel = godunov_stage_gv_with_fused_sources(
-        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &[user_source], false
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        D as u8,
+        D,
+        true,
+        GeoSource::Hydro { inertial: false },
+        &[user_source],
+        false,
     );
 
     // a UNIFORM 3x3x3 state: rho/mom/nrg all constant, all flux fields too.
@@ -129,12 +165,19 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
     fields.extend_from_slice(&u_n);
     // own the dynamically-constructed flux names so the &str borrow stays valid.
     let mass_flux_names: Vec<String> = (0..D).map(|i| format!("mass_flux_{i}")).collect();
-    let mom_flux_names: Vec<String> =
-        (0..D).flat_map(|k| (0..D).map(move |i| format!("mom_flux_{k}_{i}"))).collect();
+    let mom_flux_names: Vec<String> = (0..D)
+        .flat_map(|k| (0..D).map(move |i| format!("mom_flux_{k}_{i}")))
+        .collect();
     let nrg_flux_names: Vec<String> = (0..D).map(|i| format!("nrg_flux_{i}")).collect();
-    for n in &mass_flux_names { fields.push((n.as_str(), 0.0)); }
-    for n in &mom_flux_names { fields.push((n.as_str(), 0.0)); }
-    for n in &nrg_flux_names { fields.push((n.as_str(), 0.0)); }
+    for n in &mass_flux_names {
+        fields.push((n.as_str(), 0.0));
+    }
+    for n in &mom_flux_names {
+        fields.push((n.as_str(), 0.0));
+    }
+    for n in &nrg_flux_names {
+        fields.push((n.as_str(), 0.0));
+    }
 
     let out = KernelRun::new(kernel)
         .grid(grid)
@@ -142,8 +185,12 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
         .fields(&fields)
         .scalars(&[
             ("dt", dt),
-            EULER_AC[0], EULER_AC[1], ("mesh_hdil", 0.0),
-            ("dx_0", 1.0), ("dx_1", 1.0), ("dx_2", 1.0),
+            EULER_AC[0],
+            EULER_AC[1],
+            ("mesh_hdil", 0.0),
+            ("dx_0", 1.0),
+            ("dx_1", 1.0),
+            ("dx_2", 1.0),
             ("g_ext_0", g_ext[0]),
             ("g_ext_1", g_ext[1]),
             ("g_ext_2", g_ext[2]),
@@ -185,7 +232,16 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
     let user_source = &specs[0];
 
     let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
-        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &[user_source], false
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        D as u8,
+        D,
+        true,
+        GeoSource::Hydro { inertial: false },
+        &[user_source],
+        false,
     );
 
     // sanity: the kernel's underlying graph contains a Param leaf named
@@ -208,12 +264,22 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
 
     // and the plain godunov, for comparison, does NOT declare g_ext_0:
     let (k_plain, _) = godunov_stage_gv(
-        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false },
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        D as u8,
+        D,
+        true,
+        GeoSource::Hydro { inertial: false },
     );
     let mut plain_has_g_ext = false;
     for (_id, node, _ty) in k_plain.graph.iter() {
         if let symbi_ir::graph::Op::Param(s) = &node.op {
-            if s.as_str() == "g_ext_0" { plain_has_g_ext = true; break; }
+            if s.as_str() == "g_ext_0" {
+                plain_has_g_ext = true;
+                break;
+            }
         }
     }
     assert!(
@@ -247,13 +313,26 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
     let axes = vec![0, 1, 2];
 
     let specs = uniform_acceleration_sources(D, true);
-    assert_eq!(specs.len(), 2, "uniform_acceleration with energy must yield 2 specs");
+    assert_eq!(
+        specs.len(),
+        2,
+        "uniform_acceleration with energy must yield 2 specs"
+    );
     assert_eq!(specs[0].target_field, "mom");
     assert_eq!(specs[1].target_field, "nrg");
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
 
     let kernel = godunov_stage_gv_with_fused_sources(
-        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        D as u8,
+        D,
+        true,
+        GeoSource::Hydro { inertial: false },
+        &refs,
+        false,
     );
 
     let rho_v = 1.5_f64;
@@ -273,16 +352,25 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
 
     let mut fields: Vec<(&str, f64)> = vec![
         ("rho", rho_v),
-        ("mom_0", mom_v[0]), ("mom_1", mom_v[1]), ("mom_2", mom_v[2]),
+        ("mom_0", mom_v[0]),
+        ("mom_1", mom_v[1]),
+        ("mom_2", mom_v[2]),
         ("nrg", nrg_v),
     ];
     let mass_flux_names: Vec<String> = (0..D).map(|i| format!("mass_flux_{i}")).collect();
-    let mom_flux_names: Vec<String> =
-        (0..D).flat_map(|k| (0..D).map(move |i| format!("mom_flux_{k}_{i}"))).collect();
+    let mom_flux_names: Vec<String> = (0..D)
+        .flat_map(|k| (0..D).map(move |i| format!("mom_flux_{k}_{i}")))
+        .collect();
     let nrg_flux_names: Vec<String> = (0..D).map(|i| format!("nrg_flux_{i}")).collect();
-    for n in &mass_flux_names { fields.push((n.as_str(), 0.0)); }
-    for n in &mom_flux_names { fields.push((n.as_str(), 0.0)); }
-    for n in &nrg_flux_names { fields.push((n.as_str(), 0.0)); }
+    for n in &mass_flux_names {
+        fields.push((n.as_str(), 0.0));
+    }
+    for n in &mom_flux_names {
+        fields.push((n.as_str(), 0.0));
+    }
+    for n in &nrg_flux_names {
+        fields.push((n.as_str(), 0.0));
+    }
     let u_n = u_n_fields(rho_v, mom_v, nrg_v);
     fields.extend_from_slice(&u_n);
 
@@ -292,9 +380,15 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
         .fields(&fields)
         .scalars(&[
             ("dt", dt),
-            EULER_AC[0], EULER_AC[1], ("mesh_hdil", 0.0),
-            ("dx_0", 1.0), ("dx_1", 1.0), ("dx_2", 1.0),
-            ("g_ext_0", g_ext[0]), ("g_ext_1", g_ext[1]), ("g_ext_2", g_ext[2]),
+            EULER_AC[0],
+            EULER_AC[1],
+            ("mesh_hdil", 0.0),
+            ("dx_0", 1.0),
+            ("dx_1", 1.0),
+            ("dx_2", 1.0),
+            ("g_ext_0", g_ext[0]),
+            ("g_ext_1", g_ext[1]),
+            ("g_ext_2", g_ext[2]),
         ])
         .run();
 
@@ -328,7 +422,16 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
     let specs = uniform_acceleration_sources(D, true);
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
     let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
-        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
+        coords,
+        Spacetime::Minkowski,
+        &spacing,
+        &axes,
+        D as u8,
+        D,
+        true,
+        GeoSource::Hydro { inertial: false },
+        &refs,
+        false,
     );
 
     // every Param("g_ext_k") in the graph must occur EXACTLY ONCE — one
@@ -346,8 +449,12 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
             }
         }
     }
-    assert_eq!(seen.len(), D,
-        "expected D={D} distinct g_ext_* params, got {} ({seen:?})", seen.len());
+    assert_eq!(
+        seen.len(),
+        D,
+        "expected D={D} distinct g_ext_* params, got {} ({seen:?})",
+        seen.len()
+    );
 }
 
 #[test]
@@ -361,7 +468,14 @@ fn ssp_combine_applies_runtime_coefficients() {
     // energy (mass + one momentum law).
     let coords = Coords::Cartesian;
     let kernel = godunov_stage_gv(
-        coords, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1, 1, false, GeoSource::Hydro { inertial: false },
+        coords,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform],
+        &[0],
+        1,
+        1,
+        false,
+        GeoSource::Hydro { inertial: false },
     );
 
     // distinct snapshot (u_n) and current (cons) states; zero fluxes => div == 0.
@@ -382,15 +496,21 @@ fn ssp_combine_applies_runtime_coefficients() {
             ("mass_flux_0", 0.0),
             ("mom_flux_0_0", 0.0),
         ])
-        .scalars(&[("dt", 0.01), ("a0", a0), ("ac", ac), ("mesh_hdil", 0.0), ("dx_0", 1.0)])
+        .scalars(&[
+            ("dt", 0.01),
+            ("a0", a0),
+            ("ac", ac),
+            ("mesh_hdil", 0.0),
+            ("dx_0", 1.0),
+        ])
         .run();
 
     out.expect(
         [1usize],
         &[
             // div == 0 => fe == cons, so cons_new = a0*u_n + ac*cons.
-            ("rho", a0 * den_n + ac * den_c),     // 0.5*1 + 0.5*2 = 1.5
-            ("mom_0", a0 * mom_n + ac * mom_c),   // 0.5*2 + 0.5*4 = 3.0
+            ("rho", a0 * den_n + ac * den_c), // 0.5*1 + 0.5*2 = 1.5
+            ("mom_0", a0 * mom_n + ac * mom_c), // 0.5*2 + 0.5*4 = 3.0
         ],
         1e-12,
     );
@@ -430,7 +550,16 @@ fn unsupported_target_field_panics_loudly() {
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = godunov_stage_gv_with_fused_sources(
-            coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
+            coords,
+            Spacetime::Minkowski,
+            &spacing,
+            &axes,
+            D as u8,
+            D,
+            true,
+            GeoSource::Hydro { inertial: false },
+            &refs,
+            false,
         );
     }));
     assert!(result.is_err(), "unsupported target_field MUST panic");
@@ -446,7 +575,15 @@ fn source_apply_pass_adds_dt_times_source() {
     const D: usize = 3;
     let specs = uniform_acceleration_sources(D, true); // [mom, nrg]
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
-    let kernel = source_apply_gv(Coords::Cartesian, &[Spacing::Uniform; D], &[0, 1, 2], D as u8, D, true, &refs);
+    let kernel = source_apply_gv(
+        Coords::Cartesian,
+        &[Spacing::Uniform; D],
+        &[0, 1, 2],
+        D as u8,
+        D,
+        true,
+        &refs,
+    );
 
     let rho = 1.5_f64;
     let mom = [0.3_f64, -0.2, 0.4];
@@ -462,13 +599,22 @@ fn source_apply_pass_adds_dt_times_source() {
         .fields(&[
             // source-eval state (u_stage); standalone here so it equals the current state.
             ("rho", rho),
-            ("mom_0", mom[0]), ("mom_1", mom[1]), ("mom_2", mom[2]),
+            ("mom_0", mom[0]),
+            ("mom_1", mom[1]),
+            ("mom_2", mom[2]),
             // add-base (cons), equal to the state since no godunov ran before this pass.
             ("cons_den", rho),
-            ("cons_mom_0", mom[0]), ("cons_mom_1", mom[1]), ("cons_mom_2", mom[2]),
+            ("cons_mom_0", mom[0]),
+            ("cons_mom_1", mom[1]),
+            ("cons_mom_2", mom[2]),
             ("cons_nrg", nrg),
         ])
-        .scalars(&[("dt", dt), ("g_ext_0", g[0]), ("g_ext_1", g[1]), ("g_ext_2", g[2])])
+        .scalars(&[
+            ("dt", dt),
+            ("g_ext_0", g[0]),
+            ("g_ext_1", g[1]),
+            ("g_ext_2", g[2]),
+        ])
         .run();
 
     out.expect(
@@ -500,8 +646,28 @@ fn fused_stage_equals_plain_plus_additive_pass() {
     let axes = [0usize, 1, 2];
     let geo = GeoSource::Hydro { inertial: false };
 
-    let fused = godunov_stage_gv_with_fused_sources(coords, Spacetime::Minkowski, &sp, &axes, D as u8, D, true, geo, &refs, false);
-    let plain = godunov_stage_gv(coords, Spacetime::Minkowski, &sp, &axes, D as u8, D, true, geo);
+    let fused = godunov_stage_gv_with_fused_sources(
+        coords,
+        Spacetime::Minkowski,
+        &sp,
+        &axes,
+        D as u8,
+        D,
+        true,
+        geo,
+        &refs,
+        false,
+    );
+    let plain = godunov_stage_gv(
+        coords,
+        Spacetime::Minkowski,
+        &sp,
+        &axes,
+        D as u8,
+        D,
+        true,
+        geo,
+    );
     let pass = source_apply_gv(coords, &sp, &axes, D as u8, D, true, &refs);
 
     let (rho, mom, nrg) = (1.5_f64, [0.3_f64, -0.2, 0.4], 5.0_f64);
@@ -512,40 +678,77 @@ fn fused_stage_equals_plain_plus_additive_pass() {
 
     let u_n = u_n_fields(rho_n, mom_n, nrg_n);
     let mut gfields: Vec<(&str, f64)> = vec![
-        ("rho", rho), ("mom_0", mom[0]), ("mom_1", mom[1]), ("mom_2", mom[2]), ("nrg", nrg),
+        ("rho", rho),
+        ("mom_0", mom[0]),
+        ("mom_1", mom[1]),
+        ("mom_2", mom[2]),
+        ("nrg", nrg),
     ];
     gfields.extend_from_slice(&u_n);
     let mass_f: Vec<String> = (0..D).map(|i| format!("mass_flux_{i}")).collect();
-    let mom_f: Vec<String> =
-        (0..D).flat_map(|k| (0..D).map(move |i| format!("mom_flux_{k}_{i}"))).collect();
+    let mom_f: Vec<String> = (0..D)
+        .flat_map(|k| (0..D).map(move |i| format!("mom_flux_{k}_{i}")))
+        .collect();
     let nrg_f: Vec<String> = (0..D).map(|i| format!("nrg_flux_{i}")).collect();
-    for n in &mass_f { gfields.push((n.as_str(), 0.0)); }
-    for n in &mom_f { gfields.push((n.as_str(), 0.0)); }
-    for n in &nrg_f { gfields.push((n.as_str(), 0.0)); }
+    for n in &mass_f {
+        gfields.push((n.as_str(), 0.0));
+    }
+    for n in &mom_f {
+        gfields.push((n.as_str(), 0.0));
+    }
+    for n in &nrg_f {
+        gfields.push((n.as_str(), 0.0));
+    }
     let gscalars = [
-        ("dt", dt), ("a0", a0), ("ac", ac), ("mesh_hdil", 0.0), ("dx_0", 1.0), ("dx_1", 1.0), ("dx_2", 1.0),
-        ("g_ext_0", g[0]), ("g_ext_1", g[1]), ("g_ext_2", g[2]),
+        ("dt", dt),
+        ("a0", a0),
+        ("ac", ac),
+        ("mesh_hdil", 0.0),
+        ("dx_0", 1.0),
+        ("dx_1", 1.0),
+        ("dx_2", 1.0),
+        ("g_ext_0", g[0]),
+        ("g_ext_1", g[1]),
+        ("g_ext_2", g[2]),
     ];
 
     let cell = [1usize, 1, 1];
-    let fused_out = KernelRun::new(fused).grid([3, 3, 3]).compute_window([1, 1, 1], [1, 1, 1])
-        .fields(&gfields).scalars(&gscalars).run();
-    let plain_out = KernelRun::new(plain).grid([3, 3, 3]).compute_window([1, 1, 1], [1, 1, 1])
-        .fields(&gfields).scalars(&gscalars).run();
+    let fused_out = KernelRun::new(fused)
+        .grid([3, 3, 3])
+        .compute_window([1, 1, 1], [1, 1, 1])
+        .fields(&gfields)
+        .scalars(&gscalars)
+        .run();
+    let plain_out = KernelRun::new(plain)
+        .grid([3, 3, 3])
+        .compute_window([1, 1, 1], [1, 1, 1])
+        .fields(&gfields)
+        .scalars(&gscalars)
+        .run();
 
     // chain: additive pass — source-state u_stage = the stage input u; add-base = plain's output.
     // the driver passes dt = ac*dt; ac_dt in the fused kernel is the bit-identical product.
     let acdt = ac * dt;
-    let add_out = KernelRun::new(pass).grid([1usize, 1, 1]).compute_window([0, 0, 0], [1, 1, 1])
+    let add_out = KernelRun::new(pass)
+        .grid([1usize, 1, 1])
+        .compute_window([0, 0, 0], [1, 1, 1])
         .fields(&[
-            ("rho", rho), ("mom_0", mom[0]), ("mom_1", mom[1]), ("mom_2", mom[2]), // u_stage
+            ("rho", rho),
+            ("mom_0", mom[0]),
+            ("mom_1", mom[1]),
+            ("mom_2", mom[2]), // u_stage
             ("cons_den", plain_out.get(cell, "rho")),
             ("cons_mom_0", plain_out.get(cell, "mom_0")),
             ("cons_mom_1", plain_out.get(cell, "mom_1")),
             ("cons_mom_2", plain_out.get(cell, "mom_2")),
             ("cons_nrg", plain_out.get(cell, "nrg")),
         ])
-        .scalars(&[("dt", acdt), ("g_ext_0", g[0]), ("g_ext_1", g[1]), ("g_ext_2", g[2])])
+        .scalars(&[
+            ("dt", acdt),
+            ("g_ext_0", g[0]),
+            ("g_ext_1", g[1]),
+            ("g_ext_2", g[2]),
+        ])
         .run();
 
     for name in ["rho", "mom_0", "mom_1", "mom_2", "nrg"] {

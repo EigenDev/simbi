@@ -49,7 +49,11 @@ const BODY_Y: f64 = 2.0;
 
 // a uniform cartesian x-directed stream in the local physical basis.
 fn stream_prim(phi: f64, v: f64) -> Prim<f64, 2> {
-    Prim { rho: 1.0, vel: Tensor::new([v * phi.cos(), -v * phi.sin()]), pre: 1.0 }
+    Prim {
+        rho: 1.0,
+        vel: Tensor::new([v * phi.cos(), -v * phi.sin()]),
+        pre: 1.0,
+    }
 }
 
 // build the shaped-wall cylindrical sim on any (space, memory) — the host and device
@@ -72,7 +76,11 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
     // live on r-phi, and this matches the host twin rigid_curvilinear_wall.rs.
     .cyl_plane(symbi_sim::state::CylPlane::RPhi)
     .boundaries(Boundaries(std::array::from_fn(|a| {
-        if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
+        if a == 1 {
+            [BoundaryType::Periodic; 2]
+        } else {
+            [BoundaryType::Outflow; 2]
+        }
     })))
     .cfl(CFL)
     .timestepping(Timestepping::Rk2)
@@ -83,18 +91,20 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
     if !with_body {
         return sim;
     }
-    let mut sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(
-            0,
-            Tensor::new([BODY_X, BODY_Y]),
-            Tensor::new(body_vel),
-            1.0,
-            R_BODY,
-            0.1,
-            false,
-        )
-        .with_surface(surface),
-    ));
+    let mut sim = sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new([BODY_X, BODY_Y]),
+                Tensor::new(body_vel),
+                1.0,
+                R_BODY,
+                0.1,
+                false,
+            )
+            .with_surface(surface),
+        ),
+    );
     // the CSG shape routes the runtime-JIT / NVRTC shaped kernel.
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
@@ -120,13 +130,20 @@ fn cons_rel_gap(h: &HostSim, d: &DevSim) -> f64 {
     for k in 0..2 {
         cmp(&h.fields.cons.mom[k], &d.fields.cons.mom[k], &mut gap);
     }
-    let (hn, dn) = (h.fields.cons.nrg_field().unwrap(), d.fields.cons.nrg_field().unwrap());
+    let (hn, dn) = (
+        h.fields.cons.nrg_field().unwrap(),
+        d.fields.cons.nrg_field().unwrap(),
+    );
     cmp(hn, dn, &mut gap);
     gap
 }
 
 // run ONE shaped penalization on host + device and return their force receipts.
-fn penalize_once(vel_x: f64, body_vel: [f64; 2], surface: SurfaceSpec) -> ([f64; 2], [f64; 2], f64) {
+fn penalize_once(
+    vel_x: f64,
+    body_vel: [f64; 2],
+    surface: SurfaceSpec,
+) -> ([f64; 2], [f64; 2], f64) {
     let h = build::<CpuSpace, HostMemory>(vel_x, true, body_vel, surface);
     let d = build::<CudaSpace, UnifiedMemory>(vel_x, true, body_vel, surface);
     dispatch_penalize(&h, 1e-3, GAMMA, 1.0);
@@ -160,12 +177,22 @@ fn receipts_close(hf: [f64; 2], df: [f64; 2], tag: &str) {
 fn shaped_wall_penalize_matches_cpu_on_device() {
     // the sealed no-slip wall in an x-stream: the host + device force receipts must
     // agree, and the penalized cons fields must agree cell-by-cell.
-    let sealed = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+    let sealed = SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 50.0,
+    };
     let (hf, df, gap) = penalize_once(V_INF, [0.0, 0.0], sealed);
-    assert!(gap < 1e-9, "shaped-wall cons field host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-9,
+        "shaped-wall cons field host!=device: rel gap {gap:e}"
+    );
     receipts_close(hf, df, "sealed");
     // the host discriminator still holds through the device path: an x-stream pushes +x.
-    assert!(df[0] > 0.0 && df[0] > 3.0 * df[1].abs(), "device receipt not world-frame +x: {df:?}");
+    assert!(
+        df[0] > 0.0 && df[0] > 3.0 * df[1].abs(),
+        "device receipt not world-frame +x: {df:?}"
+    );
 }
 
 #[test]
@@ -173,11 +200,21 @@ fn moving_shaped_wall_target_matches_cpu_on_device() {
     // a sealed no-slip wall translating along +x through still gas: the frame-rotated
     // velocity target is baked into the emitted kernel, so the device receipt must match
     // the host receipt and still react along -x.
-    let sealed = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+    let sealed = SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 50.0,
+    };
     let (hf, df, gap) = penalize_once(0.0, [V_INF, 0.0], sealed);
-    assert!(gap < 1e-9, "moving shaped-wall cons field host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-9,
+        "moving shaped-wall cons field host!=device: rel gap {gap:e}"
+    );
     receipts_close(hf, df, "moving");
-    assert!(df[0] < 0.0 && df[0].abs() > 3.0 * df[1].abs(), "device moving receipt not -x: {df:?}");
+    assert!(
+        df[0] < 0.0 && df[0].abs() > 3.0 * df[1].abs(),
+        "device moving receipt not -x: {df:?}"
+    );
 }
 
 #[test]
@@ -185,14 +222,22 @@ fn shaped_wall_evolved_matches_cpu_on_device() {
     // the integration-level gate: evolve the sealed no-penetration wall to t = 1 on both
     // backends and assert the cons state agrees — the device shaped penalize rides the full
     // step loop (godunov + c2p + penalize + feedback) identically to the host run.
-    let no_pen = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 };
+    let no_pen = SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 1.0e3,
+        k_eta_t: 0.0,
+    };
     let mut h = build::<CpuSpace, HostMemory>(V_INF, true, [0.0, 0.0], no_pen);
     let mut d = build::<CudaSpace, UnifiedMemory>(V_INF, true, [0.0, 0.0], no_pen);
     let hk = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &h.geom.allocated);
-    let dk = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, &d.geom.allocated);
+    let dk =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, &d.geom.allocated);
     evolve(&mut h, &hk, 1.0).expect("host shaped-wall run");
     evolve(&mut d, &dk, 1.0).expect("device shaped-wall run");
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
     let gap = cons_rel_gap(&h, &d);
-    assert!(gap < 1e-7, "evolved shaped-wall cons host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-7,
+        "evolved shaped-wall cons host!=device: rel gap {gap:e}"
+    );
 }

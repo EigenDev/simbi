@@ -20,9 +20,11 @@
 
 use std::collections::HashMap;
 
-use crate::graph::{ConstValue, Graph, NodeId};
-use crate::passes::scalarize::{scalarize_kernel, BinaryKind, LoweredFn, ScalarExpr, ScalarStmt, UnaryKind};
 use crate::backends::kernel::KernelEmitInputs;
+use crate::graph::{ConstValue, Graph, NodeId};
+use crate::passes::scalarize::{
+    BinaryKind, LoweredFn, ScalarExpr, ScalarStmt, UnaryKind, scalarize_kernel,
+};
 
 /// a scalar value during interpretation: a float, or a boolean (from
 /// comparisons / classifications, consumed by `Select` and bitwise-logical ops).
@@ -36,7 +38,13 @@ impl Value {
     fn as_f(self) -> f64 {
         match self {
             Value::F(x) => x,
-            Value::B(b) => if b { 1.0 } else { 0.0 },
+            Value::B(b) => {
+                if b {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
         }
     }
     fn as_b(self) -> bool {
@@ -71,7 +79,9 @@ impl Backend for Cpu {
             f.params.len(),
             inputs.len(),
             "Cpu::eval_elemental: '{}' expects {} inputs, got {}",
-            f.name, f.params.len(), inputs.len(),
+            f.name,
+            f.params.len(),
+            inputs.len(),
         );
         let mut env = Env::new();
         for (p, &v) in f.params.iter().zip(inputs) {
@@ -86,18 +96,27 @@ impl Backend for Cpu {
             // top-level break would escape the kernel — disallowed by lowering.
             let _ = exec_stmt(stmt, &mut env, None);
         }
-        f.results.iter().map(|r| eval_expr(r, &env, None).as_f()).collect()
+        f.results
+            .iter()
+            .map(|r| eval_expr(r, &env, None).as_f())
+            .collect()
     }
 }
 
 /// `ScalarStmt::Break` propagates upward; the enclosing `For` catches it and
 /// stops iterating. `If`/leaf statements emit `Continue`.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Flow { Continue, Break }
+enum Flow {
+    Continue,
+    Break,
+}
 
 fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
     match stmt {
-        ScalarStmt::Let { name, value, .. } | ScalarStmt::LetMut { name, init: value, .. } => {
+        ScalarStmt::Let { name, value, .. }
+        | ScalarStmt::LetMut {
+            name, init: value, ..
+        } => {
             let v = eval_expr(value, env, fr);
             env.insert(name.clone(), v);
             Flow::Continue
@@ -109,7 +128,8 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
         }
         ScalarStmt::CompoundAssign { name, op, value } => {
             let rhs = eval_expr(value, env, fr);
-            let cur = *env.get(name)
+            let cur = *env
+                .get(name)
                 .unwrap_or_else(|| panic!("interp: compound-assign to unbound '{name}'"));
             env.insert(name.clone(), eval_binop(*op, cur, rhs));
             Flow::Continue
@@ -138,7 +158,9 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
             Flow::Continue
         }
         ScalarStmt::Break => Flow::Break,
-        ScalarStmt::Scope { name, body, result, .. } => {
+        ScalarStmt::Scope {
+            name, body, result, ..
+        } => {
             // Scope semantics for the interpreter: execute body (its lets
             // mutate env), evaluate `result`, then bind `name` to it in env.
             // **scoping is a CODEGEN concern** (lifetime hints to nvcc /
@@ -156,14 +178,23 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
             env.insert(name.clone(), v);
             Flow::Continue
         }
-        ScalarStmt::IfElse { cond, then_body, else_body, .. } => {
+        ScalarStmt::IfElse {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
             // a REAL branch: execute ONLY the taken arm (each arm ends with a
             // `name = <arm result>` Assign that binds `name` in env). this
             // matches BOTH the f64 host oracle and the rendered `if/else` — the
             // untaken arm's ops never run, so an out-of-domain transcendental in
             // the dead arm cannot poison the result. break does not propagate
             // out (not a loop).
-            let arm = if eval_expr(cond, env, fr).as_b() { then_body } else { else_body };
+            let arm = if eval_expr(cond, env, fr).as_b() {
+                then_body
+            } else {
+                else_body
+            };
             for s in arm {
                 if exec_stmt(s, env, fr) == Flow::Break {
                     return Flow::Break;
@@ -177,9 +208,12 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
 fn eval_expr(e: &ScalarExpr, env: &Env, fr: FieldRead) -> Value {
     match e {
         ScalarExpr::Const(c) => eval_const(c),
-        ScalarExpr::Var(name) => *env.get(name)
+        ScalarExpr::Var(name) => *env
+            .get(name)
             .unwrap_or_else(|| panic!("interp: unbound variable '{name}'")),
-        ScalarExpr::BinOp(op, a, b) => eval_binop(*op, eval_expr(a, env, fr), eval_expr(b, env, fr)),
+        ScalarExpr::BinOp(op, a, b) => {
+            eval_binop(*op, eval_expr(a, env, fr), eval_expr(b, env, fr))
+        }
         ScalarExpr::UnaryOp(UnaryKind::Neg, a) => Value::F(-eval_expr(a, env, fr).as_f()),
         ScalarExpr::UnaryOp(UnaryKind::Not, a) => Value::B(!eval_expr(a, env, fr).as_b()),
         // numeric promotion: the interpreter is f64-based, so the int->float cast is
@@ -192,16 +226,24 @@ fn eval_expr(e: &ScalarExpr, env: &Env, fr: FieldRead) -> Value {
                 eval_expr(else_, env, fr)
             }
         }
-        ScalarExpr::MethodCall { receiver, method, args } => {
+        ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             let recv = eval_expr(receiver, env, fr).as_f();
             let argv: Vec<f64> = args.iter().map(|a| eval_expr(a, env, fr).as_f()).collect();
             eval_method(recv, method, &argv)
         }
-        ScalarExpr::FieldLoadAt { field_key, components } => {
-            let read = fr.unwrap_or_else(|| panic!(
-                "interp: field stencil read '{field_key}[coord]' outside a kernel context"
-            ));
-            let coord: Vec<i64> = components.iter()
+        ScalarExpr::FieldLoadAt {
+            field_key,
+            components,
+        } => {
+            let read = fr.unwrap_or_else(|| {
+                panic!("interp: field stencil read '{field_key}[coord]' outside a kernel context")
+            });
+            let coord: Vec<i64> = components
+                .iter()
                 .map(|c| eval_expr(c, env, fr).as_f().round() as i64)
                 .collect();
             Value::F(read(field_key, &coord))
@@ -210,9 +252,9 @@ fn eval_expr(e: &ScalarExpr, env: &Env, fr: FieldRead) -> Value {
             "interp: opaque free call '{name}(...)' is not interpretable (its body lives \
              outside the IR); supply a host implementation or inline it"
         ),
-        ScalarExpr::IndexInto { container, .. } => panic!(
-            "interp: array indexing into '{container}' not supported (rank-1 array params)"
-        ),
+        ScalarExpr::IndexInto { container, .. } => {
+            panic!("interp: array indexing into '{container}' not supported (rank-1 array params)")
+        }
     }
 }
 
@@ -304,15 +346,15 @@ fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
 /// buffer's per-axis origin, `extent[axis]` its per-axis size (the stride
 /// source). indexing matches `emit::emit_flat_index`.
 pub struct CpuField<'a> {
-    pub data:   &'a [f64],
-    pub lo:     &'a [i32],
+    pub data: &'a [f64],
+    pub lo: &'a [i32],
     pub extent: &'a [u32],
 }
 
 /// a writable host field buffer (the kernel's output target).
 pub struct CpuFieldMut<'a> {
-    pub data:   &'a mut [f64],
-    pub lo:     &'a [i32],
+    pub data: &'a mut [f64],
+    pub lo: &'a [i32],
     pub extent: &'a [u32],
 }
 
@@ -330,7 +372,10 @@ fn flat_index(coord: &[i64], lo: &[i32], extent: &[u32], ndim: usize) -> usize {
     for ax in 0..ndim {
         idx += (coord[ax] - lo[ax] as i64) * strides[ax];
     }
-    assert!(idx >= 0, "interp: negative flat index (coord out of buffer bounds)");
+    assert!(
+        idx >= 0,
+        "interp: negative flat index (coord out of buffer bounds)"
+    );
     idx as usize
 }
 
@@ -350,7 +395,11 @@ impl Cpu {
     ) {
         let ndim = spec.ndim as usize;
         assert_eq!(inputs.len(), spec.field_inputs.len(), "input buffer count");
-        assert_eq!(outputs.len(), spec.field_writes.len(), "output buffer count");
+        assert_eq!(
+            outputs.len(),
+            spec.field_writes.len(),
+            "output buffer count"
+        );
         assert_eq!(scalars.len(), spec.scalar_params.len(), "scalar count");
         assert_eq!(grid_sizes.len(), ndim);
         assert_eq!(dom_los.len(), ndim);
@@ -365,7 +414,8 @@ impl Cpu {
             in_map.insert(key.as_str(), buf);
         }
         let field_read = |key: &str, coord: &[i64]| -> f64 {
-            let f = in_map.get(key)
+            let f = in_map
+                .get(key)
                 .unwrap_or_else(|| panic!("interp: no buffer for field '{key}'"));
             f.data[flat_index(coord, f.lo, f.extent, ndim)]
         };
@@ -378,8 +428,9 @@ impl Cpu {
             // this reference sweep visits cells in the same order the emitted kernels and the JIT
             // drivers do. the inverse map comes from the layout, never hand-rolled here.
             symbi_algebra::unflatten(flat, &ext, &mut idx);
-            let coord: Vec<i64> =
-                (0..ndim).map(|ax| dom_los[ax] as i64 + idx[ax] as i64).collect();
+            let coord: Vec<i64> = (0..ndim)
+                .map(|ax| dom_los[ax] as i64 + idx[ax] as i64)
+                .collect();
             // per-cell environment: coord components, field cell loads, scalars.
             let mut env = Env::new();
             for ax in 0..ndim {
@@ -461,10 +512,16 @@ mod tests {
                         Layout::<2>::new([lo[0], lo[1]], [ext[0], ext[1]])
                             .at([coord[0] as i32, coord[1] as i32])
                     } else {
-                        Layout::<3>::new([lo[0], lo[1], lo[2]], [ext[0], ext[1], ext[2]])
-                            .at([coord[0] as i32, coord[1] as i32, coord[2] as i32])
+                        Layout::<3>::new([lo[0], lo[1], lo[2]], [ext[0], ext[1], ext[2]]).at([
+                            coord[0] as i32,
+                            coord[1] as i32,
+                            coord[2] as i32,
+                        ])
                     };
-                    assert_eq!(got, want, "interp::flat_index != Layout::at at coord {coord:?}");
+                    assert_eq!(
+                        got, want,
+                        "interp::flat_index != Layout::at at coord {coord:?}"
+                    );
                 }
             }
         }
@@ -499,10 +556,21 @@ mod tests {
         let q = g.element_wise(ElementWiseOp::FloorDiv, vec![a, b], None);
         let f = scalarize(&g, q, "fdiv");
 
-        for (aa, bb) in [(5i64, 2i64), (4, 2), (0, 2), (-1, 2), (-2, 2), (-3, 2), (-4, 2), (7, 3), (-7, 3)] {
+        for (aa, bb) in [
+            (5i64, 2i64),
+            (4, 2),
+            (0, 2),
+            (-1, 2),
+            (-2, 2),
+            (-3, 2),
+            (-4, 2),
+            (7, 3),
+            (-7, 3),
+        ] {
             let out = Cpu.eval_elemental(&f, &[aa as f64, bb as f64]);
             assert_eq!(
-                out, vec![aa.div_euclid(bb) as f64],
+                out,
+                vec![aa.div_euclid(bb) as f64],
                 "floor_div({aa}, {bb}) disagrees with div_euclid"
             );
         }
@@ -530,7 +598,7 @@ mod tests {
         let sel = g.select(cond, neg, x, None);
         let f = scalarize(&g, sel, "absish");
         assert_eq!(Cpu.eval_elemental(&f, &[-5.0]), vec![5.0]);
-        assert_eq!(Cpu.eval_elemental(&f, &[ 2.0]), vec![2.0]);
+        assert_eq!(Cpu.eval_elemental(&f, &[2.0]), vec![2.0]);
     }
 
     // ----- Scope interpreter semantics test -----
@@ -543,7 +611,9 @@ mod tests {
     /// safe: it doesn't change semantics, only codegen.
     #[test]
     fn scope_is_semantically_transparent_in_interpreter() {
-        use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind};
+        use crate::passes::scalarize::{
+            BinaryKind, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt,
+        };
 
         // build a tiny LoweredFn BY HAND using a Scope for a controlled
         // test of the Scope arm in exec_stmt — independent of whatever the
@@ -557,31 +627,27 @@ mod tests {
                 LoweredParam::scalar("a".to_string(), ElementTy::F64),
                 LoweredParam::scalar("b".to_string(), ElementTy::F64),
             ],
-            body: vec![
-                ScalarStmt::Scope {
-                    name:    "out".to_string(),
+            body: vec![ScalarStmt::Scope {
+                name: "out".to_string(),
+                element: ElementTy::F64,
+                body: vec![ScalarStmt::Let {
+                    name: "__t1".to_string(),
                     element: ElementTy::F64,
-                    body: vec![
-                        ScalarStmt::Let {
-                            name:    "__t1".to_string(),
-                            element: ElementTy::F64,
-                            value: ScalarExpr::BinOp(
-                                BinaryKind::Add,
-                                Box::new(ScalarExpr::Var("a".to_string())),
-                                Box::new(ScalarExpr::Var("b".to_string())),
-                            ),
-                        },
-                    ],
-                    result: ScalarExpr::BinOp(
-                        BinaryKind::Mul,
-                        Box::new(ScalarExpr::Var("__t1".to_string())),
+                    value: ScalarExpr::BinOp(
+                        BinaryKind::Add,
                         Box::new(ScalarExpr::Var("a".to_string())),
+                        Box::new(ScalarExpr::Var("b".to_string())),
                     ),
-                },
-            ],
+                }],
+                result: ScalarExpr::BinOp(
+                    BinaryKind::Mul,
+                    Box::new(ScalarExpr::Var("__t1".to_string())),
+                    Box::new(ScalarExpr::Var("a".to_string())),
+                ),
+            }],
             results: vec![ScalarExpr::Var("out".to_string())],
             result_element: ElementTy::F64,
-            result_shape:   vec![],
+            result_shape: vec![],
         };
 
         // equivalent FLAT form: same math, no scope.
@@ -593,7 +659,7 @@ mod tests {
             ],
             body: vec![
                 ScalarStmt::Let {
-                    name:    "__t1".to_string(),
+                    name: "__t1".to_string(),
                     element: ElementTy::F64,
                     value: ScalarExpr::BinOp(
                         BinaryKind::Add,
@@ -602,7 +668,7 @@ mod tests {
                     ),
                 },
                 ScalarStmt::Let {
-                    name:    "out".to_string(),
+                    name: "out".to_string(),
                     element: ElementTy::F64,
                     value: ScalarExpr::BinOp(
                         BinaryKind::Mul,
@@ -613,15 +679,17 @@ mod tests {
             ],
             results: vec![ScalarExpr::Var("out".to_string())],
             result_element: ElementTy::F64,
-            result_shape:   vec![],
+            result_shape: vec![],
         };
 
         // run both, on the same inputs.
         for &(a, b) in &[(3.0_f64, 4.0), (-1.0, 0.5), (1.5, -2.0)] {
             let scope_out = Cpu.eval_elemental(&scope_form, &[a, b]);
-            let flat_out  = Cpu.eval_elemental(&flat_form,  &[a, b]);
-            assert_eq!(scope_out, flat_out,
-                "scope_form and flat_form must produce IDENTICAL results for a={a}, b={b}");
+            let flat_out = Cpu.eval_elemental(&flat_form, &[a, b]);
+            assert_eq!(
+                scope_out, flat_out,
+                "scope_form and flat_form must produce IDENTICAL results for a={a}, b={b}"
+            );
             // sanity-check the actual value too.
             assert_eq!(scope_out, vec![(a + b) * a]);
         }

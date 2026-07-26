@@ -70,7 +70,11 @@ impl<const R: usize> BlockGrid<R> {
         Domain::new(std::array::from_fn(|aa| {
             let lo = self.domain.spaces[aa].lo + (idx[aa] * self.block[aa]) as isize;
             let hi = (lo + self.block[aa] as isize).min(self.domain.spaces[aa].hi);
-            Space { name: self.domain.spaces[aa].name, lo, hi }
+            Space {
+                name: self.domain.spaces[aa].name,
+                lo,
+                hi,
+            }
         }))
     }
 
@@ -188,7 +192,11 @@ mod laws {
             let dom = Domain::new(std::array::from_fn(|a| {
                 let lo = rng.in_range(-4, 4);
                 let size = rng.in_range(1, 9);
-                crate::domain::Space { name: N3[a], lo, hi: lo + size }
+                crate::domain::Space {
+                    name: N3[a],
+                    lo,
+                    hi: lo + size,
+                }
             }));
             let block: [usize; 3] = std::array::from_fn(|_| rng.in_range(1, 6) as usize);
             let grid = BlockGrid::new(dom.clone(), block);
@@ -224,7 +232,11 @@ mod laws {
             let dom = Domain::new(std::array::from_fn(|a| {
                 let lo = rng.in_range(-4, 4);
                 let size = rng.in_range(1, 9);
-                crate::domain::Space { name: N3[a], lo, hi: lo + size }
+                crate::domain::Space {
+                    name: N3[a],
+                    lo,
+                    hi: lo + size,
+                }
             }));
             let block: [usize; 3] = std::array::from_fn(|_| rng.in_range(1, 6) as usize);
             let grid = BlockGrid::new(dom, block);
@@ -233,7 +245,11 @@ mod laws {
                 let (lo, size) = grid.window(bi);
                 for a in 0..3 {
                     assert_eq!(lo[a], b.spaces[a].lo, "window lo mismatch at block {bi}");
-                    assert_eq!(size[a], b.spaces[a].size(), "window size mismatch at block {bi}");
+                    assert_eq!(
+                        size[a],
+                        b.spaces[a].size(),
+                        "window size mismatch at block {bi}"
+                    );
                 }
             }
         }
@@ -248,13 +264,20 @@ mod laws {
             let dom = Domain::new(std::array::from_fn(|a| {
                 let lo = rng.in_range(-4, 4);
                 let size = rng.in_range(1, 9);
-                crate::domain::Space { name: N3[a], lo, hi: lo + size }
+                crate::domain::Space {
+                    name: N3[a],
+                    lo,
+                    hi: lo + size,
+                }
             }));
             let block: [usize; 3] = std::array::from_fn(|_| rng.in_range(1, 6) as usize);
             let grid = BlockGrid::new(dom.clone(), block);
             for c in dom.iter() {
                 let owner = grid.block(grid.block_of(c));
-                assert!(owner.contains(c), "block_of({c:?}) does not contain the cell");
+                assert!(
+                    owner.contains(c),
+                    "block_of({c:?}) does not contain the cell"
+                );
             }
         }
     }
@@ -263,13 +286,20 @@ mod laws {
     // and zero at width 0 — "larger blocks are cheaper", as a law.
     #[test]
     fn ghost_ratio_is_monotone_in_block_size() {
-        let dom = domain([index("i").over(256), index("j").over(256), index("k").over(256)]);
+        let dom = domain([
+            index("i").over(256),
+            index("j").over(256),
+            index("k").over(256),
+        ]);
         for width in 1..=4usize {
             let mut prev = f64::INFINITY;
             for b in [8, 16, 24, 32, 48, 64, 96, 128usize] {
                 let r = BlockGrid::new(dom.clone(), [b, b, b]).ghost_ratio(width);
                 assert!(r > 0.0, "ghost ratio must be positive for width {width}");
-                assert!(r < prev, "ghost ratio not decreasing at block {b}, width {width}");
+                assert!(
+                    r < prev,
+                    "ghost ratio not decreasing at block {b}, width {width}"
+                );
                 prev = r;
             }
         }
@@ -282,7 +312,11 @@ mod laws {
     #[test]
     fn block_halo_is_a_guillotine_shell() {
         let grid = BlockGrid::new(
-            domain([index("i").over(64), index("j").over(64), index("k").over(64)]),
+            domain([
+                index("i").over(64),
+                index("j").over(64),
+                index("k").over(64),
+            ]),
             [32, 32, 32],
         );
         let b = grid.block([0, 0, 0]);

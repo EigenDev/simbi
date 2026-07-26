@@ -14,9 +14,9 @@
 //  let adot = law.adot_at(t);
 // =============================================================================
 use crate::expr_bridge::lower_dag_to_builtsource;
-use symbi_expr::load::{nodes_from_descs, SourceConfig};
+use symbi_expr::load::{SourceConfig, nodes_from_descs};
 use symbi_ir::backends::interp::{Backend, Cpu};
-use symbi_ir::passes::scalarize::{scalarize, LoweredFn};
+use symbi_ir::passes::scalarize::{LoweredFn, scalarize};
 
 /// a traced scale-factor law a(t) with its analytic derivative a_dot(t). both are scalar functions
 /// of time only (the single param `t`).
@@ -55,7 +55,11 @@ impl MotionLaw {
         }
         let a = scalarize(&built.graph, built.outputs[0], "motion_a");
         let adot = scalarize(&built.graph, built.outputs[1], "motion_adot");
-        let law = MotionLaw { a, adot, n_params: built.params.len() };
+        let law = MotionLaw {
+            a,
+            adot,
+            n_params: built.params.len(),
+        };
         law.fd_check(t0, t_end)?;
         Ok(law)
     }
@@ -81,7 +85,11 @@ impl MotionLaw {
     /// spanning the run; a wrong autodiff rule OR a non-smooth a(t) (a kink, a t-dependent branch)
     /// makes AD and FD disagree past a relative tolerance and the run is refused.
     fn fd_check(&self, t0: f64, t_end: f64) -> Result<(), String> {
-        let (lo, hi) = if t_end > t0 { (t0, t_end) } else { (t0, t0 + 1.0) };
+        let (lo, hi) = if t_end > t0 {
+            (t0, t_end)
+        } else {
+            (t0, t0 + 1.0)
+        };
         for k in 0..5 {
             let t = lo + (hi - lo) * (k as f64 + 0.5) / 5.0;
             let h = 1.0e-6 * t.abs().max(1.0);

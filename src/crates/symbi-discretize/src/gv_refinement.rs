@@ -25,10 +25,10 @@
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::algebra::Scalar;
 use symbi_ir::FieldBind;
+use symbi_ir::algebra::Scalar;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
-use symbi_ir::{begin_trace, end_trace, with_trace, Gv, GvKernel};
+use symbi_ir::{Gv, GvKernel, begin_trace, end_trace, with_trace};
 
 use super::gv::gv_load_at;
 
@@ -88,10 +88,7 @@ fn plm_interp<S: Scalar>(vm: S, vc: S, vp: S, frac: S) -> S {
 /// left-then-right overshoot correction), then the exact parabola
 /// antiderivative difference times `ratio` — so the children average back to
 /// the parent exactly (conservation by construction).
-fn ppm_interp<S: Scalar>(
-    vm2: S, vm1: S, vc: S, vp1: S, vp2: S,
-    xi_lo: S, xi_hi: S, ratio: S,
-) -> S {
+fn ppm_interp<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S, xi_lo: S, xi_hi: S, ratio: S) -> S {
     let two = S::ONE + S::ONE;
     let half = S::ONE / two;
     let three = S::from_f64(3.0);
@@ -113,7 +110,11 @@ fn ppm_interp<S: Scalar>(
     let extremum = ((u_r - vc) * (vc - u_l)).cmp_le(S::ZERO);
     let diff = u_r - u_l;
     let curv = six * (vc - (u_l + u_r) / two);
-    let a_l = S::select((diff * curv).cmp_gt(diff * diff), three * vc - two * u_r, u_l);
+    let a_l = S::select(
+        (diff * curv).cmp_gt(diff * diff),
+        three * vc - two * u_r,
+        u_l,
+    );
     let a_r = S::select(
         (diff * curv).cmp_lt(S::ZERO - diff * diff),
         three * vc - two * a_l,
@@ -143,7 +144,10 @@ fn ppm_interp<S: Scalar>(
 /// COARSE field; the dispatch domain is the coarse coverage in absolute coarse
 /// indices.
 pub fn refine_restrict_gv(ndim: usize, ratio: i64) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_restrict_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_restrict_gv: ndim must be 1..=3"
+    );
     assert!(ratio >= 2, "refine_restrict_gv: ratio must be >= 2");
     begin_trace();
     // the per-axis Refine map base: source[ax] = coord[ax] * ratio (+ child offset).
@@ -226,12 +230,16 @@ pub fn field_fill_gv(ndim: usize) -> (GvKernel, Writes) {
 /// coarse-flux accumulation (arg = 0, scale = -A*w) and the reflux apply
 /// (src = the register face read at the cell's adjacent face, scale = sign/V).
 pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "field_axpy_shift_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "field_axpy_shift_gv: ndim must be 1..=3"
+    );
     begin_trace();
     let src_coords: Vec<NodeId> = with_trace(|t| {
         let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let args: Vec<NodeId> =
-            (0..ndim).map(|ax| t.scalar_int(&format!("arg_{ax}"))).collect();
+        let args: Vec<NodeId> = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("arg_{ax}")))
+            .collect();
         let g = t.graph();
         coords
             .into_iter()
@@ -252,8 +260,14 @@ pub fn field_axpy_shift_gv(ndim: usize) -> (GvKernel, Writes) {
 /// — the register's fine-flux accumulation. `scale` carries the fine face
 /// area times the stage weight.
 pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_acc_face_gv: ndim must be 1..=3");
-    assert!(axis < ndim, "refine_acc_face_gv: axis {axis} out of range for ndim {ndim}");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_acc_face_gv: ndim must be 1..=3"
+    );
+    assert!(
+        axis < ndim,
+        "refine_acc_face_gv: axis {axis} out of range for ndim {ndim}"
+    );
     assert!(ratio >= 2, "refine_acc_face_gv: ratio must be >= 2");
     begin_trace();
     let scaled: Vec<NodeId> = with_trace(|t| {
@@ -280,8 +294,14 @@ pub fn refine_acc_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Wr
 /// — the emf register's fine accumulation. `scale` carries the fine dt times
 /// the length-average factor 1/ratio.
 pub fn refine_acc_edge_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_acc_edge_gv: ndim must be 1..=3");
-    assert!(axis < ndim, "refine_acc_edge_gv: axis {axis} out of range for ndim {ndim}");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_acc_edge_gv: ndim must be 1..=3"
+    );
+    assert!(
+        axis < ndim,
+        "refine_acc_edge_gv: axis {axis} out of range for ndim {ndim}"
+    );
     assert!(ratio >= 2, "refine_acc_edge_gv: ratio must be >= 2");
     begin_trace();
     let scaled: Vec<NodeId> = with_trace(|t| {
@@ -366,8 +386,14 @@ fn acc_face_sum(scaled: &[NodeId], ratio: i64, axis: usize, ax: isize, off: &mut
 /// "src" is the FINE face field, output "dst" the COARSE one; the dispatch
 /// domain is the coverage face domain in absolute coarse indices.
 pub fn refine_restrict_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_restrict_face_gv: ndim must be 1..=3");
-    assert!(axis < ndim, "refine_restrict_face_gv: axis {axis} out of range for ndim {ndim}");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_restrict_face_gv: ndim must be 1..=3"
+    );
+    assert!(
+        axis < ndim,
+        "refine_restrict_face_gv: axis {axis} out of range for ndim {ndim}"
+    );
     assert!(ratio >= 2, "refine_restrict_face_gv: ratio must be >= 2");
     begin_trace();
     let scaled: Vec<NodeId> = with_trace(|t| {
@@ -442,12 +468,19 @@ fn restrict_face_eval(
 /// dispatch domain is the fine destination region (a coarse-fine ghost slab,
 /// or a freshly nested patch interior) in absolute fine indices.
 pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_prolong_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_prolong_gv: ndim must be 1..=3"
+    );
     assert!(ratio >= 2, "refine_prolong_gv: ratio must be >= 2");
     begin_trace();
     let alpha = Gv::scalar("alpha");
     let geom = prolong_geometry(ndim, ratio);
-    let src = ProlongSrc::TimePair { old: "src_old", new: "src_new", alpha };
+    let src = ProlongSrc::TimePair {
+        old: "src_old",
+        new: "src_new",
+        alpha,
+    };
     let ctx = geom.ctx(ndim, order, &src);
     let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
     let writes = vec![("dst".to_string(), "dst".into(), val.node())];
@@ -461,7 +494,10 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
 /// gather traffic (the time pair reads 2x the loads of a 5^3 ppm
 /// neighbourhood, recomputed per fine cell).
 pub fn refine_prolong_1t_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_prolong_1t_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_prolong_1t_gv: ndim must be 1..=3"
+    );
     assert!(ratio >= 2, "refine_prolong_1t_gv: ratio must be >= 2");
     begin_trace();
     let geom = prolong_geometry(ndim, ratio);
@@ -487,7 +523,10 @@ pub fn refine_prolong_multi_gv(
     order: ProlongOrder,
     ncomp: usize,
 ) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_prolong_multi_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_prolong_multi_gv: ndim must be 1..=3"
+    );
     assert!(ratio >= 2, "refine_prolong_multi_gv: ratio must be >= 2");
     assert!(ncomp >= 1, "refine_prolong_multi_gv: ncomp must be >= 1");
     begin_trace();
@@ -495,9 +534,16 @@ pub fn refine_prolong_multi_gv(
     let geom = prolong_geometry(ndim, ratio);
     let mut writes = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
-        let (old_name, new_name, dst_name) =
-            (format!("src_old_{k}"), format!("src_new_{k}"), format!("dst_{k}"));
-        let src = ProlongSrc::TimePair { old: &old_name, new: &new_name, alpha };
+        let (old_name, new_name, dst_name) = (
+            format!("src_old_{k}"),
+            format!("src_new_{k}"),
+            format!("dst_{k}"),
+        );
+        let src = ProlongSrc::TimePair {
+            old: &old_name,
+            new: &new_name,
+            alpha,
+        };
         let ctx = geom.ctx(ndim, order, &src);
         let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
         writes.push((dst_name.clone(), dst_name.into(), val.node()));
@@ -515,7 +561,10 @@ pub fn refine_prolong_multi_1t_gv(
     order: ProlongOrder,
     ncomp: usize,
 ) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_prolong_multi_1t_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_prolong_multi_1t_gv: ndim must be 1..=3"
+    );
     assert!(ratio >= 2, "refine_prolong_multi_1t_gv: ratio must be >= 2");
     assert!(ncomp >= 1, "refine_prolong_multi_1t_gv: ncomp must be >= 1");
     begin_trace();
@@ -547,10 +596,22 @@ pub fn refine_prolong_sweep_multi_gv(
     sweep_axis: usize,
     ncomp: usize,
 ) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_prolong_sweep_multi_gv: ndim must be 1..=3");
-    assert!(ratio >= 2, "refine_prolong_sweep_multi_gv: ratio must be >= 2");
-    assert!(sweep_axis < ndim, "refine_prolong_sweep_multi_gv: sweep_axis out of range");
-    assert!(ncomp >= 1, "refine_prolong_sweep_multi_gv: ncomp must be >= 1");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_prolong_sweep_multi_gv: ndim must be 1..=3"
+    );
+    assert!(
+        ratio >= 2,
+        "refine_prolong_sweep_multi_gv: ratio must be >= 2"
+    );
+    assert!(
+        sweep_axis < ndim,
+        "refine_prolong_sweep_multi_gv: sweep_axis out of range"
+    );
+    assert!(
+        ncomp >= 1,
+        "refine_prolong_sweep_multi_gv: ncomp must be >= 1"
+    );
     begin_trace();
     // parent + parity on the SWEPT axis only (the same arithmetic
     // prolong_geometry builds per axis).
@@ -601,8 +662,7 @@ pub fn refine_prolong_sweep_multi_gv(
             ProlongOrder::Pcm => vals[0],
             ProlongOrder::Plm => plm_interp(vals[0], vals[1], vals[2], frac),
             ProlongOrder::Ppm => ppm_interp(
-                vals[0], vals[1], vals[2], vals[3], vals[4],
-                xi_lo, xi_hi, ratio_f,
+                vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
             ),
         };
         let dst_name = format!("dst_{k}");
@@ -619,7 +679,10 @@ pub fn refine_prolong_sweep_multi_gv(
 /// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
 /// (outputs); scalar "alpha".
 pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "field_lerp_multi_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "field_lerp_multi_gv: ndim must be 1..=3"
+    );
     assert!(ncomp >= 1, "field_lerp_multi_gv: ncomp must be >= 1");
     begin_trace();
     let alpha = Gv::scalar("alpha");
@@ -656,9 +719,18 @@ pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
 /// plm is the maximum order here, one above the pcm a plain copy would be.
 /// inputs "src_old"/"src_new" + scalar "alpha" as in `refine_prolong_gv`.
 pub fn refine_prolong_face_gv(ndim: usize, ratio: i64, axis: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "refine_prolong_face_gv: ndim must be 1..=3");
-    assert!(axis < ndim, "refine_prolong_face_gv: axis {axis} out of range for ndim {ndim}");
-    assert!(ratio == 2, "refine_prolong_face_gv: the face-lattice midpoint pair is ratio-2");
+    assert!(
+        (1..=3).contains(&ndim),
+        "refine_prolong_face_gv: ndim must be 1..=3"
+    );
+    assert!(
+        axis < ndim,
+        "refine_prolong_face_gv: axis {axis} out of range for ndim {ndim}"
+    );
+    assert!(
+        ratio == 2,
+        "refine_prolong_face_gv: the face-lattice midpoint pair is ratio-2"
+    );
     begin_trace();
     let alpha = Gv::scalar("alpha");
     let one = Gv::from_f64(1.0);
@@ -732,7 +804,11 @@ fn face_prolong_eval(ctx: &FaceProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv 
                 let g = t.graph();
                 (0..ctx.ndim)
                     .map(|kk| {
-                        let base = if kk == ctx.axis { normals[kk] } else { ctx.parent[kk] };
+                        let base = if kk == ctx.axis {
+                            normals[kk]
+                        } else {
+                            ctx.parent[kk]
+                        };
                         let o = g.add_const(ConstValue::I32(off[kk] as i32), None);
                         g.element_wise(ElementWiseOp::Add, vec![base, o], None)
                     })
@@ -764,8 +840,14 @@ fn face_prolong_eval(ctx: &FaceProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv 
 /// or a SINGLE pre-interpolated buffer (a `field_lerp` pass hoisted the time
 /// interpolation to once per coarse cell — half the gather traffic).
 enum ProlongSrc<'a> {
-    TimePair { old: &'a str, new: &'a str, alpha: Gv },
-    Single { name: &'a str },
+    TimePair {
+        old: &'a str,
+        new: &'a str,
+        alpha: Gv,
+    },
+    Single {
+        name: &'a str,
+    },
 }
 
 /// the shared per-cell prolong geometry: the per-axis Coarsen map (parent =
@@ -803,14 +885,29 @@ fn prolong_geometry(ndim: usize, ratio: i64) -> ProlongGeom {
     let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
     let ratio_f = Gv::from_f64(ratio as f64);
     let parity_f: Vec<Gv> = parity.iter().map(|&q| Gv::of(q)).collect();
-    let frac: Vec<Gv> = parity_f.iter().map(|&q| (q + half) * inv_ratio - half).collect();
+    let frac: Vec<Gv> = parity_f
+        .iter()
+        .map(|&q| (q + half) * inv_ratio - half)
+        .collect();
     let xi_lo: Vec<Gv> = parity_f.iter().map(|&q| q * inv_ratio).collect();
     let xi_hi: Vec<Gv> = parity_f.iter().map(|&q| (q + one) * inv_ratio).collect();
-    ProlongGeom { parent, frac, xi_lo, xi_hi, ratio_f, one }
+    ProlongGeom {
+        parent,
+        frac,
+        xi_lo,
+        xi_hi,
+        ratio_f,
+        one,
+    }
 }
 
 impl ProlongGeom {
-    fn ctx<'a>(&'a self, ndim: usize, order: ProlongOrder, src: &'a ProlongSrc<'a>) -> ProlongCtx<'a> {
+    fn ctx<'a>(
+        &'a self,
+        ndim: usize,
+        order: ProlongOrder,
+        src: &'a ProlongSrc<'a>,
+    ) -> ProlongCtx<'a> {
         ProlongCtx {
             ndim,
             order,
@@ -877,8 +974,14 @@ fn prolong_eval(ctx: &ProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv {
         ProlongOrder::Pcm => vals[0],
         ProlongOrder::Plm => plm_interp(vals[0], vals[1], vals[2], ctx.frac[aa]),
         ProlongOrder::Ppm => ppm_interp(
-            vals[0], vals[1], vals[2], vals[3], vals[4],
-            ctx.xi_lo[aa], ctx.xi_hi[aa], ctx.ratio_f,
+            vals[0],
+            vals[1],
+            vals[2],
+            vals[3],
+            vals[4],
+            ctx.xi_lo[aa],
+            ctx.xi_hi[aa],
+            ctx.ratio_f,
         ),
     }
 }

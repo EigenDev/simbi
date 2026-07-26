@@ -74,11 +74,15 @@ fn make_sim() -> Sim {
         .expect("rmhd sim construction failed")
         .set_initial(|[x, y, _z]| {
             let vx = -V0 * (2.0 * PI * y).sin();
-            let vy =  V0 * (2.0 * PI * x).sin();
+            let vy = V0 * (2.0 * PI * x).sin();
             let bx_c = -B0 * (2.0 * PI * y).sin();
-            let by_c =  B0 * (4.0 * PI * x).sin();
+            let by_c = B0 * (4.0 * PI * x).sin();
             MhdPrim {
-                hydro: Prim { rho: rho0, vel: Tensor::new([vx, vy, 0.0]), pre: p0 },
+                hydro: Prim {
+                    rho: rho0,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: p0,
+                },
                 mag: Tensor::new([bx_c, by_c, 0.0]),
             }
         })
@@ -109,7 +113,9 @@ fn max_divb_and_b(sim: &Sim, idx: f64, idy: f64, idz: f64) -> (f64, f64, [isize;
             worst = c;
         }
         let b_mag = (bx_lo * bx_lo + by_lo * by_lo + bz_lo * bz_lo).sqrt();
-        if b_mag > max_b { max_b = b_mag; }
+        if b_mag > max_b {
+            max_b = b_mag;
+        }
     }
     (max_div, max_b, worst)
 }
@@ -127,32 +133,41 @@ fn rmhd_orszag_tang_preserves_divb_under_full_evolve() {
     assert!(
         div0 / b0_max.max(1.0) < 1e-13,
         "ORSZAG-TANG IC is not divergence-free: max|divB|={:e} (rel {:e})",
-        div0, div0 / b0_max.max(1.0),
+        div0,
+        div0 / b0_max.max(1.0),
     );
 
-    let sub = RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, /* theta */ 1.0, &sim.geom.allocated);
+    let sub = RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(
+        GAMMA,
+        CFL,
+        /* theta */ 1.0,
+        &sim.geom.allocated,
+    );
 
     // per-step divB monitoring through the production loop (interval = 1).
     let mut max_seen_rel = 0.0_f64;
     let mut steps_seen: u64 = 0;
-    evolve_with_callback(
-        &mut sim,
-        &sub,
-        T_FINAL,
-        1,
-        |s| {
-            let (max_div, max_b, worst) = max_divb_and_b(s, idx, idy, idz);
-            let rel = max_div / max_b.max(1.0);
-            assert!(
-                rel < DIVB_TOL,
-                "DIVB GREW UNDER EVOLVE at iter {} t={:.4e} cell {:?}: \
+    evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
+        let (max_div, max_b, worst) = max_divb_and_b(s, idx, idy, idz);
+        let rel = max_div / max_b.max(1.0);
+        assert!(
+            rel < DIVB_TOL,
+            "DIVB GREW UNDER EVOLVE at iter {} t={:.4e} cell {:?}: \
                  max|divB|={:e}  max|B|={:e}  rel={:e}  (tol {:e}) — CT operator is broken",
-                s.iteration, s.time, worst, max_div, max_b, rel, DIVB_TOL,
-            );
-            if rel > max_seen_rel { max_seen_rel = rel; }
-            steps_seen = s.iteration;
-        },
-    ).expect("rmhd evolve failed");
+            s.iteration,
+            s.time,
+            worst,
+            max_div,
+            max_b,
+            rel,
+            DIVB_TOL,
+        );
+        if rel > max_seen_rel {
+            max_seen_rel = rel;
+        }
+        steps_seen = s.iteration;
+    })
+    .expect("rmhd evolve failed");
 
     assert!(
         steps_seen >= 5,

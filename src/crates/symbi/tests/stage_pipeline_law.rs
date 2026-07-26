@@ -23,7 +23,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use symbi::sim::evolve::{evolve, KernelSet};
+use symbi::sim::evolve::{KernelSet, evolve};
 use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -50,7 +50,11 @@ struct Recorder {
 
 impl Recorder {
     fn new(additive: bool, fofc: bool) -> Self {
-        Self { log: Arc::new(Mutex::new(Vec::new())), additive, fofc }
+        Self {
+            log: Arc::new(Mutex::new(Vec::new())),
+            additive,
+            fofc,
+        }
     }
     fn push(&self, s: &str) {
         self.log.lock().unwrap().push(s.to_string());
@@ -142,7 +146,11 @@ fn tiny_sim(with_chi: bool) -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
     if with_chi {
         sim.with_passive_scalar().expect("chi alloc")
@@ -166,14 +174,16 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
         ("none", None),
         (
             "one-way-grav",
-            Some(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
-                0,
-                Tensor::new([0.0, 0.0]),
-                Tensor::zeros(),
-                1.0,
-                0.1,
-                0.05,
-            ))),
+            Some(
+                symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                    0,
+                    Tensor::new([0.0, 0.0]),
+                    Tensor::zeros(),
+                    1.0,
+                    0.1,
+                    0.05,
+                )),
+            ),
         ),
         (
             "two-way-rigid+horizon",
@@ -253,7 +263,7 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
 // the passive scalar is config-fenced off this driver, so chi stays false.
 #[test]
 fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
-    use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+    use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
     const T: f64 = 2.5e-3;
     for additive in [false, true] {
         for fofc in [false, true] {
@@ -297,8 +307,11 @@ fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
                 &LocalCopy,
                 |_, _, _| std::ops::ControlFlow::Continue(()),
             );
-            let dec: Vec<String> =
-                rec_c.take().into_iter().filter(|p| !p.starts_with("excise")).collect();
+            let dec: Vec<String> = rec_c
+                .take()
+                .into_iter()
+                .filter(|p| !p.starts_with("excise"))
+                .collect();
 
             assert_eq!(
                 dec, expected,
@@ -316,7 +329,7 @@ fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
 // invisible to the recorder on every driver).
 #[test]
 fn decomposed_per_step_extras_match_the_canonical_order() {
-    use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+    use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
     const T: f64 = 2.5e-3;
     let bodies = || {
         symbi_ib::BodyCollection::new().add(
@@ -363,7 +376,11 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
         &LocalCopy,
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
-    let dec: Vec<String> = rec_c.take().into_iter().filter(|p| !p.starts_with("excise")).collect();
+    let dec: Vec<String> = rec_c
+        .take()
+        .into_iter()
+        .filter(|p| !p.starts_with("excise"))
+        .collect();
 
     assert_eq!(
         dec, expected,

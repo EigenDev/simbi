@@ -16,19 +16,19 @@
 //   table.refresh();
 // =============================================================================
 
-pub mod terminal;
-pub mod renderer;
-pub mod exit;
-pub mod input;
 pub mod attach;
+pub mod exit;
 pub mod hostinfo;
+pub mod input;
 pub mod live;
 pub mod livethread;
+pub mod meta_table;
+pub mod renderer;
+pub mod signal_guard;
 pub mod snapshot;
 pub mod table;
-pub mod meta_table;
 pub mod term_guard;
-pub mod signal_guard;
+pub mod terminal;
 
 pub use attach::run_attach;
 pub use exit::ExitKind;
@@ -36,8 +36,8 @@ pub use hostinfo::HostStats;
 pub use input::{Key, poll_key, poll_key_timeout};
 pub use live::{Colormap, DiagnosticView, FieldSlice};
 pub use livethread::{Controls, LiveDashboard};
-pub use snapshot::{Snapshot, snapshot_path};
-pub use renderer::{Alignment, Renderer, align_text, truncate};
-pub use table::{MessageType, Table};
 pub use meta_table::{render_metadata, render_tree_buf};
+pub use renderer::{Alignment, Renderer, align_text, truncate};
 pub use signal_guard::{ScreenGuard, SignalGuard};
+pub use snapshot::{Snapshot, snapshot_path};
+pub use table::{MessageType, Table};

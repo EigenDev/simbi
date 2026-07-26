@@ -23,9 +23,9 @@ use symbi::sim::state::*;
 use symbi::sim::substrate_seam::WithExcision;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 4.0 / 3.0;
@@ -43,22 +43,33 @@ fn build_hier(
     r_exc: f64,
 ) -> Hierarchy<Rhd, 2, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory, Kset>
 {
-    let coarse = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells([N; 2])
-        .origin([-L; 2])
-        .spacing([DX; 2])
-        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-        .cfl(CFL)
-        .timestepping(Timestepping::Rk2)
-        .allocate()
-        .unwrap()
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 2]), pre: 0.1 })
-        .build();
+    let coarse = Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells([N; 2])
+    .origin([-L; 2])
+    .spacing([DX; 2])
+    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+    .cfl(CFL)
+    .timestepping(Timestepping::Rk2)
+    .allocate()
+    .unwrap()
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0; 2]),
+        pre: 0.1,
+    })
+    .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated).with_excision(r_exc);
     // the fine patch sits in the far-field corner quadrant, clear of the excised
     // region (the request gate enforces this separation on the python path; the
     // harness honors the same contract).
-    let region = RefinementRegion { x_lo: [0.4, 0.4], x_hi: [1.0, 1.0] };
+    let region = RefinementRegion {
+        x_lo: [0.4, 0.4],
+        x_hi: [1.0, 1.0],
+    };
     Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, &s.geom.allocated).with_excision(r_exc)
     })
@@ -104,8 +115,14 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
     let (root_b, _, _) = run(0.5);
     let (none, _, _) = run(0.0);
 
-    assert!(root_a.iter().all(|v| v.is_finite() && *v > 0.0), "root state broke");
-    assert!(fine_a.iter().all(|v| v.is_finite() && *v > 0.0), "fine state broke");
+    assert!(
+        root_a.iter().all(|v| v.is_finite() && *v > 0.0),
+        "root state broke"
+    );
+    assert!(
+        fine_a.iter().all(|v| v.is_finite() && *v > 0.0),
+        "fine state broke"
+    );
 
     // r_+ = 2M = 0.6; both excision radii (0.35, 0.5) sit strictly inside the horizon. classify each
     // root cell by |x|: the INTERIOR (r < r_+) is where excision acts and is causally disconnected
@@ -154,7 +171,10 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
 
     // the fine patch genuinely evolved: the infall reaches the corner quadrant
     // within 20 root steps, so the fine state departs its uniform seed.
-    let fine_dev = fine_a.iter().map(|v| (v - fine_a[0]).abs()).fold(0.0_f64, f64::max);
+    let fine_dev = fine_a
+        .iter()
+        .map(|v| (v - fine_a[0]).abs())
+        .fold(0.0_f64, f64::max);
     let seed_dev = fine_a
         .iter()
         .map(|v| (v - 1.0_f64).abs())

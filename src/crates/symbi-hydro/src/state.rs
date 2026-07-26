@@ -16,11 +16,11 @@
 //   let cons = prim.to_conserved(&eos);  // newtonian convenience
 // =============================================================================
 
-use symbi_algebra::{Tensor, FieldElement};
-use symbi_ir::algebra::Scalar;
+use crate::energy::{Adiabatic, EnergyModel, EnergySlot, IsoModel};
 use crate::eos::Eos;
-use crate::energy::{EnergyModel, EnergySlot, Adiabatic, IsoModel};
-use std::ops::{Add, Sub, Neg, Mul};
+use std::ops::{Add, Mul, Neg, Sub};
+use symbi_algebra::{FieldElement, Tensor};
+use symbi_ir::algebra::Scalar;
 
 // ---- generic state types ----
 
@@ -85,11 +85,17 @@ impl<S: Scalar, const D: usize, E: EnergyModel> NonMagnetic for ConsG<S, D, E> {
 impl<S: Scalar, const D: usize, E: EnergyModel> SeedableCons<S, D> for ConsG<S, D, E> {
     type Energy = E;
     #[inline]
-    fn hydro_part(&self) -> ConsG<S, D, E> { *self }
+    fn hydro_part(&self) -> ConsG<S, D, E> {
+        *self
+    }
     #[inline]
-    fn mag_part(&self) -> Option<Tensor<S, D>> { None }
+    fn mag_part(&self) -> Option<Tensor<S, D>> {
+        None
+    }
     #[inline]
-    fn from_parts(hydro: ConsG<S, D, E>, _mag: Option<Tensor<S, D>>) -> Self { hydro }
+    fn from_parts(hydro: ConsG<S, D, E>, _mag: Option<Tensor<S, D>>) -> Self {
+        hydro
+    }
 }
 
 // ---- backward-compatible type aliases ----
@@ -104,13 +110,21 @@ pub type Prim<S, const D: usize> = PrimG<S, D, Adiabatic>;
 
 impl<S: Scalar, const D: usize, E: EnergyModel> PrimG<S, D, E> {
     pub fn zero() -> Self {
-        PrimG { rho: S::ZERO, vel: Tensor::zeros(), pre: E::Slot::<S>::zero() }
+        PrimG {
+            rho: S::ZERO,
+            vel: Tensor::zeros(),
+            pre: E::Slot::<S>::zero(),
+        }
     }
 }
 
 impl<S: Scalar, const D: usize, E: EnergyModel> ConsG<S, D, E> {
     pub fn zero() -> Self {
-        ConsG { den: S::ZERO, mom: Tensor::zeros(), nrg: E::Slot::<S>::zero() }
+        ConsG {
+            den: S::ZERO,
+            mom: Tensor::zeros(),
+            nrg: E::Slot::<S>::zero(),
+        }
     }
 }
 
@@ -147,11 +161,15 @@ impl<S: Scalar, const D: usize> Cons<S, D> {
 // ---- Default ----
 
 impl<S: Scalar, const D: usize, E: EnergyModel> Default for PrimG<S, D, E> {
-    fn default() -> Self { Self::zero() }
+    fn default() -> Self {
+        Self::zero()
+    }
 }
 
 impl<S: Scalar, const D: usize, E: EnergyModel> Default for ConsG<S, D, E> {
-    fn default() -> Self { Self::zero() }
+    fn default() -> Self {
+        Self::zero()
+    }
 }
 
 // ---- arithmetic on PrimG (for reconstruction, averaging, time integration) ----
@@ -160,7 +178,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Add for PrimG<S, D, E> {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        PrimG { rho: self.rho + rhs.rho, vel: self.vel + rhs.vel, pre: self.pre.add(rhs.pre) }
+        PrimG {
+            rho: self.rho + rhs.rho,
+            vel: self.vel + rhs.vel,
+            pre: self.pre.add(rhs.pre),
+        }
     }
 }
 
@@ -168,7 +190,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Sub for PrimG<S, D, E> {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self {
-        PrimG { rho: self.rho - rhs.rho, vel: self.vel - rhs.vel, pre: self.pre.sub(rhs.pre) }
+        PrimG {
+            rho: self.rho - rhs.rho,
+            vel: self.vel - rhs.vel,
+            pre: self.pre.sub(rhs.pre),
+        }
     }
 }
 
@@ -176,7 +202,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Neg for PrimG<S, D, E> {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        PrimG { rho: -self.rho, vel: -self.vel, pre: self.pre.neg() }
+        PrimG {
+            rho: -self.rho,
+            vel: -self.vel,
+            pre: self.pre.neg(),
+        }
     }
 }
 
@@ -184,7 +214,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for PrimG<S, D, E> {
     type Output = Self;
     #[inline]
     fn mul(self, s: S) -> Self {
-        PrimG { rho: self.rho * s, vel: self.vel.scale(s), pre: self.pre.scale(s) }
+        PrimG {
+            rho: self.rho * s,
+            vel: self.vel.scale(s),
+            pre: self.pre.scale(s),
+        }
     }
 }
 
@@ -194,7 +228,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Add for ConsG<S, D, E> {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        ConsG { den: self.den + rhs.den, mom: self.mom + rhs.mom, nrg: self.nrg.add(rhs.nrg) }
+        ConsG {
+            den: self.den + rhs.den,
+            mom: self.mom + rhs.mom,
+            nrg: self.nrg.add(rhs.nrg),
+        }
     }
 }
 
@@ -202,7 +240,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Sub for ConsG<S, D, E> {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self {
-        ConsG { den: self.den - rhs.den, mom: self.mom - rhs.mom, nrg: self.nrg.sub(rhs.nrg) }
+        ConsG {
+            den: self.den - rhs.den,
+            mom: self.mom - rhs.mom,
+            nrg: self.nrg.sub(rhs.nrg),
+        }
     }
 }
 
@@ -210,7 +252,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Neg for ConsG<S, D, E> {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        ConsG { den: -self.den, mom: -self.mom, nrg: self.nrg.neg() }
+        ConsG {
+            den: -self.den,
+            mom: -self.mom,
+            nrg: self.nrg.neg(),
+        }
     }
 }
 
@@ -218,7 +264,11 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for ConsG<S, D, E> {
     type Output = Self;
     #[inline]
     fn mul(self, s: S) -> Self {
-        ConsG { den: self.den * s, mom: self.mom.scale(s), nrg: self.nrg.scale(s) }
+        ConsG {
+            den: self.den * s,
+            mom: self.mom.scale(s),
+            nrg: self.nrg.scale(s),
+        }
     }
 }
 
@@ -256,27 +306,43 @@ where
 
 // safety: ConsG<f64, D, Adiabatic> is (f64, Tensor<f64, D>, f64) — contiguous, fixed-size,
 // zero bytes produce valid values (0.0, zeros, 0.0).
-unsafe impl<const D: usize> FieldElement for ConsG<f64, D, Adiabatic> { type Scalar = f64; }
-unsafe impl<const D: usize> FieldElement for ConsG<f32, D, Adiabatic> { type Scalar = f32; }
+unsafe impl<const D: usize> FieldElement for ConsG<f64, D, Adiabatic> {
+    type Scalar = f64;
+}
+unsafe impl<const D: usize> FieldElement for ConsG<f32, D, Adiabatic> {
+    type Scalar = f32;
+}
 
 // safety: PrimG<f64, D, Adiabatic> is (f64, Tensor<f64, D>, f64) — same layout guarantees.
-unsafe impl<const D: usize> FieldElement for PrimG<f64, D, Adiabatic> { type Scalar = f64; }
-unsafe impl<const D: usize> FieldElement for PrimG<f32, D, Adiabatic> { type Scalar = f32; }
+unsafe impl<const D: usize> FieldElement for PrimG<f64, D, Adiabatic> {
+    type Scalar = f64;
+}
+unsafe impl<const D: usize> FieldElement for PrimG<f32, D, Adiabatic> {
+    type Scalar = f32;
+}
 
 // safety: ConsG<f64, D, IsoModel> is (f64, Tensor<f64, D>) — Zero<f64> is ZST.
 // zero bytes produce valid values.
-unsafe impl<const D: usize> FieldElement for ConsG<f64, D, IsoModel> { type Scalar = f64; }
-unsafe impl<const D: usize> FieldElement for ConsG<f32, D, IsoModel> { type Scalar = f32; }
+unsafe impl<const D: usize> FieldElement for ConsG<f64, D, IsoModel> {
+    type Scalar = f64;
+}
+unsafe impl<const D: usize> FieldElement for ConsG<f32, D, IsoModel> {
+    type Scalar = f32;
+}
 
 // safety: PrimG<f64, D, IsoModel> is (f64, Tensor<f64, D>) — Zero<f64> is ZST.
-unsafe impl<const D: usize> FieldElement for PrimG<f64, D, IsoModel> { type Scalar = f64; }
-unsafe impl<const D: usize> FieldElement for PrimG<f32, D, IsoModel> { type Scalar = f32; }
+unsafe impl<const D: usize> FieldElement for PrimG<f64, D, IsoModel> {
+    type Scalar = f64;
+}
+unsafe impl<const D: usize> FieldElement for PrimG<f32, D, IsoModel> {
+    type Scalar = f32;
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::energy::{EnergySlot, Zero};
     use crate::eos::IdealGas;
-    use crate::energy::{Zero, EnergySlot};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-13 * a.abs().max(b.abs()).max(1.0)
@@ -287,7 +353,11 @@ mod tests {
     #[test]
     fn prim_cons_roundtrip_1d() {
         let eos = IdealGas { gamma: 1.4 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.5]), pre: 2.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.5]),
+            pre: 2.0,
+        };
         let cons = prim.to_conserved(&eos);
         let prim2 = cons.to_primitive(&eos);
         assert!(approx(prim.rho, prim2.rho));
@@ -298,7 +368,11 @@ mod tests {
     #[test]
     fn prim_cons_roundtrip_3d() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let prim = Prim { rho: 0.5, vel: Tensor::new([1.0, -0.3, 0.7]), pre: 0.1 };
+        let prim = Prim {
+            rho: 0.5,
+            vel: Tensor::new([1.0, -0.3, 0.7]),
+            pre: 0.1,
+        };
         let cons = prim.to_conserved(&eos);
         let prim2 = cons.to_primitive(&eos);
         assert!(approx(prim.rho, prim2.rho));
@@ -311,7 +385,11 @@ mod tests {
     #[test]
     fn conserved_values_1d() {
         let eos = IdealGas { gamma: 1.4 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
         let cons = prim.to_conserved(&eos);
         assert!(approx(cons.den, 1.0));
         assert!(approx(cons.mom[0], 0.0));
@@ -321,8 +399,16 @@ mod tests {
 
     #[test]
     fn cons_arithmetic() {
-        let a = Cons::<f64, 2> { den: 1.0, mom: Tensor::new([2.0, 3.0]), nrg: 4.0 };
-        let b = Cons::<f64, 2> { den: 0.5, mom: Tensor::new([1.0, 0.5]), nrg: 2.0 };
+        let a = Cons::<f64, 2> {
+            den: 1.0,
+            mom: Tensor::new([2.0, 3.0]),
+            nrg: 4.0,
+        };
+        let b = Cons::<f64, 2> {
+            den: 0.5,
+            mom: Tensor::new([1.0, 0.5]),
+            nrg: 2.0,
+        };
         let sum = a + b;
         assert!(approx(sum.den, 1.5));
         assert!(approx(sum.mom[0], 3.0));
@@ -346,7 +432,11 @@ mod tests {
     #[test]
     fn isothermal_cons_stores_cs_squared() {
         let eos = crate::eos::Isothermal { cs: 2.0 };
-        let prim = Prim { rho: 3.0, vel: Tensor::new([1.0]), pre: 12.0 }; // p = cs^2*rho = 4*3
+        let prim = Prim {
+            rho: 3.0,
+            vel: Tensor::new([1.0]),
+            pre: 12.0,
+        }; // p = cs^2*rho = 4*3
         let cons = prim.to_conserved(&eos);
         assert!(approx(cons.den, 3.0));
         assert!(approx(cons.mom[0], 3.0));
@@ -357,7 +447,11 @@ mod tests {
     #[test]
     fn isothermal_roundtrip_1d() {
         let eos = crate::eos::Isothermal { cs: 1.5 };
-        let prim = Prim { rho: 2.0, vel: Tensor::new([0.7]), pre: 4.5 }; // p = cs^2*rho = 2.25*2
+        let prim = Prim {
+            rho: 2.0,
+            vel: Tensor::new([0.7]),
+            pre: 4.5,
+        }; // p = cs^2*rho = 2.25*2
         let cons = prim.to_conserved(&eos);
         let prim2 = cons.to_primitive(&eos);
         assert!(approx(prim.rho, prim2.rho));
@@ -370,7 +464,11 @@ mod tests {
         let eos = crate::eos::Isothermal { cs: 0.5 };
         let rho = 4.0;
         let pre = 0.25 * rho; // cs^2 * rho = 0.25 * 4 = 1.0
-        let prim = Prim { rho, vel: Tensor::new([1.0, -0.5, 0.3]), pre };
+        let prim = Prim {
+            rho,
+            vel: Tensor::new([1.0, -0.5, 0.3]),
+            pre,
+        };
         let cons = prim.to_conserved(&eos);
         let prim2 = cons.to_primitive(&eos);
         assert!(approx(prim.rho, prim2.rho));
@@ -386,7 +484,11 @@ mod tests {
         // use a "dummy" global eos — recover_pressure reads cs^2 from nrg.
         let eos = crate::eos::Isothermal { cs: 0.0 }; // global cs irrelevant
         let local_cs_sq = 9.0; // local sound speed squared
-        let cons = Cons { den: 2.0, mom: Tensor::new([1.0]), nrg: local_cs_sq };
+        let cons = Cons {
+            den: 2.0,
+            mom: Tensor::new([1.0]),
+            nrg: local_cs_sq,
+        };
         let prim = cons.to_primitive(&eos);
         assert!(approx(prim.rho, 2.0));
         assert!(approx(prim.vel[0], 0.5));
@@ -396,8 +498,16 @@ mod tests {
 
     #[test]
     fn prim_arithmetic() {
-        let a = Prim::<f64, 2> { rho: 1.0, vel: Tensor::new([2.0, 3.0]), pre: 4.0 };
-        let b = Prim::<f64, 2> { rho: 0.5, vel: Tensor::new([1.0, 0.5]), pre: 2.0 };
+        let a = Prim::<f64, 2> {
+            rho: 1.0,
+            vel: Tensor::new([2.0, 3.0]),
+            pre: 4.0,
+        };
+        let b = Prim::<f64, 2> {
+            rho: 0.5,
+            vel: Tensor::new([1.0, 0.5]),
+            pre: 2.0,
+        };
 
         let sum = a + b;
         assert!(approx(sum.rho, 1.5));

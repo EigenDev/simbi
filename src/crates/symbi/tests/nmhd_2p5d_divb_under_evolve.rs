@@ -26,7 +26,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -61,8 +61,19 @@ fn make_sim() -> Sim {
         .expect("nmhd 2.5d sim construction failed")
         .set_initial(|[x, y]| {
             let vel = Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]);
-            let mag = Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), BZ0 * (2.0 * PI * x).cos()]);
-            MhdPrim { hydro: Prim { rho: rho0, vel, pre: p0 }, mag }
+            let mag = Tensor::new([
+                -B0 * (2.0 * PI * y).sin(),
+                B0 * (4.0 * PI * x).sin(),
+                BZ0 * (2.0 * PI * x).cos(),
+            ]);
+            MhdPrim {
+                hydro: Prim {
+                    rho: rho0,
+                    vel,
+                    pre: p0,
+                },
+                mag,
+            }
         })
         .seed_faces(|axis, [x, y]| match axis {
             0 => -B0 * (2.0 * PI * y).sin(),
@@ -121,10 +132,16 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
     assert!(
         div0 / b0_max.max(1.0) < 1e-13,
         "2.5D ORSZAG-TANG IC is not divergence-free: max|divB|={:e} (rel {:e})",
-        div0, div0 / b0_max.max(1.0),
+        div0,
+        div0 / b0_max.max(1.0),
     );
 
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, /* theta */ 1.0, &sim.geom.allocated);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        /* theta */ 1.0,
+        &sim.geom.allocated,
+    );
 
     let mut max_seen_rel = 0.0_f64;
     let mut steps_seen: u64 = 0;
@@ -135,7 +152,13 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
             rel < DIVB_TOL,
             "2.5D DIVB GREW UNDER EVOLVE at iter {} t={:.4e} cell {:?}: \
              max|divB|={:e}  max|B|={:e}  rel={:e}  (tol {:e}) — 2.5D CT is broken",
-            s.iteration, s.time, worst, max_div, max_b, rel, DIVB_TOL,
+            s.iteration,
+            s.time,
+            worst,
+            max_div,
+            max_b,
+            rel,
+            DIVB_TOL,
         );
         if rel > max_seen_rel {
             max_seen_rel = rel;
@@ -144,7 +167,10 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
     })
     .expect("nmhd 2.5d evolve failed");
 
-    assert!(steps_seen >= 5, "2.5D evolve produced only {steps_seen} steps — gate barely exercised");
+    assert!(
+        steps_seen >= 5,
+        "2.5D evolve produced only {steps_seen} steps — gate barely exercised"
+    );
 
     // PHYSICALITY: recover prims from the evolved conserved state (DOF=3 cons).
     let eos = IdealGas { gamma: GAMMA };
@@ -168,8 +194,16 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
             ]),
         };
         let prim = nmhd_recover(&eos, &cons);
-        assert!(prim.rho.is_finite() && prim.rho > 0.0, "cell {c:?}: rho = {}", prim.rho);
-        assert!(prim.pre.is_finite() && prim.pre > 0.0, "cell {c:?}: p = {}", prim.pre);
+        assert!(
+            prim.rho.is_finite() && prim.rho > 0.0,
+            "cell {c:?}: rho = {}",
+            prim.rho
+        );
+        assert!(
+            prim.pre.is_finite() && prim.pre > 0.0,
+            "cell {c:?}: p = {}",
+            prim.pre
+        );
     }
 
     // the out-of-plane Bz must have evolved (cell-centered induction-flux divergence).

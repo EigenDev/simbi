@@ -30,12 +30,15 @@ const GAMMA: f64 = 5.0 / 3.0;
 const PAD: isize = 3;
 
 #[derive(Clone, Copy)]
-enum Chart { Sph, Cyl }
+enum Chart {
+    Sph,
+    Cyl,
+}
 // (h0, h1, h2) at coordinate (x0, x1, x2). MUST match Metric::scale_factors of the chart.
 fn h(chart: Chart, x: [f64; 3]) -> [f64; 3] {
     match chart {
         Chart::Sph => [1.0, x[0], x[0] * x[1].sin()], // (h_r, h_theta=r, h_phi=r sin theta)
-        Chart::Cyl => [1.0, x[0], 1.0],                // (h_r, h_phi=r, h_z=1)
+        Chart::Cyl => [1.0, x[0], 1.0],               // (h_r, h_phi=r, h_z=1)
     }
 }
 
@@ -52,14 +55,24 @@ fn rnd(c: [isize; 3], salt: u64) -> f64 {
 fn in_window(c: [isize; 3]) -> bool {
     (0..3).all(|a| c[a] >= PAD && c[a] < N as isize - PAD)
 }
-fn b_seed(c: [isize; 3], k: usize) -> f64 { if in_window(c) { rnd(c, k as u64 + 1) } else { 0.0 } }
+fn b_seed(c: [isize; 3], k: usize) -> f64 {
+    if in_window(c) {
+        rnd(c, k as u64 + 1)
+    } else {
+        0.0
+    }
+}
 
 fn pos(fs: &Store, c: [isize; 3], face_axis: usize) -> [f64; 3] {
     // the staggered coordinate: `face_axis` sits on the face (integer), the others at cell centers.
     std::array::from_fn(|a| {
         let base = fs.geom.x_lo[a];
         let d = fs.geom.dx[a];
-        if a == face_axis { base + c[a] as f64 * d } else { base + (c[a] as f64 + 0.5) * d }
+        if a == face_axis {
+            base + c[a] as f64 * d
+        } else {
+            base + (c[a] as f64 + 0.5) * d
+        }
     })
 }
 // the edge along axis k: axis k at the cell CENTER, the two transverse axes on faces.
@@ -67,17 +80,25 @@ fn pos_edge(fs: &Store, c: [isize; 3], edge_axis: usize) -> [f64; 3] {
     std::array::from_fn(|a| {
         let base = fs.geom.x_lo[a];
         let d = fs.geom.dx[a];
-        if a == edge_axis { base + (c[a] as f64 + 0.5) * d } else { base + c[a] as f64 * d }
+        if a == edge_axis {
+            base + (c[a] as f64 + 0.5) * d
+        } else {
+            base + c[a] as f64 * d
+        }
     })
 }
 
 fn seed(fs: &Store) {
     let m = fs.fields.mhd.as_ref().unwrap();
     for k in 0..3 {
-        for c in m.bface[k].domain().iter() { m.bface[k].set(c, b_seed(c, k)); }
+        for c in m.bface[k].domain().iter() {
+            m.bface[k].set(c, b_seed(c, k));
+        }
     }
     for k in 0..3 {
-        for c in m.efield[k].domain().iter() { m.efield[k].set(c, 0.0); }
+        for c in m.efield[k].domain().iter() {
+            m.efield[k].set(c, 0.0);
+        }
     }
 }
 
@@ -96,7 +117,9 @@ fn assert_adjoint_3d(fs: &Store, chart: Chart, label: &str) {
     }
     // curl(J B) = -bface after reset + ct_curl(dt=1).
     for k in 0..3 {
-        for c in m.bface[k].domain().iter() { m.bface[k].set(c, 0.0); }
+        for c in m.bface[k].domain().iter() {
+            m.bface[k].set(c, 0.0);
+        }
     }
     ct_curl::<3, 3, HostMemory, f64>(fs, 1.0);
     // <B, curl(J B)>_F = sum_k sum_face B_k*(-bface[k])*w_{B_k}, w_{B_k} = prod of the OTHER two h.
@@ -108,7 +131,10 @@ fn assert_adjoint_3d(fs: &Store, chart: Chart, label: &str) {
             pair_f += b_seed(c, k) * (-*m.bface[k].at(c)) * w;
         }
     }
-    assert!(norm_e > 1e-6, "{label}: degenerate oracle, <JB,JB>_E = {norm_e} ~ 0");
+    assert!(
+        norm_e > 1e-6,
+        "{label}: degenerate oracle, <JB,JB>_E = {norm_e} ~ 0"
+    );
     let rel = (pair_f - norm_e).abs() / norm_e;
     assert!(
         rel < 1e-10,
@@ -119,7 +145,11 @@ fn assert_adjoint_3d(fs: &Store, chart: Chart, label: &str) {
 
 fn still_gas() -> MhdPrim<f64, 3> {
     MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.0, 0.0, 0.0]),
     }
 }
@@ -128,10 +158,19 @@ fn still_gas() -> MhdPrim<f64, 3> {
 fn spherical_3d_adjoint() {
     // r in [1,2], theta in [0.8, 2.3] (off the poles), phi in [0,1].
     let sim = SimState::<NewtonianMhd, 3, Spherical, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        NewtonianMhd, IdealGas { gamma: GAMMA }, Spherical)
-        .cells([N, N, N]).bounds([1.0, 0.8, 0.0], [2.0, 2.3, 1.0])
-        .boundaries(Boundaries::uniform(BoundaryType::Outflow)).cfl(0.3)
-        .allocate().expect("3d spherical sim").set_initial(|_| still_gas()).seed_faces(|_, _| 0.0).build();
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        Spherical,
+    )
+    .cells([N, N, N])
+    .bounds([1.0, 0.8, 0.0], [2.0, 2.3, 1.0])
+    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+    .cfl(0.3)
+    .allocate()
+    .expect("3d spherical sim")
+    .set_initial(|_| still_gas())
+    .seed_faces(|_, _| 0.0)
+    .build();
     assert_adjoint_3d(&sim, Chart::Sph, "3D spherical");
 }
 
@@ -139,9 +178,18 @@ fn spherical_3d_adjoint() {
 fn cylindrical_3d_adjoint() {
     // r in [1,2], phi in [0,1], z in [0,1].
     let sim = SimState::<NewtonianMhd, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        NewtonianMhd, IdealGas { gamma: GAMMA }, Cylindrical)
-        .cells([N, N, N]).bounds([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])
-        .boundaries(Boundaries::uniform(BoundaryType::Outflow)).cfl(0.3)
-        .allocate().expect("3d cylindrical sim").set_initial(|_| still_gas()).seed_faces(|_, _| 0.0).build();
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        Cylindrical,
+    )
+    .cells([N, N, N])
+    .bounds([1.0, 0.0, 0.0], [2.0, 1.0, 1.0])
+    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+    .cfl(0.3)
+    .allocate()
+    .expect("3d cylindrical sim")
+    .set_initial(|_| still_gas())
+    .seed_faces(|_, _| 0.0)
+    .build();
     assert_adjoint_3d(&sim, Chart::Cyl, "3D cylindrical");
 }

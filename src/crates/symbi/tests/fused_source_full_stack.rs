@@ -39,7 +39,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{FusedSourceFamily, SimulationLaws, NEWTONIAN_SPEC};
+use symbi_hydro::{FusedSourceFamily, NEWTONIAN_SPEC, SimulationLaws};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -57,47 +57,69 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
     let dx = 1.0 / n as f64;
     // uniform stationary gas everywhere.
     let mut sim = Sim2::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([n, n]).spacing([dx, dx])
+        .cells([n, n])
+        .spacing([dx, dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
         .build();
 
     // declare the family, derive the binding from the data layer.
     let g_ext = vec![0.4_f64, 0.0]; // accelerate in +x only
-    let laws = SimulationLaws::new(&NEWTONIAN_SPEC)
-        .with_fused_family(
-            FusedSourceFamily::UniformAcceleration { g_ext: g_ext.clone() },
-            2,
-        );
-    let pair = laws.derive_fused_binding().expect("a fused family produces a binding");
-    assert_eq!(pair.0, "uniform_accel", "the derived slug matches the AOT kernel name");
+    let laws = SimulationLaws::new(&NEWTONIAN_SPEC).with_fused_family(
+        FusedSourceFamily::UniformAcceleration {
+            g_ext: g_ext.clone(),
+        },
+        2,
+    );
+    let pair = laws
+        .derive_fused_binding()
+        .expect("a fused family produces a binding");
+    assert_eq!(
+        pair.0, "uniform_accel",
+        "the derived slug matches the AOT kernel name"
+    );
     let binding = FusedSourceBinding::from_pair(pair);
 
     // wire through the kernel set + evolve via the production loop.
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated)
-        .with_fused_source(binding);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated)
+            .with_fused_source(binding);
     let t_final = 0.05_f64;
     evolve(&mut sim, &sub, t_final).expect("2D evolve with fused source failed");
 
     // gas accelerated in +x to \approx g\cdot t; +y stayed at rest.
     let cells: Vec<[isize; 2]> = sim.geom.interior.iter().collect();
     let cnt = cells.len() as f64;
-    let mean_vx: f64 = cells.iter()
+    let mean_vx: f64 = cells
+        .iter()
         .map(|c| *sim.fields.prim.vel[0].view().at(*c))
-        .sum::<f64>() / cnt;
-    let mean_vy: f64 = cells.iter()
+        .sum::<f64>()
+        / cnt;
+    let mean_vy: f64 = cells
+        .iter()
         .map(|c| *sim.fields.prim.vel[1].view().at(*c))
-        .sum::<f64>() / cnt;
+        .sum::<f64>()
+        / cnt;
     let analytical_vx = g_ext[0] * sim.time;
-    assert!(mean_vx > 0.0, "+x acceleration did not occur (mean vx = {mean_vx})");
+    assert!(
+        mean_vx > 0.0,
+        "+x acceleration did not occur (mean vx = {mean_vx})"
+    );
     assert!(
         (mean_vx - analytical_vx).abs() < 0.5 * analytical_vx.abs(),
         "mean vx = {mean_vx} too far from analytical g·t = {analytical_vx}",
     );
-    assert!(mean_vy.abs() < 1e-6, "+y picked up motion ({mean_vy}); gravity component leaked");
+    assert!(
+        mean_vy.abs() < 1e-6,
+        "+y picked up motion ({mean_vy}); gravity component leaked"
+    );
 }
 
 #[test]
@@ -119,9 +141,18 @@ fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
     let scalars = symbi_ir::kernel_scalar_params_typed_from_ir(ir_blob);
     let scalar_names: Vec<String> = scalars.iter().map(|(b, _)| b.name()).collect();
     let scalar_names: Vec<&str> = scalar_names.iter().map(|s| s.as_str()).collect();
-    assert!(scalar_names.contains(&"xm_0"), "xm_0 missing from {scalar_names:?}");
-    assert!(scalar_names.contains(&"xm_1"), "xm_1 missing from {scalar_names:?}");
-    assert!(scalar_names.contains(&"gm"), "gm missing from {scalar_names:?}");
+    assert!(
+        scalar_names.contains(&"xm_0"),
+        "xm_0 missing from {scalar_names:?}"
+    );
+    assert!(
+        scalar_names.contains(&"xm_1"),
+        "xm_1 missing from {scalar_names:?}"
+    );
+    assert!(
+        scalar_names.contains(&"gm"),
+        "gm missing from {scalar_names:?}"
+    );
     assert!(
         !scalar_names.contains(&"x_0"),
         "x_0 leaked into scalars — Phase 2c centroid binding broke; scalars = {scalar_names:?}",
@@ -132,8 +163,14 @@ fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
     );
 
     // and the geometry scalars ARE present (the centroid is computed from them).
-    assert!(scalar_names.contains(&"x_lo_0"), "x_lo_0 missing (centroid needs the grid origin)");
-    assert!(scalar_names.contains(&"dx_0"),   "dx_0 missing (centroid needs the grid step)");
+    assert!(
+        scalar_names.contains(&"x_lo_0"),
+        "x_lo_0 missing (centroid needs the grid origin)"
+    );
+    assert!(
+        scalar_names.contains(&"dx_0"),
+        "dx_0 missing (centroid needs the grid step)"
+    );
 }
 
 #[test]
@@ -154,7 +191,9 @@ fn fused_source_family_round_trip_uniform_accel() {
     // baked dimension.
     for ndim in 1usize..=3 {
         let g_ext: Vec<f64> = (0..ndim).map(|k| 0.5 * (k as f64 + 1.0)).collect();
-        let family = FusedSourceFamily::UniformAcceleration { g_ext: g_ext.clone() };
+        let family = FusedSourceFamily::UniformAcceleration {
+            g_ext: g_ext.clone(),
+        };
         let (slug, pairs) = family.into_binding_pair();
         assert_eq!(slug, "uniform_accel");
         assert_eq!(pairs.len(), ndim);
@@ -177,7 +216,11 @@ fn fused_source_family_round_trip_point_mass_grav() {
     for ndim in 1usize..=3 {
         let xm: Vec<f64> = vec![0.5; ndim];
         let gm = 1.0_f64;
-        let family = FusedSourceFamily::PointMassGravity { gm, xm: xm.clone(), eps: 0.0 };
+        let family = FusedSourceFamily::PointMassGravity {
+            gm,
+            xm: xm.clone(),
+            eps: 0.0,
+        };
         let (slug, pairs) = family.into_binding_pair();
         assert_eq!(slug, "point_mass_grav");
         // pairs: xm_0..xm_{D-1}, then gm, then eps

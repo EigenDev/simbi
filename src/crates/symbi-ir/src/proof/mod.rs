@@ -36,7 +36,7 @@ pub use poly::{FieldTerm, Poly, RatFun};
 #[cfg(test)]
 mod tests {
     use super::linform::LinForm;
-    use super::poly::{shift_poly_coords, Poly, RatFun};
+    use super::poly::{Poly, RatFun, shift_poly_coords};
     use std::collections::BTreeMap;
 
     #[test]
@@ -55,12 +55,21 @@ mod tests {
     fn ratfun_arithmetic_and_zero() {
         // 1/r - 1/r = 0; 1/r + 1/r = 2/r (nonzero numerator).
         let r = Poly::var("x_lo_0"); // a stand-in nonzero denominator poly.
-        let inv = RatFun { num: Poly::constant(1), den: r.clone() };
+        let inv = RatFun {
+            num: Poly::constant(1),
+            den: r.clone(),
+        };
         assert!(inv.sub(&inv).is_zero());
         assert!(!inv.add(&inv).is_zero());
         // a/b == c/d cancellation by cross-multiply: (2)/(r) - (2*r)/(r*r) == 0.
-        let two_over_r = RatFun { num: Poly::constant(2), den: r.clone() };
-        let two_over_r2 = RatFun { num: Poly::constant(2).mul(&r), den: r.mul(&r) };
+        let two_over_r = RatFun {
+            num: Poly::constant(2),
+            den: r.clone(),
+        };
+        let two_over_r2 = RatFun {
+            num: Poly::constant(2).mul(&r),
+            den: r.mul(&r),
+        };
         assert!(two_over_r.sub(&two_over_r2).is_zero());
     }
 
@@ -88,7 +97,14 @@ mod tests {
         mono.insert("sin_th@1".to_string(), 1u32);
         p.terms.insert(mono, 1);
         let shifted = shift_poly_coords(&p, &[0, 1, 0]);
-        assert!(shifted.terms.keys().next().unwrap().contains_key("sin_th@3"));
+        assert!(
+            shifted
+                .terms
+                .keys()
+                .next()
+                .unwrap()
+                .contains_key("sin_th@3")
+        );
     }
 
     #[test]

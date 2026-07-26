@@ -7,13 +7,13 @@
 // host wrapper (`rhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use crate::spatial_metric::SpatialMetric;
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::state::{Prim, Cons};
 use crate::c2p_result::C2pResult;
+use crate::eos::Eos;
 use crate::rhd::lorentz_factor;
+use crate::spatial_metric::SpatialMetric;
+use crate::state::{Cons, Prim};
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 /// maximum newton-raphson iterations for RHD cons2prim on the HOST (early-break).
 /// the substrate kernel bakes its own fixed count (build.rs passes 20 to the gv
@@ -99,7 +99,11 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // and math to rmhd_recover.
     let qq = tau / dd;
     let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
-    let pre = S::select(cone_ok, p_eq, S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE));
+    let pre = S::select(
+        cone_ok,
+        p_eq,
+        S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE),
+    );
     Prim { rho, vel, pre }
 }
 
@@ -120,7 +124,8 @@ pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     // kernel path) that keeps the recovery's `dd/ww`, `tau+dd+p` finite for callers.
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = Prim {
-            rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR), vel: Tensor::zeros(),
+            rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+            vel: Tensor::zeros(),
             pre: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
         };
         return C2pResult::err(floored, code);
@@ -133,15 +138,19 @@ pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
     let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-    if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
+    if code.is_ok() {
+        C2pResult::ok(prim)
+    } else {
+        C2pResult::err(prim, code)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rhd::Rhd;
-    use crate::regime::Regime;
     use crate::eos::IdealGas;
+    use crate::regime::Regime;
+    use crate::rhd::Rhd;
 
     fn approx_rel(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol * a.abs().max(b.abs()).max(1.0)
@@ -151,7 +160,11 @@ mod tests {
     fn roundtrip_stationary() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-10));
@@ -163,7 +176,11 @@ mod tests {
     fn roundtrip_mildly_relativistic() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.5]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.5]),
+            pre: 1.0,
+        };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-10));
@@ -175,7 +192,11 @@ mod tests {
     fn roundtrip_ultra_relativistic() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.99]), pre: 10.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.99]),
+            pre: 10.0,
+        };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx_rel(prim.rho, prim2.rho, 1e-8));
@@ -207,18 +228,28 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
         for &(rho, pre) in &[(10.0, 13.33), (1.0, 1e-6), (1e-2, 1e-4)] {
-            let prim = Prim { rho, vel: Tensor::new([0.0]), pre };
+            let prim = Prim {
+                rho,
+                vel: Tensor::new([0.0]),
+                pre,
+            };
             let cons = regime.to_conserved(&eos, &prim);
             let prim2 = regime.to_primitive(&eos, &cons).unwrap();
             assert!(
                 approx_rel(prim.rho, prim2.rho, 1e-8),
                 "rho: {} vs {} (input rho={}, pre={})",
-                prim.rho, prim2.rho, rho, pre
+                prim.rho,
+                prim2.rho,
+                rho,
+                pre
             );
             assert!(
                 approx_rel(prim.pre, prim2.pre, 1e-8),
                 "pre: {} vs {} (input rho={}, pre={})",
-                prim.pre, prim2.pre, rho, pre
+                prim.pre,
+                prim2.pre,
+                rho,
+                pre
             );
         }
     }
@@ -227,9 +258,17 @@ mod tests {
     fn negative_density_detected() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let cons = Cons { den: -1.0, mom: Tensor::new([0.0]), nrg: 1.0 };
+        let cons = Cons {
+            den: -1.0,
+            mom: Tensor::new([0.0]),
+            nrg: 1.0,
+        };
         let result = regime.to_primitive(&eos, &cons);
-        assert!(result.error.contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY));
+        assert!(
+            result
+                .error
+                .contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY)
+        );
         assert!(result.value.rho > 0.0);
     }
 
@@ -238,7 +277,11 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
         // huge momentum, tiny density+energy -> superluminal or negative pressure
-        let cons = Cons { den: 1e-14, mom: Tensor::new([100.0]), nrg: 1e-14 };
+        let cons = Cons {
+            den: 1e-14,
+            mom: Tensor::new([100.0]),
+            nrg: 1e-14,
+        };
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.error.is_err());
     }
@@ -257,14 +300,24 @@ mod tests {
     fn kernel_path_unphysical_cons_recovers_finite_and_flagged() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         // s_mag = 10 >> d + tau = 1.1 => out of cone (tau + d < sqrt(d^2 + s_mag^2)).
-        let cons: Cons<f64, 1> = Cons { den: 1.0, mom: Tensor::new([10.0]), nrg: 0.1 };
+        let cons: Cons<f64, 1> = Cons {
+            den: 1.0,
+            mom: Tensor::new([10.0]),
+            nrg: 0.1,
+        };
         let prim = rhd_recover(&eos, &cons, &SpatialMetric::flat(), MAX_ITER);
         assert!(
             prim.rho.is_finite() && prim.pre.is_finite() && prim.vel[0].is_finite(),
             "unified c2p must recover a FINITE state (rho={}, pre={}, v={}), not a NaN",
-            prim.rho, prim.pre, prim.vel[0]
+            prim.rho,
+            prim.pre,
+            prim.vel[0]
         );
-        assert!(prim.rho > 0.0, "density must stay positive/finite, got {}", prim.rho);
+        assert!(
+            prim.rho > 0.0,
+            "density must stay positive/finite, got {}",
+            prim.rho
+        );
         assert!(
             prim.pre <= 0.0,
             "out-of-cone state must flag a non-positive pressure (the FOFC-visible signal), got {}",
@@ -276,7 +329,11 @@ mod tests {
     fn valid_rhd_state_is_ok() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.3]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3]),
+            pre: 1.0,
+        };
         let cons = regime.to_conserved(&eos, &prim);
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.is_ok());

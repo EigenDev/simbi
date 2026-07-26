@@ -5,11 +5,13 @@
 // =============================================================================
 
 use super::*;
-use symbi_hydro::rhd::RhdGr;
+use symbi_geometry::{
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
+};
 use symbi_hydro::RmhdGr;
+use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
-
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
 /// primitive (rho, v_{0,1,2}, pre, B_{0,1,2}) to the face, then the canonical
@@ -26,14 +28,24 @@ use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarz
 // GRID axis `dir`; the NORMAL is physical component `coord_n` (= axes[dir]; == dir for
 // cartesian/identity, [0,2][dir] for cyl r-z) — nhat and the staggered normal-B override
 // both index `coord_n`, while the face field is read along grid `dir`.
-fn nmhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (IdealGas<Gv>, MhdPrim<Gv, 3>, MhdPrim<Gv, 3>, Tensor<Gv, 3>) {
+fn nmhd_reconstruct(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (IdealGas<Gv>, MhdPrim<Gv, 3>, MhdPrim<Gv, 3>, Tensor<Gv, 3>) {
     let gamma = Gv::scalar("gamma");
     let theta = Gv::scalar("theta");
     let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
     let mut vl = Vec::with_capacity(3);
     let mut vr = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim,
+            dir,
+            theta,
+        );
         vl.push(l);
         vr.push(r);
     }
@@ -41,7 +53,13 @@ fn nmhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (IdealGas<Gv>, MhdPrim
     let mut bl = Vec::with_capacity(3);
     let mut br = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_b{k}"), &format!("prim.mag[{k}]"), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_b{k}"),
+            &format!("prim.mag[{k}]"),
+            ndim,
+            dir,
+            theta,
+        );
         bl.push(l);
         br.push(r);
     }
@@ -55,7 +73,11 @@ fn nmhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (IdealGas<Gv>, MhdPrim
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
     let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
-        hydro: Prim { rho, vel: Tensor::new([v[0], v[1], v[2]]), pre: p },
+        hydro: Prim {
+            rho,
+            vel: Tensor::new([v[0], v[1], v[2]]),
+            pre: p,
+        },
         mag: Tensor::new([b[0], b[1], b[2]]),
     };
     let left = mk(rho_l, &vl, pre_l, &bl);
@@ -64,22 +86,40 @@ fn nmhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (IdealGas<Gv>, MhdPrim
     (IdealGas { gamma }, left, right, nhat)
 }
 
-
 // the 8 conserved face-flux writes (D, S_{0..2}, nrg, B_{0..2}).
 fn nmhd_flux_writes(flux: &MhdCons<Gv, 3>) -> Vec<(String, FieldBind, NodeId)> {
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+    let mut writes = vec![(
+        "flux_den".to_string(),
+        FieldRef::flux_den().into(),
+        flux.den.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+        writes.push((
+            format!("flux_mom_{k}"),
+            FieldRef::flux_mom(k as u8).into(),
+            flux.mom[k].node(),
+        ));
     }
-    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+    writes.push((
+        "flux_nrg".to_string(),
+        FieldRef::flux_nrg().into(),
+        flux.nrg.node(),
+    ));
     for k in 0..3 {
-        writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+        writes.push((
+            format!("flux_mag_{k}"),
+            format!("flux.mag_{k}").into(),
+            flux.mag[k].node(),
+        ));
     }
     writes
 }
 
-
-pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hlle(&NewtonianMhd, &eos, &left, &right, &nhat, Gv::ZERO);
@@ -87,21 +127,34 @@ pub fn nmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     (end_trace(), writes)
 }
 
-
 /// NMHD HLLC face flux — `hllc_newtonian` (Li 2005, contact-resolving, transverse-B
 /// continuous) on the reconstructed L/R states. inline wave speeds (no ws_l/ws_r).
-pub fn nmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_hllc_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hllc_newtonian(&eos, &left, &right, &nhat, Gv::ZERO, ShockwaveLimiter::Standard);
+    let flux = hllc_newtonian(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        Gv::ZERO,
+        ShockwaveLimiter::Standard,
+    );
     let writes = nmhd_flux_writes(&flux);
     (end_trace(), writes)
 }
 
-
 /// NMHD HLLD face flux — `hlld_newtonian` (Miyoshi-Kusano 2005, full 5-wave). the
 /// robust solver: the algebraic c2p + this closed-form HLLD make Orszag-Tang stable.
-pub fn nmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn nmhd_hlld_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
     let flux = hlld_newtonian(&eos, &left, &right, &nhat, Gv::ZERO);
@@ -109,26 +162,46 @@ pub fn nmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(S
     (end_trace(), writes)
 }
 
-
 // shared isothermal face-flux reconstruction: bind cs + theta, PLM-reconstruct the
 // 7-component iso-MHD primitive (rho, v_{0..2}, B_{0..2}) to the face. NO pre. the
 // NORMAL field comes from the staggered face field (bface coupling, see
 // nmhd_reconstruct). returns the Isothermal eos + L/R primitives + the sweep normal.
-fn imhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (Isothermal<Gv>, IsoMhdPrim<Gv, 3>, IsoMhdPrim<Gv, 3>, Tensor<Gv, 3>) {
+fn imhd_reconstruct(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (
+    Isothermal<Gv>,
+    IsoMhdPrim<Gv, 3>,
+    IsoMhdPrim<Gv, 3>,
+    Tensor<Gv, 3>,
+) {
     let cs = Gv::scalar("cs");
     let theta = Gv::scalar("theta");
     let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
     let mut vl = Vec::with_capacity(3);
     let mut vr = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim,
+            dir,
+            theta,
+        );
         vl.push(l);
         vr.push(r);
     }
     let mut bl = Vec::with_capacity(3);
     let mut br = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_b{k}"), &format!("prim.mag[{k}]"), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_b{k}"),
+            &format!("prim.mag[{k}]"),
+            ndim,
+            dir,
+            theta,
+        );
         bl.push(l);
         br.push(r);
     }
@@ -138,7 +211,11 @@ fn imhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (Isothermal<Gv>, IsoMh
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
     let mk = |rho: Gv, v: &[Gv], b: &[Gv]| IsoMhdPrim::<Gv, 3> {
-        hydro: PrimG { rho, vel: Tensor::new([v[0], v[1], v[2]]), pre: Zero::default() },
+        hydro: PrimG {
+            rho,
+            vel: Tensor::new([v[0], v[1], v[2]]),
+            pre: Zero::default(),
+        },
         mag: Tensor::new([b[0], b[1], b[2]]),
     };
     let left = mk(rho_l, &vl, &bl);
@@ -147,22 +224,36 @@ fn imhd_reconstruct(ndim: u8, dir: u8, coord_n: usize) -> (Isothermal<Gv>, IsoMh
     (Isothermal { cs }, left, right, nhat)
 }
 
-
 // the 7 conserved face-flux writes (D, S_{0..2}, B_{0..2}) — NO nrg.
 fn imhd_flux_writes(flux: &IsoMhdCons<Gv, 3>) -> Vec<(String, FieldBind, NodeId)> {
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+    let mut writes = vec![(
+        "flux_den".to_string(),
+        FieldRef::flux_den().into(),
+        flux.den.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+        writes.push((
+            format!("flux_mom_{k}"),
+            FieldRef::flux_mom(k as u8).into(),
+            flux.mom[k].node(),
+        ));
     }
     for k in 0..3 {
-        writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+        writes.push((
+            format!("flux_mag_{k}"),
+            format!("flux.mag_{k}").into(),
+            flux.mag[k].node(),
+        ));
     }
     writes
 }
 
-
 /// isothermal-MHD HLLE face flux.
-pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn imhd_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = imhd_reconstruct(ndim, dir, coord_n);
     let flux = hlle(&IsothermalMhd, &eos, &left, &right, &nhat, Gv::ZERO);
@@ -170,16 +261,18 @@ pub fn imhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     (end_trace(), writes)
 }
 
-
 /// isothermal-MHD HLLD face flux — `hlld_isothermal` (Mignone 2007, 3-state).
-pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn imhd_hlld_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = imhd_reconstruct(ndim, dir, coord_n);
     let flux = hlld_isothermal(&eos, &left, &right, &nhat, Gv::ZERO);
     let writes = imhd_flux_writes(&flux);
     (end_trace(), writes)
 }
-
 
 // =============================================================================
 // face flux — PLM reconstruction (Gv stencil) composed with the carrier-generic
@@ -200,11 +293,10 @@ pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(S
 /// uses, minted through `MeshScalar` so the trace and the dispatch cannot drift.
 fn mesh_face_velocity_gv(dir: u8) -> Gv {
     let mesh_adot = Gv::scalar(&MeshScalar::Adot(dir).name());
-    let x_face = Gv::scalar(&format!("x_lo_{dir}"))
-        + Gv::coord(dir) * Gv::scalar(&format!("dx_{dir}"));
+    let x_face =
+        Gv::scalar(&format!("x_lo_{dir}")) + Gv::coord(dir) * Gv::scalar(&format!("dx_{dir}"));
     mesh_adot * x_face + Gv::scalar(&MeshScalar::Vtrans(dir).name())
 }
-
 
 // shared euler (ideal-gas Newtonian/relativistic) face reconstruction: bind the
 // scalar tail (gamma, theta), theta-MC PLM-reconstruct the (rho, vel_{0..D}, pre)
@@ -225,7 +317,13 @@ fn euler_reconstruct<const D: usize>(
     let mut vl = Vec::with_capacity(D);
     let mut vr = Vec::with_capacity(D);
     for k in 0..D {
-        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim,
+            dir,
+            theta,
+        );
         vl.push(l);
         vr.push(r);
     }
@@ -234,24 +332,42 @@ fn euler_reconstruct<const D: usize>(
     let eos = IdealGas { gamma };
     let vl_arr: [Gv; D] = vl.try_into().expect("D velocity components");
     let vr_arr: [Gv; D] = vr.try_into().expect("D velocity components");
-    let left = Prim::<Gv, D> { rho: rho_l, vel: Tensor::new(vl_arr), pre: pre_l };
-    let right = Prim::<Gv, D> { rho: rho_r, vel: Tensor::new(vr_arr), pre: pre_r };
+    let left = Prim::<Gv, D> {
+        rho: rho_l,
+        vel: Tensor::new(vl_arr),
+        pre: pre_l,
+    };
+    let right = Prim::<Gv, D> {
+        rho: rho_r,
+        vel: Tensor::new(vr_arr),
+        pre: pre_r,
+    };
     let nhat = Tensor::<Gv, D>::unit(coord_n);
     let vface = mesh_face_velocity_gv(dir);
     (eos, left, right, nhat, vface)
 }
 
-
 // the D+2 conserved face-flux writes (D, S_{0..D}, nrg) for an euler-shaped Cons.
 fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> Vec<(String, FieldBind, NodeId)> {
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+    let mut writes = vec![(
+        "flux_den".to_string(),
+        FieldRef::flux_den().into(),
+        flux.den.node(),
+    )];
     for k in 0..D {
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+        writes.push((
+            format!("flux_mom_{k}"),
+            FieldRef::flux_mom(k as u8).into(),
+            flux.mom[k].node(),
+        ));
     }
-    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+    writes.push((
+        "flux_nrg".to_string(),
+        FieldRef::flux_nrg().into(),
+        flux.nrg.node(),
+    ));
     writes
 }
-
 
 /// trace an ideal-gas Euler face flux (Newtonian OR relativistic) along sweep `dir` —
 /// the gv single source: PLM-reconstruct (rho, every vel_k, pre) to the face, then the
@@ -281,14 +397,12 @@ where
     (end_trace(), writes)
 }
 
-
 /// the adiabatic (ideal-gas Newtonian Euler) face flux — `euler_hlle_flux_gv` at the
 /// `Newtonian` regime. replaces the cartesian `hlle_flux(.., has_energy=true)` builder.
 /// cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
 pub fn adiabatic_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     euler_hlle_flux_gv::<D, _>(&Newtonian, D as u8, dir, dir as usize)
 }
-
 
 /// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
 /// into KE) on a 2D (r, z) grid; the sweep coordinate is `axes[dir]` ([0, 2][dir] — grid
@@ -298,14 +412,12 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, N
     euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n)
 }
 
-
 /// the RHD (special-relativistic Euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
 /// regime (relativistic U/F/wave speeds via Mignone-Bodo). replaces the `rhd_hlle_flux`
 /// Expr builder + `rhd_side`. cartesian-only (rhd has no cyl r-z), ncomp == ndim == D.
 pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize)
 }
-
 
 /// the RHD face flux on a curved spacetime — the `_schw`/`_ks` GR path. PLM-reconstruct the
 /// CONTRAVARIANT-velocity primitive, build the in-kernel 3+1 block (gamma/gamma^{-1}, lapse, shift)
@@ -337,7 +449,8 @@ where
     // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
     // the gridded sweeps like any transverse component). the sweep NORMAL is coordinate `axes[dir]`.
     let ndim = axes.len();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize]);
+    let (eos, left, right, nhat, vface) =
+        euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize]);
     // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse GRIDDED coordinates at
     // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
     // slot (the axisymmetric phi) takes zero: the spherical metrics never read phi, and
@@ -368,37 +481,90 @@ where
     let (gamma, gamma_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update
         // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius; non-diagonal
         // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
         (Spacetime::Kerr, Coords::Cartesian) => {
-            let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            let m = KerrKSCartesian {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::Kerr, Coords::Cylindrical) => {
-            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            let m = KerrKSCylindrical {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} at the face — swirl (D = 3) only.
-            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x), m.volume_factor(x))
+            let m = KerrKS {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                m.shift(x),
+                m.volume_factor(x),
+            )
         }
-        (Spacetime::Minkowski, _) => unreachable!("the GR flux is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GR flux is baked only for a curved spacetime")
+        }
     };
     // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying
     // variable w = v^phi + (gamma_{r phi} / gamma_{phi phi}) v^r, so a zero-angular-momentum
@@ -433,7 +599,8 @@ where
             };
             let m = KerrKS { mass, spin };
             let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
-                &m, Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+                &m,
+                Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
             );
             gm_c[(0, 2)] / gm_c[(2, 2)]
         };
@@ -443,9 +610,8 @@ where
             let vp = Gv::field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
             vp + q_at(off) * vr
         };
-        let (w_l, w_r) = plm_theta_from_stencil(
-            stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim,
-        );
+        let (w_l, w_r) =
+            plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
         // back to v^phi with the FACE coefficient — the same matrices the riemann states lower
         // with, so the face cancellation is exact to roundoff.
         let q_face = gamma[(0, 2)] / gamma[(2, 2)];
@@ -485,7 +651,6 @@ where
     (end_trace(), writes)
 }
 
-
 /// the isothermal face flux — ISO-NATIVE through the gv path. traces the iso physics
 /// DIRECTLY (no `Regime` trait, no `IdealGas{gamma}` EOS, no energy U/F): U/F have
 /// `(den, mom_k)` only, wave speeds use `cs = sqrt(pre / rho)` with prim.pre carrying
@@ -497,7 +662,6 @@ where
 pub fn iso_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     iso_hlle_flux_gv::<D>(D as u8, dir, dir as usize)
 }
-
 
 /// build the iso HLLE face flux directly using Gv ops — no Regime trait detour, no
 /// generic `riemann::hlle` (which would force adiabatic-shaped `Cons<S,D>`). HLLE the
@@ -524,7 +688,13 @@ fn iso_hlle_flux_gv<const D: usize>(
     let mut vl: Vec<Gv> = Vec::with_capacity(D);
     let mut vr: Vec<Gv> = Vec::with_capacity(D);
     for k in 0..D {
-        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim,
+            dir,
+            theta,
+        );
         vl.push(l);
         vr.push(r);
     }
@@ -570,37 +740,48 @@ fn iso_hlle_flux_gv<const D: usize>(
     let den_flux = Gv::branch(
         s_l.cmp_ge(vface),
         || f_l_den - rho_l * vface,
-        || Gv::branch(
-            s_r.cmp_le(vface),
-            || f_r_den - rho_r * vface,
-            || den_hll - den_u_hll * vface,
-        ),
+        || {
+            Gv::branch(
+                s_r.cmp_le(vface),
+                || f_r_den - rho_r * vface,
+                || den_hll - den_u_hll * vface,
+            )
+        },
     );
 
     let mut mom_flux: Vec<Gv> = Vec::with_capacity(D);
     for k in 0..D {
-        let mom_hll = (f_l_mom[k] * s_r - f_r_mom[k] * s_l
-                     + (u_r_mom[k] - u_l_mom[k]) * (s_l * s_r)) * inv;
+        let mom_hll =
+            (f_l_mom[k] * s_r - f_r_mom[k] * s_l + (u_r_mom[k] - u_l_mom[k]) * (s_l * s_r)) * inv;
         let mom_u_hll = (u_r_mom[k] * s_r - u_l_mom[k] * s_l - f_r_mom[k] + f_l_mom[k]) * inv;
         let mk = Gv::branch(
             s_l.cmp_ge(vface),
             || f_l_mom[k] - u_l_mom[k] * vface,
-            || Gv::branch(
-                s_r.cmp_le(vface),
-                || f_r_mom[k] - u_r_mom[k] * vface,
-                || mom_hll - mom_u_hll * vface,
-            ),
+            || {
+                Gv::branch(
+                    s_r.cmp_le(vface),
+                    || f_r_mom[k] - u_r_mom[k] * vface,
+                    || mom_hll - mom_u_hll * vface,
+                )
+            },
         );
         mom_flux.push(mk);
     }
 
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), den_flux.node())];
+    let mut writes = vec![(
+        "flux_den".to_string(),
+        FieldRef::flux_den().into(),
+        den_flux.node(),
+    )];
     for k in 0..D {
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), mom_flux[k].node()));
+        writes.push((
+            format!("flux_mom_{k}"),
+            FieldRef::flux_mom(k as u8).into(),
+            mom_flux[k].node(),
+        ));
     }
     (end_trace(), writes)
 }
-
 
 /// trace the RMHD (relativistic MHD) face flux along sweep `dir` on an `ndim`-grid — the
 /// gv single source: theta-MC PLM-reconstruct (rho, vel_{0,1,2}, pre, mag_{0,1,2}) to the
@@ -608,7 +789,11 @@ fn iso_hlle_flux_gv<const D: usize>(
 /// wave speeds + induction flux, all S::select-traceable). replaces the `rmhd_hlle_flux`
 /// Expr builder + `lower_rmhd_side`. RMHD vectors are ALWAYS 3-component; `ndim` selects the
 /// reconstruction grid + emit loop. writes the 8 conserved fluxes (D, S_k, tau, B_k).
-pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // scalar params in the substrate order: gamma (EOS) then theta (limiter compression).
     let gamma = Gv::scalar("gamma");
@@ -617,7 +802,13 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     let mut vl = Vec::with_capacity(3);
     let mut vr = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim,
+            dir,
+            theta,
+        );
         vl.push(l);
         vr.push(r);
     }
@@ -625,7 +816,13 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     let mut bl = Vec::with_capacity(3);
     let mut br = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_b{k}"), &format!("prim.mag[{k}]"), ndim, dir, theta);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_b{k}"),
+            &format!("prim.mag[{k}]"),
+            ndim,
+            dir,
+            theta,
+        );
         bl.push(l);
         br.push(r);
     }
@@ -633,7 +830,11 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     // the SINGLE-SOURCE physics: reconstructed L/R MHD primitives -> canonical HLLE.
     let eos = IdealGas { gamma };
     let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
-        hydro: Prim { rho, vel: Tensor::new([v[0], v[1], v[2]]), pre: p },
+        hydro: Prim {
+            rho,
+            vel: Tensor::new([v[0], v[1], v[2]]),
+            pre: p,
+        },
         mag: Tensor::new([b[0], b[1], b[2]]),
     };
     // normal B from the staggered FACE field (Gardiner-Stone CT coupling) — reconstructed
@@ -663,13 +864,29 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     let s_r = wsr_m1.max(wsr_0).max(Gv::ZERO);
     let flux = hlle_with_speeds(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r);
 
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+    let mut writes = vec![(
+        "flux_den".to_string(),
+        FieldRef::flux_den().into(),
+        flux.den.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+        writes.push((
+            format!("flux_mom_{k}"),
+            FieldRef::flux_mom(k as u8).into(),
+            flux.mom[k].node(),
+        ));
     }
-    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+    writes.push((
+        "flux_nrg".to_string(),
+        FieldRef::flux_nrg().into(),
+        flux.nrg.node(),
+    ));
     for k in 0..3 {
-        writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+        writes.push((
+            format!("flux_mag_{k}"),
+            format!("flux.mag_{k}").into(),
+            flux.mag[k].node(),
+        ));
     }
 
     // the smem tile: reconstruction is 1D ALONG `dir`, so the
@@ -683,10 +900,12 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
     }
     let mut halo = vec![0u8; ndim as usize];
     halo[dir as usize] = 2;
-    let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
+    let k = k.with_tile_spec(TileSpec {
+        halo,
+        tiled_field_keys: stencil_keys,
+    });
     (k, writes)
 }
-
 
 /// the RMHD face flux on a curved SPATIAL metric — the GRMHD path (Valencia covariant U/F via
 /// `RmhdGr` + the fast-magnetosonic-bound coordinate wave speeds). PLM-reconstruct the 8 MHD
@@ -719,7 +938,13 @@ pub fn rmhd_flux_gr_gv(
     let mut vl = Vec::with_capacity(3);
     let mut vr = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim as u8, dir, theta_lim);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim as u8,
+            dir,
+            theta_lim,
+        );
         vl.push(l);
         vr.push(r);
     }
@@ -727,7 +952,13 @@ pub fn rmhd_flux_gr_gv(
     let mut bl = Vec::with_capacity(3);
     let mut br = Vec::with_capacity(3);
     for k in 0..3 {
-        let (l, r) = plm_theta_gv(&format!("prim_b{k}"), &format!("prim.mag[{k}]"), ndim as u8, dir, theta_lim);
+        let (l, r) = plm_theta_gv(
+            &format!("prim_b{k}"),
+            &format!("prim.mag[{k}]"),
+            ndim as u8,
+            dir,
+            theta_lim,
+        );
         bl.push(l);
         br.push(r);
     }
@@ -737,7 +968,11 @@ pub fn rmhd_flux_gr_gv(
     br[coord_n] = bn_face;
     let eos = IdealGas { gamma: gamma_eos };
     let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
-        hydro: Prim { rho, vel: Tensor::new([v[0], v[1], v[2]]), pre: p },
+        hydro: Prim {
+            rho,
+            vel: Tensor::new([v[0], v[1], v[2]]),
+            pre: p,
+        },
         mag: Tensor::new([b[0], b[1], b[2]]),
     };
     let left = mk(rho_l, &vl, pre_l, &bl);
@@ -752,7 +987,11 @@ pub fn rmhd_flux_gr_gv(
             gv_axis_face_at(dir as usize, spacing[dir as usize], 0)
         } else {
             match axes.iter().position(|&a| a == c) {
-                Some(d) => geo.as_ref().expect("a transverse gridded axis implies ndim > 1").centroid[d],
+                Some(d) => {
+                    geo.as_ref()
+                        .expect("a transverse gridded axis implies ndim > 1")
+                        .centroid[d]
+                }
                 None => gv_ungridded_slot(coords, c),
             }
         }
@@ -761,19 +1000,39 @@ pub fn rmhd_flux_gr_gv(
     let (gamma, gamma_inv, alpha, beta) = match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
         (Spacetime::KerrSchild, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
         (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
@@ -783,15 +1042,25 @@ pub fn rmhd_flux_gr_gv(
             // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
             let spin = Gv::scalar("kerr_spin");
             let m = KerrKSCartesian { mass, spin };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
-(Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::Kerr, Coords::Cylindrical) => {
             // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
             // and a radial shift (the moving-interface fan handles it). the flux is otherwise
             // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
             let spin = Gv::scalar("kerr_spin");
             let m = KerrKSCylindrical { mass, spin };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
@@ -799,9 +1068,16 @@ pub fn rmhd_flux_gr_gv(
             // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
             let spin = Gv::scalar("kerr_spin");
             let m = KerrKS { mass, spin };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
         }
-        (Spacetime::Minkowski, _) => unreachable!("the GRMHD flux is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GRMHD flux is baked only for a curved spacetime")
+        }
     };
     // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying variable
     // w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so a zero-angular-momentum (S_phi = 0) dragging
@@ -818,14 +1094,21 @@ pub fn rmhd_flux_gr_gv(
             let (r_c, th_c) = if dir == 0 {
                 let rl = gv_axis_face_at(0, spacing[0], off as i64);
                 let rh = gv_axis_face_at(0, spacing[0], off as i64 + 1);
-                (Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4)) / (gv_powi(rh, 3) - gv_powi(rl, 3)), geo_c.centroid[1])
+                (
+                    Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4))
+                        / (gv_powi(rh, 3) - gv_powi(rl, 3)),
+                    geo_c.centroid[1],
+                )
             } else {
                 let tl = gv_axis_face_at(1, spacing[1], off as i64);
                 let th = gv_axis_face_at(1, spacing[1], off as i64 + 1);
                 let num = (th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos());
                 (geo_c.centroid[0], num / (tl.cos() - th.cos()))
             };
-            let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(&KerrKS { mass, spin }, Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]));
+            let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+                &KerrKS { mass, spin },
+                Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+            );
             gm_c[(0, 2)] / gm_c[(2, 2)]
         };
         let stencil = |off: i32| -> Gv {
@@ -833,7 +1116,8 @@ pub fn rmhd_flux_gr_gv(
             let vp = Gv::field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
             vp + q_at(off) * vr
         };
-        let (w_l, w_r) = plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
+        let (w_l, w_r) =
+            plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
         let q_face = gamma[(0, 2)] / gamma[(2, 2)];
         let mut lv = left;
         let mut rv = right;
@@ -843,7 +1127,10 @@ pub fn rmhd_flux_gr_gv(
     } else {
         (left, right)
     };
-    let regime = RmhdGr { metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)), alpha };
+    let regime = RmhdGr {
+        metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
+        alpha,
+    };
     // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
     // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
     // applied by the has_shift fan below). this is the provably admissibility-preserving low-order
@@ -876,19 +1163,39 @@ pub fn rmhd_flux_gr_gv(
         alpha * f.nrg + (alpha - Gv::ONE) * f.den - beta.dot(&f.mom)
     };
     if hlld && !rusanov {
-        let w = if has_shift { beta[coord_n] / alpha } else { Gv::ZERO };
+        let w = if has_shift {
+            beta[coord_n] / alpha
+        } else {
+            Gv::ZERO
+        };
         let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
         if has_shift {
             flux.mag = flux.mag + beta.scale(bn_face / alpha);
         }
         flux.hydro.nrg = covariant_nrg(&flux);
-        let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+        let mut writes = vec![(
+            "flux_den".to_string(),
+            FieldRef::flux_den().into(),
+            flux.den.node(),
+        )];
         for k in 0..3 {
-            writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+            writes.push((
+                format!("flux_mom_{k}"),
+                FieldRef::flux_mom(k as u8).into(),
+                flux.mom[k].node(),
+            ));
         }
-        writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+        writes.push((
+            "flux_nrg".to_string(),
+            FieldRef::flux_nrg().into(),
+            flux.nrg.node(),
+        ));
         for k in 0..3 {
-            writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+            writes.push((
+                format!("flux_mag_{k}"),
+                format!("flux.mag_{k}").into(),
+                flux.mag[k].node(),
+            ));
         }
         let k = end_trace();
         let stencil_keys = k.stencil_read_field_keys();
@@ -897,7 +1204,10 @@ pub fn rmhd_flux_gr_gv(
         }
         let mut halo = vec![0u8; ndim];
         halo[dir as usize] = 2;
-        let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
+        let k = k.with_tile_spec(TileSpec {
+            halo,
+            tiled_field_keys: stencil_keys,
+        });
         return (k, writes);
     }
     let mut flux = if has_shift {
@@ -934,13 +1244,29 @@ pub fn rmhd_flux_gr_gv(
     };
     flux.hydro.nrg = covariant_nrg(&flux);
 
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+    let mut writes = vec![(
+        "flux_den".to_string(),
+        FieldRef::flux_den().into(),
+        flux.den.node(),
+    )];
     for k in 0..3 {
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+        writes.push((
+            format!("flux_mom_{k}"),
+            FieldRef::flux_mom(k as u8).into(),
+            flux.mom[k].node(),
+        ));
     }
-    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+    writes.push((
+        "flux_nrg".to_string(),
+        FieldRef::flux_nrg().into(),
+        flux.nrg.node(),
+    ));
     for k in 0..3 {
-        writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+        writes.push((
+            format!("flux_mag_{k}"),
+            format!("flux.mag_{k}").into(),
+            flux.mag[k].node(),
+        ));
     }
     let k = end_trace();
     let stencil_keys = k.stencil_read_field_keys();
@@ -949,10 +1275,12 @@ pub fn rmhd_flux_gr_gv(
     }
     let mut halo = vec![0u8; ndim];
     halo[dir as usize] = 2;
-    let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
+    let k = k.with_tile_spec(TileSpec {
+        halo,
+        tiled_field_keys: stencil_keys,
+    });
     (k, writes)
 }
-
 
 // =============================================================================
 // HLLC face flux — contact-resolving 3-wave solver, regime-specific bodies. one
@@ -967,14 +1295,22 @@ pub fn rmhd_flux_gr_gv(
 /// `euler_hlle_flux_gv(&Newtonian, ...)` but calls `riemann::hllc` instead of
 /// `riemann::hlle`. carrier-generic over Gv; iso is structurally excluded
 /// (no contact wave -> HLLE-only).
-pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn adiabatic_hllc_flux_gv<const D: usize>(
+    dir: u8,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
-    let flux = hllc(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Standard);
+    let flux = hllc(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        vface,
+        ShockwaveLimiter::Standard,
+    );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
-
 
 /// adiabatic HLLC-LM face flux: the same builder as `adiabatic_hllc_flux_gv` but with the
 /// FLEISCHMANN et al. (2020) low-mach / low-dissipation arm -- the anti-diffusive star-state flux is
@@ -983,47 +1319,84 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String
 /// grid-aligned shock instability AND the HLLC low-mach over-dissipation. newtonian only (the
 /// relativistic HLLC bodies ignore the LM correction). the `phi` helpers are fully branchless
 /// (`S::select`), so the Fleischmann arm traces at S = Gv just like the Standard arm.
-pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
+    dir: u8,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
-    let flux = hllc(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Fleischmann);
+    let flux = hllc(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        vface,
+        ShockwaveLimiter::Fleischmann,
+    );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
-
 
 /// RHD HLLC face flux — Mignone-Bodo (2005) quadratic for the contact speed.
 /// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
 pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
-    let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Standard);
+    let flux = hllc_rhd(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        vface,
+        ShockwaveLimiter::Standard,
+    );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
 
-
 /// RMHD HLLC face flux — Mignone-Bodo (2006), null vs non-null normal B-field
 /// branch. mirrors `rmhd_flux_gv` (8-component MHD primitive) but routes the
 /// reconstructed L/R state through `riemann::hllc_rmhd`; `rmhd_flux_gv` routes through `hlle`.
-pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_hllc_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hllc_rmhd(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, ShockwaveLimiter::Standard);
+    let flux = hllc_rmhd(
+        &Rmhd,
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        Gv::ZERO,
+        ShockwaveLimiter::Standard,
+    );
     let writes = nmhd_flux_writes(&flux);
     (end_trace(), writes)
 }
-
 
 /// RMHD HLLD face flux — Mignone, Ugliano & Bodo (2009) 5-wave solver, the
 /// full magnetosonic/Alfven/contact wave resolution. uses `Scalar::iterate_vec`
 /// for the 15-step secant on pressure (freeze-on-converged), eagerly computes
 /// HLLE as the divergence fallback, and selects via a success mask at the end.
 /// shares the MHD primitive shape with HLLE/HLLC.
-pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rmhd_hlld_flux_gv(
+    ndim: u8,
+    dir: u8,
+    coord_n: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlld_rmhd(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, &SpatialMetric::flat());
+    let flux = hlld_rmhd(
+        &Rmhd,
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        Gv::ZERO,
+        &SpatialMetric::flat(),
+    );
     let writes = nmhd_flux_writes(&flux);
     (end_trace(), writes)
 }

@@ -107,7 +107,11 @@ pub fn bondi_profile(r: f64, gamma: f64) -> BondiState {
             0.5 * u * u + rho.powf(gamma - 1.0) / (gamma - 1.0) - 1.0 / r - 1.0 / (gamma - 1.0)
         }
     };
-    let u_min = if iso { 1.0 } else { a.powf((gamma - 1.0) / (gamma + 1.0)) };
+    let u_min = if iso {
+        1.0
+    } else {
+        a.powf((gamma - 1.0) / (gamma + 1.0))
+    };
 
     // bracket the requested branch. g -> +inf at both u -> 0 and u -> inf, so
     // stepping outward from u_min until g > 0 always closes the bracket.
@@ -178,8 +182,15 @@ mod tests {
     fn bernoulli_and_mass_flux_hold_on_both_branches() {
         for gamma in [1.0, 1.2, 1.4, 1.5] {
             let rs = sonic_radius(gamma);
-            for r in [0.05, 0.3 * rs.max(0.1), 0.9 * rs.max(0.1), 1.5 * rs.max(0.1), 1.0, 3.0, 10.0]
-            {
+            for r in [
+                0.05,
+                0.3 * rs.max(0.1),
+                0.9 * rs.max(0.1),
+                1.5 * rs.max(0.1),
+                1.0,
+                3.0,
+                10.0,
+            ] {
                 let s = bondi_profile(r, gamma);
                 assert!(
                     bernoulli_residual(r, gamma, &s).abs() < 1e-10,
@@ -201,18 +212,34 @@ mod tests {
         for gamma in [1.0, 1.2, 1.4] {
             let rs = sonic_radius(gamma);
             let cs = |s: &BondiState| -> f64 {
-                if (gamma - 1.0).abs() < 1e-5 { 1.0 } else { s.rho.powf(gamma - 1.0).sqrt() }
+                if (gamma - 1.0).abs() < 1e-5 {
+                    1.0
+                } else {
+                    s.rho.powf(gamma - 1.0).sqrt()
+                }
             };
             let inside = bondi_profile(0.5 * rs, gamma);
             let outside = bondi_profile(2.0 * rs, gamma);
-            assert!(inside.u > cs(&inside), "gamma {gamma}: not supersonic inside r_s");
-            assert!(outside.u < cs(&outside), "gamma {gamma}: not subsonic outside r_s");
+            assert!(
+                inside.u > cs(&inside),
+                "gamma {gamma}: not supersonic inside r_s"
+            );
+            assert!(
+                outside.u < cs(&outside),
+                "gamma {gamma}: not subsonic outside r_s"
+            );
             // the two branches meet at r_s: u -> u_s = sqrt(1/(2 r_s)) from both sides.
             let u_s = (1.0 / (2.0 * rs)).sqrt();
             let just_in = bondi_profile(rs * (1.0 - 1e-6), gamma);
             let just_out = bondi_profile(rs * (1.0 + 1e-6), gamma);
-            assert!((just_in.u - u_s).abs() < 1e-3 * u_s, "gamma {gamma}: inner limit off u_s");
-            assert!((just_out.u - u_s).abs() < 1e-3 * u_s, "gamma {gamma}: outer limit off u_s");
+            assert!(
+                (just_in.u - u_s).abs() < 1e-3 * u_s,
+                "gamma {gamma}: inner limit off u_s"
+            );
+            assert!(
+                (just_out.u - u_s).abs() < 1e-3 * u_s,
+                "gamma {gamma}: outer limit off u_s"
+            );
         }
     }
 
@@ -220,10 +247,22 @@ mod tests {
     fn far_field_approaches_ambient() {
         for gamma in [1.0, 1.2, 1.4, 1.5] {
             let s = bondi_profile(100.0, gamma);
-            assert!((s.rho - 1.0).abs() < 2e-2, "gamma {gamma}: rho(100) = {}", s.rho);
+            assert!(
+                (s.rho - 1.0).abs() < 2e-2,
+                "gamma {gamma}: rho(100) = {}",
+                s.rho
+            );
             assert!(s.u < 1e-3, "gamma {gamma}: u(100) = {}", s.u);
-            let p_inf = if (gamma - 1.0).abs() < 1e-5 { 1.0 } else { 1.0 / gamma };
-            assert!((s.pre - p_inf).abs() < 3e-2, "gamma {gamma}: pre(100) = {}", s.pre);
+            let p_inf = if (gamma - 1.0).abs() < 1e-5 {
+                1.0
+            } else {
+                1.0 / gamma
+            };
+            assert!(
+                (s.pre - p_inf).abs() < 3e-2,
+                "gamma {gamma}: pre(100) = {}",
+                s.pre
+            );
         }
     }
 

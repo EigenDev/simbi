@@ -12,16 +12,13 @@ use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_sim::mass_transport::{ContainerId, ItoOrder};
-use symbi_sim::tracers::{
-    ContinuousTracerRecord, ContinuousTracerSet, cell_container_address,
-};
+use symbi_sim::tracers::{ContinuousTracerRecord, ContinuousTracerSet, cell_container_address};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.35;
 const B0: [f64; 3] = [0.2, 0.1, 0.0];
 
-type Sim =
-    SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+type Sim = SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = NewtonianMhdSubstrateKernelSet<HostMemory, f64, 3>;
 
 fn divergence_max(sim: &Sim) -> f64 {
@@ -32,10 +29,9 @@ fn divergence_max(sim: &Sim) -> f64 {
         for axis in 0..3 {
             let mut upper = cell;
             upper[axis] += 1;
-            divergence +=
-                (*magnetic.bface[axis].view().at(upper)
-                    - *magnetic.bface[axis].view().at(cell))
-                    / sim.geom.dx[axis];
+            divergence += (*magnetic.bface[axis].view().at(upper)
+                - *magnetic.bface[axis].view().at(cell))
+                / sim.geom.dx[axis];
         }
         maximum = maximum.max(divergence.abs());
     }
@@ -261,11 +257,7 @@ fn continuous_tracer_record_moves_to_finest_active_level_without_state_loss() {
         fine_state.geom.interior.spaces[2].lo,
     ];
     assert!(
-        *fine_state
-            .ito_coefficients
-            .as_ref()
-            .unwrap()
-            .drift[0]
+        *fine_state.ito_coefficients.as_ref().unwrap().drift[0]
             .view()
             .at(coefficient_ghost)
             > 0.1,

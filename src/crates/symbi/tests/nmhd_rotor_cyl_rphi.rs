@@ -19,7 +19,6 @@
 //       the (1/r) d_phi metric curl actually evolves the in-plane field.
 // =============================================================================
 
-
 use symbi::prelude::*;
 
 type Sim = SimCpuGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>>;
@@ -77,7 +76,11 @@ fn make_sim() -> Sim {
     sim.seed_cells(|[r, phi]| {
         let (rho, vr, vphi) = rotor_state(r, phi);
         MhdPrim {
-            hydro: Prim { rho, vel: Tensor::new([vr, vphi, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho,
+                vel: Tensor::new([vr, vphi, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, B0, 0.0]),
         }
     });
@@ -111,7 +114,11 @@ fn rel_divb(s: &Sim) -> f64 {
 fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
     let mut sim = make_sim();
     // matched KernelSet straight off the sim — gamma/cfl/alloc pulled from it; tune theta + solver.
-    let sub = sim.substrate().theta(1.5).with_solver(Solver::Hlld).expect("valid solver/regime pair");
+    let sub = sim
+        .substrate()
+        .theta(1.5)
+        .with_solver(Solver::Hlld)
+        .expect("valid solver/regime pair");
 
     // the curvilinear metric curl carries the r_hi/r_lo + 1/r factors (O(1) cancellation), so its
     // div(B) roundoff floor sits an order above cartesian ~1e-13. assert div(B) stays at a BOUNDED
@@ -120,23 +127,41 @@ fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
     let mut max_rel = 0.0_f64;
     evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
         let rel = rel_divb(s);
-        assert!(rel < 1e-11, "cyl r-phi rotor div(B) grew to rel={rel:e} at iter {}", s.iteration);
+        assert!(
+            rel < 1e-11,
+            "cyl r-phi rotor div(B) grew to rel={rel:e} at iter {}",
+            s.iteration
+        );
         max_rel = max_rel.max(rel);
         steps = s.iteration;
     })
     .expect("cyl r-phi rotor evolve failed");
-    assert!(steps >= 10, "cyl r-phi rotor produced only {steps} steps — gate barely exercised");
+    assert!(
+        steps >= 10,
+        "cyl r-phi rotor produced only {steps} steps — gate barely exercised"
+    );
 
     // physicality through the spun-up core + the field has WOUND (B_r developed from 0).
     let mhd = sim.fields.mhd.as_ref().unwrap();
     let mut max_br = 0.0_f64;
     for c in sim.geom.interior.iter() {
         let prim = sim.prim_at(c); // c2p recover — no hand-built MhdCons
-        assert!(prim.rho.is_finite() && prim.rho > 0.0, "cell {c:?}: rho={}", prim.rho);
-        assert!(prim.pre.is_finite() && prim.pre > 0.0, "cell {c:?}: p={}", prim.pre);
+        assert!(
+            prim.rho.is_finite() && prim.rho > 0.0,
+            "cell {c:?}: rho={}",
+            prim.rho
+        );
+        assert!(
+            prim.pre.is_finite() && prim.pre > 0.0,
+            "cell {c:?}: p={}",
+            prim.pre
+        );
         max_br = max_br.max(mhd.bcell[0].view().at(c).abs());
     }
-    assert!(max_br > 0.01, "field did not wind: max|B_r|={max_br:e} (in-plane rotor should generate B_r)");
+    assert!(
+        max_br > 0.01,
+        "field did not wind: max|B_r|={max_br:e} (in-plane rotor should generate B_r)"
+    );
 
     eprintln!(
         "[nmhd_rotor cyl r-phi] DONE iter={} t={:.4e} max|B_r|={:.4} max rel div(B)={:e}",

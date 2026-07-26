@@ -25,14 +25,16 @@ use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
 use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{
-    HlldStates, hllc, hllc_newtonian, hllc_rmhd, hllc_rhd, hlld_isothermal,
-    hlld_isothermal_coeffs, hlld_newtonian, hlld_newtonian_coeffs, hlld_rmhd, hlld_rmhd_gr_ortho,
-    hlld_rmhd_states, hlld_rmhd_states_gr_ortho, hlle, hlle_with_speeds,
-};
-use symbi_hydro::rmhd::{Rmhd, RmhdGr, rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities};
-use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::rhd::{Rhd, rhd_recover};
+use symbi_hydro::riemann::{
+    HlldStates, hllc, hllc_newtonian, hllc_rhd, hllc_rmhd, hlld_isothermal, hlld_isothermal_coeffs,
+    hlld_newtonian, hlld_newtonian_coeffs, hlld_rmhd, hlld_rmhd_gr_ortho, hlld_rmhd_states,
+    hlld_rmhd_states_gr_ortho, hlle, hlle_with_speeds,
+};
+use symbi_hydro::rmhd::{
+    Rmhd, RmhdGr, rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities,
+};
+use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimG};
 use symbi_ir::Symbol;
 use symbi_ir::algebra::Scalar;
@@ -44,7 +46,7 @@ use symbi_ir::{FieldBind, FieldRef};
 // symbi-hydro physics at S = Gv and trace it into the IR.
 use symbi_ir::{Gv, GvKernel, MeshScalar, TileSpec, begin_trace, end_trace, with_trace};
 
-use super::coords::{Coords, Spacing, Spacetime};
+use super::coords::{Coords, Spacetime, Spacing};
 
 // submodule declarations: each category is its own file; the glob re-exports below preserve
 // the byte-identical public path `gv::NAME` for every builder lib.rs + downstream crates reach
@@ -114,7 +116,6 @@ fn plm_theta_gv(
     let qp1 = Gv::field_shifted(key, runtime, ndim, dir, 1);
     plm_theta_from_stencil(qm2, qm1, q0, qp1, theta)
 }
-
 
 /// the theta-MC / van-leer PLM face pair from FOUR stencil VALUES (offsets -2..+1 along the
 /// sweep) — the limiter core of `plm_theta_gv`, exposed so a reconstruction can run in a
@@ -1284,8 +1285,13 @@ mod tests {
         // folded with the in-kernel cartesian-uniform widths into ONE timestep kernel — the SAME
         // physics the RHD flux's HLLE uses. cartesian 2D: reads rho + the GRIDDED normal
         // velocities (v0, v1) + pre — the dead v2 is left ZERO and never enters the graph.
-        let (k, writes) =
-            rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2);
+        let (k, writes) = rhd_wave_speed_map_gv(
+            Coords::Cartesian,
+            Spacetime::Minkowski,
+            &[Spacing::Uniform; 2],
+            &[0, 1],
+            2,
+        );
         assert_eq!(writes.len(), 1, "one scratch lambda write");
         assert_eq!(writes[0].1.name(), "scratch");
         assert_eq!(
@@ -1530,15 +1536,30 @@ mod tests {
         // the GR CFL map (B.5): the Schwarzschild wave-speed map threads the Banyuls-Font coordinate
         // correction (lapse + radial proper-width -> the `schwarzschild_mass` scalar) into the DAG;
         // the flat spherical map does NOT (bit-identical to pre-B.5).
-        let (k_gr, _) = rhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Schwarzschild, &[Spacing::Uniform], &[0], 1);
+        let (k_gr, _) = rhd_wave_speed_map_gv(
+            Coords::Spherical,
+            Spacetime::Schwarzschild,
+            &[Spacing::Uniform],
+            &[0],
+            1,
+        );
         assert!(
             k_gr.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
             "Schwarzschild wave-speed map must carry the lapse mass scalar; got {:?}",
             k_gr.scalar_params,
         );
-        let (k_flat, _) = rhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1);
+        let (k_flat, _) = rhd_wave_speed_map_gv(
+            Coords::Spherical,
+            Spacetime::Minkowski,
+            &[Spacing::Uniform],
+            &[0],
+            1,
+        );
         assert!(
-            !k_flat.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
+            !k_flat
+                .scalar_params
+                .iter()
+                .any(|s| s == "schwarzschild_mass"),
             "flat spherical wave-speed map must NOT carry the lapse mass scalar",
         );
     }
@@ -1550,8 +1571,13 @@ mod tests {
         // the kernel manifest. the flat (Minkowski) stage on the SAME spherical grid does NOT — it
         // stays bit-identical to the lapse-free flat result. proves the (Spherical, Schwarzschild) -> metric.lapse path.
         let (k_gr, _) = godunov_stage_gv(
-            Coords::Spherical, Spacetime::Schwarzschild,
-            &[Spacing::Uniform], &[0], 1, 1, true,
+            Coords::Spherical,
+            Spacetime::Schwarzschild,
+            &[Spacing::Uniform],
+            &[0],
+            1,
+            1,
+            true,
             GeoSource::Hydro { inertial: false },
         );
         assert!(
@@ -1561,12 +1587,20 @@ mod tests {
         );
 
         let (k_flat, _) = godunov_stage_gv(
-            Coords::Spherical, Spacetime::Minkowski,
-            &[Spacing::Uniform], &[0], 1, 1, true,
+            Coords::Spherical,
+            Spacetime::Minkowski,
+            &[Spacing::Uniform],
+            &[0],
+            1,
+            1,
+            true,
             GeoSource::Hydro { inertial: false },
         );
         assert!(
-            !k_flat.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
+            !k_flat
+                .scalar_params
+                .iter()
+                .any(|s| s == "schwarzschild_mass"),
             "flat stage must NOT carry the lapse mass scalar (densitization is a no-op)",
         );
     }
@@ -1655,7 +1689,16 @@ mod tests {
 
         // the compile-time spec path.
         let (k_spec, w_spec) = godunov_stage_gv_with_fused_sources(
-            coords, Spacetime::Minkowski, &spacing, &axes, 2, 2, true, geo, &spec_refs, false,
+            coords,
+            Spacetime::Minkowski,
+            &spacing,
+            &axes,
+            2,
+            2,
+            true,
+            geo,
+            &spec_refs,
+            false,
         );
 
         // the runtime BuiltSource-value path (what `RuntimeSource` feeds).
@@ -1666,7 +1709,17 @@ mod tests {
         let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
         let (k_built, w_built) = godunov_stage_gv_with_fused_built(
-            coords, Spacetime::Minkowski, &spacing, &axes, 2, 2, true, geo, &src_refs, false, 0,
+            coords,
+            Spacetime::Minkowski,
+            &spacing,
+            &axes,
+            2,
+            2,
+            true,
+            geo,
+            &src_refs,
+            false,
+            0,
         );
 
         // the ABI manifest + writes are identical (NodeIds match because both trace the SAME op

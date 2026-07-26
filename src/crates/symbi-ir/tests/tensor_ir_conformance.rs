@@ -17,13 +17,15 @@
 // =============================================================================
 
 use symbi_ir::{
-    ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, ReduceOp,
-    Symbol, TensorTy, emit_cpu, emit_cuda, scalarize,
+    ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, ReduceOp, Symbol, TensorTy, emit_cpu,
+    emit_cuda, scalarize,
 };
 
 // ----- helpers -----
 
-fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+fn lit(n: usize) -> DimExpr {
+    DimExpr::Literal(n)
+}
 
 fn add_vec(g: &mut Graph, name: &str, dim: usize) -> symbi_ir::NodeId {
     g.add_param(
@@ -43,7 +45,12 @@ fn add_mat(g: &mut Graph, name: &str, rows: usize, cols: usize) -> symbi_ir::Nod
 
 fn parse_rust(src: &str) {
     let r: syn::Result<syn::ItemFn> = syn::parse_str(src);
-    assert!(r.is_ok(), "emit_cpu output not valid Rust:\n{}\nerror: {}", src, r.err().unwrap());
+    assert!(
+        r.is_ok(),
+        "emit_cpu output not valid Rust:\n{}\nerror: {}",
+        src,
+        r.err().unwrap()
+    );
 }
 
 // ============================================================
@@ -261,10 +268,12 @@ fn cuda_abs_emits_ternary_not_fabs() {
     let r = g.element_wise(ElementWiseOp::Abs, vec![x], None);
     let f = scalarize(&g, r, "absx");
     let src = emit_cuda(&f);
-    assert!(src.contains("(x < 0.0 ? -x : x)"),
-        "expected my_abs-style ternary, got:\n{}", src);
-    assert!(!src.contains("fabs"),
-        "should not emit fabs, got:\n{}", src);
+    assert!(
+        src.contains("(x < 0.0 ? -x : x)"),
+        "expected my_abs-style ternary, got:\n{}",
+        src
+    );
+    assert!(!src.contains("fabs"), "should not emit fabs, got:\n{}", src);
     assert!(!src.contains(".abs"));
 }
 

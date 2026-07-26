@@ -24,7 +24,7 @@
 
 use std::collections::HashMap;
 
-use symbi_discretize::{rmhd_ct_curl_3d_dir_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, rmhd_ct_curl_3d_dir_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 // the curl reads exactly these edge-emf fields plus the in-place b; the scalars are
@@ -63,7 +63,11 @@ fn r_at(off: i64) -> Poly {
 // r_c, the cell-center radius x_lo_0 + (c_0 + 1/2) dx_0, as a RatFun (denominator 2).
 fn r_center() -> RatFun {
     let mut num = Poly::var("x_lo_0").times(&Poly::constant(2));
-    num = num.plus(&Poly::var("c_0").times(&Poly::var("dx_0")).times(&Poly::constant(2)));
+    num = num.plus(
+        &Poly::var("c_0")
+            .times(&Poly::var("dx_0"))
+            .times(&Poly::constant(2)),
+    );
     num = num.plus(&Poly::var("dx_0"));
     RatFun::new(num, Poly::constant(2))
 }
@@ -99,7 +103,10 @@ fn divb_cyl_symbolic_telescoping() {
 
         let raw = curl_only(LinFormR::extract_rat(&kernel.graph, root, FIELDS, SCALARS));
         let curl = raw.canonicalize_keys(&physical_rename(dir));
-        assert!(!curl.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+        assert!(
+            !curl.is_zero(),
+            "dir {dir}: curl is empty — extractor saw no emf reads"
+        );
 
         // weight by the dir-face area, then the covariant forward difference along dir.
         let weighted = curl.scale_rat(&area(dir));
@@ -124,7 +131,10 @@ fn divb_cyl_symbolic_telescoping() {
 #[test]
 fn divb_cyl_symbolic_detects_residual() {
     let mut lf = LinFormR::default();
-    lf.add(&LinFormR::single_var(("e_0".into(), vec![0, 0, 0]), "x_lo_0"));
+    lf.add(&LinFormR::single_var(
+        ("e_0".into(), vec![0, 0, 0]),
+        "x_lo_0",
+    ));
     lf.add(&LinFormR::single_var(("e_0".into(), vec![1, 0, 0]), "dx_0"));
     assert!(!lf.is_zero(), "mismatched coefficients must NOT cancel");
     assert_eq!(lf.residual().len(), 2);

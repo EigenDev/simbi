@@ -338,7 +338,11 @@ pub fn compute_skymap_deposit(
     let ni = x1.len();
     let nj = x2.len();
     let resolved_phi = mesh.x3.is_some() && mesh.data_dim > 2;
-    let nk = if resolved_phi { mesh.x3.unwrap().len() } else { 1 };
+    let nk = if resolved_phi {
+        mesh.x3.unwrap().len()
+    } else {
+        1
+    };
     if ni == 0 || nj == 0 || n_pix == 0 || half_width <= 0.0 {
         return image;
     }
@@ -402,8 +406,8 @@ pub fn compute_skymap_deposit(
                 };
 
                 // sub-sample theta so the sky-plane step r dtheta stays under half a pixel.
-                let n_t = ((((t_hi - t_lo) * r_hi) / (0.5 * px)).ceil() as usize)
-                    .clamp(1, 4 * n_pix);
+                let n_t =
+                    ((((t_hi - t_lo) * r_hi) / (0.5 * px)).ceil() as usize).clamp(1, 4 * n_pix);
                 let dth = (t_hi - t_lo) / n_t as f64;
                 for kt in 0..n_t {
                     let theta = t_lo + (kt as f64 + 0.5) * dth;
@@ -423,8 +427,7 @@ pub fn compute_skymap_deposit(
                         let u_hi = ((c_max - b_ring) / a_ring).clamp(-1.0, 1.0);
                         let (u_lo, u_hi) = (u_lo.min(u_hi), u_lo.max(u_hi));
                         if u_lo >= u_hi
-                            && ((c_min - b_ring) / a_ring > 1.0
-                                || (c_max - b_ring) / a_ring < -1.0)
+                            && ((c_min - b_ring) / a_ring > 1.0 || (c_max - b_ring) / a_ring < -1.0)
                         {
                             continue;
                         }
@@ -440,8 +443,7 @@ pub fn compute_skymap_deposit(
                         }
                         // step the arc at ~half-pixel sky resolution.
                         let step_scale = (r_hi * sin_t).max(px);
-                        let n_f = ((((arc_hi - arc_lo) * step_scale) / (0.5 * px)).ceil()
-                            as usize)
+                        let n_f = ((((arc_hi - arc_lo) * step_scale) / (0.5 * px)).ceil() as usize)
                             .clamp(1, 8 * n_pix);
                         let dphi = (arc_hi - arc_lo) / n_f as f64;
                         for kf in 0..n_f {
@@ -450,8 +452,7 @@ pub fn compute_skymap_deposit(
                             // counts (map the sample into [cell_lo, cell_lo + 2 pi) first).
                             if resolved_phi {
                                 let span = 2.0 * PI;
-                                let wrapped =
-                                    (phi - cell_phi_lo).rem_euclid(span) + cell_phi_lo;
+                                let wrapped = (phi - cell_phi_lo).rem_euclid(span) + cell_phi_lo;
                                 if wrapped < cell_phi_lo || wrapped > cell_phi_hi {
                                     continue;
                                 }
@@ -481,8 +482,7 @@ pub fn compute_skymap_deposit(
 
                             let dvol =
                                 (1.0 / 3.0) * (rb * rb * rb - ra * ra * ra) * sin_t * dth * dphi;
-                            let r_mid =
-                                (0.5 * (ra * ra * ra + rb * rb * rb)).cbrt();
+                            let r_mid = (0.5 * (ra * ra * ra + rb * rb * rb)).cbrt();
 
                             // velocity vector in the lab frame from the coordinate components.
                             let that = [cos_t * cos_p, cos_t * sin_p, -sin_t];
@@ -501,8 +501,7 @@ pub fn compute_skymap_deposit(
 
                             let nu_prime = Frequency::new(frequency_hz * one_plus_z / delta);
                             let j_nu = j_peak * spectral_shape(p, nu_prime, nu_c, nu_m);
-                            let flux =
-                                delta.powf(doppler_power) * j_nu * dvol * emit_dt_s;
+                            let flux = delta.powf(doppler_power) * j_nu * dvol * emit_dt_s;
 
                             let pos = [r_mid * xhat[0], r_mid * xhat[1], r_mid * xhat[2]];
                             let q1 = pos[0] * e1[0] + pos[1] * e1[1] + pos[2] * e1[2];
@@ -572,15 +571,33 @@ mod tests {
         let ni = 16;
         let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 0.02 * i as f64)).collect();
         let (rho, gb, pre) = (vec![1.0e-24; ni], vec![2.0; ni], vec![1.0e-6; ni]);
-        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+        let fields = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
 
         // observer window wide enough that the EATS cos band covers the whole sphere, so the
         // projected rings sweep the full disk and the profile should be continuous out to the limb.
         let r_max_s = x1[ni - 1] / C_LIGHT.value();
         let n_pix = 128;
         let img = compute_skymap_deposit_spherical(
-            &cond, &sc, &fields, &x1, [0.0, 0.0, 1.0], cond.current_time, 1.2 * r_max_s, 1.0e9,
-            0.0, 2.0, n_pix, 1.3e17, 1.0, PI, 64, 128,
+            &cond,
+            &sc,
+            &fields,
+            &x1,
+            [0.0, 0.0, 1.0],
+            cond.current_time,
+            1.2 * r_max_s,
+            1.0e9,
+            0.0,
+            2.0,
+            n_pix,
+            1.3e17,
+            1.0,
+            PI,
+            64,
+            128,
         );
 
         // walk the center row outward; inside the lit region every pixel must hold its own
@@ -588,7 +605,11 @@ mod tests {
         // a missed radial bin sits orders of magnitude low).
         let row: Vec<f64> = (0..n_pix).map(|ix| img[(n_pix / 2) * n_pix + ix]).collect();
         let lit: Vec<usize> = (1..n_pix - 1).filter(|&ix| row[ix] > 0.0).collect();
-        assert!(lit.len() > 20, "deposit produced too small an image: {} lit", lit.len());
+        assert!(
+            lit.len() > 20,
+            "deposit produced too small an image: {} lit",
+            lit.len()
+        );
         let (lo, hi) = (lit[2], lit[lit.len() - 3]);
         for ix in lo..=hi {
             let nbr = row[ix - 1].max(row[ix + 1]);
@@ -624,9 +645,22 @@ mod tests {
                 pre[jj * ni + ii] = pre1[ii];
             }
         }
-        let f1 = HydroFields { rho: &rho1, gamma_beta: &gb1, pre: &pre1 };
-        let f2 = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
-        let mesh2 = Mesh { x1: &x1, x2: &x2, x3: None, data_dim: 2 };
+        let f1 = HydroFields {
+            rho: &rho1,
+            gamma_beta: &gb1,
+            pre: &pre1,
+        };
+        let f2 = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
+        let mesh2 = Mesh {
+            x1: &x1,
+            x2: &x2,
+            x3: None,
+            data_dim: 2,
+        };
 
         let (t_obs, half_win) = full_window(&cond, &x1);
         let n_pix = 96;
@@ -634,8 +668,22 @@ mod tests {
         let nu0 = 1.0e9;
 
         let img1 = compute_skymap_deposit_spherical(
-            &cond, &sc, &f1, &x1, [0.0, 0.0, 1.0], t_obs, half_win, nu0, 0.0, 2.0, n_pix, hw,
-            1.0, PI, 0, 0,
+            &cond,
+            &sc,
+            &f1,
+            &x1,
+            [0.0, 0.0, 1.0],
+            t_obs,
+            half_win,
+            nu0,
+            0.0,
+            2.0,
+            n_pix,
+            hw,
+            1.0,
+            PI,
+            0,
+            0,
         );
         // an off-axis observer: the sphere must look identical from any direction.
         let th = 0.6_f64;
@@ -662,8 +710,7 @@ mod tests {
                     let y = -hw + (iy as f64 + 0.5) * 2.0 * hw / n_pix as f64;
                     let frac = (x * x + y * y) / (hw * hw);
                     if frac < 1.0 {
-                        sum[((frac * n_r as f64) as usize).min(n_r - 1)] +=
-                            img[iy * n_pix + ix];
+                        sum[((frac * n_r as f64) as usize).min(n_r - 1)] += img[iy * n_pix + ix];
                     }
                 }
             }
@@ -693,8 +740,9 @@ mod tests {
         let nj = 48;
         let nk = 64;
         let x2: Vec<f64> = (0..nj).map(|j| PI * (j as f64 + 0.5) / nj as f64).collect();
-        let x3: Vec<f64> =
-            (0..nk).map(|k| 2.0 * PI * (k as f64 + 0.5) / nk as f64).collect();
+        let x3: Vec<f64> = (0..nk)
+            .map(|k| 2.0 * PI * (k as f64 + 0.5) / nk as f64)
+            .collect();
 
         let len = ni * nj * nk;
         let mut rho = vec![0.0; len];
@@ -710,9 +758,22 @@ mod tests {
                 }
             }
         }
-        let f1 = HydroFields { rho: &rho1, gamma_beta: &gb1, pre: &pre1 };
-        let f3 = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
-        let mesh3 = Mesh { x1: &x1, x2: &x2, x3: Some(&x3), data_dim: 3 };
+        let f1 = HydroFields {
+            rho: &rho1,
+            gamma_beta: &gb1,
+            pre: &pre1,
+        };
+        let f3 = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
+        let mesh3 = Mesh {
+            x1: &x1,
+            x2: &x2,
+            x3: Some(&x3),
+            data_dim: 3,
+        };
 
         let (t_obs, half_win) = full_window(&cond, &x1);
         let n_pix = 64;
@@ -720,8 +781,22 @@ mod tests {
         let nu0 = 1.0e9;
 
         let img1 = compute_skymap_deposit_spherical(
-            &cond, &sc, &f1, &x1, [0.0, 0.0, 1.0], t_obs, half_win, nu0, 0.0, 2.0, n_pix, hw,
-            1.0, PI, 0, 0,
+            &cond,
+            &sc,
+            &f1,
+            &x1,
+            [0.0, 0.0, 1.0],
+            t_obs,
+            half_win,
+            nu0,
+            0.0,
+            2.0,
+            n_pix,
+            hw,
+            1.0,
+            PI,
+            0,
+            0,
         );
         let th = 0.4_f64;
         let nhat = [th.sin(), 0.0, th.cos()];
@@ -764,13 +839,22 @@ mod tests {
                 }
             }
         }
-        let f = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
-        let mesh = Mesh { x1: &x1, x2: &x2, x3: None, data_dim: 2 };
+        let f = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
+        let mesh = Mesh {
+            x1: &x1,
+            x2: &x2,
+            x3: None,
+            data_dim: 2,
+        };
         let (t_obs, half_win) = full_window(&cond, &x1);
         let total = |nhat: [f64; 3], vels: Option<VelComponents>| {
             compute_skymap_deposit(
-                &cond, &sc, &f, &mesh, vels, nhat, t_obs, half_win, 1.0e9, 0.0, 2.0, 64,
-                1.3e17, 1.0,
+                &cond, &sc, &f, &mesh, vels, nhat, t_obs, half_win, 1.0e9, 0.0, 2.0, 64, 1.3e17,
+                1.0,
             )
             .iter()
             .sum::<f64>()
@@ -778,16 +862,29 @@ mod tests {
 
         let on_axis = total([0.0, 0.0, 1.0], None);
         let off_axis = total([0.6_f64.sin(), 0.0, 0.6_f64.cos()], None);
-        assert!(on_axis > 3.0 * off_axis, "beaming: on {on_axis} vs off {off_axis}");
+        assert!(
+            on_axis > 3.0 * off_axis,
+            "beaming: on {on_axis} vs off {off_axis}"
+        );
 
         // lateral spreading: a theta-velocity component beams flux toward larger polar angles,
         // brightening the 60-degree observer relative to the purely radial flow.
         let b = 5.0_f64 / (1.0 + 25.0_f64).sqrt(); // |v| for gamma*beta = 5
-        let v1: Vec<f64> = gb.iter().map(|&g| if g > 0.0 { 0.8 * b } else { 0.0 }).collect();
-        let v2: Vec<f64> = gb.iter().map(|&g| if g > 0.0 { 0.5 * b } else { 0.0 }).collect();
+        let v1: Vec<f64> = gb
+            .iter()
+            .map(|&g| if g > 0.0 { 0.8 * b } else { 0.0 })
+            .collect();
+        let v2: Vec<f64> = gb
+            .iter()
+            .map(|&g| if g > 0.0 { 0.5 * b } else { 0.0 })
+            .collect();
         let spreading = total(
             [0.6_f64.sin(), 0.0, 0.6_f64.cos()],
-            Some(VelComponents { v1: &v1, v2: Some(&v2), v3: None }),
+            Some(VelComponents {
+                v1: &v1,
+                v2: Some(&v2),
+                v3: None,
+            }),
         );
         assert!(
             spreading > off_axis,

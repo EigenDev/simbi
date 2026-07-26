@@ -33,14 +33,25 @@ fn build() -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     // exact integer index codes (f32-representable): rho = 10000 ix + 100 iy + iz + 1,
     // so every sample's source cell is decodable exactly.
     let lo: [isize; 3] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
     for c in sim.geom.interior.iter() {
-        let (ix, iy, iz) = ((c[0] - lo[0]) as f64, (c[1] - lo[1]) as f64, (c[2] - lo[2]) as f64);
-        sim.fields.prim.rho.set(c, 10000.0 * ix + 100.0 * iy + iz + 1.0);
+        let (ix, iy, iz) = (
+            (c[0] - lo[0]) as f64,
+            (c[1] - lo[1]) as f64,
+            (c[2] - lo[2]) as f64,
+        );
+        sim.fields
+            .prim
+            .rho
+            .set(c, 10000.0 * ix + 100.0 * iy + iz + 1.0);
     }
     sim
 }
@@ -61,17 +72,29 @@ fn zoom_samples_the_centered_half_window_only() {
     // the full view spans the whole ix range (storage x = the display row axis at
     // orient 0; the z mid-plane fixes iz = N/2).
     let full_ix: Vec<usize> = full.data.iter().map(|v| decode(*v).0).collect();
-    assert!(full_ix.iter().any(|&i| i == 0) && full_ix.iter().any(|&i| i == N - 1),
-        "full-extent view missing the domain edges");
+    assert!(
+        full_ix.iter().any(|&i| i == 0) && full_ix.iter().any(|&i| i == N - 1),
+        "full-extent view missing the domain edges"
+    );
     // the 2x view samples ONLY the centered half window on BOTH display axes, at
     // full output resolution (crisper).
     let (wlo, whi) = (N / 4, N / 4 + N / 2);
     for v in &zoomed.data {
         let (ix, iy, _) = decode(*v);
-        assert!(ix >= wlo && ix < whi, "zoomed sample outside the x window: ix = {ix}");
-        assert!(iy >= wlo && iy < whi, "zoomed sample outside the y window: iy = {iy}");
+        assert!(
+            ix >= wlo && ix < whi,
+            "zoomed sample outside the x window: ix = {ix}"
+        );
+        assert!(
+            iy >= wlo && iy < whi,
+            "zoomed sample outside the y window: iy = {iy}"
+        );
     }
-    assert_eq!(zoomed.width, N / 2, "the zoomed window is decimated at sx = 1: width = span");
+    assert_eq!(
+        zoomed.width,
+        N / 2,
+        "the zoomed window is decimated at sx = 1: width = span"
+    );
 }
 
 #[test]
@@ -84,7 +107,11 @@ fn orientation_permutes_the_display_axes() {
     let mut iz_seen = [false; N];
     for v in &sl.data {
         let (ix, iy, iz) = decode(*v);
-        assert_eq!(iy, N / 2, "y mid-plane sample not at the mid index: iy = {iy}");
+        assert_eq!(
+            iy,
+            N / 2,
+            "y mid-plane sample not at the mid index: iy = {iy}"
+        );
         ix_seen[ix] = true;
         iz_seen[iz] = true;
     }

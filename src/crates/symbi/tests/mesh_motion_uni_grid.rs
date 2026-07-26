@@ -37,8 +37,8 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
-use symbi_xpu::{CpuSpace, HostMemory};
 use symbi_sim::mass_transport::ItoOrder;
+use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.4;
@@ -110,7 +110,11 @@ fn homologous_zero_rate_is_bit_identical_to_static() {
                 "mom{dd} diverged at {c:?}"
             );
         }
-        assert_eq!(*anrg.view().at(c), *bnrg.view().at(c), "nrg diverged at {c:?}");
+        assert_eq!(
+            *anrg.view().at(c),
+            *bnrg.view().at(c),
+            "nrg diverged at {c:?}"
+        );
     }
 }
 
@@ -205,9 +209,17 @@ fn iso_free_expansion_stays_self_similar() {
             worst_vel = worst_vel.max((v - adot * x[dd]).abs() / (adot * 0.5));
         }
     }
-    eprintln!("[mesh-motion] iso: a = {a:.3}  |d(rho a^3)| {worst_rho:.2e}  |dv|/v {worst_vel:.2e}");
-    assert!(worst_rho < 2e-2, "iso density broke self-similarity: {worst_rho:.3e}");
-    assert!(worst_vel < 1e-3, "iso velocity left the homologous profile: {worst_vel:.3e}");
+    eprintln!(
+        "[mesh-motion] iso: a = {a:.3}  |d(rho a^3)| {worst_rho:.2e}  |dv|/v {worst_vel:.2e}"
+    );
+    assert!(
+        worst_rho < 2e-2,
+        "iso density broke self-similarity: {worst_rho:.3e}"
+    );
+    assert!(
+        worst_vel < 1e-3,
+        "iso velocity left the homologous profile: {worst_vel:.3e}"
+    );
 }
 
 /// rhd free expansion: relativistic coasting is the same exact solution —
@@ -271,9 +283,18 @@ fn rhd_free_expansion_stays_self_similar() {
         "[mesh-motion] rhd: a = {a:.3}  |d(rho a^3)| {worst_rho:.2e}  \
          |d(p a^(3g))| {worst_pre:.2e}  |dv|/v {worst_vel:.2e}"
     );
-    assert!(worst_rho < 2e-2, "rhd density broke self-similarity: {worst_rho:.3e}");
-    assert!(worst_pre < 8e-2, "rhd pressure broke self-similarity: {worst_pre:.3e}");
-    assert!(worst_vel < 1e-2, "rhd velocity left the homologous profile: {worst_vel:.3e}");
+    assert!(
+        worst_rho < 2e-2,
+        "rhd density broke self-similarity: {worst_rho:.3e}"
+    );
+    assert!(
+        worst_pre < 8e-2,
+        "rhd pressure broke self-similarity: {worst_pre:.3e}"
+    );
+    assert!(
+        worst_vel < 1e-2,
+        "rhd velocity left the homologous profile: {worst_vel:.3e}"
+    );
 }
 
 /// uniform translation, the strongest possible moving-mesh demonstration: a
@@ -313,13 +334,21 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
         std::slice::from_raw_parts(continuous.x[dd].as_ptr::<f64>(), continuous.len).to_vec()
     });
     sim.continuous_tracers = Some(continuous);
-    let rho0: Vec<f64> = sim.geom.interior.iter()
+    let rho0: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
         .map(|c| *sim.fields.cons.den.view().at(c))
         .collect();
-    let k = Kset::new(GAMMA, CFL, &sim.geom.allocated).with_solver(Solver::Hllc).expect("valid solver/regime pair");
+    let k = Kset::new(GAMMA, CFL, &sim.geom.allocated)
+        .with_solver(Solver::Hllc)
+        .expect("valid solver/regime pair");
     evolve(&mut sim, &k, 0.5).unwrap();
 
-    assert!((sim.motion.a - 1.0).abs() == 0.0, "uniform translation scaled the mesh");
+    assert!(
+        (sim.motion.a - 1.0).abs() == 0.0,
+        "uniform translation scaled the mesh"
+    );
     let mut worst = 0.0f64;
     for (ii, c) in sim.geom.interior.iter().enumerate() {
         let rho = *sim.fields.cons.den.view().at(c);
@@ -337,9 +366,8 @@ fn translated_contact_is_preserved_exactly_on_the_comoving_grid() {
     );
     let continuous = sim.continuous_tracers.as_ref().unwrap();
     for dd in 0..3 {
-        let accepted = unsafe {
-            std::slice::from_raw_parts(continuous.x[dd].as_ptr::<f64>(), continuous.len)
-        };
+        let accepted =
+            unsafe { std::slice::from_raw_parts(continuous.x[dd].as_ptr::<f64>(), continuous.len) };
         let shift = if dd == 0 { vtrans * sim.time } else { 0.0 };
         let residuals: Vec<_> = accepted
             .iter()
@@ -372,7 +400,10 @@ fn spherical_homologous_free_expansion_stays_self_similar() {
     let (rho0, p0, adot, t_final) = (1.0, 1e-3, 0.25, 2.0);
     let (nr, nt) = (64usize, 8usize);
     let (r_lo, r_hi) = (0.5, 2.0);
-    let (th_lo, th_hi) = (std::f64::consts::FRAC_PI_4, 3.0 * std::f64::consts::FRAC_PI_4);
+    let (th_lo, th_hi) = (
+        std::f64::consts::FRAC_PI_4,
+        3.0 * std::f64::consts::FRAC_PI_4,
+    );
     let mut sim = SphSim::build(Newtonian, IdealGas { gamma: GAMMA }, Spherical)
         .cells([nr, nt])
         .origin([r_lo, th_lo])
@@ -390,7 +421,10 @@ fn spherical_homologous_free_expansion_stays_self_similar() {
     evolve(&mut sim, &k, t_final).unwrap();
 
     let a = sim.motion.a;
-    assert!((a - (1.0 + adot * t_final)).abs() < 1e-12, "scale factor drifted: a = {a}");
+    assert!(
+        (a - (1.0 + adot * t_final)).abs() < 1e-12,
+        "scale factor drifted: a = {a}"
+    );
     let pre = sim.fields.prim.pre_field().unwrap();
     let mut worst_rho = 0.0f64;
     let mut worst_pre = 0.0f64;
@@ -412,9 +446,18 @@ fn spherical_homologous_free_expansion_stays_self_similar() {
         "[mesh-motion] spherical: a = {a:.3}  |d(rho a^3)| {worst_rho:.2e}  \
          |d(p a^(3g))| {worst_pre:.2e}  |dv|/v {worst_vel:.2e}"
     );
-    assert!(worst_rho < 2e-2, "spherical density broke self-similarity: {worst_rho:.3e}");
-    assert!(worst_pre < 8e-2, "spherical pressure broke self-similarity: {worst_pre:.3e}");
-    assert!(worst_vel < 1e-2, "spherical velocity left the homologous profile: {worst_vel:.3e}");
+    assert!(
+        worst_rho < 2e-2,
+        "spherical density broke self-similarity: {worst_rho:.3e}"
+    );
+    assert!(
+        worst_pre < 8e-2,
+        "spherical pressure broke self-similarity: {worst_pre:.3e}"
+    );
+    assert!(
+        worst_vel < 1e-2,
+        "spherical velocity left the homologous profile: {worst_vel:.3e}"
+    );
 }
 
 #[test]
@@ -422,7 +465,10 @@ fn free_expansion_stays_self_similar_on_the_comoving_grid() {
     let (rho_1, pre_1, vel_1) = free_expansion_errors(CFL);
     assert!(rho_1 < 2e-2, "density broke self-similarity: {rho_1:.3e}");
     assert!(pre_1 < 8e-2, "pressure broke self-similarity: {pre_1:.3e}");
-    assert!(vel_1 < 1e-3, "velocity left the homologous profile: {vel_1:.3e}");
+    assert!(
+        vel_1 < 1e-3,
+        "velocity left the homologous profile: {vel_1:.3e}"
+    );
 
     // the deviations are pure TIME-integration error of the a(t)-coupled terms
     // (the velocity profile is exact to roundoff-scale advection) — halving dt
@@ -486,14 +532,9 @@ fn homologous_mesh_tracers_follow_accepted_geometry() {
     for (position, owner) in accepted.x.iter().zip(&accepted.owner) {
         let linear = owner.0 as usize;
         let nx = N;
-        let index = [
-            linear % nx,
-            (linear / nx) % nx,
-            linear / (nx * nx),
-        ];
-        let expected: [f64; 3] = std::array::from_fn(|dd| {
-            sim.motion.a * (-0.5 + (index[dd] as f64 + 0.5) / N as f64)
-        });
+        let index = [linear % nx, (linear / nx) % nx, linear / (nx * nx)];
+        let expected: [f64; 3] =
+            std::array::from_fn(|dd| sim.motion.a * (-0.5 + (index[dd] as f64 + 0.5) / N as f64));
         for dd in 0..3 {
             assert!(
                 (position[dd] - expected[dd]).abs() < 1.0e-12,
@@ -551,11 +592,7 @@ fn translating_mesh_tracers_follow_accepted_ale_mass_flux() {
     );
     for (position, owner) in accepted.x.iter().zip(&accepted.owner) {
         let linear = owner.0 as usize;
-        let index = [
-            linear % N,
-            (linear / N) % N,
-            linear / (N * N),
-        ];
+        let index = [linear % N, (linear / N) % N, linear / (N * N)];
         let expected: [f64; 3] = std::array::from_fn(|dd| {
             -0.5 + (index[dd] as f64 + 0.5) / N as f64
                 + if dd == 0 { velocity * sim.time } else { 0.0 }

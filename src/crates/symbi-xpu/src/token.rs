@@ -5,8 +5,8 @@
 // submitted. used for cross-stream dependencies and completion queries.
 // =============================================================================
 
-use crate::space::ExecutionSpace;
 use crate::error::Result;
+use crate::space::ExecutionSpace;
 
 /// async completion handle. wraps a stream event.
 pub struct Token<S: ExecutionSpace> {

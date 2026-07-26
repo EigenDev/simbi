@@ -21,7 +21,7 @@
 
 use symbi_ir::algebra::Scalar;
 use symbi_ir::passes::scalarize::scalarize;
-use symbi_ir::{begin_trace, end_trace, Backend, Cpu, Gv};
+use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace};
 
 /// run a Scalar-generic physics function at S = Gv, scalarize the resulting
 /// graph, and evaluate the LoweredFn at the given f64 inputs.
@@ -40,7 +40,10 @@ where
 
 fn close(a: f64, b: f64, what: &str) {
     let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
-    assert!(rel < 1e-12, "{what}: f64 {a} != gv-interp {b} (rel {rel:e})");
+    assert!(
+        rel < 1e-12,
+        "{what}: f64 {a} != gv-interp {b} (rel {rel:e})"
+    );
 }
 
 // =============================================================================
@@ -56,7 +59,11 @@ fn ring_arithmetic<S: Scalar>(a: S, b: S, c: S) -> S {
 fn ring_arithmetic_matches_f64() {
     let (a, b, c) = (1.5_f64, 2.7, 0.3);
     let want = ring_arithmetic::<f64>(a, b, c);
-    let got = gv_eval(|p| ring_arithmetic(p[0], p[1], p[2]), &["a", "b", "c"], &[a, b, c]);
+    let got = gv_eval(
+        |p| ring_arithmetic(p[0], p[1], p[2]),
+        &["a", "b", "c"],
+        &[a, b, c],
+    );
     close(want, got, "ring_arithmetic");
 }
 

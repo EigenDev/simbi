@@ -201,7 +201,9 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     // so its reads stride by `extent[0]` and touch a fresh cache line per cell; the cost GROWS with
     // the grid (the stride is the row length). slabbing the outermost axis gives each worker a
     // contiguous run. min/max are exact in any order; add/mul reassociate within roundoff either way.
-    let split = symbi_algebra::nest_order(D).next().expect("Domain rank >= 1");
+    let split = symbi_algebra::nest_order(D)
+        .next()
+        .expect("Domain rank >= 1");
     let (outer_lo, outer_hi) = (domain.spaces[split].lo, domain.spaces[split].hi);
     if domain.volume() >= PAR_THRESHOLD && (outer_hi - outer_lo) > 1 {
         use rayon::prelude::*;
@@ -218,8 +220,7 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
                 // is free to follow memory.
                 let lo: [isize; D] = std::array::from_fn(|a| slab.spaces[a].lo);
                 let hi: [isize; D] = std::array::from_fn(|a| slab.spaces[a].hi);
-                let total: usize =
-                    (0..D).map(|a| (hi[a] - lo[a]).max(0) as usize).product();
+                let total: usize = (0..D).map(|a| (hi[a] - lo[a]).max(0) as usize).product();
                 let mut acc = identity;
                 let mut c = lo;
                 for _ in 0..total {
@@ -343,9 +344,9 @@ fn field_reduce_device<
 ) -> f64 {
     use symbi_ir::emit::Precision;
     use symbi_ir::{REDUCTION_BLOCK_SIZE, render_field_reduction};
+    use symbi_xpu::LaunchConfig;
     use symbi_xpu::ctx_sync;
     use symbi_xpu::runtime::GpuRuntime;
-    use symbi_xpu::LaunchConfig;
 
     let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
     let precision = if is_f64 {

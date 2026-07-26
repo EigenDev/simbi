@@ -17,8 +17,8 @@
 
 use std::f64::consts::PI;
 
-use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet3D;
+use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_newtonian_mhd::{
     NewtonianMhdSubstrateKernelSet, NewtonianMhdSubstrateKernelSet3D,
 };
@@ -115,7 +115,11 @@ macro_rules! run_3d_divb {
             .build();
         let inv_d = [NX as f64, NY as f64, NZ as f64];
         let (div0, b_max) = max_divb(&sim, inv_d);
-        assert!(div0 / b_max.max(1.0) < 1e-13, "{}: IC not div-free: {div0:e}", $what);
+        assert!(
+            div0 / b_max.max(1.0) < 1e-13,
+            "{}: IC not div-free: {div0:e}",
+            $what
+        );
 
         let sub = <$set>::new($eos_param, CFL, 1.0, &sim.geom.allocated)
             .with_solver($solver)
@@ -128,12 +132,18 @@ macro_rules! run_3d_divb {
             assert!(
                 rel < DIVB_TOL,
                 "{}: div(B) grew at iter {} t={:.3e}: rel {rel:e}",
-                $what, s.iteration, s.time,
+                $what,
+                s.iteration,
+                s.time,
             );
             steps = s.iteration;
         })
         .expect("evolve");
-        assert!(steps >= 5, "{}: only {steps} steps — gate barely exercised", $what);
+        assert!(
+            steps >= 5,
+            "{}: only {steps} steps — gate barely exercised",
+            $what
+        );
     }};
 }
 
@@ -180,18 +190,10 @@ fn z_invariant_uct_hlld_3d_matches_2p5d_columns() {
         MhdPrim {
             hydro: Prim {
                 rho: GAMMA * GAMMA,
-                vel: Tensor::new([
-                    -0.5 * (2.0 * PI * y).sin(),
-                    0.5 * (2.0 * PI * x).sin(),
-                    0.0,
-                ]),
+                vel: Tensor::new([-0.5 * (2.0 * PI * y).sin(), 0.5 * (2.0 * PI * x).sin(), 0.0]),
                 pre: GAMMA,
             },
-            mag: Tensor::new([
-                -B0 * (2.0 * PI * y).sin(),
-                B0 * (4.0 * PI * x).sin(),
-                0.0,
-            ]),
+            mag: Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
         }
     };
     let inplane_face = |axis: usize, x: f64, y: f64| -> f64 {
@@ -214,34 +216,51 @@ fn z_invariant_uct_hlld_3d_matches_2p5d_columns() {
         .set_initial(|[x, y, _z]| inplane_prim(x, y))
         .seed_faces(|axis, [x, y, _z]| inplane_face(axis, x, y))
         .build();
-    let k3 = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &s3.geom.allocated)
-        .with_solver(Solver::Hlld)
-        .expect("hlld")
-        .ct_method(CtMethod::Uct);
+    let k3 = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &s3.geom.allocated,
+    )
+    .with_solver(Solver::Hlld)
+    .expect("hlld")
+    .ct_method(CtMethod::Uct);
     evolve_with_callback(&mut s3, &k3, T, 1, |_| {}).expect("3d evolve");
 
     // the 2.5D twin: 2 grid axes, 3 vector components (the DOF-lifted state).
-    let mut s2 = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
+    let mut s2 = SimStateGeneric::<
         NewtonianMhd,
-        IdealGas { gamma: GAMMA },
+        2,
+        3,
         Cartesian,
+        IdealGas<f64>,
+        CpuSpace,
+        HostMemory,
+    >::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
+    .cells([NX, NY])
+    .spacing([dx, dy])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(CFL)
+    .allocate()
+    .expect("2d sim")
+    .set_initial(|[x, y]| inplane_prim(x, y))
+    .seed_faces(|axis, [x, y]| inplane_face(axis, x, y))
+    .build();
+    let k2 = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &s2.geom.allocated,
     )
-        .cells([NX, NY])
-        .spacing([dx, dy])
-        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
-        .cfl(CFL)
-        .allocate()
-        .expect("2d sim")
-        .set_initial(|[x, y]| inplane_prim(x, y))
-        .seed_faces(|axis, [x, y]| inplane_face(axis, x, y))
-        .build();
-    let k2 = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.0, &s2.geom.allocated)
-        .with_solver(Solver::Hlld)
-        .expect("hlld")
-        .ct_method(CtMethod::Uct);
+    .with_solver(Solver::Hlld)
+    .expect("hlld")
+    .ct_method(CtMethod::Uct);
     evolve_with_callback(&mut s2, &k2, T, 1, |_| {}).expect("2d evolve");
 
-    assert_eq!(s3.iteration, s2.iteration, "step counts diverged: the z axis bound the CFL");
+    assert_eq!(
+        s3.iteration, s2.iteration,
+        "step counts diverged: the z axis bound the CFL"
+    );
 
     let mhd3 = s3.fields.mhd.as_ref().expect("mhd3");
     let mhd2 = s2.fields.mhd.as_ref().expect("mhd2");
@@ -254,11 +273,31 @@ fn z_invariant_uct_hlld_3d_matches_2p5d_columns() {
             for kk in 0..NZ as isize {
                 let c3 = [lo3[0] + ii, lo3[1] + jj, lo3[2] + kk];
                 let pairs = [
-                    (*s3.fields.cons.den.view().at(c3), *s2.fields.cons.den.view().at(c2), "den"),
-                    (*s3.fields.cons.mom[0].view().at(c3), *s2.fields.cons.mom[0].view().at(c2), "mom0"),
-                    (*s3.fields.cons.mom[1].view().at(c3), *s2.fields.cons.mom[1].view().at(c2), "mom1"),
-                    (*mhd3.bface[0].view().at(c3), *mhd2.bface[0].view().at(c2), "bx"),
-                    (*mhd3.bface[1].view().at(c3), *mhd2.bface[1].view().at(c2), "by"),
+                    (
+                        *s3.fields.cons.den.view().at(c3),
+                        *s2.fields.cons.den.view().at(c2),
+                        "den",
+                    ),
+                    (
+                        *s3.fields.cons.mom[0].view().at(c3),
+                        *s2.fields.cons.mom[0].view().at(c2),
+                        "mom0",
+                    ),
+                    (
+                        *s3.fields.cons.mom[1].view().at(c3),
+                        *s2.fields.cons.mom[1].view().at(c2),
+                        "mom1",
+                    ),
+                    (
+                        *mhd3.bface[0].view().at(c3),
+                        *mhd2.bface[0].view().at(c2),
+                        "bx",
+                    ),
+                    (
+                        *mhd3.bface[1].view().at(c3),
+                        *mhd2.bface[1].view().at(c2),
+                        "by",
+                    ),
                 ];
                 for (a, b, what) in pairs {
                     assert!(
@@ -266,8 +305,14 @@ fn z_invariant_uct_hlld_3d_matches_2p5d_columns() {
                         "{what} at ({ii},{jj},{kk}): 3d {a:e} vs 2.5d {b:e}"
                     );
                 }
-                let (mz, bz) = (*s3.fields.cons.mom[2].view().at(c3), *mhd3.bface[2].view().at(c3));
-                assert!(mz == 0.0 && bz == 0.0, "out-of-plane leaked at ({ii},{jj},{kk}): mz={mz:e} bz={bz:e}");
+                let (mz, bz) = (
+                    *s3.fields.cons.mom[2].view().at(c3),
+                    *mhd3.bface[2].view().at(c3),
+                );
+                assert!(
+                    mz == 0.0 && bz == 0.0,
+                    "out-of-plane leaked at ({ii},{jj},{kk}): mz={mz:e} bz={bz:e}"
+                );
                 checked += 1;
             }
         }

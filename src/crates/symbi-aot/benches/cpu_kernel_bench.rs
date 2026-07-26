@@ -19,8 +19,7 @@ use std::time::Instant;
 // loop and poison the timing. the slice ABI is still drift-stable (the signature
 // never changes when a builder adds a field; the buffer slice just grows).
 use symbi_aot::{
-    rmhd_c2p_1d, rmhd_face_flux_1d, rhd_c2p_1d, rhd_face_flux_1d_0,
-    CpuField, CpuFieldMut,
+    CpuField, CpuFieldMut, rhd_c2p_1d, rhd_face_flux_1d_0, rmhd_c2p_1d, rmhd_face_flux_1d,
 };
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -92,19 +91,34 @@ fn main() {
 
     // ---- c2p: conserved -> primitive ----
     let (mut cden, mut cm0, mut cm1, mut cm2, mut cnrg, mut cb0, mut cb1, mut cb2) = (
-        vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N],
-        vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
     );
     for ii in 0..N {
         let (rho, v, p, b) = prim_at(ii, N);
         let (d, s, tau, bb) = p2c(rho, v, p, b);
         cden[ii] = d;
-        cm0[ii] = s[0]; cm1[ii] = s[1]; cm2[ii] = s[2];
+        cm0[ii] = s[0];
+        cm1[ii] = s[1];
+        cm2[ii] = s[2];
         cnrg[ii] = tau;
-        cb0[ii] = bb[0]; cb1[ii] = bb[1]; cb2[ii] = bb[2];
+        cb0[ii] = bb[0];
+        cb1[ii] = bb[1];
+        cb2[ii] = bb[2];
     }
-    let (mut prho, mut pv0, mut pv1, mut pv2, mut ppre) =
-        (vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N]);
+    let (mut prho, mut pv0, mut pv1, mut pv2, mut ppre) = (
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+    );
 
     bench("rmhd c2p", N, REPS, || {
         let cd = CpuField::from_layout(&cden, &[0], &[N as u32]);
@@ -123,26 +137,45 @@ fn main() {
         rmhd_c2p_1d(
             &[cd, m0, m1, m2, cn, b0, b1, b2],
             &mut [pr, p0, p1, p2v, pp],
-            &[N as u32], &[0], &[], &[GAMMA],
+            &[N as u32],
+            &[0],
+            &[],
+            &[GAMMA],
         );
         black_box(&prho);
     });
 
     // ---- face flux: primitive -> 8 flux components (PLM stencil) ----
     let (mut rho, mut vx, mut vy, mut vz, mut pre, mut bx, mut by, mut bz) = (
-        vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N],
-        vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
     );
     for ii in 0..N {
         let (r, v, p, b) = prim_at(ii, N);
         rho[ii] = r;
-        vx[ii] = v[0]; vy[ii] = v[1]; vz[ii] = v[2];
+        vx[ii] = v[0];
+        vy[ii] = v[1];
+        vz[ii] = v[2];
         pre[ii] = p;
-        bx[ii] = b[0]; by[ii] = b[1]; bz[ii] = b[2];
+        bx[ii] = b[0];
+        by[ii] = b[1];
+        bz[ii] = b[2];
     }
     let (mut fden, mut fsx, mut fsy, mut fsz, mut fnrg, mut fbx, mut fby, mut fbz) = (
-        vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N],
-        vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
     );
     // the refactored rmhd flux reads the per-cell Davis fan speeds (ws_l/ws_r); the bench
     // binds the relativistic light-speed bound (-1/+1) — the Rusanov member of the HLLE
@@ -174,7 +207,10 @@ fn main() {
             // bface_n (normal face field) at manifest position 8; constant Bx in 1D -> bxf.
             &[rf, vxf, vyf, vzf, pf, bxf, byf, bzf, bxf, wslf, wsrf],
             &mut [fdf, fsxf, fsyf, fszf, fnf, fbxf, fbyf, fbzf],
-            &[(N - 4) as u32], &[2], &[], &[GAMMA, THETA],
+            &[(N - 4) as u32],
+            &[2],
+            &[],
+            &[GAMMA, THETA],
         );
         black_box(&fden);
     });
@@ -200,7 +236,14 @@ fn main() {
         let pr = CpuFieldMut::from_layout(&mut sprho, &[0], &[N as u32]);
         let pv = CpuFieldMut::from_layout(&mut spvel, &[0], &[N as u32]);
         let pp = CpuFieldMut::from_layout(&mut sppre, &[0], &[N as u32]);
-        rhd_c2p_1d(&[cd, cm, cn], &mut [pr, pv, pp], &[N as u32], &[0], &[], &[GAMMA]);
+        rhd_c2p_1d(
+            &[cd, cm, cn],
+            &mut [pr, pv, pp],
+            &[N as u32],
+            &[0],
+            &[],
+            &[GAMMA],
+        );
         black_box(&sprho);
     });
 
@@ -221,21 +264,33 @@ fn main() {
         let fm = CpuFieldMut::from_layout(&mut sfmom, &[0], &[N as u32]);
         let fn_ = CpuFieldMut::from_layout(&mut sfnrg, &[0], &[N as u32]);
         rhd_face_flux_1d_0(
-            &[a, b, c], &mut [fd, fm, fn_], &[(N - 4) as u32], &[2], &[], &[GAMMA, THETA],
+            &[a, b, c],
+            &mut [fd, fm, fn_],
+            &[(N - 4) as u32],
+            &[2],
+            &[],
+            &[GAMMA, THETA],
         );
         black_box(&sfden);
     });
 
     // ---- RMHD with B = 0: does the lazy `cond_bn` branch elide the quartic? ----
     // c2p with zero magnetic field: regenerate conserved from p2c(b=0).
-    let (mut zden, mut zm0, mut zm1, mut zm2, mut znrg) =
-        (vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N], vec![0.0; N]);
+    let (mut zden, mut zm0, mut zm1, mut zm2, mut znrg) = (
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+    );
     let zb = vec![0.0; N]; // shared zero B buffer for all 3 components
     for ii in 0..N {
         let (rho, v, p, _b) = prim_at(ii, N);
         let (d, s, tau, _bb) = p2c(rho, v, p, [0.0, 0.0, 0.0]);
         zden[ii] = d;
-        zm0[ii] = s[0]; zm1[ii] = s[1]; zm2[ii] = s[2];
+        zm0[ii] = s[0];
+        zm1[ii] = s[1];
+        zm2[ii] = s[2];
         znrg[ii] = tau;
     }
     bench("rmhd c2p (B=0)", N, REPS, || {
@@ -253,7 +308,10 @@ fn main() {
         rmhd_c2p_1d(
             &[cd, m0, m1, m2, cn, b0, b0, b0],
             &mut [pr, p0, p1, p2v, pp],
-            &[N as u32], &[0], &[], &[GAMMA],
+            &[N as u32],
+            &[0],
+            &[],
+            &[GAMMA],
         );
         black_box(&prho);
     });
@@ -280,7 +338,10 @@ fn main() {
             // bface_n at position 8; B=0 case -> zbf.
             &[rf, vxf, vyf, vzf, pf, zbf, zbf, zbf, zbf, wslf, wsrf],
             &mut [fdf, fsxf, fsyf, fszf, fnf, fbxf, fbyf, fbzf],
-            &[(N - 4) as u32], &[2], &[], &[GAMMA, THETA],
+            &[(N - 4) as u32],
+            &[2],
+            &[],
+            &[GAMMA, THETA],
         );
         black_box(&fden);
     });

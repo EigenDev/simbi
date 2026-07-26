@@ -8,8 +8,8 @@
 // cons.mom). dispatched over the interior so the +-1 stencil stays in bounds.
 // =============================================================================
 
-use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
 use symbi_algebra::Tensor;
+use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_hydro::viscous::{viscous_mom_update_2d, viscous_mom_update_3d};
 
 const N: usize = 24;
@@ -106,7 +106,10 @@ fn compiled_viscous_iso_matches_the_f64_chain_bitwise() {
             }
         }
     }
-    assert!(checked > 20, "the viscous operator never produced a nonzero force");
+    assert!(
+        checked > 20,
+        "the viscous operator never produced a nonzero force"
+    );
 }
 
 // the alpha kernel. nu(x) = alpha c_s^2 / Omega_k(r) is a
@@ -114,8 +117,7 @@ fn compiled_viscous_iso_matches_the_f64_chain_bitwise() {
 // must be bit-identical to the f64 chain that computes the same per-cell nu.
 #[test]
 fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
-    let (kernel, ir) =
-        kernel_by_name::<f64>("viscous_iso_alpha_2d").expect("alpha viscous kernel");
+    let (kernel, ir) = kernel_by_name::<f64>("viscous_iso_alpha_2d").expect("alpha viscous kernel");
 
     const ALPHA: f64 = 0.1;
     const CS: f64 = 0.1;
@@ -207,14 +209,25 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
             }
             let dmom = viscous_mom_update_2d(&vst, &rst, &nst, DX, DX, DT);
             let c = ii + jj * N;
-            assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj})");
-            assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj})");
+            assert_eq!(
+                m0[c].to_bits(),
+                (m0_in[c] + dmom[0]).to_bits(),
+                "mom0 ({ii},{jj})"
+            );
+            assert_eq!(
+                m1[c].to_bits(),
+                (m1_in[c] + dmom[1]).to_bits(),
+                "mom1 ({ii},{jj})"
+            );
             if (m0[c] - m0_in[c]).abs() > 1e-14 {
                 checked += 1;
             }
         }
     }
-    assert!(checked > 20, "the alpha viscous operator never produced a nonzero force");
+    assert!(
+        checked > 20,
+        "the alpha viscous operator never produced a nonzero force"
+    );
 }
 
 // the 3D constant-nu gate: the compiled 27-cell stencil kernel is bit-identical
@@ -304,16 +317,31 @@ fn compiled_viscous_iso_3d_matches_the_f64_chain_bitwise() {
                 }
                 let dmom = viscous_mom_update_3d(&vst, &rst, &[[[NU; 3]; 3]; 3], [DX; 3], DT);
                 let c = at(ii, jj, kk);
-                assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj},{kk})");
-                assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj},{kk})");
-                assert_eq!(m2[c].to_bits(), (m2_in[c] + dmom[2]).to_bits(), "mom2 ({ii},{jj},{kk})");
+                assert_eq!(
+                    m0[c].to_bits(),
+                    (m0_in[c] + dmom[0]).to_bits(),
+                    "mom0 ({ii},{jj},{kk})"
+                );
+                assert_eq!(
+                    m1[c].to_bits(),
+                    (m1_in[c] + dmom[1]).to_bits(),
+                    "mom1 ({ii},{jj},{kk})"
+                );
+                assert_eq!(
+                    m2[c].to_bits(),
+                    (m2_in[c] + dmom[2]).to_bits(),
+                    "mom2 ({ii},{jj},{kk})"
+                );
                 if (m2[c] - m2_in[c]).abs() > 1e-14 {
                     checked += 1;
                 }
             }
         }
     }
-    assert!(checked > 20, "the 3D viscous operator never produced a nonzero z-force");
+    assert!(
+        checked > 20,
+        "the 3D viscous operator never produced a nonzero z-force"
+    );
 }
 
 // the 3D alpha gate: nu(x,y) = alpha cs^2 / Omega_k(R) with R the CYLINDRICAL
@@ -432,16 +460,31 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
                 }
                 let dmom = viscous_mom_update_3d(&vst, &rst, &nst, [DX; 3], DT);
                 let c = at(ii, jj, kk);
-                assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj},{kk})");
-                assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj},{kk})");
-                assert_eq!(m2[c].to_bits(), (m2_in[c] + dmom[2]).to_bits(), "mom2 ({ii},{jj},{kk})");
+                assert_eq!(
+                    m0[c].to_bits(),
+                    (m0_in[c] + dmom[0]).to_bits(),
+                    "mom0 ({ii},{jj},{kk})"
+                );
+                assert_eq!(
+                    m1[c].to_bits(),
+                    (m1_in[c] + dmom[1]).to_bits(),
+                    "mom1 ({ii},{jj},{kk})"
+                );
+                assert_eq!(
+                    m2[c].to_bits(),
+                    (m2_in[c] + dmom[2]).to_bits(),
+                    "mom2 ({ii},{jj},{kk})"
+                );
                 if (m2[c] - m2_in[c]).abs() > 1e-14 {
                     checked += 1;
                 }
             }
         }
     }
-    assert!(checked > 20, "the 3D alpha viscous operator never produced a nonzero z-force");
+    assert!(
+        checked > 20,
+        "the 3D alpha viscous operator never produced a nonzero z-force"
+    );
 }
 
 // the GENERAL ORTHOGONAL kernel on the cylindrical chart: bit-identical to the f64
@@ -463,7 +506,10 @@ fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
     let (mut m0, mut m1) = (vec![0.0; n2], vec![0.0; n2]);
     for jj in 0..N {
         for ii in 0..N {
-            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            let (rr, pp) = (
+                R_LO + (ii as f64 + 0.5) * DR,
+                PHI_LO + (jj as f64 + 0.5) * DPHI,
+            );
             let c = ii + jj * N;
             rho[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
             v0[c] = 0.3 * (rr + pp).cos();
@@ -489,7 +535,11 @@ fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
         let v = scalar(&bind.name());
-        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
     }
 
     let lo = [0i32; 2];
@@ -535,17 +585,36 @@ fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
                     h2[dj][di] = rc + (di as f64 - 1.0) * DR;
                 }
             }
-            let dmom =
-                viscous_mom_update_orthogonal_2d(&vst, &rst, &[[NU; 3]; 3], &ones, &h2, DR, DPHI, DT);
+            let dmom = viscous_mom_update_orthogonal_2d(
+                &vst,
+                &rst,
+                &[[NU; 3]; 3],
+                &ones,
+                &h2,
+                DR,
+                DPHI,
+                DT,
+            );
             let c = ii + jj * N;
-            assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj})");
-            assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj})");
+            assert_eq!(
+                m0[c].to_bits(),
+                (m0_in[c] + dmom[0]).to_bits(),
+                "mom0 ({ii},{jj})"
+            );
+            assert_eq!(
+                m1[c].to_bits(),
+                (m1_in[c] + dmom[1]).to_bits(),
+                "mom1 ({ii},{jj})"
+            );
             if (m1[c] - m1_in[c]).abs() > 1e-14 {
                 checked += 1;
             }
         }
     }
-    assert!(checked > 20, "the general orthogonal operator never produced a torque");
+    assert!(
+        checked > 20,
+        "the general orthogonal operator never produced a torque"
+    );
 }
 
 // the GENERAL ORTHOGONAL ALPHA kernel on the cylindrical chart: nu(R) = alpha cs^2 /
@@ -570,7 +639,10 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
     let (mut m0, mut m1) = (vec![0.0; n2], vec![0.0; n2]);
     for jj in 0..N {
         for ii in 0..N {
-            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            let (rr, pp) = (
+                R_LO + (ii as f64 + 0.5) * DR,
+                PHI_LO + (jj as f64 + 0.5) * DPHI,
+            );
             let c = ii + jj * N;
             rho[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
             v0[c] = 0.3 * (rr + pp).cos();
@@ -598,7 +670,11 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
         let v = scalar(&bind.name());
-        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
     }
 
     let lo = [0i32; 2];
@@ -649,12 +725,23 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
             }
             let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nst, &ones, &h2, DR, DPHI, DT);
             let c = ii + jj * N;
-            assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj})");
-            assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj})");
+            assert_eq!(
+                m0[c].to_bits(),
+                (m0_in[c] + dmom[0]).to_bits(),
+                "mom0 ({ii},{jj})"
+            );
+            assert_eq!(
+                m1[c].to_bits(),
+                (m1_in[c] + dmom[1]).to_bits(),
+                "mom1 ({ii},{jj})"
+            );
             if (m1[c] - m1_in[c]).abs() > 1e-14 {
                 checked += 1;
             }
         }
     }
-    assert!(checked > 20, "the general orthogonal alpha operator never produced a torque");
+    assert!(
+        checked > 20,
+        "the general orthogonal alpha operator never produced a torque"
+    );
 }

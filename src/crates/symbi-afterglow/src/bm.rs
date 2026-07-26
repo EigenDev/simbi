@@ -36,11 +36,11 @@ use crate::{HydroFields, QuantScales, SimConditions};
 /// the fluid four-velocity magnitude, `pre` the pressure.
 #[derive(Clone, Debug)]
 pub struct BmProfile {
-    pub x1:          Vec<f64>,
-    pub rho:         Vec<f64>,
-    pub gamma_beta:  Vec<f64>,
-    pub pre:         Vec<f64>,
-    pub r_shock:     f64,
+    pub x1: Vec<f64>,
+    pub rho: Vec<f64>,
+    pub gamma_beta: Vec<f64>,
+    pub pre: Vec<f64>,
+    pub r_shock: f64,
     pub gamma_shock: f64,
 }
 
@@ -63,7 +63,8 @@ pub fn bm_profile(e_iso: f64, n0: f64, t: f64, chi_max: f64, n_cells: usize) -> 
     let r_shock = ct * (1.0 - 1.0 / a);
 
     // post-shock normalizations (standard ultrarelativistic k=0 jump conditions).
-    let p2: EnergyDensity = (2.0 / 3.0) * gamma_sh_sq * (M_P * NumberDensity::new(n0)) * C_LIGHT.squared();
+    let p2: EnergyDensity =
+        (2.0 / 3.0) * gamma_sh_sq * (M_P * NumberDensity::new(n0)) * C_LIGHT.squared();
     let p2 = p2.value();
     let np2 = 4.0 * gamma_sh * n0; // proper number density just behind the shock [cm^-3]
     let mp = M_P.value();
@@ -74,7 +75,11 @@ pub fn bm_profile(e_iso: f64, n0: f64, t: f64, chi_max: f64, n_cells: usize) -> 
     let mut pre = Vec::with_capacity(n_cells);
 
     for k in 0..n_cells {
-        let frac = if n_cells > 1 { k as f64 / (n_cells - 1) as f64 } else { 0.0 };
+        let frac = if n_cells > 1 {
+            k as f64 / (n_cells - 1) as f64
+        } else {
+            0.0
+        };
         // chi from chi_max (k=0, inner) down to 1 (k=n-1, shock) -> radius ascending.
         let chi = chi_max.powf(1.0 - frac);
         let gamma_sq = gamma_sh_sq / (2.0 * chi);
@@ -84,7 +89,14 @@ pub fn bm_profile(e_iso: f64, n0: f64, t: f64, chi_max: f64, n_cells: usize) -> 
         rho.push(np2 * chi.powf(-7.0 / 4.0) * mp);
     }
 
-    BmProfile { x1, rho, gamma_beta, pre, r_shock, gamma_shock: gamma_sh }
+    BmProfile {
+        x1,
+        rho,
+        gamma_beta,
+        pre,
+        r_shock,
+        gamma_shock: gamma_sh,
+    }
 }
 
 /// build an image-ready photon catalog for a Blandford-McKee afterglow observed on-axis at
@@ -137,18 +149,22 @@ pub fn synthesize_afterglow_events(
     let t_hi = hi_factor * t_peak;
 
     let scales = QuantScales {
-        time:     Time::new(1.0),
-        pre:      EnergyDensity::new(1.0),
-        rho:      MassDensity::new(1.0),
+        time: Time::new(1.0),
+        pre: EnergyDensity::new(1.0),
+        rho: MassDensity::new(1.0),
         velocity: Velocity::new(1.0),
-        length:   Length::new(1.0),
+        length: Length::new(1.0),
     };
 
     for k in 0..n_snapshots {
         if events.len() as u64 >= max_events {
             break;
         }
-        let frac = if n_snapshots > 1 { k as f64 / (n_snapshots - 1) as f64 } else { 0.0 };
+        let frac = if n_snapshots > 1 {
+            k as f64 / (n_snapshots - 1) as f64
+        } else {
+            0.0
+        };
         let t = t_lo * (t_hi / t_lo).powf(frac); // log-spaced lab time
         // log-spaced lab-time bin width -> emission energy weight for this snapshot.
         let dt = if n_snapshots > 1 {
@@ -170,7 +186,11 @@ pub fn synthesize_afterglow_events(
             d_l: Length::new(d_l),
             nus: vec![],
         };
-        let fields = HydroFields { rho: &prof.rho, gamma_beta: &prof.gamma_beta, pre: &prof.pre };
+        let fields = HydroFields {
+            rho: &prof.rho,
+            gamma_beta: &prof.gamma_beta,
+            pre: &prof.pre,
+        };
         let remaining = max_events - events.len() as u64;
         let mut ev = generate_photon_events_spherical(
             &cond,
@@ -199,7 +219,10 @@ mod tests {
     fn shock_lorentz_factor_scales_as_t_minus_three() {
         let g1 = shock_lorentz_factor_sq(1.0e53, 1.0, 1.0e7);
         let g2 = shock_lorentz_factor_sq(1.0e53, 1.0, 2.0e7);
-        assert!((g1 / g2 - 8.0).abs() / 8.0 < 1e-12, "gamma_sh^2 should scale as t^-3");
+        assert!(
+            (g1 / g2 - 8.0).abs() / 8.0 < 1e-12,
+            "gamma_sh^2 should scale as t^-3"
+        );
     }
 
     // post-shock jump: the outermost (shock) cell has gamma = gamma_sh / sqrt(2), and the shock
@@ -210,9 +233,15 @@ mod tests {
         let last = prof.x1.len() - 1;
         let gamma_fluid = (prof.gamma_beta[last].powi(2) + 1.0).sqrt();
         let expected = prof.gamma_shock / 2.0_f64.sqrt();
-        assert!((gamma_fluid / expected - 1.0).abs() < 1e-3, "post-shock gamma = gamma_sh/sqrt(2)");
+        assert!(
+            (gamma_fluid / expected - 1.0).abs() < 1e-3,
+            "post-shock gamma = gamma_sh/sqrt(2)"
+        );
         let ct = C_LIGHT.value() * 2.5e7;
-        assert!(prof.x1[last] <= ct && prof.x1[last] > 0.99 * ct, "shock radius just below ct");
+        assert!(
+            prof.x1[last] <= ct && prof.x1[last] > 0.99 * ct,
+            "shock radius just below ct"
+        );
     }
 
     fn argmax(v: &[f64]) -> usize {
@@ -238,13 +267,29 @@ mod tests {
         );
         assert!(!events.is_empty(), "synthesis produced no events");
         let img = crate::observe::compute_skymap(
-            &events, [0.0, 0.0, 1.0], t_obs_day, t_obs_day, 0.0, 1.0e30, 0.0, 3.0, 48, 0.0, 0.0,
+            &events,
+            [0.0, 0.0, 1.0],
+            t_obs_day,
+            t_obs_day,
+            0.0,
+            1.0e30,
+            0.0,
+            3.0,
+            48,
+            0.0,
+            0.0,
             0.1,
         );
         let prof = img.radial_profile(10);
         let peak = argmax(&prof);
-        assert!(prof.iter().all(|v| v.is_finite()), "non-finite profile: {prof:?}");
-        assert!(peak >= 2, "image should be limb-brightened (peak ring {peak}): {prof:?}");
+        assert!(
+            prof.iter().all(|v| v.is_finite()),
+            "non-finite profile: {prof:?}"
+        );
+        assert!(
+            peak >= 2,
+            "image should be limb-brightened (peak ring {peak}): {prof:?}"
+        );
         assert!(
             prof[0] < 0.5 * prof[peak],
             "center should be much dimmer than the ring: {prof:?}"

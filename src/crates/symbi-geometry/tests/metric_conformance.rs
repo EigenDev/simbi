@@ -30,13 +30,20 @@ const SPIN: f64 = 0.5;
 
 /// a flat metric: the background methods must all read their flat values, and `lapse_sq == lapse^2`.
 fn assert_flat<const D: usize, M: Metric<f64, D>>(m: &M, x: Tensor<f64, D>, name: &str) {
-    assert_eq!(m.spacetime(), Spacetime::Minkowski, "{name}: flat metric must report Minkowski");
+    assert_eq!(
+        m.spacetime(),
+        Spacetime::Minkowski,
+        "{name}: flat metric must report Minkowski"
+    );
     assert_eq!(m.lapse(x), 1.0, "{name}: flat lapse must be 1");
     let beta = m.shift(x);
     for i in 0..D {
         assert_eq!(beta[i], 0.0, "{name}: flat shift component {i} must be 0");
     }
-    assert!(m.spacetime_scalars().is_empty(), "{name}: a flat metric exposes no spacetime scalars");
+    assert!(
+        m.spacetime_scalars().is_empty(),
+        "{name}: a flat metric exposes no spacetime scalars"
+    );
     assert!(
         (m.lapse_sq(x) - m.lapse(x) * m.lapse(x)).abs() < 1e-12,
         "{name}: lapse_sq must equal lapse^2"
@@ -52,8 +59,15 @@ fn assert_curved<const D: usize, M: Metric<f64, D>>(
     name: &str,
     static_chart: bool,
 ) {
-    assert_ne!(m.spacetime(), Spacetime::Minkowski, "{name}: curved metric must not report Minkowski");
-    assert!(!m.spacetime_scalars().is_empty(), "{name}: curved metric must expose its scalar params");
+    assert_ne!(
+        m.spacetime(),
+        Spacetime::Minkowski,
+        "{name}: curved metric must not report Minkowski"
+    );
+    assert!(
+        !m.spacetime_scalars().is_empty(),
+        "{name}: curved metric must expose its scalar params"
+    );
     assert!(
         (m.lapse(x) - 1.0).abs() > 1e-6,
         "{name}: curved lapse must differ from 1 (else the gravity default leaked): got {}",
@@ -67,7 +81,10 @@ fn assert_curved<const D: usize, M: Metric<f64, D>>(
     );
     let beta_r = m.shift(x)[0];
     if static_chart {
-        assert_eq!(beta_r, 0.0, "{name}: a static chart must have zero radial shift");
+        assert_eq!(
+            beta_r, 0.0,
+            "{name}: a static chart must have zero radial shift"
+        );
     } else {
         assert!(
             beta_r.abs() > 1e-6,
@@ -90,7 +107,11 @@ fn flat_metrics_report_flat_background() {
     assert_flat(&Cylindrical, Tensor::new([5.0]), "Cylindrical 1D");
     assert_flat(&Cylindrical, Tensor::new([5.0, 2.0]), "Cylindrical 2D");
     assert_flat(&Cylindrical, Tensor::new([5.0, 0.5, 2.0]), "Cylindrical 3D");
-    assert_flat(&CylindricalRPhi, Tensor::new([5.0, 0.5]), "CylindricalRPhi 2D");
+    assert_flat(
+        &CylindricalRPhi,
+        Tensor::new([5.0, 0.5]),
+        "CylindricalRPhi 2D",
+    );
 }
 
 #[test]
@@ -99,26 +120,59 @@ fn curved_metrics_have_consistent_background() {
     let schw = Schwarzschild { mass: MASS };
     assert_curved(&schw, Tensor::new([5.0]), "Schwarzschild 1D", true);
     assert_curved(&schw, Tensor::new([5.0, 1.0]), "Schwarzschild 2D", true);
-    assert_curved(&schw, Tensor::new([5.0, 1.0, 0.5]), "Schwarzschild 3D", true);
+    assert_curved(
+        &schw,
+        Tensor::new([5.0, 1.0, 0.5]),
+        "Schwarzschild 3D",
+        true,
+    );
 
     // Schwarzschild-KS (ingoing, horizon-penetrating): nonzero radial shift.
     let ks = SchwarzschildKS { mass: MASS };
     assert_curved(&ks, Tensor::new([5.0]), "SchwarzschildKS 1D", false);
     assert_curved(&ks, Tensor::new([5.0, 1.0]), "SchwarzschildKS 2D", false);
-    assert_curved(&ks, Tensor::new([5.0, 1.0, 0.5]), "SchwarzschildKS 3D", false);
+    assert_curved(
+        &ks,
+        Tensor::new([5.0, 1.0, 0.5]),
+        "SchwarzschildKS 3D",
+        false,
+    );
 
     // cartesian KS (2D / 3D real; 1D is a degenerate stub, excluded): nonzero shift along x_i.
     let ksc = SchwarzschildKSCartesian { mass: MASS };
-    assert_curved(&ksc, Tensor::new([3.0, 4.0]), "SchwarzschildKSCartesian 2D", false);
-    assert_curved(&ksc, Tensor::new([3.0, 4.0, 0.0]), "SchwarzschildKSCartesian 3D", false);
+    assert_curved(
+        &ksc,
+        Tensor::new([3.0, 4.0]),
+        "SchwarzschildKSCartesian 2D",
+        false,
+    );
+    assert_curved(
+        &ksc,
+        Tensor::new([3.0, 4.0, 0.0]),
+        "SchwarzschildKSCartesian 3D",
+        false,
+    );
 
     // cylindrical KS: 2D equatorial disk (R, phi) + 3D (R, phi, z), both horizon-penetrating.
     let ksy = SchwarzschildKSCylindrical { mass: MASS };
-    assert_curved(&ksy, Tensor::new([5.0, 0.5]), "SchwarzschildKSCylindrical 2D", false);
-    assert_curved(&ksy, Tensor::new([5.0, 0.5, 2.0]), "SchwarzschildKSCylindrical 3D", false);
+    assert_curved(
+        &ksy,
+        Tensor::new([5.0, 0.5]),
+        "SchwarzschildKSCylindrical 2D",
+        false,
+    );
+    assert_curved(
+        &ksy,
+        Tensor::new([5.0, 0.5, 2.0]),
+        "SchwarzschildKSCylindrical 3D",
+        false,
+    );
 
     // spinning Kerr-KS (2D (r, theta) grid view + 3D full; both carry real lapse/shift).
-    let kerr = KerrKS { mass: MASS, spin: SPIN };
+    let kerr = KerrKS {
+        mass: MASS,
+        spin: SPIN,
+    };
     assert_curved(&kerr, Tensor::new([5.0, 1.0]), "KerrKS 2D", false);
     assert_curved(&kerr, Tensor::new([5.0, 1.0, 0.5]), "KerrKS 3D", false);
 }
@@ -130,7 +184,10 @@ fn reduced_dimension_volume_factor_is_the_proper_measure() {
     // and is wrong. spherical 1D: r^2 (naive would give 1); spherical 2D: r^2 sin(theta) (naive: r);
     // cylindrical 1D/2D: r (naive: 1).
     let x1 = Tensor::new([5.0]);
-    assert_eq!(<Spherical as Metric<f64, 1>>::volume_factor(&Spherical, x1), 25.0);
+    assert_eq!(
+        <Spherical as Metric<f64, 1>>::volume_factor(&Spherical, x1),
+        25.0
+    );
     assert_ne!(
         <Spherical as Metric<f64, 1>>::volume_factor(&Spherical, x1),
         <Spherical as Metric<f64, 1>>::sqrt_det_gamma(&Spherical, x1),
@@ -138,6 +195,12 @@ fn reduced_dimension_volume_factor_is_the_proper_measure() {
     );
     let x2 = Tensor::new([5.0, 1.0]);
     let vf2 = <Spherical as Metric<f64, 2>>::volume_factor(&Spherical, x2);
-    assert!((vf2 - 25.0 * (1.0_f64).sin()).abs() < 1e-12, "spherical 2D volume = r^2 sin(theta)");
-    assert_eq!(<Cylindrical as Metric<f64, 1>>::volume_factor(&Cylindrical, x1), 5.0);
+    assert!(
+        (vf2 - 25.0 * (1.0_f64).sin()).abs() < 1e-12,
+        "spherical 2D volume = r^2 sin(theta)"
+    );
+    assert_eq!(
+        <Cylindrical as Metric<f64, 1>>::volume_factor(&Cylindrical, x1),
+        5.0
+    );
 }

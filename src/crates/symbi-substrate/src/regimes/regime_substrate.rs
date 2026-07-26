@@ -28,15 +28,15 @@ use symbi_hydro::isothermal_mhd::IsothermalMhd;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::regime::Regime;
-use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::rhd::Rhd;
+use symbi_hydro::rmhd::Rmhd;
 
 use crate::regimes::substrate::IsoSubstrateKernelSet;
 use crate::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
 use crate::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use crate::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
-use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 use crate::regimes::substrate_rhd::RhdSubstrateKernelSet;
+use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 use symbi_sim::state::SimStateGeneric;
 
 /// map a regime to its substrate `KernelSet`, constructed from the run scalars (EOS param, CFL,

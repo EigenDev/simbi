@@ -9,23 +9,23 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_hydro::source_spec::BuiltSource;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
 
 use symbi_sim::state::FieldStore;
 
-use super::params::{geom_scalar, physical_geom, resolve_params, ScalarBind};
 use super::dispatch::dispatch_named;
 use super::layout::geom_suffix;
+use super::params::{ScalarBind, geom_scalar, physical_geom, resolve_params};
 use super::runtime_source::{
-    dispatch_runtime_ir, gv_kernel_to_ir, resolve_runtime_param, sim_gv_geom, RuntimeSource,
+    RuntimeSource, dispatch_runtime_ir, gv_kernel_to_ir, resolve_runtime_param, sim_gv_geom,
 };
-use symbi_sim::state::BoundaryType;
 use std::collections::HashMap;
+use symbi_sim::state::BoundaryType;
 
 /// the ghost-cell slab of one face: the ghost cells on `(axis, side)` (side 0 = lo, 1 = hi), with
 /// the transverse axes spanning the FULL ALLOCATION so the slab covers the edge/corner ghost
@@ -49,9 +49,17 @@ fn ghost_band_domain<const D: usize>(
             } else {
                 (interior.spaces[axis].hi, allocated.spaces[axis].hi) // hi ghosts
             };
-            Space { name: allocated.spaces[axis].name, lo, hi }
+            Space {
+                name: allocated.spaces[axis].name,
+                lo,
+                hi,
+            }
         } else {
-            Space { name: allocated.spaces[a].name, lo: allocated.spaces[a].lo, hi: allocated.spaces[a].hi }
+            Space {
+                name: allocated.spaces[a].name,
+                lo: allocated.spaces[a].lo,
+                hi: allocated.spaces[a].hi,
+            }
         }
     }))
 }
@@ -68,8 +76,14 @@ pub fn dispatch_driven_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
 {
     for axis in 0..D {
         for side in 0..2 {
-            let bt = if side == 0 { sim.boundaries.lo(axis) } else { sim.boundaries.hi(axis) };
-            let symbi_sim::state::BoundaryType::Driven(id) = bt else { continue };
+            let bt = if side == 0 {
+                sim.boundaries.lo(axis)
+            } else {
+                sim.boundaries.hi(axis)
+            };
+            let symbi_sim::state::BoundaryType::Driven(id) = bt else {
+                continue;
+            };
             let dag = dags.get(id as usize).unwrap_or_else(|| {
                 panic!("driven boundary on axis {axis} side {side} references unregistered id {id}")
             });
@@ -94,7 +108,10 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    assert!(!Mem::IS_DEVICE_ACCESSIBLE, "apply_boundary_dag_cpu is the host path");
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "apply_boundary_dag_cpu is the host path"
+    );
     let t = sim.time;
     let pre = sim.fields.prim.pre_field();
     let fields: Vec<String> = dag.eval.fields().map(|s| s.to_string()).collect();
@@ -102,10 +119,26 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     for c in band.iter() {
         let x = sim.geom.cell_coord(c);
         for field in &fields {
-            let params = dag.eval.params_for(field).expect("boundary dag: params_for");
+            let params = dag
+                .eval
+                .params_for(field)
+                .expect("boundary dag: params_for");
             let values: Vec<(&str, f64)> = params
                 .iter()
-                .map(|p| (p.as_str(), resolve_runtime_param::<D, DOF>(p, 0.0, &dummy_vel, 0.0, &x, t, &dag.params)))
+                .map(|p| {
+                    (
+                        p.as_str(),
+                        resolve_runtime_param::<D, DOF>(
+                            p,
+                            0.0,
+                            &dummy_vel,
+                            0.0,
+                            &x,
+                            t,
+                            &dag.params,
+                        ),
+                    )
+                })
                 .collect();
             let s = dag.eval.eval(field, &values).expect("boundary dag: eval");
             match field.as_str() {
@@ -115,19 +148,26 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
                         sim.fields.prim.vel[k].view_mut().set(c, Sc::from_f64(s[k]));
                     }
                 }
-                "nrg" => pre.expect("boundary 'nrg' on regime without prim.pre")
-                    .view_mut().set(c, Sc::from_f64(s[0])),
+                "nrg" => pre
+                    .expect("boundary 'nrg' on regime without prim.pre")
+                    .view_mut()
+                    .set(c, Sc::from_f64(s[0])),
                 // MHD cell-B prescription (prim.mag == mhd.bcell). a purely toroidal driven
                 // boundary sets the in-plane B to 0 and the out-of-plane B_phi to the injected
                 // value; the in-plane FACE B is left to the CT ghost-fill (div-free).
                 "bcell" => {
-                    let mhd = sim.fields.mhd.as_ref()
+                    let mhd = sim
+                        .fields
+                        .mhd
+                        .as_ref()
                         .expect("boundary 'bcell' slot on a non-MHD regime");
                     for k in 0..DOF {
                         mhd.bcell[k].view_mut().set(c, Sc::from_f64(s[k]));
                     }
                 }
-                other => panic!("boundary dag: unsupported slot '{other}' (den | mom | nrg | bcell)"),
+                other => {
+                    panic!("boundary dag: unsupported slot '{other}' (den | mom | nrg | bcell)")
+                }
             }
         }
     }
@@ -147,9 +187,16 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let (name, ir) = dag.gpu_ir.get_or_init(|| {
         let (coords, spacing, axes) = sim_gv_geom(sim);
-        let src_refs: Vec<(&str, &BuiltSource)> = dag.built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+        let src_refs: Vec<(&str, &BuiltSource)> =
+            dag.built.iter().map(|(t, b)| (t.as_str(), b)).collect();
         let (gvk, writes) = symbi_discretize::boundary_fill_from_built_gv(
-            coords, &spacing, &axes, D as u8, DOF, dag.has_energy, &src_refs,
+            coords,
+            &spacing,
+            &axes,
+            D as u8,
+            DOF,
+            dag.has_energy,
+            &src_refs,
         );
         gv_kernel_to_ir(&gvk, &writes, D as u8, &format!("rt_boundary_{D}d"))
     });
@@ -161,15 +208,18 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
         match *sref {
             ScalarRef::Time => Sc::from_f64(t),
             ScalarRef::UserParam(i) => Sc::from_f64(
-                *dag.params.get(i as usize).unwrap_or_else(|| panic!("boundary gpu: param p{i} not provided")),
+                *dag.params
+                    .get(i as usize)
+                    .unwrap_or_else(|| panic!("boundary gpu: param p{i} not provided")),
             ),
             other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
                 .map(Sc::from_f64)
-                .unwrap_or_else(|| panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")),
+                .unwrap_or_else(|| {
+                    panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")
+                }),
         }
     });
 }
-
 
 // =============================================================================
 // GRADIENT BOUNDARIES (Neumann / Robin) — the registry-driven convenience short-circuit for the
@@ -198,11 +248,20 @@ pub enum GradientBc {
 /// pre gradient is `cs^2 * q_rho`; for Robin the pre triple is `(a_rho, b_rho, cs^2*c_rho)` — both
 /// exact because the fills are linear in `u_edge` and `pre_edge = cs^2*rho_edge`. energy regimes
 /// (`None`) use the user's pressure coefficients directly.
-fn gradient_spec_map<const DOF: usize>(entry: &GradientBc, iso_cs2: Option<f64>) -> HashMap<String, f64> {
+fn gradient_spec_map<const DOF: usize>(
+    entry: &GradientBc,
+    iso_cs2: Option<f64>,
+) -> HashMap<String, f64> {
     let mut m = HashMap::new();
     match entry {
         GradientBc::Neumann(q) => {
-            assert_eq!(q.len(), DOF + 2, "neumann needs {} coeffs [rho, {DOF}*vel, pre], got {}", DOF + 2, q.len());
+            assert_eq!(
+                q.len(),
+                DOF + 2,
+                "neumann needs {} coeffs [rho, {DOF}*vel, pre], got {}",
+                DOF + 2,
+                q.len()
+            );
             m.insert("neu_q_rho".to_string(), q[0]);
             for k in 0..DOF {
                 m.insert(format!("neu_q_v{k}"), q[1 + k]);
@@ -214,7 +273,13 @@ fn gradient_spec_map<const DOF: usize>(entry: &GradientBc, iso_cs2: Option<f64>)
             m.insert("neu_q_pre".to_string(), q_pre);
         }
         GradientBc::Robin(abc) => {
-            assert_eq!(abc.len(), DOF + 2, "robin needs {} (a,b,c) triples, got {}", DOF + 2, abc.len());
+            assert_eq!(
+                abc.len(),
+                DOF + 2,
+                "robin needs {} (a,b,c) triples, got {}",
+                DOF + 2,
+                abc.len()
+            );
             let mut ins = |var: &str, t: &[f64; 3]| {
                 m.insert(format!("rob_a_{var}"), t[0]);
                 m.insert(format!("rob_b_{var}"), t[1]);
@@ -252,20 +317,30 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
 {
     // `pre` is the regime's pressure field (energy: `sim.fields.prim.pre`; iso: the substrate-owned
     // `cs2*rho` field, off the global ABI) — the `dispatch_named` "prim.pre" override.
-    let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+    let sfx = if DOF != D {
+        geom_suffix(sim.geom.coords, DOF, D)
+    } else {
+        ""
+    };
     let (x_lo_phys, dx_phys) =
         physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
 
     for axis in 0..D {
         for side in 0..2 {
-            let bt = if side == 0 { sim.boundaries.lo(axis) } else { sim.boundaries.hi(axis) };
+            let bt = if side == 0 {
+                sim.boundaries.lo(axis)
+            } else {
+                sim.boundaries.hi(axis)
+            };
             let (id, kind) = match bt {
                 BoundaryType::Neumann(id) => (id as usize, "neumann"),
                 BoundaryType::Robin(id) => (id as usize, "robin"),
                 _ => continue,
             };
             let entry = coeffs.get(id).unwrap_or_else(|| {
-                panic!("gradient boundary on axis {axis} side {side} references unregistered id {id}")
+                panic!(
+                    "gradient boundary on axis {axis} side {side} references unregistered id {id}"
+                )
             });
             let spec = gradient_spec_map::<DOF>(entry, iso_cs2);
             let name = format!("{kind}_ghost_fill{sfx}_{D}d");
@@ -278,30 +353,41 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
                 sim.geom.interior.spaces[axis].hi - 1
             }) as i32;
 
-            let (ints, scalars) = resolve_params(
-                &name,
-                |bind| match bind {
-                    // the boundary axis carries the outflow map (edge source); every other axis is
-                    // passthrough (map_type 0), so the in-kernel `dist` sums only the active axis.
-                    ScalarBind::Ref(ScalarRef::MapType(ax)) => {
-                        if *ax as usize == axis { 3 } else { 0 }
-                    }
-                    ScalarBind::Ref(ScalarRef::Arg(ax)) => {
-                        if *ax as usize == axis { edge } else { 0 }
-                    }
-                    o => panic!("gradient boundary: unexpected int param {o:?}"),
-                },
-                |bind| match bind {
-                    ScalarBind::Ref(sref) => {
-                        geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref)
-                            .map(Sc::from_f64)
-                            .unwrap_or_else(|| panic!("gradient boundary: unexpected geom scalar {sref:?}"))
-                    }
-                    ScalarBind::Spec(s) => Sc::from_f64(
-                        *spec.get(&**s).unwrap_or_else(|| panic!("gradient boundary: unbound coefficient '{s}'")),
-                    ),
-                },
-            );
+            let (ints, scalars) =
+                resolve_params(
+                    &name,
+                    |bind| match bind {
+                        // the boundary axis carries the outflow map (edge source); every other axis is
+                        // passthrough (map_type 0), so the in-kernel `dist` sums only the active axis.
+                        ScalarBind::Ref(ScalarRef::MapType(ax)) => {
+                            if *ax as usize == axis {
+                                3
+                            } else {
+                                0
+                            }
+                        }
+                        ScalarBind::Ref(ScalarRef::Arg(ax)) => {
+                            if *ax as usize == axis {
+                                edge
+                            } else {
+                                0
+                            }
+                        }
+                        o => panic!("gradient boundary: unexpected int param {o:?}"),
+                    },
+                    |bind| match bind {
+                        ScalarBind::Ref(sref) => {
+                            geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref)
+                                .map(Sc::from_f64)
+                                .unwrap_or_else(|| {
+                                    panic!("gradient boundary: unexpected geom scalar {sref:?}")
+                                })
+                        }
+                        ScalarBind::Spec(s) => Sc::from_f64(*spec.get(&**s).unwrap_or_else(|| {
+                            panic!("gradient boundary: unbound coefficient '{s}'")
+                        })),
+                    },
+                );
             dispatch_named(sim, pre, None, 0, &name, &band, &ints, &scalars);
         }
     }

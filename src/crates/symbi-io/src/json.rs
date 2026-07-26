@@ -63,20 +63,26 @@ fn write_node(s: &mut String, t: &Tree<'_>, indent: usize) {
 fn attr_json(a: &Attr) -> String {
     match a {
         Attr::Bool(v) => v.to_string(),
-        Attr::I64(v)  => v.to_string(),
-        Attr::U64(v)  => v.to_string(),
-        Attr::F64(v)  => {
+        Attr::I64(v) => v.to_string(),
+        Attr::U64(v) => v.to_string(),
+        Attr::F64(v) => {
             // json doesn't allow NaN / Inf; surface them as strings instead.
-            if v.is_finite() { v.to_string() } else { format!("\"{v}\"") }
+            if v.is_finite() {
+                v.to_string()
+            } else {
+                format!("\"{v}\"")
+            }
         }
-        Attr::Str(s)  => format!("\"{}\"", esc(s)),
+        Attr::Str(s) => format!("\"{}\"", esc(s)),
     }
 }
 
 fn dataset_json(d: &Dataset<'_>) -> String {
     format!(
         "{{ \"name\": \"{}\", \"dtype\": \"{:?}\", \"shape\": {:?} }}",
-        esc(&d.name), d.data.dtype(), d.shape,
+        esc(&d.name),
+        d.data.dtype(),
+        d.shape,
     )
 }
 

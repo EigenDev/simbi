@@ -71,13 +71,23 @@ fn adiabatic_2d_runs_and_stays_xy_symmetric() {
         .set_initial(|x| {
             let r2 = (x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2);
             let pre = 1.0 + 3.0 * (-r2 / 0.01).exp();
-            Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre }
+            Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0]),
+                pre,
+            }
         })
         .build();
 
-    let mass0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum();
+    let mass0: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .sum();
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
     evolve(&mut sim, &sub, 0.05).expect("2D adiabatic evolution failed");
 
     let pre = sim.fields.prim.pre_field().expect("prim.pre");
@@ -100,16 +110,35 @@ fn adiabatic_2d_runs_and_stays_xy_symmetric() {
     }
 
     // both sweep axes wired correctly => symmetry held to ~machine precision.
-    assert!(max_asym < 1e-12, "x<->y symmetry broken: max asymmetry {max_asym:e}");
+    assert!(
+        max_asym < 1e-12,
+        "x<->y symmetry broken: max asymmetry {max_asym:e}"
+    );
     // the pulse actually drove flow in the plane (a real solve).
-    assert!(max_speed > 0.05, "no flow developed (max speed {max_speed})");
+    assert!(
+        max_speed > 0.05,
+        "no flow developed (max speed {max_speed})"
+    );
     // mass conserved on the periodic box.
-    let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum();
-    assert!((mass1 - mass0).abs() < 1e-9 * mass0, "mass drift {:e}", mass1 - mass0);
+    let mass1: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .sum();
+    assert!(
+        (mass1 - mass0).abs() < 1e-9 * mass0,
+        "mass drift {:e}",
+        mass1 - mass0
+    );
 
     println!(
         "ADIABATIC 2D: {} steps to t={:.3}, max asym {:e}, max speed {:.3}, mass drift {:e}",
-        sim.iteration, sim.time, max_asym, max_speed, (mass1 - mass0) / mass0,
+        sim.iteration,
+        sim.time,
+        max_asym,
+        max_speed,
+        (mass1 - mass0) / mass0,
     );
 }
 
@@ -128,11 +157,16 @@ fn adiabatic_3d_runs_and_stays_symmetric() {
         .set_initial(|x| {
             let r2: f64 = (0..3).map(|kk| (x[kk] - 0.5).powi(2)).sum();
             let pre = 1.0 + 3.0 * (-r2 / 0.02).exp();
-            Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre }
+            Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0; 3]),
+                pre,
+            }
         })
         .build();
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sim.geom.allocated);
     evolve(&mut sim, &sub, 0.03).expect("3D adiabatic evolution failed");
 
     let pre = sim.fields.prim.pre_field().expect("prim.pre");
@@ -142,7 +176,9 @@ fn adiabatic_3d_runs_and_stays_symmetric() {
         let p = *pre.view().at(c);
         assert!(rho.is_finite() && rho > 0.0, "bad density {rho} at {c:?}");
         assert!(p.is_finite() && p > 0.0, "bad pressure {p} at {c:?}");
-        let v: f64 = (0..3).map(|k| sim.fields.prim.vel[k].view().at(c).powi(2)).sum();
+        let v: f64 = (0..3)
+            .map(|k| sim.fields.prim.vel[k].view().at(c).powi(2))
+            .sum();
         max_speed = max_speed.max(v.sqrt());
     }
     let max_asym = max_3d_asymmetry(
@@ -151,9 +187,18 @@ fn adiabatic_3d_runs_and_stays_symmetric() {
         |c| *pre.view().at(c),
         |k, c| *sim.fields.prim.vel[k].view().at(c),
     );
-    assert!(max_asym < 1e-12, "3D x<->y / x<->z symmetry broken: max asymmetry {max_asym:e}");
-    assert!(max_speed > 0.05, "3D blast did not develop flow (max speed {max_speed})");
-    println!("ADIABATIC 3D: {} steps to t={:.3}, max asym {:e}, max speed {:.3}", sim.iteration, sim.time, max_asym, max_speed);
+    assert!(
+        max_asym < 1e-12,
+        "3D x<->y / x<->z symmetry broken: max asymmetry {max_asym:e}"
+    );
+    assert!(
+        max_speed > 0.05,
+        "3D blast did not develop flow (max speed {max_speed})"
+    );
+    println!(
+        "ADIABATIC 3D: {} steps to t={:.3}, max asym {:e}, max speed {:.3}",
+        sim.iteration, sim.time, max_asym, max_speed
+    );
 }
 
 #[test]
@@ -179,7 +224,12 @@ fn iso_3d_runs_and_stays_symmetric() {
         })
         .build();
 
-    let mass0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum();
+    let mass0: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .sum();
 
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 3>::new(cs, 0.4, &sim.geom.allocated);
     evolve(&mut sim, &sub, 0.03).expect("3D iso evolution failed");
@@ -188,7 +238,9 @@ fn iso_3d_runs_and_stays_symmetric() {
     for c in sim.geom.interior.iter() {
         let rho = *sim.fields.prim.rho.view().at(c);
         assert!(rho.is_finite() && rho > 0.0, "bad density {rho} at {c:?}");
-        let v: f64 = (0..3).map(|k| sim.fields.prim.vel[k].view().at(c).powi(2)).sum();
+        let v: f64 = (0..3)
+            .map(|k| sim.fields.prim.vel[k].view().at(c).powi(2))
+            .sum();
         max_speed = max_speed.max(v.sqrt());
     }
     // iso pressure is the substrate-owned field (p = cs^2*rho), symmetric iff rho is.
@@ -198,11 +250,29 @@ fn iso_3d_runs_and_stays_symmetric() {
         |c| *sub.pre.view().at(c),
         |k, c| *sim.fields.prim.vel[k].view().at(c),
     );
-    assert!(max_asym < 1e-12, "3D iso x<->y / x<->z symmetry broken: max asymmetry {max_asym:e}");
-    assert!(max_speed > 0.02, "3D iso bump did not develop flow (max speed {max_speed})");
-    let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum();
-    assert!((mass1 - mass0).abs() < 1e-9 * mass0, "iso mass drift {:e}", mass1 - mass0);
-    println!("ISO 3D: {} steps to t={:.3}, max asym {:e}, max speed {:.3}", sim.iteration, sim.time, max_asym, max_speed);
+    assert!(
+        max_asym < 1e-12,
+        "3D iso x<->y / x<->z symmetry broken: max asymmetry {max_asym:e}"
+    );
+    assert!(
+        max_speed > 0.02,
+        "3D iso bump did not develop flow (max speed {max_speed})"
+    );
+    let mass1: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .sum();
+    assert!(
+        (mass1 - mass0).abs() < 1e-9 * mass0,
+        "iso mass drift {:e}",
+        mass1 - mass0
+    );
+    println!(
+        "ISO 3D: {} steps to t={:.3}, max asym {:e}, max speed {:.3}",
+        sim.iteration, sim.time, max_asym, max_speed
+    );
 }
 
 #[test]
@@ -222,7 +292,11 @@ fn rhd_3d_runs_and_stays_symmetric() {
         .set_initial(|x| {
             let r2: f64 = (0..3).map(|kk| (x[kk] - 0.5).powi(2)).sum();
             let pre = 1.0 + 2.0 * (-r2 / 0.02).exp();
-            Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre }
+            Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0; 3]),
+                pre,
+            }
         })
         .build();
 
@@ -236,7 +310,10 @@ fn rhd_3d_runs_and_stays_symmetric() {
         let p = *pre.view().at(c);
         assert!(rho.is_finite() && rho > 0.0, "bad density {rho} at {c:?}");
         assert!(p.is_finite() && p > 0.0, "bad pressure {p} at {c:?}");
-        let speed: f64 = (0..3).map(|k| sim.fields.prim.vel[k].view().at(c).powi(2)).sum::<f64>().sqrt();
+        let speed: f64 = (0..3)
+            .map(|k| sim.fields.prim.vel[k].view().at(c).powi(2))
+            .sum::<f64>()
+            .sqrt();
         assert!(speed < 1.0, "superluminal speed {speed} at {c:?}");
         max_speed = max_speed.max(speed);
     }
@@ -246,9 +323,18 @@ fn rhd_3d_runs_and_stays_symmetric() {
         |c| *pre.view().at(c),
         |k, c| *sim.fields.prim.vel[k].view().at(c),
     );
-    assert!(max_asym < 1e-12, "3D RHD x<->y / x<->z symmetry broken: max asymmetry {max_asym:e}");
-    assert!(max_speed > 0.005, "3D RHD pulse did not develop flow (max speed {max_speed})");
-    println!("RHD 3D: {} steps to t={:.3}, max asym {:e}, max speed {:.4}", sim.iteration, sim.time, max_asym, max_speed);
+    assert!(
+        max_asym < 1e-12,
+        "3D RHD x<->y / x<->z symmetry broken: max asymmetry {max_asym:e}"
+    );
+    assert!(
+        max_speed > 0.005,
+        "3D RHD pulse did not develop flow (max speed {max_speed})"
+    );
+    println!(
+        "RHD 3D: {} steps to t={:.3}, max asym {:e}, max speed {:.4}",
+        sim.iteration, sim.time, max_asym, max_speed
+    );
 }
 
 #[test]
@@ -272,7 +358,11 @@ fn rhd_2d_runs_and_stays_xy_symmetric() {
         .set_initial(|x| {
             let r2 = (x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2);
             let pre = 1.0 + 2.0 * (-r2 / 0.01).exp();
-            Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre }
+            Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0]),
+                pre,
+            }
         })
         .build();
 
@@ -298,8 +388,14 @@ fn rhd_2d_runs_and_stays_xy_symmetric() {
         max_asym = max_asym.max((p - *pre.view().at(t)).abs());
         max_asym = max_asym.max((vx - *sim.fields.prim.vel[1].view().at(t)).abs());
     }
-    assert!(max_asym < 1e-12, "x<->y symmetry broken: max asymmetry {max_asym:e}");
-    assert!(max_speed > 0.01, "no relativistic flow developed (max speed {max_speed})");
+    assert!(
+        max_asym < 1e-12,
+        "x<->y symmetry broken: max asymmetry {max_asym:e}"
+    );
+    assert!(
+        max_speed > 0.01,
+        "no relativistic flow developed (max speed {max_speed})"
+    );
     println!(
         "RHD 2D: {} steps to t={:.3}, max asym {:e}, max speed {:.4}",
         sim.iteration, sim.time, max_asym, max_speed,

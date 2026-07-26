@@ -20,9 +20,9 @@
 //   let geo = BlockGeometry::new(Spherical, &maps, &domain);
 // =============================================================================
 
+use crate::metric::{DiagonalMetric, Metric};
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
-use crate::metric::{DiagonalMetric, Metric};
 
 /// per-axis coordinate map. Copy + GPU-friendly enum.
 /// covers uniform, logarithmic, and geometrically graded spacing.
@@ -43,7 +43,11 @@ impl AxisMap {
         match self {
             AxisMap::Uniform { start, dx } => start + ii as f64 * dx,
             AxisMap::Log { start, log_slope } => start * 10.0_f64.powf(ii as f64 * log_slope),
-            AxisMap::Geometric { start, width, ratio } => {
+            AxisMap::Geometric {
+                start,
+                width,
+                ratio,
+            } => {
                 if (*ratio - 1.0).abs() < 1.0e-12 {
                     start + ii as f64 * width
                 } else {
@@ -78,10 +82,12 @@ impl AxisMap {
     pub fn index_at(&self, x: f64) -> isize {
         match self {
             AxisMap::Uniform { start, dx } => ((x - start) / dx).floor() as isize,
-            AxisMap::Log { start, log_slope } => {
-                ((x / start).log10() / log_slope).floor() as isize
-            }
-            AxisMap::Geometric { start, width, ratio } => {
+            AxisMap::Log { start, log_slope } => ((x / start).log10() / log_slope).floor() as isize,
+            AxisMap::Geometric {
+                start,
+                width,
+                ratio,
+            } => {
                 if (*ratio - 1.0).abs() < 1.0e-12 {
                     ((x - start) / width).floor() as isize
                 } else {
@@ -102,7 +108,10 @@ impl AxisMap {
 
 impl From<&crate::coord_map::UniformMap<f64>> for AxisMap {
     fn from(m: &crate::coord_map::UniformMap<f64>) -> Self {
-        AxisMap::Uniform { start: m.start(), dx: m.dx() }
+        AxisMap::Uniform {
+            start: m.start(),
+            dx: m.dx(),
+        }
     }
 }
 
@@ -202,7 +211,12 @@ where
 {
     /// create a block geometry from a metric and uniform grid spacing.
     pub fn uniform(metric: M, x_lo: [S; D], dx: [S; D]) -> Self {
-        BlockGeometry { metric, dx, x_lo, maps: None }
+        BlockGeometry {
+            metric,
+            dx,
+            x_lo,
+            maps: None,
+        }
     }
 
     /// create a block geometry from a metric and per-axis coordinate maps.
@@ -210,7 +224,12 @@ where
         // derive dx and x_lo from maps (for backward compatibility)
         let dx = std::array::from_fn(|ax| S::from_f64(maps[ax].width(0)));
         let x_lo = std::array::from_fn(|ax| S::from_f64(maps[ax].face(0)));
-        BlockGeometry { metric, dx, x_lo, maps: Some(maps) }
+        BlockGeometry {
+            metric,
+            dx,
+            x_lo,
+            maps: Some(maps),
+        }
     }
 
     /// cell width along axis ax at grid index.
@@ -227,7 +246,9 @@ where
     #[inline]
     pub fn centroid(&self, idx: [isize; D]) -> Tensor<S, D> {
         if let Some(ref maps) = self.maps {
-            Tensor::new(std::array::from_fn(|ax| S::from_f64(maps[ax].center(idx[ax]))))
+            Tensor::new(std::array::from_fn(|ax| {
+                S::from_f64(maps[ax].center(idx[ax]))
+            }))
         } else {
             Tensor::new(std::array::from_fn(|ax| {
                 self.x_lo[ax] + S::from_f64(idx[ax] as f64 + 0.5) * self.dx[ax]
@@ -290,7 +311,8 @@ where
         for qq in 0..n_quad {
             let mut x = Tensor::<S, D>::zeros();
             for ax in 0..D {
-                let x_center = self.axis_face(idx, ax) + self.cell_width(idx, ax) * S::from_f64(0.5);
+                let x_center =
+                    self.axis_face(idx, ax) + self.cell_width(idx, ax) * S::from_f64(0.5);
                 let dx_half = self.cell_width(idx, ax) * offset;
                 let sign = if (qq >> ax) & 1 == 0 { S::ONE } else { -S::ONE };
                 x[ax] = x_center + sign * dx_half;
@@ -337,7 +359,9 @@ where
             Geometry::Cylindrical => v * a * a,
             Geometry::Cartesian => {
                 let mut scale = S::ONE;
-                for _ in 0..D { scale = scale * a; }
+                for _ in 0..D {
+                    scale = scale * a;
+                }
                 v * scale
             }
         }
@@ -361,7 +385,9 @@ where
             }
             Geometry::Cartesian => {
                 let mut scale = S::ONE;
-                for _ in 0..D.saturating_sub(1) { scale = scale * a; }
+                for _ in 0..D.saturating_sub(1) {
+                    scale = scale * a;
+                }
                 area * scale
             }
         }
@@ -384,7 +410,11 @@ where
     /// pressure source from face area differences.
     #[inline]
     pub fn momentum_source(
-        &self, idx: [isize; D], rho: S, vel: Tensor<S, D>, pre: S,
+        &self,
+        idx: [isize; D],
+        rho: S,
+        vel: Tensor<S, D>,
+        pre: S,
     ) -> Tensor<S, D> {
         let x = self.centroid(idx);
         self.metric.momentum_source(x, rho, vel, pre)
@@ -395,18 +425,20 @@ where
     ///   S_pressure[i] = p * (A^i_R - A^i_L) / V
     #[inline]
     pub fn momentum_source_inertial(
-        &self, idx: [isize; D], mom: Tensor<S, D>, vel: Tensor<S, D>,
+        &self,
+        idx: [isize; D],
+        mom: Tensor<S, D>,
+        vel: Tensor<S, D>,
     ) -> Tensor<S, D> {
         let x = self.centroid(idx);
         self.metric.momentum_source_inertial(x, mom, vel)
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::metric::{Cartesian, Spherical, Cylindrical};
+    use crate::metric::{Cartesian, Cylindrical, Spherical};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -505,9 +537,16 @@ mod tests {
         // grid the cell centroid is the GEOMETRIC mean sqrt(r_lo r_hi) != arithmetic, so a face_area
         // that evaluated the metric at the centroid injected a spurious ~1e-6 divergence (the FM
         // torus symptom). regression: face_position uses the arithmetic transverse center.
-        let rmap = AxisMap::Log { start: 2.0, log_slope: 0.05 }; // strongly non-uniform radial zones
-        let tmap = AxisMap::Uniform { start: 0.3, dx: 0.15 };
-        let geo: BlockGeometry<Spherical, f64, 2> = BlockGeometry::with_maps(Spherical, [rmap, tmap]);
+        let rmap = AxisMap::Log {
+            start: 2.0,
+            log_slope: 0.05,
+        }; // strongly non-uniform radial zones
+        let tmap = AxisMap::Uniform {
+            start: 0.3,
+            dx: 0.15,
+        };
+        let geo: BlockGeometry<Spherical, f64, 2> =
+            BlockGeometry::with_maps(Spherical, [rmap, tmap]);
         let (nr, nth) = (8isize, 6isize);
 
         // flat-spherical volume factor r^2 sin(theta) at the metric-evaluation point.
@@ -522,24 +561,36 @@ mod tests {
 
         // B on the staggered faces, from the CT arithmetic-center curl weights (independent of
         // face_area — this is what the IC / curl produce).
-        let br = |i: isize, j: isize| (aphi(i, j + 1) - aphi(i, j)) / (vf(rmap.face(i), thc(j)) * tmap.width(j));
-        let bth = |i: isize, j: isize| -(aphi(i + 1, j) - aphi(i, j)) / (vf(rc(i), tmap.face(j)) * rmap.width(i));
+        let br = |i: isize, j: isize| {
+            (aphi(i, j + 1) - aphi(i, j)) / (vf(rmap.face(i), thc(j)) * tmap.width(j))
+        };
+        let bth = |i: isize, j: isize| {
+            -(aphi(i + 1, j) - aphi(i, j)) / (vf(rc(i), tmap.face(j)) * rmap.width(i))
+        };
 
         // the arithmetic vs geometric radial center genuinely differ on this log grid — the bug window.
         let r_arith = rc(3);
         let r_geom = (rmap.face(3) * rmap.face(4)).sqrt();
-        assert!((r_arith - r_geom).abs() > 1e-3, "log grid must separate arithmetic/geometric centers");
+        assert!(
+            (r_arith - r_geom).abs() > 1e-3,
+            "log grid must separate arithmetic/geometric centers"
+        );
 
         let mut max_div = 0.0_f64;
         for i in 1..(nr - 1) {
             for j in 1..(nth - 1) {
                 let vol = geo.volume([i, j]);
-                let flux = geo.face_area([i + 1, j], 0) * br(i + 1, j) - geo.face_area([i, j], 0) * br(i, j)
-                    + geo.face_area([i, j + 1], 1) * bth(i, j + 1) - geo.face_area([i, j], 1) * bth(i, j);
+                let flux = geo.face_area([i + 1, j], 0) * br(i + 1, j)
+                    - geo.face_area([i, j], 0) * br(i, j)
+                    + geo.face_area([i, j + 1], 1) * bth(i, j + 1)
+                    - geo.face_area([i, j], 1) * bth(i, j);
                 max_div = max_div.max((flux / vol).abs());
             }
         }
-        assert!(max_div < 1e-12, "log-radial area-weighted div(B) = {max_div:e}, expected machine zero");
+        assert!(
+            max_div < 1e-12,
+            "log-radial area-weighted div(B) = {max_div:e}, expected machine zero"
+        );
     }
 
     #[test]

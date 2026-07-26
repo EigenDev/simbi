@@ -18,7 +18,7 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -63,7 +63,11 @@ fn make_sim() -> Sim {
         .set_initial(|[x, y]| {
             let (rho, vx, vy) = rotor_state(x, y);
             MhdPrim {
-                hydro: Prim { rho, vel: Tensor::new([vx, vy, 0.0]), pre: 1.0 },
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: 1.0,
+                },
                 mag: Tensor::new([bx, 0.0, 0.0]),
             }
         })
@@ -90,17 +94,30 @@ fn rel_divb(s: &Sim) -> f64 {
 #[test]
 fn nmhd_rotor_2p5d_preserves_divb_winds_field_stays_physical() {
     let mut sim = make_sim();
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.5, &sim.geom.allocated)
-        .with_solver(Solver::Hlld).expect("valid solver/regime pair");
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.5,
+        &sim.geom.allocated,
+    )
+    .with_solver(Solver::Hlld)
+    .expect("valid solver/regime pair");
 
     let mut steps = 0u64;
     evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
         let rel = rel_divb(s);
-        assert!(rel < 1e-12, "rotor div(B) grew to rel={rel:e} at iter {}", s.iteration);
+        assert!(
+            rel < 1e-12,
+            "rotor div(B) grew to rel={rel:e} at iter {}",
+            s.iteration
+        );
         steps = s.iteration;
     })
     .expect("rotor evolve failed");
-    assert!(steps >= 10, "rotor produced only {steps} steps — gate barely exercised");
+    assert!(
+        steps >= 10,
+        "rotor produced only {steps} steps — gate barely exercised"
+    );
 
     // physicality through the low-beta core + the field has WOUND (By developed from 0).
     let eos = IdealGas { gamma: GAMMA };
@@ -125,11 +142,25 @@ fn nmhd_rotor_2p5d_preserves_divb_winds_field_stays_physical() {
             ]),
         };
         let prim = nmhd_recover(&eos, &cons);
-        assert!(prim.rho.is_finite() && prim.rho > 0.0, "cell {c:?}: rho={}", prim.rho);
-        assert!(prim.pre.is_finite() && prim.pre > 0.0, "cell {c:?}: p={}", prim.pre);
+        assert!(
+            prim.rho.is_finite() && prim.rho > 0.0,
+            "cell {c:?}: rho={}",
+            prim.rho
+        );
+        assert!(
+            prim.pre.is_finite() && prim.pre > 0.0,
+            "cell {c:?}: p={}",
+            prim.pre
+        );
         max_by = max_by.max(mhd.bcell[1].view().at(c).abs());
     }
-    assert!(max_by > 0.05, "field did not wind: max|By|={max_by:e} (rotation should generate By)");
+    assert!(
+        max_by > 0.05,
+        "field did not wind: max|By|={max_by:e} (rotation should generate By)"
+    );
 
-    eprintln!("[nmhd_rotor 2.5d] DONE iter={} t={:.4e} max|By|={:.4}", sim.iteration, sim.time, max_by);
+    eprintln!(
+        "[nmhd_rotor 2.5d] DONE iter={} t={:.4e} max|By|={:.4}",
+        sim.iteration, sim.time, max_by
+    );
 }

@@ -68,7 +68,8 @@ impl<const D: usize> BodyHistory<D> {
                 self.force.push(d.map_or(0.0, |d| d.force_delta[ax]));
             }
             for ax in 0..D {
-                self.force_normal.push(d.map_or(0.0, |d| d.force_normal_delta[ax]));
+                self.force_normal
+                    .push(d.map_or(0.0, |d| d.force_normal_delta[ax]));
             }
             for ax in 0..3 {
                 self.torque.push(d.map_or(0.0, |d| d.torque_delta[ax]));
@@ -138,7 +139,10 @@ mod tests {
         assert_eq!(h.mass_delta(), &[1.0, 2.0, 2.0, 1.0]);
         assert_eq!(h.force(), &[3.0, 4.0, 0.0, 0.0, 0.0, 0.0, 3.0, 4.0]);
         // torque is always 3-component + body-major: row0 = [d0, d1], row1 = [d1, d0].
-        assert_eq!(h.torque(), &[0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0]);
+        assert_eq!(
+            h.torque(),
+            &[0.0, 0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0]
+        );
     }
 
     #[test]

@@ -42,7 +42,11 @@ fn make_sim(b0: f64) -> Sim {
         .allocate()
         .expect("nmhd sim construction failed")
         .set_initial(move |_| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([b0, 0.0, 0.0]),
         })
         .seed_faces(move |axis, _| if axis == 0 { b0 } else { 0.0 })
@@ -50,7 +54,11 @@ fn make_sim(b0: f64) -> Sim {
 }
 
 fn total_mass(s: &Sim) -> f64 {
-    s.geom.interior.iter().map(|c| *s.fields.cons.den.view().at(c)).sum()
+    s.geom
+        .interior
+        .iter()
+        .map(|c| *s.fields.cons.den.view().at(c))
+        .sum()
 }
 
 fn magnetic_energy(s: &Sim) -> f64 {
@@ -109,11 +117,18 @@ fn setup(b0: f64) -> Sim {
     // channel active, wall channels off), so it removes plasma by a uniform scaling. the shape
     // routes it to the runtime-JIT'd kernel.
     sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
-            .with_surface(SurfaceSpec::Porous { porosity: 1.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
+        Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true).with_surface(
+            SurfaceSpec::Porous {
+                porosity: 1.0,
+                k_eta_n: 50.0,
+                k_eta_t: 50.0,
+            },
+        ),
     ));
-    sim.immersed.as_mut().unwrap().shapes[0] =
-        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.25, 0.25]));
+    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::cuboid(
+        [0.0, 0.0, 0.0],
+        [0.25, 0.25, 0.25],
+    ));
     sim
 }
 
@@ -127,7 +142,10 @@ fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
     let mag_e0 = magnetic_energy(&sim);
     let bcell0 = bcell_snapshot(&sim);
     let before = cell_state(&sim);
-    assert!(mag_e0 > 0.0, "the seed field must carry energy for the test to bite");
+    assert!(
+        mag_e0 > 0.0,
+        "the seed field must carry energy for the test to bite"
+    );
 
     // the bracketed penalize (the sandwich) — the exact production path.
     let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(
@@ -140,7 +158,11 @@ fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
 
     assert!(total_mass(&sim) < mass0, "the sink drained no plasma");
     // constrained transport owns B; the drain never touches it (bit-exact).
-    assert_eq!(bcell_snapshot(&sim), bcell0, "the drain modified the magnetic field");
+    assert_eq!(
+        bcell_snapshot(&sim),
+        bcell0,
+        "the drain modified the magnetic field"
+    );
     // and the magnetic energy read from B is unchanged (trivially, since B is untouched).
     assert_eq!(magnetic_energy(&sim), mag_e0);
 
@@ -161,7 +183,10 @@ fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
             );
         }
     }
-    assert!(drained >= MIN_DRAINED_CELLS, "the sink barely acted ({drained} cells)");
+    assert!(
+        drained >= MIN_DRAINED_CELLS,
+        "the sink barely acted ({drained} cells)"
+    );
 }
 
 #[test]
@@ -188,7 +213,10 @@ fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
             }
         }
     }
-    assert!(drained >= MIN_DRAINED_CELLS, "the naive drain barely acted ({drained} cells)");
+    assert!(
+        drained >= MIN_DRAINED_CELLS,
+        "the naive drain barely acted ({drained} cells)"
+    );
     // the deeply-masked cells (drain factor well below 1) leak visibly; mask-boundary cells
     // (factor ~1) corrupt below 1e-9. it is enough that a substantial set is corrupted -- that
     // is what the sandwich makes exact for EVERY cell in the companion test.

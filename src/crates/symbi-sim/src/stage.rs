@@ -25,8 +25,8 @@
 use crate::driver::{prof, stage_tag};
 use crate::state::FieldStore;
 use crate::substrate_seam::KernelSet;
-use symbi_ir::algebra::Scalar;
 use symbi_algebra::OrderedNumeric;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 /// the regime-independent data-flow sets a phase reads/writes; the fold
@@ -103,23 +103,95 @@ pub struct Phase {
 
 /// the canonical stage order. this list IS the sequence — every driver folds it.
 pub const STAGE_PIPELINE: &[Phase] = &[
-    Phase { name: "snapshot_stage", kind: PhaseKind::SnapshotStage, reads: FieldSet::CONS,                    writes: FieldSet::USTAGE, gate: Gate::AdditiveOrFofc },
-    Phase { name: "wave_speeds",    kind: PhaseKind::WaveSpeeds,    reads: FieldSet::PRIM,                    writes: FieldSet::NONE,   gate: Gate::Always },
-    Phase { name: "flux",           kind: PhaseKind::Flux,          reads: FieldSet::PRIM,                    writes: FieldSet::FLUX,   gate: Gate::Always },
-    Phase { name: "efield",         kind: PhaseKind::Efield,        reads: FieldSet::FLUX,                    writes: FieldSet::NONE,   gate: Gate::Always },
-    Phase { name: "godunov_stage",  kind: PhaseKind::Godunov,       reads: FieldSet::CONS.or(FieldSet::FLUX), writes: FieldSet::CONS,   gate: Gate::Always },
-    Phase { name: "post_godunov",   kind: PhaseKind::PostGodunov,   reads: FieldSet::CONS,                    writes: FieldSet::NONE,   gate: Gate::Always },
-    Phase { name: "source_apply",   kind: PhaseKind::SourceApply,   reads: FieldSet::USTAGE,                  writes: FieldSet::CONS,   gate: Gate::AdditiveSource },
-    Phase { name: "body_source",    kind: PhaseKind::BodySource,    reads: FieldSet::CONS.or(FieldSet::PRIM), writes: FieldSet::CONS,   gate: Gate::Bodies },
-    Phase { name: "c2p",            kind: PhaseKind::C2p,           reads: FieldSet::CONS,                    writes: FieldSet::PRIM,   gate: Gate::Always },
+    Phase {
+        name: "snapshot_stage",
+        kind: PhaseKind::SnapshotStage,
+        reads: FieldSet::CONS,
+        writes: FieldSet::USTAGE,
+        gate: Gate::AdditiveOrFofc,
+    },
+    Phase {
+        name: "wave_speeds",
+        kind: PhaseKind::WaveSpeeds,
+        reads: FieldSet::PRIM,
+        writes: FieldSet::NONE,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "flux",
+        kind: PhaseKind::Flux,
+        reads: FieldSet::PRIM,
+        writes: FieldSet::FLUX,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "efield",
+        kind: PhaseKind::Efield,
+        reads: FieldSet::FLUX,
+        writes: FieldSet::NONE,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "godunov_stage",
+        kind: PhaseKind::Godunov,
+        reads: FieldSet::CONS.or(FieldSet::FLUX),
+        writes: FieldSet::CONS,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "post_godunov",
+        kind: PhaseKind::PostGodunov,
+        reads: FieldSet::CONS,
+        writes: FieldSet::NONE,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "source_apply",
+        kind: PhaseKind::SourceApply,
+        reads: FieldSet::USTAGE,
+        writes: FieldSet::CONS,
+        gate: Gate::AdditiveSource,
+    },
+    Phase {
+        name: "body_source",
+        kind: PhaseKind::BodySource,
+        reads: FieldSet::CONS.or(FieldSet::PRIM),
+        writes: FieldSet::CONS,
+        gate: Gate::Bodies,
+    },
+    Phase {
+        name: "c2p",
+        kind: PhaseKind::C2p,
+        reads: FieldSet::CONS,
+        writes: FieldSet::PRIM,
+        gate: Gate::Always,
+    },
     // first-order flux correction: redo any zone whose high-order c2p went
     // unphysical with a first-order update from the stage input; host-gated
     // internally on the failure reduction.
-    Phase { name: "fofc",           kind: PhaseKind::Fofc,          reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE), writes: FieldSet::PRIM, gate: Gate::Fofc },
+    Phase {
+        name: "fofc",
+        kind: PhaseKind::Fofc,
+        reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE),
+        writes: FieldSet::PRIM,
+        gate: Gate::Fofc,
+    },
     // the dye rides AFTER fofc: it consumes the (possibly spliced) mass flux
     // and divides by the stage-final density.
-    Phase { name: "chi_update",     kind: PhaseKind::ChiUpdate,     reads: FieldSet::CONS.or(FieldSet::FLUX).or(FieldSet::PRIM), writes: FieldSet::CONS.or(FieldSet::PRIM), gate: Gate::PassiveScalar },
-    Phase { name: "ghost_fill",     kind: PhaseKind::GhostFill,     reads: FieldSet::PRIM,                    writes: FieldSet::PRIM,   gate: Gate::Always },
+    Phase {
+        name: "chi_update",
+        kind: PhaseKind::ChiUpdate,
+        reads: FieldSet::CONS.or(FieldSet::FLUX).or(FieldSet::PRIM),
+        writes: FieldSet::CONS.or(FieldSet::PRIM),
+        gate: Gate::PassiveScalar,
+    },
+    Phase {
+        name: "ghost_fill",
+        kind: PhaseKind::GhostFill,
+        reads: FieldSet::PRIM,
+        writes: FieldSet::PRIM,
+        gate: Gate::Always,
+    },
 ];
 
 /// driver-specific interleave points, fired with no field borrow held by the
@@ -174,7 +246,10 @@ pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
     let stage_input_is_un = args.stage == 0
         && args.n_stages > 1
         && args.allow_elision
-        && sim.workspace.elide_stage_snapshot.load(std::sync::atomic::Ordering::Relaxed);
+        && sim
+            .workspace
+            .elide_stage_snapshot
+            .load(std::sync::atomic::Ordering::Relaxed);
     sim.workspace
         .stage_input_is_un
         .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
@@ -204,15 +279,23 @@ pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
                 hook(HookPoint::AfterFlux);
             }
             PhaseKind::Efield => prof("efield", || kernels.efield(sim)),
-            PhaseKind::Godunov => {
-                prof("godunov_stage", || kernels.godunov_stage(sim, args.dt, args.a0, args.ac))
+            PhaseKind::Godunov => prof("godunov_stage", || {
+                kernels.godunov_stage(sim, args.dt, args.a0, args.ac)
+            }),
+            PhaseKind::PostGodunov => {
+                prof("post_godunov", || kernels.post_godunov(sim, args.dt, tag))
             }
-            PhaseKind::PostGodunov => prof("post_godunov", || kernels.post_godunov(sim, args.dt, tag)),
-            PhaseKind::SourceApply => prof("source_apply", || kernels.source_apply(sim, args.ac * args.dt)),
-            PhaseKind::BodySource => prof("body_source", || kernels.body_source(sim, args.ac * args.dt)),
+            PhaseKind::SourceApply => prof("source_apply", || {
+                kernels.source_apply(sim, args.ac * args.dt)
+            }),
+            PhaseKind::BodySource => prof("body_source", || {
+                kernels.body_source(sim, args.ac * args.dt)
+            }),
             PhaseKind::C2p => prof("c2p", || kernels.c2p(sim)),
             PhaseKind::Fofc => prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag)),
-            PhaseKind::ChiUpdate => prof("chi_update", || kernels.chi_update(sim, args.dt, args.a0, args.ac)),
+            PhaseKind::ChiUpdate => prof("chi_update", || {
+                kernels.chi_update(sim, args.dt, args.a0, args.ac)
+            }),
             PhaseKind::GhostFill => {
                 hook(HookPoint::BeforeGhostFill);
                 prof("ghost_fill", || kernels.ghost_fill(sim));

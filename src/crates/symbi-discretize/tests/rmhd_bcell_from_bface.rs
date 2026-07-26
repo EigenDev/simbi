@@ -21,9 +21,13 @@ const M: usize = 6;
 #[test]
 fn rmhd_bcell_from_bface_matches_reference() {
     // arbitrary smooth face B.
-    let bfx_fn = |i: usize, j: usize, k: usize| 0.5 + 0.3 * (0.2 * i as f64 + 0.1 * j as f64).sin() + 0.05 * k as f64;
-    let bfy_fn = |i: usize, j: usize, k: usize| 0.2 * (0.3 * j as f64).cos() - 0.1 * (i as f64 - k as f64);
-    let bfz_fn = |i: usize, _j: usize, k: usize| 0.1 + 0.4 * (0.15 * k as f64 + 0.2 * i as f64).sin();
+    let bfx_fn = |i: usize, j: usize, k: usize| {
+        0.5 + 0.3 * (0.2 * i as f64 + 0.1 * j as f64).sin() + 0.05 * k as f64
+    };
+    let bfy_fn =
+        |i: usize, j: usize, k: usize| 0.2 * (0.3 * j as f64).cos() - 0.1 * (i as f64 - k as f64);
+    let bfz_fn =
+        |i: usize, _j: usize, k: usize| 0.1 + 0.4 * (0.15 * k as f64 + 0.2 * i as f64).sin();
     let bc_seed_fn = |i: usize, j: usize, k: usize| 0.3 + 0.01 * (i + j + k) as f64;
 
     // the kernel reads the face fields bf_0/bf_1/bf_2 and writes the interpolated cell B
@@ -47,9 +51,21 @@ fn rmhd_bcell_from_bface_matches_reference() {
                 let by = 0.5 * (bfy_fn(i, j, k) + bfy_fn(i, j + 1, k));
                 let bz = 0.5 * (bfz_fn(i, j, k) + bfz_fn(i, j, k + 1));
                 let c = [i, j, k];
-                assert!((out.get(c, "bc_0_new") - bx).abs() < 1e-13, "bc_0 {i},{j},{k}: {} != {bx}", out.get(c, "bc_0_new"));
-                assert!((out.get(c, "bc_1_new") - by).abs() < 1e-13, "bc_1 {i},{j},{k}: {} != {by}", out.get(c, "bc_1_new"));
-                assert!((out.get(c, "bc_2_new") - bz).abs() < 1e-13, "bc_2 {i},{j},{k}: {} != {bz}", out.get(c, "bc_2_new"));
+                assert!(
+                    (out.get(c, "bc_0_new") - bx).abs() < 1e-13,
+                    "bc_0 {i},{j},{k}: {} != {bx}",
+                    out.get(c, "bc_0_new")
+                );
+                assert!(
+                    (out.get(c, "bc_1_new") - by).abs() < 1e-13,
+                    "bc_1 {i},{j},{k}: {} != {by}",
+                    out.get(c, "bc_1_new")
+                );
+                assert!(
+                    (out.get(c, "bc_2_new") - bz).abs() < 1e-13,
+                    "bc_2 {i},{j},{k}: {} != {bz}",
+                    out.get(c, "bc_2_new")
+                );
             }
         }
     }

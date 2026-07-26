@@ -121,8 +121,7 @@ pub fn spectral_shape(p: f64, nu_prime: Frequency, nu_c: Frequency, nu_m: Freque
         } else if nu_prime < nu_c {
             (nu_prime / nu_m).value().powf(-0.5 * (p - 1.0))
         } else {
-            (nu_c / nu_m).value().powf(-0.5 * (p - 1.0))
-                * (nu_prime / nu_c).value().powf(-0.5 * p)
+            (nu_c / nu_m).value().powf(-0.5 * (p - 1.0)) * (nu_prime / nu_c).value().powf(-0.5 * p)
         }
     } else if nu_prime < nu_c {
         (nu_prime / nu_c).value().powf(1.0 / 3.0)
@@ -142,17 +141,11 @@ pub fn spectral_shape(p: f64, nu_prime: Frequency, nu_c: Frequency, nu_m: Freque
 /// frequencies are raw f64 [Hz] (the amplitudes carry the compensating Hz^-a).
 pub struct SpectralSegments {
     pub bounds: [f64; 4],
-    pub exps:   [f64; 3],
-    pub amps:   [f64; 3],
+    pub exps: [f64; 3],
+    pub amps: [f64; 3],
 }
 
-pub fn spectral_segments(
-    p: f64,
-    nu_lo: f64,
-    nu_hi: f64,
-    nu_c: f64,
-    nu_m: f64,
-) -> SpectralSegments {
+pub fn spectral_segments(p: f64, nu_lo: f64, nu_hi: f64, nu_c: f64, nu_m: f64) -> SpectralSegments {
     let slow_cool = nu_c > nu_m;
     let mid = if slow_cool { -0.5 * (p - 1.0) } else { -0.5 };
     let exps = [1.0 / 3.0, mid, -0.5 * p];
@@ -168,7 +161,12 @@ pub fn spectral_segments(
     let a1 = a0 * b1a.powf(exps[0] - exps[1]);
     let a2 = a1 * b2a.powf(exps[1] - exps[2]);
     SpectralSegments {
-        bounds: [nu_lo, b1a.clamp(nu_lo, nu_hi), b2a.clamp(nu_lo, nu_hi), nu_hi],
+        bounds: [
+            nu_lo,
+            b1a.clamp(nu_lo, nu_hi),
+            b2a.clamp(nu_lo, nu_hi),
+            nu_hi,
+        ],
         exps,
         amps: [a0, a1, a2],
     }
@@ -271,7 +269,10 @@ mod tests {
         let gb = 10.0;
         let (w, b) = (lorentz_factor(gb), beta(gb));
         let head_on = delta_doppler(w, [b, 0.0, 0.0], [1.0, 0.0, 0.0]);
-        assert!(head_on > w, "head-on delta should exceed gamma: {head_on} vs {w}");
+        assert!(
+            head_on > w,
+            "head-on delta should exceed gamma: {head_on} vs {w}"
+        );
         assert!((delta_doppler(1.0, [0.0; 3], [1.0, 0.0, 0.0]) - 1.0).abs() < 1e-12);
     }
 
@@ -351,8 +352,7 @@ mod tests {
             (1.0e14, 1.0e10, 1.0e6, 1.0e18),
             (1.0e10, 1.0e14, 1.0e12, 1.0e13), // interior band, no breaks inside
         ] {
-            let analytic =
-                band_integrated_shape(p, nu_lo, nu_hi, nu_c, nu_m).value();
+            let analytic = band_integrated_shape(p, nu_lo, nu_hi, nu_c, nu_m).value();
             let n = 200_000;
             let lg_lo = nu_lo.ln();
             let dlg = (nu_hi / nu_lo).ln() / n as f64;

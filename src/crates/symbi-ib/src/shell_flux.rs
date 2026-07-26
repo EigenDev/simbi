@@ -122,7 +122,11 @@ mod tests {
         let flux = |c: [usize; 2], a: usize| -> FaceFlux<2> {
             let (i, j) = (c[0] as f64, c[1] as f64);
             let s = 0.37 * i - 0.21 * j + 1.7 * (a as f64) + 0.9;
-            FaceFlux { den: s, mom: Tensor::new([0.11 * s, -0.4 * s]), nrg: 2.3 * s }
+            FaceFlux {
+                den: s,
+                mom: Tensor::new([0.11 * s, -0.4 * s]),
+                nrg: 2.3 * s,
+            }
         };
         let centroid = |c: [usize; 2], a: usize| {
             let mut x = [c[0] as f64 + 0.5, c[1] as f64 + 0.5];
@@ -170,17 +174,29 @@ mod tests {
         let shape = [16usize, 16];
         // a uniform flux F_x = k on every x-face, F_y = 0: each cell's net flux is k - k = 0.
         let flux = |_c: [usize; 2], a: usize| -> FaceFlux<2> {
-            FaceFlux { den: if a == 0 { 1.3 } else { 0.0 }, mom: Tensor::zeros(), nrg: 0.0 }
+            FaceFlux {
+                den: if a == 0 { 1.3 } else { 0.0 },
+                mom: Tensor::zeros(),
+                nrg: 0.0,
+            }
         };
         let centroid = |c: [usize; 2], _a: usize| Tensor::new([c[0] as f64, c[1] as f64]);
-        let disk = |rd: f64| move |c: [usize; 2]| {
-            let (dx, dy) = (c[0] as f64 + 0.5 - 8.0, c[1] as f64 + 0.5 - 8.0);
-            (dx * dx + dy * dy).sqrt() - rd
+        let disk = |rd: f64| {
+            move |c: [usize; 2]| {
+                let (dx, dy) = (c[0] as f64 + 0.5 - 8.0, c[1] as f64 + 0.5 - 8.0);
+                (dx * dx + dy * dy).sqrt() - rd
+            }
         };
         let m_small = shell_accretion(shape, disk(2.5), flux, centroid, 0, 1.0).mass_delta;
         let m_large = shell_accretion(shape, disk(5.5), flux, centroid, 0, 1.0).mass_delta;
-        assert!(m_small.abs() < 1e-12, "closed shell of a div-free field is zero: {m_small}");
-        assert!((m_small - m_large).abs() < 1e-12, "nested shells disagree: {m_small} vs {m_large}");
+        assert!(
+            m_small.abs() < 1e-12,
+            "closed shell of a div-free field is zero: {m_small}"
+        );
+        assert!(
+            (m_small - m_large).abs() < 1e-12,
+            "nested shells disagree: {m_small} vs {m_large}"
+        );
     }
 
     /// sign + angular momentum: a single-cell Omega with a purely azimuthal (circulating)
@@ -201,7 +217,11 @@ mod tests {
                 ([1, 0], 1) => 1.0,  // center's -y face
                 _ => 0.0,
             };
-            FaceFlux { den, mom: Tensor::new([-0.5 * (a == 1) as u8 as f64, 0.5 * (a == 0) as u8 as f64]), nrg: 3.0 * den }
+            FaceFlux {
+                den,
+                mom: Tensor::new([-0.5 * (a == 1) as u8 as f64, 0.5 * (a == 0) as u8 as f64]),
+                nrg: 3.0 * den,
+            }
         };
         let centroid = |c: [usize; 2], a: usize| {
             let mut x = [c[0] as f64 + 0.5, c[1] as f64 + 0.5];
@@ -211,10 +231,22 @@ mod tests {
         let d = shell_accretion(shape, phi, flux, centroid, 7, 2.0);
         assert_eq!(d.idx, 7);
         // four inward faces, each |den| = 1, dt = 2 -> Mdot*dt = 4 * 1 * 2 = 8.
-        assert!((d.mass_delta - 8.0).abs() < 1e-12, "accreted mass {} != 8", d.mass_delta);
+        assert!(
+            (d.mass_delta - 8.0).abs() < 1e-12,
+            "accreted mass {} != 8",
+            d.mass_delta
+        );
         // energy flux is 3x the mass flux here.
-        assert!((d.energy_delta - 24.0).abs() < 1e-12, "accreted energy {} != 24", d.energy_delta);
+        assert!(
+            (d.energy_delta - 24.0).abs() < 1e-12,
+            "accreted energy {} != 24",
+            d.energy_delta
+        );
         // a circulating momentum flux gives a nonzero net z-torque (spin-up).
-        assert!(d.torque_delta[2].abs() > 1e-9, "expected nonzero z-torque, got {}", d.torque_delta[2]);
+        assert!(
+            d.torque_delta[2].abs() > 1e-9,
+            "expected nonzero z-torque, got {}",
+            d.torque_delta[2]
+        );
     }
 }

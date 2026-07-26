@@ -41,9 +41,9 @@ use symbi_geometry::{BlockGeometry, Metric};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 
-use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
-use symbi_sim::state::{axis_name, ConsFieldsGeneric};
 use symbi_ir::KernelId;
+use symbi_sim::state::{ConsFieldsGeneric, axis_name};
+use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 
 /// per coarse-fine interface accumulator. faces[2*ax + side] is the register
 /// for the coverage boundary slab on that side; None where the coverage
@@ -82,7 +82,11 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     /// `has_energy` MUST match the registered sim's `cons.has_energy()` — the register's
     /// per-face cons carries the same component set (den / mom / optional nrg) so the
     /// positional reflux zip (`comps`) stays aligned. iso (no nrg) passes `false`.
-    pub fn new(coverage: &Domain<D>, coarse_interior: &Domain<D>, has_energy: bool) -> symbi_xpu::Result<Self> {
+    pub fn new(
+        coverage: &Domain<D>,
+        coarse_interior: &Domain<D>,
+        has_energy: bool,
+    ) -> symbi_xpu::Result<Self> {
         let mut faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
         let mut domains: [Option<Domain<D>>; 6] = std::array::from_fn(|_| None);
 
@@ -94,10 +98,18 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 if side == 1 && coverage.spaces[ax].hi == coarse_interior.spaces[ax].hi {
                     continue;
                 }
-                let face_pos = if side == 0 { coverage.spaces[ax].lo } else { coverage.spaces[ax].hi };
+                let face_pos = if side == 0 {
+                    coverage.spaces[ax].lo
+                } else {
+                    coverage.spaces[ax].hi
+                };
                 let face_domain = Domain::new(std::array::from_fn(|aa| {
                     if aa == ax {
-                        Space { name: axis_name(aa), lo: face_pos, hi: face_pos + 1 }
+                        Space {
+                            name: axis_name(aa),
+                            lo: face_pos,
+                            hi: face_pos + 1,
+                        }
                     } else {
                         Space {
                             name: axis_name(aa),
@@ -106,7 +118,10 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         }
                     }
                 }));
-                faces[2 * ax + side] = Some(ConsFieldsGeneric::zeros_with_energy(&face_domain, has_energy)?);
+                faces[2 * ax + side] = Some(ConsFieldsGeneric::zeros_with_energy(
+                    &face_domain,
+                    has_energy,
+                )?);
                 domains[2 * ax + side] = Some(face_domain);
             }
         }
@@ -177,7 +192,11 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
             let idx = 2 * dir + side;
             let sign = if side == 0 { -1.0 } else { 1.0 };
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
-                for (cc, (rf, ff)) in comps(reg).into_iter().zip(comps(&fine_flux[dir])).enumerate() {
+                for (cc, (rf, ff)) in comps(reg)
+                    .into_iter()
+                    .zip(comps(&fine_flux[dir]))
+                    .enumerate()
+                {
                     for coord in dom.iter() {
                         let fine_base: [isize; D] = std::array::from_fn(|ax| coord[ax] * r);
                         let mut sum = 0.0;
@@ -193,7 +212,8 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         let rv = *rf.view().at(coord);
                         rf.view_mut().set(coord, rv + sum * w);
                         if cc == 0 {
-                            self.debug_fine_den.set(self.debug_fine_den.get() + sign * sum * w);
+                            self.debug_fine_den
+                                .set(self.debug_fine_den.get() + sign * sum * w);
                         }
                     }
                 }
@@ -222,7 +242,8 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                             }
                             let inv_vol = 1.0 / geo.volume(cell);
                             let u = *uf.view().at(cell);
-                            uf.view_mut().set(cell, u + sign * *rf.view().at(coord) * inv_vol);
+                            uf.view_mut()
+                                .set(cell, u + sign * *rf.view().at(coord) * inv_vol);
                         }
                     }
                 }
@@ -269,7 +290,12 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                 for (rf, ff) in comps(reg).into_iter().zip(comps(&flux[dir])) {
                     dispatch_fields_each::<f64, Mem, D>(
-                        name, dom, &[ff], &[rf], &ints[..D], &scalars,
+                        name,
+                        dom,
+                        &[ff],
+                        &[rf],
+                        &ints[..D],
+                        &scalars,
                     );
                 }
             }
@@ -286,7 +312,11 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         w: f64,
     ) {
         let area: f64 = (0..D).filter(|&t| t != dir).map(|t| fine_dx[t]).product();
-        let name = KernelId::RefineAccFace { axis: dir as u8, ndim: D as u8 }.name();
+        let name = KernelId::RefineAccFace {
+            axis: dir as u8,
+            ndim: D as u8,
+        }
+        .name();
         let scalars = [area * w];
         for side in 0..2usize {
             let idx = 2 * dir + side;
@@ -314,7 +344,11 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         let spaces: [Space; D] = std::array::from_fn(|aa| {
                             let s = &dom.spaces[aa];
                             let shift = if aa == ax { 1 } else { 0 };
-                            Space { name: s.name, lo: s.lo - shift, hi: s.hi - shift }
+                            Space {
+                                name: s.name,
+                                lo: s.lo - shift,
+                                hi: s.hi - shift,
+                            }
                         });
                         let mut ints = [0i32; 3];
                         ints[ax] = 1;
@@ -325,7 +359,12 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                     let scalars = [sign * inv_vol];
                     for (rf, uf) in comps(reg).into_iter().zip(comps(cons)) {
                         dispatch_fields_each::<f64, Mem, D>(
-                            name, &cell_dom, &[rf], &[uf], &arg[..D], &scalars,
+                            name,
+                            &cell_dom,
+                            &[rf],
+                            &[uf],
+                            &arg[..D],
+                            &scalars,
                         );
                     }
                 }
@@ -384,9 +423,21 @@ mod tests {
         c
     }
 
-    fn setup_1d() -> (FluxRegister<1, 1, HostMemory>, BlockGeometry<Cartesian, f64, 1>, BlockGeometry<Cartesian, f64, 1>) {
-        let interior = Domain::new([Space { name: "i", lo: 0, hi: 10 }]);
-        let coverage = Domain::new([Space { name: "i", lo: 3, hi: 7 }]);
+    fn setup_1d() -> (
+        FluxRegister<1, 1, HostMemory>,
+        BlockGeometry<Cartesian, f64, 1>,
+        BlockGeometry<Cartesian, f64, 1>,
+    ) {
+        let interior = Domain::new([Space {
+            name: "i",
+            lo: 0,
+            hi: 10,
+        }]);
+        let coverage = Domain::new([Space {
+            name: "i",
+            lo: 3,
+            hi: 7,
+        }]);
         let reg = FluxRegister::new(&coverage, &interior, true).unwrap();
         let coarse_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.1]);
         let fine_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.05]);
@@ -401,8 +452,16 @@ mod tests {
         assert_eq!(reg.domains[1].as_ref().unwrap().spaces[0].lo, 7);
 
         // coverage flush with the interior boundary: no register face there.
-        let interior = Domain::new([Space { name: "i", lo: 0, hi: 10 }]);
-        let coverage = Domain::new([Space { name: "i", lo: 0, hi: 5 }]);
+        let interior = Domain::new([Space {
+            name: "i",
+            lo: 0,
+            hi: 10,
+        }]);
+        let coverage = Domain::new([Space {
+            name: "i",
+            lo: 0,
+            hi: 5,
+        }]);
         let touching = FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true).unwrap();
         assert!(touching.faces[0].is_none() && touching.faces[1].is_some());
     }
@@ -411,8 +470,16 @@ mod tests {
     fn matching_coarse_and_fine_fluxes_cancel() {
         let (reg, coarse_geo, fine_geo) = setup_1d();
         reg.zero();
-        let alloc_c = Domain::new([Space { name: "i", lo: -2, hi: 12 }]);
-        let alloc_f = Domain::new([Space { name: "i", lo: 4, hi: 16 }]);
+        let alloc_c = Domain::new([Space {
+            name: "i",
+            lo: -2,
+            hi: 12,
+        }]);
+        let alloc_f = Domain::new([Space {
+            name: "i",
+            lo: 4,
+            hi: 16,
+        }]);
         let coarse_flux = [cons_filled(&alloc_c, 1.0, 0.5, 2.0)];
         let fine_flux = [cons_filled(&alloc_f, 1.0, 0.5, 2.0)];
 
@@ -439,7 +506,11 @@ mod tests {
         let hi = reg.faces[1].as_ref().unwrap();
         hi.den.view_mut().set([7], 0.3);
 
-        let alloc = Domain::new([Space { name: "i", lo: -2, hi: 12 }]);
+        let alloc = Domain::new([Space {
+            name: "i",
+            lo: -2,
+            hi: 12,
+        }]);
         let cons = cons_filled(&alloc, 1.0, 0.0, 1.0);
         reg.apply(&cons, &coarse_geo);
 

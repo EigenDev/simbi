@@ -290,11 +290,7 @@ pub fn ito3_displacement(rates: JumpMomentRates, dt: f64, unit: f64) -> Result<f
 /// deterministic counter-based sample for one particle axis and update.
 pub fn ito_unit_sample(run_seed: u64, particle_id: u64, counter: u64, axis: usize) -> f64 {
     unit_f64(mix64(
-        run_seed
-            ^ mix64(particle_id)
-            ^ mix64(counter)
-            ^ mix64(axis as u64)
-            ^ 0x243f_6a88_85a3_08d3,
+        run_seed ^ mix64(particle_id) ^ mix64(counter) ^ mix64(axis as u64) ^ 0x243f_6a88_85a3_08d3,
     ))
 }
 
@@ -447,10 +443,7 @@ mod tests {
         };
         assert_eq!(fold(&[2.0], &[1.0]), 2.0);
         assert_eq!(fold(&[2.0, 6.0], &[1.0, 0.5]), 4.0);
-        assert_eq!(
-            fold(&[6.0, 12.0, 18.0], &[1.0, 0.25, 2.0 / 3.0]),
-            15.0
-        );
+        assert_eq!(fold(&[6.0, 12.0, 18.0], &[1.0, 0.25, 2.0 / 3.0]), 15.0);
     }
 
     #[test]

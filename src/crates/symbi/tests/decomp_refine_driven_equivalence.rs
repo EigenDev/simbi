@@ -15,9 +15,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -26,7 +26,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_boundary_dag;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -55,8 +55,8 @@ fn boundary_json() -> String {
 fn kset(sim: &Sim) -> Kern {
     let cfg = SourceConfig::from_json(&boundary_json()).expect("parse boundary config");
     let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("lower boundary dag");
-    let (k, id) = Kern::new(GAMMA, CFL, &sim.geom.allocated)
-        .with_driven_boundary(built, cfg.params.clone());
+    let (k, id) =
+        Kern::new(GAMMA, CFL, &sim.geom.allocated).with_driven_boundary(built, cfg.params.clone());
     assert_eq!(id, 0);
     k
 }
@@ -64,7 +64,10 @@ fn kset(sim: &Sim) -> Kern {
 // the refined patch FLUSH against the driven x_lo face, inside the bottom-left quadrant so a
 // single tile owns it under every tested topology (cuts at x = 0.5 and/or y = 0.5).
 fn patch() -> RefinementRegion<2> {
-    RefinementRegion { x_lo: [0.0, 0.125], x_hi: [0.375, 0.375] }
+    RefinementRegion {
+        x_lo: [0.0, 0.125],
+        x_hi: [0.375, 0.375],
+    }
 }
 
 fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
@@ -77,7 +80,11 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("root sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
 }
 
@@ -91,8 +98,8 @@ fn phys_boundaries() -> [[BoundaryType; 2]; 2] {
 fn build_mono() -> Hier {
     let root = build_root([N, N], [0.0, 0.0], Boundaries(phys_boundaries()));
     let k = kset(&root);
-    let mut h =
-        Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset).expect("mono hierarchy");
+    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+        .expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -107,13 +114,22 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
-            let lo = if tc[a] == 0 { phys[a][0] } else { BoundaryType::CoarseFine };
-            let hi = if tc[a] == counts[a] - 1 { phys[a][1] } else { BoundaryType::CoarseFine };
+            let lo = if tc[a] == 0 {
+                phys[a][0]
+            } else {
+                BoundaryType::CoarseFine
+            };
+            let hi = if tc[a] == counts[a] - 1 {
+                phys[a][1]
+            } else {
+                BoundaryType::CoarseFine
+            };
             [lo, hi]
         }));
         let root = build_root(m, origin, bnd);
-        let owns_patch =
-            (0..2).all(|a| origin[a] <= patch().x_lo[a] && origin[a] + m[a] as f64 * DX >= patch().x_hi[a]);
+        let owns_patch = (0..2).all(|a| {
+            origin[a] <= patch().x_lo[a] && origin[a] + m[a] as f64 * DX >= patch().x_hi[a]
+        });
         let mut h = if owns_patch {
             let k = kset(&root);
             let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
@@ -198,14 +214,20 @@ fn assert_matches(counts: [usize; 2]) {
     // the inflow actually raised the density near x_lo (non-vacuous): the fine patch sits on
     // the driven face, so its edge cells feel the rho = 2+ inflow within T_FINAL.
     let inflow_gain = mono_den.iter().cloned().fold(0.0_f64, f64::max) - 1.0;
-    assert!(inflow_gain > 0.05, "driven inflow never registered (max den gain {inflow_gain:e})");
+    assert!(
+        inflow_gain > 0.05,
+        "driven inflow never registered (max den gain {inflow_gain:e})"
+    );
 
     let err = mono_den
         .iter()
         .zip(&dec_den)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
-    assert!(err < 1e-12, "{counts:?}: refined+decomposed driven diverged from mono: {err:e}");
+    assert!(
+        err < 1e-12,
+        "{counts:?}: refined+decomposed driven diverged from mono: {err:e}"
+    );
 }
 
 #[test]

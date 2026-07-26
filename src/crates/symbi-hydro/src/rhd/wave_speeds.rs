@@ -6,11 +6,11 @@
 // source both the nhat Riemann projection and the CFL axis projection call.
 // =============================================================================
 
+use crate::eos::Eos;
+use crate::rhd::sound_speed_sq;
+use crate::state::Prim;
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::state::Prim;
-use crate::rhd::sound_speed_sq;
 
 /// the Mignone & Bodo (2005) relativistic acoustic wave speeds (eqs. 21-23) as a function of
 /// the sound speed squared and the NORMAL velocity `vn` — the single core both projections
@@ -42,7 +42,13 @@ pub(crate) fn rhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
 /// at `gamma_nn = 1, alpha = 1, v_sq = vn^2` it reduces EXACTLY to the flat `rhd_speeds_from_vn`.
 #[allow(dead_code)]
 #[inline]
-pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, v_sq: S, gamma_nn: S, alpha: S) -> (S, S) {
+pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(
+    cs_sq: S,
+    vn: S,
+    v_sq: S,
+    gamma_nn: S,
+    alpha: S,
+) -> (S, S) {
     let one_m_v2cs2 = S::ONE - v_sq * cs_sq;
     let disc = (S::ONE - v_sq) * (gamma_nn * one_m_v2cs2 - vn * vn * (S::ONE - cs_sq));
     let term = vn * (S::ONE - cs_sq);
@@ -70,9 +76,9 @@ fn davis_wave_speeds_reference<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rhd::Rhd;
-    use crate::regime::Regime;
     use crate::eos::IdealGas;
+    use crate::regime::Regime;
+    use crate::rhd::Rhd;
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -82,7 +88,11 @@ mod tests {
     fn wave_speeds_stationary() {
         // v=0: symmetric wave speeds
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
         let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
         assert!(approx(sl, -sr));
         assert!(sr > 0.0);
@@ -95,7 +105,11 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         for &v in &[0.0, 0.3, 0.5, 0.9, 0.99] {
             for &pre in &[0.01, 1.0, 100.0] {
-                let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre };
+                let prim = Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([v]),
+                    pre,
+                };
                 let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
                 assert!(sl > -1.0, "sl={} at v={}, p={}", sl, v, pre);
                 assert!(sr < 1.0, "sr={} at v={}, p={}", sr, v, pre);
@@ -119,11 +133,17 @@ mod tests {
             let beta_r = 2.0 / (r + 2.0);
             for &v in &[-0.99_f64, -0.5, 0.0, 0.5, 0.99] {
                 for &pre in &[0.01, 1.0, 100.0] {
-                    let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre };
+                    let prim = Prim {
+                        rho: 1.0,
+                        vel: Tensor::new([v]),
+                        pre,
+                    };
                     let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
                     let (ll, lr) = (alpha_sq * sl - beta_r, alpha_sq * sr - beta_r);
-                    assert!(ll < 0.0 && lr < 0.0,
-                        "coord speed not ingoing at r={r}, v={v}, p={pre}: ll={ll}, lr={lr}");
+                    assert!(
+                        ll < 0.0 && lr < 0.0,
+                        "coord speed not ingoing at r={r}, v={v}, p={pre}: ll={ll}, lr={lr}"
+                    );
                 }
             }
         }
@@ -133,7 +153,11 @@ mod tests {
     fn davis_matches_mb_at_zero_v() {
         // at v=0, davis and mignone-bodo should give same result
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
         let (sl_mb, sr_mb) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
         // davis formula gives same result at v=0
         let cs_sq: f64 = sound_speed_sq(&eos, 1.0, 1.0);
@@ -150,8 +174,16 @@ mod tests {
         // Rhd::extremal_speeds always has s_l <= 0 and s_r >= 0
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let left = Prim { rho: 1.0, vel: Tensor::new([0.9]), pre: 1.0 };
-        let right = Prim { rho: 1.0, vel: Tensor::new([0.9]), pre: 1.0 };
+        let left = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.9]),
+            pre: 1.0,
+        };
+        let right = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.9]),
+            pre: 1.0,
+        };
         let (sl, sr) = regime.extremal_speeds(&eos, &left, &right, &Tensor::unit(0));
         assert!(sl <= 0.0, "sl={} should be <= 0", sl);
         assert!(sr >= 0.0, "sr={} should be >= 0", sr);
@@ -179,7 +211,10 @@ mod tests {
             for &vn in &[-0.8_f64, -0.3, 0.0, 0.3, 0.8] {
                 let (sl, sr) = rhd_speeds_from_vn(cs_sq, vn);
                 let (gl, gr) = rhd_speeds_from_vn_gr(cs_sq, vn, vn * vn, 1.0, 1.0);
-                assert!(approx(sl, gl) && approx(sr, gr), "flat reduction ({sl},{sr}) vs ({gl},{gr})");
+                assert!(
+                    approx(sl, gl) && approx(sr, gr),
+                    "flat reduction ({sl},{sr}) vs ({gl},{gr})"
+                );
             }
         }
     }
@@ -204,9 +239,14 @@ mod tests {
                         a2 * (big_v - cs) / (1.0 - big_v * cs),
                         a2 * (big_v + cs) / (1.0 + big_v * cs),
                     );
-                    assert!(sl.is_finite() && sr.is_finite(), "NaN fan at V={big_v}, f={f}, cs^2={cs_sq}");
-                    assert!(approx(sl, want_l) && approx(sr, want_r),
-                        "V={big_v} f={f} cs^2={cs_sq}: ({sl},{sr}) vs ({want_l},{want_r})");
+                    assert!(
+                        sl.is_finite() && sr.is_finite(),
+                        "NaN fan at V={big_v}, f={f}, cs^2={cs_sq}"
+                    );
+                    assert!(
+                        approx(sl, want_l) && approx(sr, want_r),
+                        "V={big_v} f={f} cs^2={cs_sq}: ({sl},{sr}) vs ({want_l},{want_r})"
+                    );
                 }
             }
         }
@@ -222,8 +262,10 @@ mod tests {
         for &big_v in &[-0.64_f64, -0.7, -0.85, -0.95] {
             let vr = alpha * big_v;
             let (sl, sr) = rhd_speeds_from_vn_gr(cs_sq, vr, big_v * big_v, grr_inv, alpha);
-            assert!(sl.is_finite() && sr.is_finite() && sl < sr,
-                "fan collapsed at transonic inner state V={big_v}: ({sl},{sr})");
+            assert!(
+                sl.is_finite() && sr.is_finite() && sl < sr,
+                "fan collapsed at transonic inner state V={big_v}: ({sl},{sr})"
+            );
         }
     }
 }

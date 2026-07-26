@@ -53,7 +53,11 @@ pub fn strength_reduce(nodes: &[Node], outputs: &[usize]) -> (Vec<Node>, Vec<usi
                 if mapped.op == Op::Pow
                     && matches!(out[expo], Node { op: Op::Constant, payload: Payload::Value(c) } if reducible(c)) =>
             {
-                let Node { payload: Payload::Value(c), .. } = out[expo] else {
+                let Node {
+                    payload: Payload::Value(c),
+                    ..
+                } = out[expo]
+                else {
                     unreachable!()
                 };
                 Some(emit_chain(&mut out, base, c))

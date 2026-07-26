@@ -27,12 +27,12 @@ pub mod dual;
 pub mod gv;
 
 // IR data structures (the closed signature operates over these)
-pub mod element;
-pub mod symbol;
 pub mod dim;
-pub mod ty;
+pub mod element;
 pub mod error;
 pub mod graph;
+pub mod symbol;
+pub mod ty;
 
 // IR-to-IR passes
 pub mod passes;
@@ -64,10 +64,10 @@ pub mod primitives;
 
 // the ABI vocabulary lives in `symbi-abi`; re-exported here so downstream callers
 // use the `symbi_ir::FieldRef` / `symbi_ir::ScalarBind` paths.
+pub use kernel_id::{KernelId, ProlongTag};
 pub use symbi_abi::{
     BodyScalar, FieldBind, FieldRef, MeshScalar, ScalarBind, ScalarRef, StateComp, StateSlot,
 };
-pub use kernel_id::{KernelId, ProlongTag};
 
 // carrier-side surface
 pub use gv::{
@@ -76,34 +76,36 @@ pub use gv::{
 };
 
 // IR data surface
+pub use dim::{DimExpr, Shape, broadcast_shape, broadcasts_to, shapes_equal};
 pub use element::ElementTy;
-pub use symbol::Symbol;
-pub use dim::{DimExpr, Shape, shapes_equal, broadcasts_to, broadcast_shape};
-pub use ty::TensorTy;
 pub use error::ShapeError;
-pub use graph::{Graph, Node, NodeId, Op, ConstValue, DimIndex, ElementWiseOp, TranscendentalOp, ReduceOp, FnDef, FnId};
+pub use graph::{
+    ConstValue, DimIndex, ElementWiseOp, FnDef, FnId, Graph, Node, NodeId, Op, ReduceOp,
+    TranscendentalOp,
+};
+pub use symbol::Symbol;
+pub use ty::TensorTy;
 
 // passes surface
+pub use passes::cse::{cse_kernel, cse_lowered_fn};
 pub use passes::scalarize::{
-    LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind, UnaryKind,
-    scalarize, scalarize_kernel, KernelScalarized,
+    BinaryKind, KernelScalarized, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, UnaryKind,
+    scalarize, scalarize_kernel,
 };
-pub use passes::splice::{splice_graph, SpliceError};
-pub use passes::stencil_reach::{stencil_reach, AxisReach, ReachReport};
+pub use passes::splice::{SpliceError, splice_graph};
+pub use passes::stencil_reach::{AxisReach, ReachReport, stencil_reach};
 pub use support::{ParamExpr, Support};
-pub use passes::cse::{cse_lowered_fn, cse_kernel};
 
 // backends surface
 pub use backends::cpu::emit_cpu;
 pub use backends::cuda::emit_cuda;
+pub use backends::interp::{Backend, Cpu, CpuField, CpuFieldMut};
 pub use backends::kernel::{
-    emit_kernel_from_lowering, prepared_from_ir, prepared_to_ir, render_field_reduction,
-    render_from_ir, KernelEmitInputs, REDUCTION_BLOCK_SIZE,
+    KernelEmitInputs, REDUCTION_BLOCK_SIZE, emit_kernel_from_lowering, prepared_from_ir,
+    prepared_to_ir, render_field_reduction, render_from_ir,
 };
 pub use backends::kernel_cpu::{emit_kernel_cpu, emit_kernel_cpu_serial};
 pub use backends::render::{
-    emit_kernel_render, kernel_bindings_from_ir, kernel_output_support_from_ir,
-    kernel_scalar_params_typed_from_ir, prepare,
-    render, KernelRenderer, Prepared,
+    KernelRenderer, Prepared, emit_kernel_render, kernel_bindings_from_ir,
+    kernel_output_support_from_ir, kernel_scalar_params_typed_from_ir, prepare, render,
 };
-pub use backends::interp::{Backend, Cpu, CpuField, CpuFieldMut};

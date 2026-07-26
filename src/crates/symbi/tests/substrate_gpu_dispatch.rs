@@ -18,8 +18,8 @@
 
 use symbi::regimes::substrate_gpu::dispatch;
 use symbi_aot::{
-    iso_c2p_1d, Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar,
-    ISO_C2P_1D_IR,
+    Buf, BufHandle, CpuField, CpuFieldMut, ISO_C2P_1D_IR, KernelInvocation, OrderedNumeric, Scalar,
+    iso_c2p_1d,
 };
 use symbi_xpu::DeviceMemory;
 use symbi_xpu::MemoryBlock;
@@ -29,11 +29,20 @@ use symbi_xpu::MemoryBlock;
 // from the one IR blob, at their own precision.
 fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     let n = 6usize;
-    let den: Vec<S> = [1.0, 2.0, 0.5, 1.5, 0.8, 1.2].iter().map(|&x| S::from_f64(x)).collect();
-    let mom: Vec<S> = [0.3, -0.4, 0.1, 0.6, -0.2, 0.05].iter().map(|&x| S::from_f64(x)).collect();
+    let den: Vec<S> = [1.0, 2.0, 0.5, 1.5, 0.8, 1.2]
+        .iter()
+        .map(|&x| S::from_f64(x))
+        .collect();
+    let mom: Vec<S> = [0.3, -0.4, 0.1, 0.6, -0.2, 0.05]
+        .iter()
+        .map(|&x| S::from_f64(x))
+        .collect();
     // cs2 is a per-cell FIELD (the prescribed sound-speed-squared). a varying cs2 here
     // exercises the LOCALLY isothermal path: p = cs2(x)*rho with a distinct sound speed per cell.
-    let cs2: Vec<S> = [0.49, 0.6, 0.4, 0.55, 0.5, 0.45].iter().map(|&x| S::from_f64(x)).collect();
+    let cs2: Vec<S> = [0.49, 0.6, 0.4, 0.55, 0.5, 0.45]
+        .iter()
+        .map(|&x| S::from_f64(x))
+        .collect();
 
     // CPU reference (the AOT-compiled kernel via the descriptor ABI), at S
     // precision. 6 buffers (den, mom, cs2 in; rho, vel, pre out), no scalar.
@@ -57,12 +66,15 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
 
     // 6 unified buffers (den, mom, cs2 inputs; rho, vel, pre outputs) — host- and
     // device-addressable, so they go straight into the invocation handles.
-    let mut blocks: Vec<MemoryBlock<DeviceMemory>> =
-        (0..6).map(|_| MemoryBlock::<DeviceMemory>::for_elements::<S>(n).unwrap()).collect();
+    let mut blocks: Vec<MemoryBlock<DeviceMemory>> = (0..6)
+        .map(|_| MemoryBlock::<DeviceMemory>::for_elements::<S>(n).unwrap())
+        .collect();
     let ptrs: Vec<*mut S> = blocks.iter_mut().map(|b| b.as_mut_ptr::<S>()).collect();
     for (i, data) in [&den, &mom, &cs2].iter().enumerate() {
         for (j, &x) in data.iter().enumerate() {
-            unsafe { *ptrs[i].add(j) = x; }
+            unsafe {
+                *ptrs[i].add(j) = x;
+            }
         }
     }
 
@@ -73,12 +85,36 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     // SAFETY: `blocks` outlives `inv`; the 6 buffers are disjoint, each n elements.
     let inv = KernelInvocation::<S> {
         buffers: vec![
-            Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(ptrs[0], n) }), lo: &lo, extent: &ext },
-            Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(ptrs[1], n) }), lo: &lo, extent: &ext },
-            Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(ptrs[2], n) }), lo: &lo, extent: &ext },
-            Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[3], n) }), lo: &lo, extent: &ext },
-            Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[4], n) }), lo: &lo, extent: &ext },
-            Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[5], n) }), lo: &lo, extent: &ext },
+            Buf {
+                handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(ptrs[0], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
+            Buf {
+                handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(ptrs[1], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
+            Buf {
+                handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(ptrs[2], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
+            Buf {
+                handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[3], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
+            Buf {
+                handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[4], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
+            Buf {
+                handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[5], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
         ],
         grid: &grid,
         dom_lo: &dom_lo,
@@ -93,11 +129,18 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     // the unified buffers (the host-read barrier).
     symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
-    let read = |p: *mut S| (0..n).map(|j| unsafe { (*p.add(j)).to_f64() }).collect::<Vec<f64>>();
+    let read = |p: *mut S| {
+        (0..n)
+            .map(|j| unsafe { (*p.add(j)).to_f64() })
+            .collect::<Vec<f64>>()
+    };
     let (rg, vg, pg) = (read(ptrs[3]), read(ptrs[4]), read(ptrs[5]));
     let close = |g: f64, c: f64, what: &str, i: usize| {
         let rel = (g - c).abs() / c.abs().max(1.0);
-        assert!(rel < tol, "{what}[{i}]: gpu {g} != cpu {c} (rel {rel:e}, tol {tol:e})");
+        assert!(
+            rel < tol,
+            "{what}[{i}]: gpu {g} != cpu {c} (rel {rel:e}, tol {tol:e})"
+        );
     };
     for i in 0..n {
         close(rg[i], rc[i].to_f64(), "rho", i);

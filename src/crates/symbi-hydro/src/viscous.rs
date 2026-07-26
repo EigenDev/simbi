@@ -143,7 +143,16 @@ pub fn viscous_update_2d<S: Scalar>(
 /// `-w/R` (rigid-rotation cancellation) terms — a rigid rotation `w = Omega R`
 /// gives `e_Rphi = (Omega - Omega)/2 = 0`, the stress-free null.
 #[allow(clippy::too_many_arguments)]
-fn cyl_stress<S: Scalar>(du_dr: S, dw_dr: S, du_dp: S, dw_dp: S, u: S, w: S, r: S, mu: S) -> (S, S, S) {
+fn cyl_stress<S: Scalar>(
+    du_dr: S,
+    dw_dr: S,
+    du_dp: S,
+    dw_dp: S,
+    u: S,
+    w: S,
+    r: S,
+    mu: S,
+) -> (S, S, S) {
     let two = S::from_f64(2.0);
     let two_thirds = S::from_f64(2.0 / 3.0);
     let half = S::from_f64(0.5);
@@ -228,11 +237,18 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     // center: the hoop stress tau_pp for the -tau_pp/R source in F_R.
     let du_dr_c = (u(1, 2) - u(1, 0)) / (two * dr);
     let dw_dp_c = (w(2, 1) - w(0, 1)) / (two * dphi);
-    let (_, tpp_c, _) =
-        cyl_stress(du_dr_c, S::ZERO, S::ZERO, dw_dp_c, u(1, 1), w(1, 1), r_c, rho[1][1] * nu[1][1]);
+    let (_, tpp_c, _) = cyl_stress(
+        du_dr_c,
+        S::ZERO,
+        S::ZERO,
+        dw_dp_c,
+        u(1, 1),
+        w(1, 1),
+        r_c,
+        rho[1][1] * nu[1][1],
+    );
 
-    let f_r = (r_p * trr_rp - r_m * trr_rm) * (inv_rc / dr)
-        + (trp_pp - trp_pm) * (inv_rc / dphi)
+    let f_r = (r_p * trr_rp - r_m * trr_rm) * (inv_rc / dr) + (trp_pp - trp_pm) * (inv_rc / dphi)
         - tpp_c * inv_rc;
     let f_phi = (r_p * r_p * trp_rp - r_m * r_m * trp_rm) * (inv_rc * inv_rc / dr)
         + (tpp_pp - tpp_pm) * (inv_rc / dphi);
@@ -247,10 +263,16 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
 /// `u2 = v along axis 2`; `dNhM = d h_M / d x_N`.
 #[allow(clippy::too_many_arguments)]
 fn ortho_stress<S: Scalar>(
-    u1: S, u2: S,
-    d1u1: S, d2u1: S, d1u2: S, d2u2: S,
-    h1: S, h2: S,
-    d2h1: S, d1h2: S,
+    u1: S,
+    u2: S,
+    d1u1: S,
+    d2u1: S,
+    d1u2: S,
+    d2u2: S,
+    h1: S,
+    h2: S,
+    d2h1: S,
+    d1h2: S,
     mu: S,
 ) -> (S, S, S) {
     let two = S::from_f64(2.0);
@@ -323,14 +345,21 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     // transverse d2 four-point. returns (tau_11, tau_12, h2_face).
     let x1_face = |ia: usize, ib: usize| -> (S, S, S, S, S) {
         let g1 = |x: &[[S; 3]; 3]| (x[1][ib] - x[1][ia]) / dx1;
-        let g2 = |x: &[[S; 3]; 3]| {
-            ((x[2][ia] - x[0][ia]) + (x[2][ib] - x[0][ib])) / (four * dx2)
-        };
+        let g2 = |x: &[[S; 3]; 3]| ((x[2][ia] - x[0][ia]) + (x[2][ib] - x[0][ib])) / (four * dx2);
         let fv = |x: &[[S; 3]; 3]| half * (x[1][ia] + x[1][ib]);
         let mu = harm(rho[1][ia], rho[1][ib]) * (half * (nu[1][ia] + nu[1][ib]));
         let (t11, _, t12) = ortho_stress(
-            fv(&u1a), fv(&u2a), g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a),
-            fv(h1), fv(h2), g2(h1), g1(h2), mu,
+            fv(&u1a),
+            fv(&u2a),
+            g1(&u1a),
+            g2(&u1a),
+            g1(&u2a),
+            g2(&u2a),
+            fv(h1),
+            fv(h2),
+            g2(h1),
+            g1(h2),
+            mu,
         );
         (t11, t12, fv(h2), fv(&u1a), fv(&u2a))
     };
@@ -338,14 +367,21 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     // four-point. returns (tau_22, tau_12, h1_face).
     let x2_face = |ja: usize, jb: usize| -> (S, S, S, S, S) {
         let g2 = |x: &[[S; 3]; 3]| (x[jb][1] - x[ja][1]) / dx2;
-        let g1 = |x: &[[S; 3]; 3]| {
-            ((x[ja][2] - x[ja][0]) + (x[jb][2] - x[jb][0])) / (four * dx1)
-        };
+        let g1 = |x: &[[S; 3]; 3]| ((x[ja][2] - x[ja][0]) + (x[jb][2] - x[jb][0])) / (four * dx1);
         let fv = |x: &[[S; 3]; 3]| half * (x[ja][1] + x[jb][1]);
         let mu = harm(rho[ja][1], rho[jb][1]) * (half * (nu[ja][1] + nu[jb][1]));
         let (_, t22, t12) = ortho_stress(
-            fv(&u1a), fv(&u2a), g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a),
-            fv(h1), fv(h2), g2(h1), g1(h2), mu,
+            fv(&u1a),
+            fv(&u2a),
+            g1(&u1a),
+            g2(&u1a),
+            g1(&u2a),
+            g2(&u2a),
+            fv(h1),
+            fv(h2),
+            g2(h1),
+            g1(h2),
+            mu,
         );
         (t22, t12, fv(h1), fv(&u1a), fv(&u2a))
     };
@@ -366,14 +402,12 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     let d1h2_c = (h2[1][2] - h2[1][0]) / (two * dx1);
     let mu_c = rho[1][1] * nu[1][1];
     let (t11_c, t22_c, t12_c) = ortho_stress(
-        u1a[1][1], u2a[1][1], d1u1_c, d2u1_c, d1u2_c, d2u2_c,
-        h1_c, h2_c, d2h1_c, d1h2_c, mu_c,
+        u1a[1][1], u2a[1][1], d1u1_c, d2u1_c, d1u2_c, d2u2_c, h1_c, h2_c, d2h1_c, d1h2_c, mu_c,
     );
     let _ = t11_c;
 
     // axis-1 (radial) force: area-weighted divergence + the geometric sources.
-    let f1 = ((h2_1p * t11_1p - h2_1m * t11_1m) / dx1
-        + (h1_2p * t12_2p - h1_2m * t12_2m) / dx2)
+    let f1 = ((h2_1p * t11_1p - h2_1m * t11_1m) / dx1 + (h1_2p * t12_2p - h1_2m * t12_2m) / dx2)
         * inv_h1h2
         + (t12_c * d2h1_c - t22_c * d1h2_c) * inv_h1h2;
     // axis-2 (angular) force: the conservative h2^2 flux + the h2 phi-divergence.
@@ -411,7 +445,11 @@ fn face_stress_2p5d<S: Scalar>(
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
     let two_thirds = S::from_f64(2.0 / 3.0);
-    let (la, ra) = if hi { (1usize, 2usize) } else { (0usize, 1usize) };
+    let (la, ra) = if hi {
+        (1usize, 2usize)
+    } else {
+        (0usize, 1usize)
+    };
     let b = 1 - a;
     // 2D stencil index [ii, jj] (v[jj][ii]) with axis a at `along`, the transverse axis b at `trans`.
     let mk = |along: usize, trans: usize| -> [usize; 2] {
@@ -500,7 +538,11 @@ fn face_stress_3d<S: Scalar>(
 ) -> [S; 3] {
     let half = S::from_f64(0.5);
     let two_thirds = S::from_f64(2.0 / 3.0);
-    let (la, ra) = if hi { (1usize, 2usize) } else { (0usize, 1usize) };
+    let (la, ra) = if hi {
+        (1usize, 2usize)
+    } else {
+        (0usize, 1usize)
+    };
     let mut lo = [1usize; 3];
     lo[a] = la;
     let mut ro = [1usize; 3];
@@ -671,11 +713,18 @@ mod tests {
         let vphi = |r: f64| (gm / r).sqrt();
         let force_at = |r: f64, phi: f64, dx: f64| -> (f64, f64) {
             let (cx, cy) = (r * phi.cos(), r * phi.sin());
-            let (v, rho) = stencil(cx, cy, dx, dx, |x, y| {
-                let rr = (x * x + y * y).sqrt();
-                let vp = vphi(rr);
-                [-vp * y / rr, vp * x / rr]
-            }, |_, _| 1.0);
+            let (v, rho) = stencil(
+                cx,
+                cy,
+                dx,
+                dx,
+                |x, y| {
+                    let rr = (x * x + y * y).sqrt();
+                    let vp = vphi(rr);
+                    [-vp * y / rr, vp * x / rr]
+                },
+                |_, _| 1.0,
+            );
             let d = viscous_mom_update_2d(&v, &rho, &uni(nu), dx, dx, 1.0);
             let fr = (d[0] * cx + d[1] * cy) / r;
             let fphi = (-d[0] * cy + d[1] * cx) / r;
@@ -700,8 +749,14 @@ mod tests {
             // azimuthal force, NO spurious radial force, and the error converges at SECOND
             // order — halving dx must cut the error by ~4x (central differences on the
             // face stresses); a ratio bound of 3 allows the subleading terms.
-            assert!(spread < 0.01, "azimuthal force varies with angle (grid m=4): spread={spread} at dx={dx}");
-            assert!(radial < 0.01, "spurious radial viscous force on an axisymmetric field: {radial} at dx={dx}");
+            assert!(
+                spread < 0.01,
+                "azimuthal force varies with angle (grid m=4): spread={spread} at dx={dx}"
+            );
+            assert!(
+                radial < 0.01,
+                "spurious radial viscous force on an axisymmetric field: {radial} at dx={dx}"
+            );
             assert!(
                 prev_err.is_infinite() || prev_err / err > 3.0,
                 "viscous force not second-order: err {prev_err:.3e} -> {err:.3e} (ratio {:.2}) at dx={dx}",
@@ -726,11 +781,18 @@ mod tests {
             for k in 0..64 {
                 let phi = std::f64::consts::TAU * k as f64 / 64.0;
                 let (cx, cy) = (r * phi.cos(), r * phi.sin());
-                let (v, rho) = stencil(cx, cy, dx, dx, |x, y| {
-                    let rr = (x * x + y * y).sqrt();
-                    let vp = vphi(rr);
-                    [-vp * y / rr, vp * x / rr]
-                }, |x, y| sigma((x * x + y * y).sqrt()));
+                let (v, rho) = stencil(
+                    cx,
+                    cy,
+                    dx,
+                    dx,
+                    |x, y| {
+                        let rr = (x * x + y * y).sqrt();
+                        let vp = vphi(rr);
+                        [-vp * y / rr, vp * x / rr]
+                    },
+                    |x, y| sigma((x * x + y * y).sqrt()),
+                );
                 let d = viscous_mom_update_2d(&v, &rho, &uni(nu), dx, dx, 1.0);
                 let fr = (d[0] * cx + d[1] * cy) / r;
                 let fphi = (-d[0] * cy + d[1] * cx) / r;
@@ -747,15 +809,28 @@ mod tests {
             let (frmax, pmin, pmax) = probe(r, 0.02);
             let scale = pmax.abs().max(pmin.abs()).max(1e-30);
             let spread = (pmax - pmin) / scale;
-            assert!(spread < 0.01, "angular force spread {spread} at r={r} (grid anisotropy in the density coupling)");
-            assert!(frmax / scale < 0.01, "spurious radial force {frmax} at r={r} ({}% of |F_phi|)", 100.0 * frmax / scale);
+            assert!(
+                spread < 0.01,
+                "angular force spread {spread} at r={r} (grid anisotropy in the density coupling)"
+            );
+            assert!(
+                frmax / scale < 0.01,
+                "spurious radial force {frmax} at r={r} ({}% of |F_phi|)",
+                100.0 * frmax / scale
+            );
         }
         // deep in the cavity (r below the carve-out radius) the density sits on the 1e-5
         // floor and the residual force is dynamically negligible in ABSOLUTE terms — the
         // relative spread there is meaningless (noise over noise).
         let (frmax, pmin, pmax) = probe(2.0, 0.02);
-        assert!(pmin.abs().max(pmax.abs()) < 1e-4, "cavity-floor azimuthal force not negligible: [{pmin:.3e},{pmax:.3e}]");
-        assert!(frmax < 1e-4, "cavity-floor radial force not negligible: {frmax:.3e}");
+        assert!(
+            pmin.abs().max(pmax.abs()) < 1e-4,
+            "cavity-floor azimuthal force not negligible: [{pmin:.3e},{pmax:.3e}]"
+        );
+        assert!(
+            frmax < 1e-4,
+            "cavity-floor radial force not negligible: {frmax:.3e}"
+        );
     }
 
     // null 3: a linear shear vx = S y has a CONSTANT stress -> zero divergence ->
@@ -778,14 +853,20 @@ mod tests {
         let (v, r) = stencil(0.1, 0.3, dx, dy, |_, y| [s * y, 0.0], |_, _| rho);
         let (dmom, dnrg) = viscous_update_2d(&v, &r, &uni(nu), dx, dy, dt);
         // constant stress -> no force.
-        assert!(dmom[0].abs() < 1e-14 && dmom[1].abs() < 1e-14, "force should vanish: {dmom:?}");
+        assert!(
+            dmom[0].abs() < 1e-14 && dmom[1].abs() < 1e-14,
+            "force should vanish: {dmom:?}"
+        );
         // heating: dnrg = dt * rho nu S^2, exactly (linear field -> exact central differences).
         let expected = dt * rho * nu * s * s;
         assert!(
             (dnrg - expected).abs() < 1e-14,
             "viscous heating off: dnrg = {dnrg}, expected rho nu S^2 dt = {expected}"
         );
-        assert!(dnrg > 0.0, "viscous heating must be positive (irreversible dissipation)");
+        assert!(
+            dnrg > 0.0,
+            "viscous heating must be positive (irreversible dissipation)"
+        );
     }
 
     // the 2.5D DOF-aware energy: a PURELY out-of-plane shear v_z = S y (v_x = v_y = 0) has a constant
@@ -806,10 +887,16 @@ mod tests {
         }
         let (dmom, dnrg) = viscous_update_2p5d(&v, &r, &[[nu; 3]; 3], [dx, dy], dt);
         for i in 0..3 {
-            assert!(dmom[i].abs() < 1e-14, "constant stress -> zero force, got {dmom:?}");
+            assert!(
+                dmom[i].abs() < 1e-14,
+                "constant stress -> zero force, got {dmom:?}"
+            );
         }
         let expected = dt * rho * nu * s * s;
-        assert!((dnrg - expected).abs() < 1e-14, "2.5D heating off: dnrg {dnrg}, expected {expected}");
+        assert!(
+            (dnrg - expected).abs() < 1e-14,
+            "2.5D heating off: dnrg {dnrg}, expected {expected}"
+        );
         assert!(dnrg > 0.0);
     }
 
@@ -820,8 +907,7 @@ mod tests {
     fn quadratic_shear_books_the_analytic_force() {
         let (a, nu, rho, dt) = (1.5, 0.02, 1.0, 0.01);
         let (dx, dy) = (0.05, 0.05);
-        let (v, r) =
-            stencil(0.2, 0.13, dx, dy, |_, y| [a * y * y, 0.0], |_, _| rho);
+        let (v, r) = stencil(0.2, 0.13, dx, dy, |_, y| [a * y * y, 0.0], |_, _| rho);
         let d = viscous_mom_update_2d(&v, &r, &uni(nu), dx, dy, dt);
         let expect_x = dt * 2.0 * a * rho * nu;
         assert!((d[0] - expect_x).abs() < 1e-14, "fx {} vs {expect_x}", d[0]);
@@ -874,11 +960,23 @@ mod tests {
         let (r_c, dr, dphi) = (1.0, 0.02, 0.1);
         let (v, r) = cyl_stencil(r_c, dr, dphi, |rr, _| [0.0, (gm / rr).sqrt()], |_, _| rho);
         let d = viscous_mom_update_cyl_2d(&v, &r, &uni(nu), r_c, dr, dphi, dt);
-        assert!(d[1].abs() > 1e-8, "keplerian shear produced no torque: {}", d[1]);
-        assert!(d[1] < 0.0, "expected angular-momentum loss, got f_phi = {}", d[1]);
+        assert!(
+            d[1].abs() > 1e-8,
+            "keplerian shear produced no torque: {}",
+            d[1]
+        );
+        assert!(
+            d[1] < 0.0,
+            "expected angular-momentum loss, got f_phi = {}",
+            d[1]
+        );
         // rough magnitude: -(3/4) mu sqrt(GM) R^-5/2 * dt at R=1.
         let expect = -0.75 * rho * nu * gm.sqrt() * dt;
-        assert!((d[1] / expect - 1.0).abs() < 0.1, "f_phi {} vs ~{expect}", d[1]);
+        assert!(
+            (d[1] / expect - 1.0).abs() < 0.1,
+            "f_phi {} vs ~{expect}",
+            d[1]
+        );
     }
 
     // -- general orthogonal operator -----------------------------------------
@@ -888,7 +986,14 @@ mod tests {
     fn orthogonal_reduces_to_cartesian() {
         let (nu, rho, dt) = (0.03, 1.1, 0.01);
         let (dx, dy) = (0.05, 0.05);
-        let (v, r) = stencil(0.2, 0.13, dx, dy, |x, y| [x + 0.5 * y, -0.3 * x * x], |_, _| rho);
+        let (v, r) = stencil(
+            0.2,
+            0.13,
+            dx,
+            dy,
+            |x, y| [x + 0.5 * y, -0.3 * x * x],
+            |_, _| rho,
+        );
         let ones = [[1.0f64; 3]; 3];
         let d_o = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &ones, &ones, dx, dy, dt);
         let d_c = viscous_mom_update_2d(&v, &r, &uni(nu), dx, dy, dt);
@@ -903,8 +1008,13 @@ mod tests {
     fn orthogonal_reduces_to_cylindrical() {
         let (nu, rho, dt) = (0.04, 1.2, 0.01);
         let (r_c, dr, dphi) = (1.5, 0.05, 0.1);
-        let (v, r) =
-            cyl_stencil(r_c, dr, dphi, |rr, pp| [0.2 * (rr + pp).cos(), (1.0 / rr).sqrt()], |_, _| rho);
+        let (v, r) = cyl_stencil(
+            r_c,
+            dr,
+            dphi,
+            |rr, pp| [0.2 * (rr + pp).cos(), (1.0 / rr).sqrt()],
+            |_, _| rho,
+        );
         let ones = [[1.0f64; 3]; 3];
         let h2: [[f64; 3]; 3] =
             std::array::from_fn(|_| std::array::from_fn(|i| r_c + (i as f64 - 1.0) * dr));
@@ -925,7 +1035,10 @@ mod tests {
         let h2: [[f64; 3]; 3] =
             std::array::from_fn(|_| std::array::from_fn(|i| r_c + (i as f64 - 1.0) * dr));
         let d = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &ones, &h2, dr, dphi, dt);
-        assert!(d[0].abs() < 1e-12 && d[1].abs() < 1e-12, "not stress-free: {d:?}");
+        assert!(
+            d[0].abs() < 1e-12 && d[1].abs() < 1e-12,
+            "not stress-free: {d:?}"
+        );
     }
 
     // THE conservation gate: a smooth, doubly-periodic fake orthogonal metric
@@ -948,7 +1061,9 @@ mod tests {
             ]
         };
         let rfun = |i: usize, j: usize| {
-            1.0 + 0.2 * (2.0 * PI * i as f64 / n as f64).sin() * (2.0 * PI * j as f64 / n as f64).cos()
+            1.0 + 0.2
+                * (2.0 * PI * i as f64 / n as f64).sin()
+                * (2.0 * PI * j as f64 / n as f64).cos()
         };
         let mut total = 0.0f64;
         for jc in 0..n {
@@ -966,13 +1081,17 @@ mod tests {
                         h2s[dj][di] = h2f(i); // x2-independent -> Killing
                     }
                 }
-                let d = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &h1s, &h2s, dx1, dx2, dt);
+                let d =
+                    viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &h1s, &h2s, dx1, dx2, dt);
                 // the conserved increment: h1_c h2_c^2 * dmom_2 (common dx dropped).
                 let h2c = h2f(ic);
                 total += h2c * h2c * d[1];
             }
         }
-        assert!(total.abs() < 1e-12, "angular momentum not conserved: {total}");
+        assert!(
+            total.abs() < 1e-12,
+            "angular momentum not conserved: {total}"
+        );
     }
 
     // a mass sink that retains momentum (the torque-free surface) leaves a mask
@@ -1112,7 +1231,10 @@ mod tests {
                 sy += d[1];
             }
         }
-        assert!(sx.abs() < 1e-12 && sy.abs() < 1e-12, "momentum leak: {sx}, {sy}");
+        assert!(
+            sx.abs() < 1e-12 && sy.abs() < 1e-12,
+            "momentum leak: {sx}, {sy}"
+        );
     }
 
     // stability: at the C_VISC = 0.1 cap the fluctuation energy decays MONOTONE
@@ -1250,7 +1372,10 @@ mod tests {
         for step in 0..400 {
             v = viscous_step_varnu(&v, &rho_field, &nu_field, dx, dt);
             let cur = fluct_energy(&v);
-            assert!(cur <= prev * (1.0 + 1e-10), "grew at step {step}: {prev} -> {cur}");
+            assert!(
+                cur <= prev * (1.0 + 1e-10),
+                "grew at step {step}: {prev} -> {cur}"
+            );
             prev = cur;
         }
         assert!(prev < 0.1 * e0, "did not decay: {e0} -> {prev}");
@@ -1287,9 +1412,17 @@ mod tests {
     #[test]
     fn uniform_flow_3d_books_zero_force() {
         let dx = [0.05, 0.07, 0.06];
-        let (v, r) = stencil3([0.2, 0.1, 0.3], dx, |_, _, _| [1.3, -0.7, 0.4], |_, _, _| 1.1);
+        let (v, r) = stencil3(
+            [0.2, 0.1, 0.3],
+            dx,
+            |_, _, _| [1.3, -0.7, 0.4],
+            |_, _, _| 1.1,
+        );
         let d = viscous_mom_update_3d(&v, &r, &uni3(0.05), dx, 0.01);
-        assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14 && d[2].abs() < 1e-14, "{d:?}");
+        assert!(
+            d[0].abs() < 1e-14 && d[1].abs() < 1e-14 && d[2].abs() < 1e-14,
+            "{d:?}"
+        );
     }
 
     // a rigid rotation v = omega x r about an arbitrary axis is strain-free, so
@@ -1305,7 +1438,10 @@ mod tests {
             |_, _, _| 1.0,
         );
         let d = viscous_mom_update_3d(&v, &r, &uni3(0.02), dx, 0.01);
-        assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14 && d[2].abs() < 1e-14, "{d:?}");
+        assert!(
+            d[0].abs() < 1e-14 && d[1].abs() < 1e-14 && d[2].abs() < 1e-14,
+            "{d:?}"
+        );
     }
 
     // the load-bearing cross-check: a z-invariant flow with v_z = 0 must give
@@ -1341,7 +1477,11 @@ mod tests {
         for k in 0..n {
             for j in 0..n {
                 for i in 0..n {
-                    let (fi, fj, fk) = (i as f64 / n as f64, j as f64 / n as f64, k as f64 / n as f64);
+                    let (fi, fj, fk) = (
+                        i as f64 / n as f64,
+                        j as f64 / n as f64,
+                        k as f64 / n as f64,
+                    );
                     let cb = if (i + j + k) % 2 == 0 { 1.0 } else { -1.0 };
                     v[(k * n + j) * n + i] = [
                         (2.0 * PI * fi).sin() + 0.4 * cb,
@@ -1354,7 +1494,14 @@ mod tests {
         v
     }
 
-    fn viscous_step_periodic_3d(v: &[[f64; 3]], n: usize, rho: f64, nu: f64, dx: f64, dt: f64) -> Vec<[f64; 3]> {
+    fn viscous_step_periodic_3d(
+        v: &[[f64; 3]],
+        n: usize,
+        rho: f64,
+        nu: f64,
+        dx: f64,
+        dt: f64,
+    ) -> Vec<[f64; 3]> {
         let at = |i: usize, j: usize, k: usize| v[(k * n + j) * n + i];
         let rst = uni3(rho);
         let nst = uni3(nu);
@@ -1375,7 +1522,8 @@ mod tests {
                     }
                     let d = viscous_mom_update_3d(&st, &rst, &nst, [dx, dx, dx], dt);
                     let c = at(i, j, k);
-                    out[(k * n + j) * n + i] = [c[0] + d[0] / rho, c[1] + d[1] / rho, c[2] + d[2] / rho];
+                    out[(k * n + j) * n + i] =
+                        [c[0] + d[0] / rho, c[1] + d[1] / rho, c[2] + d[2] / rho];
                 }
             }
         }
@@ -1424,7 +1572,10 @@ mod tests {
         for step in 0..300 {
             v = viscous_step_periodic_3d(&v, n, rho, nu, dx, dt);
             let cur = fluct_energy_3d(&v);
-            assert!(cur <= prev * (1.0 + 1e-10), "grew at step {step}: {prev} -> {cur}");
+            assert!(
+                cur <= prev * (1.0 + 1e-10),
+                "grew at step {step}: {prev} -> {cur}"
+            );
             prev = cur;
         }
         assert!(prev < 1e-2 * e0, "did not decay: {e0} -> {prev}");
@@ -1456,11 +1607,19 @@ mod ortho_heating_tests {
         let (mo, eo) = viscous_update_orthogonal_2d(&v, &r, &nu, &ones, &ones, dx, dy, 1.0e-3);
         for a in 0..2 {
             let rel = (mc[a] - mo[a]).abs() / mc[a].abs().max(1e-30);
-            assert!(rel < 1e-13, "momentum axis {a}: cartesian {} vs ortho {}", mc[a], mo[a]);
+            assert!(
+                rel < 1e-13,
+                "momentum axis {a}: cartesian {} vs ortho {}",
+                mc[a],
+                mo[a]
+            );
         }
         let rel = (ec - eo).abs() / ec.abs().max(1e-30);
         assert!(rel < 1e-13, "heating: cartesian {ec} vs ortho {eo}");
-        assert!(ec.abs() > 1e-20, "the heating never engaged; the limit check is vacuous");
+        assert!(
+            ec.abs() > 1e-20,
+            "the heating never engaged; the limit check is vacuous"
+        );
     }
 
     #[test]
@@ -1488,9 +1647,16 @@ mod ortho_heating_tests {
         }
         let nu = [[0.08; 3]; 3];
         let (dm, de) = viscous_update_orthogonal_2d(&v, &rho, &nu, &h1, &h2, dx1, dx2, 1.0e-3);
-        assert!(dm[0].abs() < 1e-15 && dm[1].abs() < 1e-15,
-            "rigid rotation produced a viscous force: ({}, {})", dm[0], dm[1]);
-        assert!(de.abs() < 1e-15, "rigid rotation produced viscous heating: {de}");
+        assert!(
+            dm[0].abs() < 1e-15 && dm[1].abs() < 1e-15,
+            "rigid rotation produced a viscous force: ({}, {})",
+            dm[0],
+            dm[1]
+        );
+        assert!(
+            de.abs() < 1e-15,
+            "rigid rotation produced viscous heating: {de}"
+        );
     }
 }
 
@@ -1504,10 +1670,22 @@ mod ortho_heating_tests {
 /// cartesian / cylindrical-z reduction).
 #[allow(clippy::too_many_arguments)]
 fn ortho_stress_2p5d<S: Scalar>(
-    u1: S, u2: S, u3: S,
-    d1u1: S, d2u1: S, d1u2: S, d2u2: S, d1u3: S, d2u3: S,
-    h1: S, h2: S, h3: S,
-    d2h1: S, d1h2: S, d1h3: S, d2h3: S,
+    u1: S,
+    u2: S,
+    u3: S,
+    d1u1: S,
+    d2u1: S,
+    d1u2: S,
+    d2u2: S,
+    d1u3: S,
+    d2u3: S,
+    h1: S,
+    h2: S,
+    h3: S,
+    d2h1: S,
+    d1h2: S,
+    d1h3: S,
+    d2h3: S,
     mu: S,
 ) -> (S, S, S, S, S, S) {
     let two = S::from_f64(2.0);
@@ -1520,7 +1698,8 @@ fn ortho_stress_2p5d<S: Scalar>(
     let e22 = d2u2 * inv_h2 + u1 * d1h2 * inv_h1 * inv_h2;
     let e33 = u1 * d1h3 * inv_h1 * inv_h3 + u2 * d2h3 * inv_h2 * inv_h3;
     let e12 = half
-        * (d2u1 * inv_h2 - u1 * d2h1 * inv_h1 * inv_h2 + d1u2 * inv_h1 - u2 * d1h2 * inv_h1 * inv_h2);
+        * (d2u1 * inv_h2 - u1 * d2h1 * inv_h1 * inv_h2 + d1u2 * inv_h1
+            - u2 * d1h2 * inv_h1 * inv_h2);
     let e13 = half * (d1u3 * inv_h1 - u3 * d1h3 * inv_h1 * inv_h3);
     let e23 = half * (d2u3 * inv_h2 - u3 * d2h3 * inv_h2 * inv_h3);
     let theta = e11 + e22 + e33;
@@ -1563,7 +1742,8 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
     let tiny = S::from_f64(1e-300);
     let one = S::from_f64(1.0);
     let harm = |a: S, b: S| two * a * b / (a + b + tiny);
-    let comp = |c: usize| -> [[S; 3]; 3] { std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][c])) };
+    let comp =
+        |c: usize| -> [[S; 3]; 3] { std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][c])) };
     let (u1a, u2a, u3a) = (comp(0), comp(1), comp(2));
 
     // stress at the x1-face between columns (ia, ib): normal d1 compact,
@@ -1574,13 +1754,31 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
         let fv = |x: &[[S; 3]; 3]| half * (x[1][ia] + x[1][ib]);
         let mu = harm(rho[1][ia], rho[1][ib]) * (half * (nu[1][ia] + nu[1][ib]));
         let t = ortho_stress_2p5d(
-            fv(&u1a), fv(&u2a), fv(&u3a),
-            g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a), g1(&u3a), g2(&u3a),
-            fv(h1), fv(h2), fv(h3),
-            g2(h1), g1(h2), g1(h3), g2(h3),
+            fv(&u1a),
+            fv(&u2a),
+            fv(&u3a),
+            g1(&u1a),
+            g2(&u1a),
+            g1(&u2a),
+            g2(&u2a),
+            g1(&u3a),
+            g2(&u3a),
+            fv(h1),
+            fv(h2),
+            fv(h3),
+            g2(h1),
+            g1(h2),
+            g1(h3),
+            g2(h3),
             mu,
         );
-        ([t.0, t.1, t.2, t.3, t.4, t.5], fv(h1), fv(h2), fv(h3), [fv(&u1a), fv(&u2a), fv(&u3a)])
+        (
+            [t.0, t.1, t.2, t.3, t.4, t.5],
+            fv(h1),
+            fv(h2),
+            fv(h3),
+            [fv(&u1a), fv(&u2a), fv(&u3a)],
+        )
     };
     let x2_face = |ja: usize, jb: usize| -> ([S; 6], S, S, S, [S; 3]) {
         let g2 = |x: &[[S; 3]; 3]| (x[jb][1] - x[ja][1]) / dx2;
@@ -1588,13 +1786,31 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
         let fv = |x: &[[S; 3]; 3]| half * (x[ja][1] + x[jb][1]);
         let mu = harm(rho[ja][1], rho[jb][1]) * (half * (nu[ja][1] + nu[jb][1]));
         let t = ortho_stress_2p5d(
-            fv(&u1a), fv(&u2a), fv(&u3a),
-            g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a), g1(&u3a), g2(&u3a),
-            fv(h1), fv(h2), fv(h3),
-            g2(h1), g1(h2), g1(h3), g2(h3),
+            fv(&u1a),
+            fv(&u2a),
+            fv(&u3a),
+            g1(&u1a),
+            g2(&u1a),
+            g1(&u2a),
+            g2(&u2a),
+            g1(&u3a),
+            g2(&u3a),
+            fv(h1),
+            fv(h2),
+            fv(h3),
+            g2(h1),
+            g1(h2),
+            g1(h3),
+            g2(h3),
             mu,
         );
-        ([t.0, t.1, t.2, t.3, t.4, t.5], fv(h1), fv(h2), fv(h3), [fv(&u1a), fv(&u2a), fv(&u3a)])
+        (
+            [t.0, t.1, t.2, t.3, t.4, t.5],
+            fv(h1),
+            fv(h2),
+            fv(h3),
+            [fv(&u1a), fv(&u2a), fv(&u3a)],
+        )
     };
     // t index order: [t11, t22, t33, t12, t13, t23].
     let (t_1p, _h1_1p, h2_1p, h3_1p, u_1p) = x1_face(1, 2);
@@ -1608,10 +1824,22 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
     let (h1_c, h2_c, h3_c) = (h1[1][1], h2[1][1], h3[1][1]);
     let mu_c = rho[1][1] * nu[1][1];
     let tc = ortho_stress_2p5d(
-        u1a[1][1], u2a[1][1], u3a[1][1],
-        cd1(&u1a), cd2(&u1a), cd1(&u2a), cd2(&u2a), cd1(&u3a), cd2(&u3a),
-        h1_c, h2_c, h3_c,
-        cd2(h1), cd1(h2), cd1(h3), cd2(h3),
+        u1a[1][1],
+        u2a[1][1],
+        u3a[1][1],
+        cd1(&u1a),
+        cd2(&u1a),
+        cd1(&u2a),
+        cd2(&u2a),
+        cd1(&u3a),
+        cd2(&u3a),
+        h1_c,
+        h2_c,
+        h3_c,
+        cd2(h1),
+        cd1(h2),
+        cd1(h3),
+        cd2(h3),
         mu_c,
     );
     let (d2h1_c, d1h2_c, d1h3_c, d2h3_c) = (cd2(h1), cd1(h2), cd1(h3), cd2(h3));
@@ -1626,23 +1854,25 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
         ((f1p - f1m) / dx1 + (f2p - f2m) / dx2) * inv_j
     };
     // momentum rows: row i lists the [t_i1, t_i2] indices in the t order.
-    let f1 = flux_div([0, 3])
-        + (tc.3 * d2h1_c - tc.1 * d1h2_c) / (h1_c * h2_c)
+    let f1 = flux_div([0, 3]) + (tc.3 * d2h1_c - tc.1 * d1h2_c) / (h1_c * h2_c)
         - tc.2 * d1h3_c / (h1_c * h3_c);
-    let f2 = flux_div([3, 1])
-        + (tc.3 * d1h2_c - tc.0 * d2h1_c) / (h1_c * h2_c)
+    let f2 = flux_div([3, 1]) + (tc.3 * d1h2_c - tc.0 * d2h1_c) / (h1_c * h2_c)
         - tc.2 * d2h3_c / (h2_c * h3_c);
-    let f3 = flux_div([4, 5])
-        + tc.4 * d1h3_c / (h1_c * h3_c)
-        + tc.5 * d2h3_c / (h2_c * h3_c);
+    let f3 = flux_div([4, 5]) + tc.4 * d1h3_c / (h1_c * h3_c) + tc.5 * d2h3_c / (h2_c * h3_c);
 
     // heating: F_j = sum_k t_jk u_k at the same faces, (1/J) d_j (J F_j / h_j).
     let fdot = |t: &[S; 6], u: &[S; 3], j: usize| -> S {
-        if j == 0 { t[0] * u[0] + t[3] * u[1] + t[4] * u[2] } else { t[3] * u[0] + t[1] * u[1] + t[5] * u[2] }
+        if j == 0 {
+            t[0] * u[0] + t[3] * u[1] + t[4] * u[2]
+        } else {
+            t[3] * u[0] + t[1] * u[1] + t[5] * u[2]
+        }
     };
     let dnrg = dt
-        * (((h2_1p * h3_1p) * fdot(&t_1p, &u_1p, 0) - (h2_1m * h3_1m) * fdot(&t_1m, &u_1m, 0)) / dx1
-            + ((h1_2p * h3_2p) * fdot(&t_2p, &u_2p, 1) - (h1_2m * h3_2m) * fdot(&t_2m, &u_2m, 1)) / dx2)
+        * (((h2_1p * h3_1p) * fdot(&t_1p, &u_1p, 0) - (h2_1m * h3_1m) * fdot(&t_1m, &u_1m, 0))
+            / dx1
+            + ((h1_2p * h3_2p) * fdot(&t_2p, &u_2p, 1) - (h1_2m * h3_2m) * fdot(&t_2m, &u_2m, 1))
+                / dx2)
         * inv_j;
 
     (Tensor::new([dt * f1, dt * f2, dt * f3]), dnrg)
@@ -1687,20 +1917,27 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     // face-adjacent cells. returns the 3x3 symmetric t plus face h's and u's.
     let face = |ax: usize| -> [([[S; 3]; 3], [S; 3], [S; 3]); 2] {
         std::array::from_fn(|side| {
-            let (a, b) = if side == 1 { (ctr, step(ctr, ax, 1)) } else { (step(ctr, ax, -1), ctr) };
+            let (a, b) = if side == 1 {
+                (ctr, step(ctr, ax, 1))
+            } else {
+                (step(ctr, ax, -1), ctr)
+            };
             let d = |f: &dyn Fn([usize; 3]) -> S, j: usize| -> S {
                 if j == ax {
                     (f(b) - f(a)) / dx[ax]
                 } else {
-                    ((f(step(a, j, 1)) - f(step(a, j, -1))) + (f(step(b, j, 1)) - f(step(b, j, -1))))
+                    ((f(step(a, j, 1)) - f(step(a, j, -1)))
+                        + (f(step(b, j, 1)) - f(step(b, j, -1))))
                         / (four * dx[j])
                 }
             };
             let fv = |f: &dyn Fn([usize; 3]) -> S| half * (f(a) + f(b));
             let uf: [S; 3] = std::array::from_fn(|c| fv(&|o| vat(o, c)));
-            let du: [[S; 3]; 3] = std::array::from_fn(|c| std::array::from_fn(|j| d(&|o| vat(o, c), j)));
+            let du: [[S; 3]; 3] =
+                std::array::from_fn(|c| std::array::from_fn(|j| d(&|o| vat(o, c), j)));
             let hf: [S; 3] = std::array::from_fn(|k| fv(&|o| at(h[k], o)));
-            let dh: [[S; 3]; 3] = std::array::from_fn(|k| std::array::from_fn(|j| d(&|o| at(h[k], o), j)));
+            let dh: [[S; 3]; 3] =
+                std::array::from_fn(|k| std::array::from_fn(|j| d(&|o| at(h[k], o), j)));
             let mu = harm(at(rho, a), at(rho, b)) * (half * (at(nu, a) + at(nu, b)));
             let mut e = [[S::ZERO; 3]; 3];
             for i in 0..3 {
@@ -1734,9 +1971,12 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     let faces: [[([[S; 3]; 3], [S; 3], [S; 3]); 2]; 3] = std::array::from_fn(face);
 
     // center stress + h gradients for the geometric sources.
-    let cd = |f: &dyn Fn([usize; 3]) -> S, j: usize| (f(step(ctr, j, 1)) - f(step(ctr, j, -1))) / (two * dx[j]);
+    let cd = |f: &dyn Fn([usize; 3]) -> S, j: usize| {
+        (f(step(ctr, j, 1)) - f(step(ctr, j, -1))) / (two * dx[j])
+    };
     let hc: [S; 3] = std::array::from_fn(|k| at(h[k], ctr));
-    let dhc: [[S; 3]; 3] = std::array::from_fn(|k| std::array::from_fn(|j| cd(&|o| at(h[k], o), j)));
+    let dhc: [[S; 3]; 3] =
+        std::array::from_fn(|k| std::array::from_fn(|j| cd(&|o| at(h[k], o), j)));
     let uc: [S; 3] = std::array::from_fn(|c| vat(ctr, c));
     let duc: [[S; 3]; 3] = std::array::from_fn(|c| std::array::from_fn(|j| cd(&|o| vat(o, c), j)));
     let mu_c = at(rho, ctr) * at(nu, ctr);
@@ -1761,7 +2001,11 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     let mut tc = [[S::ZERO; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            let tr = if i == j { two_thirds * theta_c } else { S::ZERO };
+            let tr = if i == j {
+                two_thirds * theta_c
+            } else {
+                S::ZERO
+            };
             tc[i][j] = mu_c * (two * ec[i][j] - tr);
         }
     }
@@ -1811,15 +2055,21 @@ mod ortho_general_tests {
 
     // scale-factor stencils sampled on the coordinate lattice about (r0, t0).
     fn h_lattice_2d(f: impl Fn(f64, f64) -> f64, x0: f64, y0: f64) -> [[f64; 3]; 3] {
-        std::array::from_fn(|j| std::array::from_fn(|i| {
-            f(x0 + (i as f64 - 1.0) * DX, y0 + (j as f64 - 1.0) * DX)
-        }))
+        std::array::from_fn(|j| {
+            std::array::from_fn(|i| f(x0 + (i as f64 - 1.0) * DX, y0 + (j as f64 - 1.0) * DX))
+        })
     }
 
-    fn v_lattice_2p5d(f: impl Fn(f64, f64) -> [f64; 3], x0: f64, y0: f64) -> [[Tensor<f64, 3>; 3]; 3] {
-        std::array::from_fn(|j| std::array::from_fn(|i| {
-            Tensor::new(f(x0 + (i as f64 - 1.0) * DX, y0 + (j as f64 - 1.0) * DX))
-        }))
+    fn v_lattice_2p5d(
+        f: impl Fn(f64, f64) -> [f64; 3],
+        x0: f64,
+        y0: f64,
+    ) -> [[Tensor<f64, 3>; 3]; 3] {
+        std::array::from_fn(|j| {
+            std::array::from_fn(|i| {
+                Tensor::new(f(x0 + (i as f64 - 1.0) * DX, y0 + (j as f64 - 1.0) * DX))
+            })
+        })
     }
 
     #[test]
@@ -1828,7 +2078,11 @@ mod ortho_general_tests {
         // match the dedicated cartesian 2.5D operator to roundoff (the two
         // assemble algebraically identical fluxes in different groupings).
         let vf = |x: f64, y: f64| -> [f64; 3] {
-            [0.3 * (x + 2.0 * y).sin(), -0.2 * (2.0 * x - y).cos(), 0.4 * (x * y).sin()]
+            [
+                0.3 * (x + 2.0 * y).sin(),
+                -0.2 * (2.0 * x - y).cos(),
+                0.4 * (x * y).sin(),
+            ]
         };
         let v = v_lattice_2p5d(vf, 0.4, -0.3);
         let rho = h_lattice_2d(|x, y| 1.0 + 0.2 * (x - y).cos(), 0.4, -0.3);
@@ -1863,9 +2117,16 @@ mod ortho_general_tests {
         // roundoff of the r sin(theta) products (u3 and h3 group differently),
         // orders below any physical stress.
         for c in 0..3 {
-            assert!(dm[c].abs() < 1e-13, "spherical rigid null broken, mom {c}: {:e}", dm[c]);
+            assert!(
+                dm[c].abs() < 1e-13,
+                "spherical rigid null broken, mom {c}: {:e}",
+                dm[c]
+            );
         }
-        assert!(de.abs() < 1e-13, "spherical rigid null books heating: {de:e}");
+        assert!(
+            de.abs() < 1e-13,
+            "spherical rigid null books heating: {de:e}"
+        );
     }
 
     #[test]
@@ -1888,23 +2149,34 @@ mod ortho_general_tests {
     }
 
     fn lattice_3d(f: impl Fn(f64, f64, f64) -> f64, x0: [f64; 3]) -> [[[f64; 3]; 3]; 3] {
-        std::array::from_fn(|k| std::array::from_fn(|j| std::array::from_fn(|i| {
-            f(
-                x0[0] + (i as f64 - 1.0) * DX,
-                x0[1] + (j as f64 - 1.0) * DX,
-                x0[2] + (k as f64 - 1.0) * DX,
-            )
-        })))
+        std::array::from_fn(|k| {
+            std::array::from_fn(|j| {
+                std::array::from_fn(|i| {
+                    f(
+                        x0[0] + (i as f64 - 1.0) * DX,
+                        x0[1] + (j as f64 - 1.0) * DX,
+                        x0[2] + (k as f64 - 1.0) * DX,
+                    )
+                })
+            })
+        })
     }
 
-    fn v_lattice_3d(f: impl Fn(f64, f64, f64) -> [f64; 3], x0: [f64; 3]) -> [[[Tensor<f64, 3>; 3]; 3]; 3] {
-        std::array::from_fn(|k| std::array::from_fn(|j| std::array::from_fn(|i| {
-            Tensor::new(f(
-                x0[0] + (i as f64 - 1.0) * DX,
-                x0[1] + (j as f64 - 1.0) * DX,
-                x0[2] + (k as f64 - 1.0) * DX,
-            ))
-        })))
+    fn v_lattice_3d(
+        f: impl Fn(f64, f64, f64) -> [f64; 3],
+        x0: [f64; 3],
+    ) -> [[[Tensor<f64, 3>; 3]; 3]; 3] {
+        std::array::from_fn(|k| {
+            std::array::from_fn(|j| {
+                std::array::from_fn(|i| {
+                    Tensor::new(f(
+                        x0[0] + (i as f64 - 1.0) * DX,
+                        x0[1] + (j as f64 - 1.0) * DX,
+                        x0[2] + (k as f64 - 1.0) * DX,
+                    ))
+                })
+            })
+        })
     }
 
     #[test]
@@ -1947,9 +2219,16 @@ mod ortho_general_tests {
         let nu = h_const_3d(NU);
         let (dm, de) = viscous_update_orthogonal_3d(&v, &rho, &nu, [&h1, &h2, &h3], [DX; 3], 1.0);
         for c in 0..3 {
-            assert!(dm[c].abs() < 1e-15, "cylindrical 3d rigid null broken, mom {c}: {:e}", dm[c]);
+            assert!(
+                dm[c].abs() < 1e-15,
+                "cylindrical 3d rigid null broken, mom {c}: {:e}",
+                dm[c]
+            );
         }
-        assert!(de.abs() < 1e-15, "cylindrical 3d rigid null books heating: {de:e}");
+        assert!(
+            de.abs() < 1e-15,
+            "cylindrical 3d rigid null books heating: {de:e}"
+        );
     }
 
     #[test]
@@ -1967,8 +2246,15 @@ mod ortho_general_tests {
         let (dm, de) = viscous_update_orthogonal_3d(&v, &rho, &nu, [&h1, &h2, &h3], [DX; 3], 1.0);
         // roundoff of the non-associative r sin(theta) products; see the 2.5d twin.
         for c in 0..3 {
-            assert!(dm[c].abs() < 1e-13, "spherical 3d rigid null broken, mom {c}: {:e}", dm[c]);
+            assert!(
+                dm[c].abs() < 1e-13,
+                "spherical 3d rigid null broken, mom {c}: {:e}",
+                dm[c]
+            );
         }
-        assert!(de.abs() < 1e-13, "spherical 3d rigid null books heating: {de:e}");
+        assert!(
+            de.abs() < 1e-13,
+            "spherical 3d rigid null books heating: {de:e}"
+        );
     }
 }

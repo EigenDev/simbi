@@ -13,7 +13,7 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi::sim::tracers::{cell_container_address, seed_and_partition, seed_mass_weighted};
@@ -38,7 +38,12 @@ fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.1).powi(2) + ((y - 0.5) / 0.1).powi(2))).exp()
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, motion: MotionState<f64>) -> (Sim, Kern) {
+fn make(
+    cells: [usize; 2],
+    origin: [f64; 2],
+    bnd: Boundaries<2>,
+    motion: MotionState<f64>,
+) -> (Sim, Kern) {
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
@@ -50,7 +55,11 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, motion: MotionS
         .expect("sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim { rho: 1.0 + b, vel: Tensor::new([0.0, 0.0]), pre: 1.0 + b }
+            Prim {
+                rho: 1.0 + b,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: 1.0 + b,
+            }
         })
         .build();
     sim.motion = motion;
@@ -65,8 +74,16 @@ fn grid_tiles(counts: [usize; 2], motion: MotionState<f64>) -> Vec<(Sim, Kern)> 
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd, motion)
@@ -96,7 +113,11 @@ fn run_decomposed(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
     );
 }
 
-fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [isize; 2]) -> f64) -> Vec<f64> {
+fn global_field(
+    tiles: &[(Sim, Kern)],
+    counts: [usize; 2],
+    pick: impl Fn(&Sim, [isize; 2]) -> f64,
+) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let mut out = vec![f64::NAN; N * N];
     for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
@@ -111,14 +132,22 @@ fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
     let den = |s: &Sim, c: [isize; 2]| *s.fields.cons.den.view().at(c);
     let momx = |s: &Sim, c: [isize; 2]| *s.fields.cons.mom[0].view().at(c);
 
-    let (mut mono, mk) = make([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), motion);
+    let (mut mono, mk) = make(
+        [N, N],
+        [0.0, 0.0],
+        Boundaries::uniform(BoundaryType::Outflow),
+        motion,
+    );
     let per_tile = seed_and_partition(&mono, 2048, counts);
     mono.tracers = Some(seed_mass_weighted(&mono, 2048));
     let initial_owner = mono.tracers.as_ref().unwrap().owner.clone();
@@ -166,17 +195,27 @@ fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
     }
     let de = max_err(&mono_den, &dec_den);
     let me = max_err(&mono_momx, &dec_momx);
-    assert!(de < 1e-12, "{counts:?}: density diverged under mesh motion: {de:e}");
-    assert!(me < 1e-12, "{counts:?}: mom_x diverged under mesh motion: {me:e}");
+    assert!(
+        de < 1e-12,
+        "{counts:?}: density diverged under mesh motion: {de:e}"
+    );
+    assert!(
+        me < 1e-12,
+        "{counts:?}: mom_x diverged under mesh motion: {me:e}"
+    );
 
     let mono_tracers = mono_sim.tracers.as_ref().unwrap();
     let mut decomposed = Vec::new();
     for (sim, _) in &tiles {
         let tracers = sim.tracers.as_ref().unwrap();
-        decomposed.extend(
-            (0..tracers.len())
-                .map(|ii| (tracers.id[ii], tracers.owner[ii], tracers.x[ii], tracers.flags[ii])),
-        );
+        decomposed.extend((0..tracers.len()).map(|ii| {
+            (
+                tracers.id[ii],
+                tracers.owner[ii],
+                tracers.x[ii],
+                tracers.flags[ii],
+            )
+        }));
     }
     decomposed.sort_unstable_by_key(|record| record.0);
     assert_eq!(decomposed.len(), mono_tracers.len());

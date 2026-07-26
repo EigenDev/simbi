@@ -24,9 +24,9 @@ use symbi::sim::state::*;
 use symbi::sim::substrate_seam::WithExcision;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -46,16 +46,24 @@ type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn build() -> (Sim, Kern) {
     let dx = 2.0 * L / N as f64;
-    let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells([N, N])
-        .origin([-L, -L])
-        .spacing([dx, dx])
-        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-        .allocate()
-        .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 0.1 })
-        .build()
-        .with_bodies(BodyCollection::new().add(Body::horizon(0, R_EXC, R_DIAG)));
+    let sim = Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells([N, N])
+    .origin([-L, -L])
+    .spacing([dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+    .allocate()
+    .expect("sim")
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 0.1,
+    })
+    .build()
+    .with_bodies(BodyCollection::new().add(Body::horizon(0, R_EXC, R_DIAG)));
     let k = Kern::new(GAMMA, 0.3, &sim.geom.allocated).with_excision(R_EXC);
     (sim, k)
 }
@@ -64,7 +72,11 @@ fn ledger(sim: &Sim) -> (f64, f64, f64, f64) {
     let im = sim.immersed.as_ref().expect("horizon body");
     match im.bodies.get(0).kind {
         symbi_ib::BodyKind::Horizon {
-            total_accreted_mass, total_accreted_energy, mdot, edot, ..
+            total_accreted_mass,
+            total_accreted_energy,
+            mdot,
+            edot,
+            ..
         } => (total_accreted_mass, total_accreted_energy, mdot, edot),
         _ => panic!("body 0 is not the horizon"),
     }
@@ -89,8 +101,24 @@ fn both_drivers_book_the_same_nonzero_accretion_ledger() {
     assert!(mb.abs() > 1e-12, "hierarchy ledger dead: total {mb}");
 
     // identical phase sequence at identical dt: the ledgers agree bitwise.
-    assert_eq!(ma.to_bits(), mb.to_bits(), "accreted-mass ledgers diverged: {ma} vs {mb}");
-    assert_eq!(ea.to_bits(), eb.to_bits(), "accreted-energy ledgers diverged: {ea} vs {eb}");
-    assert_eq!(mdot_a.to_bits(), mdot_b.to_bits(), "mdot diverged: {mdot_a} vs {mdot_b}");
-    assert_eq!(edot_a.to_bits(), edot_b.to_bits(), "edot diverged: {edot_a} vs {edot_b}");
+    assert_eq!(
+        ma.to_bits(),
+        mb.to_bits(),
+        "accreted-mass ledgers diverged: {ma} vs {mb}"
+    );
+    assert_eq!(
+        ea.to_bits(),
+        eb.to_bits(),
+        "accreted-energy ledgers diverged: {ea} vs {eb}"
+    );
+    assert_eq!(
+        mdot_a.to_bits(),
+        mdot_b.to_bits(),
+        "mdot diverged: {mdot_a} vs {mdot_b}"
+    );
+    assert_eq!(
+        edot_a.to_bits(),
+        edot_b.to_bits(),
+        "edot diverged: {edot_a} vs {edot_b}"
+    );
 }

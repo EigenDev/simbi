@@ -211,7 +211,10 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                 // to the exact overflow; cap the state loosely at the row count to avoid runaway.
                 Key::Up => scroll = scroll.saturating_sub(1),
                 Key::Down => {
-                    let cap = latest.as_ref().map(|f| f.view.config.len() as u16).unwrap_or(0);
+                    let cap = latest
+                        .as_ref()
+                        .map(|f| f.view.config.len() as u16)
+                        .unwrap_or(0);
                     scroll = (scroll + 1).min(cap);
                 }
                 Key::Char(' ') => {

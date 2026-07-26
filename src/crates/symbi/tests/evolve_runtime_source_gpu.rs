@@ -25,7 +25,7 @@
 #![cfg(feature = "cuda")]
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::evolve::{evolve, KernelSet};
+use symbi::sim::evolve::{KernelSet, evolve};
 use symbi::sim::state::*;
 use symbi_algebra::{Domain, Tensor};
 use symbi_geometry::{Cartesian, Metric};
@@ -34,7 +34,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_user_source;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 
@@ -56,14 +56,17 @@ fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(
         let (h, g) = (*host.view().at(c), *dev.view().at(c));
         assert!(g.is_finite(), "{what} at {c:?} went non-finite on GPU: {g}");
         let rel = (g - h).abs() / h.abs().max(1.0);
-        assert!(rel < 1e-9, "{what} at {c:?}: gpu {g} != cpu {h} (rel {rel:e})");
+        assert!(
+            rel < 1e-9,
+            "{what} at {c:?}: gpu {g} != cpu {h} (rel {rel:e})"
+        );
     }
 }
 
 // adiabatic Newton sim with a smooth nonzero state (nonzero velocity so the energy source v.g is
 // also exercised). identical IC across backends. (mirrors substrate_fused_source_gpu.rs.)
-fn build_adiabatic<S: ExecutionSpace, Mem: MemorySpace, const D: usize>(
-) -> SimState<Newtonian, D, Cartesian, IdealGas<f64>, S, Mem>
+fn build_adiabatic<S: ExecutionSpace, Mem: MemorySpace, const D: usize>()
+-> SimState<Newtonian, D, Cartesian, IdealGas<f64>, S, Mem>
 where
     Cartesian: Metric<f64, D>,
 {
@@ -86,7 +89,11 @@ where
         let vel: [f64; D] = std::array::from_fn(|k| 0.02 * (k as f64 + 1.0) / rho);
         let vsq: f64 = (0..D).map(|k| vel[k] * vel[k]).sum();
         let pre = (GAMMA - 1.0) * (nrg - 0.5 * rho * vsq);
-        Prim { rho, vel: Tensor::new(vel), pre }
+        Prim {
+            rho,
+            vel: Tensor::new(vel),
+            pre,
+        }
     })
     .build()
 }
@@ -94,7 +101,9 @@ where
 // position-INDEPENDENT force `a = [p0, 0, 0..]`: nodes [PARAMETER p0, CONSTANT 0]; output 0 -> a_0,
 // the rest -> a_k = 0.
 fn force_const_json(dim: usize) -> String {
-    let outputs: Vec<usize> = std::iter::once(0).chain(std::iter::repeat(1).take(dim - 1)).collect();
+    let outputs: Vec<usize> = std::iter::once(0)
+        .chain(std::iter::repeat(1).take(dim - 1))
+        .collect();
     format!(
         r#"{{ "kind": "force", "dim": {dim}, "outputs": {outputs:?}, "params": [0.5],
             "nodes": [ {{"op": "PARAMETER", "param_idx": 0}}, {{"op": "CONSTANT", "value": 0.0}} ] }}"#,
@@ -104,7 +113,9 @@ fn force_const_json(dim: usize) -> String {
 // position-DEPENDENT force `a = [x_0 * p0, 0, 0..]`: nodes [VARIABLE_X1, PARAMETER p0, MULTIPLY,
 // CONSTANT 0]; output 2 -> a_0 = x_0*p0, the rest -> a_k = 0.
 fn force_posdep_json(dim: usize) -> String {
-    let outputs: Vec<usize> = std::iter::once(2).chain(std::iter::repeat(3).take(dim - 1)).collect();
+    let outputs: Vec<usize> = std::iter::once(2)
+        .chain(std::iter::repeat(3).take(dim - 1))
+        .collect();
     format!(
         r#"{{ "kind": "force", "dim": {dim}, "outputs": {outputs:?}, "params": [0.5],
             "nodes": [ {{"op": "VARIABLE_X1"}}, {{"op": "PARAMETER", "param_idx": 0}},
@@ -122,10 +133,18 @@ where
     let dev = build_adiabatic::<CudaSpace, UnifiedMemory, D>();
     // each kernel-set owns its own RuntimeSource (the lazy gpu-ir OnceLock is per-instance), so
     // build the source twice from the same config.
-    let hset = AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated)
-        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"), cfg.params.clone());
-    let dset = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
-        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"), cfg.params.clone());
+    let hset =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated)
+            .with_runtime_source(
+                build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"),
+                cfg.params.clone(),
+            );
+    let dset =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
+            .with_runtime_source(
+                build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"),
+                cfg.params.clone(),
+            );
     let interior = &host.geom.interior;
 
     // fill u_stage (the stage-input snapshot the source reads), then apply the source once.
@@ -134,22 +153,52 @@ where
     hset.source_apply(&host, WEIGHT);
     dset.source_apply(&dev, WEIGHT);
 
-    cmp(interior, &host.fields.cons.den, &dev.fields.cons.den, "runtime src cons.den");
+    cmp(
+        interior,
+        &host.fields.cons.den,
+        &dev.fields.cons.den,
+        "runtime src cons.den",
+    );
     for k in 0..D {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k],
-            &format!("runtime src cons.mom_{k}"));
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            &format!("runtime src cons.mom_{k}"),
+        );
     }
-    let (hnrg, dnrg) = (host.fields.cons.nrg_field().unwrap(), dev.fields.cons.nrg_field().unwrap());
+    let (hnrg, dnrg) = (
+        host.fields.cons.nrg_field().unwrap(),
+        dev.fields.cons.nrg_field().unwrap(),
+    );
     cmp(interior, hnrg, dnrg, "runtime src cons.nrg");
 }
 
-#[test] fn runtime_force_const_gpu_1d() { check_runtime_source::<1>(&force_const_json(1)); }
-#[test] fn runtime_force_const_gpu_2d() { check_runtime_source::<2>(&force_const_json(2)); }
-#[test] fn runtime_force_const_gpu_3d() { check_runtime_source::<3>(&force_const_json(3)); }
+#[test]
+fn runtime_force_const_gpu_1d() {
+    check_runtime_source::<1>(&force_const_json(1));
+}
+#[test]
+fn runtime_force_const_gpu_2d() {
+    check_runtime_source::<2>(&force_const_json(2));
+}
+#[test]
+fn runtime_force_const_gpu_3d() {
+    check_runtime_source::<3>(&force_const_json(3));
+}
 
-#[test] fn runtime_force_posdep_gpu_1d() { check_runtime_source::<1>(&force_posdep_json(1)); }
-#[test] fn runtime_force_posdep_gpu_2d() { check_runtime_source::<2>(&force_posdep_json(2)); }
-#[test] fn runtime_force_posdep_gpu_3d() { check_runtime_source::<3>(&force_posdep_json(3)); }
+#[test]
+fn runtime_force_posdep_gpu_1d() {
+    check_runtime_source::<1>(&force_posdep_json(1));
+}
+#[test]
+fn runtime_force_posdep_gpu_2d() {
+    check_runtime_source::<2>(&force_posdep_json(2));
+}
+#[test]
+fn runtime_force_posdep_gpu_3d() {
+    check_runtime_source::<3>(&force_posdep_json(3));
+}
 
 // region (IF_THEN_ELSE -> Select) and relax (Max clamp) introduce carrier-dialect ops that must
 // trace + render on device without panicking at trace time. force a = [p0, 0] masked chi = (x_0 < 0.5).
@@ -169,8 +218,14 @@ const RELAX_JSON_2D: &str = r#"{
     "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0} ]
 }"#;
 
-#[test] fn runtime_force_region_gpu_2d() { check_runtime_source::<2>(REGION_JSON_2D); }
-#[test] fn runtime_relax_gpu_2d() { check_runtime_source::<2>(RELAX_JSON_2D); }
+#[test]
+fn runtime_force_region_gpu_2d() {
+    check_runtime_source::<2>(REGION_JSON_2D);
+}
+#[test]
+fn runtime_relax_gpu_2d() {
+    check_runtime_source::<2>(RELAX_JSON_2D);
+}
 
 // =============================================================================
 // handoff #3 — the runtime-source EVOLVE oracle across the device boundary.
@@ -202,10 +257,18 @@ where
     let cfg = SourceConfig::from_json(json).expect("parse config");
     let mut host = build_adiabatic::<CpuSpace, HostMemory, D>();
     let mut dev = build_adiabatic::<CudaSpace, UnifiedMemory, D>();
-    let hset = AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated)
-        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"), cfg.params.clone());
-    let dset = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
-        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"), cfg.params.clone());
+    let hset =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated)
+            .with_runtime_source(
+                build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"),
+                cfg.params.clone(),
+            );
+    let dset =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
+            .with_runtime_source(
+                build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"),
+                cfg.params.clone(),
+            );
 
     // capture a pre-evolve momentum sample to prove the run actually moved
     // the gas (else the test would compare two static states and pass vacuously).
@@ -219,10 +282,15 @@ where
     evolve(&mut dev, &dset, t_final).expect("gpu evolve");
     symbi_xpu::cuda::ctx_sync(); // host-read barrier: the final step's c2p/ghost run async.
 
-    assert!(host.iteration >= 3, "too few steps ({}) — smoke would be vacuous", host.iteration);
+    assert!(
+        host.iteration >= 3,
+        "too few steps ({}) — smoke would be vacuous",
+        host.iteration
+    );
     assert_eq!(
         host.iteration, dev.iteration,
-        "step count diverged: cpu {} vs gpu {}", host.iteration, dev.iteration,
+        "step count diverged: cpu {} vs gpu {}",
+        host.iteration, dev.iteration,
     );
 
     let mom0_after = *host.fields.cons.mom[0].view().at(probe);
@@ -239,23 +307,50 @@ where
     };
     let interior = &host.geom.interior;
     for coord in interior.iter() {
-        evolve_close(*dev.fields.cons.den.view().at(coord), *host.fields.cons.den.view().at(coord), "evolve cons.den");
+        evolve_close(
+            *dev.fields.cons.den.view().at(coord),
+            *host.fields.cons.den.view().at(coord),
+            "evolve cons.den",
+        );
         for k in 0..D {
             evolve_close(
-                *dev.fields.cons.mom[k].view().at(coord), *host.fields.cons.mom[k].view().at(coord),
+                *dev.fields.cons.mom[k].view().at(coord),
+                *host.fields.cons.mom[k].view().at(coord),
                 "evolve cons.mom",
             );
         }
-        let (hnrg, dnrg) = (host.fields.cons.nrg_field().unwrap(), dev.fields.cons.nrg_field().unwrap());
-        evolve_close(*dnrg.view().at(coord), *hnrg.view().at(coord), "evolve cons.nrg");
+        let (hnrg, dnrg) = (
+            host.fields.cons.nrg_field().unwrap(),
+            dev.fields.cons.nrg_field().unwrap(),
+        );
+        evolve_close(
+            *dnrg.view().at(coord),
+            *hnrg.view().at(coord),
+            "evolve cons.nrg",
+        );
     }
 }
 
 // position-independent force through the full loop (mom + the v.a energy overlay).
-#[test] fn runtime_force_const_evolve_gpu_2d() { check_runtime_source_evolve::<2>(&force_const_json(2)); }
-#[test] fn runtime_force_const_evolve_gpu_3d() { check_runtime_source_evolve::<3>(&force_const_json(3)); }
+#[test]
+fn runtime_force_const_evolve_gpu_2d() {
+    check_runtime_source_evolve::<2>(&force_const_json(2));
+}
+#[test]
+fn runtime_force_const_evolve_gpu_3d() {
+    check_runtime_source_evolve::<3>(&force_const_json(3));
+}
 // position-dependent force: the in-kernel centroid path inside the evolve loop.
-#[test] fn runtime_force_posdep_evolve_gpu_2d() { check_runtime_source_evolve::<2>(&force_posdep_json(2)); }
+#[test]
+fn runtime_force_posdep_evolve_gpu_2d() {
+    check_runtime_source_evolve::<2>(&force_posdep_json(2));
+}
 // region (Select) + relax (Max clamp) carrier-dialect ops driven multi-step on-device.
-#[test] fn runtime_force_region_evolve_gpu_2d() { check_runtime_source_evolve::<2>(REGION_JSON_2D); }
-#[test] fn runtime_relax_evolve_gpu_2d() { check_runtime_source_evolve::<2>(RELAX_JSON_2D); }
+#[test]
+fn runtime_force_region_evolve_gpu_2d() {
+    check_runtime_source_evolve::<2>(REGION_JSON_2D);
+}
+#[test]
+fn runtime_relax_evolve_gpu_2d() {
+    check_runtime_source_evolve::<2>(RELAX_JSON_2D);
+}

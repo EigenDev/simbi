@@ -34,7 +34,10 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
-use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian,
+    SchwarzschildKSCylindrical,
+};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -44,8 +47,8 @@ use symbi_hydro::state::PrimG;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::{load_checkpoint, write_hierarchy_checkpoint};
-use symbi_sim::state::SimStateGeneric;
 use symbi_sim::state::CtMethod;
+use symbi_sim::state::SimStateGeneric;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
 
 // =============================================================================
@@ -504,7 +507,13 @@ where
 fn lower_configured_sources(
     source_jsons: &[SourcePayload],
     spec: &symbi_hydro::RegimeSpec,
-) -> Result<(Vec<(String, symbi_hydro::source_spec::BuiltSource)>, Vec<f64>), String> {
+) -> Result<
+    (
+        Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        Vec<f64>,
+    ),
+    String,
+> {
     let configs = source_jsons
         .iter()
         .map(|source| {
@@ -633,7 +642,10 @@ fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str) -> PyResult<Gradien
         let (a, b, c): (f64, f64, f64) = pressure.extract()?;
         coeffs.extend_from_slice(&[a, b, c]);
     }
-    Ok(GradientBcSpec { kind: kind.to_string(), coeffs })
+    Ok(GradientBcSpec {
+        kind: kind.to_string(),
+        coeffs,
+    })
 }
 
 /// parse the exec_dict into a plain Config. only the fields the solver needs;
@@ -974,8 +986,11 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
         .map(|p| (p[0], p[1]))
         .collect();
     let n = positions.len();
-    if masses.len() != n || radii.len() != n || inertias.len() != n
-        || velocities.len() != n || mobile.len() != n
+    if masses.len() != n
+        || radii.len() != n
+        || inertias.len() != n
+        || velocities.len() != n
+        || mobile.len() != n
     {
         return Err(PyValueError::new_err(format!(
             "bonded_assembly arrays disagree on the fragment count {n}"
@@ -1036,13 +1051,14 @@ fn parse_bonded_assembly(dict: &Bound<'_, PyDict>) -> PyResult<Option<BondedAsse
                     .ok_or_else(|| PyValueError::new_err(format!("gravity missing '{k}'")))?
                     .extract()
             };
-            Some(symbi_ib::MutualGravity { g: gf("g")?, softening: gf("softening")? })
+            Some(symbi_ib::MutualGravity {
+                g: gf("g")?,
+                softening: gf("softening")?,
+            })
         }
         _ => None,
     };
-    let kf = |k: &str| -> PyResult<f64> {
-        get(k)?.extract()
-    };
+    let kf = |k: &str| -> PyResult<f64> { get(k)?.extract() };
     Ok(Some(BondedAssemblyParams {
         positions,
         masses,
@@ -1123,10 +1139,17 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let (k_eta_n, k_eta_t) = if is_rigid {
             (
                 sub_f64(b, "rigid", "k_eta_n", 1.0),
-                if no_slip { sub_f64(b, "rigid", "k_eta_t", 1.0) } else { 0.0 },
+                if no_slip {
+                    sub_f64(b, "rigid", "k_eta_t", 1.0)
+                } else {
+                    0.0
+                },
             )
         } else {
-            (sub_f64(b, "accretion", "k_eta_n", 0.0), sub_f64(b, "accretion", "k_eta_t", 0.0))
+            (
+                sub_f64(b, "accretion", "k_eta_n", 0.0),
+                sub_f64(b, "accretion", "k_eta_t", 0.0),
+            )
         };
         out.push(BodyParams {
             capability,
@@ -1187,16 +1210,25 @@ fn parse_binary(dict: &Bound<'_, PyDict>) -> Option<BinaryCfg> {
 /// leaves the component positions at the origin and delegates the ICs to `keplerian_binary`).
 fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) {
     const ACCRETION: u64 = 2;
-    let Some(bc) = binary_config_dict(dict) else { return };
+    let Some(bc) = binary_config_dict(dict) else {
+        return;
+    };
     let total_mass = get_f64_or(&bc, "total_mass", 1.0);
     let semi_major = get_f64_or(&bc, "semi_major", 1.0);
     let mass_ratio = get_f64_or(&bc, "mass_ratio", 1.0);
-    let (p1, v1, _m1, p2, v2, _m2) = symbi_ib::keplerian_binary::<f64>(total_mass, semi_major, mass_ratio);
+    let (p1, v1, _m1, p2, v2, _m2) =
+        symbi_ib::keplerian_binary::<f64>(total_mass, semi_major, mass_ratio);
     let ics = [(p1, v1), (p2, v2)];
-    let Ok(Some(comps)) = bc.get_item("components") else { return };
-    let Ok(comps) = comps.extract::<Vec<Bound<'_, PyAny>>>() else { return };
+    let Ok(Some(comps)) = bc.get_item("components") else {
+        return;
+    };
+    let Ok(comps) = comps.extract::<Vec<Bound<'_, PyAny>>>() else {
+        return;
+    };
     for (i, comp) in comps.iter().enumerate() {
-        let Ok(c) = comp.downcast::<PyDict>() else { continue };
+        let Ok(c) = comp.downcast::<PyDict>() else {
+            continue;
+        };
         let has_accretion = c.get_item("accretion").ok().flatten().is_some();
         let (pos, vel) = ics.get(i).copied().unwrap_or((p1, v1));
         let two_way = c
@@ -1251,8 +1283,20 @@ fn sub_f64_opt(body: &Bound<'_, PyDict>, group: &str, key: &str) -> Option<f64> 
 /// ready for `SdfExpr::from_json`; None when no shape is declared (the analytic sphere). the dict
 /// crosses the boundary through `json.dumps`, matching the source-expression wire convention.
 fn get_shape_json(body: &Bound<'_, PyDict>) -> Option<String> {
-    let rigid = body.get_item("rigid").ok().flatten()?.downcast::<PyDict>().ok()?.clone();
-    let shape = rigid.get_item("shape").ok().flatten()?.downcast::<PyDict>().ok()?.clone();
+    let rigid = body
+        .get_item("rigid")
+        .ok()
+        .flatten()?
+        .downcast::<PyDict>()
+        .ok()?
+        .clone();
+    let shape = rigid
+        .get_item("shape")
+        .ok()
+        .flatten()?
+        .downcast::<PyDict>()
+        .ok()?
+        .clone();
     let wire = shape.get_item("wire").ok().flatten()?;
     let json = wire.py().import("json").ok()?;
     json.call_method1("dumps", (wire,)).ok()?.extract().ok()
@@ -1336,12 +1380,8 @@ fn seed_configured_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_x
     if cfg.cohort_ic.is_empty() {
         symbi_sim::tracers::seed_mass_weighted(sim, cfg.n_tracers)
     } else {
-        symbi_sim::tracers::seed_mass_weighted_with_cohorts(
-            sim,
-            cfg.n_tracers,
-            &cfg.cohort_ic,
-        )
-        .unwrap_or_else(|detail| panic!("tracer cohort seeding: {detail}"))
+        symbi_sim::tracers::seed_mass_weighted_with_cohorts(sim, cfg.n_tracers, &cfg.cohort_ic)
+            .unwrap_or_else(|detail| panic!("tracer cohort seeding: {detail}"))
     }
 }
 
@@ -1525,7 +1565,8 @@ where
     // cp_fired at 0 would re-dump the resumed checkpoint (a duplicate file, every later index shifted
     // by one) whenever cp_at is anchored at a fixed checkpoint_log_anchor below the resume clock. a
     // restart is signalled by a nonzero loaded checkpoint_index; a fresh run skips nothing.
-    let mut cp_fired: u64 = checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, &cp_at);
+    let mut cp_fired: u64 =
+        checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, &cp_at);
     let mut next_cp = cp_at(cp_fired);
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
     // LOG-spaced runs are named by the monotonic INDEX: the fixed-3-decimal
@@ -1749,10 +1790,13 @@ where
         // manual checkpoint (w): write the current state immediately, off-schedule.
         if want_cp {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let path =
-                checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index));
+            let path = checkpoint_name(
+                cfg,
+                &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index),
+            );
             let t_io = std::time::Instant::now();
-            let res = write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index));
+            let res =
+                write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index));
             io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
             match res {
                 Ok(_) => table.post_success(&format!(
@@ -1794,8 +1838,7 @@ where
         if let Some(c) = h.crash {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let crashed =
-                checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
+            let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
             let _ =
                 write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index));
             table.post_error(&format!(
@@ -1901,7 +1944,11 @@ where
             if d_fb_ext > 0 || d_fz_ext > 0 {
                 table.post_diagnostic(&format!(
                     "FOFC: {d_fb_ext} exterior first-order fallback cell-steps{} since last window",
-                    if d_fz_ext > 0 { format!(", {d_fz_ext} freezes") } else { String::new() },
+                    if d_fz_ext > 0 {
+                        format!(", {d_fz_ext} freezes")
+                    } else {
+                        String::new()
+                    },
                 ));
             }
             if (d_fb_h > 0 || d_fz_h > 0) && !horizon_note_posted {
@@ -1947,17 +1994,30 @@ where
             // the `f`-key selects which field to decimate (density / pressure / W /
             // |B|); composite for amr, single-grid fallback for 1D. the render thread
             // owns the colormap, so Inferno here is just a default it overrides.
-            let idx = dash.as_ref().map(|d| d.controls().field_kind()).unwrap_or(0);
+            let idx = dash
+                .as_ref()
+                .map(|d| d.controls().field_kind())
+                .unwrap_or(0);
             // the o-key's 3D slice orientation (z / y / x mid-plane); 1D/2D ignore it.
-            let orient = dash.as_ref().map(|d| d.controls().slice_orient()).unwrap_or(0);
+            let orient = dash
+                .as_ref()
+                .map(|d| d.controls().slice_orient())
+                .unwrap_or(0);
             // the +/- zoom exponent: 2^k magnification about the domain center.
-            let zoom = dash.as_ref().map(|d| d.controls().zoom_level()).unwrap_or(0);
+            let zoom = dash
+                .as_ref()
+                .map(|d| d.controls().zoom_level())
+                .unwrap_or(0);
             // decimate field `kk` (composite over refinement levels, single-grid
             // fallback for 1D) into a display FieldSlice; the render thread owns the
             // colormap, so Inferno here is just a default it overrides.
             let make_slice = |kk: usize| {
                 h.field_slice_composite(200, kk, orient, zoom)
-                    .or_else(|| h.levels[0].state.field_slice_oriented(200, kk, orient, zoom))
+                    .or_else(|| {
+                        h.levels[0]
+                            .state
+                            .field_slice_oriented(200, kk, orient, zoom)
+                    })
                     .map(|fd| {
                         let mut label = if cfg.dims >= 3 {
                             let plane = ["z-slice", "y-slice", "x-slice"][orient % 3];
@@ -1987,8 +2047,9 @@ where
                 // client-side; the local TUI shows the f-key-selected one. write the
                 // read-only snapshot atomically (best-effort — a write failure must
                 // never halt the run).
-                let bundle: Vec<FieldSlice> =
-                    (0..h.levels[0].state.field_count()).filter_map(make_slice).collect();
+                let bundle: Vec<FieldSlice> = (0..h.levels[0].state.field_count())
+                    .filter_map(make_slice)
+                    .collect();
                 if let Some(sel) = bundle.get(idx.min(bundle.len().saturating_sub(1))) {
                     table.set_field(Some(sel.clone()));
                 }
@@ -2035,8 +2096,7 @@ where
         screen.leave();
         table.set_dynamic(false);
         let root = &hier.levels[0].state;
-        let restart =
-            checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Interrupted));
+        let restart = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Interrupted));
         let summary = format!(
             "interrupted — {} steps, t = {:.4} · restart {restart}",
             root.iteration, root.time,
@@ -2161,7 +2221,10 @@ fn dump_profile_if_enabled(steps: u64, n_zones: u64) {
             100.0 * ms / total
         );
     }
-    eprintln!("  {:<18} {total:>8.1} ms  (sum of instrumented phases)\n", "TOTAL");
+    eprintln!(
+        "  {:<18} {total:>8.1} ms  (sum of instrumented phases)\n",
+        "TOTAL"
+    );
 }
 
 /// set the live monitor's benchmark row + progress bar WITHOUT rendering — the
@@ -2277,17 +2340,29 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     // GEOMETRY
     push("Geometry", "coords", cfg.coord_system.clone());
     push("Geometry", "dimensions", format!("{}D", cfg.dims));
-    push("Geometry", "resolution", format!("{res}  ({n_zones} zones)"));
+    push(
+        "Geometry",
+        "resolution",
+        format!("{res}  ({n_zones} zones)"),
+    );
     push("Geometry", "domain", domain);
     push("Geometry", "boundaries", boundary_label(cfg));
 
     // NUMERICS: the discretization + solver knobs.
     push("Numerics", "solver", cfg.solver_name.clone());
-    push("Numerics", "reconstruction", cfg.reconstruction_name.clone());
+    push(
+        "Numerics",
+        "reconstruction",
+        cfg.reconstruction_name.clone(),
+    );
     if cfg.reconstruction_name == "plm" {
         push("Numerics", "limiter", limiter_label(cfg.plm_theta));
     }
-    push("Numerics", "timestepping", timestepping_label(cfg.timestepping));
+    push(
+        "Numerics",
+        "timestepping",
+        timestepping_label(cfg.timestepping),
+    );
     push("Numerics", "cfl", format!("{:.3}", cfg.cfl));
     if cfg.n_gpus > 1 {
         push("Numerics", "gpus", cfg.n_gpus.to_string());
@@ -2299,7 +2374,9 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     // viscous dt cap in particular explains a step pinned far below the advective CFL.
     if cfg.viscosity > 0.0 || cfg.alpha > 0.0 {
         let pi = std::f64::consts::PI;
-        let min_dx = (0..cfg.dims).map(|ax| cfg.dx[ax]).fold(f64::INFINITY, f64::min);
+        let min_dx = (0..cfg.dims)
+            .map(|ax| cfg.dx[ax])
+            .fold(f64::INFINITY, f64::min);
         // central mass + center: body 0 when present, else GM = 1 about the origin.
         let gm = cfg.bodies.first().map(|b| b.mass).unwrap_or(1.0);
         let center = cfg
@@ -2317,7 +2394,11 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
             let mut d2 = 0.0;
             for a in 0..plane {
                 let hi = cfg.x_lo[a] + cfg.dx[a] * cfg.n_cells[a] as f64;
-                let x = if corner & (1 << a) != 0 { hi } else { cfg.x_lo[a] };
+                let x = if corner & (1 << a) != 0 {
+                    hi
+                } else {
+                    cfg.x_lo[a]
+                };
                 let d = x - center.get(a).copied().unwrap_or(0.0);
                 d2 += d * d;
             }
@@ -2348,7 +2429,11 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
             push("Scales", "viscous time @r=1", format!("{t_nu:.3}"));
         } else {
             let t_orb = 2.0 * pi / omega_k(1.0);
-            push("Scales", "viscous time @r=1", format!("{t_nu:.2}  ({:.1} orbits)", t_nu / t_orb));
+            push(
+                "Scales",
+                "viscous time @r=1",
+                format!("{t_nu:.2}  ({:.1} orbits)", t_nu / t_orb),
+            );
             push("Scales", "orbital time @r=1", format!("{t_orb:.3}"));
             // Reynolds = r v_kep / nu, Mach = v_kep / cs, with v_kep = Omega_k r at r=1.
             let v_kep = omega_k(1.0);
@@ -2363,9 +2448,17 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     push("Run", "t_final", t_final_disp);
     push("Run", "checkpoint dt", cp);
     if custom_unit {
-        push("Run", "time unit", format!("1 {unit} = {:.4} code", cfg.time_unit));
+        push(
+            "Run",
+            "time unit",
+            format!("1 {unit} = {:.4} code", cfg.time_unit),
+        );
     }
-    push("Run", "est. memory", format!("{:.3} GB", est_memory_gb(cfg)));
+    push(
+        "Run",
+        "est. memory",
+        format!("{:.3} GB", est_memory_gb(cfg)),
+    );
     push("Run", "output", cfg.data_dir.clone());
 
     drop(push);
@@ -2530,7 +2623,10 @@ fn build_body_shapes(params: &[BodyParams]) -> Vec<Option<symbi_ib::sdf::SdfExpr
         .collect()
 }
 
-fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg>) -> BodyCollection<f64, D> {
+fn build_bodies<const D: usize>(
+    params: &[BodyParams],
+    binary: Option<&BinaryCfg>,
+) -> BodyCollection<f64, D> {
     const ACCRETION: u64 = 2;
     const RIGID: u64 = 1 << 4;
     let mut coll = BodyCollection::new();
@@ -2579,13 +2675,14 @@ fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg
             // no-penetration and the tangential channel (k_eta_t, zero for free slip)
             // enforces no-slip, both relaxing the gas velocity toward the body.
             {
-                let mut body = Body::rigid_sphere(idx, pos, vel, b.mass, b.radius, b.inertia, b.no_slip)
-                    .with_surface(symbi_ib::SurfaceSpec::Porous {
-                        porosity: 0.0,
-                        k_eta_n: b.k_eta_n,
-                        k_eta_t: b.k_eta_t,
-                    })
-                    .with_spin_about(b.omega, Tensor::new(b.spin_axis));
+                let mut body =
+                    Body::rigid_sphere(idx, pos, vel, b.mass, b.radius, b.inertia, b.no_slip)
+                        .with_surface(symbi_ib::SurfaceSpec::Porous {
+                            porosity: 0.0,
+                            k_eta_n: b.k_eta_n,
+                            k_eta_t: b.k_eta_t,
+                        })
+                        .with_spin_about(b.omega, Tensor::new(b.spin_axis));
                 // anisotropic principal moments override the isotropic default when specified
                 // (all-zero sentinel = unspecified).
                 if b.inertia_principal.iter().any(|&m| m > 0.0) {
@@ -2609,12 +2706,14 @@ fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg
     if let Some(bin) = binary {
         // `as_binary` flips the orbital-advance capability `advance_binary` gates on; `with_binary_params`
         // supplies the orbit. BOTH are required (the flag and the params are separate).
-        coll = coll.as_binary().with_binary_params(symbi_ib::BinaryParams::new(
-            bin.total_mass,
-            bin.semi_major,
-            bin.eccentricity,
-            bin.mass_ratio,
-        ));
+        coll = coll
+            .as_binary()
+            .with_binary_params(symbi_ib::BinaryParams::new(
+                bin.total_mass,
+                bin.semi_major,
+                bin.eccentricity,
+                bin.mass_ratio,
+            ));
     }
     coll
 }
@@ -2686,10 +2785,15 @@ fn append_fragments<const D: usize>(
 
 fn build_bodies_and_horizon<const D: usize>(cfg: &Config) -> BodyCollection<f64, D> {
     let mut coll = build_bodies::<D>(&cfg.bodies, cfg.binary.as_ref());
-    if cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0 {
+    if cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0
+    {
         let diagnostic_radius = 3.0 * cfg.schwarzschild_mass; // 1.5 r_+, outside the horizon
         let idx = coll.len();
-        coll = coll.add(symbi_ib::Body::horizon(idx, cfg.excision_radius, diagnostic_radius));
+        coll = coll.add(symbi_ib::Body::horizon(
+            idx,
+            cfg.excision_radius,
+            diagnostic_radius,
+        ));
     }
     coll
 }
@@ -2822,7 +2926,12 @@ mod diagnostics_tests {
 
         let text = std::fs::read_to_string(&path).unwrap();
         let mut lines = text.lines();
-        let header: Vec<&str> = lines.next().unwrap().trim_start_matches('#').split_whitespace().collect();
+        let header: Vec<&str> = lines
+            .next()
+            .unwrap()
+            .trim_start_matches('#')
+            .split_whitespace()
+            .collect();
         let row: Vec<f64> = lines
             .next()
             .unwrap()
@@ -2856,8 +2965,13 @@ mod diagnostics_tests {
         let _ = std::fs::remove_file(&path);
         append_diagnostics(path.to_str().unwrap(), 0.0, &bodies).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        let header: Vec<&str> =
-            text.lines().next().unwrap().trim_start_matches('#').split_whitespace().collect();
+        let header: Vec<&str> = text
+            .lines()
+            .next()
+            .unwrap()
+            .trim_start_matches('#')
+            .split_whitespace()
+            .collect();
         let row: Vec<f64> = text
             .lines()
             .nth(1)
@@ -2930,11 +3044,22 @@ mod diagnostics_tests {
             magnetic_resistivity: None,
         };
         let params = vec![accretor(0.5), accretor(-0.5)];
-        let binary = BinaryCfg { total_mass: 1.0, semi_major: 1.0, eccentricity: 0.0, mass_ratio: 1.0 };
+        let binary = BinaryCfg {
+            total_mass: 1.0,
+            semi_major: 1.0,
+            eccentricity: 0.0,
+            mass_ratio: 1.0,
+        };
         let coll = build_bodies::<2>(&params, Some(&binary));
         assert_eq!(coll.len(), 2, "the binary must build two bodies");
-        assert!(coll.is_binary(), "the collection must carry the prescribed binary orbit");
-        assert!(coll.get(0).has_gravity() && coll.get(1).has_gravity(), "both components gravitate");
+        assert!(
+            coll.is_binary(),
+            "the collection must carry the prescribed binary orbit"
+        );
+        assert!(
+            coll.get(0).has_gravity() && coll.get(1).has_gravity(),
+            "both components gravitate"
+        );
         // guard: without the binary cfg the same bodies are NOT a prescribed binary (the orbit is the
         // thing the body_system payload adds).
         assert!(!build_bodies::<2>(&params, None).is_binary());
@@ -2976,7 +3101,11 @@ mod diagnostics_tests {
         assert_eq!(body.mask_radius(), Some(0.3));
         // the surface is the sealed (porosity 0) porous wall, tangential channel off.
         match body.spec.surface {
-            symbi_ib::SurfaceSpec::Porous { porosity, k_eta_n, k_eta_t } => {
+            symbi_ib::SurfaceSpec::Porous {
+                porosity,
+                k_eta_n,
+                k_eta_t,
+            } => {
                 assert_eq!(porosity, 0.0);
                 assert_eq!(k_eta_n, 2.0);
                 assert_eq!(k_eta_t, 0.0);
@@ -3018,7 +3147,10 @@ mod diagnostics_tests {
             rigid(None),
         ];
         let shapes = build_body_shapes(&params);
-        assert!(matches!(shapes[0], Some(symbi_ib::sdf::SdfExpr::Cuboid { .. })));
+        assert!(matches!(
+            shapes[0],
+            Some(symbi_ib::sdf::SdfExpr::Cuboid { .. })
+        ));
         assert!(shapes[1].is_none());
     }
 
@@ -3052,7 +3184,10 @@ mod diagnostics_tests {
         let coll = build_bodies::<2>(&params, None);
         // omega = rate * spin_axis = 3.5 * (0,0,1).
         let w = coll.get(0).omega;
-        assert!(w[0] == 0.0 && w[1] == 0.0 && (w[2] - 3.5).abs() < 1e-12, "spin omega = {w:?}");
+        assert!(
+            w[0] == 0.0 && w[1] == 0.0 && (w[2] - 3.5).abs() < 1e-12,
+            "spin omega = {w:?}"
+        );
     }
 }
 
@@ -3133,7 +3268,9 @@ fn tile_axis_maps<const D: usize>(
     tile_lo: [usize; D],
 ) -> Option<[symbi_geometry::AxisMap; D]> {
     let global = axis_maps::<D>(cfg)?;
-    Some(std::array::from_fn(|ax| shift_axis_map(global[ax], tile_lo[ax])))
+    Some(std::array::from_fn(|ax| {
+        shift_axis_map(global[ax], tile_lo[ax])
+    }))
 }
 
 /// advance one axis map to a tile whose first cell is global index `tile_lo`, so the tile's LOCAL
@@ -3150,8 +3287,17 @@ fn shift_axis_map(global: symbi_geometry::AxisMap, tile_lo: usize) -> symbi_geom
             start: start + tile_lo as f64 * dx,
             dx,
         },
-        AxisMap::Geometric { start, width, ratio } => AxisMap::Geometric {
-            start: AxisMap::Geometric { start, width, ratio }.face(tile_lo as isize),
+        AxisMap::Geometric {
+            start,
+            width,
+            ratio,
+        } => AxisMap::Geometric {
+            start: AxisMap::Geometric {
+                start,
+                width,
+                ratio,
+            }
+            .face(tile_lo as isize),
             width: width * ratio.powf(tile_lo as f64),
             ratio,
         },
@@ -3714,10 +3860,7 @@ where
     }
     let _ = write_hierarchy_checkpoint(
         &[&global],
-        &checkpoint_name(
-            cfg,
-            checkpoint_status_tag(CheckpointOutcome::Completed),
-        ),
+        &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
         &checkpoint_metadata(cfg, cp_index),
     );
     Ok(())
@@ -3771,28 +3914,33 @@ where
 
     // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
     // over the fine sub-grid), then write all the global levels through the multi-level writer.
-    let mut write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
-        // the writer records the GATHER TARGET's clock: sync every global level from tile 0
-        // (all tiles advance in lockstep; between root steps the fine clock equals the root's)
-        // or the checkpoint carries the start-time forever.
-        let t_now = tiles[0].levels[0].state.time;
-        let it_now = tiles[0].levels[0].state.iteration;
-        for l in global.levels.iter_mut() {
-            l.state.time = t_now;
-            l.state.iteration = it_now;
-        }
-        let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
-        gather_interiors(&*global.levels[0].state, &roots, counts);
-        if let Some(fg) = &fg {
-            let fines: Vec<_> = fg.order.iter().map(|&i| &*tiles[i].levels[1].state).collect();
-            gather_interiors(&*global.levels[1].state, &fines, fg.counts);
-        }
-        if cfg.n_tracers > 0 {
-            gather_decomposed_hierarchy_tracers(&mut global, tiles);
-        }
-        let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
-        let _ = write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index));
-    };
+    let mut write_cp =
+        |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+            // the writer records the GATHER TARGET's clock: sync every global level from tile 0
+            // (all tiles advance in lockstep; between root steps the fine clock equals the root's)
+            // or the checkpoint carries the start-time forever.
+            let t_now = tiles[0].levels[0].state.time;
+            let it_now = tiles[0].levels[0].state.iteration;
+            for l in global.levels.iter_mut() {
+                l.state.time = t_now;
+                l.state.iteration = it_now;
+            }
+            let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
+            gather_interiors(&*global.levels[0].state, &roots, counts);
+            if let Some(fg) = &fg {
+                let fines: Vec<_> = fg
+                    .order
+                    .iter()
+                    .map(|&i| &*tiles[i].levels[1].state)
+                    .collect();
+                gather_interiors(&*global.levels[1].state, &fines, fg.counts);
+            }
+            if cfg.n_tracers > 0 {
+                gather_decomposed_hierarchy_tracers(&mut global, tiles);
+            }
+            let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
+            let _ = write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index));
+        };
 
     // t=start initial condition.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
@@ -3827,10 +3975,7 @@ where
     // canonical final snapshot.
     write_cp(
         &tiles,
-        &checkpoint_name(
-            cfg,
-            checkpoint_status_tag(CheckpointOutcome::Completed),
-        ),
+        &checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed)),
         cp_index,
     );
     Ok(())
@@ -4674,7 +4819,11 @@ macro_rules! build_and_run_mhd {
                 // relativistic momentum's B^2 v - (v.B) B block missing and the stage-1
                 // bcell_from_bface energy heal is exact only at v = 0 (and euclidean-only).
                 let mag_arr: [f64; 3] = std::array::from_fn(|k| {
-                    if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                    if k < $d {
+                        face_avg_cell_b::<$d>(&bufs[k], k, idx, n)
+                    } else {
+                        bufs[k][lin]
+                    }
                 });
                 MhdPrim {
                     hydro: Prim {
@@ -4756,8 +4905,8 @@ macro_rules! build_and_run_mhd {
                 .with_viscosity(cfg.viscosity)
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
-                let bcfg = symbi_hydro::SourceConfig::from_json(json)
-                    .expect("fine-level boundary parse");
+                let bcfg =
+                    symbi_hydro::SourceConfig::from_json(json).expect("fine-level boundary parse");
                 let built = symbi_hydro::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <$regime_ty as Regime<f64, $d>>::SPEC,
@@ -4780,7 +4929,6 @@ macro_rules! build_and_run_imhd {
         let prims: &[Vec<f64>] = $prims;
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
-
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
@@ -4820,7 +4968,11 @@ macro_rules! build_and_run_imhd {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
                 let mag_arr: [f64; 3] = std::array::from_fn(|k| {
-                    if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                    if k < $d {
+                        face_avg_cell_b::<$d>(&bufs[k], k, idx, n)
+                    } else {
+                        bufs[k][lin]
+                    }
                 });
                 MhdPrimG::<f64, 3, IsoModel> {
                     hydro: PrimG {
@@ -4901,8 +5053,8 @@ macro_rules! build_and_run_imhd {
                 .with_viscosity(cfg.viscosity)
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
-                let bcfg = symbi_hydro::SourceConfig::from_json(json)
-                    .expect("fine-level boundary parse");
+                let bcfg =
+                    symbi_hydro::SourceConfig::from_json(json).expect("fine-level boundary parse");
                 let built = symbi_hydro::expr_bridge::build_boundary_dag(
                     &bcfg,
                     <IsothermalMhd as Regime<f64, $d>>::SPEC,
@@ -5986,9 +6138,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     }
     // a curved spacetime is a RELATIVISTIC construct: only the relativistic regimes compose
     // with it (the non-relativistic kernel rows are never baked with a spacetime slug).
-    if cfg.spacetime != "minkowski"
-        && !matches!(cfg.regime.as_str(), "rhd" | "rmhd")
-    {
+    if cfg.spacetime != "minkowski" && !matches!(cfg.regime.as_str(), "rhd" | "rmhd") {
         return Err(format!(
             "spacetime '{}' requires a relativistic regime (rhd or rmhd); got '{}'",
             cfg.spacetime, cfg.regime
@@ -6266,22 +6416,16 @@ fn checkpoint_status_tag(outcome: CheckpointOutcome) -> &'static str {
 
 #[cfg(test)]
 mod checkpoint_status_tests {
-    use super::{checkpoint_status_tag, CheckpointOutcome};
+    use super::{CheckpointOutcome, checkpoint_status_tag};
 
     #[test]
     fn final_is_reserved_for_successful_completion() {
-        assert_eq!(
-            checkpoint_status_tag(CheckpointOutcome::Completed),
-            "final"
-        );
+        assert_eq!(checkpoint_status_tag(CheckpointOutcome::Completed), "final");
         assert_eq!(
             checkpoint_status_tag(CheckpointOutcome::Interrupted),
             "interrupted"
         );
-        assert_eq!(
-            checkpoint_status_tag(CheckpointOutcome::Crashed),
-            "crashed"
-        );
+        assert_eq!(checkpoint_status_tag(CheckpointOutcome::Crashed), "crashed");
     }
 }
 
@@ -6423,9 +6567,7 @@ fn check_excision_request(
     // faces stay CT-owned, so div(sqrt(gamma) B) is untouched. non-relativistic
     // regimes never reach here (a curved spacetime on a newtonian/iso regime is
     // rejected upstream).
-    if !matches!(spacetime, "kerr_schild" | "kerr") || coord_system != "cartesian"
-        || dims != 3
-    {
+    if !matches!(spacetime, "kerr_schild" | "kerr") || coord_system != "cartesian" || dims != 3 {
         return Err(format!(
             "excision_radius = {excision_radius} requires a 3d cartesian kerr-schild chart \
              (spacetime kerr_schild or kerr); got (dims={dims}, coords={coord_system}, \
@@ -6477,7 +6619,11 @@ fn check_excision_request(
             }
             let mut overlaps = true;
             for ax in 0..dims {
-                let ext = if dims == 3 && ax == 2 { excision_radius } else { semi_xy };
+                let ext = if dims == 3 && ax == 2 {
+                    excision_radius
+                } else {
+                    semi_xy
+                };
                 let (lo, hi) = (region[2 * ax], region[2 * ax + 1]);
                 if hi < -ext || lo > ext {
                     overlaps = false;
@@ -6504,7 +6650,10 @@ mod excision_gate_tests {
 
     #[test]
     fn zero_radius_is_always_fine() {
-        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, 0.0, true, &[], 4).is_ok());
+        assert!(
+            check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, 0.0, true, &[], 4)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -6512,30 +6661,77 @@ mod excision_gate_tests {
         // a 2d cartesian slice is a z-translation-invariant black string, not a point hole;
         // excision demands a genuine 3d cartesian box (or a spherical / cylindrical chart
         // that hides the horizon behind r_min).
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 3, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "kerr", "spherical", 3, 1.0, 0.9, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
+                .is_ok()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1)
+                .is_err()
+        );
+        assert!(
+            check_excision_request(
+                1.4,
+                "schwarzschild",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "spherical", 3, 1.0, 0.0, false, &[], 1)
+                .is_err()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr", "spherical", 3, 1.0, 0.9, false, &[], 1).is_err()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, &[], 1)
+                .is_err()
+        );
     }
 
     #[test]
     fn excision_surface_must_sit_between_the_guard_and_the_horizon() {
         // a = 0, M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
-        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_err());
-        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
-        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
+        assert!(
+            check_excision_request(2.0, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
+                .is_err()
+        );
+        assert!(
+            check_excision_request(0.5, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
+                .is_err()
+        );
+        assert!(
+            check_excision_request(0.6, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
+                .is_ok()
+        );
+        assert!(
+            check_excision_request(1.9, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
+                .is_ok()
+        );
     }
 
     #[test]
     fn spinning_horizon_shrinks_the_band() {
         // a = 0.9, M = 1: r_+ = 1 + sqrt(1 - 0.81) ~ 1.436.
-        assert!(check_excision_request(1.9, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err());
-        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok());
-        assert!(check_excision_request(0.5, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err());
+        assert!(
+            check_excision_request(1.9, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok()
+        );
+        assert!(
+            check_excision_request(0.5, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err()
+        );
     }
 
     #[test]
@@ -6544,10 +6740,19 @@ mod excision_gate_tests {
         // driver runs the root excise in the same position the uni-grid tail does, so decomposition
         // and refinement compose. the condition that makes a root-only excise correct is that no fine
         // patch overlaps the excised surface, which the overlap check enforces at every gpu count.
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2).is_ok());
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2)
+                .is_ok()
+        );
         let far = vec![vec![5.0, 8.0, 5.0, 8.0, 5.0, 8.0]];
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 2).is_ok());
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 1)
+                .is_ok()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 2)
+                .is_ok()
+        );
     }
 
     #[test]
@@ -6555,13 +6760,30 @@ mod excision_gate_tests {
         // a central fine box overlapping the excised spheroid would restrict
         // un-excised values back over the root-level fill.
         let central = vec![vec![-2.0, 2.0, -2.0, 2.0, -2.0, 2.0]];
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &central, 1).is_err());
+        assert!(
+            check_excision_request(
+                1.4,
+                "kerr_schild",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                true,
+                &central,
+                1
+            )
+            .is_err()
+        );
         // at spin the equatorial extent widens to sqrt(r^2 + a^2): a box clear of
         // r_exc on x but inside the widened extent still overlaps.
         let graze = vec![vec![1.5, 3.0, -0.5, 0.5, -0.5, 0.5]];
-        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &graze, 1).is_err());
+        assert!(
+            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &graze, 1).is_err()
+        );
         let clear = vec![vec![2.0, 4.0, 2.0, 4.0, -0.5, 0.5]];
-        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &clear, 1).is_ok());
+        assert!(
+            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &clear, 1).is_ok()
+        );
     }
 
     #[test]
@@ -6574,11 +6796,33 @@ mod excision_gate_tests {
         let central = vec![vec![-2.0, 2.0, -2.0, 2.0, -2.0, 2.0]];
         for gpus in [1usize, 2, 4] {
             assert!(
-                check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, gpus).is_ok(),
+                check_excision_request(
+                    1.4,
+                    "kerr_schild",
+                    "cartesian",
+                    3,
+                    1.0,
+                    0.0,
+                    true,
+                    &far,
+                    gpus
+                )
+                .is_ok(),
                 "a far patch was refused at gpus = {gpus}"
             );
             assert!(
-                check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &central, gpus).is_err(),
+                check_excision_request(
+                    1.4,
+                    "kerr_schild",
+                    "cartesian",
+                    3,
+                    1.0,
+                    0.0,
+                    true,
+                    &central,
+                    gpus
+                )
+                .is_err(),
                 "a patch ON the excised spheroid was accepted at gpus = {gpus}"
             );
         }
@@ -6757,9 +7001,7 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
         return Err("checkpoint restart is not yet supported with decomposition".to_string());
     }
     if cfg.restart_path.is_some() && cfg.refinement_enabled {
-        return Err(
-            "checkpoint restart is not yet supported for refined hierarchies".to_string(),
-        );
+        return Err("checkpoint restart is not yet supported for refined hierarchies".to_string());
     }
     check_horizon_containment(
         &cfg.spacetime,
@@ -6786,14 +7028,10 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
                 cfg.coord_system
             ));
         }
-        for (axis, spacing) in [
-            &cfg.x1_spacing,
-            &cfg.x2_spacing,
-            &cfg.x3_spacing,
-        ]
-        .into_iter()
-        .enumerate()
-        .take(cfg.dims)
+        for (axis, spacing) in [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing]
+            .into_iter()
+            .enumerate()
+            .take(cfg.dims)
         {
             if !spacing.eq_ignore_ascii_case("linear") {
                 return Err(format!(
@@ -6953,7 +7191,6 @@ fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)
 }
 
-
 #[cfg(test)]
 mod tile_coord_tests {
     use super::shift_axis_map;
@@ -6967,7 +7204,10 @@ mod tile_coord_tests {
     fn tile_local_faces_reproduce_the_global_grid_on_a_log_axis() {
         let (n, tiles) = (64usize, 4usize);
         let (start, r_hi) = (1.5_f64, 400.0_f64);
-        let global = AxisMap::Log { start, log_slope: (r_hi / start).log10() / n as f64 };
+        let global = AxisMap::Log {
+            start,
+            log_slope: (r_hi / start).log10() / n as f64,
+        };
         let m = n / tiles;
         let mut checked = 0;
         for t in 0..tiles {
@@ -6985,14 +7225,19 @@ mod tile_coord_tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, tiles * (m + 1), "the sweep did not cover every tile face");
+        assert_eq!(
+            checked,
+            tiles * (m + 1),
+            "the sweep did not cover every tile face"
+        );
         // the seam: tile t's far face IS tile t+1's origin, so tiles abut with no gap or overlap.
         for t in 0..tiles - 1 {
             let far = shift_axis_map(global, t * m).face(m as isize);
             let next = shift_axis_map(global, (t + 1) * m).face(0);
             assert!(
                 (far - next).abs() <= 1e-12 * next.abs(),
-                "tiles {t}/{} do not abut: {far} vs {next}", t + 1
+                "tiles {t}/{} do not abut: {far} vs {next}",
+                t + 1
             );
         }
     }
@@ -7033,7 +7278,10 @@ mod tile_coord_tests {
         let (n, m) = (64usize, 16usize);
         let (start, r_hi) = (1.5_f64, 400.0_f64);
         let s_global = (r_hi / start).log10() / n as f64;
-        let global = AxisMap::Log { start, log_slope: s_global };
+        let global = AxisMap::Log {
+            start,
+            log_slope: s_global,
+        };
         for t in 0..4 {
             let local = shift_axis_map(global, t * m);
             match local {
@@ -7041,8 +7289,10 @@ mod tile_coord_tests {
                     assert_eq!(log_slope, s_global, "tile {t} carries a different slope");
                     let (lo, hi) = (local.face(0), local.face(m as isize));
                     let s_local = (hi / lo).log10() / m as f64;
-                    assert!((s_local - s_global).abs() <= 1e-12 * s_global,
-                        "tile {t} endpoints imply slope {s_local}, global is {s_global}");
+                    assert!(
+                        (s_local - s_global).abs() <= 1e-12 * s_global,
+                        "tile {t} endpoints imply slope {s_local}, global is {s_global}"
+                    );
                 }
                 _ => panic!("tile {t} lost its log map"),
             }
@@ -7058,41 +7308,66 @@ mod tile_coord_tests {
     // region sits in that gap: it is inside the true tile extent and outside the linear estimate.
     #[test]
     fn log_tile_clipping_keeps_a_region_the_linear_extent_would_drop() {
-        use super::{clip_regions_to_tile, RefinementRegion};
+        use super::{RefinementRegion, clip_regions_to_tile};
         let (m, start) = (16usize, 1.5_f64);
         let slope = (400.0_f64 / start).log10() / 64.0;
-        let map = AxisMap::Log { start, log_slope: slope };
-        let maps = [map, AxisMap::Uniform { start: 0.0, dx: 1.0 }, AxisMap::Uniform { start: 0.0, dx: 1.0 }];
+        let map = AxisMap::Log {
+            start,
+            log_slope: slope,
+        };
+        let maps = [
+            map,
+            AxisMap::Uniform {
+                start: 0.0,
+                dx: 1.0,
+            },
+            AxisMap::Uniform {
+                start: 0.0,
+                dx: 1.0,
+            },
+        ];
         let origin = [map.face(0), 0.0, 0.0];
         let true_hi = map.face(m as isize);
         // the linear estimate the old code used: origin + m * (innermost width).
         let dx0 = map.face(1) - map.face(0);
         let linear_hi = origin[0] + m as f64 * dx0;
-        assert!(linear_hi < true_hi,
-            "setup is vacuous: the linear extent {linear_hi} must fall short of the true {true_hi}");
+        assert!(
+            linear_hi < true_hi,
+            "setup is vacuous: the linear extent {linear_hi} must fall short of the true {true_hi}"
+        );
         // a region living strictly between the two: genuinely on the tile, invisible to linear.
         let r = RefinementRegion {
             x_lo: [0.5 * (linear_hi + true_hi), 0.0, 0.0],
             x_hi: [true_hi, 1.0, 1.0],
         };
         let kept = clip_regions_to_tile::<3>(&[r], origin, [m, 1, 1], &maps);
-        assert_eq!(kept.len(), 1,
+        assert_eq!(
+            kept.len(),
+            1,
             "the map-aware clip dropped a region that overlaps the tile (true hi {true_hi}, \
-             linear hi {linear_hi})");
-        assert!(kept[0].x_hi[0] <= true_hi + 1e-12 * true_hi,
-            "clipped region extends past the tile's far face");
+             linear hi {linear_hi})"
+        );
+        assert!(
+            kept[0].x_hi[0] <= true_hi + 1e-12 * true_hi,
+            "clipped region extends past the tile's far face"
+        );
     }
 
     #[test]
     fn a_uniform_axis_keeps_its_additive_origin() {
-        let global = AxisMap::Uniform { start: -2.0, dx: 0.125 };
+        let global = AxisMap::Uniform {
+            start: -2.0,
+            dx: 0.125,
+        };
         for g in [0usize, 16, 48] {
             let local = shift_axis_map(global, g);
             for i in 0..=8 {
                 let want = global.face((g + i) as isize);
                 let got = local.face(i as isize);
-                assert!((got - want).abs() <= 1e-15 * want.abs().max(1.0),
-                    "uniform tile at {g}, local face {i}: {got} != {want}");
+                assert!(
+                    (got - want).abs() <= 1e-15 * want.abs().max(1.0),
+                    "uniform tile at {g}, local face {i}: {got} != {want}"
+                );
             }
         }
     }

@@ -32,7 +32,9 @@ impl ArgPool {
     /// build from `std::env::args()`, dropping the program name.
     pub fn env() -> Self {
         let mut args: Vec<String> = std::env::args().collect();
-        if !args.is_empty() { args.remove(0); }
+        if !args.is_empty() {
+            args.remove(0);
+        }
         ArgPool { args }
     }
 
@@ -40,7 +42,8 @@ impl ArgPool {
     /// match, None if absent. panics if the flag is present but the value is
     /// missing or unparseable.
     pub fn take<T: FromStr>(&mut self, flag: &str) -> Option<T>
-    where T::Err: std::fmt::Display
+    where
+        T::Err: std::fmt::Display,
     {
         let pos = self.args.iter().position(|a| a == flag)?;
         if pos + 1 >= self.args.len() {
@@ -56,7 +59,8 @@ impl ArgPool {
 
     /// `take` with a default fallback.
     pub fn take_or<T: FromStr>(&mut self, flag: &str, default: T) -> T
-    where T::Err: std::fmt::Display
+    where
+        T::Err: std::fmt::Display,
     {
         self.take(flag).unwrap_or(default)
     }
@@ -101,15 +105,24 @@ pub struct CliConfig {
 }
 
 #[derive(Copy, Clone)]
-pub enum Reconstruction { Pcm, Plm }
+pub enum Reconstruction {
+    Pcm,
+    Plm,
+}
 
 impl Reconstruction {
     /// kernel-set encoding: 0.0 = PCM, 1.0 = PLM.
     pub fn id(self) -> f64 {
-        match self { Reconstruction::Pcm => 0.0, Reconstruction::Plm => 1.0 }
+        match self {
+            Reconstruction::Pcm => 0.0,
+            Reconstruction::Plm => 1.0,
+        }
     }
     pub fn name(self) -> &'static str {
-        match self { Reconstruction::Pcm => "pcm", Reconstruction::Plm => "plm" }
+        match self {
+            Reconstruction::Pcm => "pcm",
+            Reconstruction::Plm => "plm",
+        }
     }
 }
 
@@ -118,11 +131,15 @@ impl Reconstruction {
 // (symbi-hydro) exist but are not yet traced to a kernel, so the CLI does not
 // offer them — a flag that silently ran HLLE would be a lie. add the variant
 // here when the corresponding gv flux kernel is traced.
-pub enum Solver { Hlle }
+pub enum Solver {
+    Hlle,
+}
 
 impl Solver {
     pub fn name(self) -> &'static str {
-        match self { Solver::Hlle => "hlle" }
+        match self {
+            Solver::Hlle => "hlle",
+        }
     }
 }
 
@@ -168,15 +185,34 @@ impl Default for CliConfigBuilder {
 }
 
 impl CliConfigBuilder {
-    pub fn t_final(mut self, v: f64) -> Self { self.t_final = v; self }
-    pub fn cfl(mut self, v: f64) -> Self { self.cfl = v; self }
-    pub fn recon(mut self, v: Reconstruction) -> Self { self.recon = v; self }
-    pub fn solver(mut self, v: Solver) -> Self { self.solver = v; self }
-    pub fn theta(mut self, v: f64) -> Self { self.theta = v; self }
-    pub fn timestepping(mut self, v: crate::state::Timestepping) -> Self {
-        self.timestepping = v; self
+    pub fn t_final(mut self, v: f64) -> Self {
+        self.t_final = v;
+        self
     }
-    pub fn data_dir(mut self, v: impl Into<String>) -> Self { self.data_dir = v.into(); self }
+    pub fn cfl(mut self, v: f64) -> Self {
+        self.cfl = v;
+        self
+    }
+    pub fn recon(mut self, v: Reconstruction) -> Self {
+        self.recon = v;
+        self
+    }
+    pub fn solver(mut self, v: Solver) -> Self {
+        self.solver = v;
+        self
+    }
+    pub fn theta(mut self, v: f64) -> Self {
+        self.theta = v;
+        self
+    }
+    pub fn timestepping(mut self, v: crate::state::Timestepping) -> Self {
+        self.timestepping = v;
+        self
+    }
+    pub fn data_dir(mut self, v: impl Into<String>) -> Self {
+        self.data_dir = v.into();
+        self
+    }
 
     pub fn extract(self, p: &mut ArgPool, default_prefix: &str) -> CliConfig {
         use crate::state::Timestepping;
@@ -189,7 +225,10 @@ impl CliConfigBuilder {
         let solver_name: String = p.take_or("--solver", self.solver.name().into());
         let solver = match solver_name.as_str() {
             "hlle" => Solver::Hlle,
-            other => panic!("--solver must be hlle (hllc/hlld are not wired to the codegen path), got {}", other),
+            other => panic!(
+                "--solver must be hlle (hllc/hlld are not wired to the codegen path), got {}",
+                other
+            ),
         };
         let ts_default = match self.timestepping {
             Timestepping::Euler => "euler",
@@ -201,7 +240,10 @@ impl CliConfigBuilder {
             "euler" => Timestepping::Euler,
             "rk2" => Timestepping::Rk2,
             "rk3" => Timestepping::Rk3,
-            other => panic!("--timestepping must be one of {{euler, rk2, rk3}}, got {}", other),
+            other => panic!(
+                "--timestepping must be one of {{euler, rk2, rk3}}, got {}",
+                other
+            ),
         };
         CliConfig {
             t_final: p.take_or("--tfinal", self.t_final),

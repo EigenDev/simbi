@@ -28,7 +28,7 @@ use symbi_algebra::{Embedded, Physical, Tensor};
 use symbi_geometry::{Cylindrical, CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::energy::Adiabatic;
 use symbi_hydro::state::ConsG;
-use symbi_ib::penalize::{penalize_cell, BodyKin, Property, Relax};
+use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::Writes;
 use symbi_ir::{Gv, GvKernel, ParamExpr};
@@ -42,8 +42,8 @@ fn signal_speed(cs: Gv) -> Gv {
 }
 
 use crate::coords::{Coords, Spacing};
-use crate::gv::{cell_geometry_gv, gv_axis_width};
 use crate::gv::gv_field_at;
+use crate::gv::{cell_geometry_gv, gv_axis_width};
 use symbi_ir::{begin_trace, end_trace};
 
 /// the 3-space axes whose torque component can be nonzero at dimension
@@ -100,7 +100,13 @@ fn centroid_to_cartesian(coords: Coords, ndim: usize, axes: &[usize], centroid: 
 /// Cartesian direction; the wall / torque-free split projects the physical
 /// momentum onto it, so it must be rotated here. `x` is the COORDINATE centroid
 /// (the rotation depends on the local basis). identity on a Cartesian grid.
-fn vector_from_cartesian(coords: Coords, ndim: usize, axes: &[usize], x: &[Gv], v_cart: &[Gv]) -> Vec<Gv> {
+fn vector_from_cartesian(
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+    x: &[Gv],
+    v_cart: &[Gv],
+) -> Vec<Gv> {
     if is_cyl_rz(coords, ndim, axes) {
         return v_cart[..ndim].to_vec();
     }
@@ -130,7 +136,13 @@ fn vector_from_cartesian(coords: Coords, ndim: usize, axes: &[usize], x: &[Gv], 
 /// the lab-frame torque `r_cart x F_cart` (the accreted force receipt is in the
 /// physical frame; the cross product needs both vectors in one frame). identity
 /// on a Cartesian grid, so the Cartesian torque is bit-unchanged.
-fn vector_to_cartesian(coords: Coords, ndim: usize, axes: &[usize], x: &[Gv], v_phys: &[Gv]) -> Vec<Gv> {
+fn vector_to_cartesian(
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+    x: &[Gv],
+    v_phys: &[Gv],
+) -> Vec<Gv> {
     if is_cyl_rz(coords, ndim, axes) {
         return v_phys[..ndim].to_vec();
     }
@@ -233,7 +245,9 @@ fn solid_velocity_phys(
         centroid,
         &(0..ndim).map(|a| u_cart[a]).collect::<Vec<_>>(),
     );
-    Tensor::new(std::array::from_fn(|a| if a < ndim { u_phys[a] } else { Gv::ZERO }))
+    Tensor::new(std::array::from_fn(|a| {
+        if a < ndim { u_phys[a] } else { Gv::ZERO }
+    }))
 }
 
 /// the immersed body's mask geometry as a traced SDF, centered at `center` (the body
@@ -266,7 +280,10 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
 /// the spin (`solid_velocity`) need NO change — they stay about the COM `center`.
 fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> SdfExpr<Gv, 3> {
     match shape {
-        None => SdfExpr::<Gv, 3>::Sphere { center, radius: Gv::scalar("body_0_racc") },
+        None => SdfExpr::<Gv, 3>::Sphere {
+            center,
+            radius: Gv::scalar("body_0_racc"),
+        },
         Some(s) => s.lift(&|c| Gv::from_f64(c)).translated(center),
     }
 }
@@ -280,7 +297,10 @@ fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<G
     let rot: [[Gv; 3]; 3] = std::array::from_fn(|i| {
         std::array::from_fn(|j| Gv::scalar(&format!("body_0_rot_{}", i * 3 + j)))
     });
-    shape.lift(&|c| Gv::from_f64(c)).rotated(rot).translated(center)
+    shape
+        .lift(&|c| Gv::from_f64(c))
+        .rotated(rot)
+        .translated(center)
 }
 
 /// the saturation lemma at the mask seam: `chi = 0.5(1 - tanh(phi/w))` is
@@ -294,7 +314,14 @@ fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<G
 /// interior off-cartesian). a SPINNING shape sweeps every orientation about
 /// the body position, so its ball is position-centered with the body-local
 /// offset folded into the radius.
-fn tag_body_mask(chi: &Gv, coords: Coords, ndim: usize, axes: &[usize], shape: Option<&SdfExpr<f64, 3>>, spin: bool) {
+fn tag_body_mask(
+    chi: &Gv,
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+    shape: Option<&SdfExpr<f64, 3>>,
+    spin: bool,
+) {
     // the (r, z) section's on-axis mask region is a genuine coordinate ball
     // (identity embedding), so the sphere mask tags there too; every other
     // curvilinear chart derives Everywhere. shaped CSG stays cartesian-only.
@@ -303,20 +330,32 @@ fn tag_body_mask(chi: &Gv, coords: Coords, ndim: usize, axes: &[usize], shape: O
         return;
     }
     let pad = ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-        * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
+        * ParamExpr::min_of(
+            (0..ndim)
+                .map(|a| ParamExpr::param(&format!("dx_{a}")))
+                .collect(),
+        );
     let pos = |a: usize| ParamExpr::param(&format!("body_0_pos_{a}"));
     let (center, radius) = match shape {
-        None => ((0..ndim).map(pos).collect(), ParamExpr::param("body_0_racc") + pad),
+        None => (
+            (0..ndim).map(pos).collect(),
+            ParamExpr::param("body_0_racc") + pad,
+        ),
         Some(s) => {
-            let (lc, lr) = s
-                .bounding_ball()
-                .expect("a shaped immersed body must be bounded (a complement has no support ball)");
+            let (lc, lr) = s.bounding_ball().expect(
+                "a shaped immersed body must be bounded (a complement has no support ball)",
+            );
             if spin {
                 let lc_norm = (lc[0] * lc[0] + lc[1] * lc[1] + lc[2] * lc[2]).sqrt();
-                ((0..ndim).map(pos).collect(), ParamExpr::constant(lr + lc_norm) + pad)
+                (
+                    (0..ndim).map(pos).collect(),
+                    ParamExpr::constant(lr + lc_norm) + pad,
+                )
             } else {
                 (
-                    (0..ndim).map(|a| pos(a) + ParamExpr::constant(lc[a])).collect(),
+                    (0..ndim)
+                        .map(|a| pos(a) + ParamExpr::constant(lc[a]))
+                        .collect(),
                     ParamExpr::constant(lr) + pad,
                 )
             }
@@ -356,8 +395,13 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     let corner = vec![geo.centroid[0] - half * dx0, geo.centroid[1] - half * dx1];
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let center: [Gv; 3] =
-        std::array::from_fn(|a| if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO });
+    let center: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
+    });
     let min_w = dx0.min(dx1);
     let phi = body_mask_sdf(center).dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
@@ -403,12 +447,23 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let half = Gv::from_f64(0.5);
     let corner: Vec<Gv> = (0..ndim)
-        .map(|a| if a == dir { geo.centroid[a] } else { geo.centroid[a] - half * dx[a] })
+        .map(|a| {
+            if a == dir {
+                geo.centroid[a]
+            } else {
+                geo.centroid[a] - half * dx[a]
+            }
+        })
         .collect();
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &corner);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let center: [Gv; 3] =
-        std::array::from_fn(|a| if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO });
+    let center: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
+    });
     let min_w = dx.iter().copied().reduce(|a, b| a.min(b)).unwrap();
     let phi = body_mask_sdf(center).dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
@@ -425,8 +480,16 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
 /// 3-vector's active components). `dof == ndim` for hydro and full 3D MHD; `dof = 3, ndim = 2` for
 /// 2.5D MHD, where the out-of-plane momentum must be drained too (else its velocity blows up as the
 /// density is evacuated). dimension-generic over 1..=3.
-pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim) && (ndim..=3).contains(&dof), "penalize_drain_gv: need 1<=ndim<=dof<=3");
+pub fn penalize_drain_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    assert!(
+        (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
+        "penalize_drain_gv: need 1<=ndim<=dof<=3"
+    );
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -453,12 +516,14 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
     // chi = 0.5 (1 - tanh(phi / w)). the distance is PHYSICAL, so the coordinate
     // centroid is mapped to Cartesian first (identity on a Cartesian grid).
     let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
     });
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { x_cart[a] } else { Gv::ZERO }
-    });
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);
     let phi = sphere.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
@@ -484,7 +549,9 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(
+            |a| if a < dof { mom[a] } else { Gv::ZERO },
+        )),
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
@@ -493,10 +560,22 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
     // the angular-momentum receipt: the lab-frame moment r_cart x F_cart of the
     // cell's force receipt about the body center. exactly zero beyond the support
     // ball (F vanishes there). 3d books all three components; 2d only z; 1d none.
-    let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(
+        coords,
+        ndim,
+        axes,
+        &geo.centroid,
+        &x,
+        &center,
+        &delta.force_delta,
+    );
 
     let mut writes: Writes = Vec::new();
-    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    writes.push((
+        "den_out".to_string(),
+        symbi_ir::FieldRef::cons_den().into(),
+        out.den.node(),
+    ));
     for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
@@ -504,8 +583,16 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
             out.mom[a].node(),
         ));
     }
-    writes.push(("nrg_out".to_string(), symbi_ir::FieldRef::cons_nrg().into(), out.nrg.node()));
-    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    writes.push((
+        "nrg_out".to_string(),
+        symbi_ir::FieldRef::cons_nrg().into(),
+        out.nrg.node(),
+    ));
+    writes.push((
+        "pen_mass".to_string(),
+        "pen_0_mass".into(),
+        delta.mass_delta.node(),
+    ));
     for a in 0..ndim {
         writes.push((
             format!("pen_force_{a}"),
@@ -513,7 +600,11 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
             f_cart[a].node(),
         ));
     }
-    writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
+    writes.push((
+        "pen_energy".to_string(),
+        "pen_0_energy".into(),
+        delta.energy_delta.node(),
+    ));
     for a in torque_axes(ndim) {
         writes.push((
             format!("pen_torque_{a}"),
@@ -541,7 +632,12 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
 /// (|x_rel| = 0) degrades to a zero normal — its whole du is treated as
 /// tangential, exact and finite. at p = 1 every wall factor carries an exact
 /// (1 - p) = 0 and the kernel reduces bit-for-bit to `penalize_drain`.
-pub fn penalize_porous_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {
+pub fn penalize_porous_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
     penalize_porous_inner(coords, ndim, dof, None, false, axes)
 }
 
@@ -579,7 +675,10 @@ fn penalize_porous_inner(
     spin: bool,
     axes: &[usize],
 ) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim) && (ndim..=3).contains(&dof), "penalize_porous_gv: need 1<=ndim<=dof<=3");
+    assert!(
+        (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
+        "penalize_porous_gv: need 1<=ndim<=dof<=3"
+    );
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -605,13 +704,15 @@ fn penalize_porous_inner(
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
     });
     // the mask distance is PHYSICAL: map the coordinate centroid to Cartesian.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { x_cart[a] } else { Gv::ZERO }
-    });
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sdf = if spin {
         body_mask_sdf_spinning(center, shape.expect("a spinning wall must have a shape"))
     } else {
@@ -652,7 +753,11 @@ fn penalize_porous_inner(
     }));
 
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_vel_{a}"))
+        } else {
+            Gv::ZERO
+        }
     }));
     // a spinning wall's surface moves at u_solid + omega x r with the FULL world-frame
     // angular-velocity vector (an arbitrary rotation axis; z-spin is the [0, 0, w] case).
@@ -667,7 +772,11 @@ fn penalize_porous_inner(
     } else {
         Tensor::zeros()
     };
-    let base_kin = BodyKin::<Gv, 3> { u_solid, omega, e_wall: Gv::ZERO };
+    let base_kin = BodyKin::<Gv, 3> {
+        u_solid,
+        omega,
+        e_wall: Gv::ZERO,
+    };
     // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
     // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
     // static path keeps the bare translational u_solid, bit-identical to before.
@@ -694,14 +803,28 @@ fn penalize_porous_inner(
     .contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(
+            |a| if a < dof { mom[a] } else { Gv::ZERO },
+        )),
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(
+        coords,
+        ndim,
+        axes,
+        &geo.centroid,
+        &x,
+        &center,
+        &delta.force_delta,
+    );
 
     let mut writes: Writes = Vec::new();
-    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    writes.push((
+        "den_out".to_string(),
+        symbi_ir::FieldRef::cons_den().into(),
+        out.den.node(),
+    ));
     for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
@@ -709,8 +832,16 @@ fn penalize_porous_inner(
             out.mom[a].node(),
         ));
     }
-    writes.push(("nrg_out".to_string(), symbi_ir::FieldRef::cons_nrg().into(), out.nrg.node()));
-    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    writes.push((
+        "nrg_out".to_string(),
+        symbi_ir::FieldRef::cons_nrg().into(),
+        out.nrg.node(),
+    ));
+    writes.push((
+        "pen_mass".to_string(),
+        "pen_0_mass".into(),
+        delta.mass_delta.node(),
+    ));
     for a in 0..ndim {
         writes.push((
             format!("pen_force_{a}"),
@@ -718,7 +849,11 @@ fn penalize_porous_inner(
             f_cart[a].node(),
         ));
     }
-    writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
+    writes.push((
+        "pen_energy".to_string(),
+        "pen_0_energy".into(),
+        delta.energy_delta.node(),
+    ));
     for a in torque_axes(ndim) {
         writes.push((
             format!("pen_torque_{a}"),
@@ -742,7 +877,12 @@ fn penalize_porous_inner(
 /// energy channel (iso, the thin-disk regime); delta outputs mass + force +
 /// torque. the velocity target is the body's translational velocity
 /// `body_0_vel_*` (the accretion is torque-free RELATIVE to the moving sink).
-pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {
+pub fn penalize_torque_free_iso_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!(
         (1..=3).contains(&ndim),
@@ -767,13 +907,15 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
     });
     // the mask distance is PHYSICAL: map the coordinate centroid to Cartesian.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { x_cart[a] } else { Gv::ZERO }
-    });
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     tag_body_mask(&chi, coords, ndim, axes, None, false);
@@ -794,7 +936,11 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
     }));
 
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_vel_{a}"))
+        } else {
+            Gv::ZERO
+        }
     }));
     // the body's translational velocity is a cartesian world vector; rotate it
     // into the cell's physical basis to match the stored momentum components.
@@ -807,14 +953,28 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(
+            |a| if a < dof { mom[a] } else { Gv::ZERO },
+        )),
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(
+        coords,
+        ndim,
+        axes,
+        &geo.centroid,
+        &x,
+        &center,
+        &delta.force_delta,
+    );
 
     let mut writes: Writes = Vec::new();
-    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    writes.push((
+        "den_out".to_string(),
+        symbi_ir::FieldRef::cons_den().into(),
+        out.den.node(),
+    ));
     for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
@@ -822,7 +982,11 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
             out.mom[a].node(),
         ));
     }
-    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    writes.push((
+        "pen_mass".to_string(),
+        "pen_0_mass".into(),
+        delta.mass_delta.node(),
+    ));
     for a in 0..ndim {
         writes.push((
             format!("pen_force_{a}"),
@@ -847,7 +1011,12 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
 /// `penalize_porous_gv` but for the isothermal regime — the sound speed is the
 /// constant `cs` param (no energy channel), delta outputs mass + force only.
 /// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
-pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {
+pub fn penalize_porous_iso_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
     penalize_porous_iso_inner(coords, ndim, dof, None, false, axes)
 }
 
@@ -881,7 +1050,10 @@ fn penalize_porous_iso_inner(
     axes: &[usize],
 ) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
-    assert!((1..=3).contains(&ndim) && (ndim..=3).contains(&dof), "penalize_porous_iso_gv: need 1<=ndim<=dof<=3");
+    assert!(
+        (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
+        "penalize_porous_iso_gv: need 1<=ndim<=dof<=3"
+    );
     begin_trace();
     let dt = Gv::scalar("dt");
     let cs = Gv::scalar("cs");
@@ -903,7 +1075,11 @@ fn penalize_porous_iso_inner(
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
     });
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
@@ -937,7 +1113,11 @@ fn penalize_porous_iso_inner(
     }));
 
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_vel_{a}"))
+        } else {
+            Gv::ZERO
+        }
     }));
     let omega = if spin {
         // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
@@ -950,7 +1130,11 @@ fn penalize_porous_iso_inner(
     } else {
         Tensor::zeros()
     };
-    let base_kin = BodyKin::<Gv, 3> { u_solid, omega, e_wall: Gv::ZERO };
+    let base_kin = BodyKin::<Gv, 3> {
+        u_solid,
+        omega,
+        e_wall: Gv::ZERO,
+    };
     // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
     // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
     // static path keeps the bare translational u_solid, bit-identical to before.
@@ -977,23 +1161,53 @@ fn penalize_porous_iso_inner(
     .contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(
+            |a| if a < dof { mom[a] } else { Gv::ZERO },
+        )),
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(
+        coords,
+        ndim,
+        axes,
+        &geo.centroid,
+        &x,
+        &center,
+        &delta.force_delta,
+    );
 
     let mut writes: Writes = Vec::new();
-    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    writes.push((
+        "den_out".to_string(),
+        symbi_ir::FieldRef::cons_den().into(),
+        out.den.node(),
+    ));
     for a in 0..ndim {
-        writes.push((format!("mom_out_{a}"), symbi_ir::FieldRef::cons_mom(a as u8).into(), out.mom[a].node()));
+        writes.push((
+            format!("mom_out_{a}"),
+            symbi_ir::FieldRef::cons_mom(a as u8).into(),
+            out.mom[a].node(),
+        ));
     }
-    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    writes.push((
+        "pen_mass".to_string(),
+        "pen_0_mass".into(),
+        delta.mass_delta.node(),
+    ));
     for a in 0..ndim {
-        writes.push((format!("pen_force_{a}"), format!("pen_0_force_{a}").into(), f_cart[a].node()));
+        writes.push((
+            format!("pen_force_{a}"),
+            format!("pen_0_force_{a}").into(),
+            f_cart[a].node(),
+        ));
     }
     for a in torque_axes(ndim) {
-        writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
+        writes.push((
+            format!("pen_torque_{a}"),
+            format!("pen_0_torque_{a}").into(),
+            torque[a].node(),
+        ));
     }
     push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
@@ -1005,8 +1219,16 @@ fn penalize_porous_iso_inner(
 /// `penalize_torque_free_iso_gv` but for the adiabatic regime — the sound speed
 /// is recovered from the conserved state and the energy channel is carried (delta
 /// outputs mass + force + energy + torque). `xi = 0` reduces to `penalize_drain`.
-pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "penalize_torque_free_gv: ndim must be 1..=3");
+pub fn penalize_torque_free_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    assert!(
+        (1..=3).contains(&ndim),
+        "penalize_torque_free_gv: ndim must be 1..=3"
+    );
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -1027,7 +1249,11 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
     });
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
@@ -1052,7 +1278,11 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
     }));
 
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_vel_{a}"))
+        } else {
+            Gv::ZERO
+        }
     }));
     // the body's translational velocity is a cartesian world vector; rotate it
     // into the cell's physical basis to match the stored momentum components.
@@ -1065,25 +1295,63 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(
+            |a| if a < dof { mom[a] } else { Gv::ZERO },
+        )),
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(
+        coords,
+        ndim,
+        axes,
+        &geo.centroid,
+        &x,
+        &center,
+        &delta.force_delta,
+    );
 
     let mut writes: Writes = Vec::new();
-    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    writes.push((
+        "den_out".to_string(),
+        symbi_ir::FieldRef::cons_den().into(),
+        out.den.node(),
+    ));
     for a in 0..ndim {
-        writes.push((format!("mom_out_{a}"), symbi_ir::FieldRef::cons_mom(a as u8).into(), out.mom[a].node()));
+        writes.push((
+            format!("mom_out_{a}"),
+            symbi_ir::FieldRef::cons_mom(a as u8).into(),
+            out.mom[a].node(),
+        ));
     }
-    writes.push(("nrg_out".to_string(), symbi_ir::FieldRef::cons_nrg().into(), out.nrg.node()));
-    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    writes.push((
+        "nrg_out".to_string(),
+        symbi_ir::FieldRef::cons_nrg().into(),
+        out.nrg.node(),
+    ));
+    writes.push((
+        "pen_mass".to_string(),
+        "pen_0_mass".into(),
+        delta.mass_delta.node(),
+    ));
     for a in 0..ndim {
-        writes.push((format!("pen_force_{a}"), format!("pen_0_force_{a}").into(), f_cart[a].node()));
+        writes.push((
+            format!("pen_force_{a}"),
+            format!("pen_0_force_{a}").into(),
+            f_cart[a].node(),
+        ));
     }
-    writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
+    writes.push((
+        "pen_energy".to_string(),
+        "pen_0_energy".into(),
+        delta.energy_delta.node(),
+    ));
     for a in torque_axes(ndim) {
-        writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
+        writes.push((
+            format!("pen_torque_{a}"),
+            format!("pen_0_torque_{a}").into(),
+            torque[a].node(),
+        ));
     }
     push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
 
@@ -1095,9 +1363,17 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
 /// sound speed is the constant `cs` param), delta
 /// outputs mass + force only. same [Drain] stack, same integrator — the iso
 /// energy slot discards the e-channel by construction.
-pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]) -> (GvKernel, Writes) {
+pub fn penalize_drain_iso_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
-    assert!((1..=3).contains(&ndim), "penalize_drain_iso_gv: ndim must be 1..=3");
+    assert!(
+        (1..=3).contains(&ndim),
+        "penalize_drain_iso_gv: ndim must be 1..=3"
+    );
     begin_trace();
     let dt = Gv::scalar("dt");
     let cs = Gv::scalar("cs");
@@ -1116,14 +1392,16 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[us
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+        if a < ndim {
+            Gv::scalar(&format!("body_0_pos_{a}"))
+        } else {
+            Gv::ZERO
+        }
     });
     // the mask distance is the PHYSICAL distance to the body: map the coordinate
     // centroid to Cartesian (identity on a Cartesian grid), then the euclidean SDF.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { x_cart[a] } else { Gv::ZERO }
-    });
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     tag_body_mask(&chi, coords, ndim, axes, None, false);
@@ -1138,17 +1416,31 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[us
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(
+            |a| if a < dof { mom[a] } else { Gv::ZERO },
+        )),
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
     // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
     let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
     // the angular-momentum receipt, identical booking to the adiabatic twin.
-    let (f_cart, torque) = cartesian_receipt(coords, ndim, axes, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(
+        coords,
+        ndim,
+        axes,
+        &geo.centroid,
+        &x,
+        &center,
+        &delta.force_delta,
+    );
 
     let mut writes: Writes = Vec::new();
-    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    writes.push((
+        "den_out".to_string(),
+        symbi_ir::FieldRef::cons_den().into(),
+        out.den.node(),
+    ));
     for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
@@ -1156,7 +1448,11 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[us
             out.mom[a].node(),
         ));
     }
-    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    writes.push((
+        "pen_mass".to_string(),
+        "pen_0_mass".into(),
+        delta.mass_delta.node(),
+    ));
     for a in 0..ndim {
         writes.push((
             format!("pen_force_{a}"),
@@ -1190,7 +1486,10 @@ mod shaped_tests {
         let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
             .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
         let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
-        assert!(!kernel.graph.has_errors(), "shaped porous kernel traced with graph errors");
+        assert!(
+            !kernel.graph.has_errors(),
+            "shaped porous kernel traced with graph errors"
+        );
         assert!(
             kernel.scalar_params.iter().any(|p| p == "body_0_pos_0"),
             "the runtime body position must remain a scalar (a moving body updates it)",
@@ -1201,7 +1500,10 @@ mod shaped_tests {
             kernel.scalar_params,
         );
         for p in ["porosity", "k_eta_n", "k_eta_t", "body_0_vel_0", "dt"] {
-            assert!(kernel.scalar_params.iter().any(|s| s == p), "missing runtime param {p}");
+            assert!(
+                kernel.scalar_params.iter().any(|s| s == p),
+                "missing runtime param {p}"
+            );
         }
         assert!(!writes.is_empty(), "the shaped kernel emitted no writes");
     }

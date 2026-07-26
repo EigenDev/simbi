@@ -11,7 +11,7 @@
 //   // dispatch on (cfg.regime, cfg.dims, cfg.geometry, cfg.eos)
 // =============================================================================
 
-use crate::state::{BoundaryType, Timestepping, Reconstruction, Solver, CtMethod};
+use crate::state::{BoundaryType, CtMethod, Reconstruction, Solver, Timestepping};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegimeType {

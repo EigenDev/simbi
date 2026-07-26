@@ -12,14 +12,14 @@
 // covariant conserved state from it; live cells pass through untouched.
 // =============================================================================
 
-use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
 use symbi_algebra::Tensor;
+use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_geometry::{KerrKSCartesian, Metric};
+use symbi_hydro::RhdGr;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
-use symbi_hydro::RhdGr;
 use symbi_ib::excise::onion_pass_count;
 
 const N: usize = 24;
@@ -43,7 +43,10 @@ fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state:
     // the same metric carrier the baked kernel traces (kerr-schild at a = 0):
     // algebraically the schwarzschild form, bitwise the kerr evaluation path —
     // the bit-exactness law requires the identical f64 operation sequence.
-    let m = KerrKSCartesian { mass: MASS, spin: 0.0 };
+    let m = KerrKSCartesian {
+        mass: MASS,
+        spin: 0.0,
+    };
     let x = Tensor::new([xx, yy]);
     let metric = SpatialMetric::<f64, 2>::new(
         Gamma::new(m.spatial_metric(x)),
@@ -51,8 +54,13 @@ fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state:
     );
     // the densitized excise p2c: the cell lapse, shift and full-chart measure so the rebuilt state
     // is the sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] the kernel stores (matches gv_excise).
-    RhdGr { metric, alpha: m.lapse(x), shift: m.shift(x), sqrt_gamma: m.volume_factor(x) }
-        .to_conserved(&IdealGas { gamma: GAMMA }, prim)
+    RhdGr {
+        metric,
+        alpha: m.lapse(x),
+        shift: m.shift(x),
+        sqrt_gamma: m.volume_factor(x),
+    }
+    .to_conserved(&IdealGas { gamma: GAMMA }, prim)
 }
 
 struct Grid {
@@ -140,7 +148,12 @@ fn run_compiled(g: &mut Grid) {
     let disp_ext = [(N - 2) as u32; 2];
 
     let n2 = N * N;
-    let mut exc = [vec![0.0f64; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]];
+    let mut exc = [
+        vec![0.0f64; n2],
+        vec![0.0; n2],
+        vec![0.0; n2],
+        vec![0.0; n2],
+    ];
     for _ in 0..onion_pass_count(R_EXC, DX) {
         {
             let inputs = [
@@ -156,7 +169,14 @@ fn run_compiled(g: &mut Grid) {
                 CpuFieldMut::from_layout(e2, &lo, &ext),
                 CpuFieldMut::from_layout(e3, &lo, &ext),
             ];
-            fill(&inputs, &mut outs, &disp_ext, &disp_lo, &fill_ints, &fill_scalars);
+            fill(
+                &inputs,
+                &mut outs,
+                &disp_ext,
+                &disp_lo,
+                &fill_ints,
+                &fill_scalars,
+            );
         }
         {
             let inputs = [
@@ -171,7 +191,14 @@ fn run_compiled(g: &mut Grid) {
                 CpuFieldMut::from_layout(&mut g.v1, &lo, &ext),
                 CpuFieldMut::from_layout(&mut g.pre, &lo, &ext),
             ];
-            wb(&inputs, &mut outs, &disp_ext, &disp_lo, &wb_ints, &wb_scalars);
+            wb(
+                &inputs,
+                &mut outs,
+                &disp_ext,
+                &disp_lo,
+                &wb_ints,
+                &wb_scalars,
+            );
         }
     }
     {
@@ -193,7 +220,14 @@ fn run_compiled(g: &mut Grid) {
             CpuFieldMut::from_layout(&mut g.m1, &lo, &ext),
             CpuFieldMut::from_layout(&mut g.nrg, &lo, &ext),
         ];
-        p2c(&inputs, &mut outs, &disp_ext, &disp_lo, &p2c_ints, &p2c_scalars);
+        p2c(
+            &inputs,
+            &mut outs,
+            &disp_ext,
+            &disp_lo,
+            &p2c_ints,
+            &p2c_scalars,
+        );
     }
 }
 
@@ -274,14 +308,25 @@ fn compiled_excise_sequence_matches_the_f64_chain_bitwise() {
             }
             if live {
                 // a live cell is bitwise untouched by the whole sequence.
-                assert_eq!(compiled.rho[c].to_bits(), input.rho[c].to_bits(), "live rho at ({ii},{jj})");
-                assert_eq!(compiled.den[c].to_bits(), input.den[c].to_bits(), "live den at ({ii},{jj})");
+                assert_eq!(
+                    compiled.rho[c].to_bits(),
+                    input.rho[c].to_bits(),
+                    "live rho at ({ii},{jj})"
+                );
+                assert_eq!(
+                    compiled.den[c].to_bits(),
+                    input.den[c].to_bits(),
+                    "live den at ({ii},{jj})"
+                );
             } else {
                 n_excised += 1;
             }
         }
     }
-    assert!(n_excised > 100, "the excision ball must be deep (got {n_excised} cells)");
+    assert!(
+        n_excised > 100,
+        "the excision ball must be deep (got {n_excised} cells)"
+    );
 }
 
 #[test]
@@ -290,7 +335,11 @@ fn uniform_state_round_trips_bitwise() {
     // through the whole sequence as the bitwise identity, while every EXCISED cell is overwritten
     // with the cold vacuum floor + its covariant conserved rebuild (the one-way absorbing horizon).
     let mut g = smooth_grid();
-    let uni = Prim::<f64, 2> { rho: 1.2, vel: Tensor::new([0.1, -0.05]), pre: 0.03 };
+    let uni = Prim::<f64, 2> {
+        rho: 1.2,
+        vel: Tensor::new([0.1, -0.05]),
+        pre: 0.03,
+    };
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
@@ -324,7 +373,11 @@ fn uniform_state_round_trips_bitwise() {
             if x * x + y * y < R_EXC * R_EXC {
                 // excised: the cold vacuum floor + its covariant conserved rebuild.
                 n_excised += 1;
-                let vac = Prim::<f64, 2> { rho: 1e-10, vel: Tensor::new([0.0, 0.0]), pre: 1e-12 };
+                let vac = Prim::<f64, 2> {
+                    rho: 1e-10,
+                    vel: Tensor::new([0.0, 0.0]),
+                    pre: 1e-12,
+                };
                 let cons = to_conserved_at(x, y, &vac);
                 assert_eq!(g.rho[c].to_bits(), 1e-10_f64.to_bits(), "rho vacuum at {c}");
                 assert_eq!(g.v0[c].to_bits(), 0.0_f64.to_bits(), "v0 vacuum at {c}");

@@ -25,8 +25,8 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_ib::{Body, BodyCollection, BodyKind, SurfaceSpec};
 use symbi_ib::sdf::SdfExpr;
+use symbi_ib::{Body, BodyCollection, BodyKind, SurfaceSpec};
 use symbi_sim::tracers::{body_accretion_reservoir, is_accretion_reservoir};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -65,11 +65,17 @@ fn two_level(x0: f64, bodies: BodyCollection<f64, 3>) -> Hier {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| Prim { rho: 2.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_x: [f64; 3]| Prim {
+            rho: 2.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
-    let regions =
-        [RefinementRegion { x_lo: [x0 + 0.25; 3], x_hi: [x0 + 0.75; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [x0 + 0.25; 3],
+        x_hi: [x0 + 0.75; 3],
+    }];
     let hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
     })
@@ -179,38 +185,70 @@ fn refined_sink_receipt_moves_fine_tracers_into_the_accretion_reservoir() {
 #[test]
 fn central_bh_accretes_on_the_finest_level_only() {
     let m_init = 0.05;
-    let mut hier = two_level(0.0, BodyCollection::new().add(Body::black_hole(
-        0,
-        Tensor::new([0.5; 3]),
-        Tensor::zeros(),
-        m_init,
-        0.05,
-        0.1,  // softening: ~2 coarse cells — the first gravity kick must stay subsonic
-        5.0,  // sink_rate
-        1.0,  // sink_delta
-        0.1,  // accretion_radius — sink sphere [0.4, 0.6] inside the fine level
-    )));
+    let mut hier = two_level(
+        0.0,
+        BodyCollection::new().add(Body::black_hole(
+            0,
+            Tensor::new([0.5; 3]),
+            Tensor::zeros(),
+            m_init,
+            0.05,
+            0.1, // softening: ~2 coarse cells — the first gravity kick must stay subsonic
+            5.0, // sink_rate
+            1.0, // sink_delta
+            0.1, // accretion_radius — sink sphere [0.4, 0.6] inside the fine level
+        )),
+    );
 
     // capability split: the coarse proxy must have gravity but no sink.
-    let coarse_body = *hier.levels[0].state.immersed.as_ref().unwrap().bodies.get(0);
+    let coarse_body = *hier.levels[0]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
     assert!(coarse_body.has_gravity() && !coarse_body.has_accretion());
-    let fine_body = *hier.levels[1].state.immersed.as_ref().unwrap().bodies.get(0);
+    let fine_body = *hier.levels[1]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
     assert!(fine_body.has_accretion());
 
     let m0 = composite_mass(&hier);
     hier.evolve_steps(6).unwrap();
 
     // accretion recorded on the finest; gravitating mass fixed.
-    let body = *hier.levels[1].state.immersed.as_ref().unwrap().bodies.get(0);
-    assert_eq!(body.mass, m_init, "fixed-potential sink: gravitating mass drifted");
-    let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = body.kind else {
+    let body = *hier.levels[1]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
+    assert_eq!(
+        body.mass, m_init,
+        "fixed-potential sink: gravitating mass drifted"
+    );
+    let BodyKind::BlackHole {
+        total_accreted_mass,
+        accretion_rate,
+        ..
+    } = body.kind
+    else {
         panic!("finest body lost its accretion capability");
     };
     assert!(
         total_accreted_mass > 0.0 && total_accreted_mass.is_finite(),
         "no accretion recorded on the finest level: {total_accreted_mass:e}"
     );
-    assert!(accretion_rate > 0.0, "mdot not recorded: {accretion_rate:e}");
+    assert!(
+        accretion_rate > 0.0,
+        "mdot not recorded: {accretion_rate:e}"
+    );
 
     // the mass budget: the sink removed fluid (gravity-driven inflow piles gas
     // up at the center, so a local density check is meaningless — the COMPOSITE
@@ -219,7 +257,10 @@ fn central_bh_accretes_on_the_finest_level_only() {
     // removes per stage, so the two agree only to a factor).
     let fine = &hier.levels[1].state;
     let removed = m0 - composite_mass(&hier);
-    assert!(removed > 0.0, "the sink removed no composite mass ({removed:e})");
+    assert!(
+        removed > 0.0,
+        "the sink removed no composite mass ({removed:e})"
+    );
     let ratio = removed / total_accreted_mass;
     assert!(
         (0.2..=5.0).contains(&ratio),
@@ -231,7 +272,10 @@ fn central_bh_accretes_on_the_finest_level_only() {
     // outside the box on the x axis gains momentum toward the center.
     let coarse = &hier.levels[0].state;
     let momx_out = *coarse.fields.cons.mom[0].view().at([3, 8, 8]);
-    assert!(momx_out > 0.0, "no inward pull outside the coverage (momx {momx_out:e})");
+    assert!(
+        momx_out > 0.0,
+        "no inward pull outside the coverage (momx {momx_out:e})"
+    );
 
     // restriction consistency with body sources active.
     let cov = hier.levels[0].coverage.as_ref().unwrap();
@@ -241,7 +285,11 @@ fn central_bh_accretes_on_the_finest_level_only() {
         for oi in 0..2isize {
             for oj in 0..2isize {
                 for ok in 0..2isize {
-                    sum += *fine.fields.cons.den.view().at([2 * c[0] + oi, 2 * c[1] + oj, 2 * c[2] + ok]);
+                    sum += *fine.fields.cons.den.view().at([
+                        2 * c[0] + oi,
+                        2 * c[1] + oj,
+                        2 * c[2] + ok,
+                    ]);
                 }
             }
         }
@@ -297,18 +345,10 @@ fn shaped_rigid_wall_crossing_refinement_boundary_acts_on_both_levels() {
 
     hierarchy.evolve_steps(1).unwrap();
 
-    let coarse_momentum = *hierarchy.levels[0]
-        .state
-        .fields
-        .cons
-        .mom[0]
+    let coarse_momentum = *hierarchy.levels[0].state.fields.cons.mom[0]
         .view()
         .at([8, 8, 2]);
-    let fine_momentum = *hierarchy.levels[1]
-        .state
-        .fields
-        .cons
-        .mom[0]
+    let fine_momentum = *hierarchy.levels[1].state.fields.cons.mom[0]
         .view()
         .at([16, 16, 16]);
     assert!(
@@ -329,12 +369,26 @@ fn prescribed_binary_positions_stay_synced_across_levels() {
     let omega_v = (0.05 / sep.powi(3)).sqrt() * (sep / 2.0);
     let bodies = BodyCollection::new()
         .add(Body::black_hole(
-            0, Tensor::new([-sep / 2.0, 0.0, 0.0]), Tensor::new([0.0, -omega_v, 0.0]),
-            0.025, 0.03, 0.08, 5.0, 1.0, 0.05,
+            0,
+            Tensor::new([-sep / 2.0, 0.0, 0.0]),
+            Tensor::new([0.0, -omega_v, 0.0]),
+            0.025,
+            0.03,
+            0.08,
+            5.0,
+            1.0,
+            0.05,
         ))
         .add(Body::black_hole(
-            1, Tensor::new([sep / 2.0, 0.0, 0.0]), Tensor::new([0.0, omega_v, 0.0]),
-            0.025, 0.03, 0.08, 5.0, 1.0, 0.05,
+            1,
+            Tensor::new([sep / 2.0, 0.0, 0.0]),
+            Tensor::new([0.0, omega_v, 0.0]),
+            0.025,
+            0.03,
+            0.08,
+            5.0,
+            1.0,
+            0.05,
         ))
         .with_binary_params(symbi_ib::BinaryParams::new(0.05, sep, 0.0, 1.0))
         .as_binary();
@@ -343,19 +397,36 @@ fn prescribed_binary_positions_stay_synced_across_levels() {
 
     hier.evolve_steps(4).unwrap();
 
-    let fine_b = *hier.levels[1].state.immersed.as_ref().unwrap().bodies.get(0);
-    let coarse_b = *hier.levels[0].state.immersed.as_ref().unwrap().bodies.get(0);
+    let fine_b = *hier.levels[1]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
+    let coarse_b = *hier.levels[0]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
     // the prescribed orbit moved the bodies.
-    let moved: f64 = (0..3).map(|ax| (fine_b.position[ax] - p0.position[ax]).powi(2)).sum::<f64>().sqrt();
+    let moved: f64 = (0..3)
+        .map(|ax| (fine_b.position[ax] - p0.position[ax]).powi(2))
+        .sum::<f64>()
+        .sqrt();
     assert!(moved > 1e-6, "binary did not advance (moved {moved:e})");
     // and every level sees the same positions/velocities.
     for ax in 0..3 {
         assert_eq!(
-            fine_b.position[ax].to_bits(), coarse_b.position[ax].to_bits(),
+            fine_b.position[ax].to_bits(),
+            coarse_b.position[ax].to_bits(),
             "body positions diverged across levels on axis {ax}"
         );
         assert_eq!(
-            fine_b.velocity[ax].to_bits(), coarse_b.velocity[ax].to_bits(),
+            fine_b.velocity[ax].to_bits(),
+            coarse_b.velocity[ax].to_bits(),
             "body velocities diverged across levels on axis {ax}"
         );
     }
@@ -368,8 +439,8 @@ fn prescribed_binary_positions_stay_synced_across_levels() {
 #[test]
 fn central_bh_accretes_on_the_finest_level_iso() {
     use symbi::regimes::substrate::IsoSubstrateKernelSet;
-    use symbi_hydro::eos::Isothermal;
     use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::eos::Isothermal;
     use symbi_hydro::isothermal::IsoNewtonian;
     use symbi_hydro::state::PrimG;
     type ISim = SimState<IsoNewtonian, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
@@ -392,7 +463,10 @@ fn central_bh_accretes_on_the_finest_level_iso() {
         })
         .build();
     let ck = IKset::new(cs, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 3],
+        x_hi: [0.75; 3],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         IKset::new(cs, CFL, &s.geom.allocated)
     })
@@ -421,21 +495,44 @@ fn central_bh_accretes_on_the_finest_level_iso() {
         }
     }
 
-    let coarse_body = *hier.levels[0].state.immersed.as_ref().unwrap().bodies.get(0);
+    let coarse_body = *hier.levels[0]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
     assert!(coarse_body.has_gravity() && !coarse_body.has_accretion());
 
     hier.evolve_steps(6).unwrap();
 
-    let body = *hier.levels[1].state.immersed.as_ref().unwrap().bodies.get(0);
-    assert_eq!(body.mass, m_init, "fixed-potential sink: gravitating mass drifted");
-    let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = body.kind else {
+    let body = *hier.levels[1]
+        .state
+        .immersed
+        .as_ref()
+        .unwrap()
+        .bodies
+        .get(0);
+    assert_eq!(
+        body.mass, m_init,
+        "fixed-potential sink: gravitating mass drifted"
+    );
+    let BodyKind::BlackHole {
+        total_accreted_mass,
+        accretion_rate,
+        ..
+    } = body.kind
+    else {
         panic!("finest body lost its accretion capability");
     };
     assert!(
         total_accreted_mass > 0.0 && total_accreted_mass.is_finite(),
         "no iso accretion recorded on the finest level: {total_accreted_mass:e}"
     );
-    assert!(accretion_rate > 0.0, "iso mdot not recorded: {accretion_rate:e}");
+    assert!(
+        accretion_rate > 0.0,
+        "iso mdot not recorded: {accretion_rate:e}"
+    );
 
     // every level finite (the restriction + penalize interplay held together).
     for lvll in &hier.levels {

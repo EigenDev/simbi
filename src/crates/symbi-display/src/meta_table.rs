@@ -31,7 +31,8 @@ use crate::renderer::BoxChars;
 /// println!("{}", render_metadata("simulation extras", &extras));
 /// ```
 pub fn render_metadata(title: &str, meta: &Metadata) -> String {
-    let rows: Vec<[String; 3]> = meta.iter()
+    let rows: Vec<[String; 3]> = meta
+        .iter()
         .map(|(k, v)| [k.to_string(), attr_type(v).to_string(), attr_value(v)])
         .collect();
     render_table(title, &["Key", "Type", "Value"], &rows)
@@ -48,26 +49,54 @@ pub fn render_tree_buf(root: &TreeBuf) -> String {
 
 fn render_tree_node(out: &mut String, t: &TreeBuf, path: &str) {
     let qual = if path.is_empty() {
-        if t.name.is_empty() { "<root>".to_string() } else { t.name.clone() }
+        if t.name.is_empty() {
+            "<root>".to_string()
+        } else {
+            t.name.clone()
+        }
     } else {
         format!("{path}/{}", t.name)
     };
 
     if !t.attrs.is_empty() {
-        let rows: Vec<[String; 3]> = t.attrs.iter()
+        let rows: Vec<[String; 3]> = t
+            .attrs
+            .iter()
             .map(|(k, v)| [k.to_string(), attr_type(v).to_string(), attr_value(v)])
             .collect();
-        writeln!(out, "{}", render_table(
-            &format!("{qual} — attributes"), &["Key", "Type", "Value"], &rows,
-        )).ok();
+        writeln!(
+            out,
+            "{}",
+            render_table(
+                &format!("{qual} — attributes"),
+                &["Key", "Type", "Value"],
+                &rows,
+            )
+        )
+        .ok();
     }
     if !t.datasets.is_empty() {
-        let rows: Vec<[String; 3]> = t.datasets.iter()
-            .map(|d| [d.name.clone(), dataset_dtype(d).to_string(), dataset_shape(d)])
+        let rows: Vec<[String; 3]> = t
+            .datasets
+            .iter()
+            .map(|d| {
+                [
+                    d.name.clone(),
+                    dataset_dtype(d).to_string(),
+                    dataset_shape(d),
+                ]
+            })
             .collect();
-        writeln!(out, "{}", render_table(
-            &format!("{qual} — datasets"), &["Name", "DType", "Shape"], &rows,
-        )).ok();
+        writeln!(
+            out,
+            "{}",
+            render_table(
+                &format!("{qual} — datasets"),
+                &["Name", "DType", "Shape"],
+                &rows,
+            )
+        )
+        .ok();
     }
     for g in &t.groups {
         render_tree_node(out, g, &qual);
@@ -79,20 +108,20 @@ fn render_tree_node(out: &mut String, t: &TreeBuf, path: &str) {
 fn attr_type(a: &Attr) -> &'static str {
     match a {
         Attr::Bool(_) => "bool",
-        Attr::I64(_)  => "i64",
-        Attr::U64(_)  => "u64",
-        Attr::F64(_)  => "f64",
-        Attr::Str(_)  => "str",
+        Attr::I64(_) => "i64",
+        Attr::U64(_) => "u64",
+        Attr::F64(_) => "f64",
+        Attr::Str(_) => "str",
     }
 }
 
 fn attr_value(a: &Attr) -> String {
     match a {
         Attr::Bool(v) => v.to_string(),
-        Attr::I64(v)  => v.to_string(),
-        Attr::U64(v)  => v.to_string(),
-        Attr::F64(v)  => format!("{v:.6e}"),
-        Attr::Str(s)  => format!("\"{s}\""),
+        Attr::I64(v) => v.to_string(),
+        Attr::U64(v) => v.to_string(),
+        Attr::F64(v) => format!("{v:.6e}"),
+        Attr::Str(s) => format!("\"{s}\""),
     }
 }
 
@@ -102,7 +131,7 @@ fn dataset_dtype(d: &DatasetBuf) -> &'static str {
         symbi_io::DataBuf::F32(_) => "f32",
         symbi_io::DataBuf::I64(_) => "i64",
         symbi_io::DataBuf::U64(_) => "u64",
-        symbi_io::DataBuf::U8(_)  => "u8",
+        symbi_io::DataBuf::U8(_) => "u8",
     }
 }
 
@@ -122,9 +151,13 @@ fn dataset_shape(d: &DatasetBuf) -> String {
 fn render_table(title: &str, headers: &[&str; 3], rows: &[[String; 3]]) -> String {
     let bx = BoxChars::unicode();
     let mut widths = [0usize; 3];
-    for (i, h) in headers.iter().enumerate() { widths[i] = widths[i].max(h.chars().count()); }
+    for (i, h) in headers.iter().enumerate() {
+        widths[i] = widths[i].max(h.chars().count());
+    }
     for row in rows {
-        for (i, c) in row.iter().enumerate() { widths[i] = widths[i].max(c.chars().count()); }
+        for (i, c) in row.iter().enumerate() {
+            widths[i] = widths[i].max(c.chars().count());
+        }
     }
     // tiny padding inside each cell
     let pad = 1;
@@ -140,7 +173,7 @@ fn render_table(title: &str, headers: &[&str; 3], rows: &[[String; 3]]) -> Strin
         let remainder = extra % 3;
         for i in 0..3 {
             cell_widths[i] += per_col + if i < remainder { 1 } else { 0 };
-            widths[i]      += per_col + if i < remainder { 1 } else { 0 };
+            widths[i] += per_col + if i < remainder { 1 } else { 0 };
         }
     }
     let total_inner: usize = cell_widths.iter().sum::<usize>() + 2;
@@ -148,17 +181,23 @@ fn render_table(title: &str, headers: &[&str; 3], rows: &[[String; 3]]) -> Strin
     let mut out = String::new();
     // top border
     out.push_str(bx.top_left);
-    for _ in 0..total_inner { out.push_str(bx.horizontal); }
-    out.push_str(bx.top_right); out.push('\n');
+    for _ in 0..total_inner {
+        out.push_str(bx.horizontal);
+    }
+    out.push_str(bx.top_right);
+    out.push('\n');
     // title row
     out.push_str(bx.vertical);
     let title_padded = format!("{:^width$}", title, width = total_inner);
     out.push_str(&title_padded);
-    out.push_str(bx.vertical); out.push('\n');
+    out.push_str(bx.vertical);
+    out.push('\n');
     // header separator
     out.push_str(bx.t_left);
     for i in 0..3 {
-        for _ in 0..cell_widths[i] { out.push_str(bx.horizontal); }
+        for _ in 0..cell_widths[i] {
+            out.push_str(bx.horizontal);
+        }
         out.push_str(if i + 1 < 3 { bx.cross } else { bx.t_right });
     }
     out.push('\n');
@@ -167,19 +206,28 @@ fn render_table(title: &str, headers: &[&str; 3], rows: &[[String; 3]]) -> Strin
     // header/body separator
     out.push_str(bx.t_left);
     for i in 0..3 {
-        for _ in 0..cell_widths[i] { out.push_str(bx.horizontal); }
+        for _ in 0..cell_widths[i] {
+            out.push_str(bx.horizontal);
+        }
         out.push_str(if i + 1 < 3 { bx.cross } else { bx.t_right });
     }
     out.push('\n');
     // body rows
     for row in rows {
-        push_row(&mut out, &bx, &[row[0].as_str(), row[1].as_str(), row[2].as_str()],
-                 &widths, pad);
+        push_row(
+            &mut out,
+            &bx,
+            &[row[0].as_str(), row[1].as_str(), row[2].as_str()],
+            &widths,
+            pad,
+        );
     }
     // bottom border
     out.push_str(bx.bottom_left);
     for i in 0..3 {
-        for _ in 0..cell_widths[i] { out.push_str(bx.horizontal); }
+        for _ in 0..cell_widths[i] {
+            out.push_str(bx.horizontal);
+        }
         out.push_str(if i + 1 < 3 { bx.t_up } else { bx.bottom_right });
     }
     out

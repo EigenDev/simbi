@@ -38,14 +38,20 @@ fn build() -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
         .finish()
         .expect("sim construction failed");
-    let cnrg = sim.fields.cons.nrg_field().expect("Newtonian cons.nrg").clone();
+    let cnrg = sim
+        .fields
+        .cons
+        .nrg_field()
+        .expect("Newtonian cons.nrg")
+        .clone();
     for c in sim.geom.interior.iter() {
         let y = (c[1] as f64 + 0.5) * dx;
         let vx = V0 * (k * y).sin();
         sim.fields.cons.den.view_mut().set(c, RHO0);
         sim.fields.cons.mom[0].view_mut().set(c, RHO0 * vx);
         sim.fields.cons.mom[1].view_mut().set(c, 0.0);
-        cnrg.view_mut().set(c, P0 / (GAMMA - 1.0) + 0.5 * RHO0 * vx * vx);
+        cnrg.view_mut()
+            .set(c, P0 / (GAMMA - 1.0) + 0.5 * RHO0 * vx * vx);
     }
     sim
 }
@@ -68,8 +74,9 @@ fn energies(s: &Sim) -> (f64, f64) {
 fn run(nu: f64) -> (f64, f64, f64, f64) {
     let mut sim = build();
     let (e0, ke0) = energies(&sim);
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated)
-        .with_viscosity(nu);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated)
+            .with_viscosity(nu);
     evolve(&mut sim, &sub, T_FINAL).expect("adiabatic viscous evolve failed");
     let (e1, ke1) = energies(&sim);
     (e0, ke0, e1, ke1)
@@ -82,10 +89,19 @@ fn adiabatic_viscosity_conserves_energy_and_heats() {
 
     // total energy conserved (periodic + conservative viscous energy flux) to round-off.
     let e_rel = (e1 - e0).abs() / e0;
-    assert!(e_rel < 1e-10, "adiabatic viscosity did not conserve total energy: rel drift {e_rel:.3e}");
+    assert!(
+        e_rel < 1e-10,
+        "adiabatic viscosity did not conserve total energy: rel drift {e_rel:.3e}"
+    );
     // kinetic energy dissipated, internal energy risen (the gas heated).
-    assert!(ke1 < ke0, "viscous run did not dissipate kinetic energy: {ke0} -> {ke1}");
-    assert!(ie1 > ie0, "viscous run did not heat the gas: internal {ie0} -> {ie1}");
+    assert!(
+        ke1 < ke0,
+        "viscous run did not dissipate kinetic energy: {ke0} -> {ke1}"
+    );
+    assert!(
+        ie1 > ie0,
+        "viscous run did not heat the gas: internal {ie0} -> {ie1}"
+    );
 
     // isolate the PHYSICAL dissipation from the scheme's numerical floor: the inviscid twin loses far
     // less kinetic energy and heats far less.

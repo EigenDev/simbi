@@ -30,11 +30,16 @@ const R_BODY: f64 = 0.2;
 
 fn make() -> Sim {
     let dx = 1.0 / N as f64;
-    let sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+    let sim = SimStateGeneric::<
         NewtonianMhd,
-        IdealGas { gamma: GAMMA },
+        2,
+        3,
         Cartesian,
-    )
+        IdealGas<f64>,
+        CpuSpace,
+        HostMemory,
+        f64,
+    >::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
     .cells([N, N])
     .origin([0.0, 0.0])
     .spacing([dx, dx])
@@ -44,15 +49,29 @@ fn make() -> Sim {
     .expect("2.5D MHD sink sim construction failed")
     // uniform still gas with an out-of-plane velocity v_z; tiny uniform in-plane B (div-free).
     .set_initial(|_| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, VZ]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, VZ]),
+            pre: 1.0,
+        },
         mag: Tensor::new([1e-3, 0.0, 0.0]),
     })
     .seed_faces(|axis, _| if axis == 0 { 1e-3 } else { 0.0 })
     .build();
-    sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::new(BODY), Tensor::zeros(), 1.0, R_BODY, 1.0, false)
+    sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new(BODY),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                1.0,
+                false,
+            )
             .with_surface(SurfaceSpec::Drain),
-    ))
+        ),
+    )
 }
 
 // (inside-mask, far-field) sums of the out-of-plane momentum |mom[2]| over the interior. "far" is
@@ -79,9 +98,17 @@ fn out_of_plane_momentum(s: &Sim) -> (f64, f64) {
 fn drain_removes_out_of_plane_momentum() {
     let sim = make();
     let (in0, out0) = out_of_plane_momentum(&sim);
-    assert!(in0 > 0.0, "the seed must carry out-of-plane momentum for the test to bite");
+    assert!(
+        in0 > 0.0,
+        "the seed must carry out-of-plane momentum for the test to bite"
+    );
 
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    );
     // a handful of drain steps at a modest dt so the mask accumulates a visible evacuation.
     for _ in 0..20 {
         sub.penalize(&sim, 1e-3);

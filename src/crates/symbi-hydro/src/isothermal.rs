@@ -19,13 +19,13 @@
 //   let cons = regime.to_conserved(&eos, &prim);
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::energy::{IsoModel, Zero};
-use crate::state::{ConsG, PrimG};
-use crate::regime::Regime;
 use crate::c2p_result::C2pResult;
+use crate::energy::{IsoModel, Zero};
+use crate::eos::Eos;
+use crate::regime::Regime;
+use crate::state::{ConsG, PrimG};
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 /// type aliases for isothermal state types.
 pub type IsoCons<S, const D: usize> = ConsG<S, D, IsoModel>;
@@ -53,7 +53,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
 
     #[inline]
     fn to_primitive(&self, _eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
-    where S: OrderedNumeric
+    where
+        S: OrderedNumeric,
     {
         // mul-by-reciprocal: matches the chalkboard kernel form so CPU
         // and GPU agree bit-for-bit. divide-by-zero produces inf/NaN
@@ -106,31 +107,51 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eos::Isothermal;
     use crate::energy::EnergySlot;
+    use crate::eos::Isothermal;
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-13 * a.abs().max(b.abs()).max(1.0)
     }
 
     fn iso_prim(rho: f64, vel: Tensor<f64, 1>) -> IsoPrim<f64, 1> {
-        PrimG { rho, vel, pre: Zero::default() }
+        PrimG {
+            rho,
+            vel,
+            pre: Zero::default(),
+        }
     }
 
     fn iso_prim_2d(rho: f64, vel: Tensor<f64, 2>) -> IsoPrim<f64, 2> {
-        PrimG { rho, vel, pre: Zero::default() }
+        PrimG {
+            rho,
+            vel,
+            pre: Zero::default(),
+        }
     }
 
     fn iso_prim_3d(rho: f64, vel: Tensor<f64, 3>) -> IsoPrim<f64, 3> {
-        PrimG { rho, vel, pre: Zero::default() }
+        PrimG {
+            rho,
+            vel,
+            pre: Zero::default(),
+        }
     }
 
     // ---- IsoCons arithmetic ----
 
     #[test]
     fn iso_cons_arithmetic() {
-        let a = IsoCons::<f64, 2> { den: 1.0, mom: Tensor::new([2.0, 3.0]), nrg: Zero::default() };
-        let b = IsoCons::<f64, 2> { den: 0.5, mom: Tensor::new([1.0, 0.5]), nrg: Zero::default() };
+        let a = IsoCons::<f64, 2> {
+            den: 1.0,
+            mom: Tensor::new([2.0, 3.0]),
+            nrg: Zero::default(),
+        };
+        let b = IsoCons::<f64, 2> {
+            den: 0.5,
+            mom: Tensor::new([1.0, 0.5]),
+            nrg: Zero::default(),
+        };
 
         let sum = a + b;
         assert!(approx(sum.den, 1.5));
@@ -153,8 +174,16 @@ mod tests {
 
     #[test]
     fn iso_prim_arithmetic() {
-        let a = IsoPrim::<f64, 2> { rho: 1.0, vel: Tensor::new([2.0, 3.0]), pre: Zero::default() };
-        let b = IsoPrim::<f64, 2> { rho: 0.5, vel: Tensor::new([1.0, 0.5]), pre: Zero::default() };
+        let a = IsoPrim::<f64, 2> {
+            rho: 1.0,
+            vel: Tensor::new([2.0, 3.0]),
+            pre: Zero::default(),
+        };
+        let b = IsoPrim::<f64, 2> {
+            rho: 0.5,
+            vel: Tensor::new([1.0, 0.5]),
+            pre: Zero::default(),
+        };
 
         let sum = a + b;
         assert!(approx(sum.rho, 1.5));
@@ -195,7 +224,9 @@ mod tests {
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx(prim.rho, prim2.rho));
-        for dd in 0..3 { assert!(approx(prim.vel[dd], prim2.vel[dd])); }
+        for dd in 0..3 {
+            assert!(approx(prim.vel[dd], prim2.vel[dd]));
+        }
     }
 
     // ---- flux ----
@@ -294,7 +325,11 @@ mod tests {
         // meaningfully flag).
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
-        let cons = IsoCons { den: -1.0, mom: Tensor::new([2.0]), nrg: Zero::default() };
+        let cons = IsoCons {
+            den: -1.0,
+            mom: Tensor::new([2.0]),
+            nrg: Zero::default(),
+        };
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.is_ok());
         assert_eq!(result.value.rho, -1.0);
@@ -307,7 +342,11 @@ mod tests {
         // can detect and act (e.g., dt reduction).
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
-        let cons = IsoCons { den: 0.0, mom: Tensor::new([1.0]), nrg: Zero::default() };
+        let cons = IsoCons {
+            den: 0.0,
+            mom: Tensor::new([1.0]),
+            nrg: Zero::default(),
+        };
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.is_ok());
         assert_eq!(result.value.rho, 0.0);

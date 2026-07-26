@@ -21,11 +21,9 @@
 
 #![cfg(feature = "gpu")]
 
-use symbi_hydro::regime_spec::{law_params, NEWTONIAN_SPEC};
+use symbi_hydro::regime_spec::{NEWTONIAN_SPEC, law_params};
 use symbi_hydro::source_spec::{gravity_params, point_mass_gravity_sources, source_params};
-use symbi_hydro::{
-    launch_source_kernel, GpuSourceKernel, SimulationLaws, SourceEvaluator,
-};
+use symbi_hydro::{GpuSourceKernel, SimulationLaws, SourceEvaluator, launch_source_kernel};
 
 /// helper: build a small grid of per-cell field values for one named
 /// parameter (e.g., "rho", "vel_0", "xm_0", "gm"). uniform-across-cells
@@ -35,11 +33,16 @@ fn build_input_buffers(
     cell_count: usize,
     cell_vals: &dyn Fn(usize) -> Vec<(String, f64)>,
 ) -> Vec<Vec<f64>> {
-    let mut buffers: Vec<Vec<f64>> = params.iter().map(|_| Vec::with_capacity(cell_count)).collect();
+    let mut buffers: Vec<Vec<f64>> = params
+        .iter()
+        .map(|_| Vec::with_capacity(cell_count))
+        .collect();
     for i in 0..cell_count {
         let vals = cell_vals(i);
         for (p_idx, pname) in params.iter().enumerate() {
-            let v = vals.iter().find(|(n, _)| n == pname)
+            let v = vals
+                .iter()
+                .find(|(n, _)| n == pname)
                 .map(|(_, v)| *v)
                 .unwrap_or_else(|| panic!("cell {i}: missing param '{pname}'"));
             buffers[p_idx].push(v);
@@ -56,8 +59,8 @@ fn gpu_launch_gravity_mom_matches_cpu_evaluator_per_cell() {
     // value for that cell.
 
     const N: usize = 8;
-    let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-        .with_gravity(point_mass_gravity_sources(3, false));
+    let sim =
+        SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
     let cpu_eval = SourceEvaluator::new(&sim, 3).expect("cpu evaluator");
     let gpu_kern = GpuSourceKernel::new(&sim, 3).expect("gpu kernel");
 
@@ -88,7 +91,12 @@ fn gpu_launch_gravity_mom_matches_cpu_evaluator_per_cell() {
     let gpu_out: Vec<Vec<f64>> = launch_source_kernel(&gpu_kern, "mom", &input_buffers, N);
     assert_eq!(gpu_out.len(), 3, "3D momentum source emits 3 components");
     for (k, buf) in gpu_out.iter().enumerate() {
-        assert_eq!(buf.len(), N, "output buffer {k} has length {} != {N}", buf.len());
+        assert_eq!(
+            buf.len(),
+            N,
+            "output buffer {k} has length {} != {N}",
+            buf.len()
+        );
     }
 
     // CPU per-cell ground truth.
@@ -122,8 +130,7 @@ fn gpu_launch_ib_localization_holds_on_real_hardware() {
     use symbi_hydro::source_spec::{ib_params, rigid_body_penalty_sources};
 
     const N: usize = 8;
-    let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-        .with_ib(rigid_body_penalty_sources(3));
+    let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_ib(rigid_body_penalty_sources(3));
     let gpu_kern = GpuSourceKernel::new(&sim, 3).expect("ib kernel");
 
     // every cell is OUTSIDE the body (body at origin, radius 1.0; cells
@@ -191,9 +198,9 @@ fn gpu_launch_composed_overlays_sums_additively_on_hardware() {
             (law_params::vel(1), 0.15),
             (law_params::vel(2), 0.05),
             (law_params::PRE.to_string(), 0.8),
-            (source_params::x(0), 2.0 + 0.2 * f),   // r > 0
-            (source_params::x(1), 0.8 + 0.05 * f),  // theta safely positive
-            (source_params::x(2), 0.3),             // phi (unused by 3D sph mom source's expr but a declared param)
+            (source_params::x(0), 2.0 + 0.2 * f),  // r > 0
+            (source_params::x(1), 0.8 + 0.05 * f), // theta safely positive
+            (source_params::x(2), 0.3), // phi (unused by 3D sph mom source's expr but a declared param)
             (gravity_params::xm(0), 0.5),
             (gravity_params::xm(1), 0.5),
             (gravity_params::xm(2), 0.5),

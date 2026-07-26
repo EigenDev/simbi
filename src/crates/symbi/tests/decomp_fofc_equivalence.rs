@@ -19,14 +19,14 @@
 
 use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::WithExcision;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 4.0 / 3.0;
@@ -51,36 +51,40 @@ type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpa
 type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
-    let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells(cells)
-        .spacing([DX; 2])
-        .origin(origin)
-        .boundaries(bnd)
-        .timestepping(Timestepping::Rk2)
-        .allocate()
-        .expect("sim construction failed")
-        // a cold atmosphere (p/rho = 1e-4, so cs = sqrt(gamma p / rho) = 1.15e-2) falling
-        // radially inward at 0.2c — mach 17. the infall is PRESCRIBED rather than left to
-        // gravity, so the correction fires from the first step instead of depending on how
-        // fast the well steepens the flow. the supersonic stream meets the excision rim's
-        // donor-filled cells and the high-order c2p there leaves the physical set
-        // intermittently: the deliberate, RECOVERABLE FOFC trigger.
-        //
-        // p/rho = 1e-6 is deliberately colder than the correction needs: the admissibility
-        // rate of the geometric source is charged against the covariant energy, whose
-        // killing-energy source vanishes on a stationary metric, so the admissible dt no
-        // longer scales with the pressure. charging the valencia form instead makes dt
-        // proportional to p and collapses this atmosphere into the floor below — this
-        // temperature is therefore also the regression guard on that rate.
-        .set_initial(|x| {
-            let r = (x[0] * x[0] + x[1] * x[1]).sqrt().max(1.0e-12);
-            Prim {
-                rho: 1.0,
-                vel: Tensor::new([-V_INFALL * x[0] / r, -V_INFALL * x[1] / r]),
-                pre: 1.0e-6,
-            }
-        })
-        .build();
+    let sim = Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells(cells)
+    .spacing([DX; 2])
+    .origin(origin)
+    .boundaries(bnd)
+    .timestepping(Timestepping::Rk2)
+    .allocate()
+    .expect("sim construction failed")
+    // a cold atmosphere (p/rho = 1e-4, so cs = sqrt(gamma p / rho) = 1.15e-2) falling
+    // radially inward at 0.2c — mach 17. the infall is PRESCRIBED rather than left to
+    // gravity, so the correction fires from the first step instead of depending on how
+    // fast the well steepens the flow. the supersonic stream meets the excision rim's
+    // donor-filled cells and the high-order c2p there leaves the physical set
+    // intermittently: the deliberate, RECOVERABLE FOFC trigger.
+    //
+    // p/rho = 1e-6 is deliberately colder than the correction needs: the admissibility
+    // rate of the geometric source is charged against the covariant energy, whose
+    // killing-energy source vanishes on a stationary metric, so the admissible dt no
+    // longer scales with the pressure. charging the valencia form instead makes dt
+    // proportional to p and collapses this atmosphere into the floor below — this
+    // temperature is therefore also the regression guard on that rate.
+    .set_initial(|x| {
+        let r = (x[0] * x[0] + x[1] * x[1]).sqrt().max(1.0e-12);
+        Prim {
+            rho: 1.0,
+            vel: Tensor::new([-V_INFALL * x[0] / r, -V_INFALL * x[1] / r]),
+            pre: 1.0e-6,
+        }
+    })
+    .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC);
     (sim, k)
 }
@@ -96,7 +100,11 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 let hi = if tc[a] == counts[a] - 1 {
                     BoundaryType::Outflow
                 } else {

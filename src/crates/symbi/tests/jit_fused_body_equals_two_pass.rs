@@ -18,7 +18,7 @@ use symbi::prelude::*;
 use symbi_algebra::Domain;
 use symbi_grid::Field;
 use symbi_hydro::expr_bridge::build_user_source;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::HostMemory;
 
@@ -31,8 +31,10 @@ fn assert_cons_bit_identical<const D: usize>(
     for c in interior.iter() {
         let (va, vb) = (*a.view().at(c), *b.view().at(c));
         assert_eq!(
-            va.to_bits(), vb.to_bits(),
-            "{label} differs at {c:?}: fused={va:?} two_pass={vb:?} (delta={:?})", va - vb,
+            va.to_bits(),
+            vb.to_bits(),
+            "{label} differs at {c:?}: fused={va:?} two_pass={vb:?} (delta={:?})",
+            va - vb,
         );
     }
 }
@@ -79,49 +81,82 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
             .unwrap();
         sim.seed_cells(|p| {
             let (x, y) = (p[0], p[1]);
-            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
-            Prim { rho, vel: Tensor::new([0.1, -0.05]), pre: 1.0 }
+            let rho =
+                1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            Prim {
+                rho,
+                vel: Tensor::new([0.1, -0.05]),
+                pre: 1.0,
+            }
         });
-        if with_body { sim.with_bodies(central_black_hole()) } else { sim }
+        if with_body {
+            sim.with_bodies(central_black_hole())
+        } else {
+            sim
+        }
     };
 
     // TWO-PASS: plain AOT godunov + the per-cell apply_runtime_source pass + the standalone body_source.
     let mut sim_two = build(true);
-    let sub_two = sim_two.substrate()
-        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    let sub_two = sim_two.substrate().with_runtime_source(
+        build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
+        cfg.params.clone(),
+    );
     evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
 
     // FUSED: one JIT'd godunov folding the user source AND the immersed-body wrap; source_apply and
     // body_source both skip.
     let mut sim_fused = build(true);
-    let sub_fused = sim_fused.substrate()
-        .with_fused_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    let sub_fused = sim_fused.substrate().with_fused_runtime_source(
+        build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
+        cfg.params.clone(),
+    );
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve");
 
     // GUARD: the fused kernel actually JIT-compiled (else this compares two-pass vs two-pass).
     assert_eq!(
-        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(), Some(true),
+        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(),
+        Some(true),
         "fused godunov+source+body kernel did not compile — fused path silently fell back to two-pass",
     );
 
     let interior = &sim_fused.geom.interior;
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.den,
+        &sim_two.fields.cons.den,
+        "cons.den",
+    );
     for k in 0..2 {
-        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+        assert_cons_bit_identical(
+            interior,
+            &sim_fused.fields.cons.mom[k],
+            &sim_two.fields.cons.mom[k],
+            "cons.mom",
+        );
     }
-    let (nf, nt) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_two.fields.cons.nrg_field().unwrap());
+    let (nf, nt) = (
+        sim_fused.fields.cons.nrg_field().unwrap(),
+        sim_two.fields.cons.nrg_field().unwrap(),
+    );
     assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
 
     // NON-VACUITY: the body must actually change the trajectory (else the fused body wrap could be a
     // no-op and the equivalence would prove nothing). compare against the same fused run WITHOUT a body.
     let mut sim_nobody = build(false);
-    let sub_nobody = sim_nobody.substrate()
-        .with_fused_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    let sub_nobody = sim_nobody.substrate().with_fused_runtime_source(
+        build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(),
+        cfg.params.clone(),
+    );
     evolve(&mut sim_nobody, &sub_nobody, t_final).expect("no-body evolve");
     let body_changed = interior.iter().any(|c| {
-        sim_fused.fields.cons.den.view().at(c).to_bits() != sim_nobody.fields.cons.den.view().at(c).to_bits()
+        sim_fused.fields.cons.den.view().at(c).to_bits()
+            != sim_nobody.fields.cons.den.view().at(c).to_bits()
     });
-    assert!(body_changed, "the immersed body left the state unchanged — the oracle is vacuous");
+    assert!(
+        body_changed,
+        "the immersed body left the state unchanged — the oracle is vacuous"
+    );
 }
 
 #[test]
@@ -146,8 +181,13 @@ fn adiabatic_body_only_fused_equals_two_pass_rk2() {
             .unwrap();
         sim.seed_cells(|p| {
             let (x, y) = (p[0], p[1]);
-            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
-            Prim { rho, vel: Tensor::new([0.1, -0.05]), pre: 1.0 }
+            let rho =
+                1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            Prim {
+                rho,
+                vel: Tensor::new([0.1, -0.05]),
+                pre: 1.0,
+            }
         });
         sim.with_bodies(central_black_hole())
     };
@@ -163,15 +203,29 @@ fn adiabatic_body_only_fused_equals_two_pass_rk2() {
     evolve(&mut sim_fused, &sub_fused, t_final).expect("body-only fused evolve");
 
     assert_eq!(
-        sub_fused.body_only_fused_state(), Some(true),
+        sub_fused.body_only_fused_state(),
+        Some(true),
         "body-only fused kernel did not compile — fell back to two-pass",
     );
 
     let interior = &sim_fused.geom.interior;
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.den,
+        &sim_two.fields.cons.den,
+        "cons.den",
+    );
     for k in 0..2 {
-        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+        assert_cons_bit_identical(
+            interior,
+            &sim_fused.fields.cons.mom[k],
+            &sim_two.fields.cons.mom[k],
+            "cons.mom",
+        );
     }
-    let (nf, nt) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_two.fields.cons.nrg_field().unwrap());
+    let (nf, nt) = (
+        sim_fused.fields.cons.nrg_field().unwrap(),
+        sim_two.fields.cons.nrg_field().unwrap(),
+    );
     assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
 }

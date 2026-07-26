@@ -182,20 +182,21 @@ mod tests {
     use super::*;
     use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
     use crate::source_spec::{
-        cylindrical_geometric_sources, point_mass_gravity_sources,
-        rigid_body_penalty_sources,
+        cylindrical_geometric_sources, point_mass_gravity_sources, rigid_body_penalty_sources,
     };
 
     #[test]
     fn gpu_kernel_emits_global_function_signature() {
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, false));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
         let k = GpuSourceKernel::new(&sim, 3).expect("gravity validates");
         let src = k.cuda_source("mom").expect("mom has overlay");
 
         // CUDA __global__ signature with extern "C" linkage (NVRTC default).
-        assert!(src.contains("extern \"C\" __global__ void mom_source("),
-                "missing __global__ signature; got:\n{src}");
+        assert!(
+            src.contains("extern \"C\" __global__ void mom_source("),
+            "missing __global__ signature; got:\n{src}"
+        );
         // thread index + bounds.
         assert!(src.contains("blockIdx.x * blockDim.x + threadIdx.x"));
         assert!(src.contains("if (i >= n_cells) return;"));
@@ -208,8 +209,8 @@ mod tests {
         // mom at D=3 with point-mass gravity has:
         //   inputs: rho, vel_0, vel_1, vel_2, x_0, x_1, x_2, xm_0, xm_1, xm_2, gm
         //   outputs: S_mom_0, S_mom_1, S_mom_2
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, false));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
         let k = GpuSourceKernel::new(&sim, 3).expect("gravity validates");
 
         let n_params = k.params_for("mom").unwrap().len();
@@ -235,8 +236,8 @@ mod tests {
     fn gpu_kernel_reads_inputs_by_thread_index_and_writes_outputs() {
         // every declared param becomes a per-cell read: `auto NAME = param_<k>[i];`
         // every component output is a per-cell write: `out_<k>[i] = ...;`
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, false));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
         let k = GpuSourceKernel::new(&sim, 3).expect("gravity validates");
         let src = k.cuda_source("mom").unwrap();
 
@@ -259,8 +260,8 @@ mod tests {
     fn gpu_kernel_uses_scope_blocks_for_components() {
         // each output component lives in its own `{ /* component <k> */ ... }`
         // block so `_v_<idx>` temps don't collide across components.
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, false));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
         let k = GpuSourceKernel::new(&sim, 3).expect("gravity validates");
         let src = k.cuda_source("mom").unwrap();
 
@@ -283,7 +284,7 @@ mod tests {
         // should emit two kernels — `mom_source` and `nrg_source`. each kernel
         // sums its respective overlay contributions internally.
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_geometric(cylindrical_geometric_sources(3))  // mom
+            .with_geometric(cylindrical_geometric_sources(3)) // mom
             .with_gravity(point_mass_gravity_sources(3, true)); // mom + nrg
         let k = GpuSourceKernel::new(&sim, 3).expect("composes");
 
@@ -304,8 +305,8 @@ mod tests {
         // **the symmetry-with-Cpu canary**: Cuda emit must NOT carry the
         // `S::from_f64(...)` wrap (that's the Cpu-only carrier-generic
         // form). raw `1.0` / `0.5` etc. survive into the GPU source.
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, false));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
         let k = GpuSourceKernel::new(&sim, 3).expect("gravity validates");
         let src = k.cuda_source("mom").unwrap();
         assert!(
@@ -319,8 +320,7 @@ mod tests {
         // clause-3 discipline survives all the way: the IB region mask
         // emits as a C ternary `(cond ? then : else)` in CUDA. proves
         // the branchless conditional contract holds at the GPU layer too.
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_ib(rigid_body_penalty_sources(3));
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_ib(rigid_body_penalty_sources(3));
         let k = GpuSourceKernel::new(&sim, 3).expect("ib validates");
         let src = k.cuda_source("mom").unwrap();
         // Cuda's Select renders as `(cond ? then : else)` (the C ternary).
@@ -339,7 +339,10 @@ mod tests {
         let sim = SimulationLaws::new(&ISO_NEWTONIAN_SPEC)
             .with_gravity(point_mass_gravity_sources(3, true));
         let err = GpuSourceKernel::new(&sim, 3).unwrap_err();
-        assert!(matches!(err, CompositionError::EnergyOverlayOnIsothermal { .. }));
+        assert!(matches!(
+            err,
+            CompositionError::EnergyOverlayOnIsothermal { .. }
+        ));
     }
 
     #[test]

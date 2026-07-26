@@ -108,11 +108,17 @@ struct Affine {
 
 impl Affine {
     fn constant(c: i64) -> Affine {
-        Affine { coeffs: BTreeMap::new(), constant: c }
+        Affine {
+            coeffs: BTreeMap::new(),
+            constant: c,
+        }
     }
 
     fn coord(axis: usize) -> Affine {
-        Affine { coeffs: BTreeMap::from([(axis, 1)]), constant: 0 }
+        Affine {
+            coeffs: BTreeMap::from([(axis, 1)]),
+            constant: 0,
+        }
     }
 
     fn add(mut self, other: Affine, sign: i64) -> Affine {
@@ -202,7 +208,11 @@ fn component_reach(e: &ScalarExpr, axis: usize, env: &AffineEnv) -> AxisReach {
 /// components are walked too: a nested load used as an index is itself recorded
 /// (and the outer component that contains it classifies as Unbounded).
 fn visit_expr(e: &ScalarExpr, env: &AffineEnv, report: &mut ReachReport) {
-    if let ScalarExpr::FieldLoadAt { field_key, components } = e {
+    if let ScalarExpr::FieldLoadAt {
+        field_key,
+        components,
+    } = e
+    {
         let axes: Vec<AxisReach> = components
             .iter()
             .enumerate()
@@ -268,15 +278,26 @@ mod tests {
     }
 
     fn load(field: &str, components: Vec<ScalarExpr>) -> ScalarExpr {
-        ScalarExpr::FieldLoadAt { field_key: field.to_string(), components }
+        ScalarExpr::FieldLoadAt {
+            field_key: field.to_string(),
+            components,
+        }
     }
 
     fn kernel(body: Vec<ScalarStmt>, outputs: Vec<ScalarExpr>) -> KernelScalarized {
-        KernelScalarized { params: Vec::new(), body, outputs }
+        KernelScalarized {
+            params: Vec::new(),
+            body,
+            outputs,
+        }
     }
 
     fn let_stmt(name: &str, value: ScalarExpr) -> ScalarStmt {
-        ScalarStmt::Let { name: name.to_string(), element: ElementTy::F64, value }
+        ScalarStmt::Let {
+            name: name.to_string(),
+            element: ElementTy::F64,
+            value,
+        }
     }
 
     #[test]
@@ -297,7 +318,10 @@ mod tests {
     #[test]
     fn per_axis_reach_is_independent() {
         // a 2d load offset only along axis 1: axis 0 reach 0, axis 1 reach 1.
-        let body = vec![let_stmt("q", load("prim_vel", vec![coord(0), shifted(1, -1)]))];
+        let body = vec![let_stmt(
+            "q",
+            load("prim_vel", vec![coord(0), shifted(1, -1)]),
+        )];
         let report = stencil_reach(&kernel(body, Vec::new()));
         assert_eq!(
             report.per_field["prim_vel"],
@@ -340,7 +364,10 @@ mod tests {
         // is absolute addressing. neither is a cell-relative stencil.
         let body = vec![
             let_stmt("qt", load("f_transposed", vec![coord(1)])),
-            let_stmt("qa", load("f_absolute", vec![ScalarExpr::Const(ConstValue::F64(0.0))])),
+            let_stmt(
+                "qa",
+                load("f_absolute", vec![ScalarExpr::Const(ConstValue::F64(0.0))]),
+            ),
         ];
         let report = stencil_reach(&kernel(body, Vec::new()));
         assert_eq!(report.per_field["f_transposed"], vec![AxisReach::Unbounded]);
@@ -386,11 +413,17 @@ mod tests {
         // the bug-injection gate for the ghost-width law: widening one load
         // past the halo must surface as a nameable (field, axis, reach) fact.
         let narrow = stencil_reach(&kernel(
-            vec![let_stmt("q", load("prim_rho", vec![coord(0), shifted(1, 1)]))],
+            vec![let_stmt(
+                "q",
+                load("prim_rho", vec![coord(0), shifted(1, 1)]),
+            )],
             Vec::new(),
         ));
         let widened = stencil_reach(&kernel(
-            vec![let_stmt("q", load("prim_rho", vec![coord(0), shifted(1, 3)]))],
+            vec![let_stmt(
+                "q",
+                load("prim_rho", vec![coord(0), shifted(1, 3)]),
+            )],
             Vec::new(),
         ));
         let halo = 2u32;
@@ -398,10 +431,12 @@ mod tests {
             r.per_field
                 .iter()
                 .flat_map(|(f, axes)| {
-                    axes.iter().enumerate().filter_map(move |(ax, reach)| match reach {
-                        AxisReach::Bounded(w) if *w > halo => Some((f.clone(), ax, *w)),
-                        _ => None,
-                    })
+                    axes.iter()
+                        .enumerate()
+                        .filter_map(move |(ax, reach)| match reach {
+                            AxisReach::Bounded(w) if *w > halo => Some((f.clone(), ax, *w)),
+                            _ => None,
+                        })
                 })
                 .collect()
         };
@@ -428,14 +463,23 @@ mod tests {
             },
             let_stmt(
                 "q",
-                load("prim_rho", vec![ScalarExpr::Var("__cse_0".to_string()), coord(1)]),
+                load(
+                    "prim_rho",
+                    vec![ScalarExpr::Var("__cse_0".to_string()), coord(1)],
+                ),
             ),
             ScalarStmt::LetMut {
                 name: "acc".to_string(),
                 element: ElementTy::I32,
                 init: idx,
             },
-            let_stmt("r", load("prim_pre", vec![ScalarExpr::Var("acc".to_string()), coord(1)])),
+            let_stmt(
+                "r",
+                load(
+                    "prim_pre",
+                    vec![ScalarExpr::Var("acc".to_string()), coord(1)],
+                ),
+            ),
         ];
         let report = stencil_reach(&kernel(body, Vec::new()));
         assert_eq!(

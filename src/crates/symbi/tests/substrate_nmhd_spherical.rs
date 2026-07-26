@@ -17,7 +17,7 @@
 use std::sync::atomic::Ordering;
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet3D;
-use symbi::sim::evolve::{evolve, KernelSet};
+use symbi::sim::evolve::{KernelSet, evolve};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, Spherical};
@@ -65,18 +65,31 @@ where
         let bc = B0 / (r * r);
         let pre = 1.0 + 0.3 * (-((r - 1.4) / 0.2).powi(2)).exp();
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre,
+            },
             mag: Tensor::new([bc, 0.0, 0.0]),
         };
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
-        sim.fields.cons.scatter(c, Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg });
+        sim.fields.cons.scatter(
+            c,
+            Cons {
+                den: cons.den,
+                mom: cons.mom,
+                nrg: cons.nrg,
+            },
+        );
     }
 }
 
 fn make_sph() -> SimSph {
     // unseeded; set_ic seeds the staggered B + bcell (full allocated domain) post-construction.
     SimSph::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Spherical)
-        .cells([N, N, N]).origin([R_LO, T_LO, P_LO]).spacing([DR, DTH, DPH])
+        .cells([N, N, N])
+        .origin([R_LO, T_LO, P_LO])
+        .spacing([DR, DTH, DPH])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
         .finish()
@@ -84,7 +97,9 @@ fn make_sph() -> SimSph {
 }
 fn make_cart() -> SimCart {
     SimCart::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([N, N, N]).origin([R_LO, T_LO, P_LO]).spacing([DR, DTH, DPH])
+        .cells([N, N, N])
+        .origin([R_LO, T_LO, P_LO])
+        .spacing([DR, DTH, DPH])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
         .finish()
@@ -93,11 +108,20 @@ fn make_cart() -> SimCart {
 
 #[test]
 fn full_substrate_spherical_nmhd_smoke() {
-    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, CFL, 1.0, &make_sph().geom.allocated);
+    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &make_sph().geom.allocated,
+    );
 
     let mut sph = make_sph();
     set_ic(&mut sph);
-    assert_eq!(sph.geom.coords, symbi_geometry::Geometry::Spherical, "coords must be Spherical");
+    assert_eq!(
+        sph.geom.coords,
+        symbi_geometry::Geometry::Spherical,
+        "coords must be Spherical"
+    );
 
     // geometry is ACTIVE in the wave-speed map: the spherical CFL dt (r-weighted angular
     // widths) differs from the Cartesian dt on the same state -> nmhd_wave_speed_map_sph engaged.
@@ -107,7 +131,10 @@ fn full_substrate_spherical_nmhd_smoke() {
     sub.c2p(&cart);
     let dt_sph = sub.cfl(&sph);
     let dt_cart = sub.cfl(&cart);
-    assert!(dt_sph.is_finite() && dt_sph > 0.0, "bad spherical dt {dt_sph}");
+    assert!(
+        dt_sph.is_finite() && dt_sph > 0.0,
+        "bad spherical dt {dt_sph}"
+    );
     assert!(
         (dt_sph - dt_cart).abs() > 1e-9,
         "spherical and cartesian CFL dt identical ({dt_sph} vs {dt_cart}) — wave_speed_map_sph did not engage",
@@ -125,8 +152,14 @@ fn full_substrate_spherical_nmhd_smoke() {
         assert!(rho.is_finite() && rho > 0.0, "bad density {rho} at {c:?}");
         assert!(p.is_finite() && p > 0.0, "bad pressure {p} at {c:?}");
         for d in 0..3 {
-            assert!(sph.fields.prim.vel[d].view().at(c).is_finite(), "non-finite vel[{d}] at {c:?}");
-            assert!(mhd.bcell[d].view().at(c).is_finite(), "non-finite bcell[{d}] at {c:?}");
+            assert!(
+                sph.fields.prim.vel[d].view().at(c).is_finite(),
+                "non-finite vel[{d}] at {c:?}"
+            );
+            assert!(
+                mhd.bcell[d].view().at(c).is_finite(),
+                "non-finite bcell[{d}] at {c:?}"
+            );
         }
     }
     assert!(sph.iteration > 0, "no steps taken");

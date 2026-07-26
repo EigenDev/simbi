@@ -60,10 +60,18 @@ impl<M: MemorySpace> MemoryBlock<M> {
     /// allocate a new block of `bytes` in the given memory space.
     pub fn new(bytes: usize) -> error::Result<Self> {
         if bytes == 0 {
-            return Ok(MemoryBlock { ptr: std::ptr::null_mut(), bytes: 0, _space: PhantomData });
+            return Ok(MemoryBlock {
+                ptr: std::ptr::null_mut(),
+                bytes: 0,
+                _space: PhantomData,
+            });
         }
         let ptr = M::allocate(bytes)?;
-        Ok(MemoryBlock { ptr, bytes, _space: PhantomData })
+        Ok(MemoryBlock {
+            ptr,
+            bytes,
+            _space: PhantomData,
+        })
     }
 
     /// allocate storage for `count` elements of type T.
@@ -128,10 +136,18 @@ impl MemorySpace for HostMemory {
 
     fn allocate(bytes: usize) -> error::Result<*mut u8> {
         let layout = std::alloc::Layout::from_size_align(bytes, Self::PREFERRED_ALIGNMENT)
-            .map_err(|_| error::XpuError { operation: "host_alloc", code: -1, detail: "invalid layout".into() })?;
+            .map_err(|_| error::XpuError {
+                operation: "host_alloc",
+                code: -1,
+                detail: "invalid layout".into(),
+            })?;
         let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
         if ptr.is_null() {
-            return Err(error::XpuError { operation: "host_alloc", code: -2, detail: format!("allocation failed for {} bytes", bytes) });
+            return Err(error::XpuError {
+                operation: "host_alloc",
+                code: -2,
+                detail: format!("allocation failed for {} bytes", bytes),
+            });
         }
         Ok(ptr)
     }
@@ -139,7 +155,9 @@ impl MemorySpace for HostMemory {
     fn deallocate(ptr: *mut u8, bytes: usize) {
         let layout = std::alloc::Layout::from_size_align(bytes, Self::PREFERRED_ALIGNMENT)
             .expect("invalid layout");
-        unsafe { std::alloc::dealloc(ptr, layout); }
+        unsafe {
+            std::alloc::dealloc(ptr, layout);
+        }
     }
 }
 

@@ -37,7 +37,13 @@ fn full_substrate_isothermal_euler_evolution() {
         })
         .build();
 
-    let mass0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum::<f64>() * dx;
+    let mass0: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .sum::<f64>()
+        * dx;
 
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(CS, 0.4, &sim.geom.allocated);
     // march to t=0.25 (a quarter sound-crossing); the whole loop is substrate.
@@ -48,11 +54,25 @@ fn full_substrate_isothermal_euler_evolution() {
         let r = *sim.fields.cons.den.view().at(c);
         assert!(r.is_finite() && r > 0.0, "bad density {r} at {c:?}");
     }
-    let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).sum::<f64>() * dx;
-    assert!((mass1 - mass0).abs() < 1e-12 * mass0, "mass drift {:e}", (mass1 - mass0)/mass0);
+    let mass1: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .sum::<f64>()
+        * dx;
+    assert!(
+        (mass1 - mass0).abs() < 1e-12 * mass0,
+        "mass drift {:e}",
+        (mass1 - mass0) / mass0
+    );
     assert!(sim.iteration > 5, "took only {} steps", sim.iteration);
-    println!("SUBSTRATE EVOLVE: {} steps to t={:.3}, mass rel-drift {:e}",
-             sim.iteration, sim.time, (mass1 - mass0) / mass0);
+    println!(
+        "SUBSTRATE EVOLVE: {} steps to t={:.3}, mass rel-drift {:e}",
+        sim.iteration,
+        sim.time,
+        (mass1 - mass0) / mass0
+    );
 }
 
 #[test]
@@ -91,7 +111,10 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
     sub.compute_isothermal_cs2(&sim.fields.cons.den, &pre_ic, &sim.geom.interior);
     for c in sim.geom.interior.iter() {
         let x = (c[0] as f64 + 0.5) * dx;
-        assert!((*sub.cs2.view().at(c) - cs2_of(x)).abs() < 1e-12, "cs^2 mis-derived at x={x}");
+        assert!(
+            (*sub.cs2.view().at(c) - cs2_of(x)).abs() < 1e-12,
+            "cs^2 mis-derived at x={x}"
+        );
     }
 
     evolve(&mut sim, &sub, 0.1).expect("locally isothermal evolution failed");
@@ -100,7 +123,10 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
     // stayed physical (the varying sound speed flowed through c2p / flux / cfl).
     for c in sim.geom.interior.iter() {
         let x = (c[0] as f64 + 0.5) * dx;
-        assert!((*sub.cs2.view().at(c) - cs2_of(x)).abs() < 1e-12, "cs^2 drifted (not read-only)");
+        assert!(
+            (*sub.cs2.view().at(c) - cs2_of(x)).abs() < 1e-12,
+            "cs^2 drifted (not read-only)"
+        );
         let r = *sim.fields.cons.den.view().at(c);
         assert!(r.is_finite() && r > 0.0, "bad density {r} at {c:?}");
     }
@@ -152,7 +178,10 @@ fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
         }
         ghosts += 1;
         let clamped: [isize; 2] = std::array::from_fn(|ax| {
-            c[ax].clamp(sim.geom.interior.spaces[ax].lo, sim.geom.interior.spaces[ax].hi - 1)
+            c[ax].clamp(
+                sim.geom.interior.spaces[ax].lo,
+                sim.geom.interior.spaces[ax].hi - 1,
+            )
         });
         if clamped != c {
             let both_out = (0..2).all(|ax| clamped[ax] != c[ax]);
@@ -166,9 +195,15 @@ fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
             (got - want).abs() < 1e-15,
             "ghost cs2 at {c:?} = {got}, want clamped interior {want} (uniform constructor cs^2 leaked?)"
         );
-        assert!(got < 0.1, "ghost cs2 at {c:?} = {got} is the constructor's global value, not the IC's");
+        assert!(
+            got < 0.1,
+            "ghost cs2 at {c:?} = {got} is the constructor's global value, not the IC's"
+        );
     }
-    assert!(ghosts > 0 && corners > 0, "expected face and corner ghosts to be checked");
+    assert!(
+        ghosts > 0 && corners > 0,
+        "expected face and corner ghosts to be checked"
+    );
 
     // integration: recover the interior prims, then fill ghosts — the ghost pressure
     // must obey the LOCAL closure p = cs2*rho using the per-cell cs^2.

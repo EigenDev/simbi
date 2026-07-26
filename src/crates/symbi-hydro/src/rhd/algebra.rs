@@ -10,8 +10,8 @@
 // these helpers do not clamp — that would hide infeasibility from the recover step.
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
+use symbi_ir::algebra::Scalar;
 
 /// lorentz factor from velocity squared: W = 1/sqrt(1 - v^2).
 #[inline]

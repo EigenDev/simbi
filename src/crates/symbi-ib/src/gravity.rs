@@ -45,10 +45,7 @@ pub(crate) fn accumulate_gravity<const D: usize>(
     for i in 0..nb {
         for j in (i + 1)..nb {
             let (bi, bj) = (bodies.get(i), bodies.get(j));
-            if (!bi.two_way_coupling && !bj.two_way_coupling)
-                || bi.mass <= 0.0
-                || bj.mass <= 0.0
-            {
+            if (!bi.two_way_coupling && !bj.two_way_coupling) || bi.mass <= 0.0 || bj.mass <= 0.0 {
                 continue;
             }
             let xi = lift(&bi.position);
@@ -80,10 +77,7 @@ pub(crate) fn min_dynamical_time<const D: usize>(
     for i in 0..nb {
         for j in (i + 1)..nb {
             let (bi, bj) = (bodies.get(i), bodies.get(j));
-            if (!bi.two_way_coupling && !bj.two_way_coupling)
-                || bi.mass <= 0.0
-                || bj.mass <= 0.0
-            {
+            if (!bi.two_way_coupling && !bj.two_way_coupling) || bi.mass <= 0.0 || bj.mass <= 0.0 {
                 continue;
             }
             let mut r2 = eps2;
@@ -131,7 +125,7 @@ pub fn gravitational_potential_energy<const D: usize>(
 mod tests {
     use super::*;
     use crate::body::Body;
-    use crate::bond::{advance_bonded, Bond, BondMaterial};
+    use crate::bond::{Bond, BondMaterial, advance_bonded};
     use crate::contact::{ContactMaterial, Contacts};
     use symbi_algebra::Tensor;
 
@@ -154,7 +148,10 @@ mod tests {
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(body(-0.5, 0.0, 0.0, -v_half, 1.0, true))
             .add_fragment(body(0.5, 0.0, 0.0, v_half, 1.0, true));
-        let grav = MutualGravity { g: 1.0, softening: 0.0 };
+        let grav = MutualGravity {
+            g: 1.0,
+            softening: 0.0,
+        };
         let mut bonds: Vec<Bond> = Vec::new();
         let period = 2.0 * std::f64::consts::PI / (2.0_f64).sqrt();
 
@@ -174,9 +171,15 @@ mod tests {
             p[1] += b.mass * b.velocity[1];
             p
         });
-        assert!(p[0].abs() < 1e-12 && p[1].abs() < 1e-12, "momentum drift {p:?}");
+        assert!(
+            p[0].abs() < 1e-12 && p[1].abs() < 1e-12,
+            "momentum drift {p:?}"
+        );
         let e1 = total_ke(&coll) + gravitational_potential_energy(&grav, &coll);
-        assert!((e1 - e0).abs() < 1e-4 * e0.abs(), "orbit energy drift {e0} -> {e1}");
+        assert!(
+            (e1 - e0).abs() < 1e-4 * e0.abs(),
+            "orbit energy drift {e0} -> {e1}"
+        );
     }
 
     #[test]
@@ -184,14 +187,21 @@ mod tests {
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(body(-0.01, 0.0, 0.0, 0.0, 1.0, true))
             .add_fragment(body(0.01, 0.0, 0.0, 0.0, 1.0, true));
-        let grav = MutualGravity { g: 1.0, softening: 0.1 };
+        let grav = MutualGravity {
+            g: 1.0,
+            softening: 0.1,
+        };
         let mut bonds: Vec<Bond> = Vec::new();
         for _ in 0..200 {
             advance_bonded(&mut coll, &mut bonds, None, Some(&grav), 0.005, &[]);
         }
         for b in coll.bodies() {
             assert!(b.position[0].is_finite() && b.velocity[0].is_finite());
-            assert!(b.velocity[0].abs() < 10.0, "softened pair reached {}", b.velocity[0]);
+            assert!(
+                b.velocity[0].abs() < 10.0,
+                "softened pair reached {}",
+                b.velocity[0]
+            );
         }
     }
 
@@ -201,7 +211,10 @@ mod tests {
     // fragment separation at the end of the encounter.
     fn parabolic_encounter(q: f64) -> f64 {
         const M_CENTRAL: f64 = 1000.0;
-        let grav = MutualGravity { g: 1.0, softening: 0.05 };
+        let grav = MutualGravity {
+            g: 1.0,
+            softening: 0.05,
+        };
         let r0 = 40.0;
         // parabolic speed at r0 with angular momentum sqrt(2 G M q).
         let v2 = 2.0 * M_CENTRAL / r0;
@@ -228,7 +241,14 @@ mod tests {
         });
         let mut t = 0.0;
         while t < 12.0 {
-            advance_bonded(&mut coll, &mut bonds, Some(&mut contacts), Some(&grav), 0.01, &[]);
+            advance_bonded(
+                &mut coll,
+                &mut bonds,
+                Some(&mut contacts),
+                Some(&grav),
+                0.01,
+                &[],
+            );
             t += 0.01;
         }
         let mut max_sep: f64 = 0.0;
@@ -250,8 +270,14 @@ mod tests {
         // M = 1000. a pericenter far outside keeps the pile compact; one far
         // inside shreds it.
         let far = parabolic_encounter(20.0);
-        assert!(far < 4.0, "pile disrupted outside the roche distance: max sep {far}");
+        assert!(
+            far < 4.0,
+            "pile disrupted outside the roche distance: max sep {far}"
+        );
         let close = parabolic_encounter(2.0);
-        assert!(close > 8.0, "pile survived deep inside the roche distance: max sep {close}");
+        assert!(
+            close > 8.0,
+            "pile survived deep inside the roche distance: max sep {close}"
+        );
     }
 }

@@ -69,10 +69,22 @@ fn neumann_boundary_extrapolates_from_the_edge_cell() {
             let v0 = *sim.fields.prim.vel[0].view().at(c);
             let v1 = *sim.fields.prim.vel[1].view().at(c);
             let p = *sim.fields.prim.pre_field().unwrap().view().at(c);
-            assert!((rho - (RHO + Q[0] * dist)).abs() < 1e-12, "x_lo ghost rho at {x:?}: {rho}");
-            assert!((v0 - (VX + Q[1] * dist)).abs() < 1e-12, "x_lo ghost vel_0 at {x:?}: {v0}");
-            assert!((v1 - (Q[2] * dist)).abs() < 1e-12, "x_lo ghost vel_1 at {x:?}: {v1}");
-            assert!((p - (PRE + Q[3] * dist)).abs() < 1e-12, "x_lo ghost pre at {x:?}: {p}");
+            assert!(
+                (rho - (RHO + Q[0] * dist)).abs() < 1e-12,
+                "x_lo ghost rho at {x:?}: {rho}"
+            );
+            assert!(
+                (v0 - (VX + Q[1] * dist)).abs() < 1e-12,
+                "x_lo ghost vel_0 at {x:?}: {v0}"
+            );
+            assert!(
+                (v1 - (Q[2] * dist)).abs() < 1e-12,
+                "x_lo ghost vel_1 at {x:?}: {v1}"
+            );
+            assert!(
+                (p - (PRE + Q[3] * dist)).abs() < 1e-12,
+                "x_lo ghost pre at {x:?}: {p}"
+            );
             checked += 1;
         }
     }
@@ -88,8 +100,7 @@ fn neumann_boundary_spherical_radial_uses_the_baked_cartesian_kernel() {
     let n = 16usize;
     let (r0, r1) = (1.0, 2.0);
     let dr = (r1 - r0) / n as f64;
-    let boundaries =
-        Boundaries::<1>::per_axis([[BoundaryType::Outflow, BoundaryType::Neumann(0)]]);
+    let boundaries = Boundaries::<1>::per_axis([[BoundaryType::Outflow, BoundaryType::Neumann(0)]]);
     let sim = SimSph::build(Newtonian, IdealGas { gamma: 1.4 }, Spherical)
         .cells([n])
         .bounds([r0], [r1])
@@ -104,7 +115,9 @@ fn neumann_boundary_spherical_radial_uses_the_baked_cartesian_kernel() {
     }
     // Neumann on the outer radial face: coeffs [rho, v_r, pre] (DOF = 1).
     let q = [0.5, -0.3, 1.0];
-    let (sub, _id) = sim.substrate().with_gradient_boundary(GradientBc::Neumann(q.to_vec()));
+    let (sub, _id) = sim
+        .substrate()
+        .with_gradient_boundary(GradientBc::Neumann(q.to_vec()));
     sub.ghost_fill(&sim);
 
     // outer edge = last interior cell centroid (arithmetic center, matching the kernel's face midpoint).
@@ -116,8 +129,14 @@ fn neumann_boundary_spherical_radial_uses_the_baked_cartesian_kernel() {
             let dist = (r - r_edge).abs();
             let rho = *sim.fields.prim.rho.view().at(c);
             let v0 = *sim.fields.prim.vel[0].view().at(c);
-            assert!((rho - (RHO + q[0] * dist)).abs() < 1e-12, "sph outer ghost rho at r={r}: {rho}");
-            assert!((v0 - (VX + q[1] * dist)).abs() < 1e-12, "sph outer ghost v_r at r={r}: {v0}");
+            assert!(
+                (rho - (RHO + q[0] * dist)).abs() < 1e-12,
+                "sph outer ghost rho at r={r}: {rho}"
+            );
+            assert!(
+                (v0 - (VX + q[1] * dist)).abs() < 1e-12,
+                "sph outer ghost v_r at r={r}: {v0}"
+            );
             checked += 1;
         }
     }
@@ -133,8 +152,7 @@ fn neumann_boundary_iso_rederives_the_eos_pressure() {
     let cs = 0.5;
     let n = 16usize;
     let dr = 1.0 / n as f64;
-    let boundaries =
-        Boundaries::<1>::per_axis([[BoundaryType::Outflow, BoundaryType::Neumann(0)]]);
+    let boundaries = Boundaries::<1>::per_axis([[BoundaryType::Outflow, BoundaryType::Neumann(0)]]);
     let sim = SimIso::build(IsoNewtonian, Isothermal { cs }, Cartesian)
         .cells([n])
         .bounds([0.0], [1.0])
@@ -142,7 +160,9 @@ fn neumann_boundary_iso_rederives_the_eos_pressure() {
         .finish()
         .unwrap();
     // Neumann coeffs [rho, v, pre]; the pre coeff is ignored (iso derives pre = cs^2*rho).
-    let (sub, _id) = sim.substrate().with_gradient_boundary(GradientBc::Neumann(vec![0.5, -0.3, 99.0]));
+    let (sub, _id) = sim
+        .substrate()
+        .with_gradient_boundary(GradientBc::Neumann(vec![0.5, -0.3, 99.0]));
     for c in sim.geom.interior.iter() {
         sim.fields.prim.rho.view_mut().set(c, RHO);
         sim.fields.prim.vel[0].view_mut().set(c, VX);
@@ -158,9 +178,16 @@ fn neumann_boundary_iso_rederives_the_eos_pressure() {
             let dist = (x - x_edge).abs();
             let rho = *sim.fields.prim.rho.view().at(c);
             let pre = *sub.pre.view().at(c);
-            assert!((rho - (RHO + 0.5 * dist)).abs() < 1e-12, "iso ghost rho at x={x}: {rho}");
+            assert!(
+                (rho - (RHO + 0.5 * dist)).abs() < 1e-12,
+                "iso ghost rho at x={x}: {rho}"
+            );
             // the EOS closure held at the ghost: pre = cs^2 * rho_ghost, exactly.
-            assert!((pre - cs * cs * rho).abs() < 1e-12, "iso ghost pre != cs^2*rho: {pre} vs {}", cs * cs * rho);
+            assert!(
+                (pre - cs * cs * rho).abs() < 1e-12,
+                "iso ghost pre != cs^2*rho: {pre} vs {}",
+                cs * cs * rho
+            );
             checked += 1;
         }
     }
@@ -171,10 +198,10 @@ fn neumann_boundary_iso_rederives_the_eos_pressure() {
 fn robin_boundary_solves_the_mixed_relation() {
     // per-variable (a,b,c): rho Dirichlet (a=1,b=0), vel_0 Neumann (a=0,b=1), vel_1 + pre general.
     let abc: Vec<[f64; 3]> = vec![
-        [1.0, 0.0, 2.0],  // rho:   a*U_face = c -> U_face = 2
-        [0.0, 1.0, 0.5],  // vel_0: b*dU/dn = c -> dU/dn = 0.5
-        [1.3, 0.7, 0.9],  // vel_1: general
-        [2.0, 0.5, 7.0],  // pre:   general
+        [1.0, 0.0, 2.0], // rho:   a*U_face = c -> U_face = 2
+        [0.0, 1.0, 0.5], // vel_0: b*dU/dn = c -> dU/dn = 0.5
+        [1.3, 0.7, 0.9], // vel_1: general
+        [2.0, 0.5, 7.0], // pre:   general
     ];
     let boundaries = Boundaries::<2>::per_axis([
         [BoundaryType::Robin(0), BoundaryType::Outflow],
@@ -194,7 +221,9 @@ fn robin_boundary_solves_the_mixed_relation() {
         pre_f.view_mut().set(c, PRE);
     }
 
-    let (sub, _id) = sim.substrate().with_gradient_boundary(GradientBc::Robin(abc.clone()));
+    let (sub, _id) = sim
+        .substrate()
+        .with_gradient_boundary(GradientBc::Robin(abc.clone()));
     sub.ghost_fill(&sim);
 
     let x_edge = 0.5 * (1.0 / 8.0);
@@ -215,7 +244,11 @@ fn robin_boundary_solves_the_mixed_relation() {
                 let u_face = (edge[v] + g[v]) / 2.0;
                 let dudn = (g[v] - edge[v]) / h;
                 let lhs = abc[v][0] * u_face + abc[v][1] * dudn;
-                assert!((lhs - abc[v][2]).abs() < 1e-10, "robin var {v} at {x:?}: {lhs} != {}", abc[v][2]);
+                assert!(
+                    (lhs - abc[v][2]).abs() < 1e-10,
+                    "robin var {v} at {x:?}: {lhs} != {}",
+                    abc[v][2]
+                );
             }
             checked += 1;
         }

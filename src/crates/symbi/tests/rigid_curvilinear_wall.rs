@@ -57,7 +57,11 @@ type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 // a uniform cartesian x-directed stream in the local physical basis:
 // xhat = cos(phi) rhat - sin(phi) phihat.
 fn stream_prim(phi: f64, v: f64) -> Prim<f64, 2> {
-    Prim { rho: 1.0, vel: Tensor::new([v * phi.cos(), -v * phi.sin()]), pre: 1.0 }
+    Prim {
+        rho: 1.0,
+        vel: Tensor::new([v * phi.cos(), -v * phi.sin()]),
+        pre: 1.0,
+    }
 }
 
 fn build(vel_x: f64, with_body: bool, body_vel: [f64; 2], surface: SurfaceSpec) -> Sim {
@@ -67,7 +71,11 @@ fn build(vel_x: f64, with_body: bool, body_vel: [f64; 2], surface: SurfaceSpec) 
         .spacing([DR, DP])
         .cyl_plane(symbi_sim::state::CylPlane::RPhi)
         .boundaries(Boundaries(std::array::from_fn(|a| {
-            if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
+            if a == 1 {
+                [BoundaryType::Periodic; 2]
+            } else {
+                [BoundaryType::Outflow; 2]
+            }
         })))
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -78,18 +86,20 @@ fn build(vel_x: f64, with_body: bool, body_vel: [f64; 2], surface: SurfaceSpec) 
     if !with_body {
         return sim;
     }
-    let mut sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(
-            0,
-            Tensor::new([BODY_X, BODY_Y]),
-            Tensor::new(body_vel),
-            1.0,
-            R_BODY,
-            0.1,
-            false,
-        )
-        .with_surface(surface),
-    ));
+    let mut sim = sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new([BODY_X, BODY_Y]),
+                Tensor::new(body_vel),
+                1.0,
+                R_BODY,
+                0.1,
+                false,
+            )
+            .with_surface(surface),
+        ),
+    );
     // the CSG shape (a sphere expressed as a shape, body-local) routes the
     // runtime-JIT shaped kernel.
     sim.immersed.as_mut().unwrap().shapes[0] =
@@ -123,12 +133,25 @@ fn band_normal_speed(sim: &Sim) -> f64 {
 
 #[test]
 fn shaped_wall_enforces_no_penetration_on_the_cylindrical_chart() {
-    let no_pen = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 };
+    let no_pen = SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 1.0e3,
+        k_eta_t: 0.0,
+    };
     let mut with = build(V_INF, true, [0.0, 0.0], no_pen);
     let kw = Kern::new(GAMMA, CFL, &with.geom.allocated);
     evolve(&mut with, &kw, 1.0).expect("shaped-wall run");
 
-    let mut without = build(V_INF, false, [0.0, 0.0], SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 0.0, k_eta_t: 0.0 });
+    let mut without = build(
+        V_INF,
+        false,
+        [0.0, 0.0],
+        SurfaceSpec::Porous {
+            porosity: 0.0,
+            k_eta_n: 0.0,
+            k_eta_t: 0.0,
+        },
+    );
     let ko = Kern::new(GAMMA, CFL, &without.geom.allocated);
     evolve(&mut without, &ko, 1.0).expect("free-stream run");
 
@@ -151,7 +174,11 @@ fn force_receipt_is_a_cartesian_world_vector() {
     // x-momentum, and by the mirror symmetry of the mask about phi = pi/2 the
     // y receipt cancels. the raw local-frame sum would land the receipt in the
     // (r, phi) slots — at this position mostly slot 1, with slot 0 near zero.
-    let sealed = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+    let sealed = SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 50.0,
+    };
     let sim = build(V_INF, true, [0.0, 0.0], sealed);
     dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
@@ -169,12 +196,19 @@ fn moving_wall_target_is_rotated_into_the_local_frame() {
     // gas toward +x: the gas gains x-momentum, so the receipt on the body
     // points along -x. an unrotated velocity target reads the x-velocity as a
     // radial (locally +y) push at phi = pi/2 and the receipt lands in -y.
-    let sealed = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+    let sealed = SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 50.0,
+    };
     let sim = build(0.0, true, [V_INF, 0.0], sealed);
     dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     let f = d[0].force_delta;
-    assert!(f[0] < 0.0, "dragging still gas along +x must react along -x: {f:?}");
+    assert!(
+        f[0] < 0.0,
+        "dragging still gas along +x must react along -x: {f:?}"
+    );
     assert!(
         f[0].abs() > 3.0 * f[1].abs(),
         "the moving-wall velocity target is not frame-rotated (push landed on y): {f:?}"

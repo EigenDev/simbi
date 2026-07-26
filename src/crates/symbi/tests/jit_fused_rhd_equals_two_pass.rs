@@ -18,7 +18,7 @@ use symbi::prelude::*;
 use symbi_algebra::Domain;
 use symbi_grid::Field;
 use symbi_hydro::expr_bridge::build_user_source;
-use symbi_hydro::{SourceConfig, RHD_SPEC};
+use symbi_hydro::{RHD_SPEC, SourceConfig};
 use symbi_xpu::HostMemory;
 
 fn assert_cons_bit_identical<const D: usize>(
@@ -30,8 +30,10 @@ fn assert_cons_bit_identical<const D: usize>(
     for c in interior.iter() {
         let (va, vb) = (*a.view().at(c), *b.view().at(c));
         assert_eq!(
-            va.to_bits(), vb.to_bits(),
-            "{label} differs at {c:?}: fused={va:?} two_pass={vb:?} (delta={:?})", va - vb,
+            va.to_bits(),
+            vb.to_bits(),
+            "{label} differs at {c:?}: fused={va:?} two_pass={vb:?} (delta={:?})",
+            va - vb,
         );
     }
 }
@@ -66,34 +68,57 @@ fn rhd_raw_source_fused_equals_two_pass_rk2() {
         // non-uniform density (nonzero divergence) + subluminal velocity (live relativistic flux).
         sim.seed_cells(|p| {
             let (x, y) = (p[0], p[1]);
-            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
-            Prim { rho, vel: Tensor::new([0.1, -0.05]), pre: 1.0 }
+            let rho =
+                1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            Prim {
+                rho,
+                vel: Tensor::new([0.1, -0.05]),
+                pre: 1.0,
+            }
         });
         sim
     };
 
     // TWO-PASS: plain AOT rhd godunov + the per-cell apply_runtime_source pass.
     let mut sim_two = build();
-    let sub_two = sim_two.substrate()
-        .with_runtime_source(build_user_source(&cfg, &RHD_SPEC).unwrap(), cfg.params.clone());
+    let sub_two = sim_two.substrate().with_runtime_source(
+        build_user_source(&cfg, &RHD_SPEC).unwrap(),
+        cfg.params.clone(),
+    );
     evolve(&mut sim_two, &sub_two, t_final).expect("rhd two-pass evolve");
 
     // FUSED: one JIT'd godunov+source launch.
     let mut sim_fused = build();
-    let sub_fused = sim_fused.substrate()
-        .with_fused_runtime_source(build_user_source(&cfg, &RHD_SPEC).unwrap(), cfg.params.clone());
+    let sub_fused = sim_fused.substrate().with_fused_runtime_source(
+        build_user_source(&cfg, &RHD_SPEC).unwrap(),
+        cfg.params.clone(),
+    );
     evolve(&mut sim_fused, &sub_fused, t_final).expect("rhd fused evolve");
 
     assert_eq!(
-        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(), Some(true),
+        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(),
+        Some(true),
         "rhd fused godunov+source kernel did not compile — fell back to two-pass",
     );
 
     let interior = &sim_fused.geom.interior;
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.den,
+        &sim_two.fields.cons.den,
+        "cons.den",
+    );
     for k in 0..2 {
-        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+        assert_cons_bit_identical(
+            interior,
+            &sim_fused.fields.cons.mom[k],
+            &sim_two.fields.cons.mom[k],
+            "cons.mom",
+        );
     }
-    let (nf, nt) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_two.fields.cons.nrg_field().unwrap());
+    let (nf, nt) = (
+        sim_fused.fields.cons.nrg_field().unwrap(),
+        sim_two.fields.cons.nrg_field().unwrap(),
+    );
     assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
 }

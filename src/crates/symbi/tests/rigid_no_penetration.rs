@@ -42,23 +42,33 @@ fn build(with_body: bool) -> Sim {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([V_INF, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([V_INF, 0.0]),
+            pre: 1.0,
+        })
         .build();
     if !with_body {
         return sim;
     }
-    sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(
-            0,
-            Tensor::new([0.0, 0.0]),
-            Tensor::new([0.0, 0.0]),
-            1.0,
-            R_BODY,
-            0.1,
-            false, // free slip: the no-penetration (normal) channel alone is under test
-        )
-        .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 }),
-    ))
+    sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new([0.0, 0.0]),
+                Tensor::new([0.0, 0.0]),
+                1.0,
+                R_BODY,
+                0.1,
+                false, // free slip: the no-penetration (normal) channel alone is under test
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 1.0e3,
+                k_eta_t: 0.0,
+            }),
+        ),
+    )
 }
 
 // the max wall-normal speed |v . n| over the band of cells within one cell width

@@ -59,14 +59,22 @@ fn cyl_1d_radial_outflow_rarefies_1_over_r() {
     let (rho0, v0) = (1.0_f64, 0.5_f64);
     // uniform rho0/p=1 with a uniform outward v_r=v0.
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
-        .cells([nr]).origin([r_lo]).spacing([dr])
-        .boundaries(cyl_bc()).cfl(0.3)
+        .cells([nr])
+        .origin([r_lo])
+        .spacing([dr])
+        .boundaries(cyl_bc())
+        .cfl(0.3)
         .allocate()
         .expect("cyl 1D sim construction failed")
-        .set_initial(|_x| Prim { rho: rho0, vel: Tensor::new([v0]), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: rho0,
+            vel: Tensor::new([v0]),
+            pre: 1.0,
+        })
         .build();
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &sim.geom.allocated);
     let t = 0.02;
     evolve(&mut sim, &sub, t).expect("cyl 1D evolution failed");
 
@@ -78,18 +86,31 @@ fn cyl_1d_radial_outflow_rarefies_1_over_r() {
         }
         let r = r_lo + (c[0] as f64 + 0.5) * dr;
         let rho_c = *rho.view().at(c);
-        assert!(rho_c.is_finite() && rho_c > 0.0, "bad rho at {c:?}: {rho_c}");
-        assert!(rho_c < rho0, "rho must rarefy under outflow at r={r:.3}: {rho_c:.5}");
+        assert!(
+            rho_c.is_finite() && rho_c > 0.0,
+            "bad rho at {c:?}: {rho_c}"
+        );
+        assert!(
+            rho_c < rho0,
+            "rho must rarefy under outflow at r={r:.3}: {rho_c:.5}"
+        );
         drop_r.push((rho0 - rho_c) * r);
     }
     assert!(drop_r.len() > 8, "too few samples");
     let mean = drop_r.iter().sum::<f64>() / drop_r.len() as f64;
-    let (lo, hi) = drop_r.iter().fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
-    assert!((hi - lo) / mean < 0.15,
-        "(rho0-rho)*r not radius-constant (1/r divergence): spread {:.1}%", 100.0 * (hi - lo) / mean);
+    let (lo, hi) = drop_r
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
+    assert!(
+        (hi - lo) / mean < 0.15,
+        "(rho0-rho)*r not radius-constant (1/r divergence): spread {:.1}%",
+        100.0 * (hi - lo) / mean
+    );
     let expected = rho0 * v0 * t;
-    assert!(mean > 0.5 * expected && mean < 1.4 * expected,
-        "divergence magnitude off: (rho0-rho)*r mean={mean:.4e}, expected ~rho0*v0*t={expected:.4e}");
+    assert!(
+        mean > 0.5 * expected && mean < 1.4 * expected,
+        "divergence magnitude off: (rho0-rho)*r mean={mean:.4e}, expected ~rho0*v0*t={expected:.4e}"
+    );
 }
 
 // ----- newton physics: cyl 3D centrifugal source ----------------------------------
@@ -107,14 +128,22 @@ fn cyl_3d_swirl_centrifugal_outflow() {
     let v0 = 1.0_f64;
     // uniform rho/p=1, uniform swirl v_phi=v0, v_r=v_z=0.
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
-        .cells([nr, nphi, nz]).origin([r_lo, 0.0, 0.0]).spacing([dr, dphi, dz])
-        .boundaries(cyl_bc()).cfl(0.3)
+        .cells([nr, nphi, nz])
+        .origin([r_lo, 0.0, 0.0])
+        .spacing([dr, dphi, dz])
+        .boundaries(cyl_bc())
+        .cfl(0.3)
         .allocate()
         .expect("cyl 3D sim construction failed")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::new([0.0, v0, 0.0]), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, v0, 0.0]),
+            pre: 1.0,
+        })
         .build();
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &sim.geom.allocated);
     let t = 0.02;
     evolve(&mut sim, &sub, t).expect("cyl 3D evolution failed");
 
@@ -129,17 +158,28 @@ fn cyl_3d_swirl_centrifugal_outflow() {
         let vr_c = *vr.view().at(c);
         let vz_c = *vz.view().at(c);
         assert!(vr_c.is_finite(), "non-finite v_r at {c:?}");
-        assert!(vr_c > 0.0, "v_r must be centrifugally outward at r={r:.3}: {vr_c:.3e}");
+        assert!(
+            vr_c > 0.0,
+            "v_r must be centrifugally outward at r={r:.3}: {vr_c:.3e}"
+        );
         assert!(vz_c.abs() < 1e-3, "v_z must stay ~0 at {c:?}: {vz_c:.3e}");
         vr_r.push(vr_c * r);
     }
     assert!(vr_r.len() > 8, "too few samples");
     let mean = vr_r.iter().sum::<f64>() / vr_r.len() as f64;
-    let (lo, hi) = vr_r.iter().fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
-    assert!((hi - lo) / mean < 0.2, "v_r*r not radius-constant (3D centrifugal): spread {:.1}%", 100.0 * (hi - lo) / mean);
+    let (lo, hi) = vr_r
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
+    assert!(
+        (hi - lo) / mean < 0.2,
+        "v_r*r not radius-constant (3D centrifugal): spread {:.1}%",
+        100.0 * (hi - lo) / mean
+    );
     let expected = v0 * v0 * t;
-    assert!(mean > 0.5 * expected && mean < 1.4 * expected,
-        "3D centrifugal magnitude off: v_r*r mean={mean:.4e}, expected ~v0^2*t={expected:.4e}");
+    assert!(
+        mean > 0.5 * expected && mean < 1.4 * expected,
+        "3D centrifugal magnitude off: v_r*r mean={mean:.4e}, expected ~v0^2*t={expected:.4e}"
+    );
 }
 
 // ----- iso + rhd: NaN-free smokes across cyl 1D/2D/3D ----------------------------
@@ -149,16 +189,24 @@ fn cyl_iso_runs_all_dims() {
     let cs = 1.0_f64;
     // 1D
     {
-        type Sim = SimStateGeneric<IsoNewtonian, 1, 1, Cylindrical, Isothermal<f64>, CpuSpace, HostMemory>;
+        type Sim =
+            SimStateGeneric<IsoNewtonian, 1, 1, Cylindrical, Isothermal<f64>, CpuSpace, HostMemory>;
         let (nr, r_lo, dr) = (48usize, 1.0_f64, 1.0 / 48.0);
         let mut sim = Sim::build(IsoNewtonian, Isothermal { cs }, Cylindrical)
-            .cells([nr]).origin([r_lo]).spacing([dr])
-            .boundaries(cyl_bc()).cfl(0.3)
+            .cells([nr])
+            .origin([r_lo])
+            .spacing([dr])
+            .boundaries(cyl_bc())
+            .cfl(0.3)
             .allocate()
             .expect("iso cyl 1D ctor")
             .set_initial(|[r]| {
                 let rho = 1.0 + 0.3 * (-((r - 1.5) / 0.2).powi(2)).exp();
-                PrimG::<f64, 1, IsoModel> { rho, vel: Tensor::new([0.05]), pre: Default::default() }
+                PrimG::<f64, 1, IsoModel> {
+                    rho,
+                    vel: Tensor::new([0.05]),
+                    pre: Default::default(),
+                }
             })
             .build();
         let sub = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(cs, 0.3, &sim.geom.allocated);
@@ -167,12 +215,16 @@ fn cyl_iso_runs_all_dims() {
     }
     // 2D r-phi
     {
-        type Sim = SimStateGeneric<IsoNewtonian, 2, 2, Cylindrical, Isothermal<f64>, CpuSpace, HostMemory>;
+        type Sim =
+            SimStateGeneric<IsoNewtonian, 2, 2, Cylindrical, Isothermal<f64>, CpuSpace, HostMemory>;
         let (nr, nphi, r_lo, dr) = (24usize, 24usize, 0.6_f64, 0.8 / 24.0);
         let dphi = TWO_PI / nphi as f64;
         let mut sim = Sim::build(IsoNewtonian, Isothermal { cs }, Cylindrical)
-            .cells([nr, nphi]).origin([r_lo, 0.0]).spacing([dr, dphi])
-            .boundaries(cyl_bc()).cfl(0.3)
+            .cells([nr, nphi])
+            .origin([r_lo, 0.0])
+            .spacing([dr, dphi])
+            .boundaries(cyl_bc())
+            .cfl(0.3)
             .allocate()
             .expect("iso cyl 2D ctor")
             .set_initial(|[r, _phi]| {
@@ -191,12 +243,16 @@ fn cyl_iso_runs_all_dims() {
     }
     // 3D
     {
-        type Sim = SimStateGeneric<IsoNewtonian, 3, 3, Cylindrical, Isothermal<f64>, CpuSpace, HostMemory>;
+        type Sim =
+            SimStateGeneric<IsoNewtonian, 3, 3, Cylindrical, Isothermal<f64>, CpuSpace, HostMemory>;
         let (nr, nphi, nz, r_lo, dr) = (16usize, 12usize, 4usize, 1.0_f64, 1.0 / 16.0);
         let (dphi, dz) = (TWO_PI / nphi as f64, 0.5 / nz as f64);
         let mut sim = Sim::build(IsoNewtonian, Isothermal { cs }, Cylindrical)
-            .cells([nr, nphi, nz]).origin([r_lo, 0.0, 0.0]).spacing([dr, dphi, dz])
-            .boundaries(cyl_bc()).cfl(0.3)
+            .cells([nr, nphi, nz])
+            .origin([r_lo, 0.0, 0.0])
+            .spacing([dr, dphi, dz])
+            .boundaries(cyl_bc())
+            .cfl(0.3)
             .allocate()
             .expect("iso cyl 3D ctor")
             .set_initial(|[r, _phi, _z]| {
@@ -224,13 +280,20 @@ fn cyl_rhd_runs_all_dims() {
         let (nr, r_lo, dr) = (48usize, 1.0_f64, 1.0 / 48.0);
         // rest-frame (v=0, W=1): the prim -> cons map yields D=rho, S=0, tau=p/(gamma-1).
         let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cylindrical)
-            .cells([nr]).origin([r_lo]).spacing([dr])
-            .boundaries(cyl_bc()).cfl(0.3)
+            .cells([nr])
+            .origin([r_lo])
+            .spacing([dr])
+            .boundaries(cyl_bc())
+            .cfl(0.3)
             .allocate()
             .expect("rhd cyl 1D ctor")
             .set_initial(|[r]| {
                 let rho = 1.0 + 0.3 * (-((r - 1.5) / 0.2).powi(2)).exp();
-                Prim { rho, vel: Tensor::new([0.0]), pre: 1.0 }
+                Prim {
+                    rho,
+                    vel: Tensor::new([0.0]),
+                    pre: 1.0,
+                }
             })
             .build();
         let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &sim.geom.allocated);
@@ -244,13 +307,20 @@ fn cyl_rhd_runs_all_dims() {
         let dphi = TWO_PI / nphi as f64;
         // rest frame: p=1 (cnrg=p/(gamma-1)=1/(gamma-1)), v=0.
         let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cylindrical)
-            .cells([nr, nphi]).origin([r_lo, 0.0]).spacing([dr, dphi])
-            .boundaries(cyl_bc()).cfl(0.3)
+            .cells([nr, nphi])
+            .origin([r_lo, 0.0])
+            .spacing([dr, dphi])
+            .boundaries(cyl_bc())
+            .cfl(0.3)
             .allocate()
             .expect("rhd cyl 2D ctor")
             .set_initial(|[r, _phi]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.0) / 0.2).powi(2)).exp();
-                Prim { rho, vel: Tensor::new([0.0, 0.0]), pre: 1.0 }
+                Prim {
+                    rho,
+                    vel: Tensor::new([0.0, 0.0]),
+                    pre: 1.0,
+                }
             })
             .build();
         let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated);
@@ -264,13 +334,20 @@ fn cyl_rhd_runs_all_dims() {
         let (dphi, dz) = (TWO_PI / nphi as f64, 0.5 / nz as f64);
         // rest frame: p=1 (cnrg=1/(gamma-1)), v=0.
         let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cylindrical)
-            .cells([nr, nphi, nz]).origin([r_lo, 0.0, 0.0]).spacing([dr, dphi, dz])
-            .boundaries(cyl_bc()).cfl(0.3)
+            .cells([nr, nphi, nz])
+            .origin([r_lo, 0.0, 0.0])
+            .spacing([dr, dphi, dz])
+            .boundaries(cyl_bc())
+            .cfl(0.3)
             .allocate()
             .expect("rhd cyl 3D ctor")
             .set_initial(|[r, _phi, _z]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.5) / 0.3).powi(2)).exp();
-                Prim { rho, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 }
+                Prim {
+                    rho,
+                    vel: Tensor::new([0.0, 0.0, 0.0]),
+                    pre: 1.0,
+                }
             })
             .build();
         let sub = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &sim.geom.allocated);

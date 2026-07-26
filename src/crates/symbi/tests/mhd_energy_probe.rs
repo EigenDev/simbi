@@ -9,16 +9,16 @@
 // =============================================================================
 
 use symbi::prelude::SimSubstrate;
-use symbi::sim::refinement::Hierarchy;
 use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
+use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
-use symbi_sim::substrate_seam::Solver;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
+use symbi_sim::substrate_seam::Solver;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 4.0 / 3.0;
@@ -68,7 +68,11 @@ fn run_case(nx: usize, solver: Solver) -> (f64, u64, u64, u64) {
 
 #[test]
 fn magnetized_shock_conserves_tau_with_silent_fofc() {
-    for (nx, solver) in [(128, Solver::Hlle), (128, Solver::Hlld), (256, Solver::Hlld)] {
+    for (nx, solver) in [
+        (128, Solver::Hlle),
+        (128, Solver::Hlld),
+        (256, Solver::Hlld),
+    ] {
         let (drift, fired, froze, steps) = run_case(nx, solver);
         eprintln!(
             "DBG nx={nx} solver={solver:?}: fallback={fired} freeze={froze} dtau/tau={drift:.3e} steps={steps}"

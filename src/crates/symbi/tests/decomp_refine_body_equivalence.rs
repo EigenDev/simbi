@@ -16,9 +16,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -69,12 +69,20 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("root sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
 }
 
 // clip a region to a tile's physical slab; None when the overlap is empty or degenerate.
-fn clip(region: &RefinementRegion<2>, origin: [f64; 2], m: [usize; 2]) -> Option<RefinementRegion<2>> {
+fn clip(
+    region: &RefinementRegion<2>,
+    origin: [f64; 2],
+    m: [usize; 2],
+) -> Option<RefinementRegion<2>> {
     let mut lo = [0.0; 2];
     let mut hi = [0.0; 2];
     for a in 0..2 {
@@ -90,10 +98,20 @@ fn clip(region: &RefinementRegion<2>, origin: [f64; 2], m: [usize; 2]) -> Option
 }
 
 fn build_mono(region: &RefinementRegion<2>, sink_pos: [f64; 2]) -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow));
+    let root = build_root(
+        [N, N],
+        [0.0, 0.0],
+        Boundaries::uniform(BoundaryType::Outflow),
+    );
     let k = kset(&root);
-    let h = Hier::with_refinement(root, k, std::slice::from_ref(region), ProlongOrder::Plm, kset)
-        .expect("mono hierarchy");
+    let h = Hier::with_refinement(
+        root,
+        k,
+        std::slice::from_ref(region),
+        ProlongOrder::Plm,
+        kset,
+    )
+    .expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     let mut h = h.with_bodies(sink_at(sink_pos));
     h.prime();
@@ -108,8 +126,16 @@ fn build_tiles(counts: [usize; 2], region: &RefinementRegion<2>, sink_pos: [f64;
         let tc = unflatten(flat, counts);
         let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
-            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+            let lo = if tc[a] == 0 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
+            let hi = if tc[a] == counts[a] - 1 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
             [lo, hi]
         }));
         let root = build_root(m, origin, bnd);
@@ -190,7 +216,11 @@ fn accreted(h: &Hier) -> f64 {
     let im = finest.immersed.as_ref().expect("bodies attached");
     let mut total = 0.0;
     im.bodies.visit_accretion(|b| {
-        if let symbi_ib::BodyKind::BlackHole { total_accreted_mass, .. } = &b.kind {
+        if let symbi_ib::BodyKind::BlackHole {
+            total_accreted_mass,
+            ..
+        } = &b.kind
+        {
             total += *total_accreted_mass;
         }
     });
@@ -212,7 +242,10 @@ fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: [f6
         "some composite cells were never written"
     );
     // the sink actually removed mass (non-vacuous).
-    assert!(mono_acc > 1e-6, "the sink accreted nothing ({mono_acc:e}); test is vacuous");
+    assert!(
+        mono_acc > 1e-6,
+        "the sink accreted nothing ({mono_acc:e}); test is vacuous"
+    );
     // every tile carries the identical GLOBAL accreted-mass tally, equal to the monolithic one.
     for (i, h) in tiles.iter().enumerate() {
         let a = accreted(h);
@@ -226,14 +259,23 @@ fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: [f6
         .zip(&dec_den)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
-    assert!(err < 1e-12, "{counts:?}: refined+decomposed body run diverged from mono: {err:e}");
+    assert!(
+        err < 1e-12,
+        "{counts:?}: refined+decomposed body run diverged from mono: {err:e}"
+    );
 }
 
 #[test]
 fn sink_inside_one_tiles_patch() {
     // the patch and the sink live in the bottom-left quadrant: one tile owns both.
-    let region = RefinementRegion { x_lo: [0.125, 0.125], x_hi: [0.375, 0.375] };
-    let region2 = RefinementRegion { x_lo: region.x_lo, x_hi: region.x_hi };
+    let region = RefinementRegion {
+        x_lo: [0.125, 0.125],
+        x_hi: [0.375, 0.375],
+    };
+    let region2 = RefinementRegion {
+        x_lo: region.x_lo,
+        x_hi: region.x_hi,
+    };
     assert_matches([2, 1], region2, [0.25, 0.25]);
     assert_matches([2, 2], region, [0.25, 0.25]);
 }
@@ -243,6 +285,9 @@ fn sink_straddling_a_cut_with_the_patch_spanning_tiles() {
     // the patch spans the x = 0.5 cut in a [2, 1] tiling; the sink sits ON the cut, so each
     // tile's clipped fine level drains its own share and the cross-tile sum restores the
     // global reaction.
-    let region = RefinementRegion { x_lo: [0.25, 0.25], x_hi: [0.75, 0.75] };
+    let region = RefinementRegion {
+        x_lo: [0.25, 0.25],
+        x_hi: [0.75, 0.75],
+    };
     assert_matches([2, 1], region, [0.5, 0.5]);
 }

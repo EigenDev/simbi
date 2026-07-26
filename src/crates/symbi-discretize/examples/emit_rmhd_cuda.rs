@@ -15,38 +15,54 @@
 use std::fs;
 
 use symbi_discretize::GvKernel;
-use symbi_discretize::{rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_flux_gv};
 use symbi_discretize::Spacing;
+use symbi_discretize::{
+    rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_flux_gv, rmhd_resistive_emf_2d_gv,
+    rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv,
+};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
-use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
+use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
 
 type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
 
 // emit a Gv-traced kernel (graph + ABI manifest already carried) -> CUDA source.
 fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: Writes) {
-    assert!(!k.graph.has_errors(), "{name} graph errors: {:?}", k.graph.errors());
+    assert!(
+        !k.graph.has_errors(),
+        "{name} graph errors: {:?}",
+        k.graph.errors()
+    );
     // thread the kernel's declared smem tile intent so the emitted CUDA
     // exercises the smem prelude + redirected stencil reads through the PTX gate.
     let tile_spec = k.infer_tile_spec();
-    let desc = emit_kernel_from_lowering(&k.graph, &KernelEmitInputs {
-        kernel_name: name,
-        coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),        ndim,
-        target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
-        field_inputs: &k.field_inputs,
-        scalar_params: &k.scalar_params,
-        field_writes: &writes,
-        coord_components: &k.coord_components,
-        device_preamble: &[],
-        tile_spec: tile_spec.as_ref(),
-    });
+    let desc = emit_kernel_from_lowering(
+        &k.graph,
+        &KernelEmitInputs {
+            kernel_name: name,
+            coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),
+            ndim,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
+            field_inputs: &k.field_inputs,
+            scalar_params: &k.scalar_params,
+            field_writes: &writes,
+            coord_components: &k.coord_components,
+            device_preamble: &[],
+            tile_spec: tile_spec.as_ref(),
+        },
+    );
     let path = format!("{out_dir}/{name}.cu");
     fs::write(&path, &desc.source).unwrap_or_else(|e| panic!("write {path}: {e}"));
     println!("emitted {path}");
 }
 
 fn main() {
-    let out_dir = std::env::args().nth(1).expect("usage: emit_rmhd_cuda <out_dir>");
+    let out_dir = std::env::args()
+        .nth(1)
+        .expect("usage: emit_rmhd_cuda <out_dir>");
 
     // the KKC false-position c2p is the gv single-source physics (symbi-hydro's
     // `rmhd_recover` at S=Gv — the 6-state bracketed iterate -> multi-acc IterateInline).
@@ -75,7 +91,13 @@ fn main() {
     emit_gv(&out_dir, "rmhd_resistive_emf_2d", 2, res_k, res_w);
     for dir in 0..3 {
         let (r3_k, r3_w) = rmhd_resistive_emf_3d_dir_gv(dir);
-        emit_gv(&out_dir, &format!("rmhd_resistive_emf_3d_{dir}"), 3, r3_k, r3_w);
+        emit_gv(
+            &out_dir,
+            &format!("rmhd_resistive_emf_3d_{dir}"),
+            3,
+            r3_k,
+            r3_w,
+        );
     }
 
     // the cylindrical r-z resistive EMF: the mimetic adjoint of the cyl induction curl, carrying the
@@ -85,6 +107,7 @@ fn main() {
 
     // the immersed-body localized resistive EMF: the masked current eta*chi(x)*J with the body-mask
     // SDF (tanh mollifier + body position scalars) traced in-kernel — the GPU gate for resistive sinks.
-    let (rbody_k, rbody_w) = symbi_discretize::body_resistive_emf_2d_gv(symbi_discretize::coords::Coords::Cartesian);
+    let (rbody_k, rbody_w) =
+        symbi_discretize::body_resistive_emf_2d_gv(symbi_discretize::coords::Coords::Cartesian);
     emit_gv(&out_dir, "body_resistive_emf_2d", 2, rbody_k, rbody_w);
 }

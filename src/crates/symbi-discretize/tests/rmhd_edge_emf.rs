@@ -41,9 +41,16 @@ fn soft(f: f64, a: f64, b: f64) -> f64 {
 // independent transcription of ct_edge_emf + rmhd_ct_contact_edge.
 #[allow(clippy::too_many_arguments)]
 fn ref_edge_emf(
-    dir: usize, c: [usize; 3],
-    vp1: &[f64], vp2: &[f64], bp1: &[f64], bp2: &[f64],
-    fa: &[f64], fb: &[f64], gp1: &[f64], gp2: &[f64],
+    dir: usize,
+    c: [usize; 3],
+    vp1: &[f64],
+    vp2: &[f64],
+    bp1: &[f64],
+    bp2: &[f64],
+    fa: &[f64],
+    fb: &[f64],
+    gp1: &[f64],
+    gp2: &[f64],
 ) -> f64 {
     let p1 = (dir + 1) % 3;
     let p2 = (dir + 2) % 3;
@@ -112,18 +119,27 @@ fn rmhd_edge_emf_matches_production_gather() {
 
     for dir in 0..3 {
         let bufs: Vec<(&str, &[f64])> = vec![
-            ("edge_vp1", &vp1), ("edge_vp2", &vp2), ("edge_bp1", &bp1), ("edge_bp2", &bp2),
-            ("edge_bflux_a", &fa), ("edge_bflux_b", &fb), ("edge_fden_p1", &gp1), ("edge_fden_p2", &gp2),
+            ("edge_vp1", &vp1),
+            ("edge_vp2", &vp2),
+            ("edge_bp1", &bp1),
+            ("edge_bp2", &bp2),
+            ("edge_bflux_a", &fa),
+            ("edge_bflux_b", &fb),
+            ("edge_fden_p1", &gp1),
+            ("edge_fden_p2", &gp2),
         ];
         let got = run(dir, &bufs);
         // compare on [1, M)^3 (the -1 offsets stay in bounds).
         for i in 1..M {
             for j in 1..M {
                 for k in 1..M {
-                    let want = ref_edge_emf(dir, [i, j, k], &vp1, &vp2, &bp1, &bp2, &fa, &fb, &gp1, &gp2);
+                    let want =
+                        ref_edge_emf(dir, [i, j, k], &vp1, &vp2, &bp1, &bp2, &fa, &fb, &gp1, &gp2);
                     let g = got[idx3(i, j, k)];
-                    assert!((g - want).abs() < 1e-13,
-                        "dir {dir} cell {i},{j},{k}: {g} != {want}");
+                    assert!(
+                        (g - want).abs() < 1e-13,
+                        "dir {dir} cell {i},{j},{k}: {g} != {want}"
+                    );
                 }
             }
         }

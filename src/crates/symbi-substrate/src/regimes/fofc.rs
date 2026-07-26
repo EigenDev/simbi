@@ -12,19 +12,19 @@
 //  where the closures dispatch the substrate's own first-order flux / c2p / godunov / source.
 // =============================================================================
 
+use symbi_algebra::OrderedNumeric;
 use symbi_grid::Field;
 use symbi_ir::algebra::Scalar;
-use symbi_algebra::OrderedNumeric;
-use symbi_xpu::MemorySpace;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
+use symbi_xpu::MemorySpace;
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use crate::kernels::support::FaceDomain;
+use crate::regimes::substrate_gpu::field_reduce;
 use crate::regimes::substrate_kernels::{
     coord_suffix, dispatch_fields_each, dispatch_named, kernel_field_binds, resolve_body_scalars,
 };
-use crate::regimes::substrate_gpu::field_reduce;
-use crate::kernels::support::FaceDomain;
 use symbi_ir::emit::ReductionOp;
 
 // FOFC observability counters — the running totals of DELIBERATE fallback events over a run, so a
@@ -178,8 +178,14 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     prefix: &str,
     dof_sfx: &str,
     tag: &str,
-    src: (&ConsFieldsGeneric<D, DOF, Mem, Sc>, &PrimFieldsGeneric<D, DOF, Mem, Sc>),
-    dst: (&ConsFieldsGeneric<D, DOF, Mem, Sc>, &PrimFieldsGeneric<D, DOF, Mem, Sc>),
+    src: (
+        &ConsFieldsGeneric<D, DOF, Mem, Sc>,
+        &PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    ),
+    dst: (
+        &ConsFieldsGeneric<D, DOF, Mem, Sc>,
+        &PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    ),
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -197,7 +203,11 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
 }
@@ -236,7 +246,11 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
 }
@@ -277,11 +291,14 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &scalars);
 }
-
 
 /// dispatch the FACE-BASED FLUX SPLICE kernel `{prefix}_fofc_splice_{D}d_{dir}` over the axis-`dir`
 /// interior face domain: on each face the live first-order flux (`fo_*` = `fields.flux[dir]`, spliced
@@ -318,9 +335,20 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
-    dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior.face_domain(dir), &inputs, &outputs, &[], &[]);
+    dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &sim.geom.interior.face_domain(dir),
+        &inputs,
+        &outputs,
+        &[],
+        &[],
+    );
 }
 
 /// FOFC FREEZE DIAGNOSTIC: count the zones where the SPLICED first-order result is still unphysical —
@@ -354,14 +382,17 @@ where
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
     // SUM: the freeze flag is 0/1, so this is the COUNT of frozen zones (> 0 iff any froze — the
     // caller's streak test and the observability tally both read it).
     field_reduce(scratch, &sim.geom.interior, ReductionOp::Add)
 }
-
 
 /// the FACE-BASED FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
 /// over the interior), boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
@@ -433,7 +464,16 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean substage
     // costs one pointwise probe + a reduction, skipping the flux sweep + two extra c2p passes.
     let probe = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
-    dispatch_named(sim, pre_bind, Some(flag), 0, &probe, &sim.geom.interior, &[], &[]);
+    dispatch_named(
+        sim,
+        pre_bind,
+        Some(flag),
+        0,
+        &probe,
+        &sim.geom.interior,
+        &[],
+        &[],
+    );
     // SUM (not max): the flag is 0/1, so the reduction is the COUNT of flagged cells — it doubles as
     // the fire/skip decision (count == 0 iff every high-order c2p was physical) AND the observability
     // tally. no extra pass: this replaces the former max-reduce.
@@ -454,7 +494,14 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // componentwise conserved copy is exactly `fofc_restore` (d_x = s_x), reused on the per-direction
     // flux ConsFields.
     for dir in 0..D {
-        fofc_copy(sim, prefix, dof_sfx, "restore", (&sim.fields.flux[dir], prim), (&ws.flux_ho[dir], prim));
+        fofc_copy(
+            sim,
+            prefix,
+            dof_sfx,
+            "restore",
+            (&sim.fields.flux[dir], prim),
+            (&ws.flux_ho[dir], prim),
+        );
     }
     ct_save(); // MHD: bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF)
     // the stage input via THE accessor: at the first stage of a multi-stage scheme
@@ -462,7 +509,14 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // direct ws.u_stage read restores from a stale (first step: zeroed) buffer —
     // the redo then rebuilds the flow from garbage and the freeze tier both
     // fires where it should not and parachutes into zeros where it fires.
-    fofc_copy(sim, prefix, dof_sfx, "restore", (sim.stage_input(), prim), (cons, prim));
+    fofc_copy(
+        sim,
+        prefix,
+        dof_sfx,
+        "restore",
+        (sim.stage_input(), prim),
+        (cons, prim),
+    );
     ct_restore(); // MHD: bcell <- bcell_stage (stage-input cell B, the correct EMF/predictor base)
     c2p();
     for dir in 0..D {
@@ -540,8 +594,16 @@ mod horizon_split_tests {
         // outside; only the inside one books into the horizon subtotal.
         let n = 16isize;
         let dom = Domain::new([
-            Space { name: "i", lo: 0, hi: n },
-            Space { name: "j", lo: 0, hi: n },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: n,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: n,
+            },
         ]);
         let flag = Field::<f64, 2, HostMemory>::zeros(&dom).unwrap();
         let (x_lo, dx) = ([-2.0, -2.0], [0.25, 0.25]);

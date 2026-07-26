@@ -24,24 +24,24 @@
 use std::marker::PhantomData;
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use crate::kernels::support::cfl_from_lambda;
 use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
-    dispatch_driven_boundaries, dispatch_named, dispatch_runtime_source, geom_scalar,
-    kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, scalars_for,
-    spacetime_slug, RegimeKind, RuntimeSource, ScalarBind, Solver,
+    RegimeKind, RuntimeSource, ScalarBind, Solver, dispatch_driven_boundaries, dispatch_named,
+    dispatch_runtime_source, geom_scalar, kernel_geom, mhd_flux_suffix, mhd_geom_suffix,
+    motion_scalar, scalars_for, spacetime_slug,
 };
 use symbi_hydro::source_spec::BuiltSource;
-use symbi_sim::substrate_seam::KernelSet;
-use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
+use symbi_sim::state::FieldStore;
+use symbi_sim::substrate_seam::KernelSet;
 
 /// the per-coordinate metric scale factor `h` (in f64): the
 /// physical width along an axis is `h * coordinate_width`. cartesian = 1; spherical theta = r,
@@ -70,7 +70,11 @@ fn max_inv_physical_width<const D: usize>(geom: &symbi_sim::state::PartitionGeom
     for corner in 0..(1usize << D) {
         let coord: [isize; D] = std::array::from_fn(|d| {
             let s = &geom.interior.spaces[d];
-            if (corner >> d) & 1 == 0 { s.lo } else { s.hi - 1 }
+            if (corner >> d) & 1 == 0 {
+                s.lo
+            } else {
+                s.hi - 1
+            }
         });
         // physical cell-center per COORDINATE axis (for the scale factors), mirroring driven_inflow_lambda.
         let mut pos = [0.0f64; 3];
@@ -108,11 +112,19 @@ where
     let mut max_inv_w = 0.0f64;
     for a in 0..D {
         for side in 0..2 {
-            let bt = if side == 0 { sim.boundaries.lo(a) } else { sim.boundaries.hi(a) };
+            let bt = if side == 0 {
+                sim.boundaries.lo(a)
+            } else {
+                sim.boundaries.hi(a)
+            };
             if !matches!(bt, symbi_sim::state::BoundaryType::Driven(_)) {
                 continue;
             }
-            let s = if side == 0 { symbi_algebra::Side::Lo } else { symbi_algebra::Side::Hi };
+            let s = if side == 0 {
+                symbi_algebra::Side::Lo
+            } else {
+                symbi_algebra::Side::Hi
+            };
             for coord in geom.interior.boundary(a, s, 1).iter() {
                 // physical cell-center per COORDINATE axis (for the scale factors).
                 let mut pos = [0.0f64; 3];
@@ -197,7 +209,22 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, viscosity: 0.0, excision_radius: 0.0, alpha: 0.0, _r: PhantomData }
+        Self {
+            eos_param,
+            cfl_number,
+            theta,
+            cfl_scratch,
+            solver: Solver::Hlle,
+            ct_method: CtMethod::Contact,
+            runtime_source: None,
+            boundary_dags: Vec::new(),
+            freeze_streak: std::sync::atomic::AtomicU32::new(0),
+            resistivity: 0.0,
+            viscosity: 0.0,
+            excision_radius: 0.0,
+            alpha: 0.0,
+            _r: PhantomData,
+        }
     }
 
     /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
@@ -205,9 +232,14 @@ where
     /// `built` from `expr_bridge::build_boundary_dag(&cfg, R::SPEC)` — a complete prim prescription
     /// `[rho, vel.., pre, B..]`. for a purely toroidal injection the in-plane B is 0 and the
     /// out-of-plane B_phi is the injected toroidal field (cell-centered, div-free by axisymmetry).
-    pub fn with_driven_boundary(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> (Self, u16) {
+    pub fn with_driven_boundary(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
-        self.boundary_dags.push(RuntimeSource::new(built, params, R::SPEC.has_energy));
+        self.boundary_dags
+            .push(RuntimeSource::new(built, params, R::SPEC.has_energy));
         (self, id)
     }
 
@@ -222,7 +254,11 @@ where
         self
     }
 
-    pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+    pub fn with_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, R::SPEC.has_energy));
         self
     }
@@ -272,7 +308,14 @@ where
     /// limiter `theta` — so FOFC can re-run it at FIRST ORDER (HLLE + theta = 0) through the same
     /// code path the production sweep uses. the production `flux` calls this with the configured
     /// solver + `self.theta`.
-    fn flux_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize, flat_suffix: &str, gr_solver: &str, theta: f64) {
+    fn flux_impl(
+        &self,
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        dir: usize,
+        flat_suffix: &str,
+        gr_solver: &str,
+        theta: f64,
+    ) {
         // face domain extended +1 on the sweep hi + 1 on each transverse axis (CT corners).
         let mut face = sim.geom.interior.extend(dir, 0, 1);
         for ax in 0..D {
@@ -283,34 +326,63 @@ where
         let st = spacetime_slug(sim.geom.spacetime);
         let flux_name = if st.is_empty() {
             let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
-            format!("{}_face_flux{gsfx}{flat_suffix}_{D}d_{dir}", Self::kernel_prefix())
+            format!(
+                "{}_face_flux{gsfx}{flat_suffix}_{D}d_{dir}",
+                Self::kernel_prefix()
+            )
         } else {
             // the metric-aware valencia flux (RmhdGr). "" = HLLE, "_hlld" = tetrad MUB09, "_rusanov"
             // = the light-cone Lax-Friedrichs fan (the FOFC first-order fallback).
             let solver = gr_solver;
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-            format!("{}_face_flux{solver}{gsfx}{st}_{D}d_{dir}", Self::kernel_prefix())
+            format!(
+                "{}_face_flux{solver}{gsfx}{st}_{D}d_{dir}",
+                Self::kernel_prefix()
+            )
         };
-        let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+        let (x_lo_k, dx_k) = kernel_geom(
+            &sim.geom.x_lo,
+            &sim.geom.dx,
+            &sim.geom.maps,
+            sim.geom.coords,
+            sim.motion.a,
+        );
         let scalars = scalars_for(&flux_name, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
+            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
+                Sc::from_f64(self.eos_param)
+            }
             ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(theta),
             ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass")
-                    .map(|(_, v)| *v).expect("GR MHD flux needs schwarzschild_mass"),
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("GR MHD flux needs schwarzschild_mass"),
             ),
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin")
-                    .map(|(_, v)| *v).expect("GR MHD flux needs kerr_spin"),
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("GR MHD flux needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
-                    .unwrap_or_else(|| panic!("{} flux: unexpected scalar {other:?}", Self::kernel_prefix())),
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(|| {
+                    panic!(
+                        "{} flux: unexpected scalar {other:?}",
+                        Self::kernel_prefix()
+                    )
+                }),
             ),
             o => panic!("{} flux: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
         let pre_bind = if R::SPEC.has_energy {
-            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+            sim.fields
+                .prim
+                .pre_field()
+                .expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
@@ -326,7 +398,10 @@ where
     /// patch stages to re-attach `bcell = interp(bface_HO)` + the patch onto the corrected gas.
     fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
         let pre_bind = if R::SPEC.has_energy {
-            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+            sim.fields
+                .prim
+                .pre_field()
+                .expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
@@ -356,11 +431,14 @@ where
                 // is a 3-vector on every MHD grid (the physics is 3D; grid symmetry handles 1D/2D),
                 // matching the 3-component momentum the same kernel reads. energy regimes only (the
                 // iso cone has no tau).
-                if R::SPEC.has_energy
-                    && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
+                if R::SPEC.has_energy && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
                 {
                     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-                    let mhd = sim.fields.mhd.as_ref().expect("GRMHD projection requires mhd fields");
+                    let mhd = sim
+                        .fields
+                        .mhd
+                        .as_ref()
+                        .expect("GRMHD projection requires mhd fields");
                     crate::regimes::substrate_kernels::fofc_project(
                         sim,
                         Self::kernel_prefix(),
@@ -372,7 +450,7 @@ where
                     );
                 }
             },
-            None,  // no body-evolved freeze parachute (no MHD body source)
+            None, // no body-evolved freeze parachute (no MHD body source)
             || crate::regimes::mhd_substrate::fofc_ct_save(sim),
             || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
             || {
@@ -387,7 +465,14 @@ where
                 // restores the pre-curl face field, and re-curls -> flagged cells get diffused,
                 // recoverable B; non-flagged faces are unchanged; div(B) stays zero.
                 if patch_stage {
-                    ct::efield(sim, CtMethod::Contact, self.solver, prefix, self.eos_param, 0.0);
+                    ct::efield(
+                        sim,
+                        CtMethod::Contact,
+                        self.solver,
+                        prefix,
+                        self.eos_param,
+                        0.0,
+                    );
                     ct::fofc_emf_splice(sim, flag);
                     ct::fofc_restore_bface_n(sim);
                     ct::ct_curl(sim, dt);
@@ -452,8 +537,7 @@ where
     }
 }
 
-impl<R, Mem, Sc, const D: usize> KernelSet<D, 3, Mem, Sc>
-    for MhdSubstrateKernelSet<R, Mem, Sc, D>
+impl<R, Mem, Sc, const D: usize> KernelSet<D, 3, Mem, Sc> for MhdSubstrateKernelSet<R, Mem, Sc, D>
 where
     R: Regime<Sc, D>,
     Mem: MemorySpace + Sync,
@@ -467,7 +551,10 @@ where
             // route through dispatch_viscous_alpha's (D, DOF, chart) match, which
             // fails loud on an unbaked combination.
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(
-                sim, dt, self.alpha, self.eos_param,
+                sim,
+                dt,
+                self.alpha,
+                self.eos_param,
             );
             return;
         }
@@ -484,7 +571,11 @@ where
 
     fn flux(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize) {
         // the production sweep: the configured solver + slope limiter.
-        let gr_solver = if matches!(self.solver, Solver::Hlld) { "_hlld" } else { "" };
+        let gr_solver = if matches!(self.solver, Solver::Hlld) {
+            "_hlld"
+        } else {
+            ""
+        };
         self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
     }
 
@@ -521,45 +612,69 @@ where
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
             format!("{}_c2p{gsfx}{st}_{D}d", Self::kernel_prefix())
         };
-        let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+        let (x_lo_k, dx_k) = kernel_geom(
+            &sim.geom.x_lo,
+            &sim.geom.dx,
+            &sim.geom.maps,
+            sim.geom.coords,
+            sim.motion.a,
+        );
         // iso c2p declares no scalars -> scalars_for returns [] (resolver never called).
         let scalars = scalars_for(&cname, |bind| match bind {
             ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
                 Sc::from_f64(self.eos_param)
             }
             ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
                     .find(|(n, _)| n == "schwarzschild_mass")
                     .map(|(_, v)| *v)
                     .expect("GR MHD c2p needs schwarzschild_mass"),
             ),
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
                     .find(|(n, _)| n == "kerr_spin")
                     .map(|(_, v)| *v)
                     .expect("GR MHD c2p needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
-                    .unwrap_or_else(|| panic!("{} c2p: unexpected scalar {other:?}", Self::kernel_prefix())),
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(|| {
+                    panic!("{} c2p: unexpected scalar {other:?}", Self::kernel_prefix())
+                }),
             ),
             o => panic!("{} c2p: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
         // bind BY MANIFEST: cons.{den,mom,nrg?} + bcell(3) reads -> prim.{rho,vel,pre?} writes.
         // the energy regimes' `prim.pre` is an OUTPUT here, so `pre` binds the real field.
         let pre_bind = if R::SPEC.has_energy {
-            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+            sim.fields
+                .prim
+                .pre_field()
+                .expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
-        dispatch_named(sim, pre_bind, None, 0, &cname, &sim.geom.interior, &[], &scalars);
+        dispatch_named(
+            sim,
+            pre_bind,
+            None,
+            0,
+            &cname,
+            &sim.geom.interior,
+            &[],
+            &scalars,
+        );
     }
 
     fn wave_speeds(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         // materializing regimes (RMHD always; NMHD under UCT, whose edge-EMF coefficients read
         // wave_speed_l/r) run the per-cell pass; others compute speeds inline in the flux.
         let materialize = R::SPEC.materializes_wave_speeds
-            || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
+            || (self.ct_method == CtMethod::Uct
+                && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
         let st = spacetime_slug(sim.geom.spacetime);
         // GR: the flux computes its bound speeds inline, so the ONLY consumer of the materialized
         // per-cell speeds is the GR-UCT edge EMF. materialize (the cheap SHIFTED BF bound) exactly
@@ -570,25 +685,61 @@ where
             }
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
             let wsname = format!("{}_wave_speeds_cell{gsfx}{st}_{D}d", Self::kernel_prefix());
-            let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+            let (x_lo_k, dx_k) = kernel_geom(
+                &sim.geom.x_lo,
+                &sim.geom.dx,
+                &sim.geom.maps,
+                sim.geom.coords,
+                sim.motion.a,
+            );
             let scalars = scalars_for(&wsname, |bind| match bind {
-                ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
+                ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
+                    Sc::from_f64(self.eos_param)
+                }
                 ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                    sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass")
-                        .map(|(_, v)| *v).expect("GR UCT wave speeds need schwarzschild_mass"),
+                    sim.geom
+                        .spacetime_scalars
+                        .iter()
+                        .find(|(n, _)| n == "schwarzschild_mass")
+                        .map(|(_, v)| *v)
+                        .expect("GR UCT wave speeds need schwarzschild_mass"),
                 ),
                 ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                    sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin")
-                        .map(|(_, v)| *v).expect("GR UCT wave speeds need kerr_spin"),
+                    sim.geom
+                        .spacetime_scalars
+                        .iter()
+                        .find(|(n, _)| n == "kerr_spin")
+                        .map(|(_, v)| *v)
+                        .expect("GR UCT wave speeds need kerr_spin"),
                 ),
                 ScalarBind::Ref(other) => Sc::from_f64(
-                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
-                        .unwrap_or_else(|| panic!("{} wave_speeds: unexpected scalar {other:?}", Self::kernel_prefix())),
+                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(|| {
+                        panic!(
+                            "{} wave_speeds: unexpected scalar {other:?}",
+                            Self::kernel_prefix()
+                        )
+                    }),
                 ),
-                o => panic!("{} wave_speeds: unexpected scalar {o:?}", Self::kernel_prefix()),
+                o => panic!(
+                    "{} wave_speeds: unexpected scalar {o:?}",
+                    Self::kernel_prefix()
+                ),
             });
-            let pre_bind = sim.fields.prim.pre_field().expect("GR MHD requires prim.pre");
-            dispatch_named(sim, pre_bind, None, 0, &wsname, &sim.geom.allocated, &[], &scalars);
+            let pre_bind = sim
+                .fields
+                .prim
+                .pre_field()
+                .expect("GR MHD requires prim.pre");
+            dispatch_named(
+                sim,
+                pre_bind,
+                None,
+                0,
+                &wsname,
+                &sim.geom.allocated,
+                &[],
+                &scalars,
+            );
             return;
         }
         if !materialize {
@@ -596,18 +747,35 @@ where
         }
         let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());
         let scalars = scalars_for(&wsname, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
-            o => panic!("{} wave_speeds: unexpected scalar {o:?}", Self::kernel_prefix()),
+            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
+                Sc::from_f64(self.eos_param)
+            }
+            o => panic!(
+                "{} wave_speeds: unexpected scalar {o:?}",
+                Self::kernel_prefix()
+            ),
         });
         // bind BY MANIFEST: prim + bcell reads -> the per-axis `wave_speed_{l,r}[k]` writes (typed
         // `WaveSpeedL/R(k)`). energy regimes have prim.pre; isothermal (no pressure) passes den as
         // the leading window field (mirrors the cfl dispatch).
         let pre_bind = if R::SPEC.has_energy {
-            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+            sim.fields
+                .prim
+                .pre_field()
+                .expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
-        dispatch_named(sim, pre_bind, None, 0, &wsname, &sim.geom.allocated, &[], &scalars);
+        dispatch_named(
+            sim,
+            pre_bind,
+            None,
+            0,
+            &wsname,
+            &sim.geom.allocated,
+            &[],
+            &scalars,
+        );
     }
 
     // horizon excision as the sweep/finalize pieces (see the RHD set): the gas
@@ -645,14 +813,16 @@ where
         // geometric-mean CFL-width map (`_logr`); uniform grids get sp = "" so the name is unchanged.
         let wname = format!(
             "{}_wave_speed_map{}{st}_{D}d",
-            Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes)
+            Self::kernel_prefix(),
+            mhd_geom_suffix(geom.coords, &geom.axes)
         );
         // scalars BY NAME (the kernel's declared set drives it): eos param + the per-axis CFL
         // widths (cartesian `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`); the mhd substrates run static,
         // so the motion rates bind 0. `kernel_geom` gives the log-aware per-axis scalars the in-kernel
         // `gv_axis_face_at` reads via `map_kind`; on a uniform static grid it is bit-identical to the
         // physical geometry.
-        let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+        let (x_lo_phys, dx_phys) =
+            kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
         let resolve_scalar = |bind: &ScalarBind| -> Sc {
             let sref = match bind {
                 ScalarBind::Ref(sref) => sref,
@@ -661,18 +831,23 @@ where
                 ScalarBind::Spec(sp) if &**sp == "excision_radius" => {
                     return Sc::from_f64(self.excision_radius);
                 }
-                other => panic!("{} cfl: unexpected spec scalar {other:?}", Self::kernel_prefix()),
+                other => panic!(
+                    "{} cfl: unexpected spec scalar {other:?}",
+                    Self::kernel_prefix()
+                ),
             };
             match *sref {
                 ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(self.eos_param),
                 ScalarRef::SchwarzschildMass => Sc::from_f64(
-                    geom.spacetime_scalars.iter()
+                    geom.spacetime_scalars
+                        .iter()
                         .find(|(n, _)| n == "schwarzschild_mass")
                         .map(|(_, v)| *v)
                         .expect("GR MHD cfl needs schwarzschild_mass"),
                 ),
                 ScalarRef::KerrSpin => Sc::from_f64(
-                    geom.spacetime_scalars.iter()
+                    geom.spacetime_scalars
+                        .iter()
                         .find(|(n, _)| n == "kerr_spin")
                         .map(|(_, v)| *v)
                         .expect("GR MHD cfl needs kerr_spin"),
@@ -680,7 +855,9 @@ where
                 other => Sc::from_f64(
                     motion_scalar(&sim.motion, geom.coords, D, other)
                         .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
-                        .unwrap_or_else(|| panic!("{} cfl: unexpected scalar {other:?}", Self::kernel_prefix())),
+                        .unwrap_or_else(|| {
+                            panic!("{} cfl: unexpected scalar {other:?}", Self::kernel_prefix())
+                        }),
                 ),
             }
         };
@@ -688,11 +865,23 @@ where
         // bind BY MANIFEST: prim + bcell reads -> the `scratch` lambda write (the cfl_scratch
         // field, supplied as the scratch override). iso passes a dummy pre (reads cs^2*rho).
         let pre_bind = if R::SPEC.has_energy {
-            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+            sim.fields
+                .prim
+                .pre_field()
+                .expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
-        dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &wname, &geom.interior, &[], &scalars);
+        dispatch_named(
+            sim,
+            pre_bind,
+            Some(&self.cfl_scratch),
+            0,
+            &wname,
+            &geom.interior,
+            &[],
+            &scalars,
+        );
         // the wu 2017 (arXiv:1708.07267) source-admissibility rate: on a curved background the
         // geometric source S advances U -> U + dt S and can push the conserved state out of the
         // physical-constraint set; the light-cone LxF FOFC flux is only physical-constraint-preserving
@@ -722,12 +911,23 @@ where
         if !st.is_empty() {
             let sname = format!(
                 "{}_source_cfl{}{st}_{D}d",
-                Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes)
+                Self::kernel_prefix(),
+                mhd_geom_suffix(geom.coords, &geom.axes)
             );
             let sscalars = scalars_for(&sname, &resolve_scalar);
-            dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &sname, &geom.interior, &[], &sscalars);
+            dispatch_named(
+                sim,
+                pre_bind,
+                Some(&self.cfl_scratch),
+                0,
+                &sname,
+                &geom.interior,
+                &[],
+                &sscalars,
+            );
         }
-        let mut lambda_max = crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
+        let mut lambda_max =
+            crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
         // OHMIC RESISTIVE CFL: explicit induction diffusion is stable for `dt <= dx^2 / (2 D eta)`;
         // fold the equivalent rate `2 D eta / min(dx)^2` (an inverse timescale, like the wave rate)
         // into lambda_max so the shared `dt = cfl / lambda_max` bounds the step. 0 off resistive MHD.
@@ -754,7 +954,11 @@ where
         // resistive one; fold the equivalent rate for the constant nu OR the alpha
         // bound (largest local sound speed at the slowest orbit).
         let nu_eff = if self.alpha > 0.0 {
-            crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(sim, self.alpha, self.eos_param)
+            crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(
+                sim,
+                self.alpha,
+                self.eos_param,
+            )
         } else {
             self.viscosity
         };
@@ -774,7 +978,11 @@ where
         }
         // GHOST-BAND FAIL-LOUD: a poisoned boundary leaves a non-finite ghost that FOFC never touches;
         // force the rate to +inf (dt -> 0, halt) if any zone in the allocated domain is non-finite.
-        if !crate::regimes::substrate_kernels::state_finite_over_allocated(sim, pre_bind, &self.cfl_scratch) {
+        if !crate::regimes::substrate_kernels::state_finite_over_allocated(
+            sim,
+            pre_bind,
+            &self.cfl_scratch,
+        ) {
             lambda_max = f64::INFINITY;
         }
         let dt = cfl_from_lambda(lambda_max, self.cfl_number);
@@ -793,7 +1001,15 @@ where
 
     // ---- regime-agnostic tails: the gas godunov + the full CT stack (shared AOT kernels) ----
     fn godunov_stage(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        crate::regimes::mhd_substrate::godunov_stage(sim, R::SPEC.has_energy, Self::kernel_prefix(), self.eos_param, dt, a0, ac);
+        crate::regimes::mhd_substrate::godunov_stage(
+            sim,
+            R::SPEC.has_energy,
+            Self::kernel_prefix(),
+            self.eos_param,
+            dt,
+            a0,
+            ac,
+        );
     }
     fn ghost_fill(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::ghost_fill(sim, R::SPEC.has_energy);
@@ -810,16 +1026,30 @@ where
         // UCT needs the per-cell Riemann wave speeds; only regimes that materialize them (RMHD)
         // can use it today, so fall back to Contact otherwise (nmhd/imhd).
         let materialized = R::SPEC.materializes_wave_speeds
-            || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
+            || (self.ct_method == CtMethod::Uct
+                && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
         let method = if self.ct_method == CtMethod::Uct && !materialized {
             CtMethod::Contact
         } else {
             self.ct_method
         };
-        crate::regimes::mhd_substrate::efield(sim, method, self.solver, Self::kernel_prefix(), self.eos_param, self.theta);
+        crate::regimes::mhd_substrate::efield(
+            sim,
+            method,
+            self.solver,
+            Self::kernel_prefix(),
+            self.eos_param,
+            self.theta,
+        );
     }
     fn post_godunov(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
-        crate::regimes::mhd_substrate::post_godunov(sim, R::SPEC.has_energy, dt, stage, self.resistivity);
+        crate::regimes::mhd_substrate::post_godunov(
+            sim,
+            R::SPEC.has_energy,
+            dt,
+            stage,
+            self.resistivity,
+        );
     }
 
     fn has_additive_source(&self) -> bool {

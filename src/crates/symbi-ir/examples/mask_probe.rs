@@ -12,7 +12,9 @@
 // =============================================================================
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: mask_probe <ir.json>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: mask_probe <ir.json>");
     let ir = std::fs::read_to_string(&path).expect("read ir json");
     let mut prepared: symbi_ir::Prepared = serde_json::from_str(&ir).expect("deserialize Prepared");
     println!(

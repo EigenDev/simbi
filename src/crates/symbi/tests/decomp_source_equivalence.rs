@@ -22,7 +22,7 @@
 
 use symbi::prelude::SimSubstrate;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, gather_interiors, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, gather_interiors, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -30,7 +30,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_user_sources;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -111,7 +111,11 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .expect("sim construction failed")
         .set_initial(|x| {
             let b = bump(x[0]);
-            Prim { rho: 1.0 + b, vel: Tensor::new([0.0; 2]), pre: 1.0 + b }
+            Prim {
+                rho: 1.0 + b,
+                vel: Tensor::new([0.0; 2]),
+                pre: 1.0 + b,
+            }
         })
         .build();
     let table = r#"{
@@ -158,8 +162,16 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd, ts)
@@ -192,7 +204,11 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
 }
 
 // scatter a per-cell field (selected by `pick`) from every tile interior into one global N^2 grid.
-fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [isize; 2]) -> f64) -> Vec<f64> {
+fn global_field(
+    tiles: &[(Sim, Kern)],
+    counts: [usize; 2],
+    pick: impl Fn(&Sim, [isize; 2]) -> f64,
+) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let mut out = vec![f64::NAN; N * N];
     for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
@@ -207,7 +223,10 @@ fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_source_matches(counts: [usize; 2], ts: Timestepping) {
@@ -231,12 +250,21 @@ fn assert_source_matches(counts: [usize; 2], ts: Timestepping) {
     // the source must have actually moved gas (else the test proves nothing): the position force
     // accelerates every cell, so total |mom_x| is well above zero.
     let total_momx: f64 = mono_momx.iter().map(|v| v.abs()).sum();
-    assert!(total_momx > 1e-3, "source produced no momentum ({total_momx:e}); test is vacuous");
+    assert!(
+        total_momx > 1e-3,
+        "source produced no momentum ({total_momx:e}); test is vacuous"
+    );
 
     let de = max_err(&mono_den, &dec_den);
     let me = max_err(&mono_momx, &dec_momx);
-    assert!(de < 1e-12, "{counts:?} {ts:?} density err {de:e} under runtime source");
-    assert!(me < 1e-12, "{counts:?} {ts:?} mom_x err {me:e} under runtime source");
+    assert!(
+        de < 1e-12,
+        "{counts:?} {ts:?} density err {de:e} under runtime source"
+    );
+    assert!(
+        me < 1e-12,
+        "{counts:?} {ts:?} mom_x err {me:e} under runtime source"
+    );
 
     // ALSO the production gather path (the python checkpoint output).
     let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));

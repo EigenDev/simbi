@@ -38,10 +38,20 @@ fn make() -> Sim {
         .allocate()
         .expect("3d mhd sim")
         .set_initial(|[_x, y, _z]| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([B0 * (k * y).sin(), 0.0, 0.0]),
         })
-        .seed_faces(|axis, x| if axis == 0 { B0 * (k * x[1]).sin() } else { 0.0 })
+        .seed_faces(|axis, x| {
+            if axis == 0 {
+                B0 * (k * x[1]).sin()
+            } else {
+                0.0
+            }
+        })
         .build()
 }
 
@@ -54,9 +64,15 @@ fn energies(s: &Sim) -> (f64, f64, f64) {
     for c in s.geom.interior.iter() {
         let rho = *den.view().at(c);
         let mut msq = 0.0;
-        for k in 0..3 { let mo = *s.fields.cons.mom[k].view().at(c); msq += mo * mo; }
+        for k in 0..3 {
+            let mo = *s.fields.cons.mom[k].view().at(c);
+            msq += mo * mo;
+        }
         let mut bsq = 0.0;
-        for k in 0..3 { let b = *m.bcell[k].view().at(c); bsq += b * b; }
+        for k in 0..3 {
+            let b = *m.bcell[k].view().at(c);
+            bsq += b * b;
+        }
         let tot = *nrg.view().at(c);
         e += tot;
         me += 0.5 * bsq;
@@ -69,20 +85,34 @@ fn energies(s: &Sim) -> (f64, f64, f64) {
 fn resistive_mhd_conserves_energy_and_heats_the_gas() {
     let mut sim = make();
     let (e0, me0, ie0) = energies(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_resistivity(0.05);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_resistivity(0.05);
     evolve(&mut sim, &sub, T_FINAL).expect("resistive mhd evolve failed");
     let (e1, me1, ie1) = energies(&sim);
 
     let me_loss = me0 - me1;
     let ie_gain = ie1 - ie0;
-    assert!(me_loss > 0.05 * me0, "resistivity should have dissipated substantial magnetic energy: {me0} -> {me1}");
+    assert!(
+        me_loss > 0.05 * me0,
+        "resistivity should have dissipated substantial magnetic energy: {me0} -> {me1}"
+    );
     // TOTAL energy conserved to round-off (the conservative total-energy flux form). the Ohmic
     // dissipation redistributes energy within the conserved total, so the sum is unchanged.
     let rel_drift = (e1 - e0).abs() / e0;
-    assert!(rel_drift < 1e-10, "resistive MHD did not conserve total energy: relative drift {rel_drift:.3e}");
+    assert!(
+        rel_drift < 1e-10,
+        "resistive MHD did not conserve total energy: relative drift {rel_drift:.3e}"
+    );
     // the dissipated magnetic energy became gas internal energy: the gas heated by ~the magnetic loss.
-    assert!(ie_gain > 0.0, "the gas did not heat: internal {ie0} -> {ie1}");
+    assert!(
+        ie_gain > 0.0,
+        "the gas did not heat: internal {ie0} -> {ie1}"
+    );
     // nearly ALL the dissipated magnetic energy became gas HEAT (a sub-percent sliver goes to kinetic
     // energy from the resistive dynamics; E = KE + ME + IE is the exactly-conserved total above).
     assert!(

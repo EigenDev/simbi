@@ -18,8 +18,8 @@
 //     sampler distinguishes a too-narrow declaration
 // =============================================================================
 
-use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
-use symbi_ir::{kernel_output_support_from_ir, kernel_scalar_params_typed_from_ir, Support};
+use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
+use symbi_ir::{Support, kernel_output_support_from_ir, kernel_scalar_params_typed_from_ir};
 
 const N: usize = 96;
 const X_LO: f64 = -1.2;
@@ -106,7 +106,14 @@ fn run_drain() -> (Vec<Vec<f64>>, Support) {
                 scalars.push(v);
             }
         }
-        kernel(&inputs, &mut out_fields, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        kernel(
+            &inputs,
+            &mut out_fields,
+            &[N as u32; 2],
+            &[0i32; 2],
+            &ints,
+            &scalars,
+        );
     }
     (outs, support)
 }
@@ -118,7 +125,11 @@ fn drain_outputs_are_exactly_zero_outside_the_declared_ball() {
         .eval_ball(&|n| scalar_value(n))
         .expect("the drain support must be a Ball");
     assert_eq!(center, BODY_POS.to_vec());
-    assert_eq!(radius, RACC + 20.0 * DX, "the declared radius drifted from ibm::DRAIN_SUPPORT_WIDTHS");
+    assert_eq!(
+        radius,
+        RACC + 20.0 * DX,
+        "the declared radius drifted from ibm::DRAIN_SUPPORT_WIDTHS"
+    );
     assert!(
         radius < (N as f64) * DX * 0.5,
         "the ball covers the whole grid — the outside sample set is empty and the law vacuous",
@@ -128,9 +139,8 @@ fn drain_outputs_are_exactly_zero_outside_the_declared_ball() {
     let mut inside_nonzero = false;
     for ii in 0..N {
         for jj in 0..N {
-            let d = ((cell_center(ii) - center[0]).powi(2)
-                + (cell_center(jj) - center[1]).powi(2))
-            .sqrt();
+            let d = ((cell_center(ii) - center[0]).powi(2) + (cell_center(jj) - center[1]).powi(2))
+                .sqrt();
             let cell = ii + jj * N;
             for (k, o) in outs.iter().enumerate() {
                 assert_ne!(
@@ -155,7 +165,10 @@ fn drain_outputs_are_exactly_zero_outside_the_declared_ball() {
             }
         }
     }
-    assert!(outside > N * N / 10, "too few outside-ball cells ({outside}) — weak sample");
+    assert!(
+        outside > N * N / 10,
+        "too few outside-ball cells ({outside}) — weak sample"
+    );
     assert!(
         inside_nonzero,
         "no absorbed mass anywhere inside the ball — the kernel never drained and the law is vacuous",
@@ -173,9 +186,8 @@ fn a_shrunken_ball_is_caught_by_the_sampler() {
     let mut violations = 0usize;
     for ii in 0..N {
         for jj in 0..N {
-            let d = ((cell_center(ii) - center[0]).powi(2)
-                + (cell_center(jj) - center[1]).powi(2))
-            .sqrt();
+            let d = ((cell_center(ii) - center[0]).powi(2) + (cell_center(jj) - center[1]).powi(2))
+                .sqrt();
             if d > shrunk && outs.iter().any(|o| o[ii + jj * N] != 0.0) {
                 violations += 1;
             }

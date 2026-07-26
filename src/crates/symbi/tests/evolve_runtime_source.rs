@@ -12,12 +12,16 @@
 
 use symbi::prelude::*;
 use symbi_hydro::expr_bridge::{build_user_source, build_user_sources};
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
 fn mom_x_total(sim: &Sim) -> f64 {
-    sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).sum()
+    sim.geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.mom[0].view().at(c))
+        .sum()
 }
 
 #[test]
@@ -36,12 +40,21 @@ fn runtime_loaded_force_accelerates_gas() {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
 
     // attach the RUNTIME-loaded source — no recompile, no AOT-baked kernel.
-    let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());
+    let sub = sim
+        .substrate()
+        .with_runtime_source(built, cfg.params.clone());
 
-    assert!(mom_x_total(&sim).abs() < 1e-12, "x-momentum should start at zero");
+    assert!(
+        mom_x_total(&sim).abs() < 1e-12,
+        "x-momentum should start at zero"
+    );
 
     let t_final = 0.05;
     evolve(&mut sim, &sub, t_final).expect("evolve under runtime source");
@@ -59,7 +72,10 @@ fn runtime_loaded_force_accelerates_gas() {
     // density stays uniform (the boost is galilean) — a sanity check the source didn't corrupt mass.
     for c in sim.geom.interior.iter() {
         let rho = *sim.fields.cons.den.view().at(c);
-        assert!((rho - 1.0).abs() < 1e-6, "density drifted at {c:?}: rho = {rho}");
+        assert!(
+            (rho - 1.0).abs() < 1e-6,
+            "density drifted at {c:?}: rho = {rho}"
+        );
     }
 }
 
@@ -90,7 +106,11 @@ fn runtime_source_collection_sums_independent_parameters() {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
     let sub = sim.substrate().with_runtime_source(built, params);
 
     let t_final = 0.05;

@@ -48,16 +48,33 @@ fn rnd(i: isize, j: isize, salt: u64) -> f64 {
 fn in_window(c: [isize; 2]) -> bool {
     c[0] >= PAD && c[0] < N as isize - PAD && c[1] >= PAD && c[1] < N as isize - PAD
 }
-fn bx_seed(c: [isize; 2]) -> f64 { if in_window(c) { rnd(c[0], c[1], 1) } else { 0.0 } }
-fn by_seed(c: [isize; 2]) -> f64 { if in_window(c) { rnd(c[0], c[1], 2) } else { 0.0 } }
+fn bx_seed(c: [isize; 2]) -> f64 {
+    if in_window(c) {
+        rnd(c[0], c[1], 1)
+    } else {
+        0.0
+    }
+}
+fn by_seed(c: [isize; 2]) -> f64 {
+    if in_window(c) {
+        rnd(c[0], c[1], 2)
+    } else {
+        0.0
+    }
+}
 
 fn make_sim(magnetic: MagneticSpec) -> Sim {
     let dx = 1.0 / N as f64;
-    let sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+    let sim = SimStateGeneric::<
         NewtonianMhd,
-        IdealGas { gamma: GAMMA },
+        2,
+        3,
         Cartesian,
-    )
+        IdealGas<f64>,
+        CpuSpace,
+        HostMemory,
+        f64,
+    >::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
     .cells([N, N])
     .origin([0.0, 0.0])
     .spacing([dx, dx])
@@ -66,18 +83,36 @@ fn make_sim(magnetic: MagneticSpec) -> Sim {
     .allocate()
     .expect("resistive body sim construction failed")
     .set_initial(|_| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.0, 0.0, 0.0]),
     })
     .seed_faces(|_, _| 0.0)
     .build();
     // a hydrodynamically-transparent porous body (drain off, wall force off) that keeps a mask radius
     // for the magnetic SDF; the coupling under test is purely the magnetic one.
-    sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::new(BODY), Tensor::zeros(), 1.0, R_BODY, 1.0, false)
-            .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 0.0, k_eta_t: 0.0 })
+    sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new(BODY),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                1.0,
+                false,
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 0.0,
+                k_eta_t: 0.0,
+            })
             .with_magnetic(magnetic),
-    ))
+        ),
+    )
 }
 
 // distance from the body center to the E_z corner at edge coord c.
@@ -90,9 +125,15 @@ fn corner_dist(s: &Sim, c: [isize; 2]) -> f64 {
 
 fn seed_field(s: &Sim) {
     let m = s.fields.mhd.as_ref().unwrap();
-    for c in m.bface[0].domain().iter() { m.bface[0].set(c, bx_seed(c)); }
-    for c in m.bface[1].domain().iter() { m.bface[1].set(c, by_seed(c)); }
-    for c in m.efield[0].domain().iter() { m.efield[0].set(c, 0.0); }
+    for c in m.bface[0].domain().iter() {
+        m.bface[0].set(c, bx_seed(c));
+    }
+    for c in m.bface[1].domain().iter() {
+        m.bface[1].set(c, by_seed(c));
+    }
+    for c in m.efield[0].domain().iter() {
+        m.efield[0].set(c, 0.0);
+    }
 }
 
 #[test]
@@ -111,12 +152,19 @@ fn resistive_body_localizes_and_dissipates() {
         for c in m.efield[0].domain().iter() {
             let e = m.efield[0].at(c).abs();
             let r = corner_dist(&sim, c);
-            if r < R_BODY { near_max = near_max.max(e); }
+            if r < R_BODY {
+                near_max = near_max.max(e);
+            }
             // beyond ~6 cells the mollified tanh mask (width one cell) has decayed by >5 decades.
-            if r > R_BODY + 6.0 * sim.geom.dx[0] { far_max = far_max.max(e); }
+            if r > R_BODY + 6.0 * sim.geom.dx[0] {
+                far_max = far_max.max(e);
+            }
         }
     }
-    assert!(near_max > 1e-6, "the resistive body added no EMF inside its mask (near_max = {near_max})");
+    assert!(
+        near_max > 1e-6,
+        "the resistive body added no EMF inside its mask (near_max = {near_max})"
+    );
     assert!(
         far_max < 1e-3 * near_max,
         "the resistive EMF is not localized to the body mask: far_max = {far_max}, near_max = {near_max}"
@@ -128,8 +176,12 @@ fn resistive_body_localizes_and_dissipates() {
     let mut dw = 0.0_f64;
     {
         let m = sim.fields.mhd.as_ref().unwrap();
-        for c in m.bface[0].domain().iter() { dw += bx_seed(c) * (*m.bface[0].at(c) - bx_seed(c)); }
-        for c in m.bface[1].domain().iter() { dw += by_seed(c) * (*m.bface[1].at(c) - by_seed(c)); }
+        for c in m.bface[0].domain().iter() {
+            dw += bx_seed(c) * (*m.bface[0].at(c) - bx_seed(c));
+        }
+        for c in m.bface[1].domain().iter() {
+            dw += by_seed(c) * (*m.bface[1].at(c) - by_seed(c));
+        }
     }
     assert!(
         dw < -1e-9,
@@ -142,9 +194,17 @@ fn resistive_body_localizes_and_dissipates() {
     body_resistive_emf::<2, 3, HostMemory, f64>(&sim_none);
     let none_max = {
         let m = sim_none.fields.mhd.as_ref().unwrap();
-        sim_none.geom.interior.iter().map(|c| m.efield[0].at(c).abs()).fold(0.0_f64, f64::max)
+        sim_none
+            .geom
+            .interior
+            .iter()
+            .map(|c| m.efield[0].at(c).abs())
+            .fold(0.0_f64, f64::max)
     };
-    assert_eq!(none_max, 0.0, "a non-magnetic body perturbed the edge EMF (max |E| = {none_max})");
+    assert_eq!(
+        none_max, 0.0,
+        "a non-magnetic body perturbed the edge EMF (max |E| = {none_max})"
+    );
 }
 
 // the magnetic energy in a radial shell [lo, hi) from the body center, over the interior.
@@ -160,7 +220,10 @@ fn mag_energy_shell(s: &Sim, lo: f64, hi: f64) -> f64 {
             let r = ((px - BODY[0]).powi(2) + (py - BODY[1]).powi(2)).sqrt();
             (r >= lo && r < hi).then(|| {
                 let mut bsq = 0.0;
-                for k in 0..3 { let b = *m.bcell[k].view().at(c); bsq += b * b; }
+                for k in 0..3 {
+                    let b = *m.bcell[k].view().at(c);
+                    bsq += b * b;
+                }
                 0.5 * bsq
             })
         })
@@ -172,11 +235,16 @@ fn make_evolve_sim(magnetic: MagneticSpec) -> Sim {
     let dx = 1.0 / N as f64;
     let k = 2.0 * std::f64::consts::PI;
     let b0 = 1e-2;
-    let sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
+    let sim = SimStateGeneric::<
         NewtonianMhd,
-        IdealGas { gamma: GAMMA },
+        2,
+        3,
         Cartesian,
-    )
+        IdealGas<f64>,
+        CpuSpace,
+        HostMemory,
+        f64,
+    >::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
     .cells([N, N])
     .origin([0.0, 0.0])
     .spacing([dx, dx])
@@ -185,16 +253,34 @@ fn make_evolve_sim(magnetic: MagneticSpec) -> Sim {
     .allocate()
     .expect("evolve sim construction failed")
     .set_initial(move |[_x, y]| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
     })
     .seed_faces(move |axis, [_x, y]| if axis == 0 { b0 * (k * y).sin() } else { 0.0 })
     .build();
-    sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::new(BODY), Tensor::zeros(), 1.0, R_BODY, 1.0, false)
-            .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 0.0, k_eta_t: 0.0 })
+    sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new(BODY),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                1.0,
+                false,
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 0.0,
+                k_eta_t: 0.0,
+            })
             .with_magnetic(magnetic),
-    ))
+        ),
+    )
 }
 
 #[test]
@@ -206,9 +292,17 @@ fn resistive_body_localizes_under_full_evolution() {
         let mut sim = make_evolve_sim(magnetic);
         let near0 = mag_energy_shell(&sim, 0.0, 0.30);
         let far0 = mag_energy_shell(&sim, 0.60, 1.0);
-        let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+        let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+            GAMMA,
+            0.3,
+            1.0,
+            &sim.geom.allocated,
+        );
         evolve_with_callback(&mut sim, &sub, 0.1, u64::MAX, |_| {}).expect("evolve failed");
-        (mag_energy_shell(&sim, 0.0, 0.30) / near0, mag_energy_shell(&sim, 0.60, 1.0) / far0)
+        (
+            mag_energy_shell(&sim, 0.0, 0.30) / near0,
+            mag_energy_shell(&sim, 0.60, 1.0) / far0,
+        )
     };
     let (near_res, far_res) = run(MagneticSpec::Resistive { eta: 0.03 });
     let (near_none, far_none) = run(MagneticSpec::None);
@@ -228,7 +322,8 @@ fn resistive_body_localizes_under_full_evolution() {
 // 3D cartesian: the same localization + dissipation properties for the full 3D
 // body-mask resistive EMF (all three edge EMFs).
 // =============================================================================
-type Sim3 = SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
+type Sim3 =
+    SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 
 const N3: usize = 16;
 const BODY3: [f64; 3] = [0.5, 0.5, 0.5];
@@ -247,7 +342,11 @@ fn in_window3(c: [isize; 3]) -> bool {
     (0..3).all(|a| c[a] >= PAD && c[a] < N3 as isize - PAD)
 }
 fn bseed3(axis: usize, c: [isize; 3]) -> f64 {
-    if in_window3(c) { rnd3(c, axis as u64 + 1) } else { 0.0 }
+    if in_window3(c) {
+        rnd3(c, axis as u64 + 1)
+    } else {
+        0.0
+    }
 }
 
 fn make_sim3(magnetic: MagneticSpec) -> Sim3 {
@@ -261,32 +360,57 @@ fn make_sim3(magnetic: MagneticSpec) -> Sim3 {
         .allocate()
         .expect("3D resistive body sim construction failed")
         .set_initial(|_| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.0, 0.0]),
         })
         .seed_faces(|_, _| 0.0)
         .build();
-    sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::new(BODY3), Tensor::zeros(), 1.0, R_BODY, 1.0, false)
-            .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 0.0, k_eta_t: 0.0 })
+    sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new(BODY3),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                1.0,
+                false,
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 0.0,
+                k_eta_t: 0.0,
+            })
             .with_magnetic(magnetic),
-    ))
+        ),
+    )
 }
 
 fn seed_field3(s: &Sim3) {
     let m = s.fields.mhd.as_ref().unwrap();
     for axis in 0..3 {
-        for c in m.bface[axis].domain().iter() { m.bface[axis].set(c, bseed3(axis, c)); }
+        for c in m.bface[axis].domain().iter() {
+            m.bface[axis].set(c, bseed3(axis, c));
+        }
     }
     for k in 0..3 {
-        for c in m.efield[k].domain().iter() { m.efield[k].set(c, 0.0); }
+        for c in m.efield[k].domain().iter() {
+            m.efield[k].set(c, 0.0);
+        }
     }
 }
 
 // cell-center distance from the body (a coarse locator for the near/far windows).
 fn cell_dist3(s: &Sim3, c: [isize; 3]) -> f64 {
     let dx = s.geom.dx[0];
-    (0..3).map(|a| (s.geom.x_lo[a] + (c[a] as f64 + 0.5) * dx - BODY3[a]).powi(2)).sum::<f64>().sqrt()
+    (0..3)
+        .map(|a| (s.geom.x_lo[a] + (c[a] as f64 + 0.5) * dx - BODY3[a]).powi(2))
+        .sum::<f64>()
+        .sqrt()
 }
 
 #[test]
@@ -305,12 +429,19 @@ fn resistive_body_3d_localizes_and_dissipates() {
             for c in m.efield[k].domain().iter() {
                 let e = m.efield[k].at(c).abs();
                 let r = cell_dist3(&sim, c);
-                if r < R_BODY { near_max = near_max.max(e); }
-                if r > R_BODY + 6.0 * sim.geom.dx[0] { far_max = far_max.max(e); }
+                if r < R_BODY {
+                    near_max = near_max.max(e);
+                }
+                if r > R_BODY + 6.0 * sim.geom.dx[0] {
+                    far_max = far_max.max(e);
+                }
             }
         }
     }
-    assert!(near_max > 1e-6, "the 3D resistive body added no EMF inside its mask (near_max = {near_max})");
+    assert!(
+        near_max > 1e-6,
+        "the 3D resistive body added no EMF inside its mask (near_max = {near_max})"
+    );
     assert!(
         far_max < 1e-3 * near_max,
         "the 3D resistive EMF is not localized: far_max = {far_max}, near_max = {near_max}"
@@ -328,7 +459,10 @@ fn resistive_body_3d_localizes_and_dissipates() {
             }
         }
     }
-    assert!(dw < -1e-9, "the 3D resistive body did not dissipate magnetic energy (dW = {dw} >= 0)");
+    assert!(
+        dw < -1e-9,
+        "the 3D resistive body did not dissipate magnetic energy (dW = {dw} >= 0)"
+    );
 
     // a MagneticSpec::None body adds NOTHING to any edge EMF.
     let sim_none = make_sim3(MagneticSpec::None);
@@ -341,7 +475,10 @@ fn resistive_body_3d_localizes_and_dissipates() {
             .map(|(k, c)| m.efield[k].at(c).abs())
             .fold(0.0_f64, f64::max)
     };
-    assert_eq!(none_max, 0.0, "a non-magnetic 3D body perturbed an edge EMF (max |E| = {none_max})");
+    assert_eq!(
+        none_max, 0.0,
+        "a non-magnetic 3D body perturbed an edge EMF (max |E| = {none_max})"
+    );
 }
 
 #[test]
@@ -354,46 +491,94 @@ fn drain_sink_in_2p5d_mhd_is_local_and_stable() {
     let dx = 1.0 / N as f64;
     let k = 2.0 * std::f64::consts::PI;
     let b0 = 1e-2;
-    let mut sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
-        NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([N, N]).origin([0.0, 0.0]).spacing([dx, dx])
-        .boundaries(Boundaries::uniform(BoundaryType::Periodic)).cfl(0.3).allocate().unwrap()
-        .set_initial(move |[_x, y]| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
-            mag: Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
-        })
-        .seed_faces(move |axis, [_x, y]| if axis == 0 { b0 * (k * y).sin() } else { 0.0 })
-        .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::new(BODY), Tensor::zeros(), 1.0, R_BODY, 1.0, false)
-                .with_surface(SurfaceSpec::Drain),
-        ));
+    let mut sim = SimStateGeneric::<
+        NewtonianMhd,
+        2,
+        3,
+        Cartesian,
+        IdealGas<f64>,
+        CpuSpace,
+        HostMemory,
+        f64,
+    >::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
+    .cells([N, N])
+    .origin([0.0, 0.0])
+    .spacing([dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(0.3)
+    .allocate()
+    .unwrap()
+    .set_initial(move |[_x, y]| MhdPrim {
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        },
+        mag: Tensor::new([b0 * (k * y).sin(), 0.0, 0.0]),
+    })
+    .seed_faces(move |axis, [_x, y]| if axis == 0 { b0 * (k * y).sin() } else { 0.0 })
+    .build()
+    .with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new(BODY),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                1.0,
+                false,
+            )
+            .with_surface(SurfaceSpec::Drain),
+        ),
+    );
 
     let far_den = |s: &Sim| -> (f64, f64) {
         // (min, max) interior density in the far shell r > 0.6.
         let dx = s.geom.dx[0];
-        s.geom.interior.iter().fold((f64::INFINITY, 0.0_f64), |(mn, mx), c| {
-            let px = s.geom.x_lo[0] + (c[0] as f64 + 0.5) * dx;
-            let py = s.geom.x_lo[1] + (c[1] as f64 + 0.5) * dx;
-            let r = ((px - BODY[0]).powi(2) + (py - BODY[1]).powi(2)).sqrt();
-            if r > 0.6 { let d = *s.fields.cons.den.view().at(c); (mn.min(d), mx.max(d)) } else { (mn, mx) }
-        })
+        s.geom
+            .interior
+            .iter()
+            .fold((f64::INFINITY, 0.0_f64), |(mn, mx), c| {
+                let px = s.geom.x_lo[0] + (c[0] as f64 + 0.5) * dx;
+                let py = s.geom.x_lo[1] + (c[1] as f64 + 0.5) * dx;
+                let r = ((px - BODY[0]).powi(2) + (py - BODY[1]).powi(2)).sqrt();
+                if r > 0.6 {
+                    let d = *s.fields.cons.den.view().at(c);
+                    (mn.min(d), mx.max(d))
+                } else {
+                    (mn, mx)
+                }
+            })
     };
     let near_mass = |s: &Sim| -> f64 {
         let dx = s.geom.dx[0];
-        s.geom.interior.iter().filter_map(|c| {
-            let px = s.geom.x_lo[0] + (c[0] as f64 + 0.5) * dx;
-            let py = s.geom.x_lo[1] + (c[1] as f64 + 0.5) * dx;
-            let r = ((px - BODY[0]).powi(2) + (py - BODY[1]).powi(2)).sqrt();
-            (r < R_BODY).then(|| *s.fields.cons.den.view().at(c))
-        }).sum()
+        s.geom
+            .interior
+            .iter()
+            .filter_map(|c| {
+                let px = s.geom.x_lo[0] + (c[0] as f64 + 0.5) * dx;
+                let py = s.geom.x_lo[1] + (c[1] as f64 + 0.5) * dx;
+                let r = ((px - BODY[0]).powi(2) + (py - BODY[1]).powi(2)).sqrt();
+                (r < R_BODY).then(|| *s.fields.cons.den.view().at(c))
+            })
+            .sum()
     };
     let near0 = near_mass(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
-    evolve_with_callback(&mut sim, &sub, 0.05, u64::MAX, |_| {}).expect("2.5D MHD drain evolve went unstable");
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    );
+    evolve_with_callback(&mut sim, &sub, 0.05, u64::MAX, |_| {})
+        .expect("2.5D MHD drain evolve went unstable");
 
     // the sink removed mass inside its mask...
-    assert!(near_mass(&sim) < near0 * 0.999, "the 2.5D MHD drain removed no mass inside the body");
+    assert!(
+        near_mass(&sim) < near0 * 0.999,
+        "the 2.5D MHD drain removed no mass inside the body"
+    );
     // ...while the far gas stayed at the ambient density (the drain did not wipe the whole domain).
     let (fmn, fmx) = far_den(&sim);
     assert!(

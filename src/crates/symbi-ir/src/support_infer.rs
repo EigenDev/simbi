@@ -25,10 +25,10 @@
 
 use std::collections::HashMap;
 
+use crate::FieldBind;
 use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, Op, TranscendentalOp};
 use crate::support::{ParamExpr, Support};
 use crate::symbol::Symbol;
-use crate::FieldBind;
 
 /// a symbolic ball over the kernel's scalar params. equality is structural:
 /// propagation only ever joins balls descending from the same tag, so the
@@ -107,7 +107,10 @@ fn classify_op(
     match op {
         Op::ElementWise(ew, ins) => {
             let bin = |memo: &mut HashMap<NodeId, Class>| {
-                (classify(g, tags, memo, ins[0]), classify(g, tags, memo, ins[1]))
+                (
+                    classify(g, tags, memo, ins[0]),
+                    classify(g, tags, memo, ins[1]),
+                )
             };
             match ew {
                 ElementWiseOp::Mul => {
@@ -288,7 +291,12 @@ fn classify_op(
         // the lazy branch (S::cond / cond_vec): result `index` takes one of the
         // two arm results — classify like an eager select over that pair.
         Op::Proj { source, index } => {
-            if let Op::IfElse { then_results, else_results, .. } = &g.node(*source).op {
+            if let Op::IfElse {
+                then_results,
+                else_results,
+                ..
+            } = &g.node(*source).op
+            {
                 let (t, f) = (then_results[*index as usize], else_results[*index as usize]);
                 let (ct, cf) = (classify(g, tags, memo, t), classify(g, tags, memo, f));
                 return match (&ct, &cf) {
@@ -305,9 +313,11 @@ fn classify_op(
             }
             Class::Unknown
         }
-        Op::IfElse { then_results, else_results, .. }
-            if then_results.len() == 1 && else_results.len() == 1 =>
-        {
+        Op::IfElse {
+            then_results,
+            else_results,
+            ..
+        } if then_results.len() == 1 && else_results.len() == 1 => {
             let (ct, cf) = (
                 classify(g, tags, memo, then_results[0]),
                 classify(g, tags, memo, else_results[0]),
@@ -387,7 +397,10 @@ pub fn derive_output_support(
         }
     }
     match (any_ball, acc) {
-        (true, Some(b)) => Support::Ball { center: b.center, radius: b.radius },
+        (true, Some(b)) => Support::Ball {
+            center: b.center,
+            radius: b.radius,
+        },
         // every write is zero everywhere: the kernel does nothing.
         (false, _) | (true, None) => Support::Empty,
     }
@@ -396,9 +409,9 @@ pub fn derive_output_support(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algebra::Scalar;
-    use crate::gv::{begin_trace, end_trace, tag_support_ball, Gv, Writes};
     use crate::FieldRef;
+    use crate::algebra::Scalar;
+    use crate::gv::{Gv, Writes, begin_trace, end_trace, tag_support_ball};
     use symbi_algebra::algebra::Numeric;
 
     fn ball() -> SupportBall {

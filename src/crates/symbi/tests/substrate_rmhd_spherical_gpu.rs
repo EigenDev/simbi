@@ -35,8 +35,8 @@ const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.3;
 const B0: f64 = 0.1;
 
-fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
-) -> SimStateGeneric<Rmhd, 3, 3, Spherical, IdealGas<f64>, S, Mem, f64> {
+fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
+-> SimStateGeneric<Rmhd, 3, 3, Spherical, IdealGas<f64>, S, Mem, f64> {
     SimStateGeneric::<Rmhd, 3, 3, Spherical, IdealGas<f64>, S, Mem, f64>::build(
         Rmhd,
         IdealGas { gamma: GAMMA },
@@ -53,7 +53,11 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
         let bc = B0 / (r * r);
         let pre = 1.0 + 0.3 * (-((r - 1.4) / 0.2).powi(2)).exp();
         MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre,
+            },
             mag: Tensor::new([bc, 0.0, 0.0]),
         }
     })
@@ -70,8 +74,10 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
 fn rmhd_spherical_evolve_gpu_matches_cpu() {
     let mut host = build_sim::<CpuSpace, HostMemory>();
     let mut dev = build_sim::<CudaSpace, UnifiedMemory>();
-    let hset = RmhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, 1.0, &host.geom.allocated);
-    let dset = RmhdSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(GAMMA, CFL, 1.0, &dev.geom.allocated);
+    let hset =
+        RmhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, 1.0, &host.geom.allocated);
+    let dset =
+        RmhdSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(GAMMA, CFL, 1.0, &dev.geom.allocated);
 
     let t_final = 0.03_f64;
     evolve(&mut host, &hset, t_final).expect("cpu evolve");
@@ -79,7 +85,11 @@ fn rmhd_spherical_evolve_gpu_matches_cpu() {
     symbi_xpu::cuda::ctx_sync();
 
     assert!(host.iteration >= 2, "too few steps ({})", host.iteration);
-    assert_eq!(host.iteration, dev.iteration, "step count diverged: cpu {} gpu {}", host.iteration, dev.iteration);
+    assert_eq!(
+        host.iteration, dev.iteration,
+        "step count diverged: cpu {} gpu {}",
+        host.iteration, dev.iteration
+    );
 
     let hmhd = host.fields.mhd.as_ref().unwrap();
     let dmhd = dev.fields.mhd.as_ref().unwrap();
@@ -88,18 +98,46 @@ fn rmhd_spherical_evolve_gpu_matches_cpu() {
     let close = |g: f64, c: f64, what: &str, coord: [isize; 3]| {
         assert!(g.is_finite(), "{what} at {coord:?} non-finite on GPU: {g}");
         let rel = (g - c).abs() / c.abs().max(1.0);
-        assert!(rel < 1e-9, "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})");
+        assert!(
+            rel < 1e-9,
+            "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})"
+        );
     };
     for coord in host.geom.interior.iter() {
-        close(*dev.fields.cons.den.view().at(coord), *host.fields.cons.den.view().at(coord), "cons.den", coord);
-        close(*dnrg.view().at(coord), *hnrg.view().at(coord), "cons.nrg", coord);
+        close(
+            *dev.fields.cons.den.view().at(coord),
+            *host.fields.cons.den.view().at(coord),
+            "cons.den",
+            coord,
+        );
+        close(
+            *dnrg.view().at(coord),
+            *hnrg.view().at(coord),
+            "cons.nrg",
+            coord,
+        );
         for k in 0..3 {
-            close(*dev.fields.cons.mom[k].view().at(coord), *host.fields.cons.mom[k].view().at(coord), "cons.mom", coord);
-            close(*dmhd.bcell[k].view().at(coord), *hmhd.bcell[k].view().at(coord), "bcell", coord);
+            close(
+                *dev.fields.cons.mom[k].view().at(coord),
+                *host.fields.cons.mom[k].view().at(coord),
+                "cons.mom",
+                coord,
+            );
+            close(
+                *dmhd.bcell[k].view().at(coord),
+                *hmhd.bcell[k].view().at(coord),
+                "bcell",
+                coord,
+            );
         }
     }
     // the staggered radial face B (the CT-evolved B_r) — diff over its face domain.
     for fc in hmhd.bface[0].domain().clone().iter() {
-        close(*dmhd.bface[0].view().at(fc), *hmhd.bface[0].view().at(fc), "bface_r", fc);
+        close(
+            *dmhd.bface[0].view().at(fc),
+            *hmhd.bface[0].view().at(fc),
+            "bface_r",
+            fc,
+        );
     }
 }

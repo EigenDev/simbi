@@ -28,13 +28,13 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::state::Cons;
-use crate::mhd_state::{MhdPrim, MhdCons};
-use crate::regime::Regime;
 use crate::c2p_result::{C2pResult, ErrorCode};
+use crate::eos::Eos;
+use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::regime::Regime;
+use crate::state::Cons;
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 /// newtonian (non-relativistic) ideal magnetohydrodynamics.
 #[derive(Clone, Copy, Debug)]
@@ -52,8 +52,15 @@ pub fn nmhd_recover<S: Scalar, const D: usize>(
 ) -> MhdPrim<S, D> {
     let half = S::from_f64(0.5);
     let bsq = cons.mag.dot(&cons.mag);
-    let hydro_cons = Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg - half * bsq };
-    MhdPrim { hydro: hydro_cons.to_primitive(eos), mag: cons.mag }
+    let hydro_cons = Cons {
+        den: cons.den,
+        mom: cons.mom,
+        nrg: cons.nrg - half * bsq,
+    };
+    MhdPrim {
+        hydro: hydro_cons.to_primitive(eos),
+        mag: cons.mag,
+    }
 }
 
 /// fast magnetosonic speed along nhat. closed form, single physical sqrt.
@@ -70,7 +77,7 @@ fn fast_magnetosonic<S: Scalar, const D: usize>(
     let a_sq = eos.sound_speed_sq(prim.rho, prim.pre);
     let bsq = prim.mag.dot(&prim.mag);
     let bn = prim.mag.dot(nhat);
-    let ca_sq = bsq / prim.rho;        // total alfven speed squared
+    let ca_sq = bsq / prim.rho; // total alfven speed squared
     let can_sq = (bn * bn) / prim.rho; // normal alfven speed squared
     let sum = a_sq + ca_sq;
     let disc = (sum * sum - four * a_sq * can_sq).safe_sqrt();
@@ -90,14 +97,19 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
         let bsq = prim.mag.dot(&prim.mag);
         let hydro = prim.hydro.to_conserved(eos);
         MhdCons {
-            hydro: Cons { den: hydro.den, mom: hydro.mom, nrg: hydro.nrg + half * bsq },
+            hydro: Cons {
+                den: hydro.den,
+                mom: hydro.mom,
+                nrg: hydro.nrg + half * bsq,
+            },
             mag: prim.mag,
         }
     }
 
     #[inline]
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
-    where S: OrderedNumeric
+    where
+        S: OrderedNumeric,
     {
         // algebraic, no iteration: strip magnetic energy, then invert hydro.
         // raw IEEE math; no silent floors (feedback_no_silent_floors). the
@@ -107,12 +119,20 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
         // only the comparisons below are host-side.
         let prim = nmhd_recover(eos, cons);
         let mut code = ErrorCode::NONE;
-        if prim.rho <= S::ZERO { code = code.merge(ErrorCode::NEGATIVE_DENSITY); }
-        if prim.pre <= S::ZERO { code = code.merge(ErrorCode::NEGATIVE_PRESSURE); }
+        if prim.rho <= S::ZERO {
+            code = code.merge(ErrorCode::NEGATIVE_DENSITY);
+        }
+        if prim.pre <= S::ZERO {
+            code = code.merge(ErrorCode::NEGATIVE_PRESSURE);
+        }
         if !(prim.rho == prim.rho) || !(prim.pre == prim.pre) {
             code = code.merge(ErrorCode::NON_FINITE);
         }
-        if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
+        if code.is_ok() {
+            C2pResult::ok(prim)
+        } else {
+            C2pResult::err(prim, code)
+        }
     }
 
     #[inline]
@@ -150,16 +170,23 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::Tensor;
     use crate::eos::IdealGas;
     use crate::state::Prim;
+    use symbi_algebra::Tensor;
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
     }
 
     fn prim3(rho: f64, vel: [f64; 3], pre: f64, mag: [f64; 3]) -> MhdPrim<f64, 3> {
-        MhdPrim { hydro: Prim { rho, vel: Tensor::new(vel), pre }, mag: Tensor::new(mag) }
+        MhdPrim {
+            hydro: Prim {
+                rho,
+                vel: Tensor::new(vel),
+                pre,
+            },
+            mag: Tensor::new(mag),
+        }
     }
 
     #[test]
@@ -170,9 +197,13 @@ mod tests {
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx(prim.rho, prim2.rho));
-        for dd in 0..3 { assert!(approx(prim.vel[dd], prim2.vel[dd])); }
+        for dd in 0..3 {
+            assert!(approx(prim.vel[dd], prim2.vel[dd]));
+        }
         assert!(approx(prim.pre, prim2.pre));
-        for dd in 0..3 { assert!(approx(prim.mag[dd], prim2.mag[dd])); }
+        for dd in 0..3 {
+            assert!(approx(prim.mag[dd], prim2.mag[dd]));
+        }
     }
 
     #[test]
@@ -199,7 +230,9 @@ mod tests {
         assert!(approx(flux.mom[0], 5.0));
         assert!(approx(flux.mom[1], 0.0));
         // mag flux is zero when B = 0
-        for dd in 0..3 { assert!(approx(flux.mag[dd], 0.0)); }
+        for dd in 0..3 {
+            assert!(approx(flux.mag[dd], 0.0));
+        }
     }
 
     #[test]
@@ -259,7 +292,11 @@ mod tests {
         let regime = NewtonianMhd;
         let eos = IdealGas { gamma: 1.4 };
         let cons = MhdCons {
-            hydro: Cons { den: 1.0, mom: Tensor::new([0.0, 0.0, 0.0]), nrg: 1.0 },
+            hydro: Cons {
+                den: 1.0,
+                mom: Tensor::new([0.0, 0.0, 0.0]),
+                nrg: 1.0,
+            },
             mag: Tensor::new([3.0, 0.0, 0.0]), // 1/2|B|^2 = 4.5 > nrg
         };
         let result = regime.to_primitive(&eos, &cons);

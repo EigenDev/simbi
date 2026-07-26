@@ -28,8 +28,8 @@
 // =============================================================================
 
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
-use symbi_ir::passes::scalarize::{scalarize_kernel, LoweredFn};
-use symbi_ir::{begin_trace, end_trace, with_trace, Backend, Cpu, Gv};
+use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
+use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace, with_trace};
 
 // build a Newton-for-sqrt(2) iterate via raw Graph ops, returning a LoweredFn
 // the CPU interpreter can evaluate. `with_break = true` passes Some(conv);
@@ -74,7 +74,8 @@ fn build_newton_sqrt2(with_break: bool, max_steps: usize) -> LoweredFn {
 
     let break_when: Option<NodeId> = if with_break { Some(conv_id) } else { None };
     let root = with_trace(|t| {
-        t.graph().iterate_inline_scalar(acc_id, x0, step_id, max_steps, break_when, None)
+        t.graph()
+            .iterate_inline_scalar(acc_id, x0, step_id, max_steps, break_when, None)
     });
 
     let kernel = end_trace();
@@ -102,7 +103,9 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
     let mut state: u64 = 0xA5;
     let mut mismatches: Vec<(f64, f64, f64)> = Vec::new();
     for i in 0..20 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let u = ((state >> 33) as f64) / (1u64 << 31) as f64; // ∈ [0,1)
         let x0_val = 0.5 + 9.5 * u;
 
@@ -133,7 +136,12 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
             msg.push_str(&format!(
                 "  x0 = {:.17e}  with-break = {:.17e} (bits 0x{:016x})  \
                  no-break = {:.17e} (bits 0x{:016x})  xor = 0x{:016x}\n",
-                x0, a, a.to_bits(), b, b.to_bits(), a.to_bits() ^ b.to_bits(),
+                x0,
+                a,
+                a.to_bits(),
+                b,
+                b.to_bits(),
+                a.to_bits() ^ b.to_bits(),
             ));
         }
         panic!("{msg}");
@@ -151,10 +159,13 @@ fn iterate_break_equivalent_when_cap_hit_before_convergence() {
     let a = Cpu.eval_elemental(&f_break, &[100.0])[0];
     let b = Cpu.eval_elemental(&f_no_break, &[100.0])[0];
     assert_eq!(
-        a.to_bits(), b.to_bits(),
+        a.to_bits(),
+        b.to_bits(),
         "non-converging case: with-break {:e} != no-break {:e} (xor 0x{:016x}) — \
          break_when changed the value despite never firing",
-        a, b, a.to_bits() ^ b.to_bits(),
+        a,
+        b,
+        a.to_bits() ^ b.to_bits(),
     );
     // verify the test really IS hitting the cap path (value ≠ √2).
     assert!(

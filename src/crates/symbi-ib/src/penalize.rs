@@ -175,7 +175,12 @@ pub enum Property<S: Scalar> {
     /// carry independent rates — free-slip (no-penetration only) with
     /// `inv_eta_t = 0` (an exact off switch: the tangential velocity is
     /// bit-untouched), no-slip with both finite.
-    PorousAccretor { p: S, inv_tau: S, inv_eta_n: S, inv_eta_t: S },
+    PorousAccretor {
+        p: S,
+        inv_tau: S,
+        inv_eta_n: S,
+        inv_eta_t: S,
+    },
     /// the torque-free accretor: the drain plus a tangential
     /// ANTI-relaxation locked to the drain rate, `lambda_t = -xi lambda_rho`.
     /// the radial-relative momentum drains with the mass (accreted, zero center
@@ -190,17 +195,15 @@ pub enum Property<S: Scalar> {
 }
 
 impl<S: Scalar> Property<S> {
-    pub fn contribute<const D: usize>(
-        &self,
-        chi: S,
-        kin: &BodyKin<S, D>,
-        acc: &mut Relax<S, D>,
-    ) {
+    pub fn contribute<const D: usize>(&self, chi: S, kin: &BodyKin<S, D>, acc: &mut Relax<S, D>) {
         match *self {
             Property::Drain { inv_tau } => {
                 acc.lambda_rho = acc.lambda_rho + chi * inv_tau;
             }
-            Property::Wall { inv_eta_n, inv_eta_t } => {
+            Property::Wall {
+                inv_eta_n,
+                inv_eta_t,
+            } => {
                 acc.lambda_un = acc.lambda_un + chi * inv_eta_n;
                 acc.lambda_ut = acc.lambda_ut + chi * inv_eta_t;
                 acc.u_solid = kin.u_solid;
@@ -209,7 +212,12 @@ impl<S: Scalar> Property<S> {
                 acc.lambda_e = acc.lambda_e + chi * inv_eta;
                 acc.e_target = kin.e_wall;
             }
-            Property::PorousAccretor { p, inv_tau, inv_eta_n, inv_eta_t } => {
+            Property::PorousAccretor {
+                p,
+                inv_tau,
+                inv_eta_n,
+                inv_eta_t,
+            } => {
                 acc.lambda_rho = acc.lambda_rho + p * chi * inv_tau;
                 let solidity = (S::ONE - p) * chi;
                 acc.lambda_un = acc.lambda_un + solidity * inv_eta_n;
@@ -300,7 +308,11 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel>(
         .scale(f_rho)
         .add(E::Slot::from_scalar(den_new * (e_delta + wall_work)));
 
-    let updated = ConsG { den: den_new, mom: mom_new, nrg: nrg_new };
+    let updated = ConsG {
+        den: den_new,
+        mom: mom_new,
+        nrg: nrg_new,
+    };
     let absorbed = *cons - updated;
     let mut delta = BodyDelta::new(idx);
     delta.mass_delta = absorbed.den * volume;
@@ -322,11 +334,19 @@ mod tests {
         let v = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7;
         let nrg = den * (e_int + 0.5 * v.dot(&v));
-        ConsG { den, mom: v.scale(den), nrg }
+        ConsG {
+            den,
+            mom: v.scale(den),
+            nrg,
+        }
     }
 
     fn kin() -> BodyKin<f64, 3> {
-        BodyKin { u_solid: Tensor::new([0.05, 0.0, -0.02]), omega: Tensor::zeros(), e_wall: 0.9 }
+        BodyKin {
+            u_solid: Tensor::new([0.05, 0.0, -0.02]),
+            omega: Tensor::zeros(),
+            e_wall: 0.9,
+        }
     }
 
     fn normal() -> Tensor<f64, 3> {
@@ -357,10 +377,19 @@ mod tests {
             assert_eq!(pen.mom[a].to_bits(), dr.mom[a].to_bits());
         }
         assert_eq!(pen.nrg.to_bits(), dr.nrg.to_bits());
-        assert_eq!(pen_delta.mass_delta.to_bits(), dr_delta.mass_delta.to_bits());
-        assert_eq!(pen_delta.energy_delta.to_bits(), dr_delta.energy_delta.to_bits());
+        assert_eq!(
+            pen_delta.mass_delta.to_bits(),
+            dr_delta.mass_delta.to_bits()
+        );
+        assert_eq!(
+            pen_delta.energy_delta.to_bits(),
+            dr_delta.energy_delta.to_bits()
+        );
         for a in 0..3 {
-            assert_eq!(pen_delta.force_delta[a].to_bits(), dr_delta.force_delta[a].to_bits());
+            assert_eq!(
+                pen_delta.force_delta[a].to_bits(),
+                dr_delta.force_delta[a].to_bits()
+            );
         }
     }
 
@@ -375,7 +404,11 @@ mod tests {
         let dt = 0.37;
         let mut acc = Relax::none();
         Property::Drain { inv_tau: 2.0 }.contribute(0.8, &k, &mut acc);
-        Property::Wall { inv_eta_n: 30.0, inv_eta_t: 5.0 }.contribute(0.8, &k, &mut acc);
+        Property::Wall {
+            inv_eta_n: 30.0,
+            inv_eta_t: 5.0,
+        }
+        .contribute(0.8, &k, &mut acc);
         Property::IsothermalWall { inv_eta: 11.0 }.contribute(0.8, &k, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
         let (d1, u1, e1) = primitives(&out);
@@ -388,7 +421,12 @@ mod tests {
             + du_n.scale((-acc.lambda_un * dt).exp())
             + du_t.scale((-acc.lambda_ut * dt).exp());
         for a in 0..3 {
-            assert!((u1[a] - expect_u[a]).abs() < 1e-13, "axis {a}: {} vs {}", u1[a], expect_u[a]);
+            assert!(
+                (u1[a] - expect_u[a]).abs() < 1e-13,
+                "axis {a}: {} vs {}",
+                u1[a],
+                expect_u[a]
+            );
         }
         // the velocity relaxation dissipates the frictional heat Q = |du_n|^2 g_n(1 - g_n/2) +
         // |du_t|^2 g_t(1 - g_t/2); the thermal channel then carries off a fraction g_e of it to the
@@ -415,11 +453,20 @@ mod tests {
         let n = normal();
         let props = [
             Property::Drain { inv_tau: 3.0 },
-            Property::Wall { inv_eta_n: 20.0, inv_eta_t: 7.0 },
+            Property::Wall {
+                inv_eta_n: 20.0,
+                inv_eta_t: 7.0,
+            },
             Property::IsothermalWall { inv_eta: 9.0 },
         ];
-        let orders: [[usize; 3]; 6] =
-            [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+        let orders: [[usize; 3]; 6] = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
         let run = |order: &[usize; 3]| {
             let mut acc = Relax::none();
             for &i in order {
@@ -446,7 +493,11 @@ mod tests {
         let k = kin();
         let n = normal();
         let mut acc = Relax::none();
-        Property::Wall { inv_eta_n: 1e12, inv_eta_t: 1e12 }.contribute(1.0, &k, &mut acc);
+        Property::Wall {
+            inv_eta_n: 1e12,
+            inv_eta_t: 1e12,
+        }
+        .contribute(1.0, &k, &mut acc);
         Property::IsothermalWall { inv_eta: 1e12 }.contribute(1.0, &k, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, 10.0, 1.0, 0);
         let (_, u1, e1) = primitives(&out);
@@ -468,18 +519,29 @@ mod tests {
     fn gas_loss_equals_body_gain_exactly() {
         let cons = sample_cons();
         let mut acc = Relax::none();
-        Property::PorousAccretor { p: 0.4, inv_tau: 8.0, inv_eta_n: 15.0, inv_eta_t: 15.0 }
-            .contribute(0.9, &kin(), &mut acc);
+        Property::PorousAccretor {
+            p: 0.4,
+            inv_tau: 8.0,
+            inv_eta_n: 15.0,
+            inv_eta_t: 15.0,
+        }
+        .contribute(0.9, &kin(), &mut acc);
         let (vol, dt) = (2.5e-3, 0.013);
         let (out, delta) = penalize_cell(&cons, &acc, normal(), dt, vol, 0);
-        assert_eq!(delta.mass_delta.to_bits(), ((cons.den - out.den) * vol).to_bits());
+        assert_eq!(
+            delta.mass_delta.to_bits(),
+            ((cons.den - out.den) * vol).to_bits()
+        );
         for a in 0..3 {
             assert_eq!(
                 delta.force_delta[a].to_bits(),
                 ((cons.mom[a] - out.mom[a]) * (vol / dt)).to_bits(),
             );
         }
-        assert_eq!(delta.energy_delta.to_bits(), ((cons.nrg - out.nrg) * vol).to_bits());
+        assert_eq!(
+            delta.energy_delta.to_bits(),
+            ((cons.nrg - out.nrg) * vol).to_bits()
+        );
     }
 
     // what the penalization sink does to a 2D orbiting flow: the pure drain
@@ -499,8 +561,11 @@ mod tests {
         let u = Tensor::new([0.0, v_orb]); // azimuthal: u perpendicular to r
         let den = 3.0;
         let e_int = 1.1;
-        let cons: Cons2 =
-            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let cons: Cons2 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
         let (tau, dt, vol) = (0.05, 0.01, 2.0);
         let (_, delta) = drain_cell(&cons, 1.0, tau, dt, vol, 0); // chi = 1: inside the mask
 
@@ -512,7 +577,10 @@ mod tests {
         // accretion torque = moment(r, force) = Mdot (r x u)_z = Mdot |r| v_orb.
         let tau_z = moment(&r, &delta.force_delta)[2];
         assert!((tau_z - mdot * (r[0] * u[1] - r[1] * u[0])).abs() < 1e-12);
-        assert!(tau_z > 0.0, "an orbiting standard sink absorbs angular momentum");
+        assert!(
+            tau_z > 0.0,
+            "an orbiting standard sink absorbs angular momentum"
+        );
 
         // purely radial inflow (u along -r) carries no angular momentum: zero
         // torque even for the standard sink -- the booked torque is physical.
@@ -539,8 +607,11 @@ mod tests {
         let u = Tensor::new([0.3, 0.8]); // mixed radial + azimuthal flow
         let den = 3.0;
         let e_int = 1.1;
-        let cons: Cons2 =
-            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let cons: Cons2 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
         let (inv_tau, dt, vol, chi) = (5.0, 0.02, 2.0, 1.0);
         // u_solid = 0, so du = u; du_t is the component perpendicular to n.
         let du_t = u - n.scale(u.dot(&n));
@@ -556,8 +627,8 @@ mod tests {
             Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin0, &mut acc);
             let (_out, delta) = penalize_cell(&cons, &acc, n, dt, vol, 0);
             let coeff = 1.0 - f_rho.powf(1.0 - xi); // retained-tangential complement
-            let expect = (r[0] * (den * coeff * du_t[1]) - r[1] * (den * coeff * du_t[0]))
-                * (vol / dt);
+            let expect =
+                (r[0] * (den * coeff * du_t[1]) - r[1] * (den * coeff * du_t[0])) * (vol / dt);
             let got = moment(&r, &delta.force_delta)[2];
             assert!((got - expect).abs() < 1e-11, "xi={xi}: {got} vs {expect}");
         }
@@ -583,8 +654,11 @@ mod tests {
         let u = Tensor::new([0.3, 0.7]); // radial 0.3 (drains) + azimuthal 0.7 (retained)
         let den = 4.0;
         let e_int = 1.0;
-        let cons: Cons2 =
-            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let cons: Cons2 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
 
         // (1) lambda_rho dt = 30 -> f_rho ~ 9e-14, finite. cap = INFINITY (raw).
         let mut acc = Relax::<f64, 2>::none();
@@ -592,7 +666,10 @@ mod tests {
         acc.lambda_ut = -30.0; // xi = 1, uncapped
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
         assert!(out.den < 1e-10 * den, "mass nearly fully drained");
-        assert!((out.mom[1] - cons.mom[1]).abs() < 1e-6, "tangential momentum retained (bounded)");
+        assert!(
+            (out.mom[1] - cons.mom[1]).abs() < 1e-6,
+            "tangential momentum retained (bounded)"
+        );
         assert!(out.mom[1] / out.den > 1e10, "primitive velocity diverges");
 
         // (2) lambda_rho dt = 1000 -> f_rho underflows to 0 -> 0 * inf = NaN.
@@ -600,7 +677,10 @@ mod tests {
         acc.lambda_rho = 1e3;
         acc.lambda_ut = -1e3;
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
-        assert!(!out.mom[1].is_finite(), "uncapped conserved momentum is NaN at underflow");
+        assert!(
+            !out.mom[1].is_finite(),
+            "uncapped conserved momentum is NaN at underflow"
+        );
     }
 
     // the retention floor keeps the CONSERVED
@@ -622,10 +702,17 @@ mod tests {
         // bounds the tangential factor at 1/f_floor, so `den' (du_t g_t)` is
         // `0 * finite = 0`, avoiding the `0 * inf = NaN` pathology.
         let u = Tensor::new([0.3, 0.7]);
-        let cons: Cons2 =
-            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let cons: Cons2 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
         let mut acc = Relax::none();
-        Property::TorqueFreeAccretor { inv_tau: 1e3, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
+        Property::TorqueFreeAccretor {
+            inv_tau: 1e3,
+            xi: 1.0,
+        }
+        .contribute(1.0, &kin0, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
         assert!(
             out.den.is_finite()
@@ -638,10 +725,17 @@ mod tests {
         // (2) physical regime: lambda_rho dt = 0.5 -> f_rho = 0.607, growth factor
         // 1.65 << the 1e4 cap (inert) -> torque-free is EXACT.
         let u2 = Tensor::new([0.3, 0.8]);
-        let cons2: Cons2 =
-            ConsG { den, mom: u2.scale(den), nrg: den * (e_int + 0.5 * u2.dot(&u2)) };
+        let cons2: Cons2 = ConsG {
+            den,
+            mom: u2.scale(den),
+            nrg: den * (e_int + 0.5 * u2.dot(&u2)),
+        };
         let mut acc2 = Relax::none();
-        Property::TorqueFreeAccretor { inv_tau: 0.5, xi: 1.0 }.contribute(1.0, &kin0, &mut acc2);
+        Property::TorqueFreeAccretor {
+            inv_tau: 0.5,
+            xi: 1.0,
+        }
+        .contribute(1.0, &kin0, &mut acc2);
         let (_o2, d2) = penalize_cell(&cons2, &acc2, n, 1.0, 1.0, 0);
         assert!(
             moment(&r, &d2.force_delta)[2].abs() < 1e-12,
@@ -662,8 +756,11 @@ mod tests {
         let r = Tensor::new([2.0, 0.0]);
         let u = Tensor::new([0.1, 0.6]); // radial + azimuthal
         let (den, e_int, dt) = (3.0, 1.0, 1.0);
-        let cons: Cons2 =
-            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let cons: Cons2 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
         let kin0 = BodyKin::<f64, 2> {
             u_solid: Tensor::zeros(),
             omega: Tensor::zeros(),
@@ -686,7 +783,10 @@ mod tests {
         Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
         let (_o, d) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
         let t = moment(&r, &d.force_delta)[2];
-        assert!(t.is_finite() && t.abs() > 1e-3, "below the floor: bounded standard torque, not NaN");
+        assert!(
+            t.is_finite() && t.abs() > 1e-3,
+            "below the floor: bounded standard torque, not NaN"
+        );
     }
 
     // the moment/cross helpers agree across dimensions: the 2D forms are the
@@ -736,7 +836,11 @@ mod tests {
         let n = normal();
         let dt = 0.23;
         let mut acc = Relax::none();
-        Property::Wall { inv_eta_n: 12.0, inv_eta_t: 4.0 }.contribute(0.7, &k, &mut acc);
+        Property::Wall {
+            inv_eta_n: 12.0,
+            inv_eta_t: 4.0,
+        }
+        .contribute(0.7, &k, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
         let (_, u1, _) = primitives(&out);
         let du = u0 - k.u_solid;
@@ -761,7 +865,11 @@ mod tests {
         let dt = 0.05;
         let run = |kin_used: &BodyKin<f64, 3>| {
             let mut acc = Relax::none();
-            Property::Wall { inv_eta_n: 9.0, inv_eta_t: 3.0 }.contribute(0.8, kin_used, &mut acc);
+            Property::Wall {
+                inv_eta_n: 9.0,
+                inv_eta_t: 3.0,
+            }
+            .contribute(0.8, kin_used, &mut acc);
             Property::Drain { inv_tau: 2.0 }.contribute(0.8, kin_used, &mut acc);
             penalize_cell(&cons, &acc, n, dt, 1.0, 0).0
         };
@@ -797,7 +905,11 @@ mod tests {
             nrg: den * (e_int + 0.5 * u.dot(&u)),
         };
         let mut acc = Relax::none();
-        Property::Wall { inv_eta_n: 1e12, inv_eta_t: 1e12 }.contribute(1.0, &k, &mut acc);
+        Property::Wall {
+            inv_eta_n: 1e12,
+            inv_eta_t: 1e12,
+        }
+        .contribute(1.0, &k, &mut acc);
         let (out, delta) = penalize_cell(&cons, &acc, normal(), 10.0, 1.0, 0);
         assert_eq!(out.den.to_bits(), cons.den.to_bits());
         assert_eq!(out.nrg.to_bits(), cons.nrg.to_bits());
@@ -818,13 +930,25 @@ mod tests {
         let den = 4.0;
         let u = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7;
-        let cons: Cons3 =
-            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let cons: Cons3 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
         let n = Tensor::new([1.0, 0.0, 0.0]);
-        let k = BodyKin::<f64, 3> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+        let k = BodyKin::<f64, 3> {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: 0.0,
+        };
         let mut acc = Relax::none();
-        Property::PorousAccretor { p: 0.3, inv_tau: 0.0, inv_eta_n: 1e12, inv_eta_t: 0.0 }
-            .contribute(1.0, &k, &mut acc);
+        Property::PorousAccretor {
+            p: 0.3,
+            inv_tau: 0.0,
+            inv_eta_n: 1e12,
+            inv_eta_t: 0.0,
+        }
+        .contribute(1.0, &k, &mut acc);
         let (out, _) = penalize_cell(&cons, &acc, n, 10.0, 1.0, 0);
         let u1 = out.mom.scale(1.0 / out.den);
         // normal component driven to the (zero) target, tangential exact.
@@ -844,8 +968,13 @@ mod tests {
         let (chi, dt) = (0.8, 0.02);
 
         let mut porous = Relax::none();
-        Property::PorousAccretor { p: 1.0, inv_tau: 6.0, inv_eta_n: 11.0, inv_eta_t: 7.0 }
-            .contribute(chi, &k, &mut porous);
+        Property::PorousAccretor {
+            p: 1.0,
+            inv_tau: 6.0,
+            inv_eta_n: 11.0,
+            inv_eta_t: 7.0,
+        }
+        .contribute(chi, &k, &mut porous);
         let mut drain = Relax::none();
         Property::Drain { inv_tau: 6.0 }.contribute(chi, &k, &mut drain);
         let (a, _) = penalize_cell(&cons, &porous, n, dt, 1.0, 0);
@@ -854,8 +983,13 @@ mod tests {
         assert_eq!(a.nrg.to_bits(), b.nrg.to_bits());
 
         let mut sealed = Relax::none();
-        Property::PorousAccretor { p: 0.0, inv_tau: 6.0, inv_eta_n: 11.0, inv_eta_t: 7.0 }
-            .contribute(chi, &k, &mut sealed);
+        Property::PorousAccretor {
+            p: 0.0,
+            inv_tau: 6.0,
+            inv_eta_n: 11.0,
+            inv_eta_t: 7.0,
+        }
+        .contribute(chi, &k, &mut sealed);
         let (c, delta) = penalize_cell(&cons, &sealed, n, dt, 1.0, 0);
         assert_eq!(c.den.to_bits(), cons.den.to_bits());
         assert_eq!(delta.mass_delta, 0.0);
@@ -870,7 +1004,11 @@ mod tests {
             mom: Tensor::new([0.7, -0.3]),
             nrg: Default::default(),
         };
-        let k = BodyKin { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 5.0 };
+        let k = BodyKin {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: 5.0,
+        };
         let n = Tensor::new([1.0, 0.0]);
         let mut acc = Relax::none();
         Property::Drain { inv_tau: 4.0 }.contribute(0.5, &k, &mut acc);

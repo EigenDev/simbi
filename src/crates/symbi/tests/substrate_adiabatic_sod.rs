@@ -41,14 +41,23 @@ fn full_substrate_adiabatic_euler_sod() {
         .expect("sim construction failed")
         .set_initial(|x| {
             let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-            Prim { rho, vel: Tensor::new([0.0]), pre }
+            Prim {
+                rho,
+                vel: Tensor::new([0.0]),
+                pre,
+            }
         })
         .build();
 
     let cells: Vec<[isize; 1]> = sim.geom.interior.iter().collect();
-    let mass0: f64 = cells.iter().map(|c| *sim.fields.cons.den.view().at(*c)).sum::<f64>() * dx;
+    let mass0: f64 = cells
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(*c))
+        .sum::<f64>()
+        * dx;
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     // march to t=0.1 — the waves stay well inside [0,1] at n=128.
     evolve(&mut sim, &sub, 0.1).expect("adiabatic evolution failed");
 
@@ -67,8 +76,14 @@ fn full_substrate_adiabatic_euler_sod() {
     // the undisturbed edges still hold the initial state (waves are interior).
     let rho_left = *sim.fields.prim.rho.view().at(cells[0]);
     let rho_right = *sim.fields.prim.rho.view().at(cells[n - 1]);
-    assert!((rho_left - 1.0).abs() < 1e-9, "left edge disturbed: rho = {rho_left}");
-    assert!((rho_right - 0.125).abs() < 1e-9, "right edge disturbed: rho = {rho_right}");
+    assert!(
+        (rho_left - 1.0).abs() < 1e-9,
+        "left edge disturbed: rho = {rho_left}"
+    );
+    assert!(
+        (rho_right - 0.125).abs() < 1e-9,
+        "right edge disturbed: rho = {rho_right}"
+    );
 
     // structure developed: intermediate densities exist and the gas accelerated.
     let has_intermediate = cells.iter().any(|c| {
@@ -76,17 +91,29 @@ fn full_substrate_adiabatic_euler_sod() {
         r > 0.2 && r < 0.9
     });
     assert!(has_intermediate, "no rarefaction/contact structure formed");
-    assert!(max_vel > 0.1, "gas did not accelerate (max |v| = {max_vel})");
+    assert!(
+        max_vel > 0.1,
+        "gas did not accelerate (max |v| = {max_vel})"
+    );
 
     // mass conserved: zero-velocity edges => zero boundary mass flux.
-    let mass1: f64 = cells.iter().map(|c| *sim.fields.cons.den.view().at(*c)).sum::<f64>() * dx;
+    let mass1: f64 = cells
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(*c))
+        .sum::<f64>()
+        * dx;
     assert!(
         (mass1 - mass0).abs() < 1e-9 * mass0,
-        "mass drift {:e} (rel {:e})", mass1 - mass0, (mass1 - mass0) / mass0,
+        "mass drift {:e} (rel {:e})",
+        mass1 - mass0,
+        (mass1 - mass0) / mass0,
     );
 
     println!(
         "ADIABATIC SOD: {} steps to t={:.3}, mass rel-drift {:e}, max |v| {:.3}",
-        sim.iteration, sim.time, (mass1 - mass0) / mass0, max_vel,
+        sim.iteration,
+        sim.time,
+        (mass1 - mass0) / mass0,
+        max_vel,
     );
 }

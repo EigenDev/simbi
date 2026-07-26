@@ -25,25 +25,25 @@
 //   boundary       — driven boundaries (the (Coord, Assign) DAG instance)
 // =============================================================================
 
-mod types;
-mod layout;
-mod exec;
 mod binding;
-mod params;
-mod dispatch;
-mod runtime_source;
 mod boundary;
+mod dispatch;
+mod exec;
+mod layout;
+mod params;
+mod runtime_source;
+mod types;
 
-pub use types::*;
-pub use layout::*;
 pub use exec::*;
+pub use layout::*;
+pub use types::*;
 // the raw field manifest accessor — for the component-agnostic CT kernels (edge EMF / curl) that
 // bind generic slots positionally, ordered by the recorded manifest.
 pub(crate) use binding::kernel_field_binds;
-pub use params::*;
-pub use dispatch::*;
-pub use runtime_source::*;
 pub use boundary::*;
+pub use dispatch::*;
+pub use params::*;
+pub use runtime_source::*;
 // binding holds only crate-internal helpers (resolve_path / bind_manifest / kernel_bindings /
 // parse_*), reached by the sibling submodules via `super::binding::*` — no external `substrate_kernels::`
 // consumer, so it is NOT re-exported at the module root.

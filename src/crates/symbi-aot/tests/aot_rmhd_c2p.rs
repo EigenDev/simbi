@@ -25,23 +25,54 @@ use symbi_aot::NamedKernel;
 // loud + named on manifest drift. all buffers here are 1D (lo = 0).
 #[allow(non_snake_case, clippy::too_many_arguments)]
 fn rmhd_c2p_1d(
-    cons_den: &[f64], cm0: &[f64], cm1: &[f64], cm2: &[f64], cnrg: &[f64],
-    cb0: &[f64], cb1: &[f64], cb2: &[f64],
-    prim_rho: &mut [f64], pv0: &mut [f64], pv1: &mut [f64], pv2: &mut [f64], ppre: &mut [f64],
-    grid_size_0: i32, dom_lo_0: i32,
-    _l0: i32, _l1: i32, _l2: i32, _l3: i32, _l4: i32, _l5: i32, _l6: i32,
-    _l7: i32, _l8: i32, _l9: i32, _l10: i32, _l11: i32, _l12: i32,
+    cons_den: &[f64],
+    cm0: &[f64],
+    cm1: &[f64],
+    cm2: &[f64],
+    cnrg: &[f64],
+    cb0: &[f64],
+    cb1: &[f64],
+    cb2: &[f64],
+    prim_rho: &mut [f64],
+    pv0: &mut [f64],
+    pv1: &mut [f64],
+    pv2: &mut [f64],
+    ppre: &mut [f64],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _l0: i32,
+    _l1: i32,
+    _l2: i32,
+    _l3: i32,
+    _l4: i32,
+    _l5: i32,
+    _l6: i32,
+    _l7: i32,
+    _l8: i32,
+    _l9: i32,
+    _l10: i32,
+    _l11: i32,
+    _l12: i32,
     gamma: f64,
 ) {
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("rmhd_c2p_1d")
-        .input("cons.den", cons_den).input("cons.mom_0", cm0).input("cons.mom_1", cm1)
-        .input("cons.mom_2", cm2).input("cons.nrg", cnrg)
-        .input("cons.mag_0", cb0).input("cons.mag_1", cb1).input("cons.mag_2", cb2)
-        .output("prim.rho", prim_rho).output("prim.vel_0", pv0).output("prim.vel_1", pv1)
-        .output("prim.vel_2", pv2).output("prim.pre", ppre)
-        .grid(&grid).dom_lo(&dom)
+        .input("cons.den", cons_den)
+        .input("cons.mom_0", cm0)
+        .input("cons.mom_1", cm1)
+        .input("cons.mom_2", cm2)
+        .input("cons.nrg", cnrg)
+        .input("cons.mag_0", cb0)
+        .input("cons.mag_1", cb1)
+        .input("cons.mag_2", cb2)
+        .output("prim.rho", prim_rho)
+        .output("prim.vel_0", pv0)
+        .output("prim.vel_1", pv1)
+        .output("prim.vel_2", pv2)
+        .output("prim.pre", ppre)
+        .grid(&grid)
+        .dom_lo(&dom)
         .scalar("gamma", gamma)
         .run();
 }
@@ -64,7 +95,11 @@ fn p2c(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> (f64, [f64; 3], f64, [f64;
     let bsq = dot(&b, &b);
     let vdb = dot(&v, &b);
     let ed = rho * h * wsq;
-    let s = [(ed + bsq) * v[0] - vdb * b[0], (ed + bsq) * v[1] - vdb * b[1], (ed + bsq) * v[2] - vdb * b[2]];
+    let s = [
+        (ed + bsq) * v[0] - vdb * b[0],
+        (ed + bsq) * v[1] - vdb * b[1],
+        (ed + bsq) * v[2] - vdb * b[2],
+    ];
     let tau = ed - p - rho * w + 0.5 * (bsq + bsq * v2 - vdb * vdb);
     (rho * w, s, tau, b)
 }
@@ -100,9 +135,8 @@ fn aot_rmhd_c2p_round_trips() {
     let (mut v0_o, mut v1_o, mut v2_o) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
 
     rmhd_c2p_1d(
-        &den, &mom[0], &mom[1], &mom[2], &nrg, &mag[0], &mag[1], &mag[2],
-        &mut rho_o, &mut v0_o, &mut v1_o, &mut v2_o, &mut p_o,
-        n as i32, 0, // grid_size_0, dom_lo_0
+        &den, &mom[0], &mom[1], &mom[2], &nrg, &mag[0], &mag[1], &mag[2], &mut rho_o, &mut v0_o,
+        &mut v1_o, &mut v2_o, &mut p_o, n as i32, 0, // grid_size_0, dom_lo_0
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 13 buf_lo
         GAMMA,
     );
@@ -110,8 +144,10 @@ fn aot_rmhd_c2p_round_trips() {
     let vel_o = [&v0_o, &v1_o, &v2_o];
     for (i, &(rho, v, p, _b)) in prims.iter().enumerate() {
         let close = |a: f64, want: f64, what: &str| {
-            assert!((a - want).abs() <= 1e-9 * (1.0 + want.abs()),
-                "state {i} {what}: {a} != {want}");
+            assert!(
+                (a - want).abs() <= 1e-9 * (1.0 + want.abs()),
+                "state {i} {what}: {a} != {want}"
+            );
         };
         close(rho_o[i], rho, "rho");
         close(p_o[i], p, "p");

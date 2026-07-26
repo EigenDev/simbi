@@ -153,8 +153,7 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
     pub levels: Vec<LevelData<R, NDIM, DOF, M, E, S, Mem, K>>,
-    injection_ledger:
-        std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>,
+    injection_ledger: std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>,
     /// coarse-fine prolongation order (one above the evolution reconstruction).
     pub prolong_order: ProlongOrder,
     /// flux_registers[ll] corrects the interface between level ll and ll+1.
@@ -200,9 +199,8 @@ where
             "refined mass tracers require a root grid beginning at global index zero"
         );
 
-        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
-            self.levels[0].state.geom.interior.spaces[aa].size()
-        });
+        let root_cells: [usize; NDIM] =
+            std::array::from_fn(|aa| self.levels[0].state.geom.interior.spaces[aa].size());
         let mut owners = Vec::new();
         let mut cells = Vec::new();
         let mut masses = Vec::new();
@@ -210,12 +208,8 @@ where
             let scale = 1usize
                 .checked_shl(ll as u32)
                 .expect("refinement level exceeds machine index width");
-            let global_cells: [usize; NDIM] =
-                std::array::from_fn(|aa| root_cells[aa] * scale);
-            let geometry = level
-                .state
-                .geom
-                .block_geometry(level.state.physics.metric);
+            let global_cells: [usize; NDIM] = std::array::from_fn(|aa| root_cells[aa] * scale);
+            let geometry = level.state.geom.block_geometry(level.state.physics.metric);
             for coord in level.state.geom.interior.iter() {
                 if level
                     .coverage
@@ -235,9 +229,7 @@ where
                 let lo = std::array::from_fn(|aa| center[aa] - 0.5 * widths[aa]);
                 owners.push(symbi_sim::tracers::cell_container_id(linear, ll as u8));
                 cells.push((lo, widths));
-                masses.push(
-                    *level.state.fields.cons.den.view().at(coord) * geometry.volume(coord),
-                );
+                masses.push(*level.state.fields.cons.den.view().at(coord) * geometry.volume(coord));
             }
         }
         symbi_sim::tracers::seed_weighted_cells(&owners, &cells, &masses, n)
@@ -361,9 +353,8 @@ where
                     ii += 1;
                     continue;
                 }
-                let position: [f64; NDIM] = unsafe {
-                    std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii))
-                };
+                let position: [f64; NDIM] =
+                    unsafe { std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii)) };
                 let Some((target_level, owner)) = locate(position) else {
                     ii += 1;
                     continue;
@@ -385,13 +376,8 @@ where
         }
         let count = moved.len();
         for (target_level, record) in moved {
-            if self.levels[target_level]
-                .state
-                .continuous_tracers
-                .is_none()
-            {
-                let mut tracers =
-                    symbi_sim::tracers::ContinuousTracerSet::allocate(0, metadata.0)?;
+            if self.levels[target_level].state.continuous_tracers.is_none() {
+                let mut tracers = symbi_sim::tracers::ContinuousTracerSet::allocate(0, metadata.0)?;
                 tracers.weight = metadata.1;
                 tracers.run_seed = metadata.2;
                 tracers.next_id = metadata.3;
@@ -438,9 +424,7 @@ where
         let scale = 1usize << level;
         let interior = &self.levels[level].state.geom.interior;
         symbi_sim::tracers::TransportLayout {
-            global_cells: std::array::from_fn(|aa| {
-                self.tracer_root_global_cells[aa] * scale
-            }),
+            global_cells: std::array::from_fn(|aa| self.tracer_root_global_cells[aa] * scale),
             tile_offset: std::array::from_fn(|aa| {
                 self.tracer_root_offset[aa] * scale + interior.spaces[aa].lo as usize
             }),
@@ -455,9 +439,8 @@ where
     ) {
         self.tracer_root_global_cells = global_cells;
         self.tracer_root_offset = tile_offset;
-        let parent_cells: [usize; NDIM] = std::array::from_fn(|aa| {
-            self.levels[0].state.geom.interior.spaces[aa].size()
-        });
+        let parent_cells: [usize; NDIM] =
+            std::array::from_fn(|aa| self.levels[0].state.geom.interior.spaces[aa].size());
         self.tracer_interfaces = (0..self.levels.len().saturating_sub(1))
             .map(|ll| {
                 interface_faces_with_layout(
@@ -471,10 +454,7 @@ where
             .collect();
     }
 
-    fn tracer_owner_is_active(
-        &self,
-        owner: symbi_sim::mass_transport::ContainerId,
-    ) -> bool {
+    fn tracer_owner_is_active(&self, owner: symbi_sim::mass_transport::ContainerId) -> bool {
         self.tracer_cell(owner).is_some_and(|(level, coord)| {
             !self.levels[level]
                 .coverage
@@ -533,10 +513,7 @@ where
         Ok((tracers.next_id, tracers.injection_remainder))
     }
 
-    fn tracer_cell_mass(
-        &self,
-        owner: symbi_sim::mass_transport::ContainerId,
-    ) -> Option<f64> {
+    fn tracer_cell_mass(&self, owner: symbi_sim::mass_transport::ContainerId) -> Option<f64> {
         let (level, coord) = self.tracer_cell(owner)?;
         let state = &self.levels[level].state;
         let geometry = state.geom.block_geometry(state.physics.metric);
@@ -557,9 +534,7 @@ where
         let mut post_mass = BTreeMap::new();
         for transfer in transfers {
             for owner in [transfer.source, transfer.destination] {
-                if let std::collections::btree_map::Entry::Vacant(entry) =
-                    post_mass.entry(owner)
-                {
+                if let std::collections::btree_map::Entry::Vacant(entry) = post_mass.entry(owner) {
                     let mass = self.tracer_cell_mass(owner).ok_or_else(|| {
                         format!("interface receipt names inactive cell {}", owner.0)
                     })?;
@@ -838,9 +813,8 @@ where
     /// a 1-level hierarchy: the degenerate case that must reproduce evolve()
     /// bit-for-bit.
     pub fn single(state: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>, kernels: K) -> Self {
-        let tracer_root_global_cells = std::array::from_fn(|aa| {
-            state.geom.interior.spaces[aa].size()
-        });
+        let tracer_root_global_cells =
+            std::array::from_fn(|aa| state.geom.interior.spaces[aa].size());
         Hierarchy {
             levels: vec![LevelData {
                 state,
@@ -976,9 +950,8 @@ where
 
         let mut flux_registers = Vec::with_capacity(levels.len().saturating_sub(1));
         let mut emf_registers = Vec::with_capacity(levels.len().saturating_sub(1));
-        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
-            levels[0].state.geom.interior.spaces[aa].size()
-        });
+        let root_cells: [usize; NDIM] =
+            std::array::from_fn(|aa| levels[0].state.geom.interior.spaces[aa].size());
         let mut tracer_interfaces = Vec::with_capacity(levels.len().saturating_sub(1));
         for ll in 0..levels.len().saturating_sub(1) {
             flux_registers.push(FluxRegister::new(
@@ -1451,9 +1424,11 @@ where
         root.state.dt = dt;
 
         self.advance_level(0, dt, 0.0);
-        if self.levels.iter().any(|level| {
-            level.state.continuous_tracers.is_some()
-        }) {
+        if self
+            .levels
+            .iter()
+            .any(|level| level.state.continuous_tracers.is_some())
+        {
             self.migrate_continuous_tracers_to_finest()
                 .unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
         }
@@ -1563,9 +1538,7 @@ where
             symbi_sim::tracers::snapshot_transport_state(&mut self.levels[level].state);
             self.injection_ledger.clear();
             if has_finer {
-                self.tracer_interface_ledgers[level]
-                    .borrow_mut()
-                    .clear();
+                self.tracer_interface_ledgers[level].borrow_mut().clear();
             }
         }
     }
@@ -1650,8 +1623,7 @@ where
                         }
                         if l.state.has_tracers() {
                             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                            let geometry =
-                                l.state.geom.block_geometry(l.state.physics.metric);
+                            let geometry = l.state.geom.block_geometry(l.state.physics.metric);
                             let transfers = interface_mass_transfers(
                                 &this.tracer_interfaces[level - 1],
                                 &l.state.fields.flux,
@@ -1721,11 +1693,7 @@ where
                 ac,
             ));
             injections.retain(|transfer| self.tracer_owner_is_active(transfer.destination));
-            symbi_sim::tracers::fold_injection_ledger(
-                &mut self.injection_ledger,
-                injections,
-                ac,
-            );
+            symbi_sim::tracers::fold_injection_ledger(&mut self.injection_ledger, injections, ac);
             prof("tracers", || {
                 let coverage = self.levels[level].coverage.clone();
                 symbi_sim::tracers::advance_stage_mass_transport_store_masked(
@@ -1850,9 +1818,7 @@ where
                     density_before,
                     crossing_time,
                 )
-                .unwrap_or_else(|detail| {
-                    panic!("continuous tracer accretion transport: {detail}")
-                });
+                .unwrap_or_else(|detail| panic!("continuous tracer accretion transport: {detail}"));
             }
         }
         if self.levels[level].state.continuous_tracers.is_some() {
@@ -1955,10 +1921,7 @@ where
             .take()
             .expect("continuous tracers remain attached through the level step");
         let (scale_start, scale_end, offset_start, offset_end) =
-            symbi_sim::tracers::continuous_tracer_mesh_step(
-                &self.levels[level].state.store,
-                dt,
-            );
+            symbi_sim::tracers::continuous_tracer_mesh_step(&self.levels[level].state.store, dt);
         symbi_sim::tracers::advance_continuous_tracers(
             &mut tracers,
             self.levels[level]
@@ -2437,16 +2400,7 @@ where
     })
 }
 
-pub fn seed_decomposed_hierarchy_tracers<
-    R,
-    const NDIM: usize,
-    const DOF: usize,
-    M,
-    E,
-    S,
-    Mem,
-    K,
->(
+pub fn seed_decomposed_hierarchy_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     global: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     count: usize,
@@ -2479,7 +2433,11 @@ pub fn seed_decomposed_hierarchy_tracers<
             .tracer_cell(owner)
             .expect("decomposed tracer owner must resolve");
         let x = tiles[destination].levels[level].state.geom.centroid(coord);
-        let tracers = tiles[destination].levels[level].state.tracers.as_mut().unwrap();
+        let tracers = tiles[destination].levels[level]
+            .state
+            .tracers
+            .as_mut()
+            .unwrap();
         tracers.x.push(x);
         tracers.id.push(seeded.id[ii]);
         tracers.cohort.push(seeded.cohort[ii]);
@@ -2540,8 +2498,7 @@ pub fn gather_decomposed_hierarchy_tracers<
             }));
         }
         records.sort_unstable_by_key(|record| record.0);
-        let (weight, run_seed, next_id, injection_remainder) =
-            metadata.unwrap_or_default();
+        let (weight, run_seed, next_id, injection_remainder) = metadata.unwrap_or_default();
         let mut gathered = symbi_sim::tracers::TracerSet {
             weight,
             run_seed,
@@ -2621,7 +2578,13 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
             .tracers
             .as_ref()
             .into_iter()
-            .flat_map(|tracers| tracers.id.iter().copied().zip(tracers.owner.iter().copied()))
+            .flat_map(|tracers| {
+                tracers
+                    .id
+                    .iter()
+                    .copied()
+                    .zip(tracers.owner.iter().copied())
+            })
             .filter_map(|(id, owner)| {
                 tiles
                     .iter()
@@ -2689,10 +2652,8 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
-    let Some((mut next_id, mut injection_remainder)) = tiles
-        .iter()
-        .flat_map(|tile| &tile.levels)
-        .find_map(|data| {
+    let Some((mut next_id, mut injection_remainder)) =
+        tiles.iter().flat_map(|tile| &tile.levels).find_map(|data| {
             data.state
                 .tracers
                 .as_ref()

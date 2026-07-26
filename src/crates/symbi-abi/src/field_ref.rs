@@ -92,7 +92,10 @@ pub enum FieldRef {
     /// primitive passive-scalar concentration `prim.chi` = `cons.chi / cons.den`.
     PrimChi,
     /// a conserved/flux slot component (`cons.den`, `flux.mom_2`, ...).
-    State { slot: StateSlot, comp: StateComp },
+    State {
+        slot: StateSlot,
+        comp: StateComp,
+    },
     /// flux-divergence alias for the mass flux in grid direction `ax`
     /// (`mass_flux[ax]` == `flux[ax].den`).
     MassFlux(u8),
@@ -101,7 +104,10 @@ pub enum FieldRef {
     NrgFlux(u8),
     /// flux-divergence alias for momentum component `comp` swept in grid direction
     /// `axis` (`mom_flux_{comp}[axis]` == `flux[axis].mom[comp]`).
-    MomFlux { comp: u8, axis: u8 },
+    MomFlux {
+        comp: u8,
+        axis: u8,
+    },
     /// cell-centered B component `bc_{c}` (the fused god+bcell kernel's in-place
     /// cell-B i/o) == the mhd `bcell[c]`.
     BCell(u8),
@@ -109,7 +115,10 @@ pub enum FieldRef {
     BCellN(u8),
     /// induction flux `bf_{d}_{c}` = the cell-B flux in grid direction `d` of
     /// B-component `c` == the mhd `bflux[d][c]`.
-    BFlux { dir: u8, comp: u8 },
+    BFlux {
+        dir: u8,
+        comp: u8,
+    },
     /// the cfl wave-speed scratch buffer, spelled `scratch`.
     Scratch,
     /// the cfl wave-speed scratch buffer, spelled `c` (an alias of `Scratch` —
@@ -140,20 +149,90 @@ impl FieldRef {
     // as typed values, so a mistyped binding is a compile
     // error caught at build time. they wrap `State { slot, comp }` so the call sites stay readable
     // and need no `StateSlot`/`StateComp` in scope.
-    pub const fn cons_den() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Den } }
-    pub const fn cons_nrg() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Nrg } }
-    pub const fn cons_mom(k: u8) -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Mom(k) } }
-    pub const fn un_den() -> Self { Self::State { slot: StateSlot::UN, comp: StateComp::Den } }
-    pub const fn un_nrg() -> Self { Self::State { slot: StateSlot::UN, comp: StateComp::Nrg } }
-    pub const fn un_mom(k: u8) -> Self { Self::State { slot: StateSlot::UN, comp: StateComp::Mom(k) } }
-    pub const fn ustage_den() -> Self { Self::State { slot: StateSlot::UStage, comp: StateComp::Den } }
-    pub const fn ustage_nrg() -> Self { Self::State { slot: StateSlot::UStage, comp: StateComp::Nrg } }
-    pub const fn ustage_mom(k: u8) -> Self { Self::State { slot: StateSlot::UStage, comp: StateComp::Mom(k) } }
-    pub const fn cons_chi() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Chi } }
-    pub const fn un_chi() -> Self { Self::State { slot: StateSlot::UN, comp: StateComp::Chi } }
-    pub const fn flux_den() -> Self { Self::State { slot: StateSlot::Flux, comp: StateComp::Den } }
-    pub const fn flux_nrg() -> Self { Self::State { slot: StateSlot::Flux, comp: StateComp::Nrg } }
-    pub const fn flux_mom(k: u8) -> Self { Self::State { slot: StateSlot::Flux, comp: StateComp::Mom(k) } }
+    pub const fn cons_den() -> Self {
+        Self::State {
+            slot: StateSlot::Cons,
+            comp: StateComp::Den,
+        }
+    }
+    pub const fn cons_nrg() -> Self {
+        Self::State {
+            slot: StateSlot::Cons,
+            comp: StateComp::Nrg,
+        }
+    }
+    pub const fn cons_mom(k: u8) -> Self {
+        Self::State {
+            slot: StateSlot::Cons,
+            comp: StateComp::Mom(k),
+        }
+    }
+    pub const fn un_den() -> Self {
+        Self::State {
+            slot: StateSlot::UN,
+            comp: StateComp::Den,
+        }
+    }
+    pub const fn un_nrg() -> Self {
+        Self::State {
+            slot: StateSlot::UN,
+            comp: StateComp::Nrg,
+        }
+    }
+    pub const fn un_mom(k: u8) -> Self {
+        Self::State {
+            slot: StateSlot::UN,
+            comp: StateComp::Mom(k),
+        }
+    }
+    pub const fn ustage_den() -> Self {
+        Self::State {
+            slot: StateSlot::UStage,
+            comp: StateComp::Den,
+        }
+    }
+    pub const fn ustage_nrg() -> Self {
+        Self::State {
+            slot: StateSlot::UStage,
+            comp: StateComp::Nrg,
+        }
+    }
+    pub const fn ustage_mom(k: u8) -> Self {
+        Self::State {
+            slot: StateSlot::UStage,
+            comp: StateComp::Mom(k),
+        }
+    }
+    pub const fn cons_chi() -> Self {
+        Self::State {
+            slot: StateSlot::Cons,
+            comp: StateComp::Chi,
+        }
+    }
+    pub const fn un_chi() -> Self {
+        Self::State {
+            slot: StateSlot::UN,
+            comp: StateComp::Chi,
+        }
+    }
+    pub const fn flux_den() -> Self {
+        Self::State {
+            slot: StateSlot::Flux,
+            comp: StateComp::Den,
+        }
+    }
+    pub const fn flux_nrg() -> Self {
+        Self::State {
+            slot: StateSlot::Flux,
+            comp: StateComp::Nrg,
+        }
+    }
+    pub const fn flux_mom(k: u8) -> Self {
+        Self::State {
+            slot: StateSlot::Flux,
+            comp: StateComp::Mom(k),
+        }
+    }
 
     /// the ONE place a field runtime-path is minted. holds `parse(x.name()) ==
     /// Some(x)` for every variant.
@@ -277,7 +356,9 @@ impl FieldRef {
 
 /// parse a trailing index fragment in either spelling: `[2]`, `_2`, or `2`.
 fn parse_idx(s: &str) -> Option<u8> {
-    s.trim_matches(|c| c == '[' || c == ']' || c == '_').parse().ok()
+    s.trim_matches(|c| c == '[' || c == ']' || c == '_')
+        .parse()
+        .ok()
 }
 
 /// a SERIALIZED kernel field binding: the typed core (`Ref`) over the closed
@@ -300,7 +381,9 @@ impl FieldBind {
     /// classify a runtime path: a known closed-vocabulary field becomes `Ref`, any
     /// other path is held verbatim as `Raw`. the inverse of `name()`.
     pub fn from_path(s: &str) -> Self {
-        FieldRef::parse(s).map(FieldBind::Ref).unwrap_or_else(|| FieldBind::Raw(s.into()))
+        FieldRef::parse(s)
+            .map(FieldBind::Ref)
+            .unwrap_or_else(|| FieldBind::Raw(s.into()))
     }
 
     /// the runtime path this bind names. `Ref` mints its canonical spelling through
@@ -348,8 +431,12 @@ mod tests {
 
     fn all_variants() -> Vec<FieldRef> {
         let mut v = vec![
-            FieldRef::PrimRho, FieldRef::PrimPre, FieldRef::PrimChi, FieldRef::Scratch,
-            FieldRef::ScratchC, FieldRef::BFaceNormal,
+            FieldRef::PrimRho,
+            FieldRef::PrimPre,
+            FieldRef::PrimChi,
+            FieldRef::Scratch,
+            FieldRef::ScratchC,
+            FieldRef::BFaceNormal,
         ];
         for k in 0..3u8 {
             v.push(FieldRef::PrimVel(k));
@@ -363,12 +450,29 @@ mod tests {
             v.push(FieldRef::ConsMag(k));
             v.push(FieldRef::FluxMag(k));
         }
-        for slot in [StateSlot::Cons, StateSlot::UN, StateSlot::UStage, StateSlot::Flux] {
-            v.push(FieldRef::State { slot, comp: StateComp::Den });
-            v.push(FieldRef::State { slot, comp: StateComp::Nrg });
-            v.push(FieldRef::State { slot, comp: StateComp::Chi });
+        for slot in [
+            StateSlot::Cons,
+            StateSlot::UN,
+            StateSlot::UStage,
+            StateSlot::Flux,
+        ] {
+            v.push(FieldRef::State {
+                slot,
+                comp: StateComp::Den,
+            });
+            v.push(FieldRef::State {
+                slot,
+                comp: StateComp::Nrg,
+            });
+            v.push(FieldRef::State {
+                slot,
+                comp: StateComp::Chi,
+            });
             for k in 0..3u8 {
-                v.push(FieldRef::State { slot, comp: StateComp::Mom(k) });
+                v.push(FieldRef::State {
+                    slot,
+                    comp: StateComp::Mom(k),
+                });
             }
         }
         for comp in 0..3u8 {
@@ -387,7 +491,11 @@ mod tests {
     #[test]
     fn name_parse_round_trips() {
         for r in all_variants() {
-            assert_eq!(FieldRef::parse(&r.name()), Some(r), "round-trip failed for {r:?}");
+            assert_eq!(
+                FieldRef::parse(&r.name()),
+                Some(r),
+                "round-trip failed for {r:?}"
+            );
         }
     }
 
@@ -405,8 +513,22 @@ mod tests {
 
     #[test]
     fn parse_rejects_foreign_names() {
-        for n in ["gamma", "prim.foo", "cons.bork", "mesh_adot_0", "flux", "", "bc_", "bf_0", "mom_flux_0"] {
-            assert_eq!(FieldRef::parse(n), None, "'{n}' should not parse as a field");
+        for n in [
+            "gamma",
+            "prim.foo",
+            "cons.bork",
+            "mesh_adot_0",
+            "flux",
+            "",
+            "bc_",
+            "bf_0",
+            "mom_flux_0",
+        ] {
+            assert_eq!(
+                FieldRef::parse(n),
+                None,
+                "'{n}' should not parse as a field"
+            );
         }
     }
 
@@ -416,11 +538,22 @@ mod tests {
     fn field_bind_classifies_and_round_trips() {
         for r in all_variants() {
             let bind = FieldBind::from_path(&r.name());
-            assert_eq!(bind, FieldBind::Ref(r), "typed path should bind Ref for {r:?}");
+            assert_eq!(
+                bind,
+                FieldBind::Ref(r),
+                "typed path should bind Ref for {r:?}"
+            );
             assert_eq!(bind.name(), r.name(), "Ref round-trip failed for {r:?}");
         }
         // hand-built / staggered / reduction paths are not FieldRef — they round-trip as Raw.
-        for raw in ["area_hi_0", "bcell_p1", "bface_0_1", "edge_e2", "buf0", "prim.foo"] {
+        for raw in [
+            "area_hi_0",
+            "bcell_p1",
+            "bface_0_1",
+            "edge_e2",
+            "buf0",
+            "prim.foo",
+        ] {
             let bind = FieldBind::from_path(raw);
             assert_eq!(bind, FieldBind::Raw(raw.into()), "'{raw}' should bind Raw");
             assert_eq!(bind.name(), raw, "Raw round-trip failed for '{raw}'");

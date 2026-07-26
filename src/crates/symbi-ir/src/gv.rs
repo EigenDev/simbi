@@ -21,10 +21,10 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use symbi_algebra::{Domain, FieldElement, Space};
+use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
 use crate::{ElementTy, Symbol};
 use symbi_abi::FieldBind;
-use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
+use symbi_algebra::{Domain, FieldElement, Space};
 
 /// the finished trace: the stencil graph plus the kernel ABI manifest the emit
 /// pipeline consumes — field-buffer inputs as `(ir_key, runtime_path)`, scalar
@@ -179,7 +179,10 @@ pub enum FusionError {
     /// or one is tiled and the other isn't). a single fused launch can't
     /// run two block layouts simultaneously. callers must either align the
     /// specs or keep the kernels in separate launches.
-    TileSpecMismatch { a: Option<TileSpec>, b: Option<TileSpec> },
+    TileSpecMismatch {
+        a: Option<TileSpec>,
+        b: Option<TileSpec>,
+    },
     /// the splice pass returned an error. carries the inner reason.
     Splice(String),
 }
@@ -187,16 +190,23 @@ pub enum FusionError {
 impl std::fmt::Display for FusionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FusionError::GradeMismatch { a, b } => write!(f,
-                "fuse: launch-grade mismatch — a={a:?}, b={b:?}"),
-            FusionError::UntaggedKernel => write!(f,
-                "fuse: at least one kernel is untagged; tag both via `end_trace_for_domain`"),
-            FusionError::WriteConflict { runtime_path } => write!(f,
-                "fuse: both kernels write `{runtime_path}`"),
-            FusionError::InterDep { written, read } => write!(f,
-                "fuse: one kernel writes `{written}` and the other reads `{read}`"),
-            FusionError::TileSpecMismatch { a, b } => write!(f,
-                "fuse: tile-spec mismatch — a={a:?}, b={b:?}"),
+            FusionError::GradeMismatch { a, b } => {
+                write!(f, "fuse: launch-grade mismatch — a={a:?}, b={b:?}")
+            }
+            FusionError::UntaggedKernel => write!(
+                f,
+                "fuse: at least one kernel is untagged; tag both via `end_trace_for_domain`"
+            ),
+            FusionError::WriteConflict { runtime_path } => {
+                write!(f, "fuse: both kernels write `{runtime_path}`")
+            }
+            FusionError::InterDep { written, read } => write!(
+                f,
+                "fuse: one kernel writes `{written}` and the other reads `{read}`"
+            ),
+            FusionError::TileSpecMismatch { a, b } => {
+                write!(f, "fuse: tile-spec mismatch — a={a:?}, b={b:?}")
+            }
             FusionError::Splice(e) => write!(f, "fuse: splice failed: {e}"),
         }
     }
@@ -278,10 +288,16 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
 /// the saturation lemma, stated where the mask that makes it true is built.
 /// consumed by `GvKernel::with_derived_support`, which propagates tags to the
 /// write roots; validated downstream by the compiled-kernel support sampler.
-pub fn tag_support_ball(v: &Gv, center: Vec<crate::support::ParamExpr>, radius: crate::support::ParamExpr) {
+pub fn tag_support_ball(
+    v: &Gv,
+    center: Vec<crate::support::ParamExpr>,
+    radius: crate::support::ParamExpr,
+) {
     GV_TRACE.with(|t| {
         let mut b = t.borrow_mut();
-        let tr = b.as_mut().expect("tag_support_ball outside an active trace");
+        let tr = b
+            .as_mut()
+            .expect("tag_support_ball outside an active trace");
         tr.node_supports.insert(
             v.node(),
             crate::support_infer::SupportBall { center, radius },
@@ -507,10 +523,8 @@ pub fn try_fuse(
 
     // law: disjoint writes. compare by the canonical path name (both reads and writes are
     // born-typed FieldBind now), so the in-place/inter-dep detection is spelling-invariant.
-    let a_write_paths: HashSet<String> =
-        a_writes.iter().map(|(_, p, _)| p.name()).collect();
-    let b_write_paths: HashSet<String> =
-        b_writes.iter().map(|(_, p, _)| p.name()).collect();
+    let a_write_paths: HashSet<String> = a_writes.iter().map(|(_, p, _)| p.name()).collect();
+    let b_write_paths: HashSet<String> = b_writes.iter().map(|(_, p, _)| p.name()).collect();
     if let Some(p) = a_write_paths.intersection(&b_write_paths).next() {
         return Err(FusionError::WriteConflict {
             runtime_path: p.clone(),
@@ -530,19 +544,23 @@ pub fn try_fuse(
     // compare by the CANONICAL path name on both sides (reads via FieldBind::name, writes via
     // from_path().name() below) so the in-place/inter-dep detection is spelling-invariant —
     // a field read as `prim.vel[k]` and written as `prim.vel_k` is the SAME buffer.
-    let a_input_paths: HashSet<String> =
-        a.field_inputs.iter().map(|(_, p)| p.name()).collect();
-    let b_input_paths: HashSet<String> =
-        b.field_inputs.iter().map(|(_, p)| p.name()).collect();
+    let a_input_paths: HashSet<String> = a.field_inputs.iter().map(|(_, p)| p.name()).collect();
+    let b_input_paths: HashSet<String> = b.field_inputs.iter().map(|(_, p)| p.name()).collect();
     let a_inplace: HashSet<&String> = a_write_paths.intersection(&a_input_paths).collect();
     let b_inplace: HashSet<&String> = b_write_paths.intersection(&b_input_paths).collect();
-    if let Some(p) = a_write_paths.intersection(&b_input_paths).find(|p| !a_inplace.contains(p)) {
+    if let Some(p) = a_write_paths
+        .intersection(&b_input_paths)
+        .find(|p| !a_inplace.contains(p))
+    {
         return Err(FusionError::InterDep {
             written: p.clone(),
             read: p.clone(),
         });
     }
-    if let Some(p) = b_write_paths.intersection(&a_input_paths).find(|p| !b_inplace.contains(p)) {
+    if let Some(p) = b_write_paths
+        .intersection(&a_input_paths)
+        .find(|p| !b_inplace.contains(p))
+    {
         return Err(FusionError::InterDep {
             written: p.clone(),
             read: p.clone(),
@@ -572,8 +590,7 @@ pub fn try_fuse(
 
     // manifest merge: deterministic first-seen order, a first, b appended.
     let mut field_inputs = a.field_inputs.clone();
-    let a_field_keys: HashSet<String> =
-        a.field_inputs.iter().map(|(k, _)| k.clone()).collect();
+    let a_field_keys: HashSet<String> = a.field_inputs.iter().map(|(k, _)| k.clone()).collect();
     for (k, p) in b.field_inputs.iter() {
         if !a_field_keys.contains(k) {
             field_inputs.push((k.clone(), p.clone()));
@@ -633,7 +650,9 @@ fn coord_node(t: &mut GvTrace, ax: u8) -> NodeId {
     if let Some(&id) = t.coord_nodes.get(&ax) {
         return id;
     }
-    let id = t.graph.add_scalar_param(&format!("_coord_{ax}"), ElementTy::I32);
+    let id = t
+        .graph
+        .add_scalar_param(&format!("_coord_{ax}"), ElementTy::I32);
     t.coord_nodes.insert(ax, id);
     t.coord_components.push(ax);
     id
@@ -643,7 +662,8 @@ fn coord_node(t: &mut GvTrace, ax: u8) -> NodeId {
 pub fn with_trace<R>(f: impl FnOnce(&mut GvTrace) -> R) -> R {
     GV_TRACE.with(|t| {
         let mut b = t.borrow_mut();
-        f(b.as_mut().expect("Gv op outside an active trace — call begin_trace() first"))
+        f(b.as_mut()
+            .expect("Gv op outside an active trace — call begin_trace() first"))
     })
 }
 
@@ -711,7 +731,9 @@ impl Gv {
     /// a fresh scalar param node named `name`, unrecorded in the ABI manifest
     /// (a bare leaf for unit tests). production inputs use `field` / `scalar`.
     pub fn param(name: &str) -> Gv {
-        Gv(GvVal::Node(with_trace(|t| t.graph.add_scalar_param(name, ElementTy::F64))))
+        Gv(GvVal::Node(with_trace(|t| {
+            t.graph.add_scalar_param(name, ElementTy::F64)
+        })))
     }
 
     /// a per-cell field read: `key` is the IR-side buffer-load name, `runtime` the
@@ -736,7 +758,13 @@ impl Gv {
     /// the manifest. codegen-only — a stencil is not a pointwise `Scalar` op, so this is a
     /// Gv method (the host runtime reads neighbours from the
     /// Field buffer; only the traced kernel needs the explicit `load_at`).
-    pub fn field_shifted(key: &str, runtime: impl Into<FieldBind>, ndim: u8, axis: u8, offset: i32) -> Gv {
+    pub fn field_shifted(
+        key: &str,
+        runtime: impl Into<FieldBind>,
+        ndim: u8,
+        axis: u8,
+        offset: i32,
+    ) -> Gv {
         let runtime = runtime.into();
         if offset == 0 {
             return Gv::field(key, runtime);
@@ -750,7 +778,8 @@ impl Gv {
             let off = t.graph.add_const(ConstValue::I32(offset), None);
             let mut shifted = comps.clone();
             shifted[axis as usize] =
-                t.graph.element_wise(ElementWiseOp::Add, vec![comps[axis as usize], off], None);
+                t.graph
+                    .element_wise(ElementWiseOp::Add, vec![comps[axis as usize], off], None);
             t.graph.load_at(Symbol::intern(key), shifted, None)
         })))
     }
@@ -760,7 +789,11 @@ impl Gv {
     /// viscous transverse gradient). `field_shifted` is the single-axis case.
     /// `offsets[ax]` is the per-axis shift; `offsets.len()` must be `ndim`.
     pub fn field_offset(key: &str, runtime: impl Into<FieldBind>, ndim: u8, offsets: &[i32]) -> Gv {
-        assert_eq!(offsets.len(), ndim as usize, "field_offset: one offset per axis");
+        assert_eq!(
+            offsets.len(),
+            ndim as usize,
+            "field_offset: one offset per axis"
+        );
         let runtime = runtime.into();
         if offsets.iter().all(|&o| o == 0) {
             return Gv::field(key, runtime);
@@ -774,7 +807,8 @@ impl Gv {
                 if o != 0 {
                     let off = t.graph.add_const(ConstValue::I32(o), None);
                     shifted[ax] =
-                        t.graph.element_wise(ElementWiseOp::Add, vec![shifted[ax], off], None);
+                        t.graph
+                            .element_wise(ElementWiseOp::Add, vec![shifted[ax], off], None);
                 }
             }
             t.graph.load_at(Symbol::intern(key), shifted, None)
@@ -838,15 +872,56 @@ impl Gv {
 }
 
 // ---- std::ops: record element-wise nodes ----
-impl Add for Gv { type Output = Gv; fn add(self, r: Gv) -> Gv { self.binop(r, ElementWiseOp::Add) } }
-impl Sub for Gv { type Output = Gv; fn sub(self, r: Gv) -> Gv { self.binop(r, ElementWiseOp::Sub) } }
-impl Mul for Gv { type Output = Gv; fn mul(self, r: Gv) -> Gv { self.binop(r, ElementWiseOp::Mul) } }
-impl Div for Gv { type Output = Gv; fn div(self, r: Gv) -> Gv { self.binop(r, ElementWiseOp::Div) } }
-impl Neg for Gv { type Output = Gv; fn neg(self) -> Gv { self.unop(ElementWiseOp::Neg) } }
-impl AddAssign for Gv { fn add_assign(&mut self, r: Gv) { *self = *self + r; } }
-impl SubAssign for Gv { fn sub_assign(&mut self, r: Gv) { *self = *self - r; } }
-impl MulAssign for Gv { fn mul_assign(&mut self, r: Gv) { *self = *self * r; } }
-impl DivAssign for Gv { fn div_assign(&mut self, r: Gv) { *self = *self / r; } }
+impl Add for Gv {
+    type Output = Gv;
+    fn add(self, r: Gv) -> Gv {
+        self.binop(r, ElementWiseOp::Add)
+    }
+}
+impl Sub for Gv {
+    type Output = Gv;
+    fn sub(self, r: Gv) -> Gv {
+        self.binop(r, ElementWiseOp::Sub)
+    }
+}
+impl Mul for Gv {
+    type Output = Gv;
+    fn mul(self, r: Gv) -> Gv {
+        self.binop(r, ElementWiseOp::Mul)
+    }
+}
+impl Div for Gv {
+    type Output = Gv;
+    fn div(self, r: Gv) -> Gv {
+        self.binop(r, ElementWiseOp::Div)
+    }
+}
+impl Neg for Gv {
+    type Output = Gv;
+    fn neg(self) -> Gv {
+        self.unop(ElementWiseOp::Neg)
+    }
+}
+impl AddAssign for Gv {
+    fn add_assign(&mut self, r: Gv) {
+        *self = *self + r;
+    }
+}
+impl SubAssign for Gv {
+    fn sub_assign(&mut self, r: Gv) {
+        *self = *self - r;
+    }
+}
+impl MulAssign for Gv {
+    fn mul_assign(&mut self, r: Gv) {
+        *self = *self * r;
+    }
+}
+impl DivAssign for Gv {
+    fn div_assign(&mut self, r: Gv) {
+        *self = *self / r;
+    }
+}
 
 impl std::iter::Sum for Gv {
     fn sum<I: Iterator<Item = Gv>>(iter: I) -> Gv {
@@ -859,7 +934,9 @@ impl std::iter::Sum for Gv {
 impl Default for Gv {
     // direct construction (matches `<Gv as crate::algebra::Scalar>::ZERO`); kept as
     // a direct expression to stay independent of the trait import scope.
-    fn default() -> Gv { Gv(GvVal::Lit(0.0)) }
+    fn default() -> Gv {
+        Gv(GvVal::Lit(0.0))
+    }
 }
 
 impl std::fmt::Display for Gv {
@@ -881,12 +958,27 @@ unsafe impl FieldElement for Gv {
 // `symbi-algebra` <-> `symbi-ir` dep cycle for `Tensor`'s scalar-bounded methods.
 impl symbi_algebra::algebra::Numeric for Gv {
     const ZERO: Self = Gv(GvVal::Lit(0.0));
-    const ONE:  Self = Gv(GvVal::Lit(1.0));
-    #[inline] fn from_f64(v: f64) -> Self { Gv(GvVal::Lit(v)) }
-    #[inline] fn sqrt(self) -> Self { self.unop(ElementWiseOp::Sqrt) }
-    #[inline] fn abs (self) -> Self { self.unop(ElementWiseOp::Abs)  }
-    #[inline] fn min (self, o: Self) -> Self { self.binop(o, ElementWiseOp::Min) }
-    #[inline] fn max (self, o: Self) -> Self { self.binop(o, ElementWiseOp::Max) }
+    const ONE: Self = Gv(GvVal::Lit(1.0));
+    #[inline]
+    fn from_f64(v: f64) -> Self {
+        Gv(GvVal::Lit(v))
+    }
+    #[inline]
+    fn sqrt(self) -> Self {
+        self.unop(ElementWiseOp::Sqrt)
+    }
+    #[inline]
+    fn abs(self) -> Self {
+        self.unop(ElementWiseOp::Abs)
+    }
+    #[inline]
+    fn min(self, o: Self) -> Self {
+        self.binop(o, ElementWiseOp::Min)
+    }
+    #[inline]
+    fn max(self, o: Self) -> Self {
+        self.binop(o, ElementWiseOp::Max)
+    }
 }
 
 // =============================================================================
@@ -913,7 +1005,8 @@ impl std::ops::BitAnd for GvMask {
         let a = self.0.node();
         let b = rhs.0.node();
         GvMask(Gv::of(with_trace(|t| {
-            t.graph.element_wise(ElementWiseOp::BitAnd, vec![a, b], None)
+            t.graph
+                .element_wise(ElementWiseOp::BitAnd, vec![a, b], None)
         })))
     }
 }
@@ -947,9 +1040,9 @@ impl crate::algebra::Scalar for Gv {
     type Mask = GvMask;
 
     // ZERO / ONE inherited from `Numeric for Gv`.
-    const INFINITY: Gv     = Gv(GvVal::Lit(f64::INFINITY));
+    const INFINITY: Gv = Gv(GvVal::Lit(f64::INFINITY));
     const NEG_INFINITY: Gv = Gv(GvVal::Lit(f64::NEG_INFINITY));
-    const NAN: Gv          = Gv(GvVal::Lit(f64::NAN));
+    const NAN: Gv = Gv(GvVal::Lit(f64::NAN));
 
     // from_f64 inherited from `Numeric for Gv`.
 
@@ -967,11 +1060,21 @@ impl crate::algebra::Scalar for Gv {
     }
 
     // ── comparisons return GvMask — the Mask discipline ──────────
-    fn cmp_lt(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Lt)) }
-    fn cmp_le(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Le)) }
-    fn cmp_gt(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Gt)) }
-    fn cmp_ge(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Ge)) }
-    fn cmp_eq(self, o: Gv) -> GvMask { GvMask(self.binop(o, ElementWiseOp::Eq)) }
+    fn cmp_lt(self, o: Gv) -> GvMask {
+        GvMask(self.binop(o, ElementWiseOp::Lt))
+    }
+    fn cmp_le(self, o: Gv) -> GvMask {
+        GvMask(self.binop(o, ElementWiseOp::Le))
+    }
+    fn cmp_gt(self, o: Gv) -> GvMask {
+        GvMask(self.binop(o, ElementWiseOp::Gt))
+    }
+    fn cmp_ge(self, o: Gv) -> GvMask {
+        GvMask(self.binop(o, ElementWiseOp::Ge))
+    }
+    fn cmp_eq(self, o: Gv) -> GvMask {
+        GvMask(self.binop(o, ElementWiseOp::Eq))
+    }
 
     fn select(m: GvMask, yes: Gv, no: Gv) -> Gv {
         let c = m.0.node();
@@ -1011,7 +1114,9 @@ impl crate::algebra::Scalar for Gv {
         if body_nodes.is_empty() {
             return result_gv;
         }
-        Gv::of(with_trace(|t| t.graph.scope_op(body_nodes, result_node, None)))
+        Gv::of(with_trace(|t| {
+            t.graph.scope_op(body_nodes, result_node, None)
+        }))
     }
 
     // the DUAL of `iterate` for BRANCHES: a lazy conditional at S = Gv.
@@ -1042,7 +1147,14 @@ impl crate::algebra::Scalar for Gv {
             (f_mark..end).map(|i| NodeId(i as u32)).collect()
         });
         Gv::of(with_trace(|tr| {
-            tr.graph.if_else(cond_node, then_body, vec![t_res], else_body, vec![f_res], None)
+            tr.graph.if_else(
+                cond_node,
+                then_body,
+                vec![t_res],
+                else_body,
+                vec![f_res],
+                None,
+            )
         }))
     }
 
@@ -1073,7 +1185,14 @@ impl crate::algebra::Scalar for Gv {
         let then_results: Vec<NodeId> = t_res.iter().map(|&g| g.node()).collect();
         let else_results: Vec<NodeId> = f_res.iter().map(|&g| g.node()).collect();
         let ifelse = with_trace(|tr| {
-            tr.graph.if_else(cond_node, then_body, then_results, else_body, else_results, None)
+            tr.graph.if_else(
+                cond_node,
+                then_body,
+                then_results,
+                else_body,
+                else_results,
+                None,
+            )
         });
         std::array::from_fn(|j| Gv::of(with_trace(|tr| tr.graph.proj(ifelse, j as u32, None))))
     }
@@ -1086,18 +1205,37 @@ impl crate::algebra::Scalar for Gv {
     }
 
     // ── transcendentals (mix of ElementWise + Transcendental graph ops) ───
-    fn sin(self) -> Gv   { self.unop(ElementWiseOp::Sin) }
-    fn cos(self) -> Gv   { self.unop(ElementWiseOp::Cos) }
-    fn tan(self) -> Gv   { self.transcendental_unop(TranscendentalOp::Tan) }
-    fn asin(self) -> Gv  { self.transcendental_unop(TranscendentalOp::Asin) }
-    fn acos(self) -> Gv  { self.unop(ElementWiseOp::Acos) }
+    fn sin(self) -> Gv {
+        self.unop(ElementWiseOp::Sin)
+    }
+    fn cos(self) -> Gv {
+        self.unop(ElementWiseOp::Cos)
+    }
+    fn tan(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Tan)
+    }
+    fn asin(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Asin)
+    }
+    fn acos(self) -> Gv {
+        self.unop(ElementWiseOp::Acos)
+    }
     fn atan2(self, o: Gv) -> Gv {
         let (y, x) = (self.node(), o.node());
-        Gv::of(with_trace(|t| t.graph.transcendental(TranscendentalOp::Atan2, vec![y, x], None)))
+        Gv::of(with_trace(|t| {
+            t.graph
+                .transcendental(TranscendentalOp::Atan2, vec![y, x], None)
+        }))
     }
-    fn exp(self) -> Gv   { self.transcendental_unop(TranscendentalOp::Exp) }
-    fn ln(self) -> Gv    { self.transcendental_unop(TranscendentalOp::Log) }
-    fn log10(self) -> Gv { self.transcendental_unop(TranscendentalOp::Log10) }
+    fn exp(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Exp)
+    }
+    fn ln(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Log)
+    }
+    fn log10(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Log10)
+    }
 
     fn powi(self, n: i32) -> Gv {
         // lower to repeated multiplication (exponentiation by squaring):
@@ -1130,18 +1268,36 @@ impl crate::algebra::Scalar for Gv {
             pos
         }
     }
-    fn powf(self, e: Gv) -> Gv { self.binop(e, ElementWiseOp::Pow) }
+    fn powf(self, e: Gv) -> Gv {
+        self.binop(e, ElementWiseOp::Pow)
+    }
 
-    fn floor(self) -> Gv { self.unop(ElementWiseOp::Floor) }
-    fn ceil(self) -> Gv  { self.unop(ElementWiseOp::Ceil) }
+    fn floor(self) -> Gv {
+        self.unop(ElementWiseOp::Floor)
+    }
+    fn ceil(self) -> Gv {
+        self.unop(ElementWiseOp::Ceil)
+    }
 
     // ── hyperbolics — graph-op lowerings ────────────────
-    fn sinh(self) -> Gv  { self.unop(ElementWiseOp::Sinh) }
-    fn cosh(self) -> Gv  { self.unop(ElementWiseOp::Cosh) }
-    fn tanh(self) -> Gv  { self.transcendental_unop(TranscendentalOp::Tanh) }
-    fn asinh(self) -> Gv { self.unop(ElementWiseOp::Asinh) }
-    fn acosh(self) -> Gv { self.unop(ElementWiseOp::Acosh) }
-    fn atanh(self) -> Gv { self.transcendental_unop(TranscendentalOp::Atanh) }
+    fn sinh(self) -> Gv {
+        self.unop(ElementWiseOp::Sinh)
+    }
+    fn cosh(self) -> Gv {
+        self.unop(ElementWiseOp::Cosh)
+    }
+    fn tanh(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Tanh)
+    }
+    fn asinh(self) -> Gv {
+        self.unop(ElementWiseOp::Asinh)
+    }
+    fn acosh(self) -> Gv {
+        self.unop(ElementWiseOp::Acosh)
+    }
+    fn atanh(self) -> Gv {
+        self.transcendental_unop(TranscendentalOp::Atanh)
+    }
 
     // ── HIGHER-ORDER: iterate + iterate_vec with the FREEZE LAW ───────────
     fn iterate(
@@ -1164,7 +1320,8 @@ impl crate::algebra::Scalar for Gv {
         let break_when = Some(conv.0.node());
         let init = self.node();
         Gv::of(with_trace(|t| {
-            t.graph.iterate_inline_scalar(acc, init, step, max_steps, break_when, None)
+            t.graph
+                .iterate_inline_scalar(acc, init, step, max_steps, break_when, None)
         }))
     }
 
@@ -1187,7 +1344,15 @@ impl crate::algebra::Scalar for Gv {
         let inits_n: Vec<NodeId> = init.iter().map(|g| g.node()).collect();
         let steps_n: Vec<NodeId> = steps.iter().map(|g| g.node()).collect();
         Gv::of(with_trace(|t| {
-            t.graph.iterate_inline(accs.to_vec(), inits_n, steps_n, max_steps, result as u32, break_when, None)
+            t.graph.iterate_inline(
+                accs.to_vec(),
+                inits_n,
+                steps_n,
+                max_steps,
+                result as u32,
+                break_when,
+                None,
+            )
         }))
     }
 }
@@ -1211,18 +1376,26 @@ impl crate::algebra::Scalar for Gv {
 #[cfg(test)]
 mod fusion_laws {
     use super::*;
-    use symbi_algebra::{domain, Space};
+    use symbi_algebra::{Space, domain};
 
     // shared interior fixture: a 4-cell axis. tests that need two distinct
     // grades use `edge_grade()` for an axis-shifted half-extent domain.
     fn interior_grade() -> LaunchGrade {
-        LaunchGrade::from_domain(&domain([Space { name: "i", lo: 0, hi: 4 }]))
+        LaunchGrade::from_domain(&domain([Space {
+            name: "i",
+            lo: 0,
+            hi: 4,
+        }]))
     }
 
     // distinct grade: same axis name, different extent. structural equality
     // separates these from `interior_grade()`.
     fn edge_grade() -> LaunchGrade {
-        LaunchGrade::from_domain(&domain([Space { name: "i", lo: 0, hi: 5 }]))
+        LaunchGrade::from_domain(&domain([Space {
+            name: "i",
+            lo: 0,
+            hi: 5,
+        }]))
     }
 
     // build a single-output kernel that reads `in_key`@`in_path`, doubles it,
@@ -1252,7 +1425,11 @@ mod fusion_laws {
         k: &GvKernel,
         w: &Writes,
     ) -> (HashSet<(String, String)>, HashSet<String>, HashSet<String>) {
-        let inputs: HashSet<_> = k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect();
+        let inputs: HashSet<_> = k
+            .field_inputs
+            .iter()
+            .map(|(k, b)| (k.clone(), b.name()))
+            .collect();
         let scalars: HashSet<_> = k.scalar_params.iter().cloned().collect();
         let writes: HashSet<_> = w.iter().map(|(_, p, _)| p.name()).collect();
         (inputs, scalars, writes)
@@ -1267,17 +1444,23 @@ mod fusion_laws {
 
         // left identity: noop(g) ∘ k == k
         let (noop_k, noop_w) = GvKernel::noop(g.clone());
-        let (left, left_w) = try_fuse(noop_k, noop_w, k.clone(), w.clone())
-            .expect("noop ∘ k must succeed");
-        assert_eq!(baseline, manifest_sets(&left, &left_w),
-            "left-identity violated: noop(g) ∘ k changed the manifest");
+        let (left, left_w) =
+            try_fuse(noop_k, noop_w, k.clone(), w.clone()).expect("noop ∘ k must succeed");
+        assert_eq!(
+            baseline,
+            manifest_sets(&left, &left_w),
+            "left-identity violated: noop(g) ∘ k changed the manifest"
+        );
 
         // right identity: k ∘ noop(g) == k
         let (noop_k2, noop_w2) = GvKernel::noop(g);
-        let (right, right_w) = try_fuse(k.clone(), w.clone(), noop_k2, noop_w2)
-            .expect("k ∘ noop must succeed");
-        assert_eq!(baseline, manifest_sets(&right, &right_w),
-            "right-identity violated: k ∘ noop(g) changed the manifest");
+        let (right, right_w) =
+            try_fuse(k.clone(), w.clone(), noop_k2, noop_w2).expect("k ∘ noop must succeed");
+        assert_eq!(
+            baseline,
+            manifest_sets(&right, &right_w),
+            "right-identity violated: k ∘ noop(g) changed the manifest"
+        );
     }
 
     // law 2: associativity. fuse(fuse(a,b),c) and fuse(a,fuse(b,c)) produce
@@ -1290,10 +1473,8 @@ mod fusion_laws {
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g.clone());
         let (c, cw) = doubler("c_in", "p.c_in", "c_out", "p.c_out", g);
 
-        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone())
-            .expect("a ∘ b");
-        let (ab_c, ab_cw) = try_fuse(ab, abw, c.clone(), cw.clone())
-            .expect("(a ∘ b) ∘ c");
+        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("a ∘ b");
+        let (ab_c, ab_cw) = try_fuse(ab, abw, c.clone(), cw.clone()).expect("(a ∘ b) ∘ c");
 
         let (bc, bcw) = try_fuse(b, bw, c, cw).expect("b ∘ c");
         let (a_bc, a_bcw) = try_fuse(a, aw, bc, bcw).expect("a ∘ (b ∘ c)");
@@ -1314,12 +1495,14 @@ mod fusion_laws {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
 
-        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone())
-            .expect("a ∘ b");
+        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("a ∘ b");
         let (ba, baw) = try_fuse(b, bw, a, aw).expect("b ∘ a");
 
-        assert_eq!(manifest_sets(&ab, &abw), manifest_sets(&ba, &baw),
-            "commutativity (mod-disjoint) violated");
+        assert_eq!(
+            manifest_sets(&ab, &abw),
+            manifest_sets(&ba, &baw),
+            "commutativity (mod-disjoint) violated"
+        );
     }
 
     // law 4: equivalence. fusing a + b preserves a's write roots verbatim
@@ -1338,15 +1521,21 @@ mod fusion_laws {
 
         // a's writes preserved verbatim at the head of the writes manifest.
         for (i, &a_root) in a_roots.iter().enumerate() {
-            assert_eq!(fused_w[i].2, a_root,
-                "a-write root #{i} was renumbered; equivalence broken");
+            assert_eq!(
+                fused_w[i].2, a_root,
+                "a-write root #{i} was renumbered; equivalence broken"
+            );
         }
 
         // every fused write root is a valid node in the fused graph.
         let n_nodes = fused.graph.len();
         for (k, p, root) in fused_w.iter() {
-            assert!((root.0 as usize) < n_nodes,
-                "fused write {k}@{} has dangling NodeId {:?}", p.name(), root);
+            assert!(
+                (root.0 as usize) < n_nodes,
+                "fused write {k}@{} has dangling NodeId {:?}",
+                p.name(),
+                root
+            );
         }
     }
 
@@ -1366,7 +1555,13 @@ mod fusion_laws {
     // — the algebra refuses to assume a default.
     #[test]
     fn law_untagged_rejection() {
-        let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", LaunchGrade::untagged());
+        let (a, aw) = doubler(
+            "a_in",
+            "p.a_in",
+            "a_out",
+            "p.a_out",
+            LaunchGrade::untagged(),
+        );
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", interior_grade());
 
         match try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()) {
@@ -1438,9 +1633,20 @@ mod fusion_laws {
     // not identity-based. (DomainId differs across constructions.)
     #[test]
     fn law_grade_is_structural_over_domain() {
-        let d1 = domain([Space { name: "i", lo: 0, hi: 4 }]);
-        let d2 = domain([Space { name: "i", lo: 0, hi: 4 }]);
-        assert_ne!(d1.id, d2.id, "DomainId is identity-based — independent constructions differ");
+        let d1 = domain([Space {
+            name: "i",
+            lo: 0,
+            hi: 4,
+        }]);
+        let d2 = domain([Space {
+            name: "i",
+            lo: 0,
+            hi: 4,
+        }]);
+        assert_ne!(
+            d1.id, d2.id,
+            "DomainId is identity-based — independent constructions differ"
+        );
         assert_eq!(
             LaunchGrade::from_domain(&d1),
             LaunchGrade::from_domain(&d2),
@@ -1449,8 +1655,16 @@ mod fusion_laws {
 
         // grades over different ranks are distinct.
         let d3 = domain([
-            Space { name: "i", lo: 0, hi: 4 },
-            Space { name: "j", lo: 0, hi: 4 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 4,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 4,
+            },
         ]);
         assert_ne!(
             LaunchGrade::from_domain(&d1),
@@ -1470,11 +1684,18 @@ mod fusion_laws {
         let g = interior_grade();
         let (mut a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (mut b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
-        let spec = TileSpec { halo: vec![2], tiled_field_keys: vec!["shared".to_string()] };
+        let spec = TileSpec {
+            halo: vec![2],
+            tiled_field_keys: vec!["shared".to_string()],
+        };
         a.tile_spec = Some(spec.clone());
         b.tile_spec = Some(spec.clone());
         let (fused, _w) = try_fuse(a, aw, b, bw).expect("matched tile specs must fuse");
-        assert_eq!(fused.tile_spec, Some(spec), "fused kernel must carry the shared spec");
+        assert_eq!(
+            fused.tile_spec,
+            Some(spec),
+            "fused kernel must carry the shared spec"
+        );
     }
 
     /// fuse(tiled, untiled) must fail with TileSpecMismatch — one kernel
@@ -1490,8 +1711,10 @@ mod fusion_laws {
         });
         match try_fuse(a, aw, b, bw) {
             Err(FusionError::TileSpecMismatch { a, b }) => {
-                assert!(a.is_some() && b.is_none(),
-                    "expected a=tiled, b=untiled in the mismatch report");
+                assert!(
+                    a.is_some() && b.is_none(),
+                    "expected a=tiled, b=untiled in the mismatch report"
+                );
             }
             other => panic!("expected TileSpecMismatch, got {other:?}"),
         }
@@ -1553,11 +1776,17 @@ mod fusion_laws {
     ///       bytes = 288 * 8 * 8 = 18,432 — vs the 51,840 a fat cube would cost.
     #[test]
     fn tile_spec_smem_footprint_math() {
-        let spec_cube = TileSpec { halo: vec![2, 2, 2], tiled_field_keys: vec!["x".to_string()] };
+        let spec_cube = TileSpec {
+            halo: vec![2, 2, 2],
+            tiled_field_keys: vec!["x".to_string()],
+        };
         assert_eq!(spec_cube.smem_bytes_per_block(&[16, 8, 4], 8), 1920 * 8);
 
         let keys: Vec<String> = (0..8).map(|k| format!("f{k}")).collect();
-        let spec_slab = TileSpec { halo: vec![2, 0, 0], tiled_field_keys: keys };
+        let spec_slab = TileSpec {
+            halo: vec![2, 0, 0],
+            tiled_field_keys: keys,
+        };
         assert_eq!(spec_slab.smem_bytes_per_block(&[32, 8, 1], 8), 288 * 8 * 8);
     }
 
@@ -1625,19 +1854,30 @@ mod scope_step_3b {
 
         // scope-form has +1 node (the Op::Scope itself); body subgraph
         // matches inline-form node-for-node.
-        assert_eq!(scope_graph.len(), inline_graph.len() + 1,
-            "step 3b: scope-form must add exactly one Op::Scope node over inline-form");
+        assert_eq!(
+            scope_graph.len(),
+            inline_graph.len() + 1,
+            "step 3b: scope-form must add exactly one Op::Scope node over inline-form"
+        );
         // root of scope-form is the Op::Scope (last pushed); root of
         // inline-form is the trailing Mul.
-        assert_eq!(scope_root_node.0 as usize, scope_graph.len() - 1,
-            "scope root must be the Op::Scope tail node");
-        assert_eq!(inline_root_node.0 as usize, inline_graph.len() - 1,
-            "inline root must be the trailing Mul node");
+        assert_eq!(
+            scope_root_node.0 as usize,
+            scope_graph.len() - 1,
+            "scope root must be the Op::Scope tail node"
+        );
+        assert_eq!(
+            inline_root_node.0 as usize,
+            inline_graph.len() - 1,
+            "inline root must be the trailing Mul node"
+        );
         // the first N nodes of scope-form match inline-form (the body
         // subgraph is pushed identically — only the trailing Op::Scope
         // differs).
-        for ((id, n_a, t_a), (_, n_b, t_b)) in
-            scope_graph.iter().take(inline_graph.len()).zip(inline_graph.iter())
+        for ((id, n_a, t_a), (_, n_b, t_b)) in scope_graph
+            .iter()
+            .take(inline_graph.len())
+            .zip(inline_graph.iter())
         {
             assert_eq!(&n_a.op, &n_b.op, "node {id:?} op mismatch in body region");
             assert_eq!(t_a, t_b, "node {id:?} ty mismatch in body region");
@@ -1645,16 +1885,20 @@ mod scope_step_3b {
         // tail node MUST be Op::Scope whose result is the trailing Mul.
         match &scope_graph.node(scope_root_node).op {
             Op::Scope { body, result } => {
-                assert_eq!(*result, inline_root_node,
-                    "Op::Scope.result must equal the inline trailing Mul NodeId");
+                assert_eq!(
+                    *result, inline_root_node,
+                    "Op::Scope.result must equal the inline trailing Mul NodeId"
+                );
                 // body lists every node added during the closure (the +
                 // and the *), in insertion order. for this fixture that's
                 // exactly the last two nodes before the Op::Scope.
                 let expected_body: Vec<NodeId> = (inline_graph.len() - 2..inline_graph.len())
                     .map(|i| NodeId(i as u32))
                     .collect();
-                assert_eq!(body, &expected_body,
-                    "Op::Scope.body must list the closure's new NodeIds in order");
+                assert_eq!(
+                    body, &expected_body,
+                    "Op::Scope.body must list the closure's new NodeIds in order"
+                );
             }
             other => panic!("expected Op::Scope tail, got {other:?}"),
         }
@@ -1686,8 +1930,10 @@ mod scope_step_3b {
                         inner_scope_count += 1;
                     }
                 }
-                assert_eq!(inner_scope_count, 2,
-                    "outer Op::Scope.body must contain BOTH inner Op::Scope NodeIds");
+                assert_eq!(
+                    inner_scope_count, 2,
+                    "outer Op::Scope.body must contain BOTH inner Op::Scope NodeIds"
+                );
             }
             other => panic!("expected outer Op::Scope, got {other:?}"),
         }
@@ -1705,11 +1951,17 @@ mod scope_step_3b {
         let after = with_trace(|t| t.graph.len());
         let g = end_trace_with(LaunchGrade::untagged()).graph;
         assert_eq!(before, after, "empty-body scope must not push any node");
-        assert_eq!(r.node(), x.node(), "empty-body scope must return the input directly");
+        assert_eq!(
+            r.node(),
+            x.node(),
+            "empty-body scope must return the input directly"
+        );
         // and the final graph has no Op::Scope.
         for (_, n, _) in g.iter() {
-            assert!(!matches!(n.op, Op::Scope { .. }),
-                "empty-body scope must not emit Op::Scope");
+            assert!(
+                !matches!(n.op, Op::Scope { .. }),
+                "empty-body scope must not emit Op::Scope"
+            );
         }
     }
 }
@@ -1735,8 +1987,12 @@ mod powi_carrier_equiv {
             let graph = end_trace_with(LaunchGrade::untagged()).graph;
 
             // structural: NO Pow op anywhere (the bug was lowering to powf).
-            let has_pow = (0..graph.len())
-                .any(|i| matches!(graph.node(NodeId(i as u32)).op, Op::ElementWise(ElementWiseOp::Pow, _)));
+            let has_pow = (0..graph.len()).any(|i| {
+                matches!(
+                    graph.node(NodeId(i as u32)).op,
+                    Op::ElementWise(ElementWiseOp::Pow, _)
+                )
+            });
             assert!(!has_pow, "powi({n}) must lower to multiplies, not Pow/powf");
 
             // numeric: evaluate the traced graph and require bit-agreement with f64::powi
@@ -1768,7 +2024,10 @@ mod powi_carrier_equiv {
         for &v in &[-4.0_f64, -1e-9, 0.0, 0.25, 9.0] {
             let got = Cpu.eval_elemental(&f, &[v])[0];
             let want = v.max(0.0).sqrt();
-            assert!((got - want).abs() <= 1e-12, "safe_sqrt({v}): {got} != {want}");
+            assert!(
+                (got - want).abs() <= 1e-12,
+                "safe_sqrt({v}): {got} != {want}"
+            );
         }
         // clamp into [-1, 1]
         begin_trace();
@@ -1781,7 +2040,10 @@ mod powi_carrier_equiv {
         for &v in &[-3.0_f64, -1.0, -0.2, 0.5, 1.0, 5.0] {
             let got = Cpu.eval_elemental(&cf, &[v])[0];
             let want = v.max(-1.0).min(1.0);
-            assert!((got - want).abs() <= 1e-12, "clamp({v}, -1, 1): {got} != {want}");
+            assert!(
+                (got - want).abs() <= 1e-12,
+                "clamp({v}, -1, 1): {got} != {want}"
+            );
         }
     }
 }

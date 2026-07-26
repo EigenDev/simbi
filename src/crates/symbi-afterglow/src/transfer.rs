@@ -456,7 +456,11 @@ pub fn generate_photon_events(
 /// loop, silently dropping the outer shells (where the shock lives). packet positions are
 /// jittered uniformly within each (mu, phi) cell, so a coarse tessellation still covers the
 /// full sphere without bias.
-pub fn spherical_tessellation_for_budget(ni: usize, photons_per_dir: u64, max_events: u64) -> (u64, u64) {
+pub fn spherical_tessellation_for_budget(
+    ni: usize,
+    photons_per_dir: u64,
+    max_events: u64,
+) -> (u64, u64) {
     let ni = ni.max(1) as u64;
     let ppd = photons_per_dir.max(1);
     let per_cell = (max_events / (ni * ppd)).max(8);
@@ -941,9 +945,15 @@ mod tests {
         let cond = conditions();
         let sc = scales();
         let ni = 500;
-        let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 1.0e-4 * i as f64)).collect();
+        let x1: Vec<f64> = (0..ni)
+            .map(|i| 1.0e17 * (1.0 + 1.0e-4 * i as f64))
+            .collect();
         let (rho, gb, pre) = (vec![1.0e-24; ni], vec![2.0; ni], vec![1.0e-6; ni]);
-        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+        let fields = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
 
         let budget = 50_000_u64;
         let (n_mu, n_phi) = spherical_tessellation_for_budget(ni, 1, budget);
@@ -972,7 +982,11 @@ mod tests {
         let ni = 8;
         let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 0.001 * i as f64)).collect();
         let (rho, gb, pre) = (vec![1.0e-24; ni], vec![10.0; ni], vec![1.0e-6; ni]);
-        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+        let fields = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
 
         let n_mu = 16;
         let ev = generate_photon_events_spherical(
@@ -1031,7 +1045,11 @@ mod tests {
         let ni = 16;
         let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 0.01 * i as f64)).collect();
         let (rho, gb, pre) = (vec![1.0e-24; ni], vec![2.0; ni], vec![1.0e-6; ni]);
-        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+        let fields = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
 
         let nu0 = 1.0e9;
         let d_l = 1.0e26;
@@ -1044,9 +1062,8 @@ mod tests {
         let t_hi_s = cond.current_time + 1.05 * r_max / c;
 
         // monte-carlo flux [mJy] from the packet catalog.
-        let ev = generate_photon_events_spherical(
-            &cond, &sc, &fields, &x1, 42, PI, 64, 64, 4, u64::MAX,
-        );
+        let ev =
+            generate_photon_events_spherical(&cond, &sc, &fields, &x1, 42, PI, 64, 64, 4, u64::MAX);
         let lc = crate::observe::compute_lightcurve_from_events(
             &ev,
             [0.0, 0.0, 1.0],
@@ -1079,10 +1096,12 @@ mod tests {
             64,
             128,
         );
-        let f_dep =
-            img.iter().sum::<f64>() / (4.0 * PI * d_l * d_l * (t_hi_s - t_lo_s)) * 1.0e26;
+        let f_dep = img.iter().sum::<f64>() / (4.0 * PI * d_l * d_l * (t_hi_s - t_lo_s)) * 1.0e26;
 
-        assert!(f_mc > 0.0 && f_dep > 0.0, "both paths must see flux: mc {f_mc} dep {f_dep}");
+        assert!(
+            f_mc > 0.0 && f_dep > 0.0,
+            "both paths must see flux: mc {f_mc} dep {f_dep}"
+        );
         let ratio = f_mc / f_dep;
         assert!(
             (0.8..1.25).contains(&ratio),

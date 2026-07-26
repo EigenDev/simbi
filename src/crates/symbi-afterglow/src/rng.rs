@@ -31,7 +31,9 @@ impl Rng {
             x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
             x ^ (x >> 31)
         };
-        Rng { s: [splitmix(), splitmix(), splitmix(), splitmix()] }
+        Rng {
+            s: [splitmix(), splitmix(), splitmix(), splitmix()],
+        }
     }
 
     /// the next 64 raw random bits (xoshiro256** scrambler).

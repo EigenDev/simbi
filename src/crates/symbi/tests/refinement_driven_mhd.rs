@@ -20,7 +20,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_boundary_dag;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
-use symbi_hydro::{SourceConfig, NEWTONIAN_MHD_SPEC};
+use symbi_hydro::{NEWTONIAN_MHD_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -80,8 +80,13 @@ fn fill(sim: &Sim, rho: f64, pre: f64) {
     }
 }
 
-fn build_hier(boundaries: Boundaries<3>, region: RefinementRegion<3>, json: String, rho: f64, pre: f64)
--> Hierarchy<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+fn build_hier(
+    boundaries: Boundaries<3>,
+    region: RefinementRegion<3>,
+    json: String,
+    rho: f64,
+    pre: f64,
+) -> Hierarchy<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
     let dx = 1.0 / N as f64;
     let coarse = Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N; 3])
@@ -125,7 +130,10 @@ fn uniform_mhd_stays_uniform_with_all_faces_driven() {
         [BoundaryType::Driven(0), BoundaryType::Driven(0)],
         [BoundaryType::Driven(0), BoundaryType::Driven(0)],
     ]);
-    let region = RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] };
+    let region = RefinementRegion {
+        x_lo: [0.25; 3],
+        x_hi: [0.75; 3],
+    };
     let mut hier = build_hier(boundaries, region, mhd_dag(rho0, 0.0, pre0), rho0, pre0);
     hier.evolve_steps(STEPS).unwrap();
     for (ll, level) in hier.levels.iter().enumerate() {
@@ -134,11 +142,20 @@ fn uniform_mhd_stays_uniform_with_all_faces_driven() {
         for c in sim.geom.interior.iter() {
             let den = *sim.fields.cons.den.view().at(c);
             let bx = *mhd.bcell[0].view().at(c);
-            assert!((den - rho0).abs() < 1e-12, "level {ll}: den drifted to {den} at {c:?}");
-            assert!((bx - B0).abs() < 1e-12, "level {ll}: bcell_x drifted to {bx} at {c:?}");
+            assert!(
+                (den - rho0).abs() < 1e-12,
+                "level {ll}: den drifted to {den} at {c:?}"
+            );
+            assert!(
+                (bx - B0).abs() < 1e-12,
+                "level {ll}: bcell_x drifted to {bx} at {c:?}"
+            );
         }
         let db = div_b_max(sim);
-        assert!(db < 1e-12, "level {ll}: div(B) = {db:e} under all-driven faces");
+        assert!(
+            db < 1e-12,
+            "level {ll}: div(B) = {db:e} under all-driven faces"
+        );
     }
 }
 
@@ -150,12 +167,19 @@ fn fine_mhd_level_flush_against_a_driven_face_holds_the_prescription() {
         [BoundaryType::Outflow, BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::Outflow],
     ]);
-    let region = RefinementRegion { x_lo: [0.0, 0.25, 0.25], x_hi: [0.5, 0.75, 0.75] };
+    let region = RefinementRegion {
+        x_lo: [0.0, 0.25, 0.25],
+        x_hi: [0.5, 0.75, 0.75],
+    };
     let mut hier = build_hier(boundaries, region, mhd_dag(rho_in, vx_in, pre_in), 1.0, 1.0);
     hier.evolve_steps(STEPS).unwrap();
 
     let fine = &hier.levels[1].state;
-    assert_eq!(fine.boundaries.lo(0), BoundaryType::Driven(0), "fine face did not inherit driven");
+    assert_eq!(
+        fine.boundaries.lo(0),
+        BoundaryType::Driven(0),
+        "fine face did not inherit driven"
+    );
     let mhd = fine.fields.mhd.as_ref().unwrap();
     let mut checked = 0usize;
     for c in fine.geom.allocated.iter() {
@@ -166,8 +190,14 @@ fn fine_mhd_level_flush_against_a_driven_face_holds_the_prescription() {
         checked += 1;
         let rho = *fine.fields.prim.rho.view().at(c);
         let bx = *mhd.bcell[0].view().at(c);
-        assert!((rho - rho_in).abs() < 1e-12, "fine ghost rho at {x:?} = {rho}, want {rho_in}");
-        assert!((bx - B0).abs() < 1e-12, "fine ghost bcell_x at {x:?} = {bx}, want {B0}");
+        assert!(
+            (rho - rho_in).abs() < 1e-12,
+            "fine ghost rho at {x:?} = {rho}, want {rho_in}"
+        );
+        assert!(
+            (bx - B0).abs() < 1e-12,
+            "fine ghost bcell_x at {x:?} = {bx}, want {B0}"
+        );
     }
     assert!(checked > 0, "no fine x_lo ghost cells found");
 
@@ -176,9 +206,15 @@ fn fine_mhd_level_flush_against_a_driven_face_holds_the_prescription() {
     for c in fine.geom.interior.iter() {
         momx += (*fine.fields.cons.mom[0].view().at(c)).abs();
     }
-    assert!(momx > 1e-3, "driven inflow never entered the fine level ({momx:e})");
+    assert!(
+        momx > 1e-3,
+        "driven inflow never entered the fine level ({momx:e})"
+    );
     for (ll, level) in hier.levels.iter().enumerate() {
         let db = div_b_max(&level.state);
-        assert!(db < 1e-12, "level {ll}: div(B) = {db:e} under a driven mhd inflow");
+        assert!(
+            db < 1e-12,
+            "level {ll}: div(B) = {db:e} under a driven mhd inflow"
+        );
     }
 }

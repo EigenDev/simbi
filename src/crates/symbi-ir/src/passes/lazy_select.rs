@@ -343,7 +343,10 @@ mod tests {
         assert_eq!(apply(&mut k), 0);
         assert!(matches!(
             &k.body[0],
-            ScalarStmt::Let { value: ScalarExpr::Select { .. }, .. }
+            ScalarStmt::Let {
+                value: ScalarExpr::Select { .. },
+                ..
+            }
         ));
     }
 

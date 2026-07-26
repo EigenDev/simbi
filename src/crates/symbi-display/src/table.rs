@@ -333,7 +333,8 @@ impl Table {
     /// the renderer collapses repeated `category` entries to blanks (e.g.
     /// "CPU" + 4 properties = one "CPU" label + 3 blanks).
     pub fn set_system_info(&mut self, rows: &[[&str; 3]]) {
-        self.system_info = rows.iter()
+        self.system_info = rows
+            .iter()
             .map(|r| [r[0].to_string(), r[1].to_string(), r[2].to_string()])
             .collect();
     }
@@ -341,7 +342,8 @@ impl Table {
     /// set the static Problem Setup sub-table (rendered between
     /// System Info and Benchmarks). each row is `[category, property, value]`.
     pub fn set_problem_setup(&mut self, rows: &[[&str; 3]]) {
-        self.problem_setup = rows.iter()
+        self.problem_setup = rows
+            .iter()
             .map(|r| [r[0].to_string(), r[1].to_string(), r[2].to_string()])
             .collect();
     }
@@ -508,11 +510,8 @@ impl Table {
         }
 
         // benchmark section
-        self.renderer.render_title(
-            &mut buf,
-            "BENCHMARKS",
-            self.renderer.total_width(),
-        );
+        self.renderer
+            .render_title(&mut buf, "BENCHMARKS", self.renderer.total_width());
         self.renderer.render_row(&mut buf, &headers_ref, true);
         self.renderer.render_separator(&mut buf);
         self.renderer.render_row(&mut buf, &data_ref, false);
@@ -536,7 +535,9 @@ impl Table {
     /// entries to blanks so the visual grouping is clear ("CPU" → 4 fields
     /// shows as one "CPU" label + 3 indented blanks).
     fn render_info_section(&self, buf: &mut String, title: &str, rows: &[[String; 3]]) {
-        if rows.is_empty() { return; }
+        if rows.is_empty() {
+            return;
+        }
         let term_width = terminal::width();
         let mut sub = Renderer::new();
         let headers = ["Category", "Property", "Value"];
@@ -557,7 +558,12 @@ impl Table {
         // coalesce repeated category labels into blanks.
         let mut prev_cat: &str = "";
         for r in rows {
-            let cat_render = if r[0] == prev_cat { "" } else { prev_cat = r[0].as_str(); &r[0] };
+            let cat_render = if r[0] == prev_cat {
+                ""
+            } else {
+                prev_cat = r[0].as_str();
+                &r[0]
+            };
             sub.render_row(buf, &[cat_render, r[1].as_str(), r[2].as_str()], false);
         }
         sub.render_border_bottom(buf);

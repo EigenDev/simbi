@@ -39,7 +39,7 @@ use crate::state::{Cons, Prim};
 
 use super::cons::rhd_recover;
 use super::wave_speeds::rhd_speeds_from_vn_gr;
-use super::{enthalpy, lorentz_factor, sound_speed_sq, Rhd};
+use super::{Rhd, enthalpy, lorentz_factor, sound_speed_sq};
 
 /// the maximum newton iterations for the metric-aware c2p (mirrors the flat host wrapper).
 const MAX_ITER: usize = 100;
@@ -102,8 +102,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         // U = sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], spelled in ADM variables as
         // sqrt(gamma)[D, S_i, alpha tau + (alpha-1) D - beta^i S_i].
         let p = self.valencia_parts(eos, prim);
-        let ehat =
-            self.alpha * p.tau + (self.alpha - S::ONE) * p.den - self.shift.dot(&p.mom);
+        let ehat = self.alpha * p.tau + (self.alpha - S::ONE) * p.den - self.shift.dot(&p.mom);
         Cons {
             den: self.sqrt_gamma * p.den,
             mom: p.mom.scale(self.sqrt_gamma),
@@ -139,13 +138,21 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         // beta=0 -> tau = ehat, so the flat recovery is untouched. then the SHARED metric-aware
         // newton on (D, S_i, tau) — the recovery physics never sees the energy re-split.
         let tau = (cons.nrg + (S::ONE - self.alpha) * dd + self.shift.dot(&cons.mom)) / self.alpha;
-        let cons_tau = Cons { den: dd, mom: cons.mom, nrg: tau };
+        let cons_tau = Cons {
+            den: dd,
+            mom: cons.mom,
+            nrg: tau,
+        };
         // the metric-aware recovery: |S|^2 = gamma^{ij} S_i S_j, then the raised v^i (`rhd_recover`
         // already contracts with `self.metric`). the SR->GR difference lives entirely in the metric VALUE; the code path is shared.
         let prim = rhd_recover(eos, &cons_tau, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-        if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
+        if code.is_ok() {
+            C2pResult::ok(prim)
+        } else {
+            C2pResult::err(prim, code)
+        }
     }
 
     #[inline]
@@ -197,7 +204,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
     #[inline]
     fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
         // rho h W^2 with the metric Lorentz factor |v|^2 = gamma_ij v^i v^j.
-        crate::rhd::enthalpy_density(eos, prim.rho, prim.pre, self.metric.norm_sq_contra(&prim.vel))
+        crate::rhd::enthalpy_density(
+            eos,
+            prim.rho,
+            prim.pre,
+            self.metric.norm_sq_contra(&prim.vel),
+        )
     }
 }
 
@@ -226,12 +238,28 @@ mod tests {
         };
         let nhat = Tensor::unit(0);
         for &v in &[0.0_f64, 0.3, -0.5, 0.85] {
-            let prim = Prim { rho: 1.3, vel: Tensor::new([v]), pre: 0.5 };
+            let prim = Prim {
+                rho: 1.3,
+                vel: Tensor::new([v]),
+                pre: 0.5,
+            };
             let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &prim));
-            assert!(approx(cf.den, cg.den) && approx(cf.mom[0], cg.mom[0]) && approx(cf.nrg, cg.nrg), "cons v={v}");
-            let (ff, fg) = (flat.to_flux(&prim, &nhat, &eos), gr.to_flux(&prim, &nhat, &eos));
-            assert!(approx(ff.den, fg.den) && approx(ff.mom[0], fg.mom[0]) && approx(ff.nrg, fg.nrg), "flux v={v}");
-            let ((slf, srf), (slg, srg)) = (flat.wave_speeds(&eos, &prim, &nhat), gr.wave_speeds(&eos, &prim, &nhat));
+            assert!(
+                approx(cf.den, cg.den) && approx(cf.mom[0], cg.mom[0]) && approx(cf.nrg, cg.nrg),
+                "cons v={v}"
+            );
+            let (ff, fg) = (
+                flat.to_flux(&prim, &nhat, &eos),
+                gr.to_flux(&prim, &nhat, &eos),
+            );
+            assert!(
+                approx(ff.den, fg.den) && approx(ff.mom[0], fg.mom[0]) && approx(ff.nrg, fg.nrg),
+                "flux v={v}"
+            );
+            let ((slf, srf), (slg, srg)) = (
+                flat.wave_speeds(&eos, &prim, &nhat),
+                gr.wave_speeds(&eos, &prim, &nhat),
+            );
             assert!(approx(slf, slg) && approx(srf, srg), "speeds v={v}");
         }
     }
@@ -252,14 +280,26 @@ mod tests {
             GammaInv::new(Matrix::diag(Tensor::new([f]))),
         );
         let alpha = f.sqrt();
-        let gr = RhdGr { metric, alpha, shift: Tensor::new([0.0]), sqrt_gamma };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([vr]), pre: 0.1 };
+        let gr = RhdGr {
+            metric,
+            alpha,
+            shift: Tensor::new([0.0]),
+            sqrt_gamma,
+        };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([vr]),
+            pre: 0.1,
+        };
         let c = gr.to_conserved(&eos, &prim);
         let v_sq = grr * vr * vr;
         let w = 1.0 / (1.0 - v_sq).sqrt();
         let h = 1.0 + (4.0 / 3.0) / (4.0 / 3.0 - 1.0) * 0.1 / 1.0; // 1 + Gamma/(Gamma-1) p/rho
         let rhw2 = 1.0 * h * w * w;
-        assert!(approx(c.den, sqrt_gamma * w), "mass slot = sqrt(gamma) rho W");
+        assert!(
+            approx(c.den, sqrt_gamma * w),
+            "mass slot = sqrt(gamma) rho W"
+        );
         assert!(
             approx(c.mom[0], sqrt_gamma * grr * vr * rhw2),
             "momentum slot = sqrt(gamma) gamma_rr v^r rho h W^2"
@@ -267,15 +307,24 @@ mod tests {
         // the radial fluxes carry the same measure and the lapse: sqrt(-g) rho u^r =
         // sqrt(gamma) D alpha v^r, sqrt(-g) T^r_r = sqrt(gamma)(S_r alpha v^r + alpha p).
         let fx = gr.to_flux(&prim, &Tensor::unit(0), &eos);
-        assert!(approx(fx.den, sqrt_gamma * w * alpha * vr), "mass flux = sqrt(gamma) D alpha v^r");
         assert!(
-            approx(fx.mom[0], sqrt_gamma * (grr * vr * rhw2 * alpha * vr + alpha * 0.1)),
+            approx(fx.den, sqrt_gamma * w * alpha * vr),
+            "mass flux = sqrt(gamma) D alpha v^r"
+        );
+        assert!(
+            approx(
+                fx.mom[0],
+                sqrt_gamma * (grr * vr * rhw2 * alpha * vr + alpha * 0.1)
+            ),
             "momentum flux = sqrt(gamma)(S_r alpha v^r + alpha p)"
         );
         // and the c2p undensitizes and round-trips back to the same contravariant v^r.
         let back = gr.to_primitive(&eos, &c).unwrap();
         assert!(approx(back.vel[0], vr), "c2p recovers contravariant v^r");
-        assert!(approx(back.rho, 1.0) && approx(back.pre, 0.1), "c2p recovers rho and p");
+        assert!(
+            approx(back.rho, 1.0) && approx(back.pre, 0.1),
+            "c2p recovers rho and p"
+        );
     }
 
     #[test]
@@ -285,8 +334,8 @@ mod tests {
         // -sqrt(-g)(T^r_t + rho u^r), computed INDEPENDENTLY straight from the SchwarzschildKS line
         // element by autodiff — the transcription check on the conserved vector, not a restatement
         // of the regime's own algebra. `to_primitive` then inverts the densitized state back.
-        use symbi_geometry::grhd_source::coord_energy_cons_flux;
         use symbi_geometry::SchwarzschildKS;
+        use symbi_geometry::grhd_source::coord_energy_cons_flux;
         use symbi_ir::dual::Dual;
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let (m, r, vr) = (1.0_f64, 6.0_f64, 0.15_f64);
@@ -299,13 +348,24 @@ mod tests {
             Gamma::new(Matrix::diag(Tensor::new([grr]))),
             GammaInv::new(Matrix::diag(Tensor::new([1.0 / grr]))),
         );
-        let gr = RhdGr { metric, alpha, shift: Tensor::new([beta]), sqrt_gamma };
-        let prim = Prim { rho: 1.3, vel: Tensor::new([vr]), pre: 0.4 };
+        let gr = RhdGr {
+            metric,
+            alpha,
+            shift: Tensor::new([beta]),
+            sqrt_gamma,
+        };
+        let prim = Prim {
+            rho: 1.3,
+            vel: Tensor::new([vr]),
+            pre: 0.4,
+        };
         let c = gr.to_conserved(&eos, &prim);
         let fx = gr.to_flux(&prim, &Tensor::unit(0), &eos);
         let hh = 1.0 + (4.0 / 3.0) / (1.0 / 3.0) * 0.4 / 1.3;
         let (e_ref, f_ref): (f64, Tensor<f64, 3>) = coord_energy_cons_flux(
-            &SchwarzschildKS { mass: Dual::constant(m) },
+            &SchwarzschildKS {
+                mass: Dual::constant(m),
+            },
             Tensor::<f64, 3>::new([r, std::f64::consts::FRAC_PI_2, 0.0]),
             1.3,
             1.3 * hh,
@@ -332,8 +392,16 @@ mod tests {
         // the shift enters the fan as the coordinate speed lambda - beta^r; both characteristics
         // shift by the same amount, so their separation is unchanged.
         let (s_l, s_r) = gr.wave_speeds(&eos, &prim, &Tensor::unit(0));
-        let unshifted = RhdGr { metric, alpha, shift: Tensor::new([0.0]), sqrt_gamma };
+        let unshifted = RhdGr {
+            metric,
+            alpha,
+            shift: Tensor::new([0.0]),
+            sqrt_gamma,
+        };
         let (u_l, u_r) = unshifted.wave_speeds(&eos, &prim, &Tensor::unit(0));
-        assert!(approx(s_l, u_l - beta) && approx(s_r, u_r - beta), "fan carries -beta^r");
+        assert!(
+            approx(s_l, u_l - beta) && approx(s_r, u_r - beta),
+            "fan carries -beta^r"
+        );
     }
 }

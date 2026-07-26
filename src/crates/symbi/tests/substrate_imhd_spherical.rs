@@ -15,7 +15,7 @@
 use std::sync::atomic::Ordering;
 
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet3D;
-use symbi::sim::evolve::{evolve, KernelSet};
+use symbi::sim::evolve::{KernelSet, evolve};
 use symbi::sim::state::*;
 use symbi_geometry::{Cartesian, Spherical};
 use symbi_hydro::eos::Isothermal;
@@ -41,7 +41,11 @@ fn set_ic<M>(sim: &mut SimState<IsothermalMhd, 3, M, Isothermal<f64>, CpuSpace, 
 where
     M: symbi_geometry::Metric<f64, 3> + Copy,
 {
-    let mhd = sim.fields.mhd.as_ref().expect("iso-MHD requires mhd fields");
+    let mhd = sim
+        .fields
+        .mhd
+        .as_ref()
+        .expect("iso-MHD requires mhd fields");
     // face_coord(c, 0)[0] = the r-face radius — split-monopole B_r = B0/r^2 (div-free).
     for c in &sim.geom.interior.extend(0, 0, 1) {
         let rf = sim.geom.face_coord(c, 0)[0];
@@ -66,7 +70,9 @@ where
 fn make_sph() -> SimSph {
     // unseeded; set_ic seeds the staggered B + bcell (full allocated domain) post-construction.
     SimSph::build(IsothermalMhd, Isothermal { cs: CS }, Spherical)
-        .cells([N, N, N]).origin([R_LO, T_LO, P_LO]).spacing([DR, DTH, DPH])
+        .cells([N, N, N])
+        .origin([R_LO, T_LO, P_LO])
+        .spacing([DR, DTH, DPH])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
         .finish()
@@ -74,7 +80,9 @@ fn make_sph() -> SimSph {
 }
 fn make_cart() -> SimCart {
     SimCart::build(IsothermalMhd, Isothermal { cs: CS }, Cartesian)
-        .cells([N, N, N]).origin([R_LO, T_LO, P_LO]).spacing([DR, DTH, DPH])
+        .cells([N, N, N])
+        .origin([R_LO, T_LO, P_LO])
+        .spacing([DR, DTH, DPH])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
         .finish()
@@ -83,11 +91,20 @@ fn make_cart() -> SimCart {
 
 #[test]
 fn full_substrate_spherical_imhd_smoke() {
-    let sub = IsothermalMhdSubstrateKernelSet3D::<HostMemory>::new(CS, CFL, 1.0, &make_sph().geom.allocated);
+    let sub = IsothermalMhdSubstrateKernelSet3D::<HostMemory>::new(
+        CS,
+        CFL,
+        1.0,
+        &make_sph().geom.allocated,
+    );
 
     let mut sph = make_sph();
     set_ic(&mut sph);
-    assert_eq!(sph.geom.coords, symbi_geometry::Geometry::Spherical, "coords must be Spherical");
+    assert_eq!(
+        sph.geom.coords,
+        symbi_geometry::Geometry::Spherical,
+        "coords must be Spherical"
+    );
 
     // geometry ACTIVE in the wave-speed map: the spherical CFL dt differs from Cartesian.
     let mut cart = make_cart();
@@ -96,7 +113,10 @@ fn full_substrate_spherical_imhd_smoke() {
     sub.c2p(&cart);
     let dt_sph = sub.cfl(&sph);
     let dt_cart = sub.cfl(&cart);
-    assert!(dt_sph.is_finite() && dt_sph > 0.0, "bad spherical dt {dt_sph}");
+    assert!(
+        dt_sph.is_finite() && dt_sph > 0.0,
+        "bad spherical dt {dt_sph}"
+    );
     assert!(
         (dt_sph - dt_cart).abs() > 1e-9,
         "spherical and cartesian CFL dt identical ({dt_sph} vs {dt_cart}) — wave_speed_map_sph did not engage",
@@ -111,8 +131,14 @@ fn full_substrate_spherical_imhd_smoke() {
         let rho = *sph.fields.prim.rho.view().at(c);
         assert!(rho.is_finite() && rho > 0.0, "bad density {rho} at {c:?}");
         for d in 0..3 {
-            assert!(sph.fields.prim.vel[d].view().at(c).is_finite(), "non-finite vel[{d}] at {c:?}");
-            assert!(mhd.bcell[d].view().at(c).is_finite(), "non-finite bcell[{d}] at {c:?}");
+            assert!(
+                sph.fields.prim.vel[d].view().at(c).is_finite(),
+                "non-finite vel[{d}] at {c:?}"
+            );
+            assert!(
+                mhd.bcell[d].view().at(c).is_finite(),
+                "non-finite bcell[{d}] at {c:?}"
+            );
         }
     }
     assert!(sph.iteration > 0, "no steps taken");

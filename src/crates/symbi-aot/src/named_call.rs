@@ -21,8 +21,10 @@
 //      .run::<f64>();
 // =============================================================================
 
-use crate::{kernel_by_name, BufHandle, CpuField, CpuFieldMut, OrderedNumeric, Scalar};
-use symbi_ir::{kernel_bindings_from_ir, kernel_scalar_params_typed_from_ir, FieldBind, ScalarBind, ScalarRef};
+use crate::{BufHandle, CpuField, CpuFieldMut, OrderedNumeric, Scalar, kernel_by_name};
+use symbi_ir::{
+    FieldBind, ScalarBind, ScalarRef, kernel_bindings_from_ir, kernel_scalar_params_typed_from_ir,
+};
 
 /// a buffer binding awaiting manifest ordering: its name + data handle + optional
 /// explicit layout (`lo`/`extent`). default layout is the 1D contiguous case
@@ -46,18 +48,33 @@ pub struct NamedKernel<'a, S> {
 
 impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
     pub fn new(name: &'a str) -> Self {
-        Self { name, bufs: Vec::new(), scalars: Vec::new(), ints: Vec::new(), grid: &[], dom_lo: &[] }
+        Self {
+            name,
+            bufs: Vec::new(),
+            scalars: Vec::new(),
+            ints: Vec::new(),
+            grid: &[],
+            dom_lo: &[],
+        }
     }
 
     /// bind a read-only input buffer by its manifest field name (1D layout).
     pub fn input(mut self, name: &str, data: &'a [S]) -> Self {
-        self.bufs.push(Binding { name: name.to_string(), handle: BufHandle::Host(data), layout: None });
+        self.bufs.push(Binding {
+            name: name.to_string(),
+            handle: BufHandle::Host(data),
+            layout: None,
+        });
         self
     }
 
     /// bind an output (or in-place) buffer by its manifest field name (1D layout).
     pub fn output(mut self, name: &str, data: &'a mut [S]) -> Self {
-        self.bufs.push(Binding { name: name.to_string(), handle: BufHandle::HostMut(data), layout: None });
+        self.bufs.push(Binding {
+            name: name.to_string(),
+            handle: BufHandle::HostMut(data),
+            layout: None,
+        });
         self
     }
 
@@ -72,7 +89,13 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
     }
 
     /// bind an output with an EXPLICIT layout (staggered / multi-axis domains).
-    pub fn output_at(mut self, name: &str, data: &'a mut [S], lo: &'a [i32], extent: &'a [u32]) -> Self {
+    pub fn output_at(
+        mut self,
+        name: &str,
+        data: &'a mut [S],
+        lo: &'a [i32],
+        extent: &'a [u32],
+    ) -> Self {
         self.bufs.push(Binding {
             name: name.to_string(),
             handle: BufHandle::HostMut(data),
@@ -104,8 +127,8 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
     /// resolve + reorder against the manifest, then run on the CPU. panics — with the
     /// manifest's expected names — if any declared buffer/scalar is unbound or extra.
     pub fn run(self) {
-        let (kernel, ir) =
-            kernel_by_name::<S>(self.name).unwrap_or_else(|| panic!("no kernel '{}' in registry", self.name));
+        let (kernel, ir) = kernel_by_name::<S>(self.name)
+            .unwrap_or_else(|| panic!("no kernel '{}' in registry", self.name));
         // (field path, is_output) in canonical order: inputs then outputs. the manifest is typed
         // (FieldBind); this test harness binds buffers by their runtime-path string, so flatten
         // each bind back to its name here.
@@ -141,7 +164,8 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                 BufHandle::HostMut(d) => (d.len() as u32, true),
             };
             assert_eq!(
-                is_mut, *is_out,
+                is_mut,
+                *is_out,
                 "kernel '{}': field '{field}' is {} in the manifest but bound as {}",
                 self.name,
                 if *is_out { "an output" } else { "an input" },
@@ -153,7 +177,10 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
         }
         if !provided.is_empty() {
             let extra: Vec<&str> = provided.iter().map(|b| b.name.as_str()).collect();
-            panic!("kernel '{}': buffers bound but not in manifest: {extra:?}", self.name);
+            panic!(
+                "kernel '{}': buffers bound but not in manifest: {extra:?}",
+                self.name
+            );
         }
 
         // build the slice-ABI inputs/outputs directly (the field views borrow the run-local
@@ -178,12 +205,21 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
         for (bind, is_int) in &scalar_kinds {
             let name = bind.name();
             if *is_int {
-                let v = self.ints.iter().find(|(n, _)| *n == name.as_str()).map(|(_, v)| *v).unwrap_or_else(|| {
-                    panic!("kernel '{}': missing int scalar '{name}'", self.name)
-                });
+                let v = self
+                    .ints
+                    .iter()
+                    .find(|(n, _)| *n == name.as_str())
+                    .map(|(_, v)| *v)
+                    .unwrap_or_else(|| {
+                        panic!("kernel '{}': missing int scalar '{name}'", self.name)
+                    });
                 ints.push(v);
             } else {
-                let v = self.scalars.iter().find(|(n, _)| *n == name.as_str()).map(|(_, v)| *v)
+                let v = self
+                    .scalars
+                    .iter()
+                    .find(|(n, _)| *n == name.as_str())
+                    .map(|(_, v)| *v)
                     // static-mesh default: a test that does not exercise a moving mesh has ZERO
                     // mesh rates — exactly what production `motion_scalar` returns for a static
                     // mesh. so the harness supplies 0 for any unsupplied `mesh_*` scalar rather
@@ -199,9 +235,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                         matches!(
                             bind,
                             ScalarBind::Ref(
-                                ScalarRef::Mesh(_)
-                                    | ScalarRef::MapKind(_)
-                                    | ScalarRef::MapParam(_),
+                                ScalarRef::Mesh(_) | ScalarRef::MapKind(_) | ScalarRef::MapParam(_),
                             )
                         )
                         .then_some(S::ZERO)
@@ -213,7 +247,14 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
             }
         }
 
-        kernel(&inputs, &mut outputs, self.grid, self.dom_lo, &ints, &scalars);
+        kernel(
+            &inputs,
+            &mut outputs,
+            self.grid,
+            self.dom_lo,
+            &ints,
+            &scalars,
+        );
     }
 }
 
@@ -241,7 +282,8 @@ mod tests {
             .input("cons.den", &den)
             .output("prim.vel_0", &mut vel)
             .input("cons.mom_0", &mom)
-            .grid(&grid).dom_lo(&dom)
+            .grid(&grid)
+            .dom_lo(&dom)
             .scalar("gamma", 5.0 / 3.0)
             .run();
         for ii in 0..n {
@@ -263,9 +305,13 @@ mod tests {
         let grid = [n as u32];
         let dom = [0i32];
         NamedKernel::new("rhd_c2p_1d")
-            .input("cons.den", &den).input("cons.mom_0", &mom) // cons.nrg omitted
-            .output("prim.rho", &mut rho).output("prim.vel_0", &mut vel).output("prim.pre", &mut pre)
-            .grid(&grid).dom_lo(&dom)
+            .input("cons.den", &den)
+            .input("cons.mom_0", &mom) // cons.nrg omitted
+            .output("prim.rho", &mut rho)
+            .output("prim.vel_0", &mut vel)
+            .output("prim.pre", &mut pre)
+            .grid(&grid)
+            .dom_lo(&dom)
             .scalar("gamma", 5.0 / 3.0)
             .run();
     }

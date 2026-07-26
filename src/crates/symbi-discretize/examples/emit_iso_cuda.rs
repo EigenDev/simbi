@@ -16,37 +16,50 @@ use std::fs;
 
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
-    adiabatic_c2p_gv, adiabatic_flux_gv, godunov_mass_gv, godunov_stage_gv,
-    iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, snapshot_gv, rhd_c2p_gv,
-    rhd_flux_gv, Coords, GeoSource, Spacing, Spacetime,
+    Coords, GeoSource, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv, godunov_mass_gv,
+    godunov_stage_gv, iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
+    rhd_c2p_gv, rhd_flux_gv, snapshot_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
-use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
+use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
 
 type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
 
 // emit a Gv-traced kernel (graph + ABI manifest already carried by the GvKernel) -> CUDA source.
 fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: Writes) {
-    assert!(!k.graph.has_errors(), "{name} graph errors: {:?}", k.graph.errors());
-    let desc = emit_kernel_from_lowering(&k.graph, &KernelEmitInputs {
-        kernel_name:      name,
-        coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),        ndim,
-        target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
-        field_inputs:     &k.field_inputs,
-        scalar_params:    &k.scalar_params,
-        field_writes:     &writes,
-        coord_components: &k.coord_components,
-        device_preamble:  &[],
-        tile_spec: None,
-    });
+    assert!(
+        !k.graph.has_errors(),
+        "{name} graph errors: {:?}",
+        k.graph.errors()
+    );
+    let desc = emit_kernel_from_lowering(
+        &k.graph,
+        &KernelEmitInputs {
+            kernel_name: name,
+            coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),
+            ndim,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
+            field_inputs: &k.field_inputs,
+            scalar_params: &k.scalar_params,
+            field_writes: &writes,
+            coord_components: &k.coord_components,
+            device_preamble: &[],
+            tile_spec: None,
+        },
+    );
     let path = format!("{out_dir}/{name}.cu");
     fs::write(&path, &desc.source).unwrap_or_else(|e| panic!("write {path}: {e}"));
     println!("emitted {path}");
 }
 
 fn main() {
-    let out = std::env::args().nth(1).unwrap_or_else(|| "target/iso_cuda".to_string());
+    let out = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "target/iso_cuda".to_string());
     fs::create_dir_all(&out).expect("create out dir");
 
     // ghost_fill: the gv lattice-map pullback — integer source-coord SELECT branch.
@@ -93,9 +106,27 @@ fn main() {
     let (mk, mw) = godunov_mass_gv(cart.0, &cart.1, &cart.2, 1);
     emit_gv(&out, "godunov_mass_1d", 1, mk, mw);
     // one godunov-stage kernel per regime (runtime (a0, ac) SSP coefficients serve euler/rk2/rk3).
-    let (iek, iew) = godunov_stage_gv(cart.0, Spacetime::Minkowski, &cart.1, &cart.2, 1, 1, false, src);
+    let (iek, iew) = godunov_stage_gv(
+        cart.0,
+        Spacetime::Minkowski,
+        &cart.1,
+        &cart.2,
+        1,
+        1,
+        false,
+        src,
+    );
     emit_gv(&out, "iso_godunov_stage_1d", 1, iek, iew);
-    let (aek, aew) = godunov_stage_gv(cart.0, Spacetime::Minkowski, &cart.1, &cart.2, 1, 1, true, src);
+    let (aek, aew) = godunov_stage_gv(
+        cart.0,
+        Spacetime::Minkowski,
+        &cart.1,
+        &cart.2,
+        1,
+        1,
+        true,
+        src,
+    );
     emit_gv(&out, "adiabatic_godunov_stage_1d", 1, aek, aew);
     let (isk, isw) = snapshot_gv(1, false);
     emit_gv(&out, "iso_snapshot_1d", 1, isk, isw);

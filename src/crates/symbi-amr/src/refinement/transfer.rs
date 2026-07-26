@@ -24,10 +24,10 @@
 use symbi_algebra::{Domain, Space};
 use symbi_xpu::MemorySpace;
 
-use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
-use symbi_sim::state::{Boundaries, BoundaryType, ConsFieldsGeneric, PrimFieldsGeneric};
-use symbi_sim::driver::prof;
 use symbi_ir::{KernelId, ProlongTag};
+use symbi_sim::driver::prof;
+use symbi_sim::state::{Boundaries, BoundaryType, ConsFieldsGeneric, PrimFieldsGeneric};
+use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 
 /// coarse-fine prolongation order — the driver-side selector for the aot
 /// kernel instance (the same by-name seam `Solver` uses for hlle/hllc). the
@@ -62,7 +62,11 @@ pub fn copy_field<const D: usize, Mem: MemorySpace>(
 ) {
     dispatch_fields_each::<f64, Mem, D>(
         KernelId::FieldCopy { ndim: D as u8 }.name(),
-        src.domain(), &[src], &[dst], &[], &[],
+        src.domain(),
+        &[src],
+        &[dst],
+        &[],
+        &[],
     );
 }
 
@@ -112,7 +116,11 @@ pub fn cf_ghost_slabs<const D: usize>(
         } else {
             interior.spaces[a].hi
         };
-        Space { name: allocated.spaces[a].name, lo, hi }
+        Space {
+            name: allocated.spaces[a].name,
+            lo,
+            hi,
+        }
     }));
     cf_region.guillotine_difference(interior)
 }
@@ -129,7 +137,11 @@ pub fn prolong_field<const D: usize, Mem: MemorySpace>(
     order: ProlongOrder,
     alpha: f64,
 ) {
-    let name = KernelId::RefineProlong { order: prolong_tag(order), ndim: D as u8 }.name();
+    let name = KernelId::RefineProlong {
+        order: prolong_tag(order),
+        ndim: D as u8,
+    }
+    .name();
     dispatch_fields_each::<f64, Mem, D>(name, region, &[old, new], &[dst], &[], &[alpha]);
 }
 
@@ -162,7 +174,8 @@ pub fn prolong_prims<const D: usize, const DOF: usize, Mem: MemorySpace>(
             inputs.push(&new.vel[kk]);
             outputs.push(&dst.vel[kk]);
         }
-        if let (Some(po), Some(pn), Some(pd)) = (old.pre_field(), new.pre_field(), dst.pre_field()) {
+        if let (Some(po), Some(pn), Some(pd)) = (old.pre_field(), new.pre_field(), dst.pre_field())
+        {
             inputs.push(po);
             inputs.push(pn);
             outputs.push(pd);
@@ -179,7 +192,14 @@ pub fn prolong_prims<const D: usize, const DOF: usize, Mem: MemorySpace>(
     // single-field fallback (1D/2D, or unusual component counts).
     prolong_field(&old.rho, &new.rho, &dst.rho, region, order, alpha);
     for kk in 0..DOF {
-        prolong_field(&old.vel[kk], &new.vel[kk], &dst.vel[kk], region, order, alpha);
+        prolong_field(
+            &old.vel[kk],
+            &new.vel[kk],
+            &dst.vel[kk],
+            region,
+            order,
+            alpha,
+        );
     }
     if let (Some(po), Some(pn), Some(pd)) = (old.pre_field(), new.pre_field(), dst.pre_field()) {
         prolong_field(po, pn, pd, region, order, alpha);
@@ -191,7 +211,8 @@ fn prim_comps<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
     p: &'a PrimFieldsGeneric<D, DOF, Mem>,
     has_pre: bool,
 ) -> Vec<&'a symbi_grid::Field<f64, D, Mem>> {
-    let mut v: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(1 + DOF + has_pre as usize);
+    let mut v: Vec<&symbi_grid::Field<f64, D, Mem>> =
+        Vec::with_capacity(1 + DOF + has_pre as usize);
     v.push(&p.rho);
     for kk in 0..DOF {
         v.push(&p.vel[kk]);
@@ -224,7 +245,11 @@ fn sweep_domains<const D: usize>(region: &Domain<D>, w: isize) -> (Domain<D>, Do
     let parents = coarse_parents(region, w);
     let mix = |fine_axes: usize| -> Domain<D> {
         Domain::new(std::array::from_fn(|a| {
-            if a < fine_axes { region.spaces[a].clone() } else { parents.spaces[a].clone() }
+            if a < fine_axes {
+                region.spaces[a].clone()
+            } else {
+                parents.spaces[a].clone()
+            }
         }))
     };
     (mix(1), mix(2))
@@ -273,7 +298,9 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
     let has_pre = old.pre_field().is_some();
     let ncomp = 1 + DOF + has_pre as usize;
     if !(D == 3 && (ncomp == 4 || ncomp == 5) && order != ProlongOrder::Pcm) {
-        prof("refine_prolong_1t", || prolong_prims_lerped(lerp, old, new, dst, region, order, alpha));
+        prof("refine_prolong_1t", || {
+            prolong_prims_lerped(lerp, old, new, dst, region, order, alpha)
+        });
         return;
     }
     let w = order.ghost_width() as isize;
@@ -288,13 +315,21 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 
     // pass 0 feed: the time-lerped coarse snapshots over the parent region.
     let coarse = coarse_parents(region, w);
-    let (old_c, new_c, lerp_c) = (prim_comps(old, has_pre), prim_comps(new, has_pre), prim_comps(lerp, has_pre));
+    let (old_c, new_c, lerp_c) = (
+        prim_comps(old, has_pre),
+        prim_comps(new, has_pre),
+        prim_comps(lerp, has_pre),
+    );
     let mut lerp_in: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(2 * ncomp);
     for k in 0..ncomp {
         lerp_in.push(old_c[k]);
         lerp_in.push(new_c[k]);
     }
-    let name = KernelId::FieldLerpMulti { ncomp: ncomp as u8, ndim: D as u8 }.name();
+    let name = KernelId::FieldLerpMulti {
+        ncomp: ncomp as u8,
+        ndim: D as u8,
+    }
+    .name();
     prof("refine_prolong_lerp", || {
         dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
     });
@@ -369,7 +404,11 @@ pub fn prolong_prims_lerped<const D: usize, const DOF: usize, Mem: MemorySpace>(
         lerp_in.push(old_c[k]);
         lerp_in.push(new_c[k]);
     }
-    let name = KernelId::FieldLerpMulti { ncomp: ncomp as u8, ndim: D as u8 }.name();
+    let name = KernelId::FieldLerpMulti {
+        ncomp: ncomp as u8,
+        ndim: D as u8,
+    }
+    .name();
     dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
 
     // pass 2: single-snapshot prolong from the lerped coarse buffer (no scalars).
@@ -427,22 +466,42 @@ pub fn bface_cf_halo_slabs<const D: usize>(
             continue;
         }
         for side in 0..2usize {
-            let bc_tt = if side == 0 { boundaries.lo(tt) } else { boundaries.hi(tt) };
+            let bc_tt = if side == 0 {
+                boundaries.lo(tt)
+            } else {
+                boundaries.hi(tt)
+            };
             if bc_tt != BoundaryType::CoarseFine {
                 continue;
             }
             slabs.push(Domain::new(std::array::from_fn(|aa| {
                 let s = &interior.spaces[aa];
                 let (lo, hi) = if aa == tt {
-                    if side == 0 { (s.lo - 1, s.lo) } else { (s.hi, s.hi + 1) }
+                    if side == 0 {
+                        (s.lo - 1, s.lo)
+                    } else {
+                        (s.hi, s.hi + 1)
+                    }
                 } else if aa == dd {
                     (s.lo, s.hi + 1)
                 } else {
-                    let lo = if boundaries.lo(aa) == BoundaryType::CoarseFine { s.lo - 1 } else { s.lo };
-                    let hi = if boundaries.hi(aa) == BoundaryType::CoarseFine { s.hi + 1 } else { s.hi };
+                    let lo = if boundaries.lo(aa) == BoundaryType::CoarseFine {
+                        s.lo - 1
+                    } else {
+                        s.lo
+                    };
+                    let hi = if boundaries.hi(aa) == BoundaryType::CoarseFine {
+                        s.hi + 1
+                    } else {
+                        s.hi
+                    };
                     (lo, hi)
                 };
-                Space { name: s.name, lo, hi }
+                Space {
+                    name: s.name,
+                    lo,
+                    hi,
+                }
             })));
         }
     }
@@ -462,7 +521,11 @@ pub fn prolong_face_field<const D: usize, Mem: MemorySpace>(
     region: &Domain<D>,
     alpha: f64,
 ) {
-    let name = KernelId::RefineProlongFace { axis: axis as u8, ndim: D as u8 }.name();
+    let name = KernelId::RefineProlongFace {
+        axis: axis as u8,
+        ndim: D as u8,
+    }
+    .name();
     dispatch_fields_each::<f64, Mem, D>(name, region, &[old, new], &[dst], &[], &[alpha]);
 }
 
@@ -476,9 +539,20 @@ pub fn restrict_bface<const D: usize, Mem: MemorySpace>(
     coverage: &Domain<D>,
 ) {
     for aa in 0..D {
-        let name = KernelId::RefineRestrictFace { axis: aa as u8, ndim: D as u8 }.name();
+        let name = KernelId::RefineRestrictFace {
+            axis: aa as u8,
+            ndim: D as u8,
+        }
+        .name();
         let face_dom = coverage.extend(aa, 0, 1);
-        dispatch_fields_each::<f64, Mem, D>(name, &face_dom, &[&fine[aa]], &[&coarse[aa]], &[], &[]);
+        dispatch_fields_each::<f64, Mem, D>(
+            name,
+            &face_dom,
+            &[&fine[aa]],
+            &[&coarse[aa]],
+            &[],
+            &[],
+        );
     }
 }
 
@@ -496,8 +570,7 @@ pub fn bcell_from_bface_region<const D: usize, const DOF: usize, Mem: MemorySpac
     } else {
         format!("imhd_bcell_from_bface_{}d", D)
     };
-    let inputs: Vec<&symbi_grid::Field<f64, D, Mem>> =
-        (0..D).map(|aa| &mhd.bface[aa]).collect();
+    let inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = (0..D).map(|aa| &mhd.bface[aa]).collect();
     let mut outputs: Vec<&symbi_grid::Field<f64, D, Mem>> =
         (0..D).map(|aa| &mhd.bcell[aa]).collect();
     if let Some(nrg) = cons_nrg {
@@ -527,7 +600,11 @@ mod tests {
         let mut slabs = Vec::new();
         for ax in 0..D {
             for side in 0..2usize {
-                let bc_ax = if side == 0 { boundaries.lo(ax) } else { boundaries.hi(ax) };
+                let bc_ax = if side == 0 {
+                    boundaries.lo(ax)
+                } else {
+                    boundaries.hi(ax)
+                };
                 if bc_ax != BoundaryType::CoarseFine {
                     continue;
                 }
@@ -551,7 +628,11 @@ mod tests {
                         };
                         (t_lo, t_hi)
                     };
-                    Space { name: allocated.spaces[aa].name, lo, hi }
+                    Space {
+                        name: allocated.spaces[aa].name,
+                        lo,
+                        hi,
+                    }
                 })));
             }
         }
@@ -592,7 +673,11 @@ mod tests {
             // disjoint => union volume is exactly the sum of box volumes.
             let new_vol: usize = new.iter().map(|d| d.volume()).sum();
             let new_cells = cell_set(&new);
-            assert_eq!(new_vol, new_cells.len(), "mask {mask:#b}: boxes not disjoint by volume");
+            assert_eq!(
+                new_vol,
+                new_cells.len(),
+                "mask {mask:#b}: boxes not disjoint by volume"
+            );
 
             // union-equivalence: the disjoint partition covers the SAME cells
             // the overlapping construction did.
@@ -607,8 +692,16 @@ mod tests {
     #[test]
     fn cf_slabs_1d_cf_lo_face() {
         // interior [6, 14), 3 ghosts each side; lo face CF, hi face physical.
-        let allocated = Domain::new([Space { name: "i", lo: 3, hi: 17 }]);
-        let interior = Domain::new([Space { name: "i", lo: 6, hi: 14 }]);
+        let allocated = Domain::new([Space {
+            name: "i",
+            lo: 3,
+            hi: 17,
+        }]);
+        let interior = Domain::new([Space {
+            name: "i",
+            lo: 6,
+            hi: 14,
+        }]);
         let mut b = Boundaries::<1>::uniform(BoundaryType::Outflow);
         b.0[0][0] = BoundaryType::CoarseFine;
         let slabs = cf_ghost_slabs(&allocated, &interior, &b);
@@ -619,12 +712,28 @@ mod tests {
     #[test]
     fn cf_slabs_laws_2d() {
         let allocated = Domain::new([
-            Space { name: "i", lo: -3, hi: 17 },
-            Space { name: "j", lo: -3, hi: 17 },
+            Space {
+                name: "i",
+                lo: -3,
+                hi: 17,
+            },
+            Space {
+                name: "j",
+                lo: -3,
+                hi: 17,
+            },
         ]);
         let interior = Domain::new([
-            Space { name: "i", lo: 0, hi: 14 },
-            Space { name: "j", lo: 0, hi: 14 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 14,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 14,
+            },
         ]);
         check_laws(&allocated, &interior);
     }
@@ -632,14 +741,38 @@ mod tests {
     #[test]
     fn cf_slabs_laws_3d() {
         let allocated = Domain::new([
-            Space { name: "i", lo: -2, hi: 10 },
-            Space { name: "j", lo: -2, hi: 10 },
-            Space { name: "k", lo: -2, hi: 10 },
+            Space {
+                name: "i",
+                lo: -2,
+                hi: 10,
+            },
+            Space {
+                name: "j",
+                lo: -2,
+                hi: 10,
+            },
+            Space {
+                name: "k",
+                lo: -2,
+                hi: 10,
+            },
         ]);
         let interior = Domain::new([
-            Space { name: "i", lo: 0, hi: 8 },
-            Space { name: "j", lo: 0, hi: 8 },
-            Space { name: "k", lo: 0, hi: 8 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 8,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 8,
+            },
+            Space {
+                name: "k",
+                lo: 0,
+                hi: 8,
+            },
         ]);
         check_laws(&allocated, &interior);
     }
@@ -678,7 +811,10 @@ mod tests {
             .iter()
             .map(|d| d.volume())
             .sum();
-        assert!(old_vol > new_vol, "expected overlap: old {old_vol} > new {new_vol}");
+        assert!(
+            old_vol > new_vol,
+            "expected overlap: old {old_vol} > new {new_vol}"
+        );
         // 30^3 - 24^3 = 13176 disjoint, 6*3*30^2 = 16200 overlapping.
         assert_eq!(new_vol, 13176);
         assert_eq!(old_vol, 16200);

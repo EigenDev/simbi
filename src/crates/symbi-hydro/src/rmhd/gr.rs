@@ -32,9 +32,9 @@ use crate::rhd::{enthalpy, lorentz_factor, lorentz_factor_sq, sound_speed_sq};
 use crate::spatial_metric::SpatialMetric;
 use crate::state::{Cons, Prim};
 
+use super::Rmhd;
 use super::algebra::{magnetic_four_vector_spatial, total_pressure};
 use super::cons::rmhd_recover;
-use super::Rmhd;
 
 /// the maximum KKC false-position iterations (mirrors the flat host wrapper).
 const MAX_ITER: usize = 100;
@@ -82,13 +82,16 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let den = prim.rho * ww;
         let rhw2 = prim.rho * hh * w_sq;
         let mom_fac = rhw2 + bsq;
-        let mom = self.metric.lower(&prim.vel).scale(mom_fac)
-            - self.metric.lower(&prim.mag).scale(vdb);
+        let mom =
+            self.metric.lower(&prim.vel).scale(mom_fac) - self.metric.lower(&prim.mag).scale(vdb);
         let half = S::from_f64(0.5);
         let p_tot = prim.pre + half * b_mu_sq;
         let nrg = rhw2 + bsq - p_tot - den;
 
-        MhdCons { hydro: Cons { den, mom, nrg }, mag: prim.mag }
+        MhdCons {
+            hydro: Cons { den, mom, nrg },
+            mag: prim.mag,
+        }
     }
 
     #[inline]
@@ -113,7 +116,11 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let prim = rmhd_recover(eos, cons, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-        if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
+        if code.is_ok() {
+            C2pResult::ok(prim)
+        } else {
+            C2pResult::err(prim, code)
+        }
     }
 
     #[inline]
@@ -132,7 +139,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let vsq = self.metric.norm_sq_contra(&prim.vel);
         let ww = lorentz_factor(vsq);
         let vdb = self.metric.contract_contra(&prim.vel, &prim.mag);
-        let b_lo = self.metric.lower(&magnetic_four_vector_spatial(prim, &self.metric));
+        let b_lo = self
+            .metric
+            .lower(&magnetic_four_vector_spatial(prim, &self.metric));
         let p_tot = total_pressure(prim, &self.metric);
 
         MhdCons {
@@ -205,7 +214,10 @@ mod tests {
         // regime component-for-component: conserved, flux, wave speeds, and the recovery.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let flat = Rmhd;
-        let gr = RmhdGr::<f64, 3> { metric: SpatialMetric::flat(), alpha: 1.0 };
+        let gr = RmhdGr::<f64, 3> {
+            metric: SpatialMetric::flat(),
+            alpha: 1.0,
+        };
         let nhat = Tensor::unit(0);
         for &(v, b) in &[
             ([0.0, 0.0, 0.0], [0.5, 0.0, 0.0]),
@@ -213,23 +225,39 @@ mod tests {
             ([0.0, 0.6, 0.0], [1.0, 0.0, 0.5]),
         ] {
             let prim = MhdPrim {
-                hydro: Prim { rho: 1.3, vel: Tensor::new(v), pre: 0.5 },
+                hydro: Prim {
+                    rho: 1.3,
+                    vel: Tensor::new(v),
+                    pre: 0.5,
+                },
                 mag: Tensor::new(b),
             };
             let (cf, cg) = (flat.to_conserved(&eos, &prim), gr.to_conserved(&eos, &prim));
             for k in 0..3 {
                 assert!(approx(cf.mom[k], cg.mom[k]), "cons mom{k} v={v:?}");
             }
-            assert!(approx(cf.den, cg.den) && approx(cf.nrg, cg.nrg), "cons v={v:?}");
-            let (ff, fg) = (flat.to_flux(&prim, &nhat, &eos), gr.to_flux(&prim, &nhat, &eos));
+            assert!(
+                approx(cf.den, cg.den) && approx(cf.nrg, cg.nrg),
+                "cons v={v:?}"
+            );
+            let (ff, fg) = (
+                flat.to_flux(&prim, &nhat, &eos),
+                gr.to_flux(&prim, &nhat, &eos),
+            );
             for k in 0..3 {
                 assert!(approx(ff.mom[k], fg.mom[k]), "flux mom{k} v={v:?}");
                 assert!(approx(ff.mag[k], fg.mag[k]), "flux mag{k} v={v:?}");
             }
-            assert!(approx(ff.den, fg.den) && approx(ff.nrg, fg.nrg), "flux v={v:?}");
+            assert!(
+                approx(ff.den, fg.den) && approx(ff.nrg, fg.nrg),
+                "flux v={v:?}"
+            );
             let fp = flat.to_primitive(&eos, &cf).value;
             let gp = gr.to_primitive(&eos, &cg).value;
-            assert!(approx(fp.hydro.rho, gp.hydro.rho) && approx(fp.hydro.pre, gp.hydro.pre), "c2p v={v:?}");
+            assert!(
+                approx(fp.hydro.rho, gp.hydro.rho) && approx(fp.hydro.pre, gp.hydro.pre),
+                "c2p v={v:?}"
+            );
         }
     }
 
@@ -239,7 +267,10 @@ mod tests {
         // (the bound is c_ms >= every magnetosonic speed) and stay inside the light cone.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let flat = Rmhd;
-        let gr = RmhdGr::<f64, 3> { metric: SpatialMetric::flat(), alpha: 1.0 };
+        let gr = RmhdGr::<f64, 3> {
+            metric: SpatialMetric::flat(),
+            alpha: 1.0,
+        };
         let nhat = Tensor::unit(0);
         for &(v, b) in &[
             ([0.3, -0.1, 0.2], [0.4, 0.7, -0.2]),
@@ -247,12 +278,19 @@ mod tests {
             ([0.5, 0.0, 0.0], [0.0, 0.0, 1.5]),
         ] {
             let prim = MhdPrim {
-                hydro: Prim { rho: 1.0, vel: Tensor::new(v), pre: 0.1 },
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new(v),
+                    pre: 0.1,
+                },
                 mag: Tensor::new(b),
             };
             let (fl, fr) = flat.wave_speeds(&eos, &prim, &nhat);
             let (gl, gr_) = gr.wave_speeds(&eos, &prim, &nhat);
-            assert!(gl <= fl + 1e-14 && gr_ >= fr - 1e-14, "bound contains fan: ({gl},{gr_}) vs ({fl},{fr})");
+            assert!(
+                gl <= fl + 1e-14 && gr_ >= fr - 1e-14,
+                "bound contains fan: ({gl},{gr_}) vs ({fl},{fr})"
+            );
             assert!(gl >= -1.0 && gr_ <= 1.0, "inside the light cone");
         }
     }
@@ -265,14 +303,21 @@ mod tests {
         // the invariants + raise on c2p).
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let m = curved_metric();
-        let gr = RmhdGr::<f64, 3> { metric: m, alpha: 0.8 };
+        let gr = RmhdGr::<f64, 3> {
+            metric: m,
+            alpha: 0.8,
+        };
         for &(v, b) in &[
             ([0.15, 0.02, 0.10], [0.3, 0.1, -0.1]),
             ([0.0, 0.0, 0.12], [0.6, 0.0, 0.05]),
             ([-0.2, 0.05, 0.0], [0.0, 0.4, 0.2]),
         ] {
             let prim = MhdPrim {
-                hydro: Prim { rho: 1.0, vel: Tensor::new(v), pre: 0.2 },
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new(v),
+                    pre: 0.2,
+                },
                 mag: Tensor::new(b),
             };
             let vsq = m.norm_sq_contra(&prim.hydro.vel);
@@ -284,7 +329,12 @@ mod tests {
             assert!((p.hydro.rho - 1.0).abs() < 1e-10, "rho: {}", p.hydro.rho);
             assert!((p.hydro.pre - 0.2).abs() < 1e-10, "pre: {}", p.hydro.pre);
             for k in 0..3 {
-                assert!((p.hydro.vel[k] - v[k]).abs() < 1e-10, "v{k}: {} vs {}", p.hydro.vel[k], v[k]);
+                assert!(
+                    (p.hydro.vel[k] - v[k]).abs() < 1e-10,
+                    "v{k}: {} vs {}",
+                    p.hydro.vel[k],
+                    v[k]
+                );
             }
         }
     }

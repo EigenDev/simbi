@@ -17,25 +17,27 @@
 // all functions are pure math — elemental, GPU-callable, no allocation.
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::state::Cons;
-use crate::mhd_state::{MhdPrim, MhdCons};
-use crate::regime::Regime;
 use crate::c2p_result::C2pResult;
+use crate::eos::Eos;
+use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::regime::Regime;
 use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
+use crate::state::Cons;
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 mod algebra;
 mod cons;
 mod gr;
 mod wave_speeds;
 
-pub use algebra::{magnetic_four_vector_spatial, magnetic_pressure, rmhd_source_quantities, total_pressure};
-pub use gr::RmhdGr;
+pub use algebra::{
+    magnetic_four_vector_spatial, magnetic_pressure, rmhd_source_quantities, total_pressure,
+};
 pub use cons::rmhd_recover;
 use cons::rmhd_to_primitive;
+pub use gr::RmhdGr;
 pub use wave_speeds::rmhd_magnetosonic_cfl_speeds;
 use wave_speeds::rmhd_wave_speeds;
 
@@ -81,7 +83,10 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         let p_tot = prim.pre + half * b_mu_sq;
         let nrg = rhw2 + bsq - p_tot - den;
 
-        MhdCons { hydro: Cons { den, mom, nrg }, mag: prim.mag }
+        MhdCons {
+            hydro: Cons { den, mom, nrg },
+            mag: prim.mag,
+        }
     }
 
     #[inline]
@@ -98,14 +103,26 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         // then the energy slot re-split to the covariant (killing) energy ehat = alpha tau +
         // (alpha-1) D - beta^i S_i (source-free on a stationary metric; docs/covariant_energy.md).
         // den/mom/mag are the Valencia state the KKC c2p inverts — only the energy slot changes.
-        let c = RmhdGr { metric: *gamma, alpha }.to_conserved(eos, prim);
+        let c = RmhdGr {
+            metric: *gamma,
+            alpha,
+        }
+        .to_conserved(eos, prim);
         let nrg = alpha * c.nrg + (alpha - S::ONE) * c.den - shift.dot(&c.mom);
-        MhdCons { hydro: Cons { den: c.den, mom: c.mom, nrg }, mag: c.mag }
+        MhdCons {
+            hydro: Cons {
+                den: c.den,
+                mom: c.mom,
+                nrg,
+            },
+            mag: c.mag,
+        }
     }
 
     #[inline]
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
-    where S: OrderedNumeric
+    where
+        S: OrderedNumeric,
     {
         rmhd_to_primitive(eos, cons)
     }
@@ -159,8 +176,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::Prim;
     use crate::eos::IdealGas;
+    use crate::state::Prim;
 
     fn approx(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol * a.abs().max(b.abs()).max(1.0)
@@ -172,7 +189,11 @@ mod tests {
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.0, 0.0]),
         };
         let cons = regime.to_conserved(&eos, &prim);
@@ -188,14 +209,33 @@ mod tests {
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.1, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.1, 0.0]),
         };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
-        assert!(approx(prim.rho, prim2.rho, 1e-6), "rho: {} vs {}", prim.rho, prim2.rho);
-        assert!(approx(prim.pre, prim2.pre, 1e-4), "pre: {} vs {}", prim.pre, prim2.pre);
-        assert!(approx(prim.vel[0], prim2.vel[0], 1e-6), "vx: {} vs {}", prim.vel[0], prim2.vel[0]);
+        assert!(
+            approx(prim.rho, prim2.rho, 1e-6),
+            "rho: {} vs {}",
+            prim.rho,
+            prim2.rho
+        );
+        assert!(
+            approx(prim.pre, prim2.pre, 1e-4),
+            "pre: {} vs {}",
+            prim.pre,
+            prim2.pre
+        );
+        assert!(
+            approx(prim.vel[0], prim2.vel[0], 1e-6),
+            "vx: {} vs {}",
+            prim.vel[0],
+            prim2.vel[0]
+        );
     }
 
     #[test]
@@ -203,7 +243,11 @@ mod tests {
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([1.0, 0.0, 0.0]),
         };
         let nhat = Tensor::new([1.0, 0.0, 0.0]);
@@ -219,7 +263,11 @@ mod tests {
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.5, 0.0]),
         };
         let s = regime.max_wave_speed(&eos, &prim);
@@ -232,11 +280,19 @@ mod tests {
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let cons = MhdCons {
-            hydro: Cons { den: -1.0, mom: Tensor::new([0.0, 0.0, 0.0]), nrg: 1.0 },
+            hydro: Cons {
+                den: -1.0,
+                mom: Tensor::new([0.0, 0.0, 0.0]),
+                nrg: 1.0,
+            },
             mag: Tensor::new([0.5, 0.0, 0.0]),
         };
         let result = regime.to_primitive(&eos, &cons);
-        assert!(result.error.contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY));
+        assert!(
+            result
+                .error
+                .contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY)
+        );
         assert!(result.value.rho > 0.0);
     }
 
@@ -245,7 +301,11 @@ mod tests {
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.1, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.1, 0.0]),
         };
         let cons = regime.to_conserved(&eos, &prim);

@@ -29,7 +29,11 @@ pub use symbi_discretize::kernel_slug::{
 // the per-axis geometry scalars a CURVILINEAR kernel expects, in the order cell_geometry
 // interns them: interleaved (x_lo_ax, dx_ax) per axis. Cartesian kernels take dx (or
 // inv_dx) instead; the caller pushes those directly.
-pub fn push_curvilinear_geom<Sc: Scalar + OrderedNumeric, const D: usize>(scalars: &mut Vec<Sc>, x_lo: &[f64; D], dx: &[f64; D]) {
+pub fn push_curvilinear_geom<Sc: Scalar + OrderedNumeric, const D: usize>(
+    scalars: &mut Vec<Sc>,
+    x_lo: &[f64; D],
+    dx: &[f64; D],
+) {
     for ax in 0..D {
         scalars.push(Sc::from_f64(x_lo[ax]));
         scalars.push(Sc::from_f64(dx[ax]));

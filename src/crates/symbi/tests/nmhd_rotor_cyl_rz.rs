@@ -25,11 +25,12 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cylindrical;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
 use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
-type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory, f64>;
+type Sim =
+    SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 
 const NR: usize = 128;
 const NZ: usize = 128;
@@ -70,7 +71,9 @@ fn make_sim() -> Sim {
     let dr = (R_HI - R_LO) / NR as f64;
     let dz = (Z_HI - Z_LO) / NZ as f64;
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cylindrical)
-        .cells([NR, NZ]).origin([R_LO, Z_LO]).spacing([dr, dz])
+        .cells([NR, NZ])
+        .origin([R_LO, Z_LO])
+        .spacing([dr, dz])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("cyl r-z rotor sim")
@@ -78,7 +81,11 @@ fn make_sim() -> Sim {
             let (rho, vr, vz) = rotor_state(r, z);
             // velocity is COORDINATE-indexed (0 = r, 1 = phi, 2 = z); B = (B_r, B_phi, B_z) = (0, 0, B0).
             MhdPrim {
-                hydro: Prim { rho, vel: Tensor::new([vr, 0.0, vz]), pre: 1.0 },
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new([vr, 0.0, vz]),
+                    pre: 1.0,
+                },
                 mag: Tensor::new([0.0, 0.0, B0]),
             }
         })
@@ -114,8 +121,14 @@ fn rel_divb(s: &Sim) -> f64 {
 #[test]
 fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
     let mut sim = make_sim();
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.5, &sim.geom.allocated)
-        .with_solver(Solver::Hlld).expect("valid solver/regime pair");
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.5,
+        &sim.geom.allocated,
+    )
+    .with_solver(Solver::Hlld)
+    .expect("valid solver/regime pair");
 
     // the curvilinear metric curl carries the r_hi/r_lo + 1/r_c factors (O(1) cancellation), so
     // its div(B) roundoff floor sits an order above the cartesian ~1e-13. assert div(B) stays at
@@ -124,12 +137,19 @@ fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
     let mut max_rel = 0.0_f64;
     evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| {
         let rel = rel_divb(s);
-        assert!(rel < 1e-11, "cyl r-z rotor div(B) grew to rel={rel:e} at iter {}", s.iteration);
+        assert!(
+            rel < 1e-11,
+            "cyl r-z rotor div(B) grew to rel={rel:e} at iter {}",
+            s.iteration
+        );
         max_rel = max_rel.max(rel);
         steps = s.iteration;
     })
     .expect("cyl r-z rotor evolve failed");
-    assert!(steps >= 10, "cyl r-z rotor produced only {steps} steps — gate barely exercised");
+    assert!(
+        steps >= 10,
+        "cyl r-z rotor produced only {steps} steps — gate barely exercised"
+    );
 
     // physicality through the spun-up core + the field has WOUND (B_r developed from 0).
     let eos = IdealGas { gamma: GAMMA };
@@ -154,11 +174,22 @@ fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
             ]),
         };
         let prim = nmhd_recover(&eos, &cons);
-        assert!(prim.rho.is_finite() && prim.rho > 0.0, "cell {c:?}: rho={}", prim.rho);
-        assert!(prim.pre.is_finite() && prim.pre > 0.0, "cell {c:?}: p={}", prim.pre);
+        assert!(
+            prim.rho.is_finite() && prim.rho > 0.0,
+            "cell {c:?}: rho={}",
+            prim.rho
+        );
+        assert!(
+            prim.pre.is_finite() && prim.pre > 0.0,
+            "cell {c:?}: p={}",
+            prim.pre
+        );
         max_br = max_br.max(mhd.bcell[0].view().at(c).abs());
     }
-    assert!(max_br > 0.01, "field did not wind: max|B_r|={max_br:e} (poloidal rotor should generate B_r)");
+    assert!(
+        max_br > 0.01,
+        "field did not wind: max|B_r|={max_br:e} (poloidal rotor should generate B_r)"
+    );
 
     eprintln!(
         "[nmhd_rotor cyl r-z] DONE iter={} t={:.4e} max|B_r|={:.4} max rel div(B)={:e}",

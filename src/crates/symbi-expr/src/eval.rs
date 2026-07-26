@@ -13,9 +13,9 @@
 //   let vals = expr.eval(1.0, 2.0, 3.0, 0.0);
 // =============================================================================
 
-use crate::op::Op;
 use crate::dag::{Dag, Node};
 use crate::linearize::{Instr, linearize};
+use crate::op::Op;
 
 const MAX_REGISTERS: usize = 256;
 
@@ -26,7 +26,10 @@ const MAX_REGISTERS: usize = 256;
 pub fn evaluate(
     instrs: &[Instr],
     output_regs: &[usize],
-    x1: f64, x2: f64, x3: f64, t: f64,
+    x1: f64,
+    x2: f64,
+    x3: f64,
+    t: f64,
     params: &[f64],
     outputs: &mut [f64],
 ) {
@@ -51,7 +54,10 @@ pub fn evaluate(
             }
             // per-cell state variables are resolved by the source bridge into field reads, never
             // linearized into this coordinate VM (which has no fluid-state registers).
-            Op::VariableRho | Op::VariableVel1 | Op::VariableVel2 | Op::VariableVel3
+            Op::VariableRho
+            | Op::VariableVel1
+            | Op::VariableVel2
+            | Op::VariableVel3
             | Op::VariablePressure => {
                 unreachable!("state-variable ops are bridge-only; not valid in the coordinate VM")
             }
@@ -65,51 +71,109 @@ pub fn evaluate(
             Op::Neg => -s0,
 
             // comparison (1.0 = true, 0.0 = false)
-            Op::Lt => if s0 < s1 { 1.0 } else { 0.0 },
-            Op::Gt => if s0 > s1 { 1.0 } else { 0.0 },
-            Op::Eq => if (s0 - s1).abs() < 1e-14 { 1.0 } else { 0.0 },
-            Op::Le => if s0 <= s1 { 1.0 } else { 0.0 },
-            Op::Ge => if s0 >= s1 { 1.0 } else { 0.0 },
+            Op::Lt => {
+                if s0 < s1 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Op::Gt => {
+                if s0 > s1 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Op::Eq => {
+                if (s0 - s1).abs() < 1e-14 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Op::Le => {
+                if s0 <= s1 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Op::Ge => {
+                if s0 >= s1 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
 
             // logical (nonzero = true)
-            Op::And => if s0 != 0.0 && s1 != 0.0 { 1.0 } else { 0.0 },
-            Op::Or  => if s0 != 0.0 || s1 != 0.0 { 1.0 } else { 0.0 },
-            Op::Not => if s0 == 0.0 { 1.0 } else { 0.0 },
+            Op::And => {
+                if s0 != 0.0 && s1 != 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Op::Or => {
+                if s0 != 0.0 || s1 != 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            Op::Not => {
+                if s0 == 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
 
             // math (unary)
-            Op::Log   => s0.ln(),
+            Op::Log => s0.ln(),
             Op::Log10 => s0.log10(),
-            Op::Abs   => s0.abs(),
-            Op::Sin   => s0.sin(),
-            Op::Cos   => s0.cos(),
-            Op::Tan   => s0.tan(),
-            Op::Asin  => s0.asin(),
-            Op::Acos  => s0.acos(),
-            Op::Atan  => s0.atan(),
-            Op::Exp   => s0.exp(),
-            Op::Sqrt  => s0.sqrt(),
-            Op::Sinh  => s0.sinh(),
-            Op::Cosh  => s0.cosh(),
-            Op::Tanh  => s0.tanh(),
+            Op::Abs => s0.abs(),
+            Op::Sin => s0.sin(),
+            Op::Cos => s0.cos(),
+            Op::Tan => s0.tan(),
+            Op::Asin => s0.asin(),
+            Op::Acos => s0.acos(),
+            Op::Atan => s0.atan(),
+            Op::Exp => s0.exp(),
+            Op::Sqrt => s0.sqrt(),
+            Op::Sinh => s0.sinh(),
+            Op::Cosh => s0.cosh(),
+            Op::Tanh => s0.tanh(),
             Op::Asinh => s0.asinh(),
             Op::Acosh => s0.acosh(),
             Op::Atanh => s0.atanh(),
-            Op::Sgn   => {
-                if s0 > 0.0 { 1.0 }
-                else if s0 < 0.0 { -1.0 }
-                else { 0.0 }
+            Op::Sgn => {
+                if s0 > 0.0 {
+                    1.0
+                } else if s0 < 0.0 {
+                    -1.0
+                } else {
+                    0.0
+                }
             }
-            Op::Ceil  => s0.ceil(),
+            Op::Ceil => s0.ceil(),
             Op::Floor => s0.floor(),
 
             // math (binary)
-            Op::Min   => s0.min(s1),
-            Op::Max   => s0.max(s1),
-            Op::Mod   => s0 % s1,
+            Op::Min => s0.min(s1),
+            Op::Max => s0.max(s1),
+            Op::Mod => s0 % s1,
             Op::Atan2 => s0.atan2(s1),
 
             // ternary
-            Op::IfThenElse => if s0 != 0.0 { s1 } else { s2 },
+            Op::IfThenElse => {
+                if s0 != 0.0 {
+                    s1
+                } else {
+                    s2
+                }
+            }
         };
     }
 
@@ -160,13 +224,31 @@ impl Expression {
     /// evaluate at a point, returning all outputs as a Vec.
     pub fn eval(&self, x1: f64, x2: f64, x3: f64, t: f64) -> Vec<f64> {
         let mut out = vec![0.0; self.output_regs.len()];
-        evaluate(&self.instrs, &self.output_regs, x1, x2, x3, t, &self.params, &mut out);
+        evaluate(
+            &self.instrs,
+            &self.output_regs,
+            x1,
+            x2,
+            x3,
+            t,
+            &self.params,
+            &mut out,
+        );
         out
     }
 
     /// evaluate at a point, writing outputs into the provided slice.
     pub fn eval_into(&self, x1: f64, x2: f64, x3: f64, t: f64, out: &mut [f64]) {
-        evaluate(&self.instrs, &self.output_regs, x1, x2, x3, t, &self.params, out);
+        evaluate(
+            &self.instrs,
+            &self.output_regs,
+            x1,
+            x2,
+            x3,
+            t,
+            &self.params,
+            out,
+        );
     }
 
     /// access the compiled instruction stream.
@@ -272,8 +354,8 @@ mod tests {
 
         let pi_half = std::f64::consts::FRAC_PI_2;
         let out = expr.eval(pi_half, 0.0, 0.0, 0.0);
-        assert!(approx(out[0], 1.0));  // sin(pi/2)
-        assert!(approx(out[1], 0.0));  // cos(pi/2)
+        assert!(approx(out[0], 1.0)); // sin(pi/2)
+        assert!(approx(out[1], 0.0)); // cos(pi/2)
     }
 
     #[test]
@@ -460,7 +542,10 @@ mod tests {
         let pi_half = std::f64::consts::FRAC_PI_2;
         assert!(approx(expr.eval(pi_half, 0.0, 0.0, 0.0)[0], 1.0));
         // at t=pi/2, f(pi) = sin(pi - pi/2) = sin(pi/2) = 1
-        assert!(approx(expr.eval(std::f64::consts::PI, 0.0, 0.0, pi_half)[0], 1.0));
+        assert!(approx(
+            expr.eval(std::f64::consts::PI, 0.0, 0.0, pi_half)[0],
+            1.0
+        ));
     }
 
     #[test]

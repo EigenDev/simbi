@@ -49,9 +49,9 @@ use symbi_algebra::{Domain, Space};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 
-use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
-use symbi_sim::state::{axis_name, BfaceFields, EfieldFields};
 use symbi_ir::KernelId;
+use symbi_sim::state::{BfaceFields, EfieldFields, axis_name};
+use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 
 /// the refinement ratio baked into the registered edge kernels.
 const RATIO: i64 = 2;
@@ -94,7 +94,11 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
                     if side == 1 && coverage.spaces[bb].hi == coarse_interior.spaces[bb].hi {
                         continue;
                     }
-                    let plane = if side == 0 { coverage.spaces[bb].lo } else { coverage.spaces[bb].hi };
+                    let plane = if side == 0 {
+                        coverage.spaces[bb].lo
+                    } else {
+                        coverage.spaces[bb].hi
+                    };
                     let dom = Domain::new(std::array::from_fn(|ax| {
                         let s = &coverage.spaces[ax];
                         let (lo, hi) = if ax == bb {
@@ -106,14 +110,27 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
                             // t-CELL range along the edge direction.
                             (s.lo, s.hi)
                         };
-                        Space { name: axis_name(ax), lo, hi }
+                        Space {
+                            name: axis_name(ax),
+                            lo,
+                            hi,
+                        }
                     }));
                     let reg = Field::zeros(&dom)?;
-                    slabs.push(EdgeSlab { tt, bb, side, dom, reg });
+                    slabs.push(EdgeSlab {
+                        tt,
+                        bb,
+                        side,
+                        dom,
+                        reg,
+                    });
                 }
             }
         }
-        Ok(EmfRegister { slabs, coverage: coverage.clone() })
+        Ok(EmfRegister {
+            slabs,
+            coverage: coverage.clone(),
+        })
     }
 
     pub fn zero(&self) {
@@ -131,7 +148,12 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
         let ints = [0i32; 3];
         for slab in &self.slabs {
             dispatch_fields_each::<f64, Mem, D>(
-                name, &slab.dom, &[&efield[slab.tt]], &[&slab.reg], &ints[..D], &[-dt],
+                name,
+                &slab.dom,
+                &[&efield[slab.tt]],
+                &[&slab.reg],
+                &ints[..D],
+                &[-dt],
             );
         }
     }
@@ -143,9 +165,18 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     pub fn accumulate_fine(&self, efield: &EfieldFields<D, Mem>, dt_f: f64) {
         let scale = dt_f / RATIO as f64;
         for slab in &self.slabs {
-            let name = KernelId::RefineAccEdge { axis: slab.tt as u8, ndim: D as u8 }.name();
+            let name = KernelId::RefineAccEdge {
+                axis: slab.tt as u8,
+                ndim: D as u8,
+            }
+            .name();
             dispatch_fields_each::<f64, Mem, D>(
-                name, &slab.dom, &[&efield[slab.tt]], &[&slab.reg], &[], &[scale],
+                name,
+                &slab.dom,
+                &[&efield[slab.tt]],
+                &[&slab.reg],
+                &[],
+                &[scale],
             );
         }
     }
@@ -180,20 +211,33 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
             let dom = Domain::new(std::array::from_fn(|ax| {
                 let s = &cov.spaces[ax];
                 let (lo, hi) = if ax == bb {
-                    if side == 0 { (s.lo - 1, s.lo) } else { (s.hi, s.hi + 1) }
+                    if side == 0 {
+                        (s.lo - 1, s.lo)
+                    } else {
+                        (s.hi, s.hi + 1)
+                    }
                 } else if ax == aa {
                     (s.lo, s.hi + 1)
                 } else {
                     (s.lo, s.hi)
                 };
-                Space { name: axis_name(ax), lo, hi }
+                Space {
+                    name: axis_name(ax),
+                    lo,
+                    hi,
+                }
             }));
             let mut ints = [0i32; 3];
             if side == 0 {
                 ints[bb] = 1;
             }
             dispatch_fields_each::<f64, Mem, D>(
-                name, &dom, &[&slab.reg], &[&bface[aa]], &ints[..D], &[scale],
+                name,
+                &dom,
+                &[&slab.reg],
+                &[&bface[aa]],
+                &ints[..D],
+                &[scale],
             );
         }
     }
@@ -209,17 +253,41 @@ mod tests {
 
     fn cov3() -> Domain<3> {
         Domain::new([
-            Space { name: "i", lo: 4, hi: 8 },
-            Space { name: "j", lo: 4, hi: 8 },
-            Space { name: "k", lo: 0, hi: 2 },
+            Space {
+                name: "i",
+                lo: 4,
+                hi: 8,
+            },
+            Space {
+                name: "j",
+                lo: 4,
+                hi: 8,
+            },
+            Space {
+                name: "k",
+                lo: 0,
+                hi: 2,
+            },
         ])
     }
 
     fn interior3() -> Domain<3> {
         Domain::new([
-            Space { name: "i", lo: 0, hi: 16 },
-            Space { name: "j", lo: 0, hi: 16 },
-            Space { name: "k", lo: 0, hi: 2 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 16,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 16,
+            },
+            Space {
+                name: "k",
+                lo: 0,
+                hi: 2,
+            },
         ])
     }
 
@@ -249,9 +317,7 @@ mod tests {
         // the x-lo and y-lo slabs — each side's apply consumes its own copy
         // for a different face set, so the overlap is by design.
         let reg = EmfRegister::<3, symbi_xpu::HostMemory>::new(&cov3(), &interior3()).unwrap();
-        let holds = |s: &EdgeSlab<3, symbi_xpu::HostMemory>| {
-            s.tt == 2 && s.dom.contains([4, 4, 0])
-        };
+        let holds = |s: &EdgeSlab<3, symbi_xpu::HostMemory>| s.tt == 2 && s.dom.contains([4, 4, 0]);
         let count = reg.slabs.iter().filter(|s| holds(s)).count();
         assert_eq!(count, 2, "corner edge should appear in exactly two slabs");
     }

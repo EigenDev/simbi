@@ -23,34 +23,96 @@ use symbi_aot::NamedKernel;
 // names, catching a drift that would otherwise pass silently. all buffers here are 1D (lo = 0).
 #[allow(clippy::too_many_arguments, dead_code)]
 fn rmhd_c2p_1d(
-    den: &[f64], sx: &[f64], sy: &[f64], sz: &[f64], nrg: &[f64],
-    bx: &[f64], by: &[f64], bz: &[f64],
-    rho: &mut [f64], vx: &mut [f64], vy: &mut [f64], vz: &mut [f64], pre: &mut [f64],
-    grid_size_0: i32, dom_lo_0: i32,
-    _: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,
+    den: &[f64],
+    sx: &[f64],
+    sy: &[f64],
+    sz: &[f64],
+    nrg: &[f64],
+    bx: &[f64],
+    by: &[f64],
+    bz: &[f64],
+    rho: &mut [f64],
+    vx: &mut [f64],
+    vy: &mut [f64],
+    vz: &mut [f64],
+    pre: &mut [f64],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
     gamma: f64,
 ) {
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("rmhd_c2p_1d")
-        .input("cons.den", den).input("cons.mom_0", sx).input("cons.mom_1", sy).input("cons.mom_2", sz)
-        .input("cons.nrg", nrg).input("cons.mag_0", bx).input("cons.mag_1", by).input("cons.mag_2", bz)
-        .output("prim.rho", rho).output("prim.vel_0", vx).output("prim.vel_1", vy)
-        .output("prim.vel_2", vz).output("prim.pre", pre)
-        .grid(&grid).dom_lo(&dom)
+        .input("cons.den", den)
+        .input("cons.mom_0", sx)
+        .input("cons.mom_1", sy)
+        .input("cons.mom_2", sz)
+        .input("cons.nrg", nrg)
+        .input("cons.mag_0", bx)
+        .input("cons.mag_1", by)
+        .input("cons.mag_2", bz)
+        .output("prim.rho", rho)
+        .output("prim.vel_0", vx)
+        .output("prim.vel_1", vy)
+        .output("prim.vel_2", vz)
+        .output("prim.pre", pre)
+        .grid(&grid)
+        .dom_lo(&dom)
         .scalar("gamma", gamma)
         .run();
 }
 
 #[allow(clippy::too_many_arguments, dead_code)]
 fn rmhd_face_flux_1d(
-    rho: &[f64], vx: &[f64], vy: &[f64], vz: &[f64], pre: &[f64],
-    bx: &[f64], by: &[f64], bz: &[f64],
-    fden: &mut [f64], fsx: &mut [f64], fsy: &mut [f64], fsz: &mut [f64], fnrg: &mut [f64],
-    fbx: &mut [f64], fby: &mut [f64], fbz: &mut [f64],
-    grid_size_0: i32, dom_lo_0: i32,
-    _: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,_: i32,
-    gamma: f64, theta: f64,
+    rho: &[f64],
+    vx: &[f64],
+    vy: &[f64],
+    vz: &[f64],
+    pre: &[f64],
+    bx: &[f64],
+    by: &[f64],
+    bz: &[f64],
+    fden: &mut [f64],
+    fsx: &mut [f64],
+    fsy: &mut [f64],
+    fsz: &mut [f64],
+    fnrg: &mut [f64],
+    fbx: &mut [f64],
+    fby: &mut [f64],
+    fbz: &mut [f64],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    _: i32,
+    gamma: f64,
+    theta: f64,
 ) {
     // the refactored flux reads the per-cell Davis fan speeds (ws_l/ws_r), produced in
     // the live solver by rmhd_wave_speeds_cell (the exact quartic). this test binds the
@@ -62,17 +124,31 @@ fn rmhd_face_flux_1d(
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("rmhd_face_flux_1d")
-        .input("prim.rho", rho).input("prim.vel[0]", vx).input("prim.vel[1]", vy).input("prim.vel[2]", vz)
-        .input("prim.pre", pre).input("prim.mag[0]", bx).input("prim.mag[1]", by).input("prim.mag[2]", bz)
+        .input("prim.rho", rho)
+        .input("prim.vel[0]", vx)
+        .input("prim.vel[1]", vy)
+        .input("prim.vel[2]", vz)
+        .input("prim.pre", pre)
+        .input("prim.mag[0]", bx)
+        .input("prim.mag[1]", by)
+        .input("prim.mag[2]", bz)
         // the flux now reads the NORMAL field from the staggered FACE field (Gardiner-Stone CT
         // coupling); in 1D Brio-Wu Bx is constant, so the cell bx array IS the face field.
         .input("bface_n", bx)
-        .input("wave_speed_l[0]", &wsl).input("wave_speed_r[0]", &wsr)
-        .output("flux.den", fden).output("flux.mom_0", fsx).output("flux.mom_1", fsy)
-        .output("flux.mom_2", fsz).output("flux.nrg", fnrg)
-        .output("flux.mag_0", fbx).output("flux.mag_1", fby).output("flux.mag_2", fbz)
-        .grid(&grid).dom_lo(&dom)
-        .scalar("gamma", gamma).scalar("theta", theta)
+        .input("wave_speed_l[0]", &wsl)
+        .input("wave_speed_r[0]", &wsr)
+        .output("flux.den", fden)
+        .output("flux.mom_0", fsx)
+        .output("flux.mom_1", fsy)
+        .output("flux.mom_2", fsz)
+        .output("flux.nrg", fnrg)
+        .output("flux.mag_0", fbx)
+        .output("flux.mag_1", fby)
+        .output("flux.mag_2", fbz)
+        .grid(&grid)
+        .dom_lo(&dom)
+        .scalar("gamma", gamma)
+        .scalar("theta", theta)
         .run();
 }
 
@@ -95,7 +171,11 @@ fn p2c(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> (f64, [f64; 3], f64, [f64;
     let bsq = dot(&b, &b);
     let vdb = dot(&v, &b);
     let ed = rho * h * wsq;
-    let s = [(ed + bsq) * v[0] - vdb * b[0], (ed + bsq) * v[1] - vdb * b[1], (ed + bsq) * v[2] - vdb * b[2]];
+    let s = [
+        (ed + bsq) * v[0] - vdb * b[0],
+        (ed + bsq) * v[1] - vdb * b[1],
+        (ed + bsq) * v[2] - vdb * b[2],
+    ];
     let tau = ed - p - rho * w + 0.5 * (bsq + bsq * v2 - vdb * vdb);
     (rho * w, s, tau, b)
 }
@@ -162,25 +242,72 @@ fn rmhd_briowu_1d_evolves_physically() {
     let cfl = 0.25;
     let lam = cfl; // dt/dx = cfl (dt = cfl*dx, relativistic max |lambda| <= 1)
 
-    let c2p = |den: &[f64], sx: &[f64], sy: &[f64], sz: &[f64], nrg: &[f64], bx: &[f64], by: &[f64], bz: &[f64],
-               rho: &mut [f64], vx: &mut [f64], vy: &mut [f64], vz: &mut [f64], pre: &mut [f64]| {
+    let c2p = |den: &[f64],
+               sx: &[f64],
+               sy: &[f64],
+               sz: &[f64],
+               nrg: &[f64],
+               bx: &[f64],
+               by: &[f64],
+               bz: &[f64],
+               rho: &mut [f64],
+               vx: &mut [f64],
+               vy: &mut [f64],
+               vz: &mut [f64],
+               pre: &mut [f64]| {
         rmhd_c2p_1d(
-            den, sx, sy, sz, nrg, bx, by, bz, rho, vx, vy, vz, pre,
-            TOT as i32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, GAMMA,
+            den, sx, sy, sz, nrg, bx, by, bz, rho, vx, vy, vz, pre, TOT as i32, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, GAMMA,
         );
     };
 
     let steps = 30;
     for _ in 0..steps {
-        for f in [&mut den, &mut sx, &mut sy, &mut sz, &mut nrg, &mut bx, &mut by, &mut bz] {
+        for f in [
+            &mut den, &mut sx, &mut sy, &mut sz, &mut nrg, &mut bx, &mut by, &mut bz,
+        ] {
             ghost_outflow(f);
         }
-        c2p(&den, &sx, &sy, &sz, &nrg, &bx, &by, &bz, &mut rho, &mut vx, &mut vy, &mut vz, &mut pre);
+        c2p(
+            &den, &sx, &sy, &sz, &nrg, &bx, &by, &bz, &mut rho, &mut vx, &mut vy, &mut vz, &mut pre,
+        );
         rmhd_face_flux_1d(
-            &rho, &vx, &vy, &vz, &pre, &bx, &by, &bz,
-            &mut fden, &mut fsx, &mut fsy, &mut fsz, &mut fnrg, &mut fbx, &mut fby, &mut fbz,
-            (N + 1) as i32, NG as i32,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, GAMMA, THETA,
+            &rho,
+            &vx,
+            &vy,
+            &vz,
+            &pre,
+            &bx,
+            &by,
+            &bz,
+            &mut fden,
+            &mut fsx,
+            &mut fsy,
+            &mut fsz,
+            &mut fnrg,
+            &mut fbx,
+            &mut fby,
+            &mut fbz,
+            (N + 1) as i32,
+            NG as i32,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            GAMMA,
+            THETA,
         );
         godunov(&mut den, &fden, lam);
         godunov(&mut sx, &fsx, lam);
@@ -192,25 +319,46 @@ fn rmhd_briowu_1d_evolves_physically() {
         godunov(&mut bz, &fbz, lam);
     }
 
-    for f in [&mut den, &mut sx, &mut sy, &mut sz, &mut nrg, &mut bx, &mut by, &mut bz] {
+    for f in [
+        &mut den, &mut sx, &mut sy, &mut sz, &mut nrg, &mut bx, &mut by, &mut bz,
+    ] {
         ghost_outflow(f);
     }
-    c2p(&den, &sx, &sy, &sz, &nrg, &bx, &by, &bz, &mut rho, &mut vx, &mut vy, &mut vz, &mut pre);
+    c2p(
+        &den, &sx, &sy, &sz, &nrg, &bx, &by, &bz, &mut rho, &mut vx, &mut vy, &mut vz, &mut pre,
+    );
 
     for i in NG..NG + N {
-        assert!(rho[i].is_finite() && rho[i] > 0.0, "cell {i}: rho = {}", rho[i]);
-        assert!(pre[i].is_finite() && pre[i] > 0.0, "cell {i}: p = {}", pre[i]);
+        assert!(
+            rho[i].is_finite() && rho[i] > 0.0,
+            "cell {i}: rho = {}",
+            rho[i]
+        );
+        assert!(
+            pre[i].is_finite() && pre[i] > 0.0,
+            "cell {i}: p = {}",
+            pre[i]
+        );
         let vsq = vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i];
         assert!(vsq < 1.0, "cell {i}: |v|^2 = {vsq} (superluminal)");
         // Bx stays exactly constant (induction normal flux is 0).
-        assert!((bx[i] - 0.5).abs() < 1e-12, "cell {i}: Bx drifted to {}", bx[i]);
+        assert!(
+            (bx[i] - 0.5).abs() < 1e-12,
+            "cell {i}: Bx drifted to {}",
+            bx[i]
+        );
     }
 
     // the shock develops: x-velocity becomes nonzero (it started at 0), and the
     // interface density is no longer a pure step (intermediate states formed).
     let max_vx = (NG..NG + N).map(|i| vx[i].abs()).fold(0.0_f64, f64::max);
-    assert!(max_vx > 1e-3, "no flow developed (max |vx| = {max_vx}); shock did not form");
+    assert!(
+        max_vx > 1e-3,
+        "no flow developed (max |vx| = {max_vx}); shock did not form"
+    );
     let rho_mid = rho[TOT / 2];
-    assert!(rho_mid > 0.125 + 1e-3 && rho_mid < 1.0 - 1e-3,
-        "interface density {rho_mid} still a pure step — no intermediate states formed");
+    assert!(
+        rho_mid > 0.125 + 1e-3 && rho_mid < 1.0 - 1e-3,
+        "interface density {rho_mid} still a pure step — no intermediate states formed"
+    );
 }

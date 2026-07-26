@@ -20,19 +20,19 @@
 //  cargo test -p symbi-hydro --test dissipation_carrier_oracle --release
 // =============================================================================
 
-use symbi_algebra::algebra::Numeric;
 use symbi_algebra::Tensor;
+use symbi_algebra::algebra::Numeric;
 use symbi_hydro::dissipation::{
-    adaptive_phi, detect_alignment, detect_interface, detect_shock, local_mach,
-    quirk_strong_shock, QUIRK_THRESHOLD,
+    QUIRK_THRESHOLD, adaptive_phi, detect_alignment, detect_interface, detect_shock, local_mach,
+    quirk_strong_shock,
 };
 use symbi_hydro::state::Prim;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::passes::scalarize::scalarize;
 use symbi_ir::{
-    begin_trace, emit_kernel_cpu, emit_kernel_from_lowering, end_trace, Backend, Cpu, Gv,
-    KernelEmitInputs,
+    Backend, Cpu, Gv, KernelEmitInputs, begin_trace, emit_kernel_cpu, emit_kernel_from_lowering,
+    end_trace,
 };
 
 // =============================================================================
@@ -65,13 +65,24 @@ where
     let params: Vec<Gv> = param_names.iter().map(|n| Gv::param(n)).collect();
     let _root = physics(&params).node();
     let kernel = end_trace();
-    assert!(!kernel.graph.has_errors(), "graph errors: {:?}", kernel.graph.errors());
+    assert!(
+        !kernel.graph.has_errors(),
+        "graph errors: {:?}",
+        kernel.graph.errors()
+    );
     let inputs = KernelEmitInputs {
         kernel_name: "dissipation_lower_probe",
-        coalesce_layout: false,        ndim: 1,
-        target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+        coalesce_layout: false,
+        ndim: 1,
+        target: TargetConfig {
+            target: Target::Cuda,
+            precision: Precision::F64,
+        },
         field_inputs: &[],
-        scalar_params: &param_names.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+        scalar_params: &param_names
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>(),
         field_writes: &[],
         coord_components: &[],
         device_preamble: &[],
@@ -79,8 +90,14 @@ where
     };
     let cpu = emit_kernel_cpu(&kernel.graph, &inputs);
     let cuda = emit_kernel_from_lowering(&kernel.graph, &inputs);
-    assert!(!cpu.source.is_empty(), "lowerability: CPU (rust) emit produced no source");
-    assert!(!cuda.source.is_empty(), "lowerability: CUDA emit produced no source");
+    assert!(
+        !cpu.source.is_empty(),
+        "lowerability: CPU (rust) emit produced no source"
+    );
+    assert!(
+        !cuda.source.is_empty(),
+        "lowerability: CUDA emit produced no source"
+    );
 }
 
 const GAMMA: f64 = 1.4;
@@ -92,21 +109,32 @@ const GAMMA: f64 = 1.4;
 const D: usize = 2;
 
 fn prim_l<S: Scalar>(p: &[S]) -> Prim<S, D> {
-    Prim { rho: p[0], vel: Tensor::new([p[1], p[2]]), pre: p[3] }
+    Prim {
+        rho: p[0],
+        vel: Tensor::new([p[1], p[2]]),
+        pre: p[3],
+    }
 }
 fn prim_r<S: Scalar>(p: &[S]) -> Prim<S, D> {
-    Prim { rho: p[4], vel: Tensor::new([p[5], p[6]]), pre: p[7] }
+    Prim {
+        rho: p[4],
+        vel: Tensor::new([p[5], p[6]]),
+        pre: p[7],
+    }
 }
 fn nhat<S: Scalar>(p: &[S]) -> Tensor<S, D> {
     Tensor::new([p[8], p[9]])
 }
 
-const PARAM_NAMES: [&str; 10] =
-    ["rho_l", "vx_l", "vy_l", "pre_l", "rho_r", "vx_r", "vy_r", "pre_r", "nx", "ny"];
+const PARAM_NAMES: [&str; 10] = [
+    "rho_l", "vx_l", "vy_l", "pre_l", "rho_r", "vx_r", "vy_r", "pre_r", "nx", "ny",
+];
 
 // pack an f64 state (L prim, R prim, nhat) into the flat param slice.
 fn pack(l: &Prim<f64, D>, r: &Prim<f64, D>, n: &Tensor<f64, D>) -> [f64; 10] {
-    [l.rho, l.vel[0], l.vel[1], l.pre, r.rho, r.vel[0], r.vel[1], r.pre, n[0], n[1]]
+    [
+        l.rho, l.vel[0], l.vel[1], l.pre, r.rho, r.vel[0], r.vel[1], r.pre, n[0], n[1],
+    ]
 }
 
 // names slice including the trailing gamma param (p[10]).
@@ -116,7 +144,10 @@ fn names_with_gamma() -> Vec<&'static str> {
 
 fn close(a: f64, b: f64, what: &str) {
     let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
-    assert!(rel < 1e-12, "{what}: f64 {a} != gv-interp {b} (rel {rel:e})");
+    assert!(
+        rel < 1e-12,
+        "{what}: f64 {a} != gv-interp {b} (rel {rel:e})"
+    );
 }
 
 // =============================================================================
@@ -181,8 +212,16 @@ fn quirk_strong_shock_lowers() {
 fn local_mach_f64_picks_max_side() {
     // left supersonic, right subsonic -> the left mach dominates the max.
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let fast = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([3.0 * cs, 0.0]), pre: 1.0 };
-    let slow = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([0.1 * cs, 0.0]), pre: 1.0 };
+    let fast = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([3.0 * cs, 0.0]),
+        pre: 1.0,
+    };
+    let slow = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([0.1 * cs, 0.0]),
+        pre: 1.0,
+    };
     let ma = local_mach(&fast, &slow, GAMMA);
     assert!((ma - 3.0).abs() < 1e-12, "expected mach ~3, got {ma}");
     // symmetric: swapping sides keeps the max.
@@ -191,12 +230,24 @@ fn local_mach_f64_picks_max_side() {
 
 #[test]
 fn local_mach_carrier_equivalence() {
-    let l = Prim::<f64, D> { rho: 1.2, vel: Tensor::new([0.8, -0.3]), pre: 0.9 };
-    let r = Prim::<f64, D> { rho: 0.7, vel: Tensor::new([1.5, 0.4]), pre: 0.4 };
+    let l = Prim::<f64, D> {
+        rho: 1.2,
+        vel: Tensor::new([0.8, -0.3]),
+        pre: 0.9,
+    };
+    let r = Prim::<f64, D> {
+        rho: 0.7,
+        vel: Tensor::new([1.5, 0.4]),
+        pre: 0.4,
+    };
     let n = Tensor::<f64, D>::unit(0);
     let want = local_mach(&l, &r, GAMMA);
     let inputs = [pack(&l, &r, &n).to_vec(), vec![GAMMA]].concat();
-    let got = gv_eval(|p| local_mach(&prim_l(p), &prim_r(p), p[10]), &names_with_gamma(), &inputs);
+    let got = gv_eval(
+        |p| local_mach(&prim_l(p), &prim_r(p), p[10]),
+        &names_with_gamma(),
+        &inputs,
+    );
     close(want, got, "local_mach");
 }
 
@@ -211,8 +262,16 @@ fn local_mach_carrier_equivalence() {
 // pre_l = 1 (s_l = 0), pre_r = exp(ds) (s_r = ds) -> entropy_production = ds.
 // vn = vx along +x; vn_l - vn_r = dvx.
 fn shock_state(ds: f64, dvx: f64) -> (Prim<f64, D>, Prim<f64, D>, Tensor<f64, D>) {
-    let l = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([dvx, 0.0]), pre: 1.0 };
-    let r = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: ds.exp() };
+    let l = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([dvx, 0.0]),
+        pre: 1.0,
+    };
+    let r = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: ds.exp(),
+    };
     (l, r, Tensor::unit(0))
 }
 
@@ -282,7 +341,11 @@ fn detect_shock_lowers() {
 
 #[test]
 fn detect_interface_f64_truth_table() {
-    let l = |rho: f64, pre: f64| Prim::<f64, D> { rho, vel: Tensor::zeros(), pre };
+    let l = |rho: f64, pre: f64| Prim::<f64, D> {
+        rho,
+        vel: Tensor::zeros(),
+        pre,
+    };
 
     // contact: big rho jump (1 vs 2 -> jump 0.667 > 0.1), tiny pre jump (1 vs 1.01 -> ~0.01 < 0.05)
     assert_eq!(detect_interface(&l(1.0, 1.0), &l(2.0, 1.01)), 0.4);
@@ -299,7 +362,11 @@ fn detect_interface_f64_truth_table() {
 
 #[test]
 fn detect_interface_f64_threshold_boundaries() {
-    let l = |rho: f64, pre: f64| Prim::<f64, D> { rho, vel: Tensor::zeros(), pre };
+    let l = |rho: f64, pre: f64| Prim::<f64, D> {
+        rho,
+        vel: Tensor::zeros(),
+        pre,
+    };
 
     // rho_jump boundary at 0.1 (strict-greater). avg-normalized; pressure kept identical
     // (pre_jump = 0 < 0.05 so the pre condition always holds here, isolating the rho flip).
@@ -324,13 +391,29 @@ fn detect_interface_carrier_equivalence() {
         ((1.0, 1.0), (1.01, 2.0)), // neither -> 0.0
     ];
     for &((rl, pl), (rr, pr)) in cases {
-        let l = Prim::<f64, D> { rho: rl, vel: Tensor::zeros(), pre: pl };
-        let r = Prim::<f64, D> { rho: rr, vel: Tensor::zeros(), pre: pr };
+        let l = Prim::<f64, D> {
+            rho: rl,
+            vel: Tensor::zeros(),
+            pre: pl,
+        };
+        let r = Prim::<f64, D> {
+            rho: rr,
+            vel: Tensor::zeros(),
+            pre: pr,
+        };
         let n = Tensor::<f64, D>::zeros();
         let want = detect_interface(&l, &r);
         let inputs = pack(&l, &r, &n).to_vec();
-        let got = gv_eval(|p| detect_interface(&prim_l(p), &prim_r(p)), &PARAM_NAMES, &inputs);
-        close(want, got, &format!("detect_interface(rho {rl}->{rr}, pre {pl}->{pr})"));
+        let got = gv_eval(
+            |p| detect_interface(&prim_l(p), &prim_r(p)),
+            &PARAM_NAMES,
+            &inputs,
+        );
+        close(
+            want,
+            got,
+            &format!("detect_interface(rho {rl}->{rr}, pre {pl}->{pr})"),
+        );
     }
 }
 
@@ -350,16 +433,37 @@ fn detect_alignment_f64_truth_table() {
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
     // aligned + fast: v along +x at mach ~1 -> align = 1 > 0.8, mach ~1 > 0.5 -> 1.0
-    let fast_aligned = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([1.0 * cs, 0.0]), pre: 1.0 };
-    assert_eq!(detect_alignment(&fast_aligned, &fast_aligned, &n, GAMMA), 1.0);
+    let fast_aligned = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([1.0 * cs, 0.0]),
+        pre: 1.0,
+    };
+    assert_eq!(
+        detect_alignment(&fast_aligned, &fast_aligned, &n, GAMMA),
+        1.0
+    );
 
     // misaligned: v purely transverse (+y) -> align = 0 < 0.8 -> 0.0 (even if fast)
-    let fast_transverse = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([0.0, 1.0 * cs]), pre: 1.0 };
-    assert_eq!(detect_alignment(&fast_transverse, &fast_transverse, &n, GAMMA), 0.0);
+    let fast_transverse = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 1.0 * cs]),
+        pre: 1.0,
+    };
+    assert_eq!(
+        detect_alignment(&fast_transverse, &fast_transverse, &n, GAMMA),
+        0.0
+    );
 
     // aligned but slow: mach ~0.1 < 0.5 -> 0.0
-    let slow_aligned = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([0.1 * cs, 0.0]), pre: 1.0 };
-    assert_eq!(detect_alignment(&slow_aligned, &slow_aligned, &n, GAMMA), 0.0);
+    let slow_aligned = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([0.1 * cs, 0.0]),
+        pre: 1.0,
+    };
+    assert_eq!(
+        detect_alignment(&slow_aligned, &slow_aligned, &n, GAMMA),
+        0.0
+    );
 }
 
 #[test]
@@ -368,14 +472,22 @@ fn detect_alignment_f64_zero_velocity_guard() {
     // to 0 -> result MUST be 0.0 (no NaN, no spurious fire). this is the division-guard
     // failure mode the branchless guard exists to prevent.
     let n = Tensor::<f64, D>::unit(0);
-    let still = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 };
+    let still = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    };
     let out = detect_alignment(&still, &still, &n, GAMMA);
     assert_eq!(out, 0.0);
     assert!(out.is_finite(), "zero-velocity must not produce NaN/Inf");
 
     // one side still, the other fast+aligned: c_vl (still side) gates to 0 -> 0.0.
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let fast = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([cs, 0.0]), pre: 1.0 };
+    let fast = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([cs, 0.0]),
+        pre: 1.0,
+    };
     assert_eq!(detect_alignment(&still, &fast, &n, GAMMA), 0.0);
 }
 
@@ -388,7 +500,11 @@ fn detect_alignment_f64_align_boundary() {
     let vmag = 1.5 * cs;
     let with_cos = |c: f64| {
         let s = (1.0 - c * c).sqrt();
-        Prim::<f64, D> { rho: 1.0, vel: Tensor::new([c * vmag, s * vmag]), pre: 1.0 }
+        Prim::<f64, D> {
+            rho: 1.0,
+            vel: Tensor::new([c * vmag, s * vmag]),
+            pre: 1.0,
+        }
     };
     // cos = 0.85 > 0.8 -> aligned -> 1.0
     let p = with_cos(0.85);
@@ -402,7 +518,11 @@ fn detect_alignment_f64_align_boundary() {
 fn detect_alignment_carrier_equivalence() {
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
     let n = Tensor::<f64, D>::unit(0);
-    let mk = |vx: f64, vy: f64| Prim::<f64, D> { rho: 1.0, vel: Tensor::new([vx, vy]), pre: 1.0 };
+    let mk = |vx: f64, vy: f64| Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([vx, vy]),
+        pre: 1.0,
+    };
     // drive: aligned-fast (fires), transverse-fast (align gate), slow-aligned (mach gate),
     // zero-velocity (the safe_v division guard + c_vl/c_vr gates), mixed still/fast.
     let cases: &[(Prim<f64, D>, Prim<f64, D>)] = &[
@@ -420,7 +540,11 @@ fn detect_alignment_carrier_equivalence() {
             &names_with_gamma(),
             &inputs,
         );
-        close(want, got, &format!("detect_alignment(vl={:?}, vr={:?})", l.vel, r.vel));
+        close(
+            want,
+            got,
+            &format!("detect_alignment(vl={:?}, vr={:?})", l.vel, r.vel),
+        );
     }
 }
 
@@ -443,9 +567,16 @@ fn adaptive_phi_f64_low_mach_ramp() {
     // smooth subsonic flow, no detector fires: phi follows the sin ramp.
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let slow = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([0.02 * cs, 0.0]), pre: 1.0 };
+    let slow = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([0.02 * cs, 0.0]),
+        pre: 1.0,
+    };
     let phi = adaptive_phi(&slow, &slow, &n, GAMMA);
-    assert!(phi > 0.0 && phi < 1.0, "low-mach phi must be in (0,1), got {phi}");
+    assert!(
+        phi > 0.0 && phi < 1.0,
+        "low-mach phi must be in (0,1), got {phi}"
+    );
     // ma = 0.02 -> ratio = 0.2 -> phi_ramp = sin(0.1*pi). detectors all 0 here.
     let want = ((0.02_f64 / 0.1).min(1.0) * std::f64::consts::FRAC_PI_2).sin();
     assert!((phi - want).abs() < 1e-12, "phi {phi} vs ramp {want}");
@@ -456,9 +587,16 @@ fn adaptive_phi_f64_clamped_high_mach() {
     // supersonic: ma >> mach_lim -> ratio clamps to 1 -> sin(pi/2) = 1 -> phi = 1.
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let fast = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([5.0 * cs, 0.0]), pre: 1.0 };
+    let fast = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([5.0 * cs, 0.0]),
+        pre: 1.0,
+    };
     let phi = adaptive_phi(&fast, &fast, &n, GAMMA);
-    assert!((phi - 1.0).abs() < 1e-12, "high-mach phi must clamp to 1, got {phi}");
+    assert!(
+        (phi - 1.0).abs() < 1e-12,
+        "high-mach phi must clamp to 1, got {phi}"
+    );
 }
 
 #[test]
@@ -466,10 +604,21 @@ fn adaptive_phi_f64_detector_floor_dominates_ramp() {
     // a smooth LOW-mach flow whose interface detector fires: phi must be floored at 0.4
     // (the interface weight), ABOVE the tiny low-mach ramp value. proves the max() wiring.
     let n = Tensor::<f64, D>::unit(0);
-    let l = Prim::<f64, D> { rho: 1.0, vel: Tensor::new([1e-3, 0.0]), pre: 1.0 };
-    let r = Prim::<f64, D> { rho: 2.0, vel: Tensor::new([1e-3, 0.0]), pre: 1.005 };
+    let l = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([1e-3, 0.0]),
+        pre: 1.0,
+    };
+    let r = Prim::<f64, D> {
+        rho: 2.0,
+        vel: Tensor::new([1e-3, 0.0]),
+        pre: 1.005,
+    };
     let phi = adaptive_phi(&l, &r, &n, GAMMA);
-    assert!((phi - 0.4).abs() < 1e-12, "interface floor must give phi=0.4, got {phi}");
+    assert!(
+        (phi - 0.4).abs() < 1e-12,
+        "interface floor must give phi=0.4, got {phi}"
+    );
 }
 
 #[test]
@@ -497,7 +646,11 @@ fn adaptive_phi_carrier_equivalence() {
             &names_with_gamma(),
             &inputs,
         );
-        close(want, got, &format!("adaptive_phi(rho_l={}, rho_r={})", l.rho, r.rho));
+        close(
+            want,
+            got,
+            &format!("adaptive_phi(rho_l={}, rho_r={})", l.rho, r.rho),
+        );
     }
 }
 

@@ -16,7 +16,8 @@ mod harness;
 
 use harness::KernelRun;
 use symbi_discretize::{
-    refine_prolong_face_gv, refine_prolong_gv, refine_restrict_face_gv, refine_restrict_gv, ProlongOrder,
+    ProlongOrder, refine_prolong_face_gv, refine_prolong_gv, refine_restrict_face_gv,
+    refine_restrict_gv,
 };
 
 // deterministic per-cell noise from the ABSOLUTE coordinate (splitmix-style
@@ -39,7 +40,11 @@ mod reference {
 
     pub fn van_leer(dl: f64, dr: f64) -> f64 {
         let prod = dl * dr;
-        if prod <= 0.0 { 0.0 } else { 2.0 * prod / (dl + dr) }
+        if prod <= 0.0 {
+            0.0
+        } else {
+            2.0 * prod / (dl + dr)
+        }
     }
 
     pub fn prolong_pcm(coarse: &[f64], fine: &mut [f64], ratio: usize) {
@@ -83,10 +88,12 @@ mod reference {
             let cc = jj + 2;
             let seven = 7.0;
             let twelve_inv = 1.0 / 12.0;
-            let mut u_l =
-                (seven * (coarse[cc - 1] + coarse[cc]) - (coarse[cc - 2] + coarse[cc + 1])) * twelve_inv;
-            let mut u_r =
-                (seven * (coarse[cc] + coarse[cc + 1]) - (coarse[cc - 1] + coarse[cc + 2])) * twelve_inv;
+            let mut u_l = (seven * (coarse[cc - 1] + coarse[cc])
+                - (coarse[cc - 2] + coarse[cc + 1]))
+                * twelve_inv;
+            let mut u_r = (seven * (coarse[cc] + coarse[cc + 1])
+                - (coarse[cc - 1] + coarse[cc + 2]))
+                * twelve_inv;
             let lo_l = coarse[cc - 1].min(coarse[cc]);
             let hi_l = coarse[cc - 1].max(coarse[cc]);
             u_l = u_l.max(lo_l).min(hi_l);
@@ -141,7 +148,11 @@ mod reference {
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum ProlongOrder { Pcm, Plm, Ppm }
+    pub enum ProlongOrder {
+        Pcm,
+        Plm,
+        Ppm,
+    }
 
     impl ProlongOrder {
         pub fn ghost_width(self) -> usize {
@@ -216,9 +227,13 @@ mod reference {
     }
 
     fn prolong_axis(
-        src: &[f64], src_dims: &[usize],
-        dst: &mut [f64], dst_dims: &[usize],
-        ax: usize, ratio: usize, order: ProlongOrder,
+        src: &[f64],
+        src_dims: &[usize],
+        dst: &mut [f64],
+        dst_dims: &[usize],
+        ax: usize,
+        ratio: usize,
+        order: ProlongOrder,
     ) {
         let ng = order.ghost_width();
         let ndim = src_dims.len();
@@ -252,13 +267,21 @@ mod reference {
             }
             let mut carry = true;
             for aa in (0..ndim).rev() {
-                if aa == ax { continue; }
+                if aa == ax {
+                    continue;
+                }
                 if carry {
                     trans_pos[aa] += 1;
-                    if trans_pos[aa] < src_dims[aa] { carry = false; } else { trans_pos[aa] = 0; }
+                    if trans_pos[aa] < src_dims[aa] {
+                        carry = false;
+                    } else {
+                        trans_pos[aa] = 0;
+                    }
                 }
             }
-            if carry { break; }
+            if carry {
+                break;
+            }
         }
     }
 
@@ -315,9 +338,12 @@ mod reference {
     }
 
     fn restrict_axis(
-        src: &[f64], src_dims: &[usize],
-        dst: &mut [f64], dst_dims: &[usize],
-        ax: usize, ratio: usize,
+        src: &[f64],
+        src_dims: &[usize],
+        dst: &mut [f64],
+        dst_dims: &[usize],
+        ax: usize,
+        ratio: usize,
     ) {
         let ndim = src_dims.len();
         let src_str = compute_strides(src_dims);
@@ -346,13 +372,21 @@ mod reference {
             }
             let mut carry = true;
             for aa in (0..ndim).rev() {
-                if aa == ax { continue; }
+                if aa == ax {
+                    continue;
+                }
                 if carry {
                     trans_pos[aa] += 1;
-                    if trans_pos[aa] < src_dims[aa] { carry = false; } else { trans_pos[aa] = 0; }
+                    if trans_pos[aa] < src_dims[aa] {
+                        carry = false;
+                    } else {
+                        trans_pos[aa] = 0;
+                    }
                 }
             }
-            if carry { break; }
+            if carry {
+                break;
+            }
         }
     }
 }
@@ -394,27 +428,42 @@ fn run_restrict<const D: usize>() {
     reference::restrict_nd(
         &fine,
         &mut |c: [isize; D], want: f64| {
-            let local: Vec<usize> =
-                c.iter().map(|&x| (x - R_BUF_LO as isize) as usize).collect();
+            let local: Vec<usize> = c
+                .iter()
+                .map(|&x| (x - R_BUF_LO as isize) as usize)
+                .collect();
             let got = out.get(&local, "dst");
             assert_eq!(
-                got.to_bits(), want.to_bits(),
-                "restrict {}d at {c:?}: got {got:e}, want {want:e}", D
+                got.to_bits(),
+                want.to_bits(),
+                "restrict {}d at {c:?}: got {got:e}, want {want:e}",
+                D
             );
             checked += 1;
         },
         &fine_region,
         2,
     );
-    assert_eq!(checked, R_WIN_N.pow(D as u32), "restrict {}d: oracle coverage", D);
+    assert_eq!(
+        checked,
+        R_WIN_N.pow(D as u32),
+        "restrict {}d: oracle coverage",
+        D
+    );
 }
 
 #[test]
-fn restrict_bit_matches_reference_1d() { run_restrict::<1>(); }
+fn restrict_bit_matches_reference_1d() {
+    run_restrict::<1>();
+}
 #[test]
-fn restrict_bit_matches_reference_2d() { run_restrict::<2>(); }
+fn restrict_bit_matches_reference_2d() {
+    run_restrict::<2>();
+}
 #[test]
-fn restrict_bit_matches_reference_3d() { run_restrict::<3>(); }
+fn restrict_bit_matches_reference_3d() {
+    run_restrict::<3>();
+}
 
 // =============================================================================
 // prolongation bit-match (orders x dims x time-interpolation fractions)
@@ -439,7 +488,11 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
     let seed_old = 100 + D as u64;
     let seed_new = 200 + D as u64;
     // 3d windows shrink to keep the interpreted ppm expression cheap.
-    let (act_lo, act_n) = if D == 3 { (-1i32, 2usize) } else { (P_ACT_LO, P_ACT_N) };
+    let (act_lo, act_n) = if D == 3 {
+        (-1i32, 2usize)
+    } else {
+        (P_ACT_LO, P_ACT_N)
+    };
 
     let out = KernelRun::new(refine_prolong_gv(D, 2, gv_order(order)))
         .grid([P_BUF_EXT; D])
@@ -458,11 +511,12 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
 
     // the reference: gen-1 prolong_nd over the coarse active window, reading the
     // SAME time-interpolated coarse state.
-    let coarse_active = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
-        name: ["i", "j", "k"][ax],
-        lo: act_lo as isize,
-        hi: act_lo as isize + act_n as isize,
-    }));
+    let coarse_active =
+        symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
+            name: ["i", "j", "k"][ax],
+            lo: act_lo as isize,
+            hi: act_lo as isize + act_n as isize,
+        }));
     let coarse = move |c: [isize; D]| {
         let abs: Vec<i64> = c.iter().map(|&x| x as i64).collect();
         (1.0 - alpha) * noise(seed_old, &abs) + alpha * noise(seed_new, &abs)
@@ -471,12 +525,16 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
     reference::prolong_nd(
         &coarse,
         &mut |f: [isize; D], want: f64| {
-            let local: Vec<usize> =
-                f.iter().map(|&x| (x - P_BUF_LO as isize) as usize).collect();
+            let local: Vec<usize> = f
+                .iter()
+                .map(|&x| (x - P_BUF_LO as isize) as usize)
+                .collect();
             let got = out.get(&local, "dst");
             assert_eq!(
-                got.to_bits(), want.to_bits(),
-                "prolong {order:?} {}d alpha={alpha} at fine {f:?}: got {got:e}, want {want:e}", D
+                got.to_bits(),
+                want.to_bits(),
+                "prolong {order:?} {}d alpha={alpha} at fine {f:?}: got {got:e}, want {want:e}",
+                D
             );
             checked += 1;
         },
@@ -484,7 +542,12 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
         2,
         order,
     );
-    assert_eq!(checked, (2 * act_n).pow(D as u32), "prolong {}d: oracle coverage", D);
+    assert_eq!(
+        checked,
+        (2 * act_n).pow(D as u32),
+        "prolong {}d: oracle coverage",
+        D
+    );
 }
 
 #[test]
@@ -579,11 +642,16 @@ fn run_restrict_face<const D: usize>(axis: usize) {
     }));
     for c in win.iter() {
         let want = face_reference(&fine, c, axis);
-        let local: Vec<usize> = c.iter().map(|&x| (x - R_BUF_LO as isize) as usize).collect();
+        let local: Vec<usize> = c
+            .iter()
+            .map(|&x| (x - R_BUF_LO as isize) as usize)
+            .collect();
         let got = out.get(&local, "dst");
         assert_eq!(
-            got.to_bits(), want.to_bits(),
-            "restrict_face axis {axis} {}d at {c:?}: got {got:e}, want {want:e}", D
+            got.to_bits(),
+            want.to_bits(),
+            "restrict_face axis {axis} {}d at {c:?}: got {got:e}, want {want:e}",
+            D
         );
     }
 }
@@ -677,11 +745,16 @@ fn run_prolong_face<const D: usize>(axis: usize, alpha: f64) {
     }));
     for f in win.iter() {
         let want = face_prolong_reference(&coarse, f, axis);
-        let local: Vec<usize> = f.iter().map(|&x| (x - P_BUF_LO as isize) as usize).collect();
+        let local: Vec<usize> = f
+            .iter()
+            .map(|&x| (x - P_BUF_LO as isize) as usize)
+            .collect();
         let got = out.get(&local, "dst");
         assert_eq!(
-            got.to_bits(), want.to_bits(),
-            "prolong_face axis {axis} {}d alpha={alpha} at {f:?}: got {got:e}, want {want:e}", D
+            got.to_bits(),
+            want.to_bits(),
+            "prolong_face axis {axis} {}d alpha={alpha} at {f:?}: got {got:e}, want {want:e}",
+            D
         );
     }
 }
@@ -705,22 +778,36 @@ fn prolong_face_bit_matches_reference() {
 #[test]
 fn transfer_kernels_lower_to_cpu_and_cuda() {
     use symbi_discretize::{
-        refine_acc_edge_gv, refine_acc_face_gv, field_axpy_shift_gv, field_copy_gv, field_fill_gv,
+        field_axpy_shift_gv, field_copy_gv, field_fill_gv, refine_acc_edge_gv, refine_acc_face_gv,
     };
     for d in 1..=3usize {
         let grid = vec![8usize; d];
-        KernelRun::new(refine_restrict_gv(d, 2)).grid(&grid).assert_lowers();
+        KernelRun::new(refine_restrict_gv(d, 2))
+            .grid(&grid)
+            .assert_lowers();
         KernelRun::new(field_copy_gv(d)).grid(&grid).assert_lowers();
         KernelRun::new(field_fill_gv(d)).grid(&grid).assert_lowers();
-        KernelRun::new(field_axpy_shift_gv(d)).grid(&grid).assert_lowers();
+        KernelRun::new(field_axpy_shift_gv(d))
+            .grid(&grid)
+            .assert_lowers();
         for ax in 0..d {
-            KernelRun::new(refine_restrict_face_gv(d, 2, ax)).grid(&grid).assert_lowers();
-            KernelRun::new(refine_prolong_face_gv(d, 2, ax)).grid(&grid).assert_lowers();
-            KernelRun::new(refine_acc_face_gv(d, 2, ax)).grid(&grid).assert_lowers();
-            KernelRun::new(refine_acc_edge_gv(d, 2, ax)).grid(&grid).assert_lowers();
+            KernelRun::new(refine_restrict_face_gv(d, 2, ax))
+                .grid(&grid)
+                .assert_lowers();
+            KernelRun::new(refine_prolong_face_gv(d, 2, ax))
+                .grid(&grid)
+                .assert_lowers();
+            KernelRun::new(refine_acc_face_gv(d, 2, ax))
+                .grid(&grid)
+                .assert_lowers();
+            KernelRun::new(refine_acc_edge_gv(d, 2, ax))
+                .grid(&grid)
+                .assert_lowers();
         }
         for order in [ProlongOrder::Pcm, ProlongOrder::Plm, ProlongOrder::Ppm] {
-            KernelRun::new(refine_prolong_gv(d, 2, order)).grid(&grid).assert_lowers();
+            KernelRun::new(refine_prolong_gv(d, 2, order))
+                .grid(&grid)
+                .assert_lowers();
         }
     }
 }

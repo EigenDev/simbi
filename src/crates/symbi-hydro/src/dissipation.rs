@@ -10,9 +10,9 @@
 //   let phi = adaptive_phi(&prim_l, &prim_r, &nhat, gamma);
 // =============================================================================
 
+use crate::state::Prim;
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
-use crate::state::Prim;
 
 /// shockwave limiter selector for the HLLC riemann solver. picks the flavor of
 /// HLLC the regime emits at a face:
@@ -34,7 +34,9 @@ pub enum ShockwaveLimiter {
 }
 
 impl Default for ShockwaveLimiter {
-    fn default() -> Self { ShockwaveLimiter::Standard }
+    fn default() -> Self {
+        ShockwaveLimiter::Standard
+    }
 }
 
 /// relative pressure-jump threshold for the Quirk strong-shock detector.
@@ -63,11 +65,7 @@ pub fn quirk_strong_shock<S: Scalar>(p_l: S, p_r: S) -> S::Mask {
 
 /// local mach number: max of left and right |v| / cs.
 #[inline]
-pub fn local_mach<S: Scalar, const D: usize>(
-    left: &Prim<S, D>,
-    right: &Prim<S, D>,
-    gamma: S,
-) -> S {
+pub fn local_mach<S: Scalar, const D: usize>(left: &Prim<S, D>, right: &Prim<S, D>, gamma: S) -> S {
     let cs_l = (gamma * left.pre / left.rho).sqrt();
     let cs_r = (gamma * right.pre / right.rho).sqrt();
     let ma_l = left.vel.norm() / cs_l;
@@ -94,7 +92,11 @@ pub fn detect_shock<S: Scalar, const D: usize>(
 
     // AND = product of 0/1 masks. result is 1 if both conditions hold, else 0.
     // (mask -> S via select(m, ONE, ZERO); `cmp_*` returns `S::Mask`.)
-    let c1 = S::select(entropy_production.cmp_gt(S::from_f64(0.01)), S::ONE, S::ZERO);
+    let c1 = S::select(
+        entropy_production.cmp_gt(S::from_f64(0.01)),
+        S::ONE,
+        S::ZERO,
+    );
     let c2 = S::select(velocity_convergence.cmp_gt(S::ZERO), S::ONE, S::ZERO);
     c1 * c2
 }
@@ -102,10 +104,7 @@ pub fn detect_shock<S: Scalar, const D: usize>(
 /// interface detector: large density jump with small pressure jump.
 /// branchless via cmp_* masks.
 #[inline]
-pub fn detect_interface<S: Scalar, const D: usize>(
-    left: &Prim<S, D>,
-    right: &Prim<S, D>,
-) -> S {
+pub fn detect_interface<S: Scalar, const D: usize>(left: &Prim<S, D>, right: &Prim<S, D>) -> S {
     let half = S::from_f64(0.5);
     let rho_avg = half * (left.rho + right.rho);
     let pre_avg = half * (left.pre + right.pre);

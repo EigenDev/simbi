@@ -18,7 +18,7 @@
 // sin(theta@offset) OPAQUE (half-unit keys: sin_c = sin@1, sin-faces = sin@0/sin@2).
 // =============================================================================
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gv, Spacing};
+use symbi_discretize::{Spacing, rmhd_ct_curl_2d_sph_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
@@ -41,7 +41,11 @@ fn r_at(off: i64) -> Poly {
 // r_c, the cell-center radius x_lo_0 + (c_0 + 1/2) dx_0, as a RatFun (denominator 2).
 fn r_center() -> RatFun {
     let mut num = Poly::var("x_lo_0").times(&Poly::constant(2));
-    num = num.plus(&Poly::var("c_0").times(&Poly::var("dx_0")).times(&Poly::constant(2)));
+    num = num.plus(
+        &Poly::var("c_0")
+            .times(&Poly::var("dx_0"))
+            .times(&Poly::constant(2)),
+    );
     num = num.plus(&Poly::var("dx_0"));
     RatFun::new(num, Poly::constant(2))
 }
@@ -62,8 +66,16 @@ fn dx(ax: usize) -> Poly {
 fn curl(dir: usize) -> LinFormR {
     let (kernel, writes) = rmhd_ct_curl_2d_sph_gv(dir, &[Spacing::Uniform; 2]);
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
-    let lf = curl_only(LinFormR::extract_rat(&kernel.graph, writes[0].2, FIELDS, SCALARS));
-    assert!(!lf.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+    let lf = curl_only(LinFormR::extract_rat(
+        &kernel.graph,
+        writes[0].2,
+        FIELDS,
+        SCALARS,
+    ));
+    assert!(
+        !lf.is_zero(),
+        "dir {dir}: curl is empty — extractor saw no emf reads"
+    );
     lf
 }
 

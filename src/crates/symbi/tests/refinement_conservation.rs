@@ -14,8 +14,8 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::sim::evolve::evolve;
+use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
@@ -78,7 +78,10 @@ fn assert_finite_positive<const D: usize>(
     for (ll, lvl) in hier.levels.iter().enumerate() {
         for c in lvl.state.geom.interior.iter() {
             let den = *lvl.state.fields.cons.den.view().at(c);
-            assert!(den.is_finite() && den > 0.0, "level {ll} {c:?}: bad density {den}");
+            assert!(
+                den.is_finite() && den > 0.0,
+                "level {ll} {c:?}: bad density {den}"
+            );
         }
     }
 }
@@ -145,7 +148,11 @@ fn sod_1d_two_level_conserves_composite_totals() {
     let dx = 1.0 / n as f64;
     let ic = |x: [f64; 1]| {
         let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-        Prim { rho, vel: symbi_algebra::Tensor::new([0.0]), pre }
+        Prim {
+            rho,
+            vel: symbi_algebra::Tensor::new([0.0]),
+            pre,
+        }
     };
     let coarse = Sim::<1>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n])
@@ -158,7 +165,10 @@ fn sod_1d_two_level_conserves_composite_totals() {
         .build();
     let ck = kset(&coarse);
 
-    let regions = [RefinementRegion { x_lo: [0.4], x_hi: [0.6] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.4],
+        x_hi: [0.6],
+    }];
     let mut hier =
         Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| kset(s)).unwrap();
     hier.levels[1].state.seed_cells(ic);
@@ -173,13 +183,27 @@ fn sod_1d_two_level_conserves_composite_totals() {
 
     let rel = |a: f64, b: f64, s: f64| ((a - b) / s).abs();
     assert!(rel(m1, m0, m0) < 1e-12, "mass drift {:e}", rel(m1, m0, m0));
-    assert!(rel(e1, e0, e0) < 1e-12, "energy drift {:e}", rel(e1, e0, e0));
+    assert!(
+        rel(e1, e0, e0) < 1e-12,
+        "energy drift {:e}",
+        rel(e1, e0, e0)
+    );
     // momentum starts at zero — measure against the mass scale.
-    assert!(rel(p1, p0, m0) < 1e-12, "momentum drift {:e}", rel(p1, p0, m0));
+    assert!(
+        rel(p1, p0, m0) < 1e-12,
+        "momentum drift {:e}",
+        rel(p1, p0, m0)
+    );
 
     // the shock genuinely left the refined region: density just outside the
     // hi interface departed from its initial 0.125.
-    let outside = *hier.levels[0].state.fields.cons.den.view().at([(0.63 / dx) as isize]);
+    let outside = *hier.levels[0]
+        .state
+        .fields
+        .cons
+        .den
+        .view()
+        .at([(0.63 / dx) as isize]);
     assert!(
         (outside - 0.125).abs() > 0.05,
         "shock never crossed the coarse-fine interface (den at x=0.63: {outside})"
@@ -196,7 +220,11 @@ fn smooth_pulse_two_level_matches_uniform_fine() {
     let dx = 1.0 / n as f64;
     let ic = |x: [f64; 1]| {
         let g = (-((x[0] - 0.5) / 0.06).powi(2)).exp();
-        Prim { rho: 1.0 + 0.01 * g, vel: symbi_algebra::Tensor::new([0.0]), pre: 1.0 + 0.014 * g }
+        Prim {
+            rho: 1.0 + 0.01 * g,
+            vel: symbi_algebra::Tensor::new([0.0]),
+            pre: 1.0 + 0.014 * g,
+        }
     };
     let t_final = 0.04;
 
@@ -210,7 +238,10 @@ fn smooth_pulse_two_level_matches_uniform_fine() {
         .set_initial(ic)
         .build();
     let ck = kset(&coarse);
-    let regions = [RefinementRegion { x_lo: [0.25], x_hi: [0.75] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25],
+        x_hi: [0.75],
+    }];
     let mut hier =
         Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| kset(s)).unwrap();
     hier.levels[1].state.seed_cells(ic);
@@ -262,7 +293,11 @@ fn blast_3d_two_level_conserves_composite_totals() {
     let ic = |x: [f64; 3]| {
         let r2 = x.iter().map(|&q| (q - 0.5) * (q - 0.5)).sum::<f64>();
         let pre = if r2 < 0.01 { 10.0 } else { 0.1 };
-        Prim { rho: 1.0, vel: symbi_algebra::Tensor::new([0.0; 3]), pre }
+        Prim {
+            rho: 1.0,
+            vel: symbi_algebra::Tensor::new([0.0; 3]),
+            pre,
+        }
     };
     let coarse = Sim::<3>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([n; 3])
@@ -278,7 +313,10 @@ fn blast_3d_two_level_conserves_composite_totals() {
     // a tight box around the blast: the shock crosses the coarse-fine faces
     // (0.125 from the initial sphere edge) well before t_final, so the 3d
     // reflux is exercised on all six interface faces.
-    let regions = [RefinementRegion { x_lo: [0.375; 3], x_hi: [0.625; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.375; 3],
+        x_hi: [0.625; 3],
+    }];
     let mut hier =
         Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| kset(s)).unwrap();
     hier.levels[1].state.seed_cells(ic);
@@ -289,8 +327,19 @@ fn blast_3d_two_level_conserves_composite_totals() {
 
     assert!(hier.levels[0].state.iteration > 2);
     // the blast genuinely left the refined box: pressure just outside it rose.
-    let probe = [(0.70 / dx) as isize, (0.5 / dx) as isize, (0.5 / dx) as isize];
-    let outside = *hier.levels[0].state.fields.prim.pre_field().unwrap().view().at(probe);
+    let probe = [
+        (0.70 / dx) as isize,
+        (0.5 / dx) as isize,
+        (0.5 / dx) as isize,
+    ];
+    let outside = *hier.levels[0]
+        .state
+        .fields
+        .prim
+        .pre_field()
+        .unwrap()
+        .view()
+        .at(probe);
     assert!(
         outside > 0.12,
         "blast never crossed the coarse-fine box (pre at probe: {outside})"
@@ -300,6 +349,14 @@ fn blast_3d_two_level_conserves_composite_totals() {
 
     let rel = |a: f64, b: f64, s: f64| ((a - b) / s).abs();
     assert!(rel(m1, m0, m0) < 1e-12, "mass drift {:e}", rel(m1, m0, m0));
-    assert!(rel(e1, e0, e0) < 1e-12, "energy drift {:e}", rel(e1, e0, e0));
-    assert!(rel(p1, p0, m0) < 1e-12, "momentum drift {:e}", rel(p1, p0, m0));
+    assert!(
+        rel(e1, e0, e0) < 1e-12,
+        "energy drift {:e}",
+        rel(e1, e0, e0)
+    );
+    assert!(
+        rel(p1, p0, m0) < 1e-12,
+        "momentum drift {:e}",
+        rel(p1, p0, m0)
+    );
 }

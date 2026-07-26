@@ -18,9 +18,9 @@
 use std::fmt;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
 
+use crate::Tensor;
 use crate::algebra::Numeric as Scalar;
 use crate::algebra::OrderedNumeric;
-use crate::Tensor;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Matrix<S, const N: usize> {
@@ -732,7 +732,10 @@ mod tests {
         let g = M3::diag(vec3(1.0, r * r, r * r * sin_theta * sin_theta));
         let v = vec3(1.0, 1.0, 1.0);
         // |v|^2 = 1 + 4 + 2 = 7
-        assert!(approx(g.quadratic(&v), 1.0 + r * r + r * r * sin_theta * sin_theta));
+        assert!(approx(
+            g.quadratic(&v),
+            1.0 + r * r + r * r * sin_theta * sin_theta
+        ));
     }
 
     #[test]

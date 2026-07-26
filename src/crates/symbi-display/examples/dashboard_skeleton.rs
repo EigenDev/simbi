@@ -172,7 +172,8 @@ impl App {
                 let mut d = Vec::with_capacity(n);
                 for i in 0..n {
                     let x = i as f64 / n as f64 * 10.0;
-                    let v = 1.0 + 2.2 * (-(x - 3.0 - t * 0.25).powi(2)).exp()
+                    let v = 1.0
+                        + 2.2 * (-(x - 3.0 - t * 0.25).powi(2)).exp()
                         + 0.25 * (x * 1.6 - t).sin();
                     d.push(v as f32);
                 }
@@ -194,9 +195,11 @@ impl App {
                 ("density", w, h, d)
             }
         };
-        let (mn, mx) = data.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| {
-            (a.min(v), b.max(v))
-        });
+        let (mn, mx) = data
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| {
+                (a.min(v), b.max(v))
+            });
         FieldSlice {
             label: label.into(),
             width,
@@ -239,11 +242,27 @@ impl App {
             log: self.log.iter().cloned().collect(),
             config: vec![
                 ("Physics".into(), "regime".into(), "rhd".into()),
-                ("Physics".into(), "eos".into(), "ideal gas (gamma = 1.6667)".into()),
+                (
+                    "Physics".into(),
+                    "eos".into(),
+                    "ideal gas (gamma = 1.6667)".into(),
+                ),
                 ("Geometry".into(), "coords".into(), "cartesian · 2D".into()),
-                ("Geometry".into(), "resolution".into(), "256 x 256  (65536 zones)".into()),
-                ("Numerics".into(), "solver".into(), "hllc · plm · minmod-MC (theta = 1.50)".into()),
-                ("Numerics".into(), "timestepping".into(), "rk2 · cfl 0.10".into()),
+                (
+                    "Geometry".into(),
+                    "resolution".into(),
+                    "256 x 256  (65536 zones)".into(),
+                ),
+                (
+                    "Numerics".into(),
+                    "solver".into(),
+                    "hllc · plm · minmod-MC (theta = 1.50)".into(),
+                ),
+                (
+                    "Numerics".into(),
+                    "timestepping".into(),
+                    "rk2 · cfl 0.10".into(),
+                ),
                 ("Run".into(), "t_final".into(), "20.0000".into()),
                 ("Run".into(), "output".into(), "data/kh_config/".into()),
             ],

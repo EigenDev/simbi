@@ -49,7 +49,11 @@ fn make_sim() -> Sim {
             let bx = -b0 * (2.0 * PI * y).sin();
             let by = b0 * (4.0 * PI * x).sin();
             MhdPrim {
-                hydro: Prim { rho: rho0, vel: Tensor::new([vx, vy, 0.0]), pre: p0 },
+                hydro: Prim {
+                    rho: rho0,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: p0,
+                },
                 mag: Tensor::new([bx, by, 0.0]),
             }
         })
@@ -91,8 +95,10 @@ fn reflection_l1(sim: &Sim) -> f64 {
 #[ignore = "diagnostic: ~60s at 256^2; run explicitly with --ignored"]
 fn nmhd_ot_reflection_symmetry_t03_vs_t10() {
     let mut sim = make_sim();
-    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, 0.4, 1.0, &sim.geom.allocated)
-        .with_solver(Solver::Hlld).expect("valid solver/regime pair");
+    let sub =
+        NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, 0.4, 1.0, &sim.geom.allocated)
+            .with_solver(Solver::Hlld)
+            .expect("valid solver/regime pair");
 
     eprintln!("[ot-sym] {NX}x{NY} HLLD — center point-reflection relative-L1 of density:");
     eprintln!("[ot-sym]   t=0     : 0 (uniform IC; prim not yet recovered, so not measured)");

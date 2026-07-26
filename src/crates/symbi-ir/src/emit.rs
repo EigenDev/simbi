@@ -147,7 +147,7 @@ const fn unit_stride_contiguous(lang: IndexLang) -> bool {
 pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool) -> String {
     let (decl, ty) = match lang {
         IndexLang::Rust => ("let ", ": i32"),
-        IndexLang::Cuda => ("int ",  ""),
+        IndexLang::Cuda => ("int ", ""),
     };
     let f = buf;
     // view collapse: when the kernel guarantees all buffers share buffer 0's
@@ -228,18 +228,20 @@ pub fn emit_flat_index(lang: IndexLang, ndim: u8, buf: u32, comps: &[&str]) -> S
         2 => format!(
             "(__idx_cell_buf{f} + (({c0}) - ii) * field{f}.strides[0] \
              + (({c1}) - jj) * field{f}.strides[1]){terminator}",
-            c0 = comps[0], c1 = comps[1],
+            c0 = comps[0],
+            c1 = comps[1],
         ),
         3 => format!(
             "(__idx_cell_buf{f} + (({c0}) - ii) * field{f}.strides[0] \
              + (({c1}) - jj) * field{f}.strides[1] \
              + (({c2}) - kk) * field{f}.strides[2]){terminator}",
-            c0 = comps[0], c1 = comps[1], c2 = comps[2],
+            c0 = comps[0],
+            c1 = comps[1],
+            c2 = comps[2],
         ),
         _ => panic!("emit_flat_index: unsupported ndim {ndim}"),
     }
 }
-
 
 // ---- reduction op (the device reduction descriptor's combine semantics) ----
 
@@ -250,4 +252,3 @@ pub enum ReductionOp {
     Min,
     Max,
 }
-

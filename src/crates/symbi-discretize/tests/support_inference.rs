@@ -48,7 +48,9 @@ fn resolve(name: &str) -> f64 {
 }
 
 fn expect_ball(support: &Option<Support>, what: &str, center: &[f64], radius: f64) {
-    let s = support.as_ref().unwrap_or_else(|| panic!("{what}: no derived support"));
+    let s = support
+        .as_ref()
+        .unwrap_or_else(|| panic!("{what}: no derived support"));
     let (c, r) = s
         .eval_ball(&resolve)
         .unwrap_or_else(|| panic!("{what}: derived support is not a Ball: {s:?}"));
@@ -124,9 +126,17 @@ fn spinning_kernel_derives_the_position_centered_swept_ball() {
     let shape = SdfExpr::<f64, 3>::cuboid([0.3, 0.1, 0.0], [0.5, 0.3, 0.2]);
     let (lc, lr) = shape.bounding_ball().expect("bounded shape");
     let lc_norm = (lc[0] * lc[0] + lc[1] * lc[1] + lc[2] * lc[2]).sqrt();
-    assert!(lc_norm > 0.0, "the offset shape must have an off-center bounding ball");
+    assert!(
+        lc_norm > 0.0,
+        "the offset shape must have an off-center bounding ball"
+    );
     let (k, _) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape);
-    expect_ball(&k.output_support, "shaped spinning", &POS[..2], lc_norm + lr + PAD);
+    expect_ball(
+        &k.output_support,
+        "shaped spinning",
+        &POS[..2],
+        lc_norm + lr + PAD,
+    );
 }
 
 #[test]
@@ -141,6 +151,9 @@ fn curvilinear_kernels_derive_no_ball() {
             "{coords:?}: a curvilinear kernel must not carry a cartesian ball"
         );
         let (k, _) = body_feedback_drain_gv(coords, 2, 2, &[0, 1]);
-        assert!(k.output_support.is_none(), "{coords:?}: feedback ball leaked off-cartesian");
+        assert!(
+            k.output_support.is_none(),
+            "{coords:?}: feedback ball leaked off-cartesian"
+        );
     }
 }

@@ -28,8 +28,8 @@ use std::collections::HashMap;
 
 use symbi_expr::dag::{Node, Payload};
 use symbi_expr::op::Op;
-use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
 use symbi_ir::ElementTy;
+use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
 
 use crate::source_spec::BuiltSource;
 
@@ -95,9 +95,9 @@ fn map_op(op: Op) -> Option<Mapped> {
         Acosh => Mapped::Trans(TranscendentalOp::Acosh),
         Atanh => Mapped::Trans(TranscendentalOp::Atanh),
         // leaves / ternary handled in the walk; Sgn + Mod have no carrier primitive.
-        Constant | VariableX1 | VariableX2 | VariableX3 | VariableT | Parameter
-        | VariableRho | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure
-        | IfThenElse | Sgn | Mod => return None,
+        Constant | VariableX1 | VariableX2 | VariableX3 | VariableT | Parameter | VariableRho
+        | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure | IfThenElse | Sgn
+        | Mod => return None,
     })
 }
 
@@ -139,7 +139,9 @@ fn declare_param(
 
 /// translate a child index through the partially-built node map, rejecting forward refs.
 fn child(map: &[NodeId], node: usize, c: usize) -> Result<NodeId, BridgeError> {
-    map.get(c).copied().ok_or(BridgeError::BadChild { node, child: c })
+    map.get(c)
+        .copied()
+        .ok_or(BridgeError::BadChild { node, child: c })
 }
 
 /// lower a `symbi-expr` DAG (`nodes`, in topological order) with the given `outputs`
@@ -158,10 +160,21 @@ pub fn lower_dag_to_builtsource(
         let id = match node.op {
             Op::Constant => match node.payload {
                 Payload::Value(v) => g.add_const(ConstValue::F64(v), None),
-                _ => return Err(BridgeError::BadPayload { node: i, op: node.op }),
+                _ => {
+                    return Err(BridgeError::BadPayload {
+                        node: i,
+                        op: node.op,
+                    });
+                }
             },
-            Op::VariableX1 | Op::VariableX2 | Op::VariableX3 | Op::VariableT
-            | Op::VariableRho | Op::VariableVel1 | Op::VariableVel2 | Op::VariableVel3
+            Op::VariableX1
+            | Op::VariableX2
+            | Op::VariableX3
+            | Op::VariableT
+            | Op::VariableRho
+            | Op::VariableVel1
+            | Op::VariableVel2
+            | Op::VariableVel3
             | Op::VariablePressure => {
                 let name = variable_name(node.op).expect("variable op has a name");
                 declare_param(&mut g, name, &mut param_cache, &mut params)
@@ -170,7 +183,12 @@ pub fn lower_dag_to_builtsource(
                 Payload::ParamIdx(idx) => {
                     declare_param(&mut g, &format!("p{idx}"), &mut param_cache, &mut params)
                 }
-                _ => return Err(BridgeError::BadPayload { node: i, op: node.op }),
+                _ => {
+                    return Err(BridgeError::BadPayload {
+                        node: i,
+                        op: node.op,
+                    });
+                }
             },
             Op::IfThenElse => match node.payload {
                 Payload::Ternary(c, t, e) => g.select(
@@ -179,7 +197,12 @@ pub fn lower_dag_to_builtsource(
                     child(&node_map, i, e)?,
                     None,
                 ),
-                _ => return Err(BridgeError::BadPayload { node: i, op: node.op }),
+                _ => {
+                    return Err(BridgeError::BadPayload {
+                        node: i,
+                        op: node.op,
+                    });
+                }
             },
             other => {
                 let mapped = map_op(other).ok_or(BridgeError::UnsupportedOp(other))?;
@@ -188,7 +211,12 @@ pub fn lower_dag_to_builtsource(
                     Payload::Binary(l, r) => {
                         vec![child(&node_map, i, l)?, child(&node_map, i, r)?]
                     }
-                    _ => return Err(BridgeError::BadPayload { node: i, op: node.op }),
+                    _ => {
+                        return Err(BridgeError::BadPayload {
+                            node: i,
+                            op: node.op,
+                        });
+                    }
                 };
                 match mapped {
                     Mapped::Elem(op) => g.element_wise(op, args, None),
@@ -201,9 +229,18 @@ pub fn lower_dag_to_builtsource(
 
     let out_nodes: Result<Vec<NodeId>, BridgeError> = outputs
         .iter()
-        .map(|&o| node_map.get(o).copied().ok_or(BridgeError::BadChild { node: usize::MAX, child: o }))
+        .map(|&o| {
+            node_map.get(o).copied().ok_or(BridgeError::BadChild {
+                node: usize::MAX,
+                child: o,
+            })
+        })
         .collect();
-    Ok(BuiltSource { graph: g, params, outputs: out_nodes? })
+    Ok(BuiltSource {
+        graph: g,
+        params,
+        outputs: out_nodes?,
+    })
 }
 
 /// THE FRONT DOOR: turn a serialized `SourceConfig` (python -> json -> `SourceConfig::from_json`)
@@ -249,7 +286,9 @@ pub fn build_user_source(
     let (nodes, lower_outputs) = symbi_expr::strength_reduce(&nodes, &lower_outputs);
     let mut field =
         lower_dag_to_builtsource(&nodes, &lower_outputs).map_err(|e| format!("bridge: {e:?}"))?;
-    let region: Option<NodeId> = cfg.region.map(|_| field.outputs.pop().expect("region output"));
+    let region: Option<NodeId> = cfg
+        .region
+        .map(|_| field.outputs.pop().expect("region output"));
     let n_out = cfg.outputs.len();
 
     let reject_relativistic = |law: &str| -> Result<(), String> {
@@ -325,7 +364,9 @@ pub fn build_user_source(
                 ));
             }
             if n_out != 1 {
-                return Err(format!("'cooling' is a single rate: outputs.len() = {n_out}, expected 1"));
+                return Err(format!(
+                    "'cooling' is a single rate: outputs.len() = {n_out}, expected 1"
+                ));
             }
             mask_field(&mut field, region, 0..1);
             Ok(vec![(
@@ -362,7 +403,11 @@ pub fn build_user_source(
             // (+ nrg on energy regimes). the reference conserved state U_ref is supplied per-cell.
             reject_relativistic("sponge")?;
             // adiabatic: [kappa, den_ref, mom_ref_0..mom_ref_{D-1}, nrg_ref] = 3+D; iso drops nrg_ref.
-            let want = if spec.has_energy { 3 + cfg.dim } else { 2 + cfg.dim };
+            let want = if spec.has_energy {
+                3 + cfg.dim
+            } else {
+                2 + cfg.dim
+            };
             if n_out != want {
                 return Err(format!(
                     "'sponge' needs [kappa, den_ref, mom_ref_0..mom_ref_{}{}]: outputs.len() = {n_out}, expected {want}",
@@ -405,7 +450,11 @@ pub fn build_user_source(
             // single-slot `raw` cannot express. relativistic-safe: the user supplies conserved
             // components directly (no newtonian law wrap), so no `reject_relativistic` — the
             // components ARE the regime's conserved rates (D=rho*W, S=rho*h*W^2*v, tau in rhd).
-            let want = if spec.has_energy { 2 + cfg.dim } else { 1 + cfg.dim };
+            let want = if spec.has_energy {
+                2 + cfg.dim
+            } else {
+                1 + cfg.dim
+            };
             if n_out != want {
                 return Err(format!(
                     "'inject' needs [den, mom_0..mom_{}{}]: outputs.len() = {n_out}, expected {want}",
@@ -451,9 +500,9 @@ pub fn build_user_source(
             mask_field(&mut field, region, 0..n_out); // mask every conserved component the user wrote
             Ok(vec![(target, field)])
         }
-        other => {
-            Err(format!("unknown source kind '{other}' (expected force | rotating_frame | cooling | relax | sponge | inject | raw)"))
-        }
+        other => Err(format!(
+            "unknown source kind '{other}' (expected force | rotating_frame | cooling | relax | sponge | inject | raw)"
+        )),
     }
 }
 
@@ -530,7 +579,11 @@ fn sum_built_sources(
         })
         .collect();
 
-    Ok(BuiltSource { graph, params, outputs })
+    Ok(BuiltSource {
+        graph,
+        params,
+        outputs,
+    })
 }
 
 /// multiply the named `field` outputs by the region mask `chi` (in the field's own graph), if a
@@ -540,7 +593,10 @@ fn sum_built_sources(
 fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Range<usize>) {
     let Some(chi) = chi else { return };
     for i in idxs {
-        let masked = field.graph.element_wise(ElementWiseOp::Mul, vec![field.outputs[i], chi], None);
+        let masked =
+            field
+                .graph
+                .element_wise(ElementWiseOp::Mul, vec![field.outputs[i], chi], None);
         field.outputs[i] = masked;
     }
 }
@@ -585,7 +641,11 @@ pub fn build_boundary_dag(
              = {}, expected {n_prim}",
             d.saturating_sub(1),
             if spec.has_energy { ", pre" } else { "" },
-            if spec.is_mhd { format!(", B_0..B_{}", d.saturating_sub(1)) } else { String::new() },
+            if spec.is_mhd {
+                format!(", B_0..B_{}", d.saturating_sub(1))
+            } else {
+                String::new()
+            },
             cfg.outputs.len(),
         ));
     }
@@ -605,7 +665,10 @@ pub fn build_boundary_dag(
         next += 1;
     }
     if spec.is_mhd {
-        out.push(("bcell".to_string(), lower(&reduced_outputs[next..next + d])?));
+        out.push((
+            "bcell".to_string(),
+            lower(&reduced_outputs[next..next + d])?,
+        ));
     }
     Ok(out)
 }
@@ -613,7 +676,7 @@ pub fn build_boundary_dag(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RMHD_SPEC, RHD_SPEC};
+    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC};
     use symbi_expr::dag::Dag;
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
@@ -671,7 +734,10 @@ mod tests {
         assert_eq!(cfg.dim, 2);
         assert_eq!(cfg.outputs, vec![0, 1]);
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python force config lowers");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["mom", "nrg"]
+        );
     }
 
     #[test]
@@ -701,7 +767,9 @@ mod tests {
             [15.0],
         );
         assert_eq!(
-            evaluator.eval("nrg", &[("x_0", -1.0)]).expect("lower clamp"),
+            evaluator
+                .eval("nrg", &[("x_0", -1.0)])
+                .expect("lower clamp"),
             [10.0],
         );
         assert_eq!(
@@ -718,10 +786,12 @@ mod tests {
                           {"op": "CONSTANT", "value": 0.0},
                           {"op": "CONSTANT", "value": 0.0}]}"#,
         );
-        let built =
-            build_user_source(&cfg, &NEWTONIAN_SPEC).expect("rotating frame config lowers");
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("rotating frame config lowers");
         assert_eq!(
-            built.iter().map(|(target, _)| target.as_str()).collect::<Vec<_>>(),
+            built
+                .iter()
+                .map(|(target, _)| target.as_str())
+                .collect::<Vec<_>>(),
             ["mom", "nrg"],
         );
         assert!(expect_err(&cfg, &RHD_SPEC).contains("invalid for the relativistic regime"));
@@ -745,7 +815,10 @@ mod tests {
         let (built, params) =
             build_user_sources(&[rotating, sponge], &ISO_NEWTONIAN_SPEC).expect("compose");
         assert!(params.is_empty());
-        assert_eq!(built.iter().filter(|(target, _)| target == "mom").count(), 1);
+        assert_eq!(
+            built.iter().filter(|(target, _)| target == "mom").count(),
+            1
+        );
 
         let evaluator = crate::SourceEvaluator::from_built(&built);
         let momentum = evaluator
@@ -809,23 +882,51 @@ mod tests {
                           {"op": "CONSTANT", "value": 10.0}]}"#,
         );
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python sponge config lowers");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom", "nrg"]
+        );
         // at x=(1,0,0), state rho=1.5, vel=(3,0,0), pre=2:
         // S_mom_0 = kappa*(mom_ref_0 - rho*vel_0) = 2*(x_0 - 4.5) = 2*(1 - 4.5) = -7.
         let (_, mom) = &built[1];
-        let s_mom0 = eval_lowered(mom, mom.outputs[0], &[
-            ("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("vel_2", 0.0),
-            ("x_0", 1.0), ("x_1", 0.0), ("x_2", 0.0),
-        ]);
-        assert!((s_mom0 - (-7.0)).abs() < 1e-12, "python sponge mom_0 wrong: {s_mom0}");
+        let s_mom0 = eval_lowered(
+            mom,
+            mom.outputs[0],
+            &[
+                ("rho", 1.5),
+                ("vel_0", 3.0),
+                ("vel_1", 0.0),
+                ("vel_2", 0.0),
+                ("x_0", 1.0),
+                ("x_1", 0.0),
+                ("x_2", 0.0),
+            ],
+        );
+        assert!(
+            (s_mom0 - (-7.0)).abs() < 1e-12,
+            "python sponge mom_0 wrong: {s_mom0}"
+        );
         // S_nrg = kappa*(nrg_ref - (pre*inv_gm1 + 0.5*rho*|v|^2)) = 2*(10 - (5 + 6.75)) = -3.5.
         // (the x_k leaves ride along in the spliced field — unused by the const nrg_ref, but present.)
         let (_, nrg) = &built[2];
-        let s_nrg = eval_lowered(nrg, nrg.outputs[0], &[
-            ("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("vel_2", 0.0), ("pre", 2.0),
-            ("x_0", 1.0), ("x_1", 0.0), ("x_2", 0.0),
-        ]);
-        assert!((s_nrg - (-3.5)).abs() < 1e-12, "python sponge nrg wrong: {s_nrg}");
+        let s_nrg = eval_lowered(
+            nrg,
+            nrg.outputs[0],
+            &[
+                ("rho", 1.5),
+                ("vel_0", 3.0),
+                ("vel_1", 0.0),
+                ("vel_2", 0.0),
+                ("pre", 2.0),
+                ("x_0", 1.0),
+                ("x_1", 0.0),
+                ("x_2", 0.0),
+            ],
+        );
+        assert!(
+            (s_nrg - (-3.5)).abs() < 1e-12,
+            "python sponge nrg wrong: {s_nrg}"
+        );
     }
 
     #[test]
@@ -836,7 +937,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("force ok on newtonian");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["mom", "nrg"]
+        );
     }
 
     #[test]
@@ -847,7 +951,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("force ok on iso");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["mom"]
+        );
     }
 
     #[test]
@@ -858,7 +965,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &RHD_SPEC);
-        assert!(err.contains("relativistic"), "expected relativistic rejection, got: {err}");
+        assert!(
+            err.contains("relativistic"),
+            "expected relativistic rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -872,7 +982,10 @@ mod tests {
                            {"op":"CONSTANT","value":3.0}, {"op":"CONSTANT","value":4.0} ] }"#,
         );
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("inject ok on newtonian");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom", "nrg"]
+        );
         // den: single output = 1.
         let (_, den) = &built[0];
         assert_eq!(den.outputs.len(), 1);
@@ -897,7 +1010,10 @@ mod tests {
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
         let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("inject ok on iso");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom"]
+        );
     }
 
     #[test]
@@ -911,7 +1027,10 @@ mod tests {
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
         let built = build_user_source(&cfg, &RHD_SPEC).expect("inject ok on rhd (raw-like)");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom", "nrg"]
+        );
     }
 
     #[test]
@@ -927,7 +1046,10 @@ mod tests {
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = build_user_source(&cfg, &RHD_SPEC).expect("2d engine inject ok on rhd");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom", "nrg"]
+        );
         // S_den = S_0/eta_0 = 10/100 = 0.1 (the DIVIDE channel).
         let (_, den) = &built[0];
         assert_eq!(den.outputs.len(), 1);
@@ -954,7 +1076,10 @@ mod tests {
                            {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = build_user_source(&cfg, &RHD_SPEC).expect("3d engine inject ok on rhd");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom", "nrg"]
+        );
         let (_, den) = &built[0];
         assert!((eval_lowered(den, den.outputs[0], &[]) - 0.1).abs() < 1e-12);
         // mom carries all three spatial components; only the radial one is nonzero.
@@ -977,7 +1102,10 @@ mod tests {
                            {"op":"CONSTANT","value":3.0} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
-        assert!(err.contains("inject"), "expected inject arity rejection, got: {err}");
+        assert!(
+            err.contains("inject"),
+            "expected inject arity rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -988,7 +1116,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &ISO_NEWTONIAN_SPEC);
-        assert!(err.contains("energy"), "expected energy-required rejection, got: {err}");
+        assert!(
+            err.contains("energy"),
+            "expected energy-required rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -999,7 +1130,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
-        assert!(err.contains("per dim"), "expected arity rejection, got: {err}");
+        assert!(
+            err.contains("per dim"),
+            "expected arity rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -1009,7 +1143,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
-        assert!(err.contains("conserved slot"), "expected target rejection, got: {err}");
+        assert!(
+            err.contains("conserved slot"),
+            "expected target rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -1019,7 +1156,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
         let err = expect_err(&cfg, &ISO_NEWTONIAN_SPEC);
-        assert!(err.contains("energy"), "expected nrg-needs-energy rejection, got: {err}");
+        assert!(
+            err.contains("energy"),
+            "expected nrg-needs-energy rejection, got: {err}"
+        );
     }
 
     // ---- region axis ----------------------------------------------
@@ -1037,10 +1177,28 @@ mod tests {
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("force+region");
         let (tgt, mom) = &built[0];
         assert_eq!(tgt, "mom");
-        let s_at = |x0: f64| eval_lowered(mom, mom.outputs[0], &[("rho", 2.0), ("p0", 0.5), ("x_0", x0)]);
-        assert!(s_at(0.0).abs() < 1e-12, "region masks to zero where chi = 0: got {}", s_at(0.0));
-        assert!((s_at(1.0) - 1.0).abs() < 1e-12, "full contribution where chi = 1: got {}", s_at(1.0));
-        assert!((s_at(0.5) - 0.5).abs() < 1e-12, "linear in chi: got {}", s_at(0.5));
+        let s_at = |x0: f64| {
+            eval_lowered(
+                mom,
+                mom.outputs[0],
+                &[("rho", 2.0), ("p0", 0.5), ("x_0", x0)],
+            )
+        };
+        assert!(
+            s_at(0.0).abs() < 1e-12,
+            "region masks to zero where chi = 0: got {}",
+            s_at(0.0)
+        );
+        assert!(
+            (s_at(1.0) - 1.0).abs() < 1e-12,
+            "full contribution where chi = 1: got {}",
+            s_at(1.0)
+        );
+        assert!(
+            (s_at(0.5) - 0.5).abs() < 1e-12,
+            "linear in chi: got {}",
+            s_at(0.5)
+        );
     }
 
     // ---- relax combine --------------------------------------------
@@ -1055,17 +1213,44 @@ mod tests {
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("relax newtonian");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["mom", "nrg"]
+        );
         let (_, mom) = &built[0];
         // kappa=2, rho=1, v_ref_0=0, vel_0=3 -> 2*1*(0-3) = -6: the drag OPPOSES the velocity.
-        let s_mom0 = eval_lowered(mom, mom.outputs[0],
-            &[("rho", 1.0), ("vel_0", 3.0), ("vel_1", 0.0), ("p0", 2.0), ("p1", 0.0)]);
-        assert!((s_mom0 - (-6.0)).abs() < 1e-12, "relax drag wrong: {s_mom0}");
+        let s_mom0 = eval_lowered(
+            mom,
+            mom.outputs[0],
+            &[
+                ("rho", 1.0),
+                ("vel_0", 3.0),
+                ("vel_1", 0.0),
+                ("p0", 2.0),
+                ("p1", 0.0),
+            ],
+        );
+        assert!(
+            (s_mom0 - (-6.0)).abs() < 1e-12,
+            "relax drag wrong: {s_mom0}"
+        );
         // the energy overlay = work = sum vel_k * S_mom_k = 3*(-6) + 0 = -18 < 0: KE is REMOVED.
         let (_, nrg) = &built[1];
-        let s_nrg = eval_lowered(nrg, nrg.outputs[0],
-            &[("rho", 1.0), ("vel_0", 3.0), ("vel_1", 0.0), ("p0", 2.0), ("p1", 0.0)]);
-        assert!(s_nrg < 0.0, "relaxation must remove kinetic energy, got S_nrg = {s_nrg}");
+        let s_nrg = eval_lowered(
+            nrg,
+            nrg.outputs[0],
+            &[
+                ("rho", 1.0),
+                ("vel_0", 3.0),
+                ("vel_1", 0.0),
+                ("p0", 2.0),
+                ("p1", 0.0),
+            ],
+        );
+        assert!(
+            s_nrg < 0.0,
+            "relaxation must remove kinetic energy, got S_nrg = {s_nrg}"
+        );
     }
 
     #[test]
@@ -1079,9 +1264,15 @@ mod tests {
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("relax");
         let (_, mom) = &built[0];
         // kappa = -5 -> clamped to 0 -> S_mom_0 = 0 regardless of the velocity overshoot.
-        let s = eval_lowered(mom, mom.outputs[0],
-            &[("rho", 1.0), ("vel_0", 7.0), ("p0", -5.0), ("p1", 0.0)]);
-        assert!(s.abs() < 1e-12, "negative kappa must clamp to a no-op, got {s}");
+        let s = eval_lowered(
+            mom,
+            mom.outputs[0],
+            &[("rho", 1.0), ("vel_0", 7.0), ("p0", -5.0), ("p1", 0.0)],
+        );
+        assert!(
+            s.abs() < 1e-12,
+            "negative kappa must clamp to a no-op, got {s}"
+        );
     }
 
     // ---- sponge: full conserved-state relaxation (the buffer zone) -----------------
@@ -1099,18 +1290,27 @@ mod tests {
                            {"op":"CONSTANT","value":10.0} ] }"#,
         );
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("sponge newtonian");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom", "nrg"]
+        );
 
         // state: rho=1.5, vel=[3,0], pre=2 (each channel reads only what it needs from this).
         let state = [("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("pre", 2.0)];
         // S_den = kappa*(den_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes DOWN toward the ref).
         let (_, den) = &built[0];
         let s_den = eval_lowered(den, den.outputs[0], &state);
-        assert!((s_den - (-1.0)).abs() < 1e-12, "sponge density wrong: {s_den}");
+        assert!(
+            (s_den - (-1.0)).abs() < 1e-12,
+            "sponge density wrong: {s_den}"
+        );
         // S_mom_0 = kappa*(mom_ref_0 - rho*vel_0) = 2*(0.5 - 4.5) = -8.0 (opposes the momentum).
         let (_, mom) = &built[1];
         let s_mom0 = eval_lowered(mom, mom.outputs[0], &state);
-        assert!((s_mom0 - (-8.0)).abs() < 1e-12, "sponge mom_0 wrong: {s_mom0}");
+        assert!(
+            (s_mom0 - (-8.0)).abs() < 1e-12,
+            "sponge mom_0 wrong: {s_mom0}"
+        );
         // S_nrg = kappa*(nrg_ref - E), E = pre*inv_gm1 + 0.5*rho*|v|^2 = 2*2.5 + 0.5*1.5*9 = 11.75;
         //   -> 2*(10 - 11.75) = -3.5 (total energy relaxes DOWN toward the ref).
         let (_, nrg) = &built[2];
@@ -1128,11 +1328,17 @@ mod tests {
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("sponge iso");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den", "mom"]
+        );
         // S_den = 1*(2 - rho); rho=0.5 -> 1.5 (density relaxes UP toward the ref).
         let (_, den) = &built[0];
         let s_den = eval_lowered(den, den.outputs[0], &[("rho", 0.5)]);
-        assert!((s_den - 1.5).abs() < 1e-12, "iso sponge density wrong: {s_den}");
+        assert!(
+            (s_den - 1.5).abs() < 1e-12,
+            "iso sponge density wrong: {s_den}"
+        );
     }
 
     #[test]
@@ -1144,7 +1350,10 @@ mod tests {
                            {"op":"CONSTANT","value":0.0} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
-        assert!(err.contains("nrg_ref"), "expected sponge arity rejection, got: {err}");
+        assert!(
+            err.contains("nrg_ref"),
+            "expected sponge arity rejection, got: {err}"
+        );
     }
 
     // ---- state variables: density + pressure in user source expressions -------------------
@@ -1165,11 +1374,25 @@ mod tests {
         let (tgt, nrg) = &built[0];
         assert_eq!(tgt, "nrg");
         // S_nrg = -(C * rho * pre); C=0.25, rho=2, pre=3 -> -(0.25*2*3) = -1.5.
-        let s = eval_lowered(nrg, nrg.outputs[0], &[("p0", 0.25), ("rho", 2.0), ("pre", 3.0)]);
-        assert!((s - (-1.5)).abs() < 1e-12, "cooling rate must read rho*pre: got {s}");
+        let s = eval_lowered(
+            nrg,
+            nrg.outputs[0],
+            &[("p0", 0.25), ("rho", 2.0), ("pre", 3.0)],
+        );
+        assert!(
+            (s - (-1.5)).abs() < 1e-12,
+            "cooling rate must read rho*pre: got {s}"
+        );
         // it genuinely DEPENDS on pressure: doubling pre doubles the rate.
-        let s2 = eval_lowered(nrg, nrg.outputs[0], &[("p0", 0.25), ("rho", 2.0), ("pre", 6.0)]);
-        assert!((s2 - (-3.0)).abs() < 1e-12, "rate must scale with pressure: got {s2}");
+        let s2 = eval_lowered(
+            nrg,
+            nrg.outputs[0],
+            &[("p0", 0.25), ("rho", 2.0), ("pre", 6.0)],
+        );
+        assert!(
+            (s2 - (-3.0)).abs() < 1e-12,
+            "rate must scale with pressure: got {s2}"
+        );
     }
 
     #[test]
@@ -1183,12 +1406,18 @@ mod tests {
                            {"op":"MULTIPLY","left":0,"right":1} ] }"#,
         );
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("raw den ok");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["den"]
+        );
         let (tgt, den) = &built[0];
         assert_eq!(tgt, "den");
         // S_den = p0 * rho; p0=0.5, rho=2 -> 1.
         let s = eval_lowered(den, den.outputs[0], &[("p0", 0.5), ("rho", 2.0)]);
-        assert!((s - 1.0).abs() < 1e-12, "raw den rate must be p0*rho: got {s}");
+        assert!(
+            (s - 1.0).abs() < 1e-12,
+            "raw den rate must be p0*rho: got {s}"
+        );
     }
 
     #[test]
@@ -1199,7 +1428,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("relax iso");
-        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom"]);
+        assert_eq!(
+            built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(),
+            ["mom"]
+        );
     }
 
     #[test]
@@ -1209,7 +1441,10 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let err = expect_err(&cfg, &RHD_SPEC);
-        assert!(err.contains("relativistic"), "expected relativistic rejection, got: {err}");
+        assert!(
+            err.contains("relativistic"),
+            "expected relativistic rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -1220,12 +1455,18 @@ mod tests {
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
         let err = expect_err(&cfg, &NEWTONIAN_SPEC);
-        assert!(err.contains("v_ref"), "expected relax arity rejection, got: {err}");
+        assert!(
+            err.contains("v_ref"),
+            "expected relax arity rejection, got: {err}"
+        );
     }
 
     // ---- driven boundaries -----------------------------------------------
 
-    fn expect_boundary_err(cfg: &symbi_expr::SourceConfig, spec: &crate::regime_spec::RegimeSpec) -> String {
+    fn expect_boundary_err(
+        cfg: &symbi_expr::SourceConfig,
+        spec: &crate::regime_spec::RegimeSpec,
+    ) -> String {
         match build_boundary_dag(cfg, spec) {
             Err(e) => e,
             Ok(_) => panic!("expected build_boundary_dag to reject the config"),
@@ -1242,8 +1483,10 @@ mod tests {
                            {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":2.0} ] }"#,
         );
         let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("driven boundary");
-        let slots: Vec<(&str, usize)> =
-            built.iter().map(|(s, b)| (s.as_str(), b.outputs.len())).collect();
+        let slots: Vec<(&str, usize)> = built
+            .iter()
+            .map(|(s, b)| (s.as_str(), b.outputs.len()))
+            .collect();
         assert_eq!(slots, vec![("den", 1), ("mom", 2), ("nrg", 1)]);
     }
 
@@ -1286,9 +1529,14 @@ mod tests {
                            {"op":"CONSTANT","value":0.5} ] }"#,
         );
         let built = build_boundary_dag(&cfg, &RMHD_SPEC).expect("toroidal driven boundary");
-        let slots: Vec<(&str, usize)> =
-            built.iter().map(|(s, b)| (s.as_str(), b.outputs.len())).collect();
-        assert_eq!(slots, vec![("den", 1), ("mom", 3), ("nrg", 1), ("bcell", 3)]);
+        let slots: Vec<(&str, usize)> = built
+            .iter()
+            .map(|(s, b)| (s.as_str(), b.outputs.len()))
+            .collect();
+        assert_eq!(
+            slots,
+            vec![("den", 1), ("mom", 3), ("nrg", 1), ("bcell", 3)]
+        );
     }
 
     #[test]

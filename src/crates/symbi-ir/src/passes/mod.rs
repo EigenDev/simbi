@@ -24,11 +24,11 @@
 //               expressions; powers the ghost-width law.
 // =============================================================================
 
+pub mod cse;
+pub mod lazy_select;
+pub mod mask_form;
+pub mod pressure;
 pub mod scalarize;
 pub mod splice;
-pub mod cse;
-pub mod pressure;
-pub mod mask_form;
-pub mod unswitch;
-pub mod lazy_select;
 pub mod stencil_reach;
+pub mod unswitch;

@@ -23,18 +23,27 @@ use symbi_aot::NamedKernel;
 // thin shim mapping a "raw slices + scattered lo" call shape to the
 // view-struct ABI. tests stay focused on the kernel's NUMERICS.
 fn godunov_mass_1d<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
-    rho: &[S], flux: &[S], rho_new: &mut [S],
-    grid_size_0: i32, dom_lo_0: i32,
-    _lo0: i32, _lo1: i32, _lo2: i32,
-    dt: S, dx_0: S,
+    rho: &[S],
+    flux: &[S],
+    rho_new: &mut [S],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _lo0: i32,
+    _lo1: i32,
+    _lo2: i32,
+    dt: S,
+    dx_0: S,
 ) {
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("godunov_mass_1d")
-        .input("cons.den", rho).input("mass_flux[0]", flux)
+        .input("cons.den", rho)
+        .input("mass_flux[0]", flux)
         .output("cons.den_new", rho_new)
-        .grid(&grid).dom_lo(&dom)
-        .scalar("dt", dt).scalar("dx_0", dx_0)
+        .grid(&grid)
+        .dom_lo(&dom)
+        .scalar("dt", dt)
+        .scalar("dx_0", dx_0)
         .run();
 }
 
@@ -43,7 +52,9 @@ fn aot_mass_godunov_step_matches_hand_written() {
     let n = 8usize;
     let (dt, dx) = (0.01_f64, 0.5_f64);
     // a Sod-like discontinuity and a (given) face flux of n+1 entries.
-    let rho: Vec<f64> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 0.125 }).collect();
+    let rho: Vec<f64> = (0..n)
+        .map(|i| if i < n / 2 { 1.0 } else { 0.125 })
+        .collect();
     let flux: Vec<f64> = (0..=n).map(|i| 0.3 - 0.05 * i as f64).collect();
     let mut rho_new = vec![0.0_f64; n];
 
@@ -55,10 +66,15 @@ fn aot_mass_godunov_step_matches_hand_written() {
         let expected = rho[i] - dt / dx * (flux[i + 1] - flux[i]);
         assert!(
             (rho_new[i] - expected).abs() < 1e-12,
-            "cell {i}: AOT {} != hand-written {}", rho_new[i], expected,
+            "cell {i}: AOT {} != hand-written {}",
+            rho_new[i],
+            expected,
         );
     }
-    assert!(rho_new.iter().zip(&rho).any(|(a, b)| a != b), "the AOT godunov step was a no-op");
+    assert!(
+        rho_new.iter().zip(&rho).any(|(a, b)| a != b),
+        "the AOT godunov step was a no-op"
+    );
 }
 
 #[test]
@@ -69,7 +85,9 @@ fn aot_mass_godunov_runs_at_f32() {
     // to f32::* correctly. no separate f32 kernel, no dispatch — just inference.
     let n = 8usize;
     let (dt, dx) = (0.01_f32, 0.5_f32);
-    let rho: Vec<f32> = (0..n).map(|i| if i < n / 2 { 1.0 } else { 0.125 }).collect();
+    let rho: Vec<f32> = (0..n)
+        .map(|i| if i < n / 2 { 1.0 } else { 0.125 })
+        .collect();
     let flux: Vec<f32> = (0..=n).map(|i| 0.3 - 0.05 * i as f32).collect();
     let mut rho_new = vec![0.0_f32; n];
 
@@ -79,10 +97,15 @@ fn aot_mass_godunov_runs_at_f32() {
         let expected = rho[i] - dt / dx * (flux[i + 1] - flux[i]);
         assert!(
             (rho_new[i] - expected).abs() < 1e-6,
-            "cell {i}: AOT f32 {} != hand-written {}", rho_new[i], expected,
+            "cell {i}: AOT f32 {} != hand-written {}",
+            rho_new[i],
+            expected,
         );
     }
-    assert!(rho_new.iter().zip(&rho).any(|(a, b)| a != b), "the f32 godunov step was a no-op");
+    assert!(
+        rho_new.iter().zip(&rho).any(|(a, b)| a != b),
+        "the f32 godunov step was a no-op"
+    );
 }
 
 #[test]
@@ -125,10 +148,16 @@ fn aot_mass_godunov_conserves_over_many_steps() {
     let mass1: f64 = rho.iter().sum::<f64>() * dx;
     assert!(
         (mass1 - mass0).abs() < 1e-9 * mass0,
-        "mass drift over {steps} steps: {} (rel {:e})", mass1 - mass0, (mass1 - mass0) / mass0,
+        "mass drift over {steps} steps: {} (rel {:e})",
+        mass1 - mass0,
+        (mass1 - mass0) / mass0,
     );
     // and the bump actually moved right (advection happened).
     let peak = rho.iter().cloned().fold(f64::MIN, f64::max);
     let peak_idx = rho.iter().position(|&r| r == peak).unwrap();
-    assert!(peak_idx as f64 * dx > 0.45, "bump did not advect right: peak at x={}", peak_idx as f64 * dx);
+    assert!(
+        peak_idx as f64 * dx > 0.45,
+        "bump did not advect right: peak at x={}",
+        peak_idx as f64 * dx
+    );
 }

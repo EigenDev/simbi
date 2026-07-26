@@ -9,7 +9,7 @@
 
 use symbi::prelude::*;
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
 use symbi_grid::Field;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::rmhd::Rmhd;
@@ -19,8 +19,7 @@ const GAMMA: f64 = 5.0 / 3.0;
 const T_FINAL: f64 = 0.02;
 const B0: [f64; 3] = [0.3, 0.2, 0.1];
 
-type Sim =
-    SimStateGeneric<Rmhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+type Sim = SimStateGeneric<Rmhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = RmhdSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn make(timestepping: Timestepping) -> (Sim, Kern) {
@@ -74,10 +73,9 @@ fn divergence_max(sim: &Sim) -> f64 {
         for axis in 0..2 {
             let mut upper = cell;
             upper[axis] += 1;
-            divergence +=
-                (*magnetic.bface[axis].view().at(upper)
-                    - *magnetic.bface[axis].view().at(cell))
-                    / sim.geom.dx[axis];
+            divergence += (*magnetic.bface[axis].view().at(upper)
+                - *magnetic.bface[axis].view().at(cell))
+                / sim.geom.dx[axis];
         }
         maximum = maximum.max(divergence.abs());
     }
@@ -102,7 +100,11 @@ fn assert_mhd_driver_identity(timestepping: Timestepping) {
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
 
-    assert_eq!(single.time.to_bits(), decomposed.time.to_bits(), "time differs");
+    assert_eq!(
+        single.time.to_bits(),
+        decomposed.time.to_bits(),
+        "time differs"
+    );
     assert_eq!(single.dt.to_bits(), decomposed.dt.to_bits(), "dt differs");
     assert_field_bits(
         &single.fields.cons.den,
@@ -118,7 +120,11 @@ fn assert_mhd_driver_identity(timestepping: Timestepping) {
     }
     assert_field_bits(
         single.fields.cons.nrg_field().expect("single energy"),
-        decomposed.fields.cons.nrg_field().expect("decomposed energy"),
+        decomposed
+            .fields
+            .cons
+            .nrg_field()
+            .expect("decomposed energy"),
         "cons.nrg",
     );
 
@@ -144,10 +150,7 @@ fn assert_mhd_driver_identity(timestepping: Timestepping) {
     }
 
     let magnetic_evolved = single.geom.interior.iter().any(|cell| {
-        (0..2).any(|axis| {
-            single_mhd.bface[axis].view().at(cell).to_bits()
-                != B0[axis].to_bits()
-        })
+        (0..2).any(|axis| single_mhd.bface[axis].view().at(cell).to_bits() != B0[axis].to_bits())
     });
     assert!(
         magnetic_evolved,
@@ -232,11 +235,7 @@ fn assert_mhd_tracing_inert(timestepping: Timestepping) {
     );
 
     let traced_mhd = traced.fields.mhd.as_ref().expect("traced mhd fields");
-    let untraced_mhd = untraced
-        .fields
-        .mhd
-        .as_ref()
-        .expect("untraced mhd fields");
+    let untraced_mhd = untraced.fields.mhd.as_ref().expect("untraced mhd fields");
     for component in 0..3 {
         assert_field_bits(
             &traced_mhd.bcell.b[component],

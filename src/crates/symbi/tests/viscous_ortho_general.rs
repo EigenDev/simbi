@@ -55,21 +55,37 @@ fn rz_swirl_rigid_rotation_nulls_and_shear_acts() {
             .cfl(CFL)
             .allocate()
             .expect("rz sim")
-            .set_initial(|x| Prim { rho: 1.0, vel: Tensor::new([0.0, vphi(x[0]), 0.0]), pre: 1.0 })
+            .set_initial(|x| Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, vphi(x[0]), 0.0]),
+                pre: 1.0,
+            })
             .build();
         let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(NU);
         k.c2p(&sim);
         k.ghost_fill(&sim);
         let grab = |c: usize| -> Vec<f64> {
-            sim.geom.interior.iter().map(|cc| *sim.fields.cons.mom[c].view().at(cc)).collect()
+            sim.geom
+                .interior
+                .iter()
+                .map(|cc| *sim.fields.cons.mom[c].view().at(cc))
+                .collect()
         };
-        let nrg_b: Vec<f64> =
-            sim.geom.interior.iter().map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c)).collect();
+        let nrg_b: Vec<f64> = sim
+            .geom
+            .interior
+            .iter()
+            .map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c))
+            .collect();
         let before = [grab(0), grab(1), grab(2)];
         k.viscous(&sim, DT);
         let after = [grab(0), grab(1), grab(2)];
-        let nrg_a: Vec<f64> =
-            sim.geom.interior.iter().map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c)).collect();
+        let nrg_a: Vec<f64> = sim
+            .geom
+            .interior
+            .iter()
+            .map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c))
+            .collect();
         // trim two z-rows? z is periodic and the profile is z-uniform, so only the
         // radial edges see outflow-ghost contamination: trim two r-rings. layout is
         // last-axis-fastest (z fastest), so ring i occupies [i*nz, (i+1)*nz).
@@ -84,13 +100,20 @@ fn rz_swirl_rigid_rotation_nulls_and_shear_acts() {
                 .map(|(_, (x, y))| (x - y).abs())
                 .fold(0.0_f64, f64::max)
         };
-        let dm = before.iter().zip(&after).map(|(b, a)| trim(b, a)).fold(0.0_f64, f64::max);
+        let dm = before
+            .iter()
+            .zip(&after)
+            .map(|(b, a)| trim(b, a))
+            .fold(0.0_f64, f64::max);
         let de = trim(&nrg_b, &nrg_a);
         (dm, de)
     };
     let omega = 0.4;
     let (dm_rigid, _) = run(&|r| omega * r);
-    assert!(dm_rigid < 1e-9, "rz rigid rotation produced a viscous force: {dm_rigid:e}");
+    assert!(
+        dm_rigid < 1e-9,
+        "rz rigid rotation produced a viscous force: {dm_rigid:e}"
+    );
     let (dm_shear, de_shear) = run(&|r| 0.5 / r);
     assert!(dm_shear > 1e-12, "rz shear never acted");
     assert!(de_shear > 1e-14, "rz shear booked no heating");
@@ -123,7 +146,11 @@ fn spherical_meridian_rigid_rotation_nulls() {
     // baked (this gate exercises the VISCOUS kernel only); set_initial seeds
     // the prims, and the zeroed ghost bands are excluded by the 2-cell trim.
     let grab = |c: usize| -> Vec<f64> {
-        sim.geom.interior.iter().map(|cc| *sim.fields.cons.mom[c].view().at(cc)).collect()
+        sim.geom
+            .interior
+            .iter()
+            .map(|cc| *sim.fields.cons.mom[c].view().at(cc))
+            .collect()
     };
     let before = [grab(0), grab(1), grab(2)];
     k.viscous(&sim, DT);
@@ -140,8 +167,15 @@ fn spherical_meridian_rigid_rotation_nulls() {
             .map(|(_, (x, y))| (x - y).abs())
             .fold(0.0_f64, f64::max)
     };
-    let dm = before.iter().zip(&after).map(|(b, a)| trim(b, a)).fold(0.0_f64, f64::max);
-    assert!(dm < 1e-9, "spherical-meridian rigid rotation produced a force: {dm:e}");
+    let dm = before
+        .iter()
+        .zip(&after)
+        .map(|(b, a)| trim(b, a))
+        .fold(0.0_f64, f64::max);
+    assert!(
+        dm < 1e-9,
+        "spherical-meridian rigid rotation produced a force: {dm:e}"
+    );
 }
 
 #[test]
@@ -164,13 +198,21 @@ fn cylindrical_3d_rigid_rotation_nulls() {
         .cfl(CFL)
         .allocate()
         .expect("cyl3 sim")
-        .set_initial(|x| Prim { rho: 1.0, vel: Tensor::new([0.0, omega * x[0], 0.0]), pre: 1.0 })
+        .set_initial(|x| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, omega * x[0], 0.0]),
+            pre: 1.0,
+        })
         .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(NU);
     k.c2p(&sim);
     k.ghost_fill(&sim);
     let grab = |c: usize| -> Vec<f64> {
-        sim.geom.interior.iter().map(|cc| *sim.fields.cons.mom[c].view().at(cc)).collect()
+        sim.geom
+            .interior
+            .iter()
+            .map(|cc| *sim.fields.cons.mom[c].view().at(cc))
+            .collect()
     };
     let before = [grab(0), grab(1), grab(2)];
     k.viscous(&sim, DT);
@@ -186,13 +228,21 @@ fn cylindrical_3d_rigid_rotation_nulls() {
             .map(|(_, (x, y))| (x - y).abs())
             .fold(0.0_f64, f64::max)
     };
-    let dm = before.iter().zip(&after).map(|(b, a)| trim(b, a)).fold(0.0_f64, f64::max);
-    assert!(dm < 1e-9, "cylindrical 3d rigid rotation produced a force: {dm:e}");
+    let dm = before
+        .iter()
+        .zip(&after)
+        .map(|(b, a)| trim(b, a))
+        .fold(0.0_f64, f64::max);
+    assert!(
+        dm < 1e-9,
+        "cylindrical 3d rigid rotation produced a force: {dm:e}"
+    );
 }
 
 #[test]
 fn mhd_rphi_disk_viscosity_diffuses_gas_and_leaves_b_untouched() {
-    type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Sim =
+        SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
     let (nr, np) = (24usize, 24usize);
     let (r_lo, dr) = (1.0f64, 2.0 / nr as f64);
     let dp = 2.0 * PI / np as f64;
@@ -209,42 +259,96 @@ fn mhd_rphi_disk_viscosity_diffuses_gas_and_leaves_b_untouched() {
         .allocate()
         .expect("mhd disk")
         .set_initial(|x| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.5 / x[0], 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.5 / x[0], 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.0, 0.1]),
         })
         .seed_faces(|axis, _| if axis == 2 { 0.1 } else { 0.0 })
         .build();
     let _ = &mut sim;
-    let k = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
-        .with_viscosity(NU);
+    let k = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_viscosity(NU);
     k.c2p(&sim);
     k.ghost_fill(&sim);
     let mhd = sim.fields.mhd.as_ref().expect("mhd");
     // 2.5D CT: two staggered in-plane faces + the cell-centered out-of-plane B.
     let b_before: Vec<u64> = (0..2)
         .flat_map(|a| {
-            sim.geom.interior.iter().map(move |c| mhd.bface[a].view().at(c).to_bits()).collect::<Vec<_>>()
+            sim.geom
+                .interior
+                .iter()
+                .map(move |c| mhd.bface[a].view().at(c).to_bits())
+                .collect::<Vec<_>>()
         })
-        .chain(sim.geom.interior.iter().map(|c| mhd.bcell[2].view().at(c).to_bits()))
+        .chain(
+            sim.geom
+                .interior
+                .iter()
+                .map(|c| mhd.bcell[2].view().at(c).to_bits()),
+        )
         .collect();
-    let m1_before: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[1].view().at(c)).collect();
-    let nrg_before: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c)).collect();
+    let m1_before: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.mom[1].view().at(c))
+        .collect();
+    let nrg_before: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c))
+        .collect();
     k.viscous(&sim, DT);
     let b_after: Vec<u64> = (0..2)
         .flat_map(|a| {
-            sim.geom.interior.iter().map(move |c| mhd.bface[a].view().at(c).to_bits()).collect::<Vec<_>>()
+            sim.geom
+                .interior
+                .iter()
+                .map(move |c| mhd.bface[a].view().at(c).to_bits())
+                .collect::<Vec<_>>()
         })
-        .chain(sim.geom.interior.iter().map(|c| mhd.bcell[2].view().at(c).to_bits()))
+        .chain(
+            sim.geom
+                .interior
+                .iter()
+                .map(|c| mhd.bcell[2].view().at(c).to_bits()),
+        )
         .collect();
     assert_eq!(b_before, b_after, "viscosity touched the staggered B field");
-    let m1_after: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[1].view().at(c)).collect();
-    let nrg_after: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c)).collect();
-    let dm = m1_before.iter().zip(&m1_after).map(|(b, a)| (b - a).abs()).fold(0.0_f64, f64::max);
-    let de = nrg_before.iter().zip(&nrg_after).map(|(b, a)| (b - a).abs()).fold(0.0_f64, f64::max);
-    assert!(dm > 1e-12, "mhd disk viscosity never touched the sheared momentum");
+    let m1_after: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.mom[1].view().at(c))
+        .collect();
+    let nrg_after: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c))
+        .collect();
+    let dm = m1_before
+        .iter()
+        .zip(&m1_after)
+        .map(|(b, a)| (b - a).abs())
+        .fold(0.0_f64, f64::max);
+    let de = nrg_before
+        .iter()
+        .zip(&nrg_after)
+        .map(|(b, a)| (b - a).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        dm > 1e-12,
+        "mhd disk viscosity never touched the sheared momentum"
+    );
     assert!(de > 1e-14, "mhd disk viscosity booked no heating");
 }

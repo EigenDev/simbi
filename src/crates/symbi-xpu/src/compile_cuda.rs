@@ -28,7 +28,11 @@ pub fn try_compile_cuda(cuda_source: &str, kernel_name: &str) -> Option<Vec<u8>>
 }
 
 /// compile CUDA C source to PTX via nvcc with include directories.
-pub fn try_compile_cuda_with_includes(cuda_source: &str, kernel_name: &str, include_dirs: &[&str]) -> Option<Vec<u8>> {
+pub fn try_compile_cuda_with_includes(
+    cuda_source: &str,
+    kernel_name: &str,
+    include_dirs: &[&str],
+) -> Option<Vec<u8>> {
     // detect nvcc
     let nvcc = find_nvcc()?;
 
@@ -68,15 +72,15 @@ pub fn try_compile_cuda_with_includes(cuda_source: &str, kernel_name: &str, incl
     // the working host-compiler args determined by the probe (empty, or -ccbin g++).
     args.extend(host_args.iter().cloned());
 
-    let output = Command::new(&nvcc)
-        .args(&args)
-        .output()
-        .ok()?;
+    let output = Command::new(&nvcc).args(&args).output().ok()?;
 
     if !output.status.success() {
         // nvcc errors are real failures — always surface them.
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("symbi: nvcc compilation failed for '{}': {}", kernel_name, stderr);
+        eprintln!(
+            "symbi: nvcc compilation failed for '{}': {}",
+            kernel_name, stderr
+        );
         eprintln!("symbi: source kept at {}", cu_path.display());
         return None;
     }
@@ -87,7 +91,12 @@ pub fn try_compile_cuda_with_includes(cuda_source: &str, kernel_name: &str, incl
     // per-kernel success chatter is gated behind SYMBI_VERBOSE — most builds
     // don't need to see one line per kernel.
     if std::env::var("SYMBI_VERBOSE").is_ok() {
-        eprintln!("symbi: compiled {} -> {} ({} bytes PTX)", cu_path.display(), ptx_path.display(), ptx_bytes.len());
+        eprintln!(
+            "symbi: compiled {} -> {} ({} bytes PTX)",
+            cu_path.display(),
+            ptx_path.display(),
+            ptx_bytes.len()
+        );
     }
     // don't clean up — keep for inspection.
 
@@ -111,7 +120,10 @@ fn nvcc_host_ccbin(nvcc: &str) -> Option<Vec<String>> {
         if let Some(retry) = ccbin_retry_candidate() {
             let args = vec!["-ccbin".to_string(), retry.gxx.clone()];
             if probe_nvcc(nvcc, &args) {
-                eprintln!("symbi: {}; using -ccbin {} for PTX.", retry.reason, retry.gxx);
+                eprintln!(
+                    "symbi: {}; using -ccbin {} for PTX.",
+                    retry.reason, retry.gxx
+                );
                 return Some(args);
             }
         }
@@ -143,11 +155,16 @@ pub struct CcbinRetry {
 /// real stub compile at build time). shared by both so the policy lives in ONE place.
 pub fn ccbin_retry_candidate() -> Option<CcbinRetry> {
     let nvcc_ccbin = std::env::var("NVCC_CCBIN").ok();
-    let ccbin_stale = nvcc_ccbin.as_deref().is_some_and(|p| !std::path::Path::new(p).exists());
+    let ccbin_stale = nvcc_ccbin
+        .as_deref()
+        .is_some_and(|p| !std::path::Path::new(p).exists());
     if nvcc_ccbin.is_none() || ccbin_stale {
         if let Some(gxx) = which_first(&["g++", "c++"]) {
             let reason = if ccbin_stale {
-                format!("NVCC_CCBIN={} does not exist here (stale env)", nvcc_ccbin.as_deref().unwrap_or(""))
+                format!(
+                    "NVCC_CCBIN={} does not exist here (stale env)",
+                    nvcc_ccbin.as_deref().unwrap_or("")
+                )
             } else {
                 "nvcc's default host compiler was unusable".to_string()
             };

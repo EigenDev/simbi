@@ -57,7 +57,11 @@ fn nmhd_periodic_run_conserves_and_keeps_wrap_copies_locked() {
         .allocate()
         .unwrap()
         .set_initial(|[x, y, _z]| MhdPrim {
-            hydro: Prim { rho: rho0, vel: Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]), pre: p0 },
+            hydro: Prim {
+                rho: rho0,
+                vel: Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]),
+                pre: p0,
+            },
             mag: Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
         })
         .seed_faces(|axis, [x, y, _z]| match axis {
@@ -96,7 +100,8 @@ fn nmhd_periodic_run_conserves_and_keeps_wrap_copies_locked() {
                 let a = *mhd.bface[0].view().at([0, j, kk]);
                 let b = *mhd.bface[0].view().at([n, j, kk]);
                 assert_eq!(
-                    a.to_bits(), b.to_bits(),
+                    a.to_bits(),
+                    b.to_bits(),
                     "bface wrap copies drifted at iter {} (j={j}, k={kk}): {a:e} vs {b:e}",
                     s.iteration
                 );
@@ -108,7 +113,8 @@ fn nmhd_periodic_run_conserves_and_keeps_wrap_copies_locked() {
                 let a = *mhd.bface[0].view().at([i, -1, kk]);
                 let b = *mhd.bface[0].view().at([i, n - 1, kk]);
                 assert_eq!(
-                    a.to_bits(), b.to_bits(),
+                    a.to_bits(),
+                    b.to_bits(),
                     "bface halo stale at iter {} (i={i}, k={kk}): {a:e} vs {b:e}",
                     s.iteration
                 );
@@ -121,17 +127,27 @@ fn nmhd_periodic_run_conserves_and_keeps_wrap_copies_locked() {
                 let a = *mhd.efield[2].view().at([0, j, kk]);
                 let b = *mhd.efield[2].view().at([n, j, kk]);
                 assert_eq!(
-                    a.to_bits(), b.to_bits(),
+                    a.to_bits(),
+                    b.to_bits(),
                     "efield wrap copies differ at iter {} (j={j}, k={kk})",
                     s.iteration
                 );
             }
         }
-    }).unwrap();
+    })
+    .unwrap();
 
-    assert!(sim.iteration >= 5, "only {} steps — gate barely exercised", sim.iteration);
+    assert!(
+        sim.iteration >= 5,
+        "only {} steps — gate barely exercised",
+        sim.iteration
+    );
     let (m1, p1) = totals(&sim);
     let rel = |a: f64, b: f64, s: f64| ((a - b) / s).abs();
     assert!(rel(m1, m0, m0) < 1e-12, "mass drift {:e}", rel(m1, m0, m0));
-    assert!(rel(p1, p0, m0) < 1e-12, "momentum drift {:e}", rel(p1, p0, m0));
+    assert!(
+        rel(p1, p0, m0) < 1e-12,
+        "momentum drift {:e}",
+        rel(p1, p0, m0)
+    );
 }

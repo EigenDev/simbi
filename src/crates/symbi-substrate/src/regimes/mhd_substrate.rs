@@ -21,18 +21,21 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_grid::Field;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
+use crate::kernels::support::{GhostFillDriver, to_bc_array};
+use crate::regimes::substrate_kernels::{
+    ScalarBind, Solver, body_scalar, dispatch_fields_each, dispatch_named, expect_kernel,
+    geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug,
+};
 use symbi_algebra::Domain;
-use crate::kernels::support::{to_bc_array, GhostFillDriver};
-use crate::regimes::substrate_kernels::{body_scalar, expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug, ScalarBind, Solver};
-use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
+use symbi_sim::state::FieldStore;
 
 // per-axis allocated lo / extent (where every buffer lives) + the volume.
 pub(crate) fn alloc_layout<const D: usize>(allocated: &Domain<D>) -> ([i32; D], [u32; D], usize) {
@@ -117,7 +120,11 @@ where
     let half = Sc::from_f64(0.5);
     for (e_field, en_field) in pairs {
         let n = e_field.view().len();
-        debug_assert_eq!(n, en_field.view().len(), "fused_avg_buffers: length mismatch");
+        debug_assert_eq!(
+            n,
+            en_field.view().len(),
+            "fused_avg_buffers: length mismatch"
+        );
         unsafe {
             let e = std::slice::from_raw_parts_mut(e_field.as_mut_ptr(), n);
             let en = std::slice::from_raw_parts(en_field.as_ptr(), n);
@@ -175,28 +182,34 @@ pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     let bc = to_bc_array::<D>(&sim.boundaries);
     let name = format!("scalar_ghost_fill_{D}d");
     let (flo, fext, fvol) = field_layout(flag);
-    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
-        let (grid, dlo) = exec_layout(&region.domain);
-        let mut ints = Vec::with_capacity(2 * D);
-        for ax in 0..D { ints.push(p.map_type[ax] as i32); }
-        for ax in 0..D { ints.push(p.arg[ax]); }
-        let scalars = [Sc::from_f64(1.0)];
-        let inv = KernelInvocation {
-            buffers: vec![Buf {
-                handle: BufHandle::HostMut(unsafe {
-                    std::slice::from_raw_parts_mut(flag.as_mut_ptr(), fvol)
-                }),
-                lo: &flo,
-                extent: &fext,
-            }],
-            grid: &grid,
-            dom_lo: &dlo,
-            ints: &ints,
-            scalars: &scalars,
-        };
-        let (gf, gir) = expect_kernel::<Sc>(&name);
-        invoke::<Sc, Mem, _>(inv, gir, &name, gf);
-    });
+    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+        |region, p| {
+            let (grid, dlo) = exec_layout(&region.domain);
+            let mut ints = Vec::with_capacity(2 * D);
+            for ax in 0..D {
+                ints.push(p.map_type[ax] as i32);
+            }
+            for ax in 0..D {
+                ints.push(p.arg[ax]);
+            }
+            let scalars = [Sc::from_f64(1.0)];
+            let inv = KernelInvocation {
+                buffers: vec![Buf {
+                    handle: BufHandle::HostMut(unsafe {
+                        std::slice::from_raw_parts_mut(flag.as_mut_ptr(), fvol)
+                    }),
+                    lo: &flo,
+                    extent: &fext,
+                }],
+                grid: &grid,
+                dom_lo: &dlo,
+                ints: &ints,
+                scalars: &scalars,
+            };
+            let (gf, gir) = expect_kernel::<Sc>(&name);
+            invoke::<Sc, Mem, _>(inv, gir, &name, gf);
+        },
+    );
 }
 
 // =============================================================================
@@ -240,7 +253,11 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // slope keyed on each axis map), which the in-kernel `gv_axis_face_at` reads via `map_kind`; on a
     // uniform static grid it reproduces the raw linear (x_lo, dx) bit-identically.
     let (x_lo_k, dx_k) = crate::regimes::substrate_kernels::kernel_geom(
-        &sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a,
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
     );
     let scalar = |bind: &ScalarBind| -> Sc {
         let ScalarBind::Ref(sref) = bind else {
@@ -253,13 +270,17 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
             // gamma (adiabatic) and cs (isothermal) both map to the EOS param arg.
             ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(gamma),
             ScalarRef::SchwarzschildMass => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
                     .find(|(n, _)| n == "schwarzschild_mass")
                     .map(|(_, v)| *v)
                     .expect("mhd godunov_stage: GR kernel needs schwarzschild_mass"),
             ),
             ScalarRef::KerrSpin => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
                     .find(|(n, _)| n == "kerr_spin")
                     .map(|(_, v)| *v)
                     .expect("mhd godunov_stage: GR kernel needs kerr_spin"),
@@ -268,10 +289,13 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
             // substrates run static (asserted at evolve entry), so this binds 0.
             other => Sc::from_f64(
                 crate::regimes::substrate_kernels::motion_scalar(
-                    &sim.motion, sim.geom.coords, sim.geom.dx.len(), other,
+                    &sim.motion,
+                    sim.geom.coords,
+                    sim.geom.dx.len(),
+                    other,
                 )
-                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
-                    .unwrap_or_else(|| panic!("mhd godunov_stage: unexpected scalar {other:?}")),
+                .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
+                .unwrap_or_else(|| panic!("mhd godunov_stage: unexpected scalar {other:?}")),
             ),
         }
     };
@@ -300,7 +324,16 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         &sim.fields.cons.den // iso geo-source reads cs^2*rho (there is no prim.pre); pass a dummy.
     };
-    dispatch_named(sim, pre_bind, None, 0, &gname, &sim.geom.interior, &[], &gscalars);
+    dispatch_named(
+        sim,
+        pre_bind,
+        None,
+        0,
+        &gname,
+        &sim.geom.interior,
+        &[],
+        &gscalars,
+    );
 
     // the cell-B induction-flux predictor for the OUT-OF-PLANE (non-CT) magnetic components: By,Bz in
     // 1.5D and Bz in 2.5D (curvilinear: Bphi) have no staggered face to curl and are cell-centered
@@ -319,7 +352,16 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
             format!("rmhd_bcell_godunov_rk2{sfx}_{D}d")
         };
         let bscalars = scalars_for(&bname, &scalar);
-        dispatch_named(sim, &sim.fields.cons.den, None, 0, &bname, &sim.geom.interior, &[], &bscalars);
+        dispatch_named(
+            sim,
+            &sim.fields.cons.den,
+            None,
+            0,
+            &bname,
+            &sim.geom.interior,
+            &[],
+            &bscalars,
+        );
     }
 }
 
@@ -347,56 +389,89 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         format!("imhd_ghost_fill_{D}d")
     };
-    let (x_lo_g, dx_g) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
-    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
-        // the generic ghost is float-only (vel_sign); the kerr instance is MIXED (map_type/arg ints
-        // + vel_sign/mass/spin/grid floats), so it routes BY MANIFEST through resolve_params.
-        let (ints, scalars): (Vec<i32>, Vec<Sc>) = if is_kerr {
-            crate::regimes::substrate_kernels::resolve_params(
+    let (x_lo_g, dx_g) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
+    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+        |region, p| {
+            // the generic ghost is float-only (vel_sign); the kerr instance is MIXED (map_type/arg ints
+            // + vel_sign/mass/spin/grid floats), so it routes BY MANIFEST through resolve_params.
+            let (ints, scalars): (Vec<i32>, Vec<Sc>) = if is_kerr {
+                crate::regimes::substrate_kernels::resolve_params(
+                    &gname,
+                    |bind| match bind {
+                        ScalarBind::Ref(symbi_ir::ScalarRef::MapType(ax)) => {
+                            p.map_type[*ax as usize] as i32
+                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        o => panic!("mhd kerr ghost: unexpected int param {o:?}"),
+                    },
+                    |bind| match bind {
+                        ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => {
+                            Sc::from_f64(p.vel_sign[*ax as usize])
+                        }
+                        ScalarBind::Ref(symbi_ir::ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                            sim.geom
+                                .spacetime_scalars
+                                .iter()
+                                .find(|(n, _)| n == "schwarzschild_mass")
+                                .map(|(_, v)| *v)
+                                .expect("kerr ghost fill needs schwarzschild_mass"),
+                        ),
+                        ScalarBind::Ref(symbi_ir::ScalarRef::KerrSpin) => Sc::from_f64(
+                            sim.geom
+                                .spacetime_scalars
+                                .iter()
+                                .find(|(n, _)| n == "kerr_spin")
+                                .map(|(_, v)| *v)
+                                .expect("kerr ghost fill needs kerr_spin"),
+                        ),
+                        ScalarBind::Ref(other) => Sc::from_f64(
+                            geom_scalar(&x_lo_g, &dx_g, &sim.geom.maps, *other).unwrap_or_else(
+                                || panic!("mhd kerr ghost: unexpected scalar {other:?}"),
+                            ),
+                        ),
+                        o => panic!("mhd kerr ghost: unexpected scalar {o:?}"),
+                    },
+                )
+            } else {
+                let mut ints = Vec::with_capacity(2 * D);
+                for ax in 0..D {
+                    ints.push(p.map_type[ax] as i32);
+                }
+                for ax in 0..D {
+                    ints.push(p.arg[ax]);
+                }
+                let mut scalars = Vec::with_capacity(D);
+                for ax in 0..D {
+                    scalars.push(Sc::from_f64(p.vel_sign[ax]));
+                }
+                (ints, scalars)
+            };
+            // bind BY MANIFEST: the in-place prim.{rho,vel,pre?} + bcell writes (read-at-source /
+            // write-at-cell, over all DOF B-components). prim.pre is a real output for energy; iso
+            // passes a dummy. no hand-ordered list.
+            let pre_bind = if has_energy {
+                sim.fields.prim.pre_field().expect("prim.pre")
+            } else {
+                &sim.fields.cons.den
+            };
+            dispatch_named(
+                sim,
+                pre_bind,
+                None,
+                0,
                 &gname,
-                |bind| match bind {
-                    ScalarBind::Ref(symbi_ir::ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
-                    ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
-                    o => panic!("mhd kerr ghost: unexpected int param {o:?}"),
-                },
-                |bind| match bind {
-                    ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => Sc::from_f64(p.vel_sign[*ax as usize]),
-                    ScalarBind::Ref(symbi_ir::ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                        sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass").map(|(_, v)| *v).expect("kerr ghost fill needs schwarzschild_mass"),
-                    ),
-                    ScalarBind::Ref(symbi_ir::ScalarRef::KerrSpin) => Sc::from_f64(
-                        sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin").map(|(_, v)| *v).expect("kerr ghost fill needs kerr_spin"),
-                    ),
-                    ScalarBind::Ref(other) => Sc::from_f64(
-                        geom_scalar(&x_lo_g, &dx_g, &sim.geom.maps, *other).unwrap_or_else(|| panic!("mhd kerr ghost: unexpected scalar {other:?}")),
-                    ),
-                    o => panic!("mhd kerr ghost: unexpected scalar {o:?}"),
-                },
-            )
-        } else {
-            let mut ints = Vec::with_capacity(2 * D);
-            for ax in 0..D {
-                ints.push(p.map_type[ax] as i32);
-            }
-            for ax in 0..D {
-                ints.push(p.arg[ax]);
-            }
-            let mut scalars = Vec::with_capacity(D);
-            for ax in 0..D {
-                scalars.push(Sc::from_f64(p.vel_sign[ax]));
-            }
-            (ints, scalars)
-        };
-        // bind BY MANIFEST: the in-place prim.{rho,vel,pre?} + bcell writes (read-at-source /
-        // write-at-cell, over all DOF B-components). prim.pre is a real output for energy; iso
-        // passes a dummy. no hand-ordered list.
-        let pre_bind = if has_energy {
-            sim.fields.prim.pre_field().expect("prim.pre")
-        } else {
-            &sim.fields.cons.den
-        };
-        dispatch_named(sim, pre_bind, None, 0, &gname, &region.domain, &ints, &scalars);
-    });
+                &region.domain,
+                &ints,
+                &scalars,
+            );
+        },
+    );
 
     // the staggered bface TRANSVERSE-HALO fill. bface[d] carries a +/-1 halo on
     // every axis t != d, read by the transversely-extended flux sweep (the
@@ -466,8 +541,21 @@ pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
     };
     // the gas snapshot binds BY MANIFEST: cons.{den,mom,(nrg)} reads -> u_n.{den,mom,(nrg)}
     // writes (State{Cons}/State{UN}). no hand-ordered list; reads no prim.pre (dummy override).
-    let sname = if has_energy { format!("rmhd_snapshot_{D}d") } else { format!("imhd_snapshot_{D}d") };
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, &sname, &sim.geom.allocated, &[], &[]);
+    let sname = if has_energy {
+        format!("rmhd_snapshot_{D}d")
+    } else {
+        format!("imhd_snapshot_{D}d")
+    };
+    dispatch_named(
+        sim,
+        &sim.fields.cons.den,
+        None,
+        0,
+        &sname,
+        &sim.geom.allocated,
+        &[],
+        &[],
+    );
 
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     if Mem::IS_DEVICE_ACCESSIBLE {
@@ -524,7 +612,10 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
     }
     if has_energy {
         pairs.push((
-            sim.fields.cons.nrg_field().expect("MHD with energy requires cons.nrg"),
+            sim.fields
+                .cons
+                .nrg_field()
+                .expect("MHD with energy requires cons.nrg"),
             u.nrg_field().expect("u_stage with energy requires nrg"),
         ));
     }
@@ -556,9 +647,8 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// copy a list of (src, dst) field pairs (host memcpy / device pointwise-copy), each by its OWN
 /// layout — so it serves cell-centered (bcell/bflux) AND staggered (bface/efield) fields.
-fn fofc_copy_fields<const D: usize, Sc, Mem>(
-    pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)],
-) where
+fn fofc_copy_fields<const D: usize, Sc, Mem>(pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)])
+where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
@@ -569,8 +659,20 @@ fn fofc_copy_fields<const D: usize, Sc, Mem>(
             let (l, ext, v) = field_layout(*src);
             let inv = KernelInvocation {
                 buffers: vec![
-                    Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(src.as_ptr(), v) }), lo: &l, extent: &ext },
-                    Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr(), v) }), lo: &l, extent: &ext },
+                    Buf {
+                        handle: BufHandle::Host(unsafe {
+                            std::slice::from_raw_parts(src.as_ptr(), v)
+                        }),
+                        lo: &l,
+                        extent: &ext,
+                    },
+                    Buf {
+                        handle: BufHandle::HostMut(unsafe {
+                            std::slice::from_raw_parts_mut(dst.as_mut_ptr(), v)
+                        }),
+                        lo: &l,
+                        extent: &ext,
+                    },
                 ],
                 grid: &ext,
                 dom_lo: &l,
@@ -668,9 +770,20 @@ pub(crate) fn fofc_splice_induction<const D: usize, const DOF: usize, Mem, Sc>(
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
             let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+            if *is_out {
+                outputs.push(fld);
+            } else {
+                inputs.push(fld);
+            }
         }
-        dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior.face_domain(dir), &inputs, &outputs, &[], &[]);
+        dispatch_fields_each::<Sc, Mem, D>(
+            &name,
+            &sim.geom.interior.face_domain(dir),
+            &inputs,
+            &outputs,
+            &[],
+            &[],
+        );
     }
 }
 
@@ -699,9 +812,20 @@ pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
             let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+            if *is_out {
+                outputs.push(fld);
+            } else {
+                inputs.push(fld);
+            }
         }
-        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &[]);
+        dispatch_fields_each::<Sc, Mem, D>(
+            &name,
+            mhd.efield[edge.slot].domain(),
+            &inputs,
+            &outputs,
+            &[],
+            &[],
+        );
     }
 }
 
@@ -755,12 +879,23 @@ fn ct_edge_present(k: usize, axes: &[usize]) -> bool {
 // D = 1/2/3. each edge separates its physical-component plane (p1,p2 — for the EMF sign)
 // from the grid axes (g1,g2 — for offsets / flux indexing); identical when axes is identity.
 fn ct_edges(axes: &[usize]) -> Vec<CtEdge> {
-    let pos = |c: usize| axes.iter().position(|&a| a == c).expect("plane component must be a grid axis");
+    let pos = |c: usize| {
+        axes.iter()
+            .position(|&a| a == c)
+            .expect("plane component must be a grid axis")
+    };
     let mut out = Vec::new();
     for k in 0..3 {
         if ct_edge_present(k, axes) {
             let (p1, p2) = ((k + 1) % 3, (k + 2) % 3);
-            out.push(CtEdge { slot: out.len(), name_k: k, p1, p2, g1: pos(p1), g2: pos(p2) });
+            out.push(CtEdge {
+                slot: out.len(),
+                name_k: k,
+                p1,
+                p2,
+                g1: pos(p1),
+                g2: pos(p2),
+            });
         }
     }
     out
@@ -806,19 +941,29 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     let st = spacetime_slug(sim.geom.spacetime);
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     // the GR EMF reads the metric mass (+ spin) and the LOG-AWARE face-position scalars.
-    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_k, dx_k) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let scalar = |bind: &ScalarBind| -> Sc {
         match bind {
             ScalarBind::Ref(ScalarRef::Gamma | ScalarRef::Cs) => Sc::from_f64(gamma),
             ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(theta),
             ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
                     .find(|(n, _)| n == "schwarzschild_mass")
                     .map(|(_, v)| *v)
                     .expect("GR edge EMF needs schwarzschild_mass"),
             ),
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
+                sim.geom
+                    .spacetime_scalars
+                    .iter()
                     .find(|(n, _)| n == "kerr_spin")
                     .map(|(_, v)| *v)
                     .expect("GR edge EMF needs kerr_spin"),
@@ -898,7 +1043,11 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                 // UCT-HLLC-only slots: the full cell prim (rho/pre + the out-of-plane B) for the
                 // in-kernel classical contact speed lambda* = m_n^hll/rho^hll.
                 "rho" => &sim.fields.prim.rho,
-                "pre" => sim.fields.prim.pre_field().expect("UCT-HLLC needs prim.pre (ideal gas)"),
+                "pre" => sim
+                    .fields
+                    .prim
+                    .pre_field()
+                    .expect("UCT-HLLC needs prim.pre (ideal gas)"),
                 "bcell_out" => &mhd.bcell[p_out],
                 "emf" => &mhd.efield[edge.slot],
                 o => panic!("rmhd_edge_emf: unknown manifest slot '{o}'"),
@@ -908,10 +1057,21 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
             let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+            if *is_out {
+                outputs.push(fld);
+            } else {
+                inputs.push(fld);
+            }
         }
         let scalars = scalars_for(&name, &scalar);
-        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &scalars);
+        dispatch_fields_each::<Sc, Mem, D>(
+            &name,
+            mhd.efield[edge.slot].domain(),
+            &inputs,
+            &outputs,
+            &[],
+            &scalars,
+        );
     }
 }
 
@@ -944,15 +1104,33 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
                 let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
                 let inv = KernelInvocation {
                     buffers: vec![
-                        Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(mhd.efield[e.slot].as_ptr(), v) }), lo: &l, extent: &ext },
-                        Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(mhd.efield_n[e.slot].as_mut_ptr(), v) }), lo: &l, extent: &ext },
+                        Buf {
+                            handle: BufHandle::Host(unsafe {
+                                std::slice::from_raw_parts(mhd.efield[e.slot].as_ptr(), v)
+                            }),
+                            lo: &l,
+                            extent: &ext,
+                        },
+                        Buf {
+                            handle: BufHandle::HostMut(unsafe {
+                                std::slice::from_raw_parts_mut(mhd.efield_n[e.slot].as_mut_ptr(), v)
+                            }),
+                            lo: &l,
+                            extent: &ext,
+                        },
                     ],
-                    grid: &ext, dom_lo: &l, ints: &[], scalars: &[],
+                    grid: &ext,
+                    dom_lo: &l,
+                    ints: &[],
+                    scalars: &[],
                 };
                 invoke::<Sc, Mem, _>(inv, sir, &sname, sf);
             }
         } else {
-            let pairs: Vec<_> = edges.iter().map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot])).collect();
+            let pairs: Vec<_> = edges
+                .iter()
+                .map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot]))
+                .collect();
             fused_save_buffers(&pairs);
         }
         return;
@@ -965,15 +1143,33 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
                 let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
                 let inv = KernelInvocation {
                     buffers: vec![
-                        Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(mhd.efield_n[e.slot].as_ptr(), v) }), lo: &l, extent: &ext },
-                        Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(mhd.efield[e.slot].as_mut_ptr(), v) }), lo: &l, extent: &ext },
+                        Buf {
+                            handle: BufHandle::Host(unsafe {
+                                std::slice::from_raw_parts(mhd.efield_n[e.slot].as_ptr(), v)
+                            }),
+                            lo: &l,
+                            extent: &ext,
+                        },
+                        Buf {
+                            handle: BufHandle::HostMut(unsafe {
+                                std::slice::from_raw_parts_mut(mhd.efield[e.slot].as_mut_ptr(), v)
+                            }),
+                            lo: &l,
+                            extent: &ext,
+                        },
                     ],
-                    grid: &ext, dom_lo: &l, ints: &[], scalars: &[],
+                    grid: &ext,
+                    dom_lo: &l,
+                    ints: &[],
+                    scalars: &[],
                 };
                 invoke::<Sc, Mem, _>(inv, air, &aname, af);
             }
         } else {
-            let pairs: Vec<_> = edges.iter().map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot])).collect();
+            let pairs: Vec<_> = edges
+                .iter()
+                .map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot]))
+                .collect();
             fused_avg_buffers(&pairs);
         }
     }
@@ -1033,11 +1229,15 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
         // curl + the physical energy weights), so the plain difference curl is the adjoint in 3D
         // cartesian AND 3D curvilinear (identity axes -> the cyclic curl is right-handed for all of
         // cartesian / spherical / cylindrical); a geometry-agnostic reference verifies each.
-        (Cartesian, 3) | (Spherical, 3) | (Cylindrical, 3) => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
+        (Cartesian, 3) | (Spherical, 3) | (Cylindrical, 3) => {
+            resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta)
+        }
         // 2.5D: cyl r-z is metric-free in-plane and left-handed (its own kernel); the ortho kernel
         // serves the right-handed cyl r-phi and spherical r-theta.
         (Cylindrical, 2) if sfx == "_cyl_rz" => resistive_emf_cyl_rz::<D, DOF, Mem, Sc>(sim, eta),
-        (Cylindrical, 2) if sfx == "_cyl_rphi" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_cyl_rphi"),
+        (Cylindrical, 2) if sfx == "_cyl_rphi" => {
+            resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_cyl_rphi")
+        }
         (Spherical, 2) if sfx == "_sph" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_sph"),
         (coords, d) => panic!(
             "resistive MHD (resistivity > 0) has an adjoint-verified resistive curl for the cartesian \
@@ -1060,7 +1260,13 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_k, dx_k) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let name = format!("rmhd_resistive_emf{sfx}");
     let scalars = scalars_for(&name, |bind| match bind {
         ScalarBind::Spec(s) if &**s == "eta" => Sc::from_f64(eta),
@@ -1082,9 +1288,20 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
-    dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
+    dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        mhd.efield[0].domain(),
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
 }
 
 /// dispatch the immersed-body LOCALIZED resistive edge EMF for every body running
@@ -1099,10 +1316,14 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let Some(im) = sim.immersed.as_ref() else { return };
+    let Some(im) = sim.immersed.as_ref() else {
+        return;
+    };
     let bodies = &im.bodies;
     for b in 0..bodies.len() {
-        let symbi_ib::MagneticSpec::Resistive { eta } = bodies.get(b).spec.magnetic else { continue };
+        let symbi_ib::MagneticSpec::Resistive { eta } = bodies.get(b).spec.magnetic else {
+            continue;
+        };
         if eta <= 0.0 {
             continue;
         }
@@ -1122,8 +1343,12 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
                 ScalarBind::Ref(ScalarRef::Body { idx: 0, field }) => {
                     body_scalar::<D>(Some(bodies), b as u8, *field)
                 }
-                ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
-                    .unwrap_or_else(|| panic!("body_resistive_emf: unexpected scalar {other:?}")),
+                ScalarBind::Ref(other) => {
+                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                        .unwrap_or_else(|| {
+                            panic!("body_resistive_emf: unexpected scalar {other:?}")
+                        })
+                }
                 o => panic!("body_resistive_emf: unexpected scalar {o:?}"),
             })
         };
@@ -1136,7 +1361,12 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
                 .into_iter()
                 .map(|edge| {
                     let dir = edge.name_k;
-                    (edge.slot, (dir + 1) % 3, (dir + 2) % 3, format!("body_resistive_emf_3d_{dir}"))
+                    (
+                        edge.slot,
+                        (dir + 1) % 3,
+                        (dir + 2) % 3,
+                        format!("body_resistive_emf_3d_{dir}"),
+                    )
                 })
                 .collect()
         };
@@ -1156,9 +1386,20 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
             let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
             for (bind, is_out) in kernel_field_binds(&name).iter() {
                 let fld = slot(&bind.name());
-                if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+                if *is_out {
+                    outputs.push(fld);
+                } else {
+                    inputs.push(fld);
+                }
             }
-            dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[eslot].domain(), &inputs, &outputs, &[], &scalars);
+            dispatch_fields_each::<Sc, Mem, D>(
+                &name,
+                mhd.efield[eslot].domain(),
+                &inputs,
+                &outputs,
+                &[],
+                &scalars,
+            );
         }
     }
 }
@@ -1197,9 +1438,20 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
-    dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
+    dispatch_fields_each::<Sc, Mem, D>(
+        name,
+        mhd.efield[0].domain(),
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
 }
 
 /// the 3D Cartesian Ohmic resistive edge EMF: for each of the three CT edges, add `eta * J_dir` to
@@ -1238,9 +1490,20 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&name).iter() {
             let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+            if *is_out {
+                outputs.push(fld);
+            } else {
+                inputs.push(fld);
+            }
         }
-        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &scalars);
+        dispatch_fields_each::<Sc, Mem, D>(
+            &name,
+            mhd.efield[edge.slot].domain(),
+            &inputs,
+            &outputs,
+            &[],
+            &scalars,
+        );
     }
 }
 
@@ -1257,7 +1520,13 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_k, dx_k) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let name = "rmhd_resistive_emf_cyl_rz";
     let scalars = scalars_for(name, |bind| match bind {
         ScalarBind::Spec(s) if &**s == "eta" => Sc::from_f64(eta),
@@ -1279,9 +1548,20 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(name).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
-    dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
+    dispatch_fields_each::<Sc, Mem, D>(
+        name,
+        mhd.efield[0].domain(),
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
 }
 
 /// the CT curl `bface -= dt*curl(efield)` per IN-PLANE face axis (`dir`), from that face's incident
@@ -1303,7 +1583,13 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
     let curvilinear = sim.geom.coords != symbi_geometry::Geometry::Cartesian;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = spacetime_slug(sim.geom.spacetime);
-    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_k, dx_k) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
     for dir in 0..D {
         let (edge_slots, id_axes) = ct_face_curl(dir, &axes);
@@ -1326,13 +1612,17 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
                 match *sref {
                     ScalarRef::Dt => Sc::from_f64(dt),
                     ScalarRef::SchwarzschildMass => Sc::from_f64(
-                        sim.geom.spacetime_scalars.iter()
+                        sim.geom
+                            .spacetime_scalars
+                            .iter()
                             .find(|(n, _)| n == "schwarzschild_mass")
                             .map(|(_, v)| *v)
                             .expect("gr ct curl needs schwarzschild_mass"),
                     ),
                     ScalarRef::KerrSpin => Sc::from_f64(
-                        sim.geom.spacetime_scalars.iter()
+                        sim.geom
+                            .spacetime_scalars
+                            .iter()
                             .find(|(n, _)| n == "kerr_spin")
                             .map(|(_, v)| *v)
                             .expect("gr ct curl needs kerr_spin"),
@@ -1367,9 +1657,20 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
         for (bind, is_out) in kernel_field_binds(&ct_name).iter() {
             let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+            if *is_out {
+                outputs.push(fld);
+            } else {
+                inputs.push(fld);
+            }
         }
-        dispatch_fields_each::<Sc, Mem, D>(&ct_name, &interior.extend(dir, 0, 1), &inputs, &outputs, &[], &scalars);
+        dispatch_fields_each::<Sc, Mem, D>(
+            &ct_name,
+            &interior.extend(dir, 0, 1),
+            &inputs,
+            &outputs,
+            &[],
+            &scalars,
+        );
     }
 }
 
@@ -1396,7 +1697,13 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     let axes = sim.geom.axes;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = spacetime_slug(sim.geom.spacetime);
-    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_k, dx_k) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let gr = !st.is_empty();
     let bname = if gr {
         // the GR interpolation: the energy patch contracts through the spatial metric, and the
@@ -1409,10 +1716,14 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("bf_") {
-            return &mhd.bface[c.parse::<usize>().expect("bcell_from_bface: bad bf_ slot index")];
+            return &mhd.bface[c
+                .parse::<usize>()
+                .expect("bcell_from_bface: bad bf_ slot index")];
         }
         if let Some(c) = s.strip_prefix("bc_") {
-            let c = c.parse::<usize>().expect("bcell_from_bface: bad bc_ slot index");
+            let c = c
+                .parse::<usize>()
+                .expect("bcell_from_bface: bad bc_ slot index");
             return &mhd.bcell[if gr { c } else { axes[c] }];
         }
         if s == "nrg" {
@@ -1424,7 +1735,11 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
     for (bind, is_out) in kernel_field_binds(&bname).iter() {
         let fld = slot(&bind.name());
-        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if *is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
     let bscalars: Vec<Sc> = if gr {
         scalars_for(&bname, |bind| {
@@ -1433,20 +1748,25 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
             };
             match *sref {
                 ScalarRef::SchwarzschildMass => Sc::from_f64(
-                    sim.geom.spacetime_scalars.iter()
+                    sim.geom
+                        .spacetime_scalars
+                        .iter()
                         .find(|(n, _)| n == "schwarzschild_mass")
                         .map(|(_, v)| *v)
                         .expect("gr bcell_from_bface needs schwarzschild_mass"),
                 ),
                 ScalarRef::KerrSpin => Sc::from_f64(
-                    sim.geom.spacetime_scalars.iter()
+                    sim.geom
+                        .spacetime_scalars
+                        .iter()
                         .find(|(n, _)| n == "kerr_spin")
                         .map(|(_, v)| *v)
                         .expect("gr bcell_from_bface needs kerr_spin"),
                 ),
                 other => Sc::from_f64(
-                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other)
-                        .unwrap_or_else(|| panic!("gr bcell_from_bface: unexpected scalar {other:?}")),
+                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other).unwrap_or_else(|| {
+                        panic!("gr bcell_from_bface: unexpected scalar {other:?}")
+                    }),
                 ),
             }
         })

@@ -52,13 +52,23 @@ fn assert_family(missing: &mut Vec<String>, name: String) {
 #[test]
 fn every_hydro_stage_and_cfl_kernel_is_emitted() {
     let mut missing = Vec::new();
-    let charts = [Geometry::Cartesian, Geometry::Spherical, Geometry::Cylindrical];
+    let charts = [
+        Geometry::Cartesian,
+        Geometry::Spherical,
+        Geometry::Cylindrical,
+    ];
     for (godunov_prefix, cfl_prefix) in [("rhd", "rhd"), ("adiabatic", "iso"), ("iso", "iso")] {
         for coords in charts {
             for d in 1..=3usize {
                 let geom = geom_suffix(coords, d, d);
-                assert_family(&mut missing, format!("{godunov_prefix}_godunov_stage{geom}_{d}d"));
-                assert_family(&mut missing, format!("{cfl_prefix}_wave_speed_map{geom}_{d}d"));
+                assert_family(
+                    &mut missing,
+                    format!("{godunov_prefix}_godunov_stage{geom}_{d}d"),
+                );
+                assert_family(
+                    &mut missing,
+                    format!("{cfl_prefix}_wave_speed_map{geom}_{d}d"),
+                );
             }
         }
     }

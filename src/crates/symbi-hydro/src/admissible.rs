@@ -167,7 +167,9 @@ pub fn rmhd_admissible_residuals<S: Scalar>(
         .max(S::ZERO)
         .sqrt();
     let psi = (phi - S::from_f64(2.0) * w) * (phi + w).max(S::ZERO).sqrt()
-        - (S::from_f64(13.5) * (d * d * b2 + sb * sb)).max(S::ZERO).sqrt();
+        - (S::from_f64(13.5) * (d * d * b2 + sb * sb))
+            .max(S::ZERO)
+            .sqrt();
     (q, psi)
 }
 
@@ -319,31 +321,47 @@ mod tests {
             ] {
                 let cand = admissible(rho, vr, p, grr);
                 let fc = f_of(cand.0, cand.1, cand.2, &gi);
-                let th = admissible_theta(cand.0, cand.1, cand.2, anchor.0, anchor.1, anchor.2, &gi, eps_d, eps_f);
+                let th = admissible_theta(
+                    cand.0, cand.1, cand.2, anchor.0, anchor.1, anchor.2, &gi, eps_d, eps_f,
+                );
                 // admissible candidate -> theta = 1, exact passthrough
-                assert!((th - 1.0).abs() < 1e-12,
-                    "grr={grr} cand=({rho},{vr},{p}) f_cand={fc:.3e}: not passed through, theta={th}");
+                assert!(
+                    (th - 1.0).abs() < 1e-12,
+                    "grr={grr} cand=({rho},{vr},{p}) f_cand={fc:.3e}: not passed through, theta={th}"
+                );
             }
             // WILD inadmissible candidates: the projection must still yield a state in G.
             let wild: [(f64, Tensor<f64, 3>, f64); 5] = [
-                (-2.0, Tensor::new([5.0, 0.0, 0.0]), 1.0),   // negative density
-                (0.5, Tensor::new([100.0, 0.0, 0.0]), 1.0),  // |S| >> E (superluminal)
-                (1.0, Tensor::new([0.0, 0.0, 0.0]), -3.0),   // negative energy
+                (-2.0, Tensor::new([5.0, 0.0, 0.0]), 1.0), // negative density
+                (0.5, Tensor::new([100.0, 0.0, 0.0]), 1.0), // |S| >> E (superluminal)
+                (1.0, Tensor::new([0.0, 0.0, 0.0]), -3.0), // negative energy
                 (1e-9, Tensor::new([50.0, 20.0, 0.0]), 0.1), // near-vacuum, huge momentum
-                (0.0, Tensor::new([0.0, 0.0, 0.0]), 0.0),    // the zero state
+                (0.0, Tensor::new([0.0, 0.0, 0.0]), 0.0),  // the zero state
             ];
             for (dc, sc, ec) in wild {
-                let th = admissible_theta(dc, sc, ec, anchor.0, anchor.1, anchor.2, &gi, eps_d, eps_f);
+                let th =
+                    admissible_theta(dc, sc, ec, anchor.0, anchor.1, anchor.2, &gi, eps_d, eps_f);
                 assert!((0.0..=1.0).contains(&th), "theta out of [0,1]: {th}");
                 let (dp, sp, ep) = admissible_project::<f64, 3>(
-                    dc, [sc[0], sc[1], sc[2]], ec,
-                    anchor.0, [anchor.1[0], anchor.1[1], anchor.1[2]], anchor.2,
+                    dc,
+                    [sc[0], sc[1], sc[2]],
+                    ec,
+                    anchor.0,
+                    [anchor.1[0], anchor.1[1], anchor.1[2]],
+                    anchor.2,
                     th,
                 );
                 let sp_t = Tensor::new(sp);
-                assert!(dp > 0.0, "projected density non-positive: {dp} (cand D={dc})");
+                assert!(
+                    dp > 0.0,
+                    "projected density non-positive: {dp} (cand D={dc})"
+                );
                 let fp = f_of(dp, sp_t, ep, &gi);
-                assert!(fp > 0.0, "projected state NOT in G: f={fp:.3e} (cand D={dc}, |S|={:?}, E={ec})", sc);
+                assert!(
+                    fp > 0.0,
+                    "projected state NOT in G: f={fp:.3e} (cand D={dc}, |S|={:?}, E={ec})",
+                    sc
+                );
             }
         }
     }
@@ -360,13 +378,13 @@ mod tests {
         let zero_b = Tensor::new([0.0, 0.0, 0.0]);
         let (mut n_in, mut n_out) = (0, 0);
         for &(d, sx, e) in &[
-            (1.0_f64, 0.0, 2.0),   // deep interior
-            (1.0, 0.5, 1.2),       // admissible, moving
-            (1.0, 0.0, 0.99),      // E < D: outside
-            (1.0, 3.0, 2.0),       // |S| > E: outside
-            (0.3, 0.2, 0.4),       // light and slow
-            (2.0, 1.0, 2.30),      // just inside
-            (2.0, 1.0, 2.23),      // just outside
+            (1.0_f64, 0.0, 2.0), // deep interior
+            (1.0, 0.5, 1.2),     // admissible, moving
+            (1.0, 0.0, 0.99),    // E < D: outside
+            (1.0, 3.0, 2.0),     // |S| > E: outside
+            (0.3, 0.2, 0.4),     // light and slow
+            (2.0, 1.0, 2.30),    // just inside
+            (2.0, 1.0, 2.23),    // just outside
         ] {
             let s = Tensor::new([sx, 0.0, 0.0]);
             let (q, psi) = rmhd_admissible_residuals(d, &s, e, &zero_b, &gi, &gc);
@@ -376,12 +394,19 @@ mod tests {
                 "B=0 disagreement at (D={d}, S={sx}, E={e}): q={q:.6e} psi={psi:.6e}"
             );
             // and q must agree with the hydro cone's own residual f = E^2 - D^2 - |S|^2
-            assert_eq!(q > 0.0, f_of(d, s, e, &gi) > 0.0, "q disagrees with f at (D={d}, S={sx}, E={e})");
+            assert_eq!(
+                q > 0.0,
+                f_of(d, s, e, &gi) > 0.0,
+                "q disagrees with f at (D={d}, S={sx}, E={e})"
+            );
             if q > 0.0 { n_in += 1 } else { n_out += 1 }
         }
         // the equivalence is only meaningful if the sample straddles the boundary; an all-inside or
         // all-outside sample would satisfy it trivially.
-        assert!(n_in > 0 && n_out > 0, "sample no longer straddles partial-G: {n_in} in, {n_out} out");
+        assert!(
+            n_in > 0 && n_out > 0,
+            "sample no longer straddles partial-G: {n_in} in, {n_out} out"
+        );
     }
 
     #[test]
@@ -394,8 +419,14 @@ mod tests {
         let (d, s, e) = (1.0_f64, Tensor::new([0.0, 0.0, 0.0]), 2.0);
         let b = Tensor::new([10.0, 0.0, 0.0]); // |B|^2 = 100 >> E
         let (q, psi) = rmhd_admissible_residuals(d, &s, e, &b, &gi, &gc);
-        assert!(q > 0.0, "the necessary cone should PASS this state: q={q:.6e}");
-        assert!(psi < 0.0, "the sufficient condition should REJECT it: psi={psi:.6e}");
+        assert!(
+            q > 0.0,
+            "the necessary cone should PASS this state: q={q:.6e}"
+        );
+        assert!(
+            psi < 0.0,
+            "the sufficient condition should REJECT it: psi={psi:.6e}"
+        );
     }
 
     #[test]
@@ -417,13 +448,19 @@ mod tests {
             let mut n_moved = 0;
             for (dc, sc, ec) in wild {
                 let th = rmhd_admissible_theta(
-                    dc, sc, ec, d_a, s_a, e_a, &b, &gi, &gc, eps_d, eps_q, eps_psi,
-                 40);
+                    dc, sc, ec, d_a, s_a, e_a, &b, &gi, &gc, eps_d, eps_q, eps_psi, 40,
+                );
                 assert!((0.0..=1.0).contains(&th), "theta out of [0,1]: {th}");
-                if th < 1.0 { n_moved += 1 }
+                if th < 1.0 {
+                    n_moved += 1
+                }
                 let (dp, sp, ep) = admissible_project::<f64, 3>(
-                    dc, [sc[0], sc[1], sc[2]], ec,
-                    d_a, [s_a[0], s_a[1], s_a[2]], e_a,
+                    dc,
+                    [sc[0], sc[1], sc[2]],
+                    ec,
+                    d_a,
+                    [s_a[0], s_a[1], s_a[2]],
+                    e_a,
                     th,
                 );
                 let (q, psi) = rmhd_admissible_residuals(dp, &Tensor::new(sp), ep, &b, &gi, &gc);
@@ -435,7 +472,12 @@ mod tests {
             }
             // if every candidate passed through untouched the projection was never exercised and the
             // landing assertion above proved nothing.
-            assert_eq!(n_moved, wild.len(), "grr={grr}: only {n_moved} of {} candidates were projected", wild.len());
+            assert_eq!(
+                n_moved,
+                wild.len(),
+                "grr={grr}: only {n_moved} of {} candidates were projected",
+                wild.len()
+            );
         }
     }
 
@@ -447,9 +489,12 @@ mod tests {
         for &(rho, v, p) in &[(1.2_f64, 0.2, 0.6), (0.9, -0.3, 0.4)] {
             let (dc, sc, ec) = admissible(rho, v, p, 1.0);
             let th = rmhd_admissible_theta(
-                dc, sc, ec, d_a, s_a, e_a, &b, &gi, &gc, 1e-12, 1e-14, 1e-14,
-             40);
-            assert_eq!(th, 1.0, "admissible candidate ({rho},{v},{p}) not passed through: {th}");
+                dc, sc, ec, d_a, s_a, e_a, &b, &gi, &gc, 1e-12, 1e-14, 1e-14, 40,
+            );
+            assert_eq!(
+                th, 1.0,
+                "admissible candidate ({rho},{v},{p}) not passed through: {th}"
+            );
         }
     }
 
@@ -463,12 +508,29 @@ mod tests {
         let (d_a, s_a, e_a) = admissible(1.0, 0.1, 0.5, 1.0);
         let b = Tensor::new([50.0, 0.0, 0.0]); // |B|^2 = 2500 >> E_anchor
         let (q_a, psi_a) = rmhd_admissible_residuals(d_a, &s_a, e_a, &b, &gi, &gc);
-        assert!(q_a > 0.0 && psi_a < 0.0, "setup must make the ANCHOR inadmissible in this slice");
-        let th = rmhd_admissible_theta(
-            2.0, Tensor::new([1.0, 0.0, 0.0]), 3.0, d_a, s_a, e_a, &b, &gi, &gc,
-            1e-12, 1e-14, 1e-14, 40,
+        assert!(
+            q_a > 0.0 && psi_a < 0.0,
+            "setup must make the ANCHOR inadmissible in this slice"
         );
-        assert_eq!(th, 0.0, "an unrecoverable anchor must report theta = 0, got {th}");
+        let th = rmhd_admissible_theta(
+            2.0,
+            Tensor::new([1.0, 0.0, 0.0]),
+            3.0,
+            d_a,
+            s_a,
+            e_a,
+            &b,
+            &gi,
+            &gc,
+            1e-12,
+            1e-14,
+            1e-14,
+            40,
+        );
+        assert_eq!(
+            th, 0.0,
+            "an unrecoverable anchor must report theta = 0, got {th}"
+        );
     }
 
     #[test]
@@ -483,7 +545,8 @@ mod tests {
             let w = b2 - e;
             let phi = (w * w + 3.0 * (e * e - d * d - s2)).max(0.0).sqrt();
             // WRONG: 27/2 -> 27
-            (phi - 2.0 * w) * (phi + w).max(0.0).sqrt() - (27.0 * (d * d * b2 + sb * sb)).max(0.0).sqrt()
+            (phi - 2.0 * w) * (phi + w).max(0.0).sqrt()
+                - (27.0 * (d * d * b2 + sb * sb)).max(0.0).sqrt()
         };
         // with B = 0 the injected term vanishes too, so the equivalence survives -> the B=0 test
         // alone does NOT pin the coefficient. it is pinned by a magnetized state instead.
@@ -506,10 +569,17 @@ mod tests {
         let anchor = admissible(1.0, 0.1, 0.5, 1.0);
         let (dc, sc, ec) = (0.5_f64, Tensor::new([100.0, 0.0, 0.0]), 1.0);
         let (dp, sp, ep) = admissible_project::<f64, 3>(
-            dc, [sc[0], sc[1], sc[2]], ec,
-            anchor.0, [anchor.1[0], anchor.1[1], anchor.1[2]], anchor.2,
+            dc,
+            [sc[0], sc[1], sc[2]],
+            ec,
+            anchor.0,
+            [anchor.1[0], anchor.1[1], anchor.1[2]],
+            anchor.2,
             1.0, // the injected wrong theta
         );
-        assert!(f_of(dp, Tensor::new(sp), ep, &gi) < 0.0, "the injected theta=1 should leave the state OUTSIDE G");
+        assert!(
+            f_of(dp, Tensor::new(sp), ep, &gi) < 0.0,
+            "the injected theta=1 should leave the state OUTSIDE G"
+        );
     }
 }

@@ -65,8 +65,13 @@ fn bx_amplitude(s: &Sim) -> f64 {
 fn evolve(eta: f64) -> f64 {
     let mut sim = make_sim();
     let a0 = bx_amplitude(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_resistivity(eta);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_resistivity(eta);
     evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {}).expect("evolve failed");
     bx_amplitude(&sim) / a0
 }
@@ -103,23 +108,42 @@ fn make_sim_3d() -> Sim3 {
     .allocate()
     .expect("3d resistive sim construction failed")
     .set_initial(|[_x, y, _z]| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new([B0 * (K * y).sin(), 0.0, 0.0]),
     })
-    .seed_faces(|axis, x| if axis == 0 { B0 * (K * x[1]).sin() } else { 0.0 })
+    .seed_faces(|axis, x| {
+        if axis == 0 {
+            B0 * (K * x[1]).sin()
+        } else {
+            0.0
+        }
+    })
     .build()
 }
 
 fn bx_amplitude_3d(s: &Sim3) -> f64 {
     let m = s.fields.mhd.as_ref().unwrap();
-    s.geom.interior.iter().map(|c| m.bcell[0].view().at(c).abs()).fold(0.0_f64, f64::max)
+    s.geom
+        .interior
+        .iter()
+        .map(|c| m.bcell[0].view().at(c).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn evolve_3d(eta: f64) -> f64 {
     let mut sim = make_sim_3d();
     let a0 = bx_amplitude_3d(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_resistivity(eta);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_resistivity(eta);
     evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {}).expect("3d evolve failed");
     bx_amplitude_3d(&sim) / a0
 }

@@ -22,15 +22,25 @@ const NY: isize = 512; // 512 x 512 = 2^18 cells: well past the parallel thresho
 
 fn build() -> (Field<f64, 2, HostMemory>, Domain<2>) {
     let domain = Domain::new([
-        Space { name: "x", lo: 0, hi: NX },
-        Space { name: "y", lo: 0, hi: NY },
+        Space {
+            name: "x",
+            lo: 0,
+            hi: NX,
+        },
+        Space {
+            name: "y",
+            lo: 0,
+            hi: NY,
+        },
     ]);
     let field = Field::<f64, 2, HostMemory>::zeros(&domain).expect("field");
     for c in domain.iter() {
         // adversarial magnitudes: the running sum loses the small addend whenever a
         // large one is present, so the grouping of partials is visible in the result.
         let v = if (c[0] + c[1]) % 7 == 0 { 1.0e16 } else { 1.0 };
-        field.view_mut().set(c, if (c[0] * 3 + c[1]) % 11 == 0 { -v } else { v });
+        field
+            .view_mut()
+            .set(c, if (c[0] * 3 + c[1]) % 11 == 0 { -v } else { v });
     }
     (field, domain)
 }

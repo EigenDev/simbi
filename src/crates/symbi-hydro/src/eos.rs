@@ -161,9 +161,13 @@ impl<S: Scalar> Eos<S> for Isothermal<S> {
 
     /// isothermal kernels use gamma as cs^2 for c2p (pre = cs^2 * rho),
     /// flux (HLLE wave speeds), and max_wave_speed (cs = sqrt(gamma)).
-    fn gamma_for_ops(&self) -> f64 { (self.cs * self.cs).to_f64() }
+    fn gamma_for_ops(&self) -> f64 {
+        (self.cs * self.cs).to_f64()
+    }
     /// the isothermal KernelSet constructors take the sound speed `cs` directly (cs^2 is what `gamma_for_ops` supplies).
-    fn substrate_param(&self) -> f64 { self.cs.to_f64() }
+    fn substrate_param(&self) -> f64 {
+        self.cs.to_f64()
+    }
 }
 
 #[cfg(test)]

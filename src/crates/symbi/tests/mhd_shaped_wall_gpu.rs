@@ -63,7 +63,14 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>() -> MSim<S, Mem> {
                 B0 * (4.0 * PI * x).sin(),
                 BZ0 * (2.0 * PI * x).cos(),
             ]);
-            MhdPrim { hydro: Prim { rho: rho0, vel, pre: p0 }, mag }
+            MhdPrim {
+                hydro: Prim {
+                    rho: rho0,
+                    vel,
+                    pre: p0,
+                },
+                mag,
+            }
         })
         .seed_faces(|axis, x| match axis {
             0 => -B0 * (2.0 * PI * x[1]).sin(),
@@ -73,11 +80,26 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>() -> MSim<S, Mem> {
     // a sealed shaped (SDF sphere) rigid wall placed where the Orszag-Tang velocity is maximal
     // (x = y = 0.25, |v| ~ V0), so the sealed wall sees a real flow to react against; the CSG
     // shape routes the runtime shaped kernel (host cranelift / device NVRTC) at dof = 3.
-    let mut sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::new([0.25, 0.25]), Tensor::zeros(), 1.0, R_BODY, 1.0, true)
-            .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
-    ));
-    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
+    let mut sim = sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new([0.25, 0.25]),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                1.0,
+                true,
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 50.0,
+                k_eta_t: 50.0,
+            }),
+        ),
+    );
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
     sim
 }
 
@@ -87,7 +109,9 @@ type DevSim = MSim<CudaSpace, UnifiedMemory>;
 // max relative discrepancy over the interior of every conserved gas field + the cell B.
 fn field_gap(h: &HostSim, d: &DevSim) -> f64 {
     let mut gap = 0.0_f64;
-    let cmp = |hf: &symbi_grid::Field<f64, 2, HostMemory>, df: &symbi_grid::Field<f64, 2, UnifiedMemory>, gap: &mut f64| {
+    let cmp = |hf: &symbi_grid::Field<f64, 2, HostMemory>,
+               df: &symbi_grid::Field<f64, 2, UnifiedMemory>,
+               gap: &mut f64| {
         for c in h.geom.interior.iter() {
             let (a, b) = (*hf.view().at(c), *df.view().at(c));
             assert!(b.is_finite(), "non-finite device field at {c:?}: {b}");
@@ -98,9 +122,15 @@ fn field_gap(h: &HostSim, d: &DevSim) -> f64 {
     for k in 0..3 {
         cmp(&h.fields.cons.mom[k], &d.fields.cons.mom[k], &mut gap);
     }
-    let (hn, dn) = (h.fields.cons.nrg_field().unwrap(), d.fields.cons.nrg_field().unwrap());
+    let (hn, dn) = (
+        h.fields.cons.nrg_field().unwrap(),
+        d.fields.cons.nrg_field().unwrap(),
+    );
     cmp(hn, dn, &mut gap);
-    let (hm, dm) = (h.fields.mhd.as_ref().unwrap(), d.fields.mhd.as_ref().unwrap());
+    let (hm, dm) = (
+        h.fields.mhd.as_ref().unwrap(),
+        d.fields.mhd.as_ref().unwrap(),
+    );
     for k in 0..3 {
         cmp(&hm.bcell[k], &dm.bcell[k], &mut gap);
     }
@@ -118,15 +148,26 @@ fn mhd_shaped_wall_penalize_matches_cpu_on_device() {
     // penalize rewrites the gas cons (magnetosonic-stiff via c_a2) and leaves the cell B
     // untouched: both must agree host==device.
     let gap = field_gap(&h, &d);
-    assert!(gap < 1e-9, "mhd shaped-wall penalize host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-9,
+        "mhd shaped-wall penalize host!=device: rel gap {gap:e}"
+    );
 
     let hf = h.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let df = d.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let scale = (0..2).map(|k| hf[k].abs()).fold(0.0_f64, f64::max);
-    assert!(scale > 1e-8, "the magnetized shaped wall never penalized (force {hf:?})");
+    assert!(
+        scale > 1e-8,
+        "the magnetized shaped wall never penalized (force {hf:?})"
+    );
     for k in 0..2 {
         let diff = (hf[k] - df[k]).abs();
-        assert!(diff < 1e-9 * scale + 1e-11, "mhd force[{k}] host {} != device {} (diff {diff:e})", hf[k], df[k]);
+        assert!(
+            diff < 1e-9 * scale + 1e-11,
+            "mhd force[{k}] host {} != device {} (diff {diff:e})",
+            hf[k],
+            df[k]
+        );
     }
 }
 
@@ -134,14 +175,31 @@ fn mhd_shaped_wall_penalize_matches_cpu_on_device() {
 fn mhd_shaped_wall_evolved_matches_cpu_on_device() {
     let mut h = build::<CpuSpace, HostMemory>();
     let mut d = build::<CudaSpace, UnifiedMemory>();
-    let hk = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.0, &h.geom.allocated);
-    let dk = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, 1.0, &d.geom.allocated);
+    let hk = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &h.geom.allocated,
+    );
+    let dk = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &d.geom.allocated,
+    );
     evolve(&mut h, &hk, 0.05).expect("host mhd shaped run");
     evolve(&mut d, &dk, 0.05).expect("device mhd shaped run");
     symbi_xpu::cuda::ctx_sync();
 
     assert!(h.iteration >= 3, "too few steps ({})", h.iteration);
-    assert_eq!(h.iteration, d.iteration, "step count diverged: cpu {} gpu {}", h.iteration, d.iteration);
+    assert_eq!(
+        h.iteration, d.iteration,
+        "step count diverged: cpu {} gpu {}",
+        h.iteration, d.iteration
+    );
     let gap = field_gap(&h, &d);
-    assert!(gap < 1e-6, "evolved mhd shaped-wall host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-6,
+        "evolved mhd shaped-wall host!=device: rel gap {gap:e}"
+    );
 }

@@ -28,7 +28,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_ct_curl_3d_dir_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, rmhd_ct_curl_3d_dir_gv};
 
 const M: usize = 8; // buffer extent per axis
 const R0: f64 = 1.0;
@@ -95,19 +95,26 @@ fn run_curl(b_in: &[Vec<f64>; 3], e: &[Vec<f64>; 3], dt: f64) -> [Vec<f64>; 3] {
         // b = bface[dir]; e_p1 = efield[p1]; e_p2 = efield[p2]; the spherical curl reads the
         // axis-start + cell-width geometry scalars (uniform spacing) in coordinate order.
         let (bvec, ep1, ep2) = (b_in[dir].clone(), e[p1].clone(), e[p2].clone());
-        let out = KernelRun::new(rmhd_ct_curl_3d_dir_gv(Coords::Spherical, &[Spacing::Uniform; 3], dir))
-            .grid([M, M, M])
-            .compute_window([0, 0, 0], [M - 1, M - 1, M - 1])
-            .field_with("b", move |c| bvec[idx3(c[0], c[1], c[2])])
-            .field_with("e_p1", move |c| ep1[idx3(c[0], c[1], c[2])])
-            .field_with("e_p2", move |c| ep2[idx3(c[0], c[1], c[2])])
-            .scalars(&[
-                ("dt", dt),
-                ("x_lo_0", R0), ("dx_0", DR),
-                ("x_lo_1", T0), ("dx_1", DTH),
-                ("x_lo_2", P0), ("dx_2", DPH),
-            ])
-            .run();
+        let out = KernelRun::new(rmhd_ct_curl_3d_dir_gv(
+            Coords::Spherical,
+            &[Spacing::Uniform; 3],
+            dir,
+        ))
+        .grid([M, M, M])
+        .compute_window([0, 0, 0], [M - 1, M - 1, M - 1])
+        .field_with("b", move |c| bvec[idx3(c[0], c[1], c[2])])
+        .field_with("e_p1", move |c| ep1[idx3(c[0], c[1], c[2])])
+        .field_with("e_p2", move |c| ep2[idx3(c[0], c[1], c[2])])
+        .scalars(&[
+            ("dt", dt),
+            ("x_lo_0", R0),
+            ("dx_0", DR),
+            ("x_lo_1", T0),
+            ("dx_1", DTH),
+            ("x_lo_2", P0),
+            ("dx_2", DPH),
+        ])
+        .run();
         new_b[dir] = out.values("b_new").to_vec();
     }
     new_b
@@ -157,7 +164,10 @@ fn ct_curl_sph_preserves_div_b() {
             }
         }
     }
-    assert!(max_init < 1e-10, "init area-weighted div(B) not zero: max = {max_init:e}");
+    assert!(
+        max_init < 1e-10,
+        "init area-weighted div(B) not zero: max = {max_init:e}"
+    );
 
     // evolve one CT step by curl(E).
     let b2 = run_curl(&b, &e, DT);
@@ -175,17 +185,23 @@ fn ct_curl_sph_preserves_div_b() {
             }
         }
     }
-    assert!(max_after < 1e-10, "post-update div(B) not zero: max = {max_after:e}");
-    assert!(max_change < 1e-11, "div(B) changed under CT: max delta = {max_change:e}");
+    assert!(
+        max_after < 1e-10,
+        "post-update div(B) not zero: max = {max_after:e}"
+    );
+    assert!(
+        max_change < 1e-11,
+        "div(B) changed under CT: max delta = {max_change:e}"
+    );
     eprintln!("spherical CT div(B): init={max_init:e} after={max_after:e} change={max_change:e}");
 }
 
 // the spherical scale factor h_c (Rust mirror of geometry.rs scale_factor).
 fn sf(c: usize, r: f64, theta: f64) -> f64 {
     match c {
-        1 => r,                 // h_theta
-        2 => r * theta.sin(),   // h_phi
-        _ => 1.0,               // h_r
+        1 => r,               // h_theta
+        2 => r * theta.sin(), // h_phi
+        _ => 1.0,             // h_r
     }
 }
 
@@ -221,7 +237,10 @@ fn ct_curl_sph_constant_edge_flux_is_curl_free() {
             }
         }
     }
-    assert!(mx < 1e-12, "constant edge-flux gave nonzero curl: max = {mx:e}");
+    assert!(
+        mx < 1e-12,
+        "constant edge-flux gave nonzero curl: max = {mx:e}"
+    );
     eprintln!("spherical constant-flux curl: max = {mx:e}");
 }
 
@@ -263,6 +282,9 @@ fn ct_curl_sph_b_r_matches_analytic() {
             }
         }
     }
-    assert!(mx < 1e-11, "spherical curl_r magnitude off analytic: max = {mx:e}");
+    assert!(
+        mx < 1e-11,
+        "spherical curl_r magnitude off analytic: max = {mx:e}"
+    );
     eprintln!("spherical curl_r vs analytic: max = {mx:e}");
 }

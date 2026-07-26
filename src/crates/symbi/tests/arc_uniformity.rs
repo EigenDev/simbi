@@ -14,21 +14,34 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
     let r_max = 1.0f64;
     let dr = r_max / nr as f64;
     let sim = SimState::<Newtonian, 2, Spherical, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Newtonian, IdealGas { gamma: 1.4 }, Spherical,
+        Newtonian,
+        IdealGas { gamma: 1.4 },
+        Spherical,
     )
     .cells([nr, nt])
     .origin([0.0, 0.0])
     .spacing([dr, std::f64::consts::FRAC_PI_2 / nt as f64])
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-    .allocate().expect("sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+    .allocate()
+    .expect("sim")
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::zeros(),
+        pre: 1.0,
+    })
     .build();
     // sedov-like radial profile, THETA-INDEPENDENT: evacuated interior, thin
     // bright shell (2 cells) at r = 0.25, ambient outside.
     let r_sh = 0.25f64;
     for c in sim.geom.interior.iter() {
         let r = (c[0] as f64 + 0.5) * dr;
-        let v = if r < r_sh - dr { 0.1 } else if r < r_sh + dr { 2.0 } else { 1.0 };
+        let v = if r < r_sh - dr {
+            0.1
+        } else if r < r_sh + dr {
+            2.0
+        } else {
+            1.0
+        };
         sim.fields.prim.rho.set(c, v);
     }
     let fd = sim.field_slice(200, 0).expect("slice");
@@ -49,8 +62,12 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
             if px < w && py < h {
                 let v = fd.data[py * w + px];
                 if !v.is_nan() {
-                    if v > m || m.is_nan() { m = v; }
-                    if v < n || n.is_nan() { n = v; }
+                    if v > m || m.is_nan() {
+                        m = v;
+                    }
+                    if v < n || n.is_nan() {
+                        n = v;
+                    }
                 }
             }
         }
@@ -59,13 +76,19 @@ fn thermal_bomb_shape_renders_an_angularly_uniform_arc() {
     }
     let lo = ray_max.iter().cloned().fold(f32::INFINITY, f32::min);
     let hi = ray_max.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    println!("arc max per ray: lo={lo:.3} hi={hi:.3} spread={:.3}", hi - lo);
+    println!(
+        "arc max per ray: lo={lo:.3} hi={hi:.3} spread={:.3}",
+        hi - lo
+    );
     // the bright rim shimmers under HONEST block averaging (a 2-cell shell next to
     // an evacuated interior dilutes by pixel phase — the cartesian path decimates
     // identically); the gate is the VISIBLE structure: every ray must cross the
     // dark evacuated band continuously, and no ray may show a spurious bright gap
     // ABOVE ambient (a spurious bright gap signals dropped samples, a rendering bug distinct from honest dilution).
-    assert!(hi <= 2.0 + 1e-6, "averaging can never exceed the shell peak: hi={hi}");
+    assert!(
+        hi <= 2.0 + 1e-6,
+        "averaging can never exceed the shell peak: hi={hi}"
+    );
     for (k, m) in ray_min.iter().enumerate() {
         assert!(*m < 0.5, "ray {k} lost the dark band: min={m}");
     }

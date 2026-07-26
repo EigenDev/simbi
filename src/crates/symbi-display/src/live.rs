@@ -89,7 +89,7 @@ pub struct DiagnosticView {
     pub cfl_max: f64,
     pub blocks_per_level: Vec<u64>,
     // panels
-    pub log: Vec<(String, String)>,          // (timestamp, text)
+    pub log: Vec<(String, String)>,            // (timestamp, text)
     pub config: Vec<(String, String, String)>, // config-tab rows: (section, property, value)
     // a decimated 2D field slice for the overview hero heatmap; None -> the hero
     // falls back to the throughput chart.
@@ -226,7 +226,8 @@ fn render_header(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     );
     if !view.attached.is_empty() {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(view.attached.clone(), fg(DIM)))).right_aligned(),
+            Paragraph::new(Line::from(Span::styled(view.attached.clone(), fg(DIM))))
+                .right_aligned(),
             cols[1],
         );
     } else {
@@ -252,7 +253,10 @@ fn render_statstrip(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let line = Line::from(vec![
         Span::styled(
             format!(" {} ", view.regime),
-            Style::default().fg(BADGE_FG).bg(BADGE_BG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(BADGE_FG)
+                .bg(BADGE_BG)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled("   t ", fg(DIM)),
         Span::styled(format!("{:.4}", view.t), fgb(VALUE)),
@@ -363,7 +367,10 @@ fn render_throughput_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) 
             Axis::default()
                 .style(fg(BORDER))
                 .bounds([0.0, y_max * 1.1])
-                .labels([Span::styled("0", fg(DIM)), Span::styled(humanize(y_max), fg(DIM))]),
+                .labels([
+                    Span::styled("0", fg(DIM)),
+                    Span::styled(humanize(y_max), fg(DIM)),
+                ]),
         );
     frame.render_widget(chart, inner);
 }
@@ -495,7 +502,11 @@ fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
     let range = (field.vmax - field.vmin).max(1e-30);
     // the log floor: vmin when positive, else a fixed dynamic range below vmax so a
     // zero-touching field (|B| with null points) still spans usable decades.
-    let log_lo = if field.vmin > 0.0 { field.vmin } else { field.vmax * 1e-8 };
+    let log_lo = if field.vmin > 0.0 {
+        field.vmin
+    } else {
+        field.vmax * 1e-8
+    };
     let log_range = (field.vmax.ln() - log_lo.ln()).max(1e-30);
     let norm = move |v: f64| {
         if log_active {
@@ -566,7 +577,12 @@ fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
         }
     }
     buf.set_string(bar_x + 2, inner.y, humanize(field.vmax), fg(DIM));
-    buf.set_string(bar_x + 2, inner.y + heat_h - 1, humanize(field.vmin), fg(DIM));
+    buf.set_string(
+        bar_x + 2,
+        inner.y + heat_h - 1,
+        humanize(field.vmin),
+        fg(DIM),
+    );
 }
 
 /// a 1D field as a line profile (value vs position). the trace takes a bright stop
@@ -682,8 +698,7 @@ fn render_machine(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     // and the launch block shape beneath them. the card is sized to whichever is
     // present so a cpu run leaves no blank rows.
     let gpu_rows = if view.device.is_some() { 2 } else { 0 };
-    let rows = Layout::vertical([Constraint::Length(1); 5][..3 + gpu_rows].to_vec())
-        .split(inner);
+    let rows = Layout::vertical([Constraint::Length(1); 5][..3 + gpu_rows].to_vec()).split(inner);
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(h.hostname.clone(), fgb(VALUE)))),
@@ -703,8 +718,7 @@ fn render_machine(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     } else {
         0.0
     };
-    let cols =
-        Layout::horizontal([Constraint::Min(6), Constraint::Length(14)]).split(rows[2]);
+    let cols = Layout::horizontal([Constraint::Min(6), Constraint::Length(14)]).split(rows[2]);
     let color = if ratio >= 0.9 { AMBER } else { LAV };
     let gauge = LineGauge::default()
         .ratio(ratio)
@@ -789,7 +803,10 @@ fn drift_row(frame: &mut Frame, area: Rect, label: &str, color: Color, hist: &[f
         Paragraph::new(Line::from(Span::styled(label.to_string(), fg(DIM)))),
         cols[0],
     );
-    frame.render_widget(Sparkline::default().data(spark(hist)).style(fg(color)), cols[1]);
+    frame.render_widget(
+        Sparkline::default().data(spark(hist)).style(fg(color)),
+        cols[1],
+    );
     let val = hist.last().copied().unwrap_or(0.0);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(format!("{val:.1e}"), fgb(VALUE)))).right_aligned(),
@@ -820,7 +837,9 @@ fn render_maxw_dt(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let dt_inner = dt_block.inner(dt_area);
     frame.render_widget(dt_block, dt_area);
     frame.render_widget(
-        Sparkline::default().data(spark(&view.dt_hist)).style(fg(BLUE)),
+        Sparkline::default()
+            .data(spark(&view.dt_hist))
+            .style(fg(BLUE)),
         dt_inner,
     );
 }
@@ -833,7 +852,13 @@ fn render_blocks(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     if inner.height == 0 || n == 0 {
         return;
     }
-    let peak = view.blocks_per_level.iter().copied().max().unwrap_or(1).max(1) as f64;
+    let peak = view
+        .blocks_per_level
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
     let spec: Vec<Constraint> = (0..n).map(|_| Constraint::Length(1)).collect();
     let rows = Layout::vertical(spec).split(inner);
     for lvl in 0..n {
@@ -967,7 +992,11 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
         let head = format!("{} ", sec.to_uppercase());
         let rule = "\u{2500}".repeat(width.saturating_sub(head.chars().count()));
         lines.push(Line::from(Span::styled(format!("{head}{rule}"), fgb(TEAL))));
-        for (s, k, v) in view.config.iter().filter(|(s, _, _)| s.eq_ignore_ascii_case(sec)) {
+        for (s, k, v) in view
+            .config
+            .iter()
+            .filter(|(s, _, _)| s.eq_ignore_ascii_case(sec))
+        {
             lines.push(Line::from(vec![
                 Span::styled(format!("  {k:<label_w$}  "), fg(DIM)),
                 Span::styled(v.clone(), fgb(VALUE)),
@@ -1018,7 +1047,11 @@ mod tests {
             ],
             config: vec![
                 ("Physics".into(), "regime".into(), "rhd".into()),
-                ("Geometry".into(), "resolution".into(), "256 x 256  (65536 zones)".into()),
+                (
+                    "Geometry".into(),
+                    "resolution".into(),
+                    "256 x 256  (65536 zones)".into(),
+                ),
             ],
             field: None,
             field_count: 1,
@@ -1091,7 +1124,10 @@ mod tests {
             block: [32, 8, 1],
         });
         let d = dump(&v);
-        assert!(d.contains("MI250X"), "device name missing from the machine card");
+        assert!(
+            d.contains("MI250X"),
+            "device name missing from the machine card"
+        );
         assert!(d.contains("x2"), "multi-device count not reported");
         assert!(d.contains("32x8x1"), "launch block shape missing");
     }

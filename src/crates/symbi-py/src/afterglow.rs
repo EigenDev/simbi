@@ -28,11 +28,11 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use symbi_afterglow::deposit::{VelComponents, compute_skymap_deposit};
 use symbi_afterglow::event::PhotonEvent;
 use symbi_afterglow::observe::{
     compute_lightcurve_from_events, compute_skymap as observe_compute_skymap,
 };
-use symbi_afterglow::deposit::{VelComponents, compute_skymap_deposit};
 use symbi_afterglow::transfer::{
     generate_photon_events, generate_photon_events_spherical, monte_carlo_radiative_transfer,
 };
@@ -111,11 +111,11 @@ fn req_field<'a>(dict: &Bound<'a, PyDict>, key: &str) -> PyResult<Vec<f64>> {
 fn quant_scales(dict: &Bound<'_, PyDict>) -> PyResult<QuantScales> {
     use symbi_afterglow::units::{EnergyDensity, MassDensity, Time, Velocity};
     Ok(QuantScales {
-        time:     Time::new(req_f64(dict, "time")?),
-        pre:      EnergyDensity::new(req_f64(dict, "pre")?),
-        rho:      MassDensity::new(req_f64(dict, "rho")?),
+        time: Time::new(req_f64(dict, "time")?),
+        pre: EnergyDensity::new(req_f64(dict, "pre")?),
+        rho: MassDensity::new(req_f64(dict, "rho")?),
         velocity: Velocity::new(req_f64(dict, "velocity")?),
-        length:   Length::new(req_f64(dict, "length")?),
+        length: Length::new(req_f64(dict, "length")?),
     })
 }
 
@@ -131,15 +131,15 @@ fn sim_conditions(dict: &Bound<'_, PyDict>) -> PyResult<SimConditions> {
         .map(Frequency::new)
         .collect();
     Ok(SimConditions {
-        dt:              req_f64(dict, "dt")?,
-        theta_obs:       opt_f64(dict, "theta_obs", 0.0),
+        dt: req_f64(dict, "dt")?,
+        theta_obs: opt_f64(dict, "theta_obs", 0.0),
         adiabatic_index: req_f64(dict, "adiabatic_index")?,
-        current_time:    req_f64(dict, "current_time")?,
-        p:               req_f64(dict, "p")?,
-        redshift:        opt_f64(dict, "z", 0.0),
-        eps_e:           req_f64(dict, "eps_e")?,
-        eps_b:           req_f64(dict, "eps_b")?,
-        d_l:             Length::new(opt_f64(dict, "d_L", 1.0e28)),
+        current_time: req_f64(dict, "current_time")?,
+        p: req_f64(dict, "p")?,
+        redshift: opt_f64(dict, "z", 0.0),
+        eps_e: req_f64(dict, "eps_e")?,
+        eps_b: req_f64(dict, "eps_b")?,
+        d_l: Length::new(opt_f64(dict, "d_L", 1.0e28)),
         nus,
     })
 }
@@ -147,9 +147,9 @@ fn sim_conditions(dict: &Bound<'_, PyDict>) -> PyResult<SimConditions> {
 /// pull (x1, x2, x3, data_dim) out of the mesh dict. x1 is mandatory; x2/x3 are
 /// optional (a 1d run broadcasts over them). data_dim defaults to 1.
 struct MeshData {
-    x1:       Vec<f64>,
-    x2:       Vec<f64>,
-    x3:       Option<Vec<f64>>,
+    x1: Vec<f64>,
+    x2: Vec<f64>,
+    x3: Option<Vec<f64>>,
     data_dim: i64,
 }
 
@@ -163,13 +163,19 @@ fn mesh_data(dict: &Bound<'_, PyDict>) -> PyResult<MeshData> {
         .and_then(|v| v.extract::<Vec<f64>>().ok())
         // a degenerate single-cell theta lets the cartesian generator run for 1d data.
         .unwrap_or_else(|| vec![std::f64::consts::FRAC_PI_2]);
-    let x3: Option<Vec<f64>> =
-        dict.get_item("x3")?.and_then(|v| v.extract::<Vec<f64>>().ok());
+    let x3: Option<Vec<f64>> = dict
+        .get_item("x3")?
+        .and_then(|v| v.extract::<Vec<f64>>().ok());
     let data_dim = dict
         .get_item("data_dim")?
         .and_then(|v| v.extract::<i64>().ok())
         .unwrap_or(1);
-    Ok(MeshData { x1, x2, x3, data_dim })
+    Ok(MeshData {
+        x1,
+        x2,
+        x3,
+        data_dim,
+    })
 }
 
 // =============================================================================
@@ -203,32 +209,55 @@ fn generate_photon_events_py(
             "fields rho / gamma_beta / pre must have equal length",
         ));
     }
-    let hf = HydroFields { rho: &rho, gamma_beta: &gamma_beta, pre: &pre };
+    let hf = HydroFields {
+        rho: &rho,
+        gamma_beta: &gamma_beta,
+        pre: &pre,
+    };
     let md = mesh_data(mesh)?;
 
     let events = if md.data_dim <= 1 {
         // the spherical BMK path: synthesize a full sphere from the 1d radial profile, with
         // the angular tessellation SIZED FROM THE BUDGET so every radial cell emits (see
         // `spherical_tessellation_for_budget`); full sphere (theta_max = pi).
-        let ppd = if photons_per_cell > 0 { photons_per_cell } else { 1 };
-        let (n_mu, n_phi) =
-            symbi_afterglow::transfer::spherical_tessellation_for_budget(
-                md.x1.len(),
-                ppd,
-                max_events,
-            );
+        let ppd = if photons_per_cell > 0 {
+            photons_per_cell
+        } else {
+            1
+        };
+        let (n_mu, n_phi) = symbi_afterglow::transfer::spherical_tessellation_for_budget(
+            md.x1.len(),
+            ppd,
+            max_events,
+        );
         generate_photon_events_spherical(
-            &cond, &scales, &hf, &md.x1, seed, std::f64::consts::PI, n_mu, n_phi, ppd,
+            &cond,
+            &scales,
+            &hf,
+            &md.x1,
+            seed,
+            std::f64::consts::PI,
+            n_mu,
+            n_phi,
+            ppd,
             max_events,
         )
     } else {
         let mesh = Mesh {
-            x1:       &md.x1,
-            x2:       &md.x2,
-            x3:       md.x3.as_deref(),
+            x1: &md.x1,
+            x2: &md.x2,
+            x3: md.x3.as_deref(),
             data_dim: md.data_dim,
         };
-        generate_photon_events(&cond, &scales, &hf, &mesh, seed, max_events, photons_per_cell)
+        generate_photon_events(
+            &cond,
+            &scales,
+            &hf,
+            &mesh,
+            seed,
+            max_events,
+            photons_per_cell,
+        )
     };
 
     Ok(PhotonEvents { events })
@@ -257,12 +286,16 @@ fn monte_carlo_radiative_transfer_py(
     let rho = req_field(fields, "rho")?;
     let gamma_beta = req_field(fields, "gamma_beta")?;
     let pre = req_field(fields, "pre")?;
-    let hf = HydroFields { rho: &rho, gamma_beta: &gamma_beta, pre: &pre };
+    let hf = HydroFields {
+        rho: &rho,
+        gamma_beta: &gamma_beta,
+        pre: &pre,
+    };
     let md = mesh_data(mesh)?;
     let mesh = Mesh {
-        x1:       &md.x1,
-        x2:       &md.x2,
-        x3:       md.x3.as_deref(),
+        x1: &md.x1,
+        x2: &md.x2,
+        x3: md.x3.as_deref(),
         data_dim: md.data_dim,
     };
     monte_carlo_radiative_transfer(
@@ -313,7 +346,11 @@ fn skymap_from_events_py(
             "observer_direction must be a length-3 unit vector",
         ));
     }
-    let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
+    let nhat = [
+        observer_direction[0],
+        observer_direction[1],
+        observer_direction[2],
+    ];
     // half_width > 0 fixes the field of view (a shared grid for streaming accumulation); 0 auto-sizes.
     let img = observe_compute_skymap(
         &events.events,
@@ -380,7 +417,11 @@ fn write_photon_events_py(
 
     let shape = vec![n];
     let mut tree = Tree::new("");
-    tree.push_dataset(Dataset::new("t_emission", shape.clone(), DataRef::F64(&t_emission)));
+    tree.push_dataset(Dataset::new(
+        "t_emission",
+        shape.clone(),
+        DataRef::F64(&t_emission),
+    ));
     tree.push_dataset(Dataset::new("x", shape.clone(), DataRef::F64(&x)));
     tree.push_dataset(Dataset::new("y", shape.clone(), DataRef::F64(&y)));
     tree.push_dataset(Dataset::new("z", shape.clone(), DataRef::F64(&z)));
@@ -388,20 +429,64 @@ fn write_photon_events_py(
     tree.push_dataset(Dataset::new("px", shape.clone(), DataRef::F64(&px)));
     tree.push_dataset(Dataset::new("py", shape.clone(), DataRef::F64(&py)));
     tree.push_dataset(Dataset::new("pz", shape.clone(), DataRef::F64(&pz)));
-    tree.push_dataset(Dataset::new("stokes_I", shape.clone(), DataRef::F64(&stokes_i)));
-    tree.push_dataset(Dataset::new("stokes_Q", shape.clone(), DataRef::F64(&stokes_q)));
-    tree.push_dataset(Dataset::new("stokes_U", shape.clone(), DataRef::F64(&stokes_u)));
-    tree.push_dataset(Dataset::new("stokes_V", shape.clone(), DataRef::F64(&stokes_v)));
-    tree.push_dataset(Dataset::new("doppler_factor", shape.clone(), DataRef::F64(&doppler)));
-    tree.push_dataset(Dataset::new("lorentz_factor", shape.clone(), DataRef::F64(&lorentz)));
+    tree.push_dataset(Dataset::new(
+        "stokes_I",
+        shape.clone(),
+        DataRef::F64(&stokes_i),
+    ));
+    tree.push_dataset(Dataset::new(
+        "stokes_Q",
+        shape.clone(),
+        DataRef::F64(&stokes_q),
+    ));
+    tree.push_dataset(Dataset::new(
+        "stokes_U",
+        shape.clone(),
+        DataRef::F64(&stokes_u),
+    ));
+    tree.push_dataset(Dataset::new(
+        "stokes_V",
+        shape.clone(),
+        DataRef::F64(&stokes_v),
+    ));
+    tree.push_dataset(Dataset::new(
+        "doppler_factor",
+        shape.clone(),
+        DataRef::F64(&doppler),
+    ));
+    tree.push_dataset(Dataset::new(
+        "lorentz_factor",
+        shape.clone(),
+        DataRef::F64(&lorentz),
+    ));
     tree.push_dataset(Dataset::new("beta_x", shape.clone(), DataRef::F64(&beta_x)));
     tree.push_dataset(Dataset::new("beta_y", shape.clone(), DataRef::F64(&beta_y)));
     tree.push_dataset(Dataset::new("beta_z", shape.clone(), DataRef::F64(&beta_z)));
-    tree.push_dataset(Dataset::new("optical_depth", shape.clone(), DataRef::F64(&optical_depth)));
-    tree.push_dataset(Dataset::new("cell_id", shape.clone(), DataRef::U64(&cell_id)));
-    tree.push_dataset(Dataset::new("absorbed", shape.clone(), DataRef::U8(&absorbed)));
-    tree.push_dataset(Dataset::new("n_scatter", shape.clone(), DataRef::U64(&n_scatter)));
-    tree.push_dataset(Dataset::new("frequencies", shape.clone(), DataRef::F64(&frequencies)));
+    tree.push_dataset(Dataset::new(
+        "optical_depth",
+        shape.clone(),
+        DataRef::F64(&optical_depth),
+    ));
+    tree.push_dataset(Dataset::new(
+        "cell_id",
+        shape.clone(),
+        DataRef::U64(&cell_id),
+    ));
+    tree.push_dataset(Dataset::new(
+        "absorbed",
+        shape.clone(),
+        DataRef::U8(&absorbed),
+    ));
+    tree.push_dataset(Dataset::new(
+        "n_scatter",
+        shape.clone(),
+        DataRef::U64(&n_scatter),
+    ));
+    tree.push_dataset(Dataset::new(
+        "frequencies",
+        shape.clone(),
+        DataRef::F64(&frequencies),
+    ));
 
     // run metadata as root attributes (the `meta_t` reader contract).
     tree.push_attr("dt", req_f64(sim_cond, "dt")?);
@@ -508,27 +593,26 @@ fn events_from_tree(tree: &TreeBuf) -> PyResult<PhotonEvents> {
     };
 
     // beta_vec: prefer the stored vector; else reconstruct radially from position + lorentz.
-    let (beta_x, beta_y, beta_z) =
-        match (f64col("beta_x"), f64col("beta_y"), f64col("beta_z")) {
-            (Ok(bx), Ok(by), Ok(bz)) => (bx, by, bz),
-            _ => {
-                let lorentz = f64col("lorentz_factor").unwrap_or_else(|_| vec![1.0; n]);
-                let mut bx = vec![0.0; n];
-                let mut by = vec![0.0; n];
-                let mut bz = vec![0.0; n];
-                for ii in 0..n {
-                    let w = lorentz[ii].max(1.0);
-                    let beta_mag = (1.0 - 1.0 / (w * w)).max(0.0).sqrt();
-                    let r = (x[ii] * x[ii] + y[ii] * y[ii] + z[ii] * z[ii]).sqrt();
-                    if r > 0.0 {
-                        bx[ii] = beta_mag * x[ii] / r;
-                        by[ii] = beta_mag * y[ii] / r;
-                        bz[ii] = beta_mag * z[ii] / r;
-                    }
+    let (beta_x, beta_y, beta_z) = match (f64col("beta_x"), f64col("beta_y"), f64col("beta_z")) {
+        (Ok(bx), Ok(by), Ok(bz)) => (bx, by, bz),
+        _ => {
+            let lorentz = f64col("lorentz_factor").unwrap_or_else(|_| vec![1.0; n]);
+            let mut bx = vec![0.0; n];
+            let mut by = vec![0.0; n];
+            let mut bz = vec![0.0; n];
+            for ii in 0..n {
+                let w = lorentz[ii].max(1.0);
+                let beta_mag = (1.0 - 1.0 / (w * w)).max(0.0).sqrt();
+                let r = (x[ii] * x[ii] + y[ii] * y[ii] + z[ii] * z[ii]).sqrt();
+                if r > 0.0 {
+                    bx[ii] = beta_mag * x[ii] / r;
+                    by[ii] = beta_mag * y[ii] / r;
+                    bz[ii] = beta_mag * z[ii] / r;
                 }
-                (bx, by, bz)
             }
-        };
+            (bx, by, bz)
+        }
+    };
 
     let mut events = Vec::with_capacity(n);
     for ii in 0..n {
@@ -580,7 +664,11 @@ fn lightcurve_from_events_py(
             "observer_direction must be a length-3 unit vector",
         ));
     }
-    let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
+    let nhat = [
+        observer_direction[0],
+        observer_direction[1],
+        observer_direction[2],
+    ];
     let lc = compute_lightcurve_from_events(
         &events.events,
         nhat,
@@ -639,7 +727,11 @@ fn skymap_deposit_py(
             "fields rho / gamma_beta / pre must have equal length",
         ));
     }
-    let hf = HydroFields { rho: &rho, gamma_beta: &gamma_beta, pre: &pre };
+    let hf = HydroFields {
+        rho: &rho,
+        gamma_beta: &gamma_beta,
+        pre: &pre,
+    };
     let md = mesh_data(mesh)?;
 
     // optional three-velocity components for lateral spreading (v1 mandatory if any given).
@@ -671,7 +763,11 @@ fn skymap_deposit_py(
     });
 
     const SECONDS_PER_DAY: f64 = 86_400.0;
-    let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
+    let nhat = [
+        observer_direction[0],
+        observer_direction[1],
+        observer_direction[2],
+    ];
     let emit_dt_s = (cond.dt * scales.time).value();
     let obs_time_s = obs_time * SECONDS_PER_DAY;
     let half_window_s = 0.5 * time_window * SECONDS_PER_DAY;
@@ -683,8 +779,20 @@ fn skymap_deposit_py(
         data_dim: md.data_dim,
     };
     Ok(compute_skymap_deposit(
-        &cond, &scales, &hf, &mesh, vels, nhat, obs_time_s, half_window_s, frequency, redshift,
-        doppler_power, n_pix, half_width, emit_dt_s,
+        &cond,
+        &scales,
+        &hf,
+        &mesh,
+        vels,
+        nhat,
+        obs_time_s,
+        half_window_s,
+        frequency,
+        redshift,
+        doppler_power,
+        n_pix,
+        half_width,
+        emit_dt_s,
     ))
 }
 

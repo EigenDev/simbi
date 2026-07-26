@@ -58,12 +58,17 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     let dx = 1.0 / n as f64;
     // uniform stationary state — every cell starts at rest, rho = 1, p = 1.
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([n]).spacing([dx])
+        .cells([n])
+        .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
         .build();
 
     // a uniform_accel SourceSpec mapping `g_ext_0 = 0.5`.
@@ -72,8 +77,9 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     // kernel — in EVERY step of the real evolve() loop.
     let g_ext_0 = 0.5_f64;
     let binding = FusedSourceBinding::new("uniform_accel", &[("g_ext_0", g_ext_0)]);
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)
-        .with_fused_source(binding);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)
+            .with_fused_source(binding);
 
     // march a short time. the fused-source contribution accumulates per RK
     // step inside evolve() — there is no manual `cons.mom += dt\cdot\rho\cdot g_ext` loop
@@ -88,13 +94,18 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     // so the assertion is "interior mean is in the right ballpark".
     let cells: Vec<[isize; 1]> = sim.geom.interior.iter().collect();
     let cnt = cells.len() as f64;
-    let mean_v: f64 = cells.iter()
+    let mean_v: f64 = cells
+        .iter()
         .map(|c| *sim.fields.prim.vel[0].view().at(*c))
-        .sum::<f64>() / cnt;
+        .sum::<f64>()
+        / cnt;
     let analytical_v = g_ext_0 * sim.time;
 
     // gas actually accelerated in the right direction:
-    assert!(mean_v > 0.0, "gas did not accelerate (mean v = {mean_v}); fused source binding did not reach the kernel");
+    assert!(
+        mean_v > 0.0,
+        "gas did not accelerate (mean v = {mean_v}); fused source binding did not reach the kernel"
+    );
     // and the magnitude is close to the analytical estimate (loose tol —
     // outflow boundary + finite-volume diffusion drag the mean slightly):
     assert!(
@@ -104,10 +115,12 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     );
     // density should stay close to 1 — the mom overlay alone (energy side
     // is also applied for adiabatic, but the gas frame stays near-uniform):
-    let rho_min = cells.iter()
+    let rho_min = cells
+        .iter()
         .map(|c| *sim.fields.prim.rho.view().at(*c))
         .fold(f64::INFINITY, f64::min);
-    let rho_max = cells.iter()
+    let rho_max = cells
+        .iter()
         .map(|c| *sim.fields.prim.rho.view().at(*c))
         .fold(f64::NEG_INFINITY, f64::max);
     assert!(
@@ -125,22 +138,29 @@ fn adiabatic_evolve_without_binding_stays_at_rest() {
     let n = 32usize;
     let dx = 1.0 / n as f64;
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([n]).spacing([dx])
+        .cells([n])
+        .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .timestepping(Timestepping::Euler)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
         .build();
 
     // no `with_fused_source` — the kernel-set has `fused_source: None`,
     // godunov_euler routes through the UNFUSED `dispatch_godunov`. this is
     // the prior (pre-Phase-4b) behavior, preserved by the routing default.
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     evolve(&mut sim, &sub, 0.05).expect("unfused evolve failed");
 
     let cells: Vec<[isize; 1]> = sim.geom.interior.iter().collect();
-    let max_abs_v: f64 = cells.iter()
+    let max_abs_v: f64 = cells
+        .iter()
         .map(|c| sim.fields.prim.vel[0].view().at(*c).abs())
         .fold(0.0_f64, f64::max);
     assert!(

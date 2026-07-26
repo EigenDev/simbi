@@ -69,7 +69,15 @@ where
     /// is kept everywhere else. a floor-free robustness layer: cells the sharp scheme cannot recover
     /// fall back to the diffusive-but-robust first-order update with no pressure floor. host-gated
     /// on a failure reduction, so a clean substage pays only the scan. default: no-op.
-    fn fofc(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _a0: f64, _ac: f64, _stage: u8) {}
+    fn fofc(
+        &self,
+        _store: &FieldStore<NDIM, DOF, Mem, Sc>,
+        _dt: f64,
+        _a0: f64,
+        _ac: f64,
+        _stage: u8,
+    ) {
+    }
 
     /// whether this kernel set runs FOFC (`fofc` is non-trivial). when true the driver also takes the
     /// per-stage `u_stage` snapshot every substage (FOFC restores `cons <- u_stage` to reconstruct the

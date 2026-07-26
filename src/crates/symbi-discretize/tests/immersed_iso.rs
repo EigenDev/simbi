@@ -17,7 +17,7 @@ mod harness;
 use harness::{KernelRun, Out};
 
 use symbi_discretize::{
-    body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, Coords,
+    Coords, body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv,
 };
 
 const NX: usize = 6;
@@ -40,13 +40,28 @@ const DELTA0: f64 = 0.3;
 fn iso_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
     vec![
         ("dt", DT),
-        ("x_lo_0", X0), ("dx_0", DX), ("x_lo_1", Y0), ("dx_1", DY),
-        ("body_0_mass", M0), ("body_0_soft", SOFT0), ("body_0_pos_0", 0.0), ("body_0_pos_1", 0.0),
-        ("body_0_racc", RACC0), ("body_0_sink", sink0), ("body_0_delta", DELTA0),
-        ("body_0_vel_0", 0.0), ("body_0_vel_1", 0.0),
-        ("body_1_mass", 0.0), ("body_1_soft", 1.0), ("body_1_pos_0", 5.0), ("body_1_pos_1", -3.0),
-        ("body_1_racc", 1.0), ("body_1_sink", 0.0), ("body_1_delta", 1.0),
-        ("body_1_vel_0", 0.0), ("body_1_vel_1", 0.0),
+        ("x_lo_0", X0),
+        ("dx_0", DX),
+        ("x_lo_1", Y0),
+        ("dx_1", DY),
+        ("body_0_mass", M0),
+        ("body_0_soft", SOFT0),
+        ("body_0_pos_0", 0.0),
+        ("body_0_pos_1", 0.0),
+        ("body_0_racc", RACC0),
+        ("body_0_sink", sink0),
+        ("body_0_delta", DELTA0),
+        ("body_0_vel_0", 0.0),
+        ("body_0_vel_1", 0.0),
+        ("body_1_mass", 0.0),
+        ("body_1_soft", 1.0),
+        ("body_1_pos_0", 5.0),
+        ("body_1_pos_1", -3.0),
+        ("body_1_racc", 1.0),
+        ("body_1_sink", 0.0),
+        ("body_1_delta", 1.0),
+        ("body_1_vel_0", 0.0),
+        ("body_1_vel_1", 0.0),
     ]
 }
 
@@ -90,7 +105,10 @@ fn iso_gravity_matches_adiabatic_exactly() {
             let c = [i, j];
             for w in ["den_new", "mom_0_new", "mom_1_new"] {
                 let (a, b) = (iso.get(c, w), adia.get(c, w));
-                assert!((a - b).abs() < 1e-14, "iso vs adiabatic {w} ({i},{j}): {a} vs {b}");
+                assert!(
+                    (a - b).abs() < 1e-14,
+                    "iso vs adiabatic {w} ({i},{j}): {a} vs {b}"
+                );
             }
         }
     }
@@ -107,9 +125,18 @@ fn iso_source_gravity_only_matches_analytic() {
             let r_eff = (x * x + y * y + SOFT0 * SOFT0).sqrt();
             let inv_r3 = 1.0 / r_eff.powi(3);
             let c = [i, j];
-            assert!(rel(out.get(c, "den_new"), 2.0) < 1e-12, "den unchanged ({i},{j})");
-            assert!(rel(out.get(c, "mom_0_new"), DT * 2.0 * (-M0 * x * inv_r3)) < 1e-12, "mom0 ({i},{j})");
-            assert!(rel(out.get(c, "mom_1_new"), DT * 2.0 * (-M0 * y * inv_r3)) < 1e-12, "mom1 ({i},{j})");
+            assert!(
+                rel(out.get(c, "den_new"), 2.0) < 1e-12,
+                "den unchanged ({i},{j})"
+            );
+            assert!(
+                rel(out.get(c, "mom_0_new"), DT * 2.0 * (-M0 * x * inv_r3)) < 1e-12,
+                "mom0 ({i},{j})"
+            );
+            assert!(
+                rel(out.get(c, "mom_1_new"), DT * 2.0 * (-M0 * y * inv_r3)) < 1e-12,
+                "mom1 ({i},{j})"
+            );
         }
     }
 }
@@ -141,13 +168,22 @@ fn iso_source_accretion_matches_spec() {
             let f = (-drain_rate * DT).exp();
             let c = [i, j];
             assert!(rel(out.get(c, "den_new"), den * f) < 1e-11, "den ({i},{j})");
-            assert!(rel(out.get(c, "mom_0_new"), mom_grav[0] * f) < 1e-11, "mom0 ({i},{j})");
-            assert!(rel(out.get(c, "mom_1_new"), mom_grav[1] * f) < 1e-11, "mom1 ({i},{j})");
+            assert!(
+                rel(out.get(c, "mom_0_new"), mom_grav[0] * f) < 1e-11,
+                "mom0 ({i},{j})"
+            );
+            assert!(
+                rel(out.get(c, "mom_1_new"), mom_grav[1] * f) < 1e-11,
+                "mom1 ({i},{j})"
+            );
             // the design invariant: velocity (mom/den) is invariant under the drain (gravity aside).
             // check the drained state's velocity equals the gravity-updated velocity.
             let v_drained = out.get(c, "mom_0_new") / out.get(c, "den_new");
             let v_grav = mom_grav[0] / den;
-            assert!((v_drained - v_grav).abs() < 1e-11, "velocity not drain-invariant ({i},{j})");
+            assert!(
+                (v_drained - v_grav).abs() < 1e-11,
+                "velocity not drain-invariant ({i},{j})"
+            );
         }
     }
     let any_removed = out.values("den_new").iter().any(|&d| d < den - 1e-9);
@@ -164,7 +200,12 @@ fn iso_feedback_matches_adiabatic_when_cs_matches() {
     let nrg = CS * CS * den / (gamma * (gamma - 1.0)); // mom=0 -> ke=0
     let iso = KernelRun::new(body_feedback_iso_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
         .grid([NX, NY])
-        .fields(&[("den", den), ("mom_0", 0.0), ("mom_1", 0.0), ("pre", CS * CS * den)])
+        .fields(&[
+            ("den", den),
+            ("mom_0", 0.0),
+            ("mom_1", 0.0),
+            ("pre", CS * CS * den),
+        ])
         .scalars(&iso_scalars(SINK0))
         .run();
     let adia = KernelRun::new(body_feedback_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
@@ -177,7 +218,10 @@ fn iso_feedback_matches_adiabatic_when_cs_matches() {
             let c = [i, j];
             for w in ["b0_f0", "b0_f1", "b0_t2", "b0_m"] {
                 let (a, b) = (iso.get(c, w), adia.get(c, w));
-                assert!((a - b).abs() < 1e-11, "iso vs adiabatic feedback {w} ({i},{j}): {a} vs {b}");
+                assert!(
+                    (a - b).abs() < 1e-11,
+                    "iso vs adiabatic feedback {w} ({i},{j}): {a} vs {b}"
+                );
             }
         }
     }
