@@ -297,6 +297,45 @@ where
             .then_some((level, coord))
     }
 
+    fn tracer_layout(&self, level: usize) -> symbi_sim::tracers::TransportLayout<NDIM> {
+        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
+            self.levels[0].state.geom.interior.spaces[aa].size()
+        });
+        let scale = 1usize << level;
+        let interior = &self.levels[level].state.geom.interior;
+        symbi_sim::tracers::TransportLayout {
+            global_cells: std::array::from_fn(|aa| root_cells[aa] * scale),
+            tile_offset: std::array::from_fn(|aa| interior.spaces[aa].lo as usize),
+            level: level as u8,
+        }
+    }
+
+    fn tracer_owner_is_active(
+        &self,
+        owner: symbi_sim::mass_transport::ContainerId,
+    ) -> bool {
+        self.tracer_cell(owner).is_some_and(|(level, coord)| {
+            !self.levels[level]
+                .coverage
+                .as_ref()
+                .is_some_and(|coverage| coverage.contains(coord))
+        })
+    }
+
+    fn sync_tracer_spawn_state(&mut self, source_level: usize) {
+        let Some(source) = self.levels[source_level].state.tracers.as_ref() else {
+            return;
+        };
+        let next_id = source.next_id;
+        let injection_remainder = source.injection_remainder;
+        for level in &mut self.levels {
+            if let Some(tracers) = level.state.tracers.as_mut() {
+                tracers.next_id = next_id;
+                tracers.injection_remainder = injection_remainder;
+            }
+        }
+    }
+
     fn tracer_cell_mass(
         &self,
         owner: symbi_sim::mass_transport::ContainerId,
@@ -1401,19 +1440,7 @@ where
         );
         if self.levels[level].state.has_tracers() {
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-            let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
-                self.levels[0].state.geom.interior.spaces[aa].size()
-            });
-            let scale = 1usize << level;
-            let global_cells = std::array::from_fn(|aa| root_cells[aa] * scale);
-            let interior = &self.levels[level].state.geom.interior;
-            let layout = symbi_sim::tracers::TransportLayout {
-                global_cells,
-                tile_offset: std::array::from_fn(|aa| {
-                    interior.spaces[aa].lo as usize
-                }),
-                level: level as u8,
-            };
+            let layout = self.tracer_layout(level);
             let geometry = self.levels[level]
                 .state
                 .geom
@@ -1430,6 +1457,7 @@ where
                 a0,
                 ac,
             ));
+            injections.retain(|transfer| self.tracer_owner_is_active(transfer.destination));
             symbi_sim::tracers::fold_injection_ledger(
                 &mut self.injection_ledger,
                 injections,
@@ -1473,11 +1501,19 @@ where
         let has_finer = level + 1 < self.levels.len();
         if self.levels[level].state.has_tracers() {
             let ledger = std::mem::take(&mut self.injection_ledger);
-            symbi_sim::tracers::spawn_boundary_injection(
-                &mut self.levels[level].state,
+            let layout = self.tracer_layout(level);
+            let geometry = self.levels[level]
+                .state
+                .geom
+                .block_geometry(self.levels[level].state.physics.metric);
+            symbi_sim::tracers::spawn_boundary_injection_store(
+                &mut self.levels[level].state.store,
+                &geometry,
+                layout,
                 ledger,
             )
             .unwrap_or_else(|detail| panic!("tracer boundary injection: {detail}"));
+            self.sync_tracer_spawn_state(level);
         }
         self.level_tail_emf(level, dt);
         // the IBM surface physics on the FINEST level, once per its substep,

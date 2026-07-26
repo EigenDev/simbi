@@ -365,6 +365,20 @@ where
     let interior = sim.geom.interior.clone();
     let geometry = sim.geom.block_geometry(sim.physics.metric);
     let layout = TransportLayout::single(&interior);
+    spawn_boundary_injection_store(&mut sim.store, &geometry, layout, ledger)
+}
+
+pub fn spawn_boundary_injection_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    ledger: std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>,
+) -> Result<usize, String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
     let Some(mut tracers) = sim.tracers.take() else {
         return Ok(0);
     };
