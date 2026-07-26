@@ -682,7 +682,7 @@ pub fn godunov_stage_gv_with_fused_built(
     mag_from_bcell: bool,
     // immersed-body count. > 0 wraps the post-combine cons with `body_evolved_gv` (gravity +
     // accretion drain) at weight `ac*dt`, so the single fused sweep IS `plain godunov + source_apply
-    // + body_source`, in that order, bit-for-bit. 0 leaves the update body-free. adiabatic only.
+    // + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
     n_bodies: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -1160,22 +1160,36 @@ pub fn godunov_stage_gv_with_fused_built(
     // `contribs` accumulation — the body wraps the final nodes. adiabatic (energy) only; the iso
     // body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
     let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
-        let nrg_in =
-            nrg_g.expect("fused body source requires has_energy (iso body fusion pending)");
-        let gamma = Gv::scalar("gamma");
-        let (den_b, mom_b, nrg_b) = crate::gv_immersed::body_evolved_gv(
-            rho_g,
-            &mom_g,
-            nrg_in,
-            ac_dt,
-            gamma,
-            n_bodies,
-            coords,
-            ndim as usize,
-            ncomp,
-            axes,
-        );
-        (den_b, mom_b, Some(nrg_b))
+        if let Some(nrg_in) = nrg_g {
+            let gamma = Gv::scalar("gamma");
+            let (den_b, mom_b, nrg_b) = crate::gv_immersed::body_evolved_gv(
+                rho_g,
+                &mom_g,
+                nrg_in,
+                ac_dt,
+                gamma,
+                n_bodies,
+                coords,
+                ndim as usize,
+                ncomp,
+                axes,
+            );
+            (den_b, mom_b, Some(nrg_b))
+        } else {
+            let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+            let (den_b, mom_b) = crate::gv_immersed::body_evolved_iso_gv(
+                rho_g,
+                &mom_g,
+                pre,
+                ac_dt,
+                n_bodies,
+                coords,
+                ndim as usize,
+                ncomp,
+                axes,
+            );
+            (den_b, mom_b, None)
+        }
     } else {
         (rho_g, mom_g, nrg_g)
     };

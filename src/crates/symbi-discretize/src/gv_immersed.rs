@@ -28,10 +28,6 @@ use super::coords::{Coords, Spacing};
 use super::gv::{CellGeometryGv, cell_geometry_gv};
 use symbi_ir::{Gv, GvKernel, begin_trace, end_trace};
 
-use symbi_hydro::regime_spec::law_params;
-use symbi_hydro::source_spec::{BuiltSource, lift_to_built, source_params};
-use symbi_hydro::source_term::BodySource;
-
 type Writes = Vec<(String, FieldBind, NodeId)>;
 
 #[inline]
@@ -276,7 +272,6 @@ pub(crate) fn body_evolved_gv(
     // applied as ONE uniform multiplicative factor (the exact-exponential
     // relaxation). the two operators split cleanly: gravity accelerates, then the mask drains.
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
-    let mut d_nrg = Gv::ZERO;
     let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(
@@ -285,9 +280,16 @@ pub(crate) fn body_evolved_gv(
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
         for comp in 0..ncomp {
             d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity force
-            d_nrg = d_nrg + mom[comp] * g_phys[comp]; // gravity work
         }
         total_rate = total_rate + bc.drain_rate;
+    }
+    // average-momentum work across the finite kick preserves internal energy:
+    // delta E = m.g dt + 0.5 rho |g|^2 dt^2.
+    let mut gravity_work = Gv::ZERO;
+    let mut force_sq = Gv::ZERO;
+    for comp in 0..ncomp {
+        gravity_work = gravity_work + mom[comp] * d_mom[comp] / den;
+        force_sq = force_sq + d_mom[comp] * d_mom[comp];
     }
 
     // f = exp(-total_rate * dt) in (0, 1]: uniform scaling of den, mom, nrg (intensive state
@@ -303,7 +305,7 @@ pub(crate) fn body_evolved_gv(
     let mom_new: Vec<Gv> = (0..ncomp)
         .map(|comp| (mom[comp] + dt * d_mom[comp]) * f)
         .collect();
-    let nrg_new = (nrg + dt * d_nrg) * f;
+    let nrg_new = (nrg + dt * gravity_work + Gv::from_f64(0.5) * dt * dt * force_sq / den) * f;
     (den_new, mom_new, nrg_new)
 }
 
@@ -773,140 +775,4 @@ pub fn body_feedback_iso_gv(
         ));
     }
     (end_trace(), writes)
-}
-
-// =============================================================================
-// fused additive body source (the frame-correct twin of `body_source_gv`)
-//
-// re-expresses the body source as `BuiltSource`s so it FUSES into the godunov
-// stage (one launch, no separate pass) via `godunov_stage_gv_with_fused_built`.
-// frame-correct for any geometry: the cell coord is lifted to Cartesian, the
-// shared `BodySource` carrier does the physics, and the Cartesian momentum source
-// is projected onto the physical coordinate basis. additive convention: reads the
-// SSP-stage prim (rho/vel/pre), applied with the `ac*dt` weight by the composer.
-// =============================================================================
-
-/// declare the shared per-cell leaves (INSIDE `lift_to_built`'s trace): gas state
-/// (rho, vel in CARTESIAN, cs), the cell CARTESIAN position, and the grid (min
-/// width, 1/dt). `has_energy` picks the cs closure: adiabatic = sqrt(gamma*pre/rho),
-/// iso = the constant `cs` scalar (exact for globally-isothermal; the cs only enters
-/// the accretion rate cap).
-fn body_scaffold(
-    coords: Coords,
-    ndim: usize,
-    ncomp: usize,
-    axes: &[usize],
-    has_energy: bool,
-) -> (Gv, [Gv; 3], [Gv; 3], Gv, Gv, Gv, [Gv; 3]) {
-    let rho = Gv::scalar(law_params::RHO);
-    let vel_phys: Vec<Gv> = (0..ncomp)
-        .map(|k| Gv::scalar(&law_params::vel(k)))
-        .collect();
-    let mut coord3 = [Gv::ZERO; 3];
-    for (g, &coord_idx) in axes.iter().enumerate() {
-        if coord_idx < 3 {
-            coord3[coord_idx] = Gv::scalar(&source_params::x(g));
-        }
-    }
-    let x_cart = to_cartesian_gv(coords, &coord3);
-    let vel_cart = vector_to_cartesian_gv(coords, &coord3, &vel_phys);
-    let cs = if has_energy {
-        let gamma = Gv::scalar("gamma");
-        let pre = Gv::scalar(law_params::PRE);
-        (gamma * pre / rho).sqrt()
-    } else {
-        Gv::scalar("cs")
-    };
-    let mut min_w = Gv::scalar("dx_0");
-    for g in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{g}")));
-    }
-    let inv_dt = Gv::ONE / Gv::scalar("dt");
-    (rho, vel_cart, x_cart, cs, min_w, inv_dt, coord3)
-}
-
-/// the b-th body's carrier (Cartesian Gv leaves) — params resolved by name from
-/// the immersed side-car at dispatch. `body_vec3` places the ndim pos/vel
-/// components on their Cartesian axes (the grid-plane convention).
-fn body_at(b: usize, ndim: usize, cart_axes: &[usize]) -> BodySource<Gv> {
-    BodySource {
-        mass: Gv::scalar(&format!("body_{b}_mass")),
-        xm: body_vec3(b, ndim, cart_axes, "pos"),
-        vm: body_vec3(b, ndim, cart_axes, "vel"),
-        soft: Gv::scalar(&format!("body_{b}_soft")),
-        racc: Gv::scalar(&format!("body_{b}_racc")),
-        sink: Gv::scalar(&format!("body_{b}_sink")),
-        delta: Gv::scalar(&format!("body_{b}_delta")),
-    }
-}
-
-/// the immersed-body source as FUSED-source `BuiltSource`s (gravity + Bondi
-/// accretion). returns (target_field, BuiltSource): "mom" (ncomp), "den" (1), and
-/// for energy-bearing regimes "nrg" (1).
-pub fn body_source_built(
-    coords: Coords,
-    ndim: usize,
-    ncomp: usize,
-    axes: &[usize],
-    n_bodies: usize,
-    has_energy: bool,
-) -> Vec<(String, BuiltSource)> {
-    let axes = axes.to_vec();
-    let cart_axes = body_cart_axes(coords, ndim, &axes);
-
-    let mom = {
-        let (axes, cart_axes) = (axes.clone(), cart_axes.clone());
-        lift_to_built(move || {
-            let (rho, vel_cart, x_cart, cs, min_w, inv_dt, coord3) =
-                body_scaffold(coords, ndim, ncomp, &axes, has_energy);
-            let mut s_cart = [Gv::ZERO; 3];
-            for b in 0..n_bodies {
-                let sm = body_at(b, ndim, &cart_axes)
-                    .momentum_cartesian(rho, &vel_cart, &x_cart, cs, min_w, inv_dt);
-                for k in 0..3 {
-                    s_cart[k] = s_cart[k] + sm[k];
-                }
-            }
-            vector_from_cartesian_gv(coords, &coord3, &s_cart, ncomp)
-        })
-    };
-
-    let den = {
-        let (axes, cart_axes) = (axes.clone(), cart_axes.clone());
-        lift_to_built(move || {
-            let (rho, _v, x_cart, cs, min_w, inv_dt, _c3) =
-                body_scaffold(coords, ndim, ncomp, &axes, has_energy);
-            let mut s = Gv::ZERO;
-            for b in 0..n_bodies {
-                s = s + body_at(b, ndim, &cart_axes).density(rho, cs, &x_cart, min_w, inv_dt);
-            }
-            vec![s]
-        })
-    };
-
-    let mut out = vec![("mom".to_string(), mom), ("den".to_string(), den)];
-
-    if has_energy {
-        let (axes, cart_axes) = (axes.clone(), cart_axes.clone());
-        let nrg = lift_to_built(move || {
-            let (rho, vel_cart, x_cart, cs, min_w, inv_dt, _c3) =
-                body_scaffold(coords, ndim, ncomp, &axes, has_energy);
-            let gamma = Gv::scalar("gamma");
-            let pre = Gv::scalar(law_params::PRE);
-            let e_int = pre / ((gamma - Gv::ONE) * rho);
-            let mut d_nrg = Gv::ZERO;
-            for b in 0..n_bodies {
-                let bsrc = body_at(b, ndim, &cart_axes);
-                let a = bsrc.accel(&x_cart);
-                let den_dot = bsrc.accretion_rate(rho, cs, &x_cart, min_w, inv_dt);
-                let vstar = bsrc.sink_velocity(&vel_cart, &x_cart);
-                let work = rho * (a[0] * vel_cart[0] + a[1] * vel_cart[1] + a[2] * vel_cart[2]);
-                let vstar2 = vstar[0] * vstar[0] + vstar[1] * vstar[1] + vstar[2] * vstar[2];
-                d_nrg = d_nrg + work - (Gv::from_f64(0.5) * vstar2 + e_int) * den_dot;
-            }
-            vec![d_nrg]
-        });
-        out.push(("nrg".to_string(), nrg));
-    }
-    out
 }
