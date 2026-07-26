@@ -54,10 +54,26 @@ pub fn interface_faces<const D: usize>(
     root_cells: [usize; D],
     coarse_level: u8,
 ) -> Vec<InterfaceFace<D>> {
+    interface_faces_with_layout(
+        coverage,
+        root_cells,
+        [0; D],
+        root_cells,
+        coarse_level,
+    )
+}
+
+pub fn interface_faces_with_layout<const D: usize>(
+    coverage: &Domain<D>,
+    parent_cells: [usize; D],
+    root_offset: [usize; D],
+    root_global_cells: [usize; D],
+    coarse_level: u8,
+) -> Vec<InterfaceFace<D>> {
     assert!(coarse_level < 63, "tracer refinement level exceeds 63");
     let coarse_scale = 1usize << coarse_level;
     let coarse_cells: [usize; D] =
-        std::array::from_fn(|aa| root_cells[aa] * coarse_scale);
+        std::array::from_fn(|aa| root_global_cells[aa] * coarse_scale);
     let fine_cells: [usize; D] =
         std::array::from_fn(|aa| coarse_cells[aa] * RATIO as usize);
     let mut result = Vec::new();
@@ -65,7 +81,9 @@ pub fn interface_faces<const D: usize>(
     for axis in 0..D {
         for high in [false, true] {
             if (!high && coverage.spaces[axis].lo == 0)
-                || (high && coverage.spaces[axis].hi == coarse_cells[axis] as isize)
+                || (high
+                    && coverage.spaces[axis].hi
+                        == parent_cells[axis] as isize * coarse_scale as isize)
             {
                 continue;
             }
@@ -100,16 +118,24 @@ pub fn interface_faces<const D: usize>(
                         coord[aa] / RATIO
                     }
                 });
+                let coarse_global: [isize; D] = std::array::from_fn(|aa| {
+                    coarse_cell_coord[aa]
+                        + (root_offset[aa] * coarse_scale) as isize
+                });
+                let fine_global: [isize; D] = std::array::from_fn(|aa| {
+                    fine_cell_coord[aa]
+                        + (root_offset[aa] * coarse_scale * RATIO as usize) as isize
+                });
                 result.push(InterfaceFace {
                     axis,
                     high,
                     fine_face: coord,
                     coarse_cell: cell_container_id(
-                        linear(coarse_cell_coord, coarse_cells),
+                        linear(coarse_global, coarse_cells),
                         coarse_level,
                     ),
                     fine_cell: cell_container_id(
-                        linear(fine_cell_coord, fine_cells),
+                        linear(fine_global, fine_cells),
                         coarse_level + 1,
                     ),
                 });

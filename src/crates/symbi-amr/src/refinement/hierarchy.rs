@@ -43,8 +43,8 @@ use symbi_grid::Field;
 use super::emf_register::EmfRegister;
 use super::flux_register::FluxRegister;
 use super::tracer_interface::{
-    InterfaceFace, InterfaceTransfer, interface_faces, interface_mass_transfers,
-    interface_transport_kernels,
+    InterfaceFace, InterfaceTransfer, interface_faces, interface_faces_with_layout,
+    interface_mass_transfers, interface_transport_kernels,
 };
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
@@ -164,6 +164,8 @@ where
     pub emf_registers: Vec<Option<EmfRegister<NDIM, Mem>>>,
     tracer_interfaces: Vec<Vec<InterfaceFace<NDIM>>>,
     tracer_interface_ledgers: Vec<std::cell::RefCell<Vec<InterfaceTransfer>>>,
+    tracer_root_global_cells: [usize; NDIM],
+    tracer_root_offset: [usize; NDIM],
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive / a sudden blowup from a
     /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
@@ -278,15 +280,15 @@ where
         let (level, mut linear) = symbi_sim::tracers::cell_container_address(owner)?;
         let level = level as usize;
         let scale = 1usize.checked_shl(level as u32)?;
-        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
-            self.levels[0].state.geom.interior.spaces[aa].size()
-        });
         let global_cells: [usize; NDIM] =
-            std::array::from_fn(|aa| root_cells[aa] * scale);
-        let coord = std::array::from_fn(|aa| {
+            std::array::from_fn(|aa| self.tracer_root_global_cells[aa] * scale);
+        let global_coord: [isize; NDIM] = std::array::from_fn(|aa| {
             let index = linear % global_cells[aa];
             linear /= global_cells[aa];
             index as isize
+        });
+        let coord = std::array::from_fn(|aa| {
+            global_coord[aa] - (self.tracer_root_offset[aa] * scale) as isize
         });
         self.levels
             .get(level)?
@@ -298,16 +300,40 @@ where
     }
 
     fn tracer_layout(&self, level: usize) -> symbi_sim::tracers::TransportLayout<NDIM> {
-        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
-            self.levels[0].state.geom.interior.spaces[aa].size()
-        });
         let scale = 1usize << level;
         let interior = &self.levels[level].state.geom.interior;
         symbi_sim::tracers::TransportLayout {
-            global_cells: std::array::from_fn(|aa| root_cells[aa] * scale),
-            tile_offset: std::array::from_fn(|aa| interior.spaces[aa].lo as usize),
+            global_cells: std::array::from_fn(|aa| {
+                self.tracer_root_global_cells[aa] * scale
+            }),
+            tile_offset: std::array::from_fn(|aa| {
+                self.tracer_root_offset[aa] * scale + interior.spaces[aa].lo as usize
+            }),
             level: level as u8,
         }
+    }
+
+    pub fn set_tracer_root_layout(
+        &mut self,
+        global_cells: [usize; NDIM],
+        tile_offset: [usize; NDIM],
+    ) {
+        self.tracer_root_global_cells = global_cells;
+        self.tracer_root_offset = tile_offset;
+        let parent_cells: [usize; NDIM] = std::array::from_fn(|aa| {
+            self.levels[0].state.geom.interior.spaces[aa].size()
+        });
+        self.tracer_interfaces = (0..self.levels.len().saturating_sub(1))
+            .map(|ll| {
+                interface_faces_with_layout(
+                    self.levels[ll].coverage.as_ref().unwrap(),
+                    parent_cells,
+                    tile_offset,
+                    global_cells,
+                    ll as u8,
+                )
+            })
+            .collect();
     }
 
     fn tracer_owner_is_active(
@@ -639,6 +665,9 @@ where
     /// a 1-level hierarchy: the degenerate case that must reproduce evolve()
     /// bit-for-bit.
     pub fn single(state: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>, kernels: K) -> Self {
+        let tracer_root_global_cells = std::array::from_fn(|aa| {
+            state.geom.interior.spaces[aa].size()
+        });
         Hierarchy {
             levels: vec![LevelData {
                 state,
@@ -656,6 +685,8 @@ where
             emf_registers: Vec::new(),
             tracer_interfaces: Vec::new(),
             tracer_interface_ledgers: Vec::new(),
+            tracer_root_global_cells,
+            tracer_root_offset: [0; NDIM],
             crash: None,
         }
     }
@@ -808,6 +839,8 @@ where
             emf_registers,
             tracer_interfaces,
             tracer_interface_ledgers,
+            tracer_root_global_cells: root_cells,
+            tracer_root_offset: [0; NDIM],
             crash: None,
         })
     }
@@ -2036,6 +2069,128 @@ where
     })
 }
 
+pub fn seed_decomposed_hierarchy_tracers<
+    R,
+    const NDIM: usize,
+    const DOF: usize,
+    M,
+    E,
+    S,
+    Mem,
+    K,
+>(
+    global: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    count: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let seeded = global.seed_mass_tracers(count);
+    for tile in tiles.iter_mut() {
+        for level in &mut tile.levels {
+            level.state.tracers = Some(symbi_sim::tracers::TracerSet {
+                weight: seeded.weight,
+                run_seed: seeded.run_seed,
+                next_id: seeded.next_id,
+                ..Default::default()
+            });
+        }
+    }
+    for ii in 0..seeded.len() {
+        let owner = seeded.owner[ii];
+        let destination = tiles
+            .iter()
+            .position(|tile| tile.tracer_owner_is_active(owner))
+            .expect("composite tracer seed has no decomposed owner");
+        let (level, coord) = tiles[destination]
+            .tracer_cell(owner)
+            .expect("decomposed tracer owner must resolve");
+        let x = tiles[destination].levels[level].state.geom.centroid(coord);
+        let tracers = tiles[destination].levels[level].state.tracers.as_mut().unwrap();
+        tracers.x.push(x);
+        tracers.id.push(seeded.id[ii]);
+        tracers.flags.push(seeded.flags[ii]);
+        tracers.owner.push(owner);
+        tracers.step_owner.push(seeded.step_owner[ii]);
+        tracers.step_flags.push(seeded.step_flags[ii]);
+    }
+}
+
+pub fn gather_decomposed_hierarchy_tracers<
+    R,
+    const NDIM: usize,
+    const DOF: usize,
+    M,
+    E,
+    S,
+    Mem,
+    K,
+>(
+    global: &mut Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    for level in 0..global.levels.len() {
+        let mut records = Vec::new();
+        let mut metadata = None;
+        for tile in tiles {
+            let Some(tracers) = tile
+                .levels
+                .get(level)
+                .and_then(|data| data.state.tracers.as_ref())
+            else {
+                continue;
+            };
+            metadata.get_or_insert((
+                tracers.weight,
+                tracers.run_seed,
+                tracers.next_id,
+                tracers.injection_remainder,
+            ));
+            records.extend((0..tracers.len()).map(|ii| {
+                (
+                    tracers.id[ii],
+                    tracers.x[ii],
+                    tracers.flags[ii],
+                    tracers.owner[ii],
+                    tracers.step_owner[ii],
+                    tracers.step_flags[ii],
+                )
+            }));
+        }
+        records.sort_unstable_by_key(|record| record.0);
+        let (weight, run_seed, next_id, injection_remainder) =
+            metadata.unwrap_or_default();
+        let mut gathered = symbi_sim::tracers::TracerSet {
+            weight,
+            run_seed,
+            next_id,
+            injection_remainder,
+            ..Default::default()
+        };
+        for (id, x, flags, owner, step_owner, step_flags) in records {
+            gathered.id.push(id);
+            gathered.x.push(x);
+            gathered.flags.push(flags);
+            gathered.owner.push(owner);
+            gathered.step_owner.push(step_owner);
+            gathered.step_flags.push(step_flags);
+        }
+        global.levels[level].state.tracers = Some(gathered);
+    }
+}
+
 /// exchange one LEVEL's halos across an ordered set of tiles (a sub-grid of shape `counts`), then
 /// per-tile `ghost_fill` at that level. `order[k]` is the tile index at flatten position `k`;
 /// `devices[k]` is order-aligned. cut faces are `CoarseFine` (so `ghost_fill` leaves them for the
@@ -2071,6 +2226,81 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
                 .kernels
                 .ghost_fill(&tiles[i].levels[level].state)
         });
+    }
+}
+
+fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let mut migrating = Vec::new();
+    for source in 0..tiles.len() {
+        if level >= tiles[source].levels.len() {
+            continue;
+        }
+        let destinations: std::collections::BTreeMap<u64, usize> = tiles[source].levels[level]
+            .state
+            .tracers
+            .as_ref()
+            .into_iter()
+            .flat_map(|tracers| tracers.id.iter().copied().zip(tracers.owner.iter().copied()))
+            .filter_map(|(id, owner)| {
+                tiles
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, tile)| {
+                        (index != source
+                            && tile
+                                .tracer_cell(owner)
+                                .is_some_and(|(owner_level, _)| owner_level == level))
+                        .then_some(index)
+                    })
+                    .map(|destination| (id, destination))
+            })
+            .collect();
+        let Some(tracers) = tiles[source].levels[level].state.tracers.as_mut() else {
+            continue;
+        };
+        let mut ii = 0usize;
+        while ii < tracers.len() {
+            let Some(&destination) = destinations.get(&tracers.id[ii]) else {
+                ii += 1;
+                continue;
+            };
+            tracers.x.swap_remove(ii);
+            migrating.push((
+                destination,
+                tracers.id.swap_remove(ii),
+                tracers.flags.swap_remove(ii),
+                tracers.owner.swap_remove(ii),
+                tracers.step_owner.swap_remove(ii),
+                tracers.step_flags.swap_remove(ii),
+            ));
+        }
+    }
+    for (destination, id, flags, owner, step_owner, step_flags) in migrating {
+        let (_, coord) = tiles[destination]
+            .tracer_cell(owner)
+            .expect("tracer destination tile owns the addressed cell");
+        let x = tiles[destination].levels[level].state.geom.centroid(coord);
+        let tracers = tiles[destination].levels[level]
+            .state
+            .tracers
+            .as_mut()
+            .expect("every decomposed hierarchy level carries tracers");
+        tracers.x.push(x);
+        tracers.id.push(id);
+        tracers.flags.push(flags);
+        tracers.owner.push(owner);
+        tracers.step_owner.push(step_owner);
+        tracers.step_flags.push(step_flags);
     }
 }
 
@@ -2146,6 +2376,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
             for i in 0..n {
                 symbi_xpu::with_device(devices[i], || tiles[i].level_stage(0, ii, gdt, 0.0));
             }
+            migrate_level_tracers(tiles, 0);
             exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
         }
         // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
@@ -2200,6 +2431,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                             tiles[i].level_stage(1, jj, fine_dt, alpha)
                         });
                     }
+                    migrate_level_tracers(tiles, 1);
                     exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
                 }
                 for (k, &i) in fg.order.iter().enumerate() {

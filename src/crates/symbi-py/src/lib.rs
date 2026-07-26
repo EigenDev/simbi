@@ -3583,7 +3583,9 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
 {
     use symbi::sim::decomp::{enable_peer_mesh, gather_interiors};
-    use symbi::sim::refinement::{evolve_hierarchy_decomposed, fine_subgrid};
+    use symbi::sim::refinement::{
+        evolve_hierarchy_decomposed, fine_subgrid, gather_decomposed_hierarchy_tracers,
+    };
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -3621,6 +3623,9 @@ where
         if let Some(fg) = &fg {
             let fines: Vec<_> = fg.order.iter().map(|&i| &*tiles[i].levels[1].state).collect();
             gather_interiors(&*global.levels[1].state, &fines, fg.counts);
+        }
+        if cfg.n_tracers > 0 {
+            gather_decomposed_hierarchy_tracers(&mut global, tiles);
         }
         let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
         let _ = write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index));
@@ -3834,6 +3839,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     h = h.with_bodies(build_bodies_and_horizon::<$d>(cfg));
                     h.attach_body_shapes(build_body_shapes(&cfg.bodies));
                 }
+                h.set_tracer_root_layout(n, tile_lo);
                 h.prime();
                 Ok(h)
             })?;
@@ -3842,7 +3848,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
         // the full-size OUTPUT hierarchy (root + the full region): gather scatters each level's tile
         // interiors into it. lives on device 0 (touched only at output).
-        let global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
+        let mut global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
             let groot = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
                 .cells(n)
                 .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
@@ -3889,6 +3895,14 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 .map_err(|e| format!("global fine seed: {e:?}"))?;
             Ok(gh)
         })?;
+        if cfg.n_tracers > 0 {
+            symbi::sim::refinement::seed_decomposed_hierarchy_tracers(
+                &global,
+                &mut tiles,
+                cfg.n_tracers,
+            );
+            global.attach_mass_tracers(cfg.n_tracers);
+        }
 
         run_refined_decomposed_loop(cfg, tiles, global, counts)
     }};
@@ -5905,10 +5919,13 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             );
         }
         if cfg.refinement_enabled {
-            if cfg.n_gpus > 1 {
+            if cfg.n_gpus > 1
+                && matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal")
+                && (!cfg.source_jsons.is_empty() || !cfg.driven_exprs.is_empty())
+            {
                 return Err(
-                    "n_tracers with refinement is single-device until decomposed hierarchy \
-                     ownership migration is wired"
+                    "n_tracers with decomposed refinement does not yet support runtime mass \
+                     sources or driven inflow until spawning is globally apportioned"
                         .to_string(),
                 );
             }
