@@ -2,9 +2,8 @@
 # tracers.py
 #
 # load + scatter lagrangian tracer particles from a checkpoint. reads the
-# `tracers` group (cell/reservoir ownership, derived position, exact identity,
-# provenance flags, and mass weight) and scatters the derived positions on a
-# 2D field plot.
+# `tracers` discrete-owner group or `continuous_tracers` ito group and scatters
+# the persisted positions on a 2D field plot.
 # the eulerian complement is a `chi` field plot (see the passive scalar); this is
 # the lagrangian view of the same transport.
 #
@@ -39,6 +38,8 @@ class TracerCloud:
     run_seed: int
     next_id: int
     injection_remainder: float
+    scheme: str = "discrete"
+    order: Optional[int] = None
 
     def __len__(self) -> int:
         return len(self.id)
@@ -248,12 +249,17 @@ def projected_gas_concentration(
 
 
 def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
-    """read the tracer population from a checkpoint's `tracers` group, or None when the
-    run carried no tracers."""
+    """read either tracer representation, preferring the continuous group."""
     with h5py.File(checkpoint_path, "r") as f:
-        if "tracers" not in f:
+        if "continuous_tracers" in f:
+            group_name = "continuous_tracers"
+            scheme = "ito"
+        elif "tracers" in f:
+            group_name = "tracers"
+            scheme = "discrete"
+        else:
             return None
-        g = f["tracers"]
+        g = f[group_name]
         return TracerCloud(
             position=np.asarray(g["position"], dtype=float),
             id=np.asarray(g["id"], dtype=np.uint64),
@@ -266,6 +272,8 @@ def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
             run_seed=int(g.attrs["run_seed"]),
             next_id=int(g.attrs["next_id"]),
             injection_remainder=float(g.attrs["injection_remainder"]),
+            scheme=scheme,
+            order=int(g.attrs["order"]) if "order" in g.attrs else None,
         )
 
 
@@ -297,7 +305,7 @@ def overlay_tracers(
     cloud = load_tracers(checkpoint_path)
     if cloud is None:
         print(
-            f"--draw-tracers: '{checkpoint_path}' has no 'tracers' group "
+            f"--draw-tracers: '{checkpoint_path}' has no tracer group "
             "(the run carried no tracers; set n_tracers > 0 to seed them)",
             file=sys.stderr,
         )
