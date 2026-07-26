@@ -307,8 +307,30 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--draw-tracers",
         action="store_true",
-        help="scatter the lagrangian tracer particles on the field plot (crossed-sink "
-        "crimson, escaped grey, live blue); follows --slice; no tracers draws nothing",
+        help="scatter mass-transport tracers on the field plot; follows --slice",
+    )
+    parser.add_argument(
+        "--tracers-only",
+        action="store_true",
+        help="render only the mass-transport tracer cloud without an eulerian field",
+    )
+    parser.add_argument(
+        "--tracer-render",
+        choices=["concentration", "scatter"],
+        default="concentration",
+        help="tracer-only rendering mode",
+    )
+    parser.add_argument(
+        "--tracer-smoothing",
+        type=float,
+        default=None,
+        help="concentration smoothing width in display cells; default is adaptive, 0 is exact",
+    )
+    parser.add_argument(
+        "--tracer-color-by",
+        choices=["flag", "id", "none"],
+        default="flag",
+        help="scatter-mode tracer coloring",
     )
     parser.add_argument(
         "--draw-horizon",

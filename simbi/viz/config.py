@@ -41,8 +41,8 @@ class FigureConfig(BaseModel):
     # overlay the black-hole event horizon (and excision surface) of a curved-spacetime
     # run, read from the checkpoint metadata; a flat (minkowski) run draws nothing.
     draw_horizon: bool = False
-    # scatter the lagrangian tracer particles on the field plot (crossed-sink crimson,
-    # escaped grey, live blue); a run with no `tracers` group draws nothing.
+    # scatter mass-transport tracers on the field plot; a run with no
+    # `tracers` group draws nothing.
     draw_tracers: bool = False
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}

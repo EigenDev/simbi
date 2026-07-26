@@ -100,6 +100,7 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "tmin",
         "tmax",
         "stride",
+        "tracers_only",
     }
     pass_through_kwargs = {
         k: v for k, v in cli_args.items() if k not in processed_args
@@ -118,11 +119,26 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "coordinate_bin": api.plot_coordinate_profile_overlay,
     }
 
+    tracers_only = getattr(args, "tracers_only", False)
+    if tracers_only and (is_overlay or is_animation):
+        print("Error: --tracers-only does not support --overlay or --animate")
+        sys.exit(1)
+    if tracers_only and args.vector_fields:
+        print("Error: --tracers-only does not support --vector-fields")
+        sys.exit(1)
+
     if is_overlay and is_animation:
         print("Error: --overlay and --animate are mutually exclusive")
         sys.exit(1)
 
-    if is_overlay:
+    if tracers_only:
+        api.plot_tracers(
+            config=config,
+            file=args.files[0],
+            save_as=args.save_as,
+            **pass_through_kwargs,
+        )
+    elif is_overlay:
         if plot_type not in overlay_dispatch:
             print(f"Error: overlay not supported for plot type '{plot_type}'")
             sys.exit(1)

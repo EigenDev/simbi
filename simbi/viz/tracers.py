@@ -42,6 +42,57 @@ class TracerCloud:
         return len(self.id)
 
 
+def _smooth_grid(values: np.ndarray, sigma: float) -> np.ndarray:
+    """apply a normalized separable gaussian display kernel."""
+    if sigma <= 0.0:
+        return values
+    radius = max(1, int(np.ceil(3.0 * sigma)))
+    offsets = np.arange(-radius, radius + 1, dtype=float)
+    kernel = np.exp(-0.5 * (offsets / sigma) ** 2)
+    kernel /= kernel.sum()
+
+    result = values
+    for axis in range(2):
+        padding = [(0, 0), (0, 0)]
+        padding[axis] = (radius, radius)
+        padded = np.pad(result, padding, mode="edge")
+        result = np.apply_along_axis(
+            lambda row: np.convolve(row, kernel, mode="valid"),
+            axis,
+            padded,
+        )
+    return result
+
+
+def tracer_concentration(
+    cloud: TracerCloud,
+    x_edges: np.ndarray,
+    y_edges: np.ndarray,
+    plane: tuple[str, str] = ("x", "y"),
+    smoothing: Optional[float] = None,
+) -> np.ndarray:
+    """estimate projected tracer mass per area on the supplied display mesh."""
+    axes = tuple(_AXIS[name] for name in plane)
+    reservoir_bits = np.uint64((1 << 63) | (1 << 62))
+    live = (cloud.owner & reservoir_bits) == 0
+    positions = cloud.position[live]
+    weights = np.full(len(positions), cloud.weight, dtype=float)
+    mass, _, _ = np.histogram2d(
+        positions[:, axes[1]],
+        positions[:, axes[0]],
+        bins=(y_edges, x_edges),
+        weights=weights,
+    )
+    if smoothing is None:
+        cells_per_tracer = mass.size / max(len(positions), 1)
+        smoothing = min(6.0, max(0.75, 0.5 * np.sqrt(cells_per_tracer)))
+    if not np.isfinite(smoothing) or smoothing < 0.0:
+        raise ValueError("tracer smoothing must be finite and non-negative")
+    smoothed_mass = _smooth_grid(mass, smoothing)
+    area = np.outer(np.diff(y_edges), np.diff(x_edges))
+    return smoothed_mass / area
+
+
 def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
     """read the tracer population from a checkpoint's `tracers` group, or None when the
     run carried no tracers."""
