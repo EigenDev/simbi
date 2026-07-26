@@ -31,6 +31,29 @@ use symbi_hydro::FieldSpec;
 pub use symbi_io::{Attr, IoError, Metadata, Result};
 use symbi_io::{DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf};
 
+fn write_tree_atomic(path: &Path, tree: &Tree<'_>) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| IoError::MissingPath(format!("checkpoint path has no file name: {path:?}")))?;
+    let temporary = path.with_file_name(format!(
+        ".{}.tmp.{}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    ));
+    if temporary.exists() {
+        std::fs::remove_file(&temporary)?;
+    }
+    if let Err(error) = Hdf5Backend.write(&temporary, tree) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&temporary, path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error.into());
+    }
+    Ok(())
+}
+
 // =============================================================================
 // CheckpointSchedule — unchanged, owned here for historical compatibility.
 // =============================================================================
@@ -1163,7 +1186,7 @@ where
     if let Some(snap) = continuous_snap.as_ref() {
         tree.push_group(continuous_tracer_group::<D>(snap));
     }
-    Hdf5Backend.write(Path::new(path), &tree)
+    write_tree_atomic(Path::new(path), &tree)
 }
 
 /// **AMR checkpoint** — write an entire refinement hierarchy into ONE file as
@@ -1278,7 +1301,7 @@ where
                 )),
         );
     }
-    Hdf5Backend.write(Path::new(path), &root)
+    write_tree_atomic(Path::new(path), &root)
 }
 
 // =============================================================================

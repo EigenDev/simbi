@@ -2022,14 +2022,6 @@ where
         return Ok(());
     }
 
-    let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
-    let final_path =
-        checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-    let t_io = std::time::Instant::now();
-    symbi_sim::driver::prof("checkpoint_io", || {
-        write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))
-    })?;
-    io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
     let root = &hier.levels[0].state;
     // fail-loud completion: a run whose FINAL state is non-finite must never
     // wear the green box — the in-loop NaN guard only fires on the NEXT cfl,
@@ -2040,6 +2032,29 @@ where
         .interior
         .iter()
         .all(|c| root.fields.cons.den.view().at(c).is_finite());
+    if !final_finite {
+        let states: Vec<&_> = hier.levels.iter().map(|level| &level.state).collect();
+        let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
+        write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index))?;
+        screen.leave();
+        table.set_dynamic(false);
+        let summary = format!(
+            "CRASHED — final state is non-finite (NaN/inf density) after {} steps at t = {:.4}; \
+             diagnostic state {crashed}",
+            root.iteration, root.time,
+        );
+        table.post_error(&summary);
+        table.exit_frame(ExitKind::Crash, &summary);
+        return Err(summary.into());
+    }
+
+    let states: Vec<&_> = hier.levels.iter().map(|level| &level.state).collect();
+    let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+    let t_io = std::time::Instant::now();
+    symbi_sim::driver::prof("checkpoint_io", || {
+        write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))
+    })?;
+    io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
     let wall = start.elapsed().as_secs_f64();
     // the sustained integration rate excludes checkpoint i/o: what the solver
     // delivers between writes, and the number comparable across run lengths
@@ -2054,26 +2069,15 @@ where
     // run's summary persists on the primary buffer.
     screen.leave();
     table.set_dynamic(false);
-    let summary = if final_finite {
-        format!(
-            "complete — {} steps, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
-            root.iteration,
-            root.time,
-            wall,
-            io_secs.get(),
-            humanize_rate(avg),
-        )
-    } else {
-        format!(
-            "CRASHED — final state is non-finite (NaN/inf density) after {} steps at t = {:.4};              the written checkpoint holds garbage. suspect a degenerate parameter set (dt = {:.3e})",
-            root.iteration, root.time, root.dt,
-        )
-    };
-    if final_finite {
-        table.post_success(&summary);
-    } else {
-        table.post_error(&summary);
-    }
+    let summary = format!(
+        "complete — {} steps, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
+        root.iteration,
+        root.time,
+        wall,
+        io_secs.get(),
+        humanize_rate(avg),
+    );
+    table.post_success(&summary);
     // FOFC run total: report the deliberate fallbacks over the whole run (a quiet run shows
     // nothing). on a horizon-split run the exterior count is the acceptance criterion
     // (exterior == 0 for a production run); the interior tally is informational.
@@ -2093,7 +2097,7 @@ where
             ));
         }
     }
-    table.exit_frame(if final_finite { ExitKind::Success } else { ExitKind::Crash }, &summary);
+    table.exit_frame(ExitKind::Success, &summary);
     dump_profile_if_enabled(root.iteration, n_zones);
     Ok(())
 }
