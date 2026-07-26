@@ -756,11 +756,9 @@ fn gen_godunov_stage(
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the IMMERSED-BODY source fused into the godunov stage (frame-correct: Cartesian
-// physics projected onto the physical basis). its own bake — the body source is a
-// set of coord-dependent `BuiltSource`s (`body_source_built`); being coord-dependent, it
-// doesn't ride the coord-agnostic `SourceSpec` FUSED_FAMILIES loop. one launch:
-// `cons_new = godunov(cons) + ac*dt*(gravity + accretion)` for MAX_SOURCE_BODIES bodies.
+// the immersed-body source fused into the godunov stage. the shared body
+// operator applies the finite gravity kick and exact-exponential drain directly
+// to the combined stage state, matching the standalone device pass.
 fn gen_godunov_with_body_source(
     out_dir: &str,
     ndim: u8,
@@ -772,16 +770,7 @@ fn gen_godunov_with_body_source(
         "{prefix}_godunov_stage_with_body_source{}_{ndim}d",
         geom.suffix()
     );
-    let built = symbi_discretize::body_source_built(
-        geom.coords,
-        ndim as usize,
-        geom.ncomp as usize,
-        &geom.axes,
-        MAX_SOURCE_BODIES,
-        has_energy,
-    );
-    let refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
-        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let refs: [(&str, &symbi_hydro::source_spec::BuiltSource); 0] = [];
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         geom.coords,
         symbi_discretize::Spacetime::Minkowski,
@@ -793,7 +782,7 @@ fn gen_godunov_with_body_source(
         geo_source(prefix),
         &refs,
         /* mag_from_bcell = */ false,
-        /* n_bodies = */ 0,
+        /* n_bodies = */ MAX_SOURCE_BODIES,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }

@@ -42,8 +42,12 @@ fn body_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
         ("gamma", GAMMA),
         ("x_lo_0", X0),
         ("dx_0", DX),
+        ("map_kind_0", 0.0),
+        ("map_param_0", 1.0),
         ("x_lo_1", Y0),
         ("dx_1", DY),
+        ("map_kind_1", 0.0),
+        ("map_param_1", 1.0),
         ("body_0_mass", M0),
         ("body_0_soft", SOFT0),
         ("body_0_pos_0", 0.0),
@@ -87,7 +91,8 @@ fn rel(a: f64, b: f64) -> f64 {
 
 #[test]
 fn body_source_gravity_only_matches_analytic() {
-    // sink=0 -> accretion off; only gravity acts. fluid at rest (mom=0) so nrg is unchanged.
+    // sink=0 -> accretion off; only gravity acts. the finite kick adds the
+    // kinetic energy carried by its new momentum, leaving internal energy fixed.
     let out = run(0.0, 2.0, 0.0, 0.0, 5.0);
     for i in 0..NX {
         for j in 0..NY {
@@ -111,10 +116,14 @@ fn body_source_gravity_only_matches_analytic() {
                 rel(out.get(c, "mom_1_new"), DT * 2.0 * gy) < 1e-12,
                 "mom1 ({i},{j})"
             );
+            let mom_x = DT * 2.0 * gx;
+            let mom_y = DT * 2.0 * gy;
+            let kinetic = 0.5 * (mom_x * mom_x + mom_y * mom_y) / 2.0;
+            let nrg_new = out.get(c, "nrg_new");
+            assert!(rel(nrg_new, 5.0 + kinetic) < 1e-12, "nrg ({i},{j})");
             assert!(
-                rel(out.get(c, "nrg_new"), 5.0) < 1e-12,
-                "nrg (mom=0 -> no work) ({i},{j}): {}",
-                out.get(c, "nrg_new")
+                rel(nrg_new - kinetic, 5.0) < 1e-12,
+                "gravity changed internal energy ({i},{j})"
             );
         }
     }
@@ -146,7 +155,9 @@ fn body_source_accretion_matches_spec() {
             // conserved component by f = exp(-drain_rate*dt).
             let g = [-M0 * rvec[0] / r_eff3, -M0 * rvec[1] / r_eff3];
             let mom_grav = [m0_in + DT * den_in * g[0], m1_in + DT * den_in * g[1]];
-            let nrg_grav = nrg_in + DT * (m0_in * g[0] + m1_in * g[1]);
+            let g2 = g[0] * g[0] + g[1] * g[1];
+            let nrg_grav =
+                nrg_in + DT * (m0_in * g[0] + m1_in * g[1]) + 0.5 * den_in * g2 * DT * DT;
             let chi = 0.5 * (1.0 - ((r_mag - RACC0) / min_w).tanh());
             let drain_rate = chi * SINK0.min(cs / min_w);
             let f = (-drain_rate * DT).exp();
