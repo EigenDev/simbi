@@ -59,24 +59,32 @@ def plot_tracers(
     **kwargs,
 ) -> Figure:
     """render an ownership-derived tracer cloud without an eulerian field."""
-    from .bodies import slice_to_plane
     from .tracers import (
         cohort_to_gas_ratio,
         load_tracers,
         overlay_tracers,
+        projected_gas_concentration,
         tracer_concentration,
+        tracer_projection,
     )
 
     sim_data = load_data(file)
-    if sim_data.metadata.coord_system != "cartesian":
-        raise ValueError("--tracers-only currently supports cartesian coordinates")
     if sim_data.mesh.ndim < 2:
         raise ValueError("--tracers-only requires a 2d or 3d checkpoint")
-
-    mapped = slice_to_plane(config.plot.slice)
-    if mapped is None:
-        raise ValueError("--tracers-only requires a 2d plane, not a 1d slice")
-    plane, at = mapped
+    coord_system = sim_data.metadata.coord_system
+    collapsed_axis = None
+    if config.plot.slice:
+        if len(config.plot.slice) != 1:
+            raise ValueError("--tracers-only requires a 2d projection, not a 1d slice")
+        axis_name = next(iter(config.plot.slice))
+        if axis_name not in {"x1", "x2", "x3"}:
+            raise ValueError(f"unknown tracer projection axis '{axis_name}'")
+        collapsed_axis = int(axis_name[1]) - 1
+    chart = tracer_projection(
+        coord_system,
+        sim_data.mesh.ndim,
+        collapsed_axis,
+    )
     cloud = load_tracers(file)
     if cloud is None:
         raise ValueError(f"checkpoint '{file}' has no tracer population")
@@ -86,18 +94,17 @@ def plot_tracers(
     figure = prepare_figure(
         config,
         1,
-        projection="cartesian",
-        coord_system=CoordSystem.CARTESIAN,
+        projection=chart.projection,
+        coord_system=CoordSystem(coord_system),
     )
     figure.render()
     ax = figure.axes["main"]
-    vertices = {
-        "x": sim_data.mesh.x1v,
-        "y": sim_data.mesh.x2v,
-        "z": sim_data.mesh.x3v,
-    }
-    x_edges = vertices[plane[0]]
-    y_edges = vertices[plane[1]]
+    vertices = tuple(
+        np.asarray(getattr(sim_data.mesh, f"x{axis + 1}v"))
+        for axis in range(sim_data.mesh.ndim)
+    )
+    x_edges = vertices[chart.plane[0]]
+    y_edges = vertices[chart.plane[1]]
     if tracer_render in {"concentration", "cohort-ratio"}:
         if tracer_render == "cohort-ratio" and tracer_cohort is None:
             raise ValueError("--tracer-render cohort-ratio requires --tracer-cohort")
@@ -105,7 +112,7 @@ def plot_tracers(
             cloud,
             x_edges,
             y_edges,
-            plane=plane,
+            plane=chart.plane,
             smoothing=tracer_smoothing,
             cohort=tracer_cohort,
         )
@@ -116,14 +123,17 @@ def plot_tracers(
         label = "tracer concentration / mean"
         if tracer_render == "cohort-ratio":
             rho = np.squeeze(sim_data.get_field("rho", crop_to_owned=True))
-            if rho.shape != concentration.shape:
-                if rho.T.shape == concentration.shape:
-                    rho = rho.T
-                else:
-                    raise ValueError(
-                        "cohort-ratio projection is not defined for this checkpoint slice"
-                    )
-            ratio = cohort_to_gas_ratio(concentration, rho, display_area)
+            gas_concentration = projected_gas_concentration(
+                rho,
+                vertices,
+                coord_system,
+                chart,
+            )
+            ratio = cohort_to_gas_ratio(
+                concentration,
+                gas_concentration,
+                display_area,
+            )
             normalized = np.log10(np.maximum(ratio, np.finfo(float).tiny))
             cmap = "coolwarm"
             label = f"log10 cohort {tracer_cohort} / gas concentration"
@@ -143,20 +153,20 @@ def plot_tracers(
         overlay_tracers(
             ax,
             file,
-            plane=plane,
-            at=at,
+            plane=chart.plane,
             color_by=tracer_color_by,
         )
     else:
         raise ValueError(f"unknown tracer rendering mode '{tracer_render}'")
 
     if config.figure.xlims is None:
-        ax.set_xlim(float(vertices[plane[0]][0]), float(vertices[plane[0]][-1]))
+        ax.set_xlim(float(x_edges[0]), float(x_edges[-1]))
     if config.figure.ylims is None:
-        ax.set_ylim(float(vertices[plane[1]][0]), float(vertices[plane[1]][-1]))
-    ax.set_xlabel(config.figure.xlabel or plane[0])
-    ax.set_ylabel(config.figure.ylabel or plane[1])
-    ax.set_aspect("equal")
+        ax.set_ylim(float(y_edges[0]), float(y_edges[-1]))
+    ax.set_xlabel(config.figure.xlabel or chart.labels[0])
+    ax.set_ylabel(config.figure.ylabel or chart.labels[1])
+    if chart.projection == "cartesian":
+        ax.set_aspect("equal")
     if config.figure.title:
         ax.set_title(config.figure.title)
 
