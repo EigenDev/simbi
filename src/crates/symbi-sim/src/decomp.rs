@@ -1092,6 +1092,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         let layout = crate::tracers::TransportLayout {
                             global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
                             tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                            level: 0,
                         };
                         let mut injections =
                             crate::tracers::boundary_injection_transfers_store(
@@ -1246,6 +1247,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 let layout = crate::tracers::TransportLayout {
                     global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
                     tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                    level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
                 crate::tracers::advance_accretion_transport_store(
