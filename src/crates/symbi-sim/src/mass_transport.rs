@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 
 /// stable identity for a fluid cell or material reservoir.
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ContainerId(pub u64);
 
@@ -115,6 +116,13 @@ pub struct SamplingKey {
     pub epoch: u64,
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ItoOrder {
+    Two = 2,
+    Three = 3,
+}
+
 /// first three per-time displacement moments of one axis of an accepted jump law.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JumpMomentRates {
@@ -168,6 +176,38 @@ impl JumpMomentRates {
             self.third * dt / variance.powf(1.5)
         }
     }
+}
+
+pub fn accepted_face_moment_rates(
+    source_mass: f64,
+    mass_to_minus: f64,
+    mass_to_plus: f64,
+    cell_width: f64,
+    dt: f64,
+) -> Result<JumpMomentRates, String> {
+    if !source_mass.is_finite() || source_mass <= 0.0 {
+        return Err("ito coefficient source mass must be positive and finite".to_string());
+    }
+    if !mass_to_minus.is_finite()
+        || !mass_to_plus.is_finite()
+        || mass_to_minus < 0.0
+        || mass_to_plus < 0.0
+    {
+        return Err("accepted outward face masses must be finite and non-negative".to_string());
+    }
+    let outgoing = mass_to_minus + mass_to_plus;
+    let tolerance = 32.0 * f64::EPSILON * source_mass.max(outgoing).max(1.0);
+    if outgoing > source_mass + tolerance {
+        return Err(format!(
+            "accepted outward face mass {outgoing:?} exceeds source mass {source_mass:?}"
+        ));
+    }
+    JumpMomentRates::from_probabilities(
+        mass_to_plus / source_mass,
+        mass_to_minus / source_mass,
+        cell_width,
+        dt,
+    )
 }
 
 /// zero-mean, unit-variance piecewise-skew-uniform distribution.
@@ -226,6 +266,17 @@ pub fn ito3_displacement(rates: JumpMomentRates, dt: f64, unit: f64) -> Result<f
     }
     let standardized = PiecewiseSkewUniform::new(rates.skewness(dt))?.sample(unit)?;
     Ok(rates.drift * dt + (rates.variance * dt).sqrt() * standardized)
+}
+
+/// deterministic counter-based sample for one particle axis and update.
+pub fn ito_unit_sample(run_seed: u64, particle_id: u64, counter: u64, axis: usize) -> f64 {
+    unit_f64(mix64(
+        run_seed
+            ^ mix64(particle_id)
+            ^ mix64(counter)
+            ^ mix64(axis as u64)
+            ^ 0x243f_6a88_85a3_08d3,
+    ))
 }
 
 /// assign every original tracer to exactly one kernel destination using a
@@ -310,8 +361,8 @@ fn unit_f64(value: u64) -> f64 {
 mod tests {
     use super::{
         ContainerId, JumpMomentRates, MassTransfer, PiecewiseSkewUniform, SamplingKey,
-        TransportKernel, ito2_displacement, ito3_displacement, sample_convex_blend,
-        sample_systematic,
+        TransportKernel, accepted_face_moment_rates, ito2_displacement, ito3_displacement,
+        sample_convex_blend, sample_systematic,
     };
     use std::collections::BTreeMap;
 
@@ -351,6 +402,18 @@ mod tests {
         assert!((rates.drift * 0.5 - 0.4).abs() < 1e-15);
         assert!((rates.variance * 0.5 - 1.44).abs() < 1e-15);
         assert!((rates.third * 0.5 + 0.192).abs() < 1e-15);
+    }
+
+    #[test]
+    fn accepted_face_masses_define_the_same_jump_law() {
+        let direct = JumpMomentRates::from_probabilities(0.3, 0.1, 2.0, 0.5).unwrap();
+        let accepted = accepted_face_moment_rates(10.0, 1.0, 3.0, 2.0, 0.5).unwrap();
+        assert_eq!(accepted, direct);
+        assert!(
+            accepted_face_moment_rates(1.0, 0.6, 0.5, 1.0, 0.1)
+                .unwrap_err()
+                .contains("exceeds source mass")
+        );
     }
 
     #[test]
