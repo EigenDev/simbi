@@ -3368,6 +3368,20 @@ macro_rules! build_and_run_hydro {
                 .expect("fine-level boundary lower");
                 ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
             }
+            for spec in &cfg.gradient_bcs {
+                use symbi::regimes::substrate_kernels::GradientBc;
+                let boundary = match spec.kind.as_str() {
+                    "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
+                    "robin" => GradientBc::Robin(
+                        spec.coeffs
+                            .chunks_exact(3)
+                            .map(|coeff| [coeff[0], coeff[1], coeff[2]])
+                            .collect(),
+                    ),
+                    other => panic!("unknown fine-level gradient boundary kind '{other}'"),
+                };
+                ks = ks.with_gradient_boundary(boundary).0;
+            }
             let ks = ks;
             // attach the SAME user source to each fine level as the base level, so a source
             // overlapping a refined region still acts there (a base-only attach would be restricted
@@ -3795,6 +3809,20 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         )
                         .expect("tile boundary lower");
                         ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+                    }
+                    for spec in &cfg.gradient_bcs {
+                        use symbi::regimes::substrate_kernels::GradientBc;
+                        let boundary = match spec.kind.as_str() {
+                            "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
+                            "robin" => GradientBc::Robin(
+                                spec.coeffs
+                                    .chunks_exact(3)
+                                    .map(|coeff| [coeff[0], coeff[1], coeff[2]])
+                                    .collect(),
+                            ),
+                            other => panic!("unknown tile gradient boundary kind '{other}'"),
+                        };
+                        ks = ks.with_gradient_boundary(boundary).0;
                     }
                     // the SAME user source on the tile root and every fine level: each level of
                     // each tile evaluates S at its own GLOBAL coordinates, so a position-dependent
@@ -5668,6 +5696,20 @@ macro_rules! build_and_run_iso {
                 .expect("fine-level boundary lower");
                 ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
             }
+            for spec in &cfg.gradient_bcs {
+                use symbi::regimes::substrate_kernels::GradientBc;
+                let boundary = match spec.kind.as_str() {
+                    "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
+                    "robin" => GradientBc::Robin(
+                        spec.coeffs
+                            .chunks_exact(3)
+                            .map(|coeff| [coeff[0], coeff[1], coeff[2]])
+                            .collect(),
+                    ),
+                    other => panic!("unknown fine-level gradient boundary kind '{other}'"),
+                };
+                ks = ks.with_gradient_boundary(boundary).0;
+            }
             let ks = ks;
             // attach the SAME user source to each fine level (a base-only attach
             // would be restricted away by the fine solution). already validated
@@ -5917,15 +5959,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             return Err(
                 "n_tracers does not support mesh motion yet".to_string(),
             );
-        }
-        if cfg.refinement_enabled {
-            if !cfg.gradient_bcs.is_empty() {
-                return Err(
-                    "n_tracers with refinement does not yet support gradient boundaries until \
-                     their level-specific material receipts are wired"
-                        .to_string(),
-                );
-            }
         }
         // multi-device hydro uses global container identities and migrates
         // complete tracer records across decomposition cuts.
