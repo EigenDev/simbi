@@ -19,7 +19,8 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_sim::tracers::seed_mass_weighted;
+use symbi_sim::mass_transport::ItoOrder;
+use symbi_sim::tracers::{ContinuousTracerSet, seed_mass_weighted};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -124,6 +125,73 @@ fn seeding_follows_the_mass() {
         (m_total - m_field).abs() < 1e-10 * m_field,
         "sampled mass {m_total} vs field mass {m_field}"
     );
+}
+
+#[test]
+fn continuous_tracer_concentration_tracks_gas_mass() {
+    const PARTICLES: usize = 32_768;
+    const BINS: usize = 12;
+    const T: f64 = 0.15;
+
+    for order in [ItoOrder::Two, ItoOrder::Three] {
+        let mut sim = build();
+        let seed = seed_mass_weighted(&sim, PARTICLES);
+        sim.continuous_tracers =
+            Some(ContinuousTracerSet::from_discrete(&seed, order).unwrap());
+        let kernels =
+            AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(
+                GAMMA,
+                0.4,
+                &sim.geom.allocated,
+            );
+
+        evolve(&mut sim, &kernels, T).unwrap();
+
+        let mut observed = vec![0usize; BINS * BINS];
+        let tracers = sim.continuous_tracers.as_ref().unwrap();
+        unsafe {
+            for ii in 0..tracers.len {
+                assert_eq!(*tracers.escaped.as_ptr::<u8>().add(ii), 0);
+                let x = *tracers.x[0].as_ptr::<f64>().add(ii);
+                let y = *tracers.x[1].as_ptr::<f64>().add(ii);
+                let bx = (((x + L) / (2.0 * L) * BINS as f64).floor() as isize)
+                    .rem_euclid(BINS as isize) as usize;
+                let by = (((y + L) / (2.0 * L) * BINS as f64).floor() as isize)
+                    .rem_euclid(BINS as isize) as usize;
+                observed[bx + BINS * by] += 1;
+            }
+        }
+        let mut gas = vec![0.0; BINS * BINS];
+        let cells_per_bin = N / BINS;
+        for coord in sim.geom.interior.iter() {
+            let ix = (coord[0] - sim.geom.interior.spaces[0].lo) as usize;
+            let iy = (coord[1] - sim.geom.interior.spaces[1].lo) as usize;
+            gas[ix / cells_per_bin + BINS * (iy / cells_per_bin)] +=
+                *sim.fields.cons.den.view().at(coord);
+        }
+        let gas_total: f64 = gas.iter().sum();
+        let expected: Vec<_> = gas
+            .iter()
+            .map(|mass| PARTICLES as f64 * mass / gas_total)
+            .collect();
+        assert!(
+            expected.iter().all(|count| *count > 50.0),
+            "gas-tracer chi-square gate has an underpopulated bin"
+        );
+        let chi_square: f64 = observed
+            .iter()
+            .zip(&expected)
+            .map(|(actual, expected)| {
+                let residual = *actual as f64 - expected;
+                residual * residual / expected
+            })
+            .sum();
+        let reduced = chi_square / (BINS * BINS - 1) as f64;
+        assert!(
+            reduced < 4.0,
+            "{order:?} tracer concentration disagrees with gas: reduced chi-square {reduced:.3}"
+        );
+    }
 }
 
 #[test]

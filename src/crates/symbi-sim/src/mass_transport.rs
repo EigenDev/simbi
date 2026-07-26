@@ -238,9 +238,14 @@ impl PiecewiseSkewUniform {
         if !skewness.is_finite() {
             return Err("piecewise-skew-uniform skewness must be finite".to_string());
         }
-        let root = (27.0 + 4.0 * skewness * skewness).sqrt();
-        let left_extent = (root - 2.0 * skewness) / 3.0;
-        let right_extent = (root + 2.0 * skewness) / 3.0;
+        let root = 27.0_f64.sqrt().hypot(2.0 * skewness);
+        let (left_extent, right_extent) = if skewness >= 0.0 {
+            let right = (root + 2.0 * skewness) / 3.0;
+            (3.0 / right, right)
+        } else {
+            let left = (root - 2.0 * skewness) / 3.0;
+            (left, 3.0 / left)
+        };
         let extent_sum = left_extent + right_extent;
         Ok(Self {
             left_extent,
@@ -457,6 +462,19 @@ mod tests {
             assert!(mean.abs() < 2e-14);
             assert!((variance - 1.0).abs() < 2e-14);
             assert!((third - skewness).abs() < 2e-13);
+        }
+    }
+
+    #[test]
+    fn piecewise_skew_uniform_remains_finite_at_extreme_skewness() {
+        for skewness in [-1.0e12, 1.0e12] {
+            let distribution = PiecewiseSkewUniform::new(skewness).unwrap();
+            for unit in [0.0, 0.25, 0.5, 0.75, 1.0 - f64::EPSILON] {
+                assert!(
+                    distribution.sample(unit).unwrap().is_finite(),
+                    "non-finite sample at skewness {skewness} and unit {unit}"
+                );
+            }
         }
     }
 

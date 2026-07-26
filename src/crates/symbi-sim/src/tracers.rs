@@ -303,7 +303,15 @@ pub fn advance_continuous_tracers_affine_mesh_host<
                         crate::mass_transport::ito2_displacement(rates[dd], dt, unit)?
                     }
                     crate::mass_transport::ItoOrder::Three => {
-                        crate::mass_transport::ito3_displacement(rates[dd], dt, unit)?
+                        crate::mass_transport::ito3_displacement(rates[dd], dt, unit).map_err(
+                            |detail| {
+                                format!(
+                                    "{detail}; particle={}, axis={dd}, position={position:?}, \
+                                     rates={:?}",
+                                    ids[ii], rates[dd]
+                                )
+                            },
+                        )?
                     }
                 };
                 let mapped = scale_end * logical[dd] + offset_end[dd];
