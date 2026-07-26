@@ -51,7 +51,7 @@ L = 5.0
 
 class _CartesianKerrBH3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR, cli=True)]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS, cli=True)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     kerr_spin: Annotated[float, ProblemParam(0.9, cli=True)]
     resolution: Annotated[tuple[int, int, int], ProblemParam((RES, RES, RES))]
@@ -116,8 +116,8 @@ def _vphi_moment(f: dict[str, np.ndarray]) -> float:
 
 @needs_backend
 def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
-    a = _run(Spacetime.KERR, 0.0)
-    b = _run(Spacetime.KERR_SCHILD, 0.0)
+    a = _run(Spacetime.KERR_KS, 0.0)
+    b = _run(Spacetime.SCHWARZSCHILD_KS, 0.0)
     # non-vacuous: the infall genuinely developed (a pair of identically-floored
     # states would also "agree").
     assert a["rho"].max() > 1.05 * RHO0, "no accretion developed in the a = 0 kerr run"
@@ -149,7 +149,7 @@ def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
 
 @needs_backend
 def test_cartesian_kerr_symmetries_and_frame_dragging() -> None:
-    f = _run(Spacetime.KERR, 0.9)
+    f = _run(Spacetime.KERR_KS, 0.9)
     rho = f["rho"]
     assert np.isfinite(rho).all(), "non-finite state at a = 0.9"
     assert rho.min() > 0.0, "density went non-positive"
@@ -169,7 +169,7 @@ def test_cartesian_kerr_symmetries_and_frame_dragging() -> None:
     # the x <-> y transpose is a reflection, so it maps the spin a -> -a while
     # fixing everything else: the +a run transposed must equal the -a run to
     # roundoff (a sharp equivalence at FULL spin, storage [k, j, i]).
-    g = _run(Spacetime.KERR, -0.9)
+    g = _run(Spacetime.KERR_KS, -0.9)
     err = np.abs(np.transpose(f["rho"], (0, 2, 1)) - g["rho"]).max()
     assert err < 1e-11, f"transpose(+a) != run(-a): {err:e}"
 
@@ -178,7 +178,7 @@ def test_cartesian_kerr_symmetries_and_frame_dragging() -> None:
     # the antisymmetry in a is the invariant).
     swirl = _vphi_moment(f)
     swirl_m = _vphi_moment(g)
-    f0 = _run(Spacetime.KERR, 0.0)
+    f0 = _run(Spacetime.KERR_KS, 0.0)
     swirl0 = abs(_vphi_moment(f0))
     assert abs(swirl) > 100.0 * max(swirl0, 1e-300), (
         f"spin swirl {swirl:e} does not dominate the a = 0 floor {swirl0:e}"

@@ -106,7 +106,7 @@ pub(crate) fn gv_lapse_weight(
         // FULL cartesian position (the metric computes r = |x| internally). the spherical shortcut
         // r = coord_centroid[0] would use the x-coordinate as the radius — wrong and NOT symmetric
         // under x <-> y.
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
@@ -120,7 +120,7 @@ pub(crate) fn gv_lapse_weight(
         // cylindrical kerr-schild: alpha = 1/sqrt(1 + 2M/r), r = sqrt(R^2 + z^2) the SPHERICAL radius
         // at the FULL (R, phi, z) position — the metric reads both slots 0 and 2 (the cylindrical
         // R and z). same radial-shortcut trap the cartesian arm avoids.
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
@@ -134,7 +134,7 @@ pub(crate) fn gv_lapse_weight(
         // cartesian spinning kerr: alpha = 1/sqrt(1 + 2H |l|^2) at the FULL cartesian position
         // (the metric solves the oblate-spheroidal radius internally); the radial-slot shortcut
         // does not exist on this chart.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
@@ -142,7 +142,7 @@ pub(crate) fn gv_lapse_weight(
             let spin = Gv::scalar("kerr_spin");
             Some(KerrKSCartesian { mass, spin }.lapse(x))
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
@@ -189,24 +189,24 @@ pub(crate) fn gv_metric_volume_factor_at(
     let mass = Gv::scalar("schwarzschild_mass");
     match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => Schwarzschild { mass }.volume_factor(x),
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             SchwarzschildKSCartesian { mass }.volume_factor(x)
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             SchwarzschildKSCylindrical { mass }.volume_factor(x)
         }
-        (Spacetime::KerrSchild, _) => SchwarzschildKS { mass }.volume_factor(x),
-        (Spacetime::Kerr, Coords::Cartesian) => KerrKSCartesian {
+        (Spacetime::SchwarzschildKS, _) => SchwarzschildKS { mass }.volume_factor(x),
+        (Spacetime::KerrKS, Coords::Cartesian) => KerrKSCartesian {
             mass,
             spin: Gv::scalar("kerr_spin"),
         }
         .volume_factor(x),
-        (Spacetime::Kerr, Coords::Cylindrical) => KerrKSCylindrical {
+        (Spacetime::KerrKS, Coords::Cylindrical) => KerrKSCylindrical {
             mass,
             spin: Gv::scalar("kerr_spin"),
         }
         .volume_factor(x),
-        (Spacetime::Kerr, _) => KerrKS {
+        (Spacetime::KerrKS, _) => KerrKS {
             mass,
             spin: Gv::scalar("kerr_spin"),
         }
@@ -231,8 +231,8 @@ pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>)
         // alpha = sqrt(1 - 2M/r) (schwarzschild coords) / alpha = 1/sqrt(1 + 2M/r) (kerr-schild),
         // each from its `Metric` impl (the SINGLE source of the lapse expression).
         Spacetime::Schwarzschild => Schwarzschild { mass }.lapse(Tensor::new([r])),
-        Spacetime::KerrSchild => SchwarzschildKS { mass }.lapse(Tensor::new([r])),
-        Spacetime::Kerr => {
+        Spacetime::SchwarzschildKS => SchwarzschildKS { mass }.lapse(Tensor::new([r])),
+        Spacetime::KerrKS => {
             let spin = Gv::scalar("kerr_spin");
             let th = theta.expect("the kerr lapse requires the polar coordinate");
             KerrKS { mass, spin }.lapse(Tensor::new([r, th, Gv::ZERO]))
@@ -249,8 +249,8 @@ pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv, theta: Option<G
     let mass = Gv::scalar("schwarzschild_mass");
     match spacetime {
         Spacetime::Schwarzschild => Schwarzschild { mass }.lapse_sq(Tensor::new([r])),
-        Spacetime::KerrSchild => SchwarzschildKS { mass }.lapse_sq(Tensor::new([r])),
-        Spacetime::Kerr => {
+        Spacetime::SchwarzschildKS => SchwarzschildKS { mass }.lapse_sq(Tensor::new([r])),
+        Spacetime::KerrKS => {
             let spin = Gv::scalar("kerr_spin");
             let th = theta.expect("the kerr lapse-square requires the polar coordinate");
             KerrKS { mass, spin }.lapse_sq(Tensor::new([r, th, Gv::ZERO]))
@@ -265,11 +265,11 @@ pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv, theta: Option<G
 pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Option<Gv> {
     match spacetime {
         Spacetime::Minkowski | Spacetime::Schwarzschild => None,
-        Spacetime::KerrSchild => {
+        Spacetime::SchwarzschildKS => {
             let mass = Gv::scalar("schwarzschild_mass");
             Some(SchwarzschildKS { mass }.shift(Tensor::new([r]))[0])
         }
-        Spacetime::Kerr => {
+        Spacetime::KerrKS => {
             let mass = Gv::scalar("schwarzschild_mass");
             let spin = Gv::scalar("kerr_spin");
             let th = theta.expect("the kerr shift requires the polar coordinate");

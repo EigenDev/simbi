@@ -31,10 +31,17 @@ from simbi_configs.examples.grhd.gr_michel import GrMichel
 from simbi_configs.examples.newtonian.sod import SodProblem
 
 
+def test_horizon_penetrating_spacetime_names_identify_the_solution() -> None:
+    assert Spacetime.SCHWARZSCHILD_KS.value == "schwarzschild_ks"
+    assert Spacetime.KERR_KS.value == "kerr_ks"
+    assert "KERR_SCHILD" not in Spacetime.__members__
+    assert "KERR" not in Spacetime.__members__
+
+
 class _UnbakedKerrMichel(GrMichel):
     # (1, spherical, kerr) is NOT a baked GR-hydro arm (only 2D spherical kerr is);
     # the C4 guard must reject it before it can reach the flat (1, spherical) arm.
-    spacetime: Spacetime = Spacetime.KERR
+    spacetime: Spacetime = Spacetime.KERR_KS
 
 
 @needs_backend

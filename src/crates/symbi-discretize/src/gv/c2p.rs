@@ -255,7 +255,7 @@ where
                 m.volume_factor(x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (
                 m.spatial_metric(x),
@@ -265,7 +265,7 @@ where
                 m.volume_factor(x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
             (
                 m.spatial_metric(x),
@@ -275,7 +275,7 @@ where
                 m.volume_factor(x),
             )
         }
-        (Spacetime::KerrSchild, _) => {
+        (Spacetime::SchwarzschildKS, _) => {
             let m = SchwarzschildKS { mass };
             (
                 m.spatial_metric(x),
@@ -287,7 +287,7 @@ where
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             let m = KerrKSCartesian {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -300,7 +300,7 @@ where
                 m.volume_factor(x),
             )
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             let m = KerrKSCylindrical {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -313,7 +313,7 @@ where
                 m.volume_factor(x),
             )
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} — only the azimuthal-momentum (swirl,
             // D = 3) instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
             let m = KerrKS {
@@ -469,7 +469,7 @@ pub fn rmhd_c2p_gr_gv(
                 m.shift(x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (
                 m.spatial_metric(x),
@@ -478,7 +478,7 @@ pub fn rmhd_c2p_gr_gv(
                 m.shift(x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
             (
                 m.spatial_metric(x),
@@ -487,7 +487,7 @@ pub fn rmhd_c2p_gr_gv(
                 m.shift(x),
             )
         }
-        (Spacetime::KerrSchild, _) => {
+        (Spacetime::SchwarzschildKS, _) => {
             let m = SchwarzschildKS { mass };
             (
                 m.spatial_metric(x),
@@ -498,7 +498,7 @@ pub fn rmhd_c2p_gr_gv(
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
@@ -513,7 +513,7 @@ pub fn rmhd_c2p_gr_gv(
                 m.shift(x),
             )
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
@@ -528,7 +528,7 @@ pub fn rmhd_c2p_gr_gv(
                 m.shift(x),
             )
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.

@@ -9,7 +9,7 @@
 // so every metric quantity from the two implementations must agree to roundoff.
 //
 // this is a LAW, not a sampled comparison: the two are separate code paths that
-// carry separate baked kernels (Spacetime::Kerr vs Spacetime::KerrSchild), so a
+// carry separate baked kernels (Spacetime::KerrKS vs Spacetime::SchwarzschildKS), so a
 // divergence here is silent — both paths keep running and merely disagree about
 // the same spacetime.
 //

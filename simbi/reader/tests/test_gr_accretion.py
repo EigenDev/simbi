@@ -47,7 +47,7 @@ def test_reducer_recovers_a_conserved_ks_inflow_1d():
     v_r = -0.20 * np.ones_like(r)  # contravariant; subluminal: h (v^r)^2 < 1
     rho, v_r = _conserved_ks_inflow(r, mass, mdot_true, v_r)
 
-    mdot = accretion_rate(rho, [v_r], r, None, mass, spacetime="kerr_schild")
+    mdot = accretion_rate(rho, [v_r], r, None, mass, spacetime="schwarzschild_ks")
     assert np.allclose(mdot, mdot_true, rtol=1e-12), mdot
 
     cert = rex_invariance(mdot, r, [3, 5, 10, 20])
@@ -72,7 +72,7 @@ def test_reducer_is_rex_invariant_2d_axisymmetric():
     v_r2d = np.repeat(v1d[:, None], n_theta, axis=1)
 
     mdot = accretion_rate(
-        rho, [v_r2d], r, theta, mass, spacetime="kerr_schild", dtheta=dtheta, dphi=2.0 * np.pi
+        rho, [v_r2d], r, theta, mass, spacetime="schwarzschild_ks", dtheta=dtheta, dphi=2.0 * np.pi
     )
     cert = rex_invariance(mdot, r, [3, 5, 10, 20])
     assert cert["relative_spread"] < 1e-12
@@ -122,7 +122,7 @@ def test_shell_accretion_recovers_conserved_flow_on_a_log_grid_1d():
     v_r = -0.18 * np.ones_like(r)
     rho, v_r = _conserved_ks_inflow(r, mass, mdot_true, v_r)
 
-    mdot, cert = shell_accretion(rho, [v_r], x1v, None, mass, "kerr_schild")
+    mdot, cert = shell_accretion(rho, [v_r], x1v, None, mass, "schwarzschild_ks")
     assert np.allclose(mdot, mdot_true, rtol=1e-12)
     assert cert["relative_spread"] < 1e-12
 
@@ -141,7 +141,7 @@ def test_shell_accretion_is_rex_invariant_2d_storage_order():
     rho = np.repeat(rho1d[None, :], n_theta, axis=0)  # (ntheta, nr)
     v_r2d = np.repeat(v1d[None, :], n_theta, axis=0)
 
-    mdot, cert = shell_accretion(rho, [v_r2d], x1v, x2v, mass, "kerr_schild")
+    mdot, cert = shell_accretion(rho, [v_r2d], x1v, x2v, mass, "schwarzschild_ks")
     assert cert["relative_spread"] < 1e-12
     assert abs(cert["mean"] - mdot_true) < 1e-3
 
@@ -183,7 +183,7 @@ def test_accretion_from_checkpoint_uses_self_describing_metadata():
     data = _FakeData(
         {"rho": rho, "v1": v_r},
         _FakeMesh(x1v),
-        _FakeMeta("kerr_schild", mass),
+        _FakeMeta("schwarzschild_ks", mass),
     )
 
     mdot, cert = accretion_from_checkpoint(data)  # chart + mass from metadata
@@ -201,7 +201,7 @@ def test_accretion_from_checkpoint_rejects_flat_and_massless():
         accretion_from_checkpoint(flat)
     # a GR chart with no mass attr must be overridable but fail loud when absent.
     massless = _FakeData(
-        {"rho": rho, "v1": v1}, _FakeMesh(x1v), _FakeMeta("kerr_schild", 0.0)
+        {"rho": rho, "v1": v1}, _FakeMesh(x1v), _FakeMeta("schwarzschild_ks", 0.0)
     )
     with pytest.raises(ValueError):
         accretion_from_checkpoint(massless)
@@ -297,7 +297,7 @@ def test_ring_accretion_from_checkpoint_wrapper():
     data = _FakeData(
         {"rho": rho, "v1": v_x, "v2": v_y},
         _FakeMesh(x1v, x1v),
-        _FakeCartMeta("kerr_schild", "cartesian", mass),
+        _FakeCartMeta("schwarzschild_ks", "cartesian", mass),
     )
     mdot, cert = ring_accretion_from_checkpoint(data, radii=[2.5, 3.5, 5.0, 6.5])
     assert np.allclose(mdot, mdot_true, rtol=2e-3)
@@ -307,7 +307,7 @@ def test_ring_accretion_from_checkpoint_wrapper():
     sph = _FakeData(
         {"rho": rho, "v1": v_x, "v2": v_y},
         _FakeMesh(x1v, x1v),
-        _FakeCartMeta("kerr_schild", "spherical", mass),
+        _FakeCartMeta("schwarzschild_ks", "spherical", mass),
     )
     with pytest.raises(ValueError):
         ring_accretion_from_checkpoint(sph)
@@ -319,9 +319,9 @@ def test_superluminal_velocity_is_rejected():
     r = np.array([3.0])
     v_r = np.array([0.85])  # h (v^r)^2 = (1 + 2/3) 0.7225 > 1 at r = 3
     with pytest.raises(ValueError):
-        accretion_rate(np.array([1.0]), [v_r], r, None, mass, spacetime="kerr_schild")
+        accretion_rate(np.array([1.0]), [v_r], r, None, mass, spacetime="schwarzschild_ks")
 
 
 def test_unsupported_chart_is_rejected():
     with pytest.raises(ValueError):
-        accretion_rate(np.array([1.0]), [np.array([-0.1])], np.array([3.0]), None, 1.0, spacetime="kerr")
+        accretion_rate(np.array([1.0]), [np.array([-0.1])], np.array([3.0]), None, 1.0, spacetime="kerr_ks")

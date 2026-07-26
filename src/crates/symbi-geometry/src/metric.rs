@@ -62,14 +62,14 @@ pub enum Spacetime {
     /// vacuum as `Schwarzschild` in a HORIZON-PENETRATING chart: regular across r = 2M, nonzero
     /// radial shift beta^r, DIAGONAL spatial metric gamma_{rr} = 1 + 2M/r. reuses the
     /// `schwarzschild_mass` scalar. selects the shift-advection flux + KS densitization kernel path.
-    KerrSchild = 2,
+    SchwarzschildKS = 2,
     /// spinning Kerr in ingoing kerr-schild coordinates — horizon-penetrating, NON-DIAGONAL
     /// spatial metric (gamma_{r phi} carries the frame dragging into the spatial slice), radial
     /// shift beta^r = 2Mr/(Sigma + 2Mr). the covariant valencia storage is REQUIRED here (no
     /// componentwise orthonormal frame exists for a non-diagonal gamma). the mass M and spin a
-    /// ride as kernel scalars (`schwarzschild_mass`, `kerr_spin`). reduces to `KerrSchild`
+    /// ride as kernel scalars (`schwarzschild_mass`, `kerr_spin`). reduces to `SchwarzschildKS`
     /// physics at a = 0 (different kernel expressions, same values).
-    Kerr = 3,
+    KerrKS = 3,
 }
 
 impl Spacetime {
@@ -962,7 +962,7 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKS<S> {
         Geometry::Spherical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1010,7 +1010,7 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKS<S> {
         Geometry::Spherical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1075,7 +1075,7 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKS<S> {
         Geometry::Spherical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1228,7 +1228,7 @@ macro_rules! impl_schwarzschild_ks_cartesian {
                 Geometry::Cartesian
             }
             fn spacetime(&self) -> Spacetime {
-                Spacetime::KerrSchild
+                Spacetime::SchwarzschildKS
             }
             fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
                 vec![("schwarzschild_mass", self.mass)]
@@ -1349,7 +1349,7 @@ macro_rules! impl_kerr_ks_cartesian {
                 Geometry::Cartesian
             }
             fn spacetime(&self) -> Spacetime {
-                Spacetime::Kerr
+                Spacetime::KerrKS
             }
             fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
                 vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -1415,7 +1415,7 @@ impl<S: Scalar> Metric<S, 1> for KerrKSCartesian<S> {
         Geometry::Cartesian
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::Kerr
+        Spacetime::KerrKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -1448,7 +1448,7 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
         Geometry::Cartesian
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1556,7 +1556,7 @@ macro_rules! impl_kerr_ks_cylindrical_stub {
                 Geometry::Cylindrical
             }
             fn spacetime(&self) -> Spacetime {
-                Spacetime::Kerr
+                Spacetime::KerrKS
             }
             fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
                 vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -1590,7 +1590,7 @@ impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
         Geometry::Cylindrical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::Kerr
+        Spacetime::KerrKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -1676,7 +1676,7 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindrical<S> {
         Geometry::Cylindrical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1763,7 +1763,7 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
         Geometry::Cylindrical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1806,7 +1806,7 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
         Geometry::Cylindrical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::KerrSchild
+        Spacetime::SchwarzschildKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
@@ -1900,7 +1900,7 @@ impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
         Geometry::Spherical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::Kerr
+        Spacetime::KerrKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -1960,12 +1960,24 @@ impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
     fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let (r, theta, phi) = (x[0], x[1], x[2]);
         let st = theta.sin();
-        Tensor::new([r * st * phi.cos(), r * st * phi.sin(), r * theta.cos()])
+        let (cp, sp) = (phi.cos(), phi.sin());
+        Tensor::new([
+            (r * cp - self.spin * sp) * st,
+            (r * sp + self.spin * cp) * st,
+            r * theta.cos(),
+        ])
     }
     fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let (cx, cy, cz) = (x[0], x[1], x[2]);
-        let r = (cx * cx + cy * cy + cz * cz).sqrt();
-        Tensor::new([r, (cz / r).acos(), cy.atan2(cx)])
+        let radius_sq = cx * cx + cy * cy + cz * cz;
+        let spin_sq = self.spin * self.spin;
+        let delta = radius_sq - spin_sq;
+        let r_sq = (delta + (delta * delta + S::from_f64(4.0) * spin_sq * cz * cz).sqrt())
+            / S::from_f64(2.0);
+        let r = r_sq.sqrt();
+        let theta = (cz / r).acos();
+        let phi = cy.atan2(cx) - self.spin.atan2(r);
+        Tensor::new([r, theta, phi])
     }
 
     /// proper volume element: sqrt(gamma) = Sigma sin(theta) sqrt(1 + b).
@@ -1979,7 +1991,7 @@ impl<S: Scalar> Metric<S, 1> for KerrKS<S> {
         Geometry::Spherical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::Kerr
+        Spacetime::KerrKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -2017,7 +2029,7 @@ impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
         Geometry::Spherical
     }
     fn spacetime(&self) -> Spacetime {
-        Spacetime::Kerr
+        Spacetime::KerrKS
     }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
@@ -3355,7 +3367,7 @@ mod tests {
         );
         assert_eq!(
             <SchwarzschildKS<f64> as Metric<f64, 3>>::spacetime(&bh),
-            Spacetime::KerrSchild
+            Spacetime::SchwarzschildKS
         );
     }
 
@@ -3681,7 +3693,7 @@ mod tests {
         );
         assert_eq!(
             <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spacetime(&bh),
-            Spacetime::KerrSchild
+            Spacetime::SchwarzschildKS
         );
     }
 
@@ -3879,7 +3891,7 @@ mod tests {
         );
         assert_eq!(
             <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spacetime(&bh),
-            Spacetime::KerrSchild
+            Spacetime::SchwarzschildKS
         );
     }
 

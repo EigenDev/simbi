@@ -1385,7 +1385,7 @@ fn cartesian_ks_flux_is_x_y_symmetric() {
     let run_flux = |dir: u8| {
         KernelRun::new(rhd_flux_gr_gv::<2>(
             dir,
-            Spacetime::KerrSchild,
+            Spacetime::SchwarzschildKS,
             Coords::Cartesian,
             &cart2,
             &axes,
@@ -1462,7 +1462,7 @@ fn cartesian_ks_c2p_is_x_y_symmetric() {
     let sy = |c: &[usize]| 0.010 * (c[1] as f64) + 0.005 * (c[0] as f64);
     let out = KernelRun::new(rhd_c2p_gr_gv::<2>(
         Coords::Cartesian,
-        Spacetime::KerrSchild,
+        Spacetime::SchwarzschildKS,
         &cart2,
         &axes,
         20,
@@ -1516,7 +1516,7 @@ fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
     let axes = [0usize, 1];
     let kernel = godunov_stage_gv(
         Coords::Cartesian,
-        Spacetime::KerrSchild,
+        Spacetime::SchwarzschildKS,
         &sp,
         &axes,
         2,

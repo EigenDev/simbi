@@ -54,7 +54,7 @@ class GrBondiCartesian(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.KERR_SCHILD, description="cartesian kerr-schild background"),
+        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="cartesian kerr-schild background"),
     ]
     schwarzschild_mass: Annotated[
         float, ProblemParam(1.0, cli=True, description="black-hole mass M (G=c=1); r_+ = 2M")

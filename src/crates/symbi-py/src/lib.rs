@@ -4559,16 +4559,16 @@ macro_rules! hydro_dispatch {
                 if $cfg.spacetime != "minkowski"
                     && !matches!(
                         (d, c, $cfg.spacetime.as_str()),
-                        (3, "cartesian", "kerr_schild")
-                            | (3, "cartesian", "kerr")
+                        (3, "cartesian", "schwarzschild_ks")
+                            | (3, "cartesian", "kerr_ks")
                             | (1, "spherical", "schwarzschild")
                             | (2, "spherical", "schwarzschild")
-                            | (1, "spherical", "kerr_schild")
-                            | (2, "spherical", "kerr")
-                            | (2, "spherical", "kerr_schild")
-                            | (2, "cylindrical", "kerr_schild")
-                            | (3, "cylindrical", "kerr_schild")
-                            | (3, "cylindrical", "kerr")
+                            | (1, "spherical", "schwarzschild_ks")
+                            | (2, "spherical", "kerr_ks")
+                            | (2, "spherical", "schwarzschild_ks")
+                            | (2, "cylindrical", "schwarzschild_ks")
+                            | (3, "cylindrical", "schwarzschild_ks")
+                            | (3, "cylindrical", "kerr_ks")
                     ) =>
             {
                 Err(format!(
@@ -4585,14 +4585,14 @@ macro_rules! hydro_dispatch {
             // chart — SchwarzschildKSCartesian selects the `_cart` metric-aware c2p +
             // per-sweep flux + light-cone CFL (non-diagonal gamma, shift on every axis, no polar
             // axis). guarded BEFORE the flat cartesian arm; 2D equatorial slice, DOF = 2 (no swirl).
-            (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+            (2, "cartesian") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 2, 2,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
             ),
             // GR (kerr-schild) CARTESIAN 3D: the full horizon-penetrating box — no polar axis
             // anywhere, so a torus resolves its poles like any other direction. DOF = NDIM = 3.
-            (3, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+            (3, "cartesian") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
@@ -4602,12 +4602,12 @@ macro_rules! hydro_dispatch {
             // axis, frame dragging in the swirl of l. DOF == NDIM (no extra momentum slot; the
             // cartesian components already span the dragging). the 2D instance is the exact
             // equatorial slice (l_z = 0 at z = 0).
-            (2, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_hydro!(
+            (2, "cartesian") if $cfg.spacetime == "kerr_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 2, 2,
                 KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
                 KerrKSCartesian<f64>
             ),
-            (3, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_hydro!(
+            (3, "cartesian") if $cfg.spacetime == "kerr_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
                 KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
                 KerrKSCartesian<f64>
@@ -4647,14 +4647,14 @@ macro_rules! hydro_dispatch {
             // r = 2M) — the `_ks` shift-advection-flux + KS-densitized/wavespeed kernels. reuses the
             // `schwarzschild_mass` scalar. 1D radial + the 2D plane (with the same row-length DOF
             // pick as schwarzschild: 5-tuples lift the azimuthal momentum, `_sph_swirl`).
-            (1, "spherical") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+            (1, "spherical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 1, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
             // spinning kerr (ingoing kerr-schild coords): the frame-dragging gamma_{r phi}
             // needs the azimuthal momentum DOF, so the 5-tuple (swirl) generator row is
             // REQUIRED — a 4-tuple config is a setup error with no fallback.
-            (2, "spherical") if $cfg.spacetime == "kerr" => {
+            (2, "spherical") if $cfg.spacetime == "kerr_ks" => {
                 if !$prims.first().map_or(false, |row| row.len() == 5) {
                     return Err(
                         "the kerr spacetime requires the azimuthal momentum DOF: yield \
@@ -4666,7 +4666,7 @@ macro_rules! hydro_dispatch {
                     KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
                 )
             }
-            (2, "spherical") if $cfg.spacetime == "kerr_schild" => {
+            (2, "spherical") if $cfg.spacetime == "schwarzschild_ks" => {
                 if $prims.first().map_or(false, |row| row.len() == 5) {
                     build_and_run_hydro!(
                         $cfg, $prims, $regime, $regime_ty, 2, 3,
@@ -4702,7 +4702,7 @@ macro_rules! hydro_dispatch {
             // equatorial DISK (planar_cylindrical) is DIAGONAL (z = 0, r = R), DOF = 2 (v_R, v_phi);
             // the (R, z) 2.5D axisymmetric-swirl (the default) lifts v_phi, DOF = 3, requiring the
             // 5-tuple. both use the one SchwarzschildKSCylindrical metric (D = 2 disk / D = 3 swirl).
-            (2, "cylindrical") if $cfg.spacetime == "kerr_schild" => match $cfg.cyl_plane {
+            (2, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => match $cfg.cyl_plane {
                 symbi_sim::state::CylPlane::RPhi => build_and_run_hydro!(
                     $cfg, $prims, $regime, $regime_ty, 2, 2,
                     SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
@@ -4734,7 +4734,7 @@ macro_rules! hydro_dispatch {
                 Cylindrical
             ),
             // GR (kerr-schild) CYLINDRICAL full 3D (R, phi, z): DOF == NDIM = 3.
-            (3, "cylindrical") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+            (3, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
                 SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCylindrical<f64>
@@ -4743,7 +4743,7 @@ macro_rules! hydro_dispatch {
             // frame dragging in l_phi, shift on every axis. DOF == NDIM = 3; the 2.5D
             // (R, z) swirl at spin needs the dragging-consistent azimuthal reconstruction
             // and stays guard-rejected.
-            (3, "cylindrical") if $cfg.spacetime == "kerr" => build_and_run_hydro!(
+            (3, "cylindrical") if $cfg.spacetime == "kerr_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
                 KerrKSCylindrical { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
                 KerrKSCylindrical<f64>
@@ -5560,12 +5560,12 @@ macro_rules! mhd_dispatch {
                     && !matches!(
                         (d, c, $cfg.spacetime.as_str()),
                         (1, "spherical", "schwarzschild")
-                            | (1, "spherical", "kerr_schild")
+                            | (1, "spherical", "schwarzschild_ks")
                             | (2, "spherical", "schwarzschild")
-                            | (2, "spherical", "kerr")
-                            | (3, "cartesian", "kerr_schild")
-                            | (3, "cartesian", "kerr")
-                            | (2, "cylindrical", "kerr_schild")
+                            | (2, "spherical", "kerr_ks")
+                            | (3, "cartesian", "schwarzschild_ks")
+                            | (3, "cartesian", "kerr_ks")
+                            | (2, "cylindrical", "schwarzschild_ks")
                     ) =>
             {
                 Err(format!(
@@ -5584,7 +5584,7 @@ macro_rules! mhd_dispatch {
             ),
             // the horizon-penetrating chart: the `_ks` GRMHD row (the shifted riemann fan with
             // the induction transpose term). the inner boundary can sit below r = 2M.
-            (1, "spherical") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+            (1, "spherical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
@@ -5597,7 +5597,7 @@ macro_rules! mhd_dispatch {
             // the 2D (r, theta) SPINNING-KERR GRMHD row: the non-diagonal
             // gamma_{r phi} rides the tetrad HLLD, the radial shift the moving-interface fan, and
             // the azimuthal (swirl) momentum the frame dragging. requires the 5-tuple swirl gas rows.
-            (2, "spherical") if $cfg.spacetime == "kerr" => {
+            (2, "spherical") if $cfg.spacetime == "kerr_ks" => {
                 if !$prims.first().map_or(false, |row| row.len() == 5) {
                     return Err(
                         "the kerr GRMHD spacetime requires the azimuthal momentum DOF: yield \
@@ -5615,14 +5615,14 @@ macro_rules! mhd_dispatch {
             // non-diagonal gamma_{r phi} — is not yet wired for this chart; HLLE here is a follow-on
             // gap; the metric's non-diagonality is not the cause (the Gram-Schmidt tetrad handles non-diagonal
             // spatial metrics). the covariant geodesic + EM-stress source carries the gravity.
-            (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+            (2, "cartesian") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
             ),
             // GRMHD on the FULL 3D cartesian kerr-schild box: no polar axis, the densitized
             // contact CT (the UCT families are unbaked at 3D GR and fail loud by name).
-            (3, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+            (3, "cartesian") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 3,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
@@ -5631,12 +5631,12 @@ macro_rules! mhd_dispatch {
             // the rank-1 non-diagonal metric with the frame dragging in the swirl of l; the
             // densitized contact CT telescopes for any face weight, so the CT chain is the
             // same family as the a = 0 chart with the kerr metric arms.
-            (2, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_mhd!(
+            (2, "cartesian") if $cfg.spacetime == "kerr_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
                 KerrKSCartesian<f64>
             ),
-            (3, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_mhd!(
+            (3, "cartesian") if $cfg.spacetime == "kerr_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 3,
                 KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
                 KerrKSCartesian<f64>
@@ -5674,7 +5674,7 @@ macro_rules! mhd_dispatch {
             // plane (axes [0, 2], non-diagonal gamma_Rz, toroidal E_phi CT) and the (R, phi)
             // equatorial DISK (axes [0, 1], diagonal on the equator, vertical E_z CT). MHD momentum
             // is a full 3-vector in both, so one metric arm serves; HLLE gas flux + contact/UCT-HLL CT.
-            (2, "cylindrical") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+            (2, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCylindrical<f64>
@@ -6588,8 +6588,8 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 /// accretion-rate certificate needs the innermost flux surface to be causally one-way;
 /// the domain's inner radius must sit on the correct side of the horizon for the chart:
 ///   schwarzschild  singular at r_+ = 2M (lapse -> 0)  -> r_min > r_+   (stay outside)
-///   kerr_schild    horizon-penetrating, r_+ = 2M      -> r_min < r_+   (swallow it)
-///   kerr           horizon-penetrating, r_+ = M + sqrt(M^2 - a^2)  -> r_min < r_+
+///   schwarzschild_ks  horizon-penetrating, r_+ = 2M      -> r_min < r_+   (swallow it)
+///   kerr_ks           horizon-penetrating, r_+ = M + sqrt(M^2 - a^2)  -> r_min < r_+
 /// the gate is a radial (spherical/cylindrical) condition; the cartesian equatorial
 /// slice places the origin inside the box, a containment condition on the box bounds,
 /// so it is left to those bounds. flat minkowski has no horizon.
@@ -6609,8 +6609,8 @@ fn check_horizon_containment(
         ));
     }
     let r_plus = match spacetime {
-        "schwarzschild" | "kerr_schild" => 2.0 * mass,
-        "kerr" => {
+        "schwarzschild" | "schwarzschild_ks" => 2.0 * mass,
+        "kerr_ks" => {
             if spin.abs() > mass {
                 return Err(format!(
                     "kerr spin |a| = {} exceeds mass M = {mass}: no horizon (a naked \
@@ -6633,7 +6633,7 @@ fn check_horizon_containment(
         return Err(format!(
             "schwarzschild inner radius r_min = {r_min} <= r_+ = 2M = {r_plus}: the \
              metric is singular at and inside the horizon (lapse alpha = sqrt(1 - 2M/r) \
-             is imaginary). use r_min > 2M, or the horizon-penetrating kerr_schild chart."
+             is imaginary). use r_min > 2M, or the horizon-penetrating schwarzschild_ks chart."
         ));
     }
     Ok(())
@@ -6664,10 +6664,13 @@ fn check_excision_request(
     // faces stay CT-owned, so div(sqrt(gamma) B) is untouched. non-relativistic
     // regimes never reach here (a curved spacetime on a newtonian/iso regime is
     // rejected upstream).
-    if !matches!(spacetime, "kerr_schild" | "kerr") || coord_system != "cartesian" || dims != 3 {
+    if !matches!(spacetime, "schwarzschild_ks" | "kerr_ks")
+        || coord_system != "cartesian"
+        || dims != 3
+    {
         return Err(format!(
             "excision_radius = {excision_radius} requires a 3d cartesian kerr-schild chart \
-             (spacetime kerr_schild or kerr); got (dims={dims}, coords={coord_system}, \
+             (spacetime schwarzschild_ks or kerr_ks); got (dims={dims}, coords={coord_system}, \
              spacetime={spacetime}). a 2d cartesian slice is z-translation-invariant — a black \
              string, not a point black hole: its spherical metric evaluated at z = 0 is \
              inconsistent with the planar dynamics, and the excision circle is grid-staircased \
@@ -6678,7 +6681,7 @@ fn check_excision_request(
     // the excision surface is the kerr-schild-radius level set r_ks = r_exc, which
     // must sit strictly inside the outer horizon: r_+ = 2M at a = 0,
     // r_+ = M + sqrt(M^2 - a^2) at spin (|a| <= M is validated by the horizon gate).
-    let r_plus = if spacetime == "kerr" {
+    let r_plus = if spacetime == "kerr_ks" {
         mass + (mass * mass - spin * spin).max(0.0).sqrt()
     } else {
         2.0 * mass
@@ -6759,15 +6762,35 @@ mod excision_gate_tests {
         // excision demands a genuine 3d cartesian box (or a spherical / cylindrical chart
         // that hides the horizon behind r_min).
         assert!(
-            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
-                .is_ok()
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_ok()
         );
         assert!(
-            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok()
+            check_excision_request(1.4, "kerr_ks", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok()
         );
         assert!(
-            check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1)
-                .is_err()
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "cartesian",
+                2,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_err()
         );
         assert!(
             check_excision_request(
@@ -6784,15 +6807,36 @@ mod excision_gate_tests {
             .is_err()
         );
         assert!(
-            check_excision_request(1.4, "kerr_schild", "spherical", 3, 1.0, 0.0, false, &[], 1)
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "spherical",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_err()
+        );
+        assert!(
+            check_excision_request(1.4, "kerr_ks", "spherical", 3, 1.0, 0.9, false, &[], 1)
                 .is_err()
         );
         assert!(
-            check_excision_request(1.4, "kerr", "spherical", 3, 1.0, 0.9, false, &[], 1).is_err()
-        );
-        assert!(
-            check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, &[], 1)
-                .is_err()
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "cartesian",
+                1,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_err()
         );
     }
 
@@ -6800,20 +6844,60 @@ mod excision_gate_tests {
     fn excision_surface_must_sit_between_the_guard_and_the_horizon() {
         // a = 0, M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
         assert!(
-            check_excision_request(2.0, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
-                .is_err()
+            check_excision_request(
+                2.0,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_err()
         );
         assert!(
-            check_excision_request(0.5, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
-                .is_err()
+            check_excision_request(
+                0.5,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_err()
         );
         assert!(
-            check_excision_request(0.6, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
-                .is_ok()
+            check_excision_request(
+                0.6,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_ok()
         );
         assert!(
-            check_excision_request(1.9, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1)
-                .is_ok()
+            check_excision_request(
+                1.9,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                1
+            )
+            .is_ok()
         );
     }
 
@@ -6821,13 +6905,15 @@ mod excision_gate_tests {
     fn spinning_horizon_shrinks_the_band() {
         // a = 0.9, M = 1: r_+ = 1 + sqrt(1 - 0.81) ~ 1.436.
         assert!(
-            check_excision_request(1.9, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err()
+            check_excision_request(1.9, "kerr_ks", "cartesian", 3, 1.0, 0.9, false, &[], 1)
+                .is_err()
         );
         assert!(
-            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok()
+            check_excision_request(1.4, "kerr_ks", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok()
         );
         assert!(
-            check_excision_request(0.5, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err()
+            check_excision_request(0.5, "kerr_ks", "cartesian", 3, 1.0, 0.9, false, &[], 1)
+                .is_err()
         );
     }
 
@@ -6838,17 +6924,47 @@ mod excision_gate_tests {
         // and refinement compose. the condition that makes a root-only excise correct is that no fine
         // patch overlaps the excised surface, which the overlap check enforces at every gpu count.
         assert!(
-            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 2)
-                .is_ok()
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                false,
+                &[],
+                2
+            )
+            .is_ok()
         );
         let far = vec![vec![5.0, 8.0, 5.0, 8.0, 5.0, 8.0]];
         assert!(
-            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 1)
-                .is_ok()
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                true,
+                &far,
+                1
+            )
+            .is_ok()
         );
         assert!(
-            check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, true, &far, 2)
-                .is_ok()
+            check_excision_request(
+                1.4,
+                "schwarzschild_ks",
+                "cartesian",
+                3,
+                1.0,
+                0.0,
+                true,
+                &far,
+                2
+            )
+            .is_ok()
         );
     }
 
@@ -6860,7 +6976,7 @@ mod excision_gate_tests {
         assert!(
             check_excision_request(
                 1.4,
-                "kerr_schild",
+                "schwarzschild_ks",
                 "cartesian",
                 3,
                 1.0,
@@ -6875,11 +6991,13 @@ mod excision_gate_tests {
         // r_exc on x but inside the widened extent still overlaps.
         let graze = vec![vec![1.5, 3.0, -0.5, 0.5, -0.5, 0.5]];
         assert!(
-            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &graze, 1).is_err()
+            check_excision_request(1.4, "kerr_ks", "cartesian", 3, 1.0, 0.9, true, &graze, 1)
+                .is_err()
         );
         let clear = vec![vec![2.0, 4.0, 2.0, 4.0, -0.5, 0.5]];
         assert!(
-            check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &clear, 1).is_ok()
+            check_excision_request(1.4, "kerr_ks", "cartesian", 3, 1.0, 0.9, true, &clear, 1)
+                .is_ok()
         );
     }
 
@@ -6895,7 +7013,7 @@ mod excision_gate_tests {
             assert!(
                 check_excision_request(
                     1.4,
-                    "kerr_schild",
+                    "schwarzschild_ks",
                     "cartesian",
                     3,
                     1.0,
@@ -6910,7 +7028,7 @@ mod excision_gate_tests {
             assert!(
                 check_excision_request(
                     1.4,
-                    "kerr_schild",
+                    "schwarzschild_ks",
                     "cartesian",
                     3,
                     1.0,
@@ -6945,33 +7063,35 @@ mod horizon_gate_tests {
     }
 
     #[test]
-    fn kerr_schild_allows_any_regular_patch() {
+    fn schwarzschild_ks_allows_any_regular_patch() {
         // the horizon-penetrating chart is regular everywhere: inside-horizon
         // inner boundaries (the accretion configs) AND entirely-outside patches
         // are both legitimate. only excision demands the swallow geometry, and
         // its own request gate enforces that.
-        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 1.5).is_ok());
-        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 3.0).is_ok());
+        assert!(check_horizon_containment("schwarzschild_ks", 1.0, 0.0, "spherical", 1.5).is_ok());
+        assert!(check_horizon_containment("schwarzschild_ks", 1.0, 0.0, "spherical", 3.0).is_ok());
         // the cylindrical chart's slot 0 is a cylindrical R, so the spherical-radius gate is exempt.
-        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "cylindrical", 4.0).is_ok());
+        assert!(
+            check_horizon_containment("schwarzschild_ks", 1.0, 0.0, "cylindrical", 4.0).is_ok()
+        );
     }
 
     #[test]
     fn kerr_rejects_only_the_naked_singularity() {
-        assert!(check_horizon_containment("kerr", 1.0, 0.6, "spherical", 1.7).is_ok());
+        assert!(check_horizon_containment("kerr_ks", 1.0, 0.6, "spherical", 1.7).is_ok());
         // |a| > M is a naked singularity: no horizon at all.
-        assert!(check_horizon_containment("kerr", 1.0, 1.5, "spherical", 0.5).is_err());
+        assert!(check_horizon_containment("kerr_ks", 1.0, 1.5, "spherical", 0.5).is_err());
     }
 
     #[test]
     fn cartesian_slice_is_gated_by_box_bounds_not_r_min() {
         // the origin sits inside the box; r_min (a corner distance) does not gate it.
-        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "cartesian", 5.0).is_ok());
+        assert!(check_horizon_containment("schwarzschild_ks", 1.0, 0.0, "cartesian", 5.0).is_ok());
     }
 
     #[test]
     fn gr_chart_requires_positive_mass() {
-        assert!(check_horizon_containment("kerr_schild", 0.0, 0.0, "spherical", 1.0).is_err());
+        assert!(check_horizon_containment("schwarzschild_ks", 0.0, 0.0, "spherical", 1.0).is_err());
         assert!(check_horizon_containment("schwarzschild", -1.0, 0.0, "spherical", 3.0).is_err());
     }
 }

@@ -32,7 +32,7 @@ class GrCylindrical3DKsBH(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.KERR_SCHILD, description="cylindrical kerr-schild background"),
+        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="cylindrical kerr-schild background"),
     ]
     schwarzschild_mass: Annotated[
         float, ProblemParam(1.0, cli=True, description="black-hole mass M (G=c=1)")

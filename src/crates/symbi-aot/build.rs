@@ -550,8 +550,8 @@ impl Geom {
     // shift beta^r = 2M/(r+2M), gamma_rr = 1+2M/r); the spatial `coords` stay Spherical. selects the
     // shift-advection-flux + KS densitization/wavespeed kernel branch + a `_ks` slug tag. relativistic
     // regimes only.
-    fn kerr_schild(mut self) -> Self {
-        self.spacetime = Spacetime::KerrSchild;
+    fn schwarzschild_ks(mut self) -> Self {
+        self.spacetime = Spacetime::SchwarzschildKS;
         self
     }
 
@@ -559,7 +559,7 @@ impl Geom {
     // 1/sqrt(1 + 2Mr/Sigma), radial shift, NON-DIAGONAL gamma_{r phi}); swirl (DOF = 3) only —
     // the frame dragging needs the azimuthal momentum. `_kerr` slug; `kerr_spin` kernel scalar.
     fn kerr(mut self) -> Self {
-        self.spacetime = Spacetime::Kerr;
+        self.spacetime = Spacetime::KerrKS;
         self
     }
 
@@ -2152,7 +2152,7 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // lapse + non-diagonal gamma^{rr} break the radial-only backgrounds' factored BF form).
     // the spherical swirl keeps its dedicated (r, theta) instance; the cartesian kerr chart
     // rides the generic light-cone map below (full-position metric, shift on every axis).
-    let (k, writes) = if geom.spacetime == Spacetime::Kerr && geom.coords == Coords::Spherical {
+    let (k, writes) = if geom.spacetime == Spacetime::KerrKS && geom.coords == Coords::Spherical {
         symbi_discretize::gv::kerr_wave_speed_map_gv(
             geom.coords,
             &geom.spacing,
@@ -2224,7 +2224,7 @@ fn gen_robin_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
 // suffix (face positions) + the mass/spin scalars; baked only for the kerr spacetime.
 fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
     assert!(
-        geom.spacetime == Spacetime::Kerr && geom.ncomp == 3,
+        geom.spacetime == Spacetime::KerrKS && geom.ncomp == 3,
         "the kerr ghost fill is swirl-only"
     );
     let name = format!(
@@ -2241,7 +2241,7 @@ fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
 // MHD ghost dispatch keys on the spacetime tag only). kerr-only.
 fn gen_rmhd_kerr_ghost_fill(out_dir: &str, geom: &Geom) {
     assert!(
-        geom.spacetime == Spacetime::Kerr,
+        geom.spacetime == Spacetime::KerrKS,
         "the rmhd kerr ghost fill is kerr-only"
     );
     let name = format!("rmhd_ghost_fill{}_2d", geom.spacetime_suffix());
@@ -2835,7 +2835,7 @@ fn main() {
         for (base, tag) in [("mass_flux", "mass"), ("nrg_flux", "nrg")] {
             let (k, w) = symbi_discretize::shell_flux_map_gv(
                 Coords::Cartesian,
-                Spacetime::KerrSchild,
+                Spacetime::SchwarzschildKS,
                 &[Spacing::Uniform; 2],
                 &[0, 1],
                 2,
@@ -2844,7 +2844,7 @@ fn main() {
             emit_gv(&out_dir, &format!("shell_{tag}_flux_2d"), 2, &k, &w);
             let (k, w) = symbi_discretize::shell_flux_map_gv(
                 Coords::Cartesian,
-                Spacetime::KerrSchild,
+                Spacetime::SchwarzschildKS,
                 &[Spacing::Uniform; 3],
                 &[0, 1, 2],
                 3,
@@ -2919,7 +2919,7 @@ fn main() {
     // unconditionally ingoing. uniform + log-radial grids share one kernel tagged `_sph_ks` (the
     // radial spacing is a runtime `map_kind` scalar; encoding it as a kernel-name axis would bake a separate kernel per map).
     for ndim in 1u8..=2 {
-        let ks = Geom::sph(ndim).kerr_schild();
+        let ks = Geom::sph(ndim).schwarzschild_ks();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
         gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
@@ -2935,8 +2935,8 @@ fn main() {
     // metric-aware c2p / per-sweep flux (the shift rides every sweep's fan). tagged `_ks` (cartesian
     // suffix is empty). baked for the 2D equatorial slice and the full 3D box.
     for (ks, ndim) in [
-        (Geom::cart(2).kerr_schild(), 2u8),
-        (Geom::cart(3).kerr_schild(), 3u8),
+        (Geom::cart(2).schwarzschild_ks(), 2u8),
+        (Geom::cart(3).schwarzschild_ks(), 3u8),
     ] {
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
@@ -2969,8 +2969,8 @@ fn main() {
     // 0 -> the generic ghost (no frame dragging). 2.5D axisymmetric-swirl (R, z gridded + the v_phi
     // out-of-plane DOF, `_cyl_rz`) + full 3D (R, phi, z, `_cyl`).
     for (geom, ndim) in [
-        (Geom::cyl_rz().kerr_schild(), 2u8),
-        (Geom::cyl_3d().kerr_schild(), 3u8),
+        (Geom::cyl_rz().schwarzschild_ks(), 2u8),
+        (Geom::cyl_3d().schwarzschild_ks(), 3u8),
     ] {
         gen_godunov_stage(&out_dir, ndim, "rhd", true, geom.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, geom.clone());
@@ -3002,7 +3002,7 @@ fn main() {
     // (v_R, v_phi), axes [0, 1]; the shift rides the R sweep (beta^phi = 0); light-cone CFL. reuses
     // the unsuffixed rhd_snapshot_2d (DOF == NDIM copy).
     {
-        let disk = Geom::cyl_rphi().kerr_schild();
+        let disk = Geom::cyl_rphi().schwarzschild_ks();
         gen_godunov_stage(&out_dir, 2, "rhd", true, disk.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, 2, disk.clone());
         gen_rhd_c2p_gr(&out_dir, 2, 20, disk.clone());
@@ -3018,7 +3018,7 @@ fn main() {
     // + ghost fill.
     for base in [
         Geom::sph_swirl().schwarzschild(),
-        Geom::sph_swirl().kerr_schild(),
+        Geom::sph_swirl().schwarzschild_ks(),
     ] {
         for geom in [base.clone()] {
             gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
@@ -3055,7 +3055,10 @@ fn main() {
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
     // zero — the transverse-B curved measures land with the phase-B densitized CT).
-    for geom in [Geom::sph(1).schwarzschild(), Geom::sph(1).kerr_schild()] {
+    for geom in [
+        Geom::sph(1).schwarzschild(),
+        Geom::sph(1).schwarzschild_ks(),
+    ] {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
@@ -3097,8 +3100,8 @@ fn main() {
     // Etilde = sqrt(gamma) E divided by the per-face sqrt(gamma) weight (Font eq. 101), which
     // telescopes for any weight. the covariant geodesic + EM-stress source carries the gravity.
     for (geom, ndim) in [
-        (Geom::cart(2).kerr_schild(), 2u8),
-        (Geom::cart(3).kerr_schild(), 3u8),
+        (Geom::cart(2).schwarzschild_ks(), 2u8),
+        (Geom::cart(3).schwarzschild_ks(), 3u8),
     ] {
         gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
@@ -3163,7 +3166,10 @@ fn main() {
     // gr_ct_plane, so the GAPPED (R, z) grid-axis set [0, 2] reconstructs the staggered field along
     // the axis whose transverse halo it carries. HLLE gas flux; the HLLD orthonormal wrapper is a
     // follow-on (diagonal-metric only, so even the disk defers it).
-    for geom in [Geom::cyl_rphi().kerr_schild(), Geom::cyl_rz().kerr_schild()] {
+    for geom in [
+        Geom::cyl_rphi().schwarzschild_ks(),
+        Geom::cyl_rz().schwarzschild_ks(),
+    ] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());

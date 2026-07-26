@@ -692,7 +692,7 @@ mod tests {
     }
 
     // the ingoing kerr-schild ADM block (h = 1 + 2M/r).
-    fn kerr_schild_adm(r: f64, m: f64) -> (f64, f64, f64, AdmRadialDerivs<f64>) {
+    fn schwarzschild_ks_adm(r: f64, m: f64) -> (f64, f64, f64, AdmRadialDerivs<f64>) {
         let b = 2.0 * m / r;
         let h = 1.0 + b;
         let db = -2.0 * m / (r * r); // d_r (2M/r)
@@ -753,7 +753,7 @@ mod tests {
                     continue;
                 }
                 let (a, br, grr, d) = if ks {
-                    kerr_schild_adm(r, m)
+                    schwarzschild_ks_adm(r, m)
                 } else {
                     schwarzschild_adm(r, m)
                 };
@@ -1059,7 +1059,7 @@ mod tests {
         let m = 1.0;
         let (e, big_v, p) = (2.3, -0.4, 0.05);
         for &r in &[8.0, 3.0, 2.0, 1.5, 1.2] {
-            let (a, br, grr, d) = kerr_schild_adm(r, m);
+            let (a, br, grr, d) = schwarzschild_ks_adm(r, m);
             let (s_mom, s_tau) = grhd_radial_geodesic_source(
                 r,
                 a,

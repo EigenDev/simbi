@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn kerr_schild_coordinate_speed_is_ingoing_at_and_inside_horizon() {
+    fn schwarzschild_ks_coordinate_speed_is_ingoing_at_and_inside_horizon() {
         // the horizon-penetrating CFL guarantee. the kerr-schild coordinate wave speed is the
         // factored form the CFL map uses, lambda_coord = alpha^2 * lambda^SR - beta^r, with
         // alpha^2 = 1/(1 + 2M/r) and beta^r = 2M/(r + 2M) (M = 1). BOTH characteristic roots are
