@@ -220,6 +220,45 @@ struct BodyParams {
     magnetic_resistivity: Option<f64>,
 }
 
+fn validate_porous_body_overlaps(bodies: &[BodyParams]) -> Result<(), String> {
+    const ACCRETION: u64 = 2;
+    const RIGID: u64 = 1 << 4;
+    let mask_radius = |body: &BodyParams| {
+        if body.capability & ACCRETION != 0 {
+            body.accretion_radius
+        } else if body.capability & RIGID != 0 {
+            body.radius
+        } else {
+            0.0
+        }
+    };
+    for ii in 0..bodies.len() {
+        for jj in ii + 1..bodies.len() {
+            if bodies[ii].porosity.is_none() && bodies[jj].porosity.is_none() {
+                continue;
+            }
+            let radius_sum = mask_radius(&bodies[ii]) + mask_radius(&bodies[jj]);
+            if radius_sum <= 0.0 {
+                continue;
+            }
+            let distance_sq = (0..3)
+                .map(|axis| {
+                    let left = bodies[ii].position.get(axis).copied().unwrap_or(0.0);
+                    let right = bodies[jj].position.get(axis).copied().unwrap_or(0.0);
+                    (left - right) * (left - right)
+                })
+                .sum::<f64>();
+            if distance_sq < radius_sum * radius_sum {
+                return Err(format!(
+                    "porous immersed-body masks {ii} and {jj} overlap: sequential wall targets \
+                     are order-dependent; separate the masks or represent them as one CSG body"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// a bonded-fragment assembly from the `bonded_assembly` config key: a cluster
 /// of wall-only rigid spherical fragments (sealed porous surfaces) joined by
 /// breakable elastic bonds, with optional soft-sphere contact and mutual
@@ -2720,6 +2759,40 @@ fn append_diagnostics<const D: usize>(
 #[cfg(test)]
 mod diagnostics_tests {
     use super::*;
+
+    fn porous_body(x: f64) -> BodyParams {
+        BodyParams {
+            capability: 2,
+            mass: 1.0,
+            radius: 0.0,
+            position: vec![x, 0.0],
+            velocity: vec![0.0, 0.0],
+            softening: 0.05,
+            accretion_radius: 0.2,
+            sink_rate: 1.0,
+            porosity: Some(0.5),
+            k_eta_n: 1.0,
+            k_eta_t: 0.0,
+            torque_free_xi: None,
+            inertia: 0.0,
+            no_slip: false,
+            shape_json: None,
+            omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0; 3],
+            two_way_coupling: false,
+            magnetic_resistivity: None,
+        }
+    }
+
+    #[test]
+    fn porous_masks_reject_order_dependent_overlap() {
+        let error = validate_porous_body_overlaps(&[porous_body(0.0), porous_body(0.3)])
+            .expect_err("overlapping porous masks were accepted");
+        assert!(error.contains("order-dependent"), "{error}");
+        validate_porous_body_overlaps(&[porous_body(0.0), porous_body(0.5)])
+            .expect("separated porous masks were rejected");
+    }
 
     // the diagnostics row carries all three components for every grid
     // dimension — a 3d run's z position/velocity/force and the full torque
@@ -5861,6 +5934,7 @@ macro_rules! iso_dispatch {
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
 fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> Result<(), String> {
+    validate_porous_body_overlaps(&cfg.bodies)?;
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the
     // two cases still pending need extra fine-level prolongation:
     if cfg.refinement_enabled
