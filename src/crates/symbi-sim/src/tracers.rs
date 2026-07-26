@@ -601,7 +601,24 @@ where
     Mem: MemorySpace,
 {
     let geometry = sim.geom.block_geometry(sim.physics.metric);
-    advance_stage_mass_transport_store(&mut sim.store, &geometry, a0, ac, stage)
+    let layout = TransportLayout::single(&sim.geom.interior);
+    advance_stage_mass_transport_store(&mut sim.store, &geometry, layout, a0, ac, stage)
+}
+
+/// global cell addressing for a single grid or one tile of a decomposition.
+#[derive(Clone, Copy, Debug)]
+pub struct TransportLayout<const D: usize> {
+    pub global_cells: [usize; D],
+    pub tile_offset: [usize; D],
+}
+
+impl<const D: usize> TransportLayout<D> {
+    pub fn single(domain: &symbi_algebra::Domain<D>) -> Self {
+        Self {
+            global_cells: std::array::from_fn(|dd| domain.spaces[dd].size()),
+            tile_offset: [0; D],
+        }
+    }
 }
 
 /// advance one transport stage when the driver owns a field store and its
@@ -609,6 +626,7 @@ where
 pub fn advance_stage_mass_transport_store<const D: usize, const DOF: usize, M, Mem>(
     sim: &mut FieldStore<D, DOF, Mem, f64>,
     geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
     a0: f64,
     ac: f64,
     stage: usize,
@@ -652,7 +670,7 @@ where
 
     let mut candidate = BTreeMap::<u64, ContainerId>::new();
     for coord in interior.iter() {
-        let source = cell_container(coord, &interior);
+        let source = cell_container(coord, &interior, layout);
         let Some(ids) = by_source.get(&source) else {
             continue;
         };
@@ -665,13 +683,27 @@ where
             let high_flux = *sim.fields.flux[dd].den.view().at(high);
             if low_flux < 0.0 {
                 transfers.push(MassTransfer {
-                    destination: face_destination(coord, dd, false, &interior, &sim.boundaries),
+                    destination: face_destination(
+                        coord,
+                        dd,
+                        false,
+                        &interior,
+                        &sim.boundaries,
+                        layout,
+                    ),
                     mass: -low_flux * geometry.face_area(coord, dd) * sim.dt,
                 });
             }
             if high_flux > 0.0 {
                 transfers.push(MassTransfer {
-                    destination: face_destination(coord, dd, true, &interior, &sim.boundaries),
+                    destination: face_destination(
+                        coord,
+                        dd,
+                        true,
+                        &interior,
+                        &sim.boundaries,
+                        layout,
+                    ),
                     mass: high_flux * geometry.face_area(high, dd) * sim.dt,
                 });
             }
@@ -701,10 +733,11 @@ where
 
     for (ii, &owner) in tracers.owner.iter().enumerate() {
         if !is_exterior(owner) {
-            let coord = container_cell(owner, &interior);
-            let center = geometry.centroid(coord);
-            for dd in 0..D {
-                tracers.x[ii][dd] = center[dd];
+            if let Some(coord) = container_cell(owner, &interior, layout) {
+                let center = geometry.centroid(coord);
+                for dd in 0..D {
+                    tracers.x[ii][dd] = center[dd];
+                }
             }
         }
     }
@@ -725,12 +758,14 @@ fn exterior_container(axis: usize, high: bool) -> crate::mass_transport::Contain
 fn cell_container<const D: usize>(
     coord: [isize; D],
     domain: &symbi_algebra::Domain<D>,
+    layout: TransportLayout<D>,
 ) -> crate::mass_transport::ContainerId {
     let mut linear = 0usize;
     let mut stride = 1usize;
     for dd in 0..D {
-        linear += (coord[dd] - domain.spaces[dd].lo) as usize * stride;
-        stride *= (domain.spaces[dd].hi - domain.spaces[dd].lo) as usize;
+        let local = (coord[dd] - domain.spaces[dd].lo) as usize;
+        linear += (layout.tile_offset[dd] + local) * stride;
+        stride *= layout.global_cells[dd];
     }
     crate::mass_transport::ContainerId(linear as u64)
 }
@@ -738,14 +773,18 @@ fn cell_container<const D: usize>(
 fn container_cell<const D: usize>(
     container: crate::mass_transport::ContainerId,
     domain: &symbi_algebra::Domain<D>,
-) -> [isize; D] {
+    layout: TransportLayout<D>,
+) -> Option<[isize; D]> {
     let mut linear = container.0 as usize;
-    std::array::from_fn(|dd| {
-        let extent = (domain.spaces[dd].hi - domain.spaces[dd].lo) as usize;
-        let index = linear % extent;
-        linear /= extent;
-        domain.spaces[dd].lo + index as isize
-    })
+    let global: [usize; D] = std::array::from_fn(|dd| {
+        let index = linear % layout.global_cells[dd];
+        linear /= layout.global_cells[dd];
+        index
+    });
+    let local: [isize; D] = std::array::from_fn(|dd| {
+        global[dd] as isize - layout.tile_offset[dd] as isize + domain.spaces[dd].lo
+    });
+    domain.contains(local).then_some(local)
 }
 
 fn face_destination<const D: usize>(
@@ -754,22 +793,37 @@ fn face_destination<const D: usize>(
     high: bool,
     domain: &symbi_algebra::Domain<D>,
     boundaries: &crate::state::Boundaries<D>,
+    layout: TransportLayout<D>,
 ) -> crate::mass_transport::ContainerId {
-    let mut neighbor = coord;
-    neighbor[axis] += if high { 1 } else { -1 };
-    if domain.contains(neighbor) {
-        return cell_container(neighbor, domain);
+    let local: [usize; D] = std::array::from_fn(|dd| (coord[dd] - domain.spaces[dd].lo) as usize);
+    let mut global: [isize; D] =
+        std::array::from_fn(|dd| (layout.tile_offset[dd] + local[dd]) as isize);
+    global[axis] += if high { 1 } else { -1 };
+    if global[axis] >= 0 && global[axis] < layout.global_cells[axis] as isize {
+        let mut linear = 0usize;
+        let mut stride = 1usize;
+        for dd in 0..D {
+            linear += global[dd] as usize * stride;
+            stride *= layout.global_cells[dd];
+        }
+        return crate::mass_transport::ContainerId(linear as u64);
     }
     match boundaries.0[axis][high as usize] {
         crate::state::BoundaryType::Periodic => {
-            neighbor[axis] = if high {
-                domain.spaces[axis].lo
+            global[axis] = if high {
+                0
             } else {
-                domain.spaces[axis].hi - 1
+                layout.global_cells[axis] as isize - 1
             };
-            cell_container(neighbor, domain)
+            let mut linear = 0usize;
+            let mut stride = 1usize;
+            for dd in 0..D {
+                linear += global[dd] as usize * stride;
+                stride *= layout.global_cells[dd];
+            }
+            crate::mass_transport::ContainerId(linear as u64)
         }
-        crate::state::BoundaryType::Reflect => cell_container(coord, domain),
+        crate::state::BoundaryType::Reflect => cell_container(coord, domain, layout),
         _ => exterior_container(axis, high),
     }
 }
