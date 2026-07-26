@@ -1959,7 +1959,7 @@ where
                 &self.levels[level].state.store,
                 dt,
             );
-        symbi_sim::tracers::advance_continuous_tracers_affine_mesh_host(
+        symbi_sim::tracers::advance_continuous_tracers(
             &mut tracers,
             self.levels[level]
                 .state

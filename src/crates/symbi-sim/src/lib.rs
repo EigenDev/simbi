@@ -22,6 +22,8 @@
 pub mod stage;
 pub mod mass_transport;
 pub mod tracers;
+#[cfg(feature = "gpu")]
+mod tracer_device;
 pub mod state;
 pub mod substrate_seam;
 pub mod driver;

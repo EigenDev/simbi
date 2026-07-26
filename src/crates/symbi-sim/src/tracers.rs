@@ -323,6 +323,62 @@ pub fn advance_continuous_tracers_affine_mesh_host<
     Ok(())
 }
 
+/// execute the affine cic/ito update on the selected memory backend.
+///
+/// uniform grids launch one gpu thread per particle when device-accessible
+/// storage is active. mapped grids retain the host oracle.
+pub fn advance_continuous_tracers<
+    const D: usize,
+    Mem: symbi_xpu::MemorySpace,
+>(
+    tracers: &mut ContinuousTracerSet<D, Mem>,
+    coefficients: &ItoCoefficientFields<D, Mem>,
+    geometry: &crate::state::PartitionGeometry<D>,
+    scale_start: f64,
+    scale_end: f64,
+    offset_start: [f64; D],
+    offset_end: [f64; D],
+    dt: f64,
+) -> Result<(), String> {
+    #[cfg(feature = "gpu")]
+    if Mem::IS_DEVICE_ACCESSIBLE && geometry.maps.is_none() {
+        if !dt.is_finite() || dt <= 0.0 {
+            return Err("ito tracer timestep must be positive and finite".to_string());
+        }
+        if !scale_start.is_finite()
+            || !scale_end.is_finite()
+            || scale_start <= 0.0
+            || scale_end <= 0.0
+            || offset_start.iter().any(|value| !value.is_finite())
+            || offset_end.iter().any(|value| !value.is_finite())
+        {
+            return Err(
+                "continuous tracer mesh map must be finite with positive scales".to_string(),
+            );
+        }
+        return crate::tracer_device::advance_uniform(
+            tracers,
+            coefficients,
+            geometry,
+            scale_start,
+            scale_end,
+            offset_start,
+            offset_end,
+            dt,
+        );
+    }
+    advance_continuous_tracers_affine_mesh_host(
+        tracers,
+        coefficients,
+        geometry,
+        scale_start,
+        scale_end,
+        offset_start,
+        offset_end,
+        dt,
+    )
+}
+
 /// affine logical-to-physical maps at the endpoints of one accepted step.
 pub fn continuous_tracer_mesh_step<const D: usize, const DOF: usize, Mem>(
     sim: &FieldStore<D, DOF, Mem, f64>,
@@ -1817,6 +1873,131 @@ mod tests {
             assert_eq!(*tracers.step_x[0].as_ptr::<f64>(), 2.0);
             assert_eq!(*tracers.x[0].as_ptr::<f64>(), 3.5);
             assert_eq!(*tracers.random_counter.as_ptr::<u64>(), 8);
+        }
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn continuous_device_update_matches_host_oracle() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, DeviceMemory, HostMemory};
+
+        let sim =
+            SimState::<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [8, 6],
+                [0.0, -1.0],
+                [0.125, 0.25],
+                2,
+                Boundaries::uniform(BoundaryType::Periodic),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        for order in [
+            crate::mass_transport::ItoOrder::Two,
+            crate::mass_transport::ItoOrder::Three,
+        ] {
+            let host_coefficients =
+                ItoCoefficientFields::<2, HostMemory>::zeros(&sim.geom.allocated).unwrap();
+            let device_coefficients =
+                ItoCoefficientFields::<2, DeviceMemory>::zeros(&sim.geom.allocated).unwrap();
+            for coord in sim.geom.allocated.iter() {
+                let [x, y] = sim.geom.cell_coord(coord);
+                let values = [
+                    [0.15 + 0.02 * x, 0.04 + 0.01 * y.abs(), 0.003],
+                    [-0.07 + 0.01 * y, 0.03 + 0.005 * x.abs(), -0.002],
+                ];
+                for dd in 0..2 {
+                    host_coefficients.drift[dd]
+                        .view_mut()
+                        .set(coord, values[dd][0]);
+                    host_coefficients.variance[dd]
+                        .view_mut()
+                        .set(coord, values[dd][1]);
+                    host_coefficients.third[dd]
+                        .view_mut()
+                        .set(coord, values[dd][2]);
+                    device_coefficients.drift[dd]
+                        .view_mut()
+                        .set(coord, values[dd][0]);
+                    device_coefficients.variance[dd]
+                        .view_mut()
+                        .set(coord, values[dd][1]);
+                    device_coefficients.third[dd]
+                        .view_mut()
+                        .set(coord, values[dd][2]);
+                }
+            }
+            let mut host = ContinuousTracerSet::<2, HostMemory>::allocate(256, order).unwrap();
+            let mut device =
+                ContinuousTracerSet::<2, DeviceMemory>::allocate(256, order).unwrap();
+            host.run_seed = 0x1234_5678_9abc_def0;
+            device.run_seed = host.run_seed;
+            for ii in 0..256 {
+                let record = ContinuousTracerRecord {
+                    x: [
+                        0.1 + 0.8 * (ii as f64 + 0.5) / 256.0,
+                        -0.7 + 1.4 * ((37 * ii % 256) as f64 + 0.5) / 256.0,
+                    ],
+                    step_x: [0.0; 2],
+                    id: 1000 + ii as u64,
+                    cohort: (ii % 3) as u16,
+                    owner: crate::mass_transport::ContainerId(ii as u64),
+                    escaped: 0,
+                    crossed_sink: 0,
+                    crossing_time: 0.0,
+                    random_counter: (ii % 11) as u64,
+                };
+                host.push_host(record).unwrap();
+                device.push_host(record).unwrap();
+            }
+            advance_continuous_tracers_affine_mesh_host(
+                &mut host,
+                &host_coefficients,
+                &sim.geom,
+                1.0,
+                1.02,
+                [0.0, 0.0],
+                [0.01, -0.02],
+                0.05,
+            )
+            .unwrap();
+            advance_continuous_tracers(
+                &mut device,
+                &device_coefficients,
+                &sim.geom,
+                1.0,
+                1.02,
+                [0.0, 0.0],
+                [0.01, -0.02],
+                0.05,
+            )
+            .unwrap();
+            unsafe {
+                for ii in 0..256 {
+                    assert_eq!(
+                        *device.random_counter.as_ptr::<u64>().add(ii),
+                        *host.random_counter.as_ptr::<u64>().add(ii)
+                    );
+                    for dd in 0..2 {
+                        let actual = *device.x[dd].as_ptr::<f64>().add(ii);
+                        let expected = *host.x[dd].as_ptr::<f64>().add(ii);
+                        let tolerance =
+                            512.0 * f64::EPSILON * actual.abs().max(expected.abs()).max(1.0);
+                        assert!(
+                            (actual - expected).abs() <= tolerance,
+                            "{order:?} particle {ii} axis {dd}: {actual} != {expected}"
+                        );
+                    }
+                }
+            }
         }
     }
 

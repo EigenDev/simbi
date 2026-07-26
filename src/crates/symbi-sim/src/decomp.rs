@@ -1518,7 +1518,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     .expect("ito coefficients were materialized");
                 let (scale_start, scale_end, offset_start, offset_end) =
                     crate::tracers::continuous_tracer_mesh_step(&**store, dt);
-                crate::tracers::advance_continuous_tracers_affine_mesh_host(
+                crate::tracers::advance_continuous_tracers(
                     &mut tracers,
                     coefficients,
                     &store.geom,
