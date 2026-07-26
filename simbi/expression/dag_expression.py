@@ -797,6 +797,89 @@ def tabulated_2d(
     )
 
 
+def tabulated_3d(
+    coordinate_x: Expr,
+    coordinate_y: Expr,
+    coordinate_z: Expr,
+    coordinates_x: Sequence[float],
+    coordinates_y: Sequence[float],
+    coordinates_z: Sequence[float],
+    values: Sequence[Sequence[Sequence[float]]],
+    *,
+    bounds: TableBounds | str,
+) -> Expr:
+    """trilinear immutable field on a rectilinear three-dimensional table."""
+    if not (
+        coordinate_x.graph is coordinate_y.graph
+        and coordinate_x.graph is coordinate_z.graph
+    ):
+        raise ValueError("tabulated_3d coordinates must belong to the same graph")
+    xs = tuple(float(value) for value in coordinates_x)
+    ys = tuple(float(value) for value in coordinates_y)
+    zs = tuple(float(value) for value in coordinates_z)
+    planes = tuple(
+        tuple(tuple(float(value) for value in row) for row in plane)
+        for plane in values
+    )
+    if len(xs) < 2 or len(ys) < 2 or len(zs) < 2:
+        raise ValueError("tabulated_3d requires at least two samples per axis")
+    if (
+        len(planes) != len(zs)
+        or any(len(plane) != len(ys) for plane in planes)
+        or any(len(row) != len(xs) for plane in planes for row in plane)
+    ):
+        raise ValueError(
+            "tabulated_3d values must have shape "
+            "(len(coordinates_z), len(coordinates_y), len(coordinates_x))"
+        )
+    flat_values = tuple(
+        value for plane in planes for row in plane for value in row
+    )
+    if not all(
+        math.isfinite(value) for value in (*xs, *ys, *zs, *flat_values)
+    ):
+        raise ValueError("tabulated_3d samples must be finite")
+    if (
+        any(right <= left for left, right in zip(xs, xs[1:]))
+        or any(right <= left for left, right in zip(ys, ys[1:]))
+        or any(right <= left for left, right in zip(zs, zs[1:]))
+    ):
+        raise ValueError("tabulated_3d coordinates must be strictly increasing")
+    try:
+        bounds_mode = bounds if isinstance(bounds, TableBounds) else TableBounds(bounds)
+    except ValueError as exc:
+        raise ValueError(
+            "tabulated_3d bounds must be 'clamp' or 'zero'"
+        ) from exc
+
+    graph = coordinate_x.graph
+    plane_fields = []
+    for plane in planes:
+        row_fields = tuple(
+            _tabulated_1d_expr_values(
+                coordinate_x,
+                xs,
+                tuple(constant(value, graph) for value in row),
+                bounds_mode,
+            )
+            for row in plane
+        )
+        plane_fields.append(
+            _tabulated_1d_expr_values(
+                coordinate_y,
+                ys,
+                row_fields,
+                bounds_mode,
+            )
+        )
+    return _tabulated_1d_expr_values(
+        coordinate_z,
+        zs,
+        tuple(plane_fields),
+        bounds_mode,
+    )
+
+
 def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:
     """Map a function over expressions."""
     return [f(expr) for expr in exprs]
