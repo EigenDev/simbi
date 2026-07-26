@@ -48,9 +48,8 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
 CUDA and HIP are peer production backends generated from the same kernel
-definitions. The AMD path runs on the OLCF Frontier cluster. Multi-*node*
-decomposition is the next step on the roadmap; single-node multi-GPU already
-runs today.
+definitions. Multi-*node* decomposition is the next step on the roadmap;
+single-node multi-GPU already runs today.
 I don't have a science problem that needs it at this time, so it prob won't be added for 
 quite a while.
 ---
