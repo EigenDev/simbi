@@ -27,7 +27,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, BodyKind, SurfaceSpec};
 use symbi_ib::sdf::SdfExpr;
-use symbi_sim::tracers::ACCRETION_RESERVOIR;
+use symbi_sim::tracers::{body_accretion_reservoir, is_accretion_reservoir};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -99,17 +99,32 @@ fn composite_mass(hier: &Hier) -> f64 {
 
 #[test]
 fn refined_sink_receipt_moves_fine_tracers_into_the_accretion_reservoir() {
-    let mut hierarchy = two_level(0.0, BodyCollection::new().add(Body::black_hole(
-        0,
-        Tensor::new([0.5; 3]),
-        Tensor::zeros(),
-        0.05,
-        0.05,
-        0.1,
-        20.0,
-        1.0,
-        0.1,
-    )));
+    let mut hierarchy = two_level(
+        0.0,
+        BodyCollection::new()
+            .add(Body::black_hole(
+                0,
+                Tensor::new([0.4, 0.5, 0.5]),
+                Tensor::zeros(),
+                0.05,
+                0.05,
+                0.1,
+                20.0,
+                1.0,
+                0.08,
+            ))
+            .add(Body::black_hole(
+                1,
+                Tensor::new([0.6, 0.5, 0.5]),
+                Tensor::zeros(),
+                0.05,
+                0.05,
+                0.1,
+                20.0,
+                1.0,
+                0.08,
+            )),
+    );
     hierarchy.attach_mass_tracers(32_768);
     let mass_before = composite_mass(&hierarchy);
 
@@ -120,7 +135,7 @@ fn refined_sink_receipt_moves_fine_tracers_into_the_accretion_reservoir() {
     let accreted = tracers
         .owner
         .iter()
-        .filter(|&&owner| owner == ACCRETION_RESERVOIR)
+        .filter(|&&owner| is_accretion_reservoir(owner))
         .count();
     let represented_mass = accreted as f64 * tracers.weight;
 
@@ -142,6 +157,22 @@ fn refined_sink_receipt_moves_fine_tracers_into_the_accretion_reservoir() {
             .count()
             == accreted,
         "sink flags and reservoir ownership disagree"
+    );
+    let per_body: [usize; 2] = std::array::from_fn(|body| {
+        tracers
+            .owner
+            .iter()
+            .filter(|&&owner| owner == body_accretion_reservoir(body))
+            .count()
+    });
+    assert!(
+        per_body.iter().all(|&count| count > 50),
+        "both refined sinks must own tracer receipts: {per_body:?}"
+    );
+    assert_eq!(
+        per_body.iter().sum::<usize>(),
+        accreted,
+        "the refined sinks collapsed body identity into an aggregate reservoir"
     );
 }
 

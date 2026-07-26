@@ -22,6 +22,7 @@
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{evolve_decomposed, flatten, gather_interiors, unflatten, LocalCopy};
 use symbi::sim::state::*;
+use symbi::sim::tracers::{body_accretion_reservoir, seed_mass_weighted};
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
@@ -55,6 +56,32 @@ fn central_bh() -> BodyCollection<f64, 2> {
         0.5, // sink_delta
         0.5, // accretion_radius
     ))
+}
+
+fn two_accretors() -> BodyCollection<f64, 2> {
+    BodyCollection::new()
+        .add(Body::black_hole(
+            0,
+            Tensor::new([-0.35, 0.0]),
+            Tensor::zeros(),
+            0.1,
+            0.05,
+            0.1,
+            20.0,
+            1.0,
+            0.2,
+        ))
+        .add(Body::black_hole(
+            1,
+            Tensor::new([0.35, 0.0]),
+            Tensor::zeros(),
+            0.1,
+            0.05,
+            0.1,
+            20.0,
+            1.0,
+            0.2,
+        ))
 }
 
 // a MOVING binary: two gravitating bodies orbiting the origin (prescribed Keplerian motion via
@@ -282,4 +309,29 @@ fn binary_rk2_quad_tile_2d_grid() {
 #[test]
 fn binary_euler_two_tile_x_cut() {
     assert_body_matches([2, 1], Timestepping::Euler, binary, false);
+}
+
+#[test]
+fn decomposed_accretors_preserve_distinct_tracer_reservoirs() {
+    let counts = [2, 1];
+    let mut tiles = grid_tiles(counts, Timestepping::Euler, two_accretors);
+    for (sim, _) in &mut tiles {
+        sim.tracers = Some(seed_mass_weighted(&**sim, 4096));
+    }
+
+    run(&mut tiles, counts, Timestepping::Euler);
+
+    let per_body: [usize; 2] = std::array::from_fn(|body| {
+        let reservoir = body_accretion_reservoir(body);
+        tiles
+            .iter()
+            .filter_map(|(sim, _)| sim.tracers.as_ref())
+            .flat_map(|tracers| tracers.owner.iter())
+            .filter(|&&owner| owner == reservoir)
+            .count()
+    });
+    assert!(
+        per_body.iter().all(|&count| count > 50),
+        "both decomposed accretors must own tracer receipts: {per_body:?}"
+    );
 }

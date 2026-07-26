@@ -74,6 +74,31 @@ class AccretionRestartProbe(RestartProbe):
         ]
 
 
+class TwoAccretorRestartProbe(AccretionRestartProbe):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 2048
+
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
+        return [
+            ImmersedBodyConfig(
+                capability=BodyCapability.ACCRETION,
+                mass=1.0,
+                radius=0.08,
+                position=(position, 0.0, 0.0),
+                velocity=(0.0, 0.0, 0.0),
+                accretion=AccretionProperties(
+                    accretion_radius=0.08,
+                    sink_rate=10.0,
+                ),
+            )
+            for position in (0.35, 0.65)
+        ]
+
+
 def _final(directory: Path) -> Path:
     files = list(directory.glob("*final*.h5"))
     assert len(files) == 1
@@ -223,3 +248,33 @@ def test_python_runner_restart_preserves_body_state(tmp_path):
             restarted["level_0/conserved/den"],
         )
         assert continuous["bodies/total_accreted_mass"][0] > 0.0
+
+
+@pytest.mark.simulation
+def test_python_runner_preserves_distinct_body_accretion_reservoirs(tmp_path):
+    split_dir = tmp_path / "two-body-split"
+    restarted_dir = tmp_path / "two-body-restarted"
+    run(
+        TwoAccretorRestartProbe(data_directory=split_dir),
+        compute_mode="cpu",
+        max_steps=3,
+    )
+    checkpoint = _final(split_dir)
+    prefix = np.uint64((1 << 62) | (1 << 61))
+    with h5py.File(checkpoint) as split:
+        owners = split["tracers/owner"][:]
+        assert np.count_nonzero(owners == prefix) > 0
+        assert np.count_nonzero(owners == (prefix | np.uint64(1))) > 0
+
+    run(
+        TwoAccretorRestartProbe(
+            data_directory=restarted_dir,
+            checkpoint_file=checkpoint,
+        ),
+        compute_mode="cpu",
+        max_steps=6,
+    )
+    with h5py.File(_final(restarted_dir)) as restarted:
+        owners = restarted["tracers/owner"][:]
+        assert np.count_nonzero(owners == prefix) > 0
+        assert np.count_nonzero(owners == (prefix | np.uint64(1))) > 0

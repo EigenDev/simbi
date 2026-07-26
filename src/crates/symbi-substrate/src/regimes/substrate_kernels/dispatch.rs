@@ -1387,6 +1387,19 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
 
     // reduce the per-body deltas over the bbox and book them, exactly as the AOT path does.
     let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
+    if sim.has_tracers() && body.has_accretion() {
+        crate::regimes::substrate_gpu::device_sync::<Mem>();
+        im.record_accretion_receipt(
+            b,
+            sim.geom.interior.iter().map(|coord| {
+                if bbox.contains(coord) {
+                    scratch[0].view().at(coord).to_f64()
+                } else {
+                    0.0
+                }
+            }),
+        );
+    }
     let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
     for a in 0..D {
         force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
@@ -1506,6 +1519,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // last; the drain writes zero (no wall normal). the tangential (skin-friction) part is derived
     // downstream as force - force_normal.
     let scratch = feedback_scratch(sim, n_delta + n_torque + D);
+    if sim.has_tracers() {
+        im.reset_accretion_receipts(geom.interior.volume());
+    }
     for b in 0..bodies.len() {
         // penalize every body that runs a surface stack (accretor OR rigid wall); a body
         // with no mask (passive / purely gravitational) contributes no penalization.
@@ -1604,6 +1620,19 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
 
         let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
         let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
+        if sim.has_tracers() && bodies.get(b).has_accretion() {
+            crate::regimes::substrate_gpu::device_sync::<Mem>();
+            im.record_accretion_receipt(
+                b,
+                geom.interior.iter().map(|coord| {
+                    if bbox.contains(coord) {
+                        scratch[0].view().at(coord).to_f64()
+                    } else {
+                        0.0
+                    }
+                }),
+            );
+        }
         for a in 0..D {
             force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
         }

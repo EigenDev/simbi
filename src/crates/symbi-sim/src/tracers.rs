@@ -796,6 +796,86 @@ mod tests {
         assert_eq!(cell_container_address(MATERIAL_REMOVAL_RESERVOIR), None);
         assert_eq!(cell_container_address(exterior_container(0, false)), None);
     }
+
+    #[test]
+    fn body_accretion_reservoirs_preserve_identity_and_aggregate_queries() {
+        let first = body_accretion_reservoir(0);
+        let second = body_accretion_reservoir(1);
+
+        assert_ne!(first, second);
+        assert_eq!(accretion_reservoir_body(first), Some(0));
+        assert_eq!(accretion_reservoir_body(second), Some(1));
+        assert!(is_accretion_reservoir(first));
+        assert!(is_accretion_reservoir(second));
+        assert!(is_accretion_reservoir(ACCRETION_RESERVOIR));
+        assert!(!is_accretion_reservoir(MATERIAL_REMOVAL_RESERVOIR));
+    }
+
+    #[test]
+    fn accepted_body_receipts_partition_accreted_tracers_by_body() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_algebra::Tensor;
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [1],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        let bodies = (0..2).fold(symbi_ib::BodyCollection::new(), |bodies, ii| {
+            bodies.add(symbi_ib::Body::black_hole(
+                ii,
+                Tensor::new([0.5]),
+                Tensor::zeros(),
+                1.0,
+                0.1,
+                0.05,
+                0.5,
+                0.0,
+                0.1,
+            ))
+        });
+        sim.attach_bodies(bodies);
+        let cell = [sim.geom.interior.spaces[0].lo];
+        sim.fields.cons.den.view_mut().set(cell, 0.5);
+        sim.tracers = Some(TracerSet::seed_stratified(&[([0.0], [1.0])], &[100], 0.01));
+        let immersed = sim.immersed.as_ref().unwrap();
+        immersed.reset_accretion_receipts(1);
+        immersed.record_accretion_receipt(0, [0.25]);
+        immersed.record_accretion_receipt(1, [0.25]);
+
+        advance_accretion_transport(&mut sim, &[1.0]).unwrap();
+
+        let tracers = sim.tracers.as_ref().unwrap();
+        let first = body_accretion_reservoir(0);
+        let second = body_accretion_reservoir(1);
+        assert_eq!(
+            tracers.owner.iter().filter(|&&owner| owner == first).count(),
+            25
+        );
+        assert_eq!(
+            tracers.owner.iter().filter(|&&owner| owner == second).count(),
+            25
+        );
+        assert_eq!(
+            tracers.owner.iter().filter(|&&owner| owner.0 == 0).count(),
+            50
+        );
+        assert_eq!(tracers.crossed_mass(), 0.5);
+    }
 }
 
 // =============================================================================
@@ -1095,7 +1175,8 @@ where
 
 const EXTERIOR_BIT: u64 = 1 << 63;
 const ACCRETION_RESERVOIR_ID: u64 = 1 << 62;
-const MATERIAL_REMOVAL_RESERVOIR_ID: u64 = (1 << 62) | 2;
+const BODY_ACCRETION_BIT: u64 = 1 << 61;
+const MATERIAL_REMOVAL_RESERVOIR_ID: u64 = (1 << 62) | 1;
 const CELL_LEVEL_SHIFT: u32 = 56;
 const CELL_LEVEL_MASK: u64 = 0x3f << CELL_LEVEL_SHIFT;
 const CELL_LINEAR_MASK: u64 = (1 << CELL_LEVEL_SHIFT) - 1;
@@ -1104,6 +1185,19 @@ pub const ACCRETION_RESERVOIR: crate::mass_transport::ContainerId =
     crate::mass_transport::ContainerId(ACCRETION_RESERVOIR_ID);
 pub const MATERIAL_REMOVAL_RESERVOIR: crate::mass_transport::ContainerId =
     crate::mass_transport::ContainerId(MATERIAL_REMOVAL_RESERVOIR_ID);
+
+pub fn body_accretion_reservoir(body: usize) -> crate::mass_transport::ContainerId {
+    crate::mass_transport::ContainerId(ACCRETION_RESERVOIR_ID | BODY_ACCRETION_BIT | body as u64)
+}
+
+pub fn accretion_reservoir_body(container: crate::mass_transport::ContainerId) -> Option<usize> {
+    let prefix = ACCRETION_RESERVOIR_ID | BODY_ACCRETION_BIT;
+    ((container.0 & prefix) == prefix).then_some((container.0 & (BODY_ACCRETION_BIT - 1)) as usize)
+}
+
+pub fn is_accretion_reservoir(container: crate::mass_transport::ContainerId) -> bool {
+    container == ACCRETION_RESERVOIR || accretion_reservoir_body(container).is_some()
+}
 
 fn is_exterior(container: crate::mass_transport::ContainerId) -> bool {
     container.0 & EXTERIOR_BIT != 0
@@ -1159,6 +1253,11 @@ where
     if density_before.len() != interior.volume() {
         return Err("accretion density snapshot has the wrong cell count".to_string());
     }
+    let body_receipts = sim
+        .immersed
+        .as_ref()
+        .map(|immersed| immersed.accretion_receipts())
+        .unwrap_or_default();
     let Some(mut tracers) = sim.tracers.take() else {
         return Ok(());
     };
@@ -1183,21 +1282,34 @@ where
         };
         let before = density_before[linear];
         let after = *sim.fields.cons.den.view().at(coord);
-        let removed_density = (before - after).max(0.0);
         let volume = geometry.volume(coord);
-        let kernel = TransportKernel::new(
-            source,
-            before * volume,
-            [MassTransfer {
+        let mut transfers: Vec<MassTransfer> = body_receipts
+            .iter()
+            .enumerate()
+            .filter_map(|(body, receipt)| {
+                let mass = receipt.get(linear).copied().unwrap_or(0.0).max(0.0);
+                (mass > 0.0).then_some(MassTransfer {
+                    destination: body_accretion_reservoir(body),
+                    mass,
+                })
+            })
+            .collect();
+        if transfers.is_empty() {
+            let removed_density = (before - after).max(0.0);
+            transfers.push(MassTransfer {
                 destination: ACCRETION_RESERVOIR,
                 mass: removed_density * volume,
-            }],
-        )?;
+            });
+        }
+        let kernel = TransportKernel::new(source, before * volume, transfers)?;
         assignments.extend(sample_systematic(&kernel, ids, key));
     }
     for (ii, id) in tracers.id.iter().enumerate() {
-        if assignments.get(id) == Some(&ACCRETION_RESERVOIR) {
-            tracers.owner[ii] = ACCRETION_RESERVOIR;
+        if let Some(&owner) = assignments
+            .get(id)
+            .filter(|&&owner| is_accretion_reservoir(owner))
+        {
+            tracers.owner[ii] = owner;
             tracers.flags[ii].crossed_sink = true;
             tracers.flags[ii].crossing_time = sim.time + sim.dt;
         }

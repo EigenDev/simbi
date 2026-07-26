@@ -1458,6 +1458,9 @@ pub struct ImmersedBodies<const NDIM: usize> {
     /// subcycle integrates fragment motion with the gas force/torque held
     /// frozen; the legacy body integrator owns only the source prefix.
     pub fragment_physics: Option<symbi_ib::FragmentPhysics>,
+    /// accepted per-cell mass removal for each body during the latest
+    /// penalization pass. each body row follows `geom.interior.iter()` order.
+    accretion_receipts: std::sync::Mutex<Vec<Vec<f64>>>,
     /// the GLOBAL fast-magnetosonic Alfven stiffness c_a2 = max_interior |B|^2/rho for the wall
     /// relaxation. the max is a domain-global property, so under domain decomposition the
     /// decomposed loop reduces the per-tile maxima and publishes the global value here; the
@@ -1478,6 +1481,25 @@ impl<const NDIM: usize> ImmersedBodies<NDIM> {
     /// publish the global Alfven stiffness (the decomposed loop's cross-tile max).
     pub fn set_c_a2_override(&self, v: f64) {
         self.c_a2_override.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn reset_accretion_receipts(&self, cell_count: usize) {
+        let mut receipts = self.accretion_receipts.lock().unwrap();
+        receipts.clear();
+        receipts.resize_with(self.bodies.len(), || vec![0.0; cell_count]);
+    }
+
+    pub fn record_accretion_receipt(&self, body: usize, values: impl IntoIterator<Item = f64>) {
+        let mut receipts = self.accretion_receipts.lock().unwrap();
+        if let Some(row) = receipts.get_mut(body) {
+            for (slot, value) in row.iter_mut().zip(values) {
+                *slot = value;
+            }
+        }
+    }
+
+    pub fn accretion_receipts(&self) -> Vec<Vec<f64>> {
+        self.accretion_receipts.lock().unwrap().clone()
     }
 }
 
@@ -2162,6 +2184,7 @@ where
             // default: every body is its analytic sphere; a config shape is attached separately.
             shapes: vec![None; n],
             fragment_physics: None,
+            accretion_receipts: std::sync::Mutex::new(Vec::new()),
             // NaN = "compute the local max"; the decomposed loop publishes a global value.
             c_a2_override: std::sync::atomic::AtomicU64::new(f64::NAN.to_bits()),
         });

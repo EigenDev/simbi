@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import h5py
+import matplotlib
 import numpy as np
 
 
@@ -40,6 +41,16 @@ class TracerCloud:
 
     def __len__(self) -> int:
         return len(self.id)
+
+    def accretion_body(self) -> np.ndarray:
+        """body index for body-owned accretion reservoirs; -1 otherwise."""
+        prefix = np.uint64((1 << 62) | (1 << 61))
+        body_mask = (self.owner & prefix) == prefix
+        result = np.full(len(self), -1, dtype=np.int64)
+        result[body_mask] = (
+            self.owner[body_mask] & np.uint64((1 << 61) - 1)
+        ).astype(np.int64)
+        return result
 
 
 def _smooth_grid(values: np.ndarray, sigma: float) -> np.ndarray:
@@ -131,6 +142,7 @@ def overlay_tracers(
     out-of-plane coordinate is within `slab` of `at` (a thin sheet); with `slab` None
     every particle projects onto the plane. `color_by`:
       - "flag": crossed-sink crimson, escaped grey, live blue (provenance at a glance)
+      - "reservoir": accreted particles colored by body index
       - "id":   a stable per-particle color (follow a particle across frames)
       - "none": a single color (pass `c=` / `color=` through kwargs)
     returns the scatter artist, or None when there is nothing to draw -- in which case it
@@ -179,5 +191,14 @@ def overlay_tracers(
     elif color_by == "id":
         opts["c"] = cloud.id[keep]
         opts.setdefault("cmap", "twilight")
+    elif color_by == "reservoir":
+        body = cloud.accretion_body()[keep]
+        palette = matplotlib.colormaps["tab20"]
+        opts["c"] = [
+            palette(int(index) % palette.N)
+            if index >= 0
+            else ("0.5" if escaped else "white")
+            for index, escaped in zip(body, cloud.escaped[keep])
+        ]
     opts.update(kwargs)
     return ax.scatter(x, y, **opts)

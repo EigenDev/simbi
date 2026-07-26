@@ -50,6 +50,31 @@ def test_load_tracers_preserves_exact_ownership_and_spawn_state(tmp_path):
     assert cloud.injection_remainder == 0.125
 
 
+def test_body_accretion_reservoir_identity_is_available_to_visualization(tmp_path):
+    path = tmp_path / "body-reservoirs.h5"
+    prefix = (1 << 62) | (1 << 61)
+    with h5py.File(path, "w") as checkpoint:
+        group = checkpoint.create_group("tracers")
+        group.attrs["run_seed"] = np.uint64(0)
+        group.attrs["next_id"] = np.uint64(3)
+        group.attrs["injection_remainder"] = 0.0
+        group.create_dataset("position", data=np.zeros((3, 2)))
+        group.create_dataset("id", data=np.arange(3, dtype=np.uint64))
+        group.create_dataset(
+            "owner",
+            data=np.array([0, prefix, prefix | 7], dtype=np.uint64),
+        )
+        group.create_dataset("escaped", data=np.zeros(3))
+        group.create_dataset("crossed_sink", data=np.array([0.0, 1.0, 1.0]))
+        group.create_dataset("crossing_time", data=np.zeros(3))
+        group.create_dataset("weight", data=np.array([1.0]))
+
+    cloud = load_tracers(str(path))
+
+    assert cloud is not None
+    np.testing.assert_array_equal(cloud.accretion_body(), [-1, 0, 7])
+
+
 def test_tracers_only_cli_flag_is_available():
     parser = argparse.ArgumentParser()
     setup_parser(parser)

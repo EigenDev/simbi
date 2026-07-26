@@ -17,7 +17,9 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
-use symbi_sim::tracers::{ACCRETION_RESERVOIR, seed_mass_weighted};
+use symbi_sim::tracers::{
+    body_accretion_reservoir, is_accretion_reservoir, seed_mass_weighted,
+};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -71,7 +73,7 @@ fn accretion_reservoir_matches_the_sink_ledger() {
     let accreted = tracers
         .owner
         .iter()
-        .filter(|&&owner| owner == ACCRETION_RESERVOIR)
+        .filter(|&&owner| is_accretion_reservoir(owner))
         .count();
     let tracer_mass = accreted as f64 * tracers.weight;
 
@@ -79,6 +81,14 @@ fn accretion_reservoir_matches_the_sink_ledger() {
     assert!(
         accreted > 100,
         "too few reservoir transfers for a statistical comparison: {accreted}"
+    );
+    assert!(
+        tracers
+            .owner
+            .iter()
+            .filter(|&&owner| is_accretion_reservoir(owner))
+            .all(|&owner| owner == body_accretion_reservoir(0)),
+        "single-body accretion lost body-specific reservoir ownership"
     );
     let relative_error = (tracer_mass - ledger).abs() / ledger;
     assert!(
