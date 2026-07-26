@@ -149,6 +149,8 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
     pub levels: Vec<LevelData<R, NDIM, DOF, M, E, S, Mem, K>>,
+    injection_ledger:
+        std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>,
     /// coarse-fine prolongation order (one above the evolution reconstruction).
     pub prolong_order: ProlongOrder,
     /// flux_registers[ll] corrects the interface between level ll and ll+1.
@@ -371,6 +373,7 @@ where
                 bface_old: None,
                 coverage: None,
             }],
+            injection_ledger: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
             flux_registers: Vec::new(),
             emf_registers: Vec::new(),
@@ -508,6 +511,7 @@ where
 
         Ok(Hierarchy {
             levels,
+            injection_ledger: std::collections::BTreeMap::new(),
             prolong_order,
             flux_registers,
             emf_registers,
@@ -1018,6 +1022,7 @@ where
                 "mass-transport tracers on a refined hierarchy are not wired",
             );
             symbi_sim::tracers::snapshot_transport_state(&mut self.levels[level].state);
+            self.injection_ledger.clear();
         }
     }
 
@@ -1123,6 +1128,19 @@ where
             &mut hook,
         );
         if self.levels[level].state.has_tracers() {
+            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+            let mut injections =
+                symbi_sim::tracers::boundary_injection_transfers(&self.levels[level].state);
+            injections.extend(symbi_sim::tracers::source_injection_transfers(
+                &self.levels[level].state,
+                a0,
+                ac,
+            ));
+            symbi_sim::tracers::fold_injection_ledger(
+                &mut self.injection_ledger,
+                injections,
+                ac,
+            );
             prof("tracers", || {
                 symbi_sim::tracers::advance_stage_mass_transport(
                     &mut self.levels[level].state,
@@ -1141,6 +1159,14 @@ where
     /// inside one tile), so it reuses the recursive `advance_level` on the finer level unchanged.
     pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) {
         let has_finer = level + 1 < self.levels.len();
+        if self.levels[level].state.has_tracers() {
+            let ledger = std::mem::take(&mut self.injection_ledger);
+            symbi_sim::tracers::spawn_boundary_injection(
+                &mut self.levels[level].state,
+                ledger,
+            )
+            .unwrap_or_else(|detail| panic!("tracer boundary injection: {detail}"));
+        }
         self.level_tail_emf(level, dt);
         // the IBM surface physics on the FINEST level, once per its substep,
         // AFTER the full RK combination (receipt == removal) and BEFORE the

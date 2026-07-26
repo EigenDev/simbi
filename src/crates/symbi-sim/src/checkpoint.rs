@@ -740,6 +740,8 @@ struct TracerSnap {
     id: Vec<u64>,
     owner: Vec<u64>,
     run_seed: u64,
+    next_id: u64,
+    injection_remainder: f64,
     escaped: Vec<f64>,
     crossed: Vec<f64>,
     crossing_time: Vec<f64>,
@@ -758,6 +760,8 @@ fn tracer_snap<const D: usize>(tr: &symbi_sim_tracers::TracerSet<D>) -> TracerSn
         id: tr.id.clone(),
         owner: tr.owner.iter().map(|owner| owner.0).collect(),
         run_seed: tr.run_seed,
+        next_id: tr.next_id,
+        injection_remainder: tr.injection_remainder,
         escaped: tr.flags.iter().map(|f| f.escaped as u8 as f64).collect(),
         crossed: tr
             .flags
@@ -773,6 +777,8 @@ fn tracer_group<const D: usize>(snap: &TracerSnap) -> Tree<'_> {
     Tree::new("tracers")
         .with_attr("n_tracers", snap.n as u64)
         .with_attr("run_seed", snap.run_seed)
+        .with_attr("next_id", snap.next_id)
+        .with_attr("injection_remainder", snap.injection_remainder)
         .with_dataset(Dataset::new(
             "position",
             vec![snap.n, D],
@@ -1372,9 +1378,19 @@ where
             .find_attr("run_seed")
             .ok_or_else(|| IoError::MissingPath("tracers/run_seed".to_string()))?
             .as_u64("tracers/run_seed")?;
+        let next_id = tg
+            .find_attr("next_id")
+            .ok_or_else(|| IoError::MissingPath("tracers/next_id".to_string()))?
+            .as_u64("tracers/next_id")?;
+        let injection_remainder = tg
+            .find_attr("injection_remainder")
+            .ok_or_else(|| IoError::MissingPath("tracers/injection_remainder".to_string()))?
+            .as_f64("tracers/injection_remainder")?;
         let mut tr = symbi_sim_tracers::TracerSet::<D> {
             weight,
             run_seed,
+            next_id,
+            injection_remainder,
             ..Default::default()
         };
         for i in 0..n {
@@ -1737,6 +1753,8 @@ mod tests {
             ],
             step_flags: vec![Default::default(); 2],
             run_seed: u64::MAX - 7,
+            next_id: u64::MAX - 2,
+            injection_remainder: 0.25,
         });
 
         let dir = std::env::temp_dir().join("symbi_checkpoint_mass_transport_tracers");
@@ -1752,6 +1770,11 @@ mod tests {
         assert_eq!(actual.owner, expected.owner);
         assert_eq!(actual.step_owner, expected.owner);
         assert_eq!(actual.run_seed, expected.run_seed);
+        assert_eq!(actual.next_id, expected.next_id);
+        assert_eq!(
+            actual.injection_remainder.to_bits(),
+            expected.injection_remainder.to_bits()
+        );
         assert_eq!(actual.weight.to_bits(), expected.weight.to_bits());
     }
 

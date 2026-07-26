@@ -302,6 +302,8 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     g.owner.clear();
     g.step_owner.clear();
     g.step_flags.clear();
+    g.next_id = 0;
+    g.injection_remainder = 0.0;
     for t in tiles {
         if let Some(tr) = t.tracers.as_ref() {
             g.x.extend_from_slice(&tr.x);
@@ -312,6 +314,8 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
             g.step_flags.extend_from_slice(&tr.step_flags);
             g.weight = tr.weight;
             g.run_seed = tr.run_seed;
+            g.next_id = g.next_id.max(tr.next_id);
+            g.injection_remainder += tr.injection_remainder;
         }
     }
     // stable id order: build the permutation, apply to each SoA column.
@@ -810,6 +814,103 @@ fn blend_mass_transport_ancestry<const D: usize, const DOF: usize, M: MemorySpac
     }
 }
 
+fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    counts: [usize; D],
+    ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+) {
+    let mut injections = std::collections::BTreeMap::new();
+    for ledger in ledgers {
+        for (destination, mass) in ledger {
+            *injections.entry(destination).or_insert(0.0) += mass;
+        }
+    }
+    if injections.is_empty() {
+        return;
+    }
+    let local_cells: [usize; D] =
+        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+    let global_cells: [usize; D] =
+        std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
+    let global_lo = stores[0].geom.x_lo;
+    let dx = stores[0].geom.dx;
+    let first = stores
+        .iter()
+        .find_map(|store| store.tracers.as_ref())
+        .expect("decomposed tracer population is present");
+    let mut spawned = crate::tracers::TracerSet {
+        weight: first.weight,
+        run_seed: first.run_seed,
+        next_id: stores
+            .iter()
+            .filter_map(|store| store.tracers.as_ref())
+            .map(|tracers| tracers.next_id)
+            .max()
+            .unwrap_or(0),
+        injection_remainder: stores
+            .iter()
+            .filter_map(|store| store.tracers.as_ref())
+            .map(|tracers| tracers.injection_remainder)
+            .sum(),
+        ..Default::default()
+    };
+    let key = crate::mass_transport::SamplingKey {
+        run_seed: spawned.run_seed,
+        epoch: stores[0].iteration | (1 << 62),
+    };
+    crate::tracers::spawn_injected_tracers(
+        &mut spawned,
+        injections
+            .into_iter()
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer {
+                destination,
+                mass,
+            }),
+        |owner| {
+            let mut linear = owner.0 as usize;
+            std::array::from_fn(|dd| {
+                let index = linear % global_cells[dd];
+                linear /= global_cells[dd];
+                global_lo[dd] + (index as f64 + 0.5) * dx[dd]
+            })
+        },
+        key,
+    )
+    .unwrap_or_else(|detail| panic!("decomposed tracer injection: {detail}"));
+
+    for store in stores.iter_mut() {
+        let tracers = store
+            .tracers
+            .as_mut()
+            .expect("every decomposed tile carries tracers");
+        tracers.next_id = spawned.next_id;
+        tracers.injection_remainder = 0.0;
+    }
+    stores[0]
+        .tracers
+        .as_mut()
+        .expect("tile zero carries tracers")
+        .injection_remainder = spawned.injection_remainder;
+
+    for ii in 0..spawned.len() {
+        let mut linear = spawned.owner[ii].0 as usize;
+        let global: [usize; D] = std::array::from_fn(|dd| {
+            let index = linear % global_cells[dd];
+            linear /= global_cells[dd];
+            index
+        });
+        let tile = std::array::from_fn(|dd| global[dd] / local_cells[dd]);
+        let target = flatten(tile, counts);
+        let tracers = stores[target].tracers.as_mut().unwrap();
+        tracers.x.push(spawned.x[ii]);
+        tracers.id.push(spawned.id[ii]);
+        tracers.flags.push(spawned.flags[ii]);
+        tracers.owner.push(spawned.owner[ii]);
+        tracers.step_owner.push(spawned.step_owner[ii]);
+        tracers.step_flags.push(spawned.step_flags[ii]);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
@@ -907,6 +1008,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // restored to the step-entry value after the stages; the canonical step advance
         // lives at the step tail. static meshes assign a_n back to itself — no change.
         let a_n: Vec<f64> = stores.iter().map(|s| s.motion.a).collect();
+        let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
         for s in stores.iter_mut() {
             s.dt = dt;
             if has_tracers {
@@ -991,6 +1093,24 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
                             tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
                         };
+                        let mut injections =
+                            crate::tracers::boundary_injection_transfers_store(
+                                &**store,
+                                &geometry,
+                                layout,
+                            );
+                        injections.extend(crate::tracers::source_injection_transfers_store(
+                            &**store,
+                            &geometry,
+                            layout,
+                            stage.a0,
+                            stage.ac,
+                        ));
+                        crate::tracers::fold_injection_ledger(
+                            &mut injection_ledgers[flat],
+                            injections,
+                            stage.ac,
+                        );
                         crate::tracers::advance_stage_mass_transport_store(
                             &mut **store,
                             &geometry,
@@ -1006,6 +1126,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     migrate_mass_transport_tracers(stores, counts);
                 }
             }
+        }
+        if has_tracers {
+            spawn_decomposed_injection(stores, counts, injection_ledgers);
         }
         // the stage refresh mutated a; the step-tail advance below starts from the
         // step-entry value, mirroring the single-grid step's restore.

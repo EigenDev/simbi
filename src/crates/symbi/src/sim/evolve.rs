@@ -398,6 +398,7 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     // restored afterward; the canonical step advance lives in the caller. static
     // meshes assign a_n back to itself — no behavioral change.
     let a_n = sim.motion.a;
+    let mut injection_ledger = std::collections::BTreeMap::new();
     for stage in stage_schedule(stages) {
         let t_entry = sim.time + stage.entry * sim.dt;
         let law_value = sim
@@ -433,6 +434,18 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             &mut |_| {},
         );
         if sim.has_tracers() {
+            crate::regimes::substrate_gpu::device_sync::<Mem>();
+            let mut injections = symbi_sim::tracers::boundary_injection_transfers(sim);
+            injections.extend(symbi_sim::tracers::source_injection_transfers(
+                sim,
+                stage.a0,
+                stage.ac,
+            ));
+            symbi_sim::tracers::fold_injection_ledger(
+                &mut injection_ledger,
+                injections,
+                stage.ac,
+            );
             prof("tracers", || {
                 symbi_sim::tracers::advance_stage_mass_transport(
                     sim,
@@ -443,6 +456,10 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
                 .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
             });
         }
+    }
+    if sim.has_tracers() {
+        symbi_sim::tracers::spawn_boundary_injection(sim, injection_ledger)
+            .unwrap_or_else(|detail| panic!("tracer boundary injection: {detail}"));
     }
     sim.motion.a = a_n;
 }
