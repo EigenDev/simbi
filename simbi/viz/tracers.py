@@ -54,6 +54,80 @@ class TracerCloud:
         return result
 
 
+@dataclass(frozen=True)
+class TracerProjection:
+    """logical checkpoint axes used by a tracer-only chart."""
+
+    plane: tuple[int, int]
+    collapsed_axis: Optional[int]
+    projection: str
+    labels: tuple[str, str]
+
+
+def tracer_projection(
+    coord_system: str,
+    ndim: int,
+    collapsed_axis: Optional[int] = None,
+) -> TracerProjection:
+    """select the native two-dimensional chart and projected column axis."""
+    if ndim not in {2, 3}:
+        raise ValueError("tracer projection requires two or three dimensions")
+    if collapsed_axis is not None:
+        if ndim != 3 or collapsed_axis not in range(3):
+            raise ValueError("a projected axis requires a three-dimensional checkpoint")
+        remaining = tuple(axis for axis in range(3) if axis != collapsed_axis)
+        if coord_system == "spherical" and collapsed_axis in {1, 2}:
+            angular = 2 if collapsed_axis == 1 else 1
+            return TracerProjection(
+                plane=(angular, 0),
+                collapsed_axis=collapsed_axis,
+                projection="polar",
+                labels=(r"$\phi$" if angular == 2 else r"$\theta$", "$r$"),
+            )
+        if coord_system == "cylindrical" and collapsed_axis == 2:
+            return TracerProjection(
+                plane=(1, 0),
+                collapsed_axis=2,
+                projection="polar",
+                labels=(r"$\phi$", "$R$"),
+            )
+        labels = {
+            "cartesian": ("x", "y", "z"),
+            "spherical": ("r", r"$\theta$", r"$\phi$"),
+            "cylindrical": ("R", r"$\phi$", "z"),
+        }.get(coord_system)
+        if labels is None:
+            raise ValueError(f"unsupported tracer coordinate system '{coord_system}'")
+        return TracerProjection(
+            plane=(remaining[0], remaining[1]),
+            collapsed_axis=collapsed_axis,
+            projection="cartesian",
+            labels=(labels[remaining[0]], labels[remaining[1]]),
+        )
+    if coord_system in {"spherical", "planar_cylindrical"}:
+        return TracerProjection(
+            plane=(1, 0),
+            collapsed_axis=2 if ndim == 3 else None,
+            projection="polar",
+            labels=(r"$\theta$", "$r$"),
+        )
+    if coord_system in {"cylindrical", "axis_cylindrical"}:
+        return TracerProjection(
+            plane=(0, 2 if ndim == 3 else 1),
+            collapsed_axis=1 if ndim == 3 else None,
+            projection="cartesian",
+            labels=("R", "z"),
+        )
+    if coord_system == "cartesian":
+        return TracerProjection(
+            plane=(0, 1),
+            collapsed_axis=2 if ndim == 3 else None,
+            projection="cartesian",
+            labels=("x", "y"),
+        )
+    raise ValueError(f"unsupported tracer coordinate system '{coord_system}'")
+
+
 def _smooth_grid(values: np.ndarray, sigma: float) -> np.ndarray:
     """apply a normalized separable gaussian display kernel."""
     if sigma <= 0.0:
@@ -80,12 +154,12 @@ def tracer_concentration(
     cloud: TracerCloud,
     x_edges: np.ndarray,
     y_edges: np.ndarray,
-    plane: tuple[str, str] = ("x", "y"),
+    plane: tuple[str, str] | tuple[int, int] = ("x", "y"),
     smoothing: Optional[float] = None,
     cohort: Optional[int] = None,
 ) -> np.ndarray:
     """estimate projected tracer mass per area on the supplied display mesh."""
-    axes = tuple(_AXIS[name] for name in plane)
+    axes = tuple(_AXIS[name] if isinstance(name, str) else name for name in plane)
     reservoir_bits = np.uint64((1 << 63) | (1 << 62))
     live = (cloud.owner & reservoir_bits) == 0
     if cohort is not None:
@@ -133,6 +207,46 @@ def cohort_to_gas_ratio(
     )
 
 
+def projected_gas_concentration(
+    density: np.ndarray,
+    edges: tuple[np.ndarray, ...],
+    coord_system: str,
+    projection: TracerProjection,
+) -> np.ndarray:
+    """integrate gas mass over the collapsed chart axis per display-coordinate area."""
+    ndim = len(edges)
+    logical_density = np.asarray(density).transpose(tuple(reversed(range(ndim))))
+    factors = [np.diff(edge) for edge in edges]
+    if coord_system == "spherical":
+        factors[0] = np.diff(edges[0] ** 3) / 3.0
+        factors[1] = np.cos(edges[1][:-1]) - np.cos(edges[1][1:])
+    elif coord_system == "planar_cylindrical":
+        factors[0] = np.diff(edges[0] ** 2) / 2.0
+    elif coord_system in {"cylindrical", "axis_cylindrical"}:
+        factors[0] = np.diff(edges[0] ** 2) / 2.0
+    volume = np.ones(tuple(len(edge) - 1 for edge in edges))
+    for axis, factor in enumerate(factors):
+        shape = [1] * ndim
+        shape[axis] = len(factor)
+        volume *= factor.reshape(shape)
+    mass = logical_density * volume
+    if projection.collapsed_axis is not None:
+        mass = mass.sum(axis=projection.collapsed_axis)
+        remaining = [
+            axis for axis in range(ndim) if axis != projection.collapsed_axis
+        ]
+    else:
+        remaining = list(range(ndim))
+    order = (
+        remaining.index(projection.plane[1]),
+        remaining.index(projection.plane[0]),
+    )
+    projected_mass = mass.transpose(order)
+    x_edges = edges[projection.plane[0]]
+    y_edges = edges[projection.plane[1]]
+    return projected_mass / np.outer(np.diff(y_edges), np.diff(x_edges))
+
+
 def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
     """read the tracer population from a checkpoint's `tracers` group, or None when the
     run carried no tracers."""
@@ -161,7 +275,7 @@ _AXIS = {"x": 0, "y": 1, "z": 2}
 def overlay_tracers(
     ax,
     checkpoint_path: str,
-    plane: tuple[str, str] = ("x", "y"),
+    plane: tuple[str, str] | tuple[int, int] = ("x", "y"),
     at: Optional[float] = None,
     slab: Optional[float] = None,
     color_by: str = "flag",
@@ -192,7 +306,10 @@ def overlay_tracers(
         print(f"--draw-tracers: '{checkpoint_path}' tracer group is empty", file=sys.stderr)
         return None
 
-    ai, aj = _AXIS[plane[0]], _AXIS[plane[1]]
+    ai, aj = (
+        _AXIS[plane[0]] if isinstance(plane[0], str) else plane[0],
+        _AXIS[plane[1]] if isinstance(plane[1], str) else plane[1],
+    )
     pos = cloud.position
     keep = np.ones(len(cloud), dtype=bool)
     # thin-sheet filter in 3D: drop particles off the slice so the scatter matches the

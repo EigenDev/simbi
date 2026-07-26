@@ -21,7 +21,9 @@ from simbi.viz.config import PlotConfig, VisualizationConfig
 from simbi.viz.tracers import (
     cohort_to_gas_ratio,
     load_tracers,
+    projected_gas_concentration,
     tracer_concentration,
+    tracer_projection,
 )
 
 
@@ -136,6 +138,74 @@ def test_cohort_to_gas_ratio_normalizes_both_column_densities():
     )
 
 
+def test_curvilinear_projection_uses_native_chart_order():
+    spherical = tracer_projection("spherical", 3)
+    cylindrical = tracer_projection("cylindrical", 3)
+    cylindrical_rz = tracer_projection("cylindrical", 2)
+    cylindrical_rphi = tracer_projection("planar_cylindrical", 2)
+    spherical_rphi = tracer_projection("spherical", 3, collapsed_axis=1)
+    cylindrical_rphi_3d = tracer_projection(
+        "cylindrical", 3, collapsed_axis=2
+    )
+
+    assert spherical.plane == (1, 0)
+    assert spherical.collapsed_axis == 2
+    assert spherical.projection == "polar"
+    assert cylindrical.plane == (0, 2)
+    assert cylindrical.collapsed_axis == 1
+    assert cylindrical.projection == "cartesian"
+    assert cylindrical_rz.plane == (0, 1)
+    assert cylindrical_rz.projection == "cartesian"
+    assert cylindrical_rphi.plane == (1, 0)
+    assert cylindrical_rphi.projection == "polar"
+    assert spherical_rphi.plane == (2, 0)
+    assert spherical_rphi.projection == "polar"
+    assert cylindrical_rphi_3d.plane == (1, 0)
+    assert cylindrical_rphi_3d.projection == "polar"
+
+
+def test_spherical_column_uses_physical_cell_volumes():
+    edges = (
+        np.array([1.0, 2.0]),
+        np.array([0.0, np.pi / 2.0]),
+        np.array([0.0, np.pi, 2.0 * np.pi]),
+    )
+    density = np.ones((2, 1, 1))
+
+    concentration = projected_gas_concentration(
+        density,
+        edges,
+        "spherical",
+        tracer_projection("spherical", 3),
+    )
+
+    expected_mass = (2.0**3 - 1.0**3) / 3.0 * 2.0 * np.pi
+    expected_area = (2.0 - 1.0) * (np.pi / 2.0)
+    np.testing.assert_allclose(concentration, [[expected_mass / expected_area]])
+
+
+def test_cylindrical_column_collapses_phi_not_z():
+    edges = (
+        np.array([1.0, 2.0]),
+        np.array([0.0, 1.0, 3.0]),
+        np.array([-1.0, 0.0, 2.0]),
+    )
+    density = np.ones((2, 2, 1))
+
+    concentration = projected_gas_concentration(
+        density,
+        edges,
+        "cylindrical",
+        tracer_projection("cylindrical", 3),
+    )
+
+    radial_factor = (2.0**2 - 1.0**2) / 2.0
+    np.testing.assert_allclose(
+        concentration[:, 0],
+        [radial_factor * 3.0, radial_factor * 3.0],
+    )
+
+
 def test_tracers_only_plot_uses_checkpoint_bounds(monkeypatch):
     mesh = SimpleNamespace(
         ndim=2,
@@ -173,3 +243,44 @@ def test_tracers_only_plot_uses_checkpoint_bounds(monkeypatch):
     assert ax.get_xlabel() == "x"
     assert ax.get_ylabel() == "y"
     assert len(ax.collections) == 1
+
+
+def test_spherical_tracer_plot_uses_theta_r_polar_chart(monkeypatch):
+    mesh = SimpleNamespace(
+        ndim=2,
+        x1v=np.array([1.0, 2.0, 4.0]),
+        x2v=np.array([0.0, 0.5, 1.0]),
+    )
+    sim_data = SimpleNamespace(
+        metadata=SimpleNamespace(coord_system="spherical"),
+        mesh=mesh,
+    )
+    cloud = type("Cloud", (), {"__len__": lambda self: 2})()
+    receipt = {}
+
+    monkeypatch.setattr(api, "load_data", lambda _path: sim_data)
+    monkeypatch.setattr("simbi.viz.tracers.load_tracers", lambda _path: cloud)
+
+    def scatter(ax, _path, **kwargs):
+        receipt["plane"] = kwargs["plane"]
+        return ax.scatter([0.25], [1.5])
+
+    monkeypatch.setattr("simbi.viz.tracers.overlay_tracers", scatter)
+    config = VisualizationConfig(
+        plot=PlotConfig(plot_type="multidim", fields=["rho"], ndim=2)
+    )
+
+    figure = api.plot_tracers(
+        config,
+        "checkpoint.h5",
+        show=False,
+        tracer_render="scatter",
+    )
+    ax = figure.axes["main"]
+
+    assert ax.name == "polar"
+    assert receipt["plane"] == (1, 0)
+    np.testing.assert_allclose(ax.get_xlim(), [0.0, 1.0])
+    np.testing.assert_allclose(ax.get_ylim(), [1.0, 4.0])
+    assert ax.get_xlabel() == r"$\theta$"
+    assert ax.get_ylabel() == "$r$"
