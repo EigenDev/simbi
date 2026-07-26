@@ -99,8 +99,14 @@ def tracer_concentration(
         weights=weights,
     )
     if smoothing is None:
-        cells_per_tracer = mass.size / max(len(positions), 1)
-        smoothing = min(6.0, max(0.75, 0.5 * np.sqrt(cells_per_tracer)))
+        particles_per_cell = len(positions) / mass.size
+        # a gaussian kernel needs a useful local sample before its surface
+        # density stops looking like individual particle shot noise. target
+        # roughly 16 particles inside a radius of two sigma.
+        smoothing = np.sqrt(
+            16.0 / max(4.0 * np.pi * particles_per_cell, np.finfo(float).tiny)
+        )
+        smoothing = min(8.0, max(1.0, smoothing))
     if not np.isfinite(smoothing) or smoothing < 0.0:
         raise ValueError("tracer smoothing must be finite and non-negative")
     smoothed_mass = _smooth_grid(mass, smoothing)

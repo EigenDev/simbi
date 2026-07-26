@@ -1085,11 +1085,17 @@ where
     if tracers.step_owner.len() != tracers.id.len() {
         return Err("tracer step snapshot is missing".to_string());
     }
-    if sim.motion.homologous {
-        return Err("mass-transport tracers with mesh motion are not wired".to_string());
-    }
-
     let interior = sim.geom.interior.clone();
+    let volume_scale = if sim.motion.homologous {
+        sim.motion.a.powi(D as i32)
+    } else {
+        1.0
+    };
+    let area_scale = if sim.motion.homologous {
+        sim.motion.a.powi(D.saturating_sub(1) as i32)
+    } else {
+        1.0
+    };
     let stage_input = sim.stage_input();
     let key = SamplingKey {
         run_seed: tracers.run_seed,
@@ -1112,7 +1118,8 @@ where
         let Some(ids) = by_source.get(&source) else {
             continue;
         };
-        let source_mass = *stage_input.den.view().at(coord) * geometry.volume(coord);
+        let source_mass =
+            *stage_input.den.view().at(coord) * geometry.volume(coord) * volume_scale;
         let mut transfers = Vec::with_capacity(2 * D);
         for dd in 0..D {
             let mut high = coord;
@@ -1133,7 +1140,7 @@ where
                         &sim.boundaries,
                         layout,
                     ),
-                    mass: -low_flux * geometry.face_area(coord, dd) * sim.dt,
+                    mass: -low_flux * geometry.face_area(coord, dd) * area_scale * sim.dt,
                 });
             }
             if high_flux > 0.0 && !high_inactive {
@@ -1146,11 +1153,11 @@ where
                         &sim.boundaries,
                         layout,
                     ),
-                    mass: high_flux * geometry.face_area(high, dd) * sim.dt,
+                    mass: high_flux * geometry.face_area(high, dd) * area_scale * sim.dt,
                 });
             }
         }
-        if ac > 0.0 {
+        if ac > 0.0 && !sim.motion.homologous {
             let mut divergence = 0.0;
             for dd in 0..D {
                 let mut high = coord;
@@ -1396,7 +1403,15 @@ pub fn refresh_derived_positions_store<const D: usize, const DOF: usize, M, Mem>
         let Some(coord) = container_cell(owner, &interior, layout) else {
             continue;
         };
-        tracers.x[ii] = geometry.centroid(coord).into();
+        let mut position: [f64; D] = geometry.centroid(coord).into();
+        if sim.motion.homologous {
+            for value in &mut position {
+                *value *= sim.motion.a;
+            }
+        } else if D > 0 {
+            position[0] += sim.motion.a_dot * sim.time;
+        }
+        tracers.x[ii] = position;
     }
 }
 

@@ -1277,6 +1277,24 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);
         }
+        if has_tracers {
+            let local_cells: [usize; D] =
+                std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+            for (flat, store) in stores.iter_mut().enumerate() {
+                let tile = unflatten(flat, counts);
+                let layout = crate::tracers::TransportLayout {
+                    global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
+                    tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                    level: 0,
+                };
+                let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::refresh_derived_positions_store(
+                    &mut **store,
+                    &geometry,
+                    layout,
+                );
+            }
+        }
         if std::env::var_os("SYMBI_TRACE_DT").is_some() {
             eprintln!("SYMBI_TRACE_DT iter={iter} t={t:.6e} dt={dt:.6e}");
         }
