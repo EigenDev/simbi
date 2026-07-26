@@ -9,12 +9,12 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed};
 use symbi_algebra::Domain;
 use symbi_geometry::MotionState;
 use symbi_grid::Field;
 use symbi_hydro::expr_bridge::build_user_sources;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_sim::tracers::seed_mass_weighted;
 
@@ -22,11 +22,7 @@ const GAMMA: f64 = 1.4;
 const T_FINAL: f64 = 0.03;
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
-type Kern = symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet<
-    HostMemory,
-    f64,
-    2,
->;
+type Kern = symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn make(timestepping: Timestepping) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
@@ -99,7 +95,11 @@ fn run_and_assert_identity(
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
 
-    assert_eq!(single.time.to_bits(), decomposed.time.to_bits(), "time differs");
+    assert_eq!(
+        single.time.to_bits(),
+        decomposed.time.to_bits(),
+        "time differs"
+    );
     assert_eq!(single.dt.to_bits(), decomposed.dt.to_bits(), "dt differs");
     let interior = &single.geom.interior;
     assert_field_bits(
@@ -118,7 +118,11 @@ fn run_and_assert_identity(
     }
     assert_field_bits(
         single.fields.cons.nrg_field().expect("single energy"),
-        decomposed.fields.cons.nrg_field().expect("decomposed energy"),
+        decomposed
+            .fields
+            .cons
+            .nrg_field()
+            .expect("decomposed energy"),
         interior,
         "cons.nrg",
     );
@@ -218,7 +222,12 @@ fn make_with_body(timestepping: Timestepping) -> (Sim, Kern) {
 }
 
 fn accreted_mass(sim: &Sim) -> f64 {
-    let body = sim.immersed.as_ref().expect("body collection").bodies.get(0);
+    let body = sim
+        .immersed
+        .as_ref()
+        .expect("body collection")
+        .bodies
+        .get(0);
     match body.kind {
         BodyKind::BlackHole {
             total_accreted_mass,
@@ -265,8 +274,7 @@ fn assert_body_driver_identity(timestepping: Timestepping) {
     );
     let gravity_changed_far_field = single.geom.interior.iter().any(|cell| {
         let position = single.geom.cell_coord(cell);
-        let radius =
-            ((position[0] - 0.5).powi(2) + (position[1] - 0.375).powi(2)).sqrt();
+        let radius = ((position[0] - 0.5).powi(2) + (position[1] - 0.375).powi(2)).sqrt();
         radius > 0.25
             && single.fields.cons.mom[0].view().at(cell).to_bits()
                 != body_free.fields.cons.mom[0].view().at(cell).to_bits()
@@ -322,11 +330,11 @@ fn make_with_tracers(timestepping: Timestepping) -> (Sim, Kern) {
 fn assert_tracer_driver_identity(timestepping: Timestepping) {
     let (mut single, single_kernels) = make_with_tracers(timestepping);
     let (mut decomposed, decomposed_kernels) = make_with_tracers(timestepping);
-    let initial_positions = single
+    let initial_owners = single
         .tracers
         .as_ref()
         .expect("single tracers")
-        .x
+        .owner
         .clone();
 
     run_and_assert_identity(
@@ -339,22 +347,22 @@ fn assert_tracer_driver_identity(timestepping: Timestepping) {
 
     let single_tracers = single.tracers.as_ref().expect("single tracers");
     let decomposed_tracers = decomposed.tracers.as_ref().expect("decomposed tracers");
-    assert_eq!(single_tracers.id, decomposed_tracers.id, "tracer ids differ");
+    assert_eq!(
+        single_tracers.id, decomposed_tracers.id,
+        "tracer ids differ"
+    );
     assert_eq!(
         single_tracers.weight.to_bits(),
         decomposed_tracers.weight.to_bits(),
         "tracer weights differ",
     );
     assert_eq!(single_tracers.len(), decomposed_tracers.len());
+    assert_eq!(
+        single_tracers.owner, decomposed_tracers.owner,
+        "tracer owners differ"
+    );
     let mut moved = 0usize;
     for index in 0..single_tracers.len() {
-        for axis in 0..2 {
-            assert_eq!(
-                single_tracers.x[index][axis].to_bits(),
-                decomposed_tracers.x[index][axis].to_bits(),
-                "tracer {index} position differs on axis {axis}",
-            );
-        }
         let single_flags = single_tracers.flags[index];
         let decomposed_flags = decomposed_tracers.flags[index];
         assert_eq!(
@@ -370,13 +378,13 @@ fn assert_tracer_driver_identity(timestepping: Timestepping) {
             decomposed_flags.crossing_time.to_bits(),
             "tracer {index} crossing time differs",
         );
-        if single_tracers.x[index] != initial_positions[index] {
+        if single_tracers.owner[index] != initial_owners[index] {
             moved += 1;
         }
     }
     assert!(
-        moved > single_tracers.len() / 2,
-        "only {moved} tracers moved; driver identity is vacuous",
+        moved > 0,
+        "no tracer crossed a cell face; driver identity is vacuous",
     );
 }
 

@@ -30,7 +30,7 @@
 
 /// one tracer's provenance record: the crossing events the accretion ledgers
 /// consume. positions/ids live in the parallel SoA vectors of [`TracerSet`].
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TracerFlags {
     /// left the domain: frozen at its exit state, no further advection.
     pub escaped: bool,
@@ -47,6 +47,13 @@ pub struct TracerSet<const D: usize> {
     pub id: Vec<u64>,
     pub flags: Vec<TracerFlags>,
     pub weight: f64,
+    /// material container that owns each tracer. cell containers use the
+    /// interior's axis-0-fastest linear index.
+    pub owner: Vec<crate::mass_transport::ContainerId>,
+    /// step-entry ancestry retained across all ssp stages.
+    pub step_owner: Vec<crate::mass_transport::ContainerId>,
+    pub step_flags: Vec<TracerFlags>,
+    pub run_seed: u64,
 }
 
 /// stratified apportionment of `n` tracers over cells proportional to their
@@ -65,7 +72,9 @@ pub fn systematic_counts(masses: &[f64], n: usize) -> Vec<usize> {
         return counts;
     }
     const PHI: f64 = 0.618_033_988_749_894_9;
-    let mut pts: Vec<f64> = (0..n).map(|k| ((k as f64 + 1.0) * PHI).fract() * total).collect();
+    let mut pts: Vec<f64> = (0..n)
+        .map(|k| ((k as f64 + 1.0) * PHI).fract() * total)
+        .collect();
     pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let mut cum = 0.0;
     let mut k = 0usize;
@@ -88,25 +97,30 @@ impl<const D: usize> TracerSet<D> {
     /// sub-lattice (deterministic: k of m tracers sits at fraction
     /// (k + 1/2)/m along axis 0, centered on the other axes). `cells` gives
     /// each cell's low corner and widths.
-    pub fn seed_stratified(
-        cells: &[([f64; D], [f64; D])],
-        counts: &[usize],
-        weight: f64,
-    ) -> Self {
+    pub fn seed_stratified(cells: &[([f64; D], [f64; D])], counts: &[usize], weight: f64) -> Self {
         assert_eq!(cells.len(), counts.len(), "cells/counts length mismatch");
-        let mut set = Self { weight, ..Default::default() };
+        let mut set = Self {
+            weight,
+            ..Default::default()
+        };
         let mut next_id = 0u64;
         for (ci, &(lo, dx)) in cells.iter().enumerate() {
             let m = counts[ci];
             for k in 0..m {
                 let mut p = [0.0; D];
                 for a in 0..D {
-                    let frac = if a == 0 { (k as f64 + 0.5) / m as f64 } else { 0.5 };
+                    let frac = if a == 0 {
+                        (k as f64 + 0.5) / m as f64
+                    } else {
+                        0.5
+                    };
                     p[a] = lo[a] + frac * dx[a];
                 }
                 set.x.push(p);
                 set.id.push(next_id);
                 set.flags.push(TracerFlags::default());
+                set.owner
+                    .push(crate::mass_transport::ContainerId(ci as u64));
                 next_id += 1;
             }
         }
@@ -269,7 +283,10 @@ mod tests {
         // few points of its exact quota (O(log n), not the uniform-strata 1).
         for (m, c) in masses.iter().zip(&counts) {
             let quota = 1000.0 * m / 10.0;
-            assert!((*c as f64 - quota).abs() <= 4.0, "count {c} vs quota {quota}");
+            assert!(
+                (*c as f64 - quota).abs() <= 4.0,
+                "count {c} vs quota {quota}"
+            );
         }
         assert_eq!(counts, systematic_counts(&masses, 1000));
     }
@@ -287,7 +304,10 @@ mod tests {
         let counts = systematic_counts(&masses, 300);
         assert_eq!(counts.iter().sum::<usize>(), 300);
         let in_band: usize = counts[..800].iter().sum();
-        assert!((195..=205).contains(&in_band), "band got {in_band}, expected ~200");
+        assert!(
+            (195..=205).contains(&in_band),
+            "band got {in_band}, expected ~200"
+        );
         // and the band allocation is spread, not concentrated at its head.
         assert!(counts[..800].iter().filter(|&&c| c > 0).count() > 150);
     }
@@ -302,7 +322,10 @@ mod tests {
             set.advance_rk2(dt, |_| [0.3, -0.2]);
         }
         for (p, p0) in set.x.iter().zip(&x0) {
-            assert!((p[0] - (p0[0] + 0.3)).abs() < 1e-12, "x drifted: {p:?} from {p0:?}");
+            assert!(
+                (p[0] - (p0[0] + 0.3)).abs() < 1e-12,
+                "x drifted: {p:?} from {p0:?}"
+            );
             assert!((p[1] - (p0[1] - 0.2)).abs() < 1e-12, "y drifted");
         }
     }
@@ -317,6 +340,7 @@ mod tests {
             id: vec![0],
             flags: vec![TracerFlags::default()],
             weight: 1.0,
+            ..Default::default()
         };
         let period = 2.0 * std::f64::consts::PI / OMEGA;
         let n = 2000;
@@ -341,7 +365,10 @@ mod tests {
         let mut vy = vec![0.0; N * N];
         for j in 0..N {
             for i in 0..N {
-                let (x, y) = (x_lo[0] + (i as f64 + 0.5) * dx[0], x_lo[1] + (j as f64 + 0.5) * dx[1]);
+                let (x, y) = (
+                    x_lo[0] + (i as f64 + 0.5) * dx[0],
+                    x_lo[1] + (j as f64 + 0.5) * dx[1],
+                );
                 vx[i + j * N] = 2.0 + x + 2.0 * y;
                 vy[i + j * N] = -1.0 + 0.5 * x - y;
             }
@@ -349,8 +376,16 @@ mod tests {
         let sampler = grid_velocity_sampler::<2>([&vx, &vy], [N, N], x_lo, dx);
         for &(px, py) in &[(2.3, 3.7), (4.0, 4.0), (1.6, 5.9)] {
             let v = sampler([px, py]);
-            assert!((v[0] - (2.0 + px + 2.0 * py)).abs() < 1e-12, "vx at ({px},{py}): {}", v[0]);
-            assert!((v[1] - (-1.0 + 0.5 * px - py)).abs() < 1e-12, "vy at ({px},{py}): {}", v[1]);
+            assert!(
+                (v[0] - (2.0 + px + 2.0 * py)).abs() < 1e-12,
+                "vx at ({px},{py}): {}",
+                v[0]
+            );
+            assert!(
+                (v[1] - (-1.0 + 0.5 * px - py)).abs() < 1e-12,
+                "vy at ({px},{py}): {}",
+                v[1]
+            );
         }
     }
 
@@ -361,6 +396,7 @@ mod tests {
             id: vec![0, 1, 2],
             flags: vec![TracerFlags::default(); 3],
             weight: 2.5,
+            ..Default::default()
         };
         set.scan_events([0.0, 0.0], [1.0, 1.0], Some(([0.0, 0.0], 0.1)), 3.25);
         assert!(!set.flags[0].escaped && !set.flags[0].crossed_sink);
@@ -390,11 +426,18 @@ mod tests {
             id: vec![0, 1, 2, 3],
             flags: vec![TracerFlags::default(); 4],
             weight: 1.0,
+            ..Default::default()
         };
         set.wrap_periodic(lo, hi, [true, false]);
         // periodic x wraps into [0, 1); y (non-periodic) is left alone for the scan.
-        assert!((set.x[0][0] - 0.2).abs() < 1e-12, "x=1.2 did not wrap to 0.2");
-        assert!((set.x[1][0] - 0.7).abs() < 1e-12, "x=-0.3 did not wrap to 0.7");
+        assert!(
+            (set.x[0][0] - 0.2).abs() < 1e-12,
+            "x=1.2 did not wrap to 0.2"
+        );
+        assert!(
+            (set.x[1][0] - 0.7).abs() < 1e-12,
+            "x=-0.3 did not wrap to 0.7"
+        );
         assert_eq!(set.x[2][1], 1.4, "outflow y wrongly wrapped");
 
         set.scan_events(lo, hi, None, 0.0);
@@ -420,6 +463,7 @@ mod tests {
             id: (0..50).collect(),
             flags: vec![TracerFlags::default(); 50],
             weight: 1.0,
+            ..Default::default()
         };
         // advect a big uniform drift many steps (several box-lengths), wrapping each step.
         for _ in 0..200 {
@@ -427,10 +471,63 @@ mod tests {
             set.wrap_periodic([0.0, 0.0], [1.0, 1.0], [true, true]);
             set.scan_events([0.0, 0.0], [1.0, 1.0], None, 0.0);
         }
-        assert_eq!(set.flags.iter().filter(|f| f.escaped).count(), 0, "a periodic box lost tracers");
+        assert_eq!(
+            set.flags.iter().filter(|f| f.escaped).count(),
+            0,
+            "a periodic box lost tracers"
+        );
         for p in &set.x {
-            assert!((0.0..1.0).contains(&p[0]) && (0.0..1.0).contains(&p[1]), "tracer left the box: {p:?}");
+            assert!(
+                (0.0..1.0).contains(&p[0]) && (0.0..1.0).contains(&p[1]),
+                "tracer left the box: {p:?}"
+            );
         }
+    }
+
+    #[test]
+    fn accepted_mass_flux_moves_the_low_variance_quota() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        for coord in sim.geom.interior.iter() {
+            sim.fields.cons.den.view_mut().set(coord, 1.0);
+            sim.workspace.u_stage.den.view_mut().set(coord, 1.0);
+        }
+        for coord in sim.geom.allocated.iter() {
+            sim.fields.flux[0].den.view_mut().set(coord, 0.0);
+        }
+        let internal_face = [sim.geom.interior.spaces[0].lo + 1];
+        sim.fields.flux[0].den.view_mut().set(internal_face, 0.5);
+        sim.dt = 0.5;
+        let cells = [([0.0], [1.0]), ([1.0], [1.0])];
+        sim.tracers = Some(TracerSet::seed_stratified(&cells, &[100, 100], 0.01));
+        snapshot_transport_state(&mut sim);
+
+        advance_stage_mass_transport(&mut sim, 0.0, 1.0, 0).unwrap();
+
+        let tracers = sim.tracers.as_ref().unwrap();
+        let in_left = tracers.owner.iter().filter(|owner| owner.0 == 0).count();
+        let in_right = tracers.owner.iter().filter(|owner| owner.0 == 1).count();
+        assert_eq!((in_left, in_right), (75, 125));
+        assert_eq!(tracers.flags.iter().filter(|flag| flag.escaped).count(), 0);
     }
 }
 
@@ -458,16 +555,223 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
         let mut lo = [0.0; D];
         let mut dxs = [0.0; D];
         for a in 0..D {
-            lo[a] = sim.geom.x_lo[a]
-                + (c[a] - interior.spaces[a].lo) as f64 * sim.geom.dx[a];
+            lo[a] = sim.geom.x_lo[a] + (c[a] - interior.spaces[a].lo) as f64 * sim.geom.dx[a];
             dxs[a] = sim.geom.dx[a];
         }
         cells.push((lo, dxs));
     }
     let counts = systematic_counts(&masses, n);
     let vol: f64 = sim.geom.dx[..D].iter().product();
-    let weight = if n == 0 { 0.0 } else { masses.iter().sum::<f64>() * vol / n as f64 };
-    TracerSet::seed_stratified(&cells, &counts, weight)
+    let weight = if n == 0 {
+        0.0
+    } else {
+        masses.iter().sum::<f64>() * vol / n as f64
+    };
+    let mut tracers = TracerSet::seed_stratified(&cells, &counts, weight);
+    tracers.step_owner = tracers.owner.clone();
+    tracers.step_flags = tracers.flags.clone();
+    tracers
+}
+
+/// retain the ownership and provenance state that supplies the `a0*u_n`
+/// ancestry branch of every ssp stage in the step.
+pub fn snapshot_transport_state<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+) {
+    let Some(tracers) = sim.tracers.as_mut() else {
+        return;
+    };
+    tracers.step_owner.clone_from(&tracers.owner);
+    tracers.step_flags.clone_from(&tracers.flags);
+}
+
+/// advance cell-owned tracers through one accepted forward-euler mass-flux
+/// kernel, then apply the ssp convex ancestry selection.
+pub fn advance_stage_mass_transport<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    a0: f64,
+    ac: f64,
+    stage: usize,
+) -> Result<(), String>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let geometry = sim.geom.block_geometry(sim.physics.metric);
+    advance_stage_mass_transport_store(&mut sim.store, &geometry, a0, ac, stage)
+}
+
+/// advance one transport stage when the driver owns a field store and its
+/// material-volume geometry separately.
+pub fn advance_stage_mass_transport_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    a0: f64,
+    ac: f64,
+    stage: usize,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    use crate::mass_transport::{
+        ContainerId, MassTransfer, SamplingKey, TransportKernel, sample_convex_blend,
+        sample_systematic,
+    };
+    use std::collections::BTreeMap;
+
+    let Some(mut tracers) = sim.tracers.take() else {
+        return Ok(());
+    };
+    if tracers.owner.len() != tracers.id.len() {
+        return Err("tracer ownership length does not match tracer ids".to_string());
+    }
+    if tracers.step_owner.len() != tracers.id.len() {
+        return Err("tracer step snapshot is missing".to_string());
+    }
+    if sim.motion.homologous {
+        return Err("mass-transport tracers with mesh motion are not wired".to_string());
+    }
+
+    let interior = sim.geom.interior.clone();
+    let stage_input = sim.stage_input();
+    let key = SamplingKey {
+        run_seed: tracers.run_seed,
+        epoch: sim.iteration.wrapping_mul(4).wrapping_add(stage as u64),
+    };
+
+    let mut by_source = BTreeMap::<ContainerId, Vec<u64>>::new();
+    for (ii, &owner) in tracers.owner.iter().enumerate() {
+        if !tracers.flags[ii].escaped && !tracers.flags[ii].crossed_sink {
+            by_source.entry(owner).or_default().push(tracers.id[ii]);
+        }
+    }
+
+    let mut candidate = BTreeMap::<u64, ContainerId>::new();
+    for coord in interior.iter() {
+        let source = cell_container(coord, &interior);
+        let Some(ids) = by_source.get(&source) else {
+            continue;
+        };
+        let source_mass = *stage_input.den.view().at(coord) * geometry.volume(coord);
+        let mut transfers = Vec::with_capacity(2 * D);
+        for dd in 0..D {
+            let mut high = coord;
+            high[dd] += 1;
+            let low_flux = *sim.fields.flux[dd].den.view().at(coord);
+            let high_flux = *sim.fields.flux[dd].den.view().at(high);
+            if low_flux < 0.0 {
+                transfers.push(MassTransfer {
+                    destination: face_destination(coord, dd, false, &interior, &sim.boundaries),
+                    mass: -low_flux * geometry.face_area(coord, dd) * sim.dt,
+                });
+            }
+            if high_flux > 0.0 {
+                transfers.push(MassTransfer {
+                    destination: face_destination(coord, dd, true, &interior, &sim.boundaries),
+                    mass: high_flux * geometry.face_area(high, dd) * sim.dt,
+                });
+            }
+        }
+        let kernel = TransportKernel::new(source, source_mass, transfers)?;
+        candidate.extend(sample_systematic(&kernel, ids, key));
+    }
+
+    for (ii, id) in tracers.id.iter().enumerate() {
+        if let Some(&destination) = candidate.get(id) {
+            tracers.owner[ii] = destination;
+            if is_exterior(destination) {
+                tracers.flags[ii].escaped = true;
+            }
+        }
+    }
+
+    if a0 != 0.0 || ac != 1.0 {
+        let selections = sample_convex_blend(&tracers.id, ac, key)?;
+        for (ii, (_, choose_candidate)) in selections.into_iter().enumerate() {
+            if !choose_candidate {
+                tracers.owner[ii] = tracers.step_owner[ii];
+                tracers.flags[ii] = tracers.step_flags[ii];
+            }
+        }
+    }
+
+    for (ii, &owner) in tracers.owner.iter().enumerate() {
+        if !is_exterior(owner) {
+            let coord = container_cell(owner, &interior);
+            let center = geometry.centroid(coord);
+            for dd in 0..D {
+                tracers.x[ii][dd] = center[dd];
+            }
+        }
+    }
+    sim.tracers = Some(tracers);
+    Ok(())
+}
+
+const EXTERIOR_BIT: u64 = 1 << 63;
+
+fn is_exterior(container: crate::mass_transport::ContainerId) -> bool {
+    container.0 & EXTERIOR_BIT != 0
+}
+
+fn exterior_container(axis: usize, high: bool) -> crate::mass_transport::ContainerId {
+    crate::mass_transport::ContainerId(EXTERIOR_BIT | ((axis as u64) << 1) | high as u64)
+}
+
+fn cell_container<const D: usize>(
+    coord: [isize; D],
+    domain: &symbi_algebra::Domain<D>,
+) -> crate::mass_transport::ContainerId {
+    let mut linear = 0usize;
+    let mut stride = 1usize;
+    for dd in 0..D {
+        linear += (coord[dd] - domain.spaces[dd].lo) as usize * stride;
+        stride *= (domain.spaces[dd].hi - domain.spaces[dd].lo) as usize;
+    }
+    crate::mass_transport::ContainerId(linear as u64)
+}
+
+fn container_cell<const D: usize>(
+    container: crate::mass_transport::ContainerId,
+    domain: &symbi_algebra::Domain<D>,
+) -> [isize; D] {
+    let mut linear = container.0 as usize;
+    std::array::from_fn(|dd| {
+        let extent = (domain.spaces[dd].hi - domain.spaces[dd].lo) as usize;
+        let index = linear % extent;
+        linear /= extent;
+        domain.spaces[dd].lo + index as isize
+    })
+}
+
+fn face_destination<const D: usize>(
+    coord: [isize; D],
+    axis: usize,
+    high: bool,
+    domain: &symbi_algebra::Domain<D>,
+    boundaries: &crate::state::Boundaries<D>,
+) -> crate::mass_transport::ContainerId {
+    let mut neighbor = coord;
+    neighbor[axis] += if high { 1 } else { -1 };
+    if domain.contains(neighbor) {
+        return cell_container(neighbor, domain);
+    }
+    match boundaries.0[axis][high as usize] {
+        crate::state::BoundaryType::Periodic => {
+            neighbor[axis] = if high {
+                domain.spaces[axis].lo
+            } else {
+                domain.spaces[axis].hi - 1
+            };
+            cell_container(neighbor, domain)
+        }
+        crate::state::BoundaryType::Reflect => cell_container(coord, domain),
+        _ => exterior_container(axis, high),
+    }
 }
 
 /// advance the tracer population by one fluid step against the CURRENT
@@ -479,7 +783,9 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
 pub fn advance_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
     sim: &mut FieldStore<D, DOF, Mem, f64>,
 ) {
-    let Some(mut tr) = sim.tracers.take() else { return };
+    let Some(mut tr) = sim.tracers.take() else {
+        return;
+    };
     advance_positions(sim, &mut tr);
     let (lo, hi) = interior_box(sim);
     // periodic crossings wrap (conserved population); the escape scan then only fires on
@@ -549,15 +855,19 @@ fn sink_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
     sim: &FieldStore<D, DOF, Mem, f64>,
 ) -> Option<([f64; D], f64)> {
     sim.immersed.as_ref().and_then(|im| {
-        im.bodies.bodies().iter().find(|b| b.has_accretion()).and_then(|b| {
-            b.accretion_radius().map(|r| {
-                let mut c = [0.0; D];
-                for a in 0..D {
-                    c[a] = b.position[a];
-                }
-                (c, r)
+        im.bodies
+            .bodies()
+            .iter()
+            .find(|b| b.has_accretion())
+            .and_then(|b| {
+                b.accretion_radius().map(|r| {
+                    let mut c = [0.0; D];
+                    for a in 0..D {
+                        c[a] = b.position[a];
+                    }
+                    (c, r)
+                })
             })
-        })
     })
 }
 
@@ -585,8 +895,8 @@ pub fn advance_tracers_decomposed<const D: usize, const DOF: usize, Mem: MemoryS
     // the global domain box = tile (0,..,0)'s lower corner extended by the full cell count.
     let (mut glo, mut ghi) = ([0.0; D], [0.0; D]);
     for a in 0..D {
-        let n_int = (stores[0].geom.interior.spaces[a].hi - stores[0].geom.interior.spaces[a].lo)
-            as f64;
+        let n_int =
+            (stores[0].geom.interior.spaces[a].hi - stores[0].geom.interior.spaces[a].lo) as f64;
         glo[a] = stores[0].geom.x_lo[a];
         ghi[a] = glo[a] + n_int * counts[a] as f64 * stores[0].geom.dx[a];
     }
@@ -667,7 +977,10 @@ pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
     }
     let ntiles: usize = counts.iter().product();
     let mut per_tile: Vec<TracerSet<D>> = (0..ntiles)
-        .map(|_| TracerSet { weight: set.weight, ..Default::default() })
+        .map(|_| TracerSet {
+            weight: set.weight,
+            ..Default::default()
+        })
         .collect();
     for i in 0..set.x.len() {
         // the seed is inside the domain by construction, so `tile_owner` is always Some.
@@ -675,6 +988,10 @@ pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
         per_tile[dest].x.push(set.x[i]);
         per_tile[dest].id.push(set.id[i]);
         per_tile[dest].flags.push(set.flags[i]);
+        per_tile[dest].owner.push(set.owner[i]);
+        per_tile[dest].step_owner.push(set.step_owner[i]);
+        per_tile[dest].step_flags.push(set.step_flags[i]);
+        per_tile[dest].run_seed = set.run_seed;
     }
     per_tile
 }
@@ -691,13 +1008,19 @@ fn migrate_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
     // considered exactly once this step.
     let mut moved: Vec<(usize, [f64; D], u64, TracerFlags)> = Vec::new();
     for (src, s) in stores.iter_mut().enumerate() {
-        let Some(tr) = s.tracers.as_mut() else { continue };
+        let Some(tr) = s.tracers.as_mut() else {
+            continue;
+        };
         let mut i = 0;
         while i < tr.x.len() {
             let f = tr.flags[i];
             // a frozen tracer (escaped/crossed) stays; otherwise its owner is by position, and
             // an owner outside the domain (None) stays too, for the global scan to flag it.
-            let dest = if f.escaped || f.crossed_sink { Some(src) } else { owner(&tr.x[i]) };
+            let dest = if f.escaped || f.crossed_sink {
+                Some(src)
+            } else {
+                owner(&tr.x[i])
+            };
             match dest {
                 Some(d) if d != src => {
                     let x = tr.x.swap_remove(i);
@@ -711,7 +1034,10 @@ fn migrate_tracers<const D: usize, const DOF: usize, Mem: MemorySpace>(
         }
     }
     for (dest, x, id, fl) in moved {
-        let tr = stores[dest].tracers.as_mut().expect("dest tile carries a tracer set");
+        let tr = stores[dest]
+            .tracers
+            .as_mut()
+            .expect("dest tile carries a tracer set");
         tr.x.push(x);
         tr.id.push(id);
         tr.flags.push(fl);

@@ -27,11 +27,11 @@ use symbi_algebra::{Domain, Side};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 #[cfg(feature = "gpu")]
-use symbi_xpu::{can_access_peer, ctx_sync, memcpy_peer, DeviceMemory, MAX_GPUS};
+use symbi_xpu::runtime::{GpuRuntime, current_dispatcher};
 #[cfg(feature = "gpu")]
-use symbi_xpu::runtime::{current_dispatcher, GpuRuntime};
+use symbi_xpu::{DeviceMemory, MAX_GPUS, can_access_peer, ctx_sync, memcpy_peer};
 #[cfg(feature = "gpu")]
-use symbi_xpu::{with_device, KernelArgs, LaunchConfig, MemoryBlock};
+use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock, with_device};
 
 /// move `src` over `src_region` into `dst` over `dst_region`, cell-for-cell. the two
 /// regions have identical shape (same per-axis extents); the transport pairs them by
@@ -175,8 +175,11 @@ impl HaloTransport for DeviceCopy {
             let sidx_ptr = bufs.sidx.as_ptr::<u32>() as u64;
             let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
 
-            let kernel =
-                current_dispatcher().jit_kernel_keyed(HALO_COPY_KERNEL, "decomp/halo_copy", "halo_copy");
+            let kernel = current_dispatcher().jit_kernel_keyed(
+                HALO_COPY_KERNEL,
+                "decomp/halo_copy",
+                "halo_copy",
+            );
             let mut args = KernelArgs::new();
             args.push(&src_ptr);
             args.push(&dst_ptr);
@@ -382,7 +385,13 @@ fn face_ghost_strip<const D: usize>(
             // clip to interior on un-processed cut axes (two-pass corner rule). on the face's
             // own normal axis there is one extra face past the last interior cell.
             let hi_ext = if b == d { 1 } else { 0 };
-            strip = strip.slab(b, (geom.interior.spaces[b].lo, geom.interior.spaces[b].hi + hi_ext));
+            strip = strip.slab(
+                b,
+                (
+                    geom.interior.spaces[b].lo,
+                    geom.interior.spaces[b].hi + hi_ext,
+                ),
+            );
         }
     }
     strip
@@ -444,9 +453,11 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
             let fr = &hi_mhd.bface[d];
             let lo_alloc = fl.domain();
             let hi_alloc = fr.domain();
-            let lo_ghost_f = face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, processed, counts);
+            let lo_ghost_f =
+                face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, processed, counts);
             let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + ng));
-            let hi_ghost_f = face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, processed, counts);
+            let hi_ghost_f =
+                face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, processed, counts);
             let lo_src_f = hi_ghost_f.slab(axis, (i_hi_lo - ng, i_hi_lo));
             transport.copy_region(fr, &hi_src_f, fl, &lo_ghost_f, hi_dev, lo_dev);
             transport.copy_region(fl, &lo_src_f, fr, &hi_ghost_f, lo_dev, hi_dev);
@@ -512,7 +523,7 @@ pub fn decompose_grid<const D: usize>(
                      no remaining axis evenly (each per-axis tile count must divide that axis's \
                      cells). pick a gpu count whose factors divide the resolution, or set an \
                      explicit decomposition."
-                ))
+                ));
             }
         }
     }
@@ -557,8 +568,16 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     transport: &T,
 ) {
     let total: usize = counts.iter().product();
-    debug_assert_eq!(tiles.len(), total, "tiles slice length does not match counts");
-    debug_assert_eq!(devices.len(), total, "devices slice length does not match counts");
+    debug_assert_eq!(
+        tiles.len(),
+        total,
+        "tiles slice length does not match counts"
+    );
+    debug_assert_eq!(
+        devices.len(),
+        total,
+        "devices slice length does not match counts"
+    );
     let mut processed = [false; D];
     for axis in 0..D {
         for flat in 0..total {
@@ -572,7 +591,16 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
             let hi_flat = flatten(tc_hi, counts);
             let lo = tiles[lo_flat];
             let hi = tiles[hi_flat];
-            exchange_faces(lo, hi, axis, &processed, &counts, devices[lo_flat], devices[hi_flat], transport);
+            exchange_faces(
+                lo,
+                hi,
+                axis,
+                &processed,
+                &counts,
+                devices[lo_flat],
+                devices[hi_flat],
+                transport,
+            );
         }
         processed[axis] = true;
     }
@@ -628,10 +656,12 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     dt: f64,
 ) {
-    use symbi_ib::{apply_body_deltas, BodyDelta};
+    use symbi_ib::{BodyDelta, apply_body_deltas};
     let mut global: Vec<BodyDelta<f64, D>> = Vec::new();
     for s in stores.iter() {
-        let Some(im) = s.immersed.as_ref() else { continue };
+        let Some(im) = s.immersed.as_ref() else {
+            continue;
+        };
         for d in im.diagnostics.consolidate() {
             match global.iter_mut().find(|g| g.idx == d.idx) {
                 Some(g) => {
@@ -644,7 +674,9 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
         }
     }
     for s in stores.iter_mut() {
-        let Some(im) = s.immersed.as_mut() else { continue };
+        let Some(im) = s.immersed.as_mut() else {
+            continue;
+        };
         apply_body_deltas(&mut im.bodies, &global, dt);
         // bonded fragments: the cross-tile-summed fluid loads drive the DEM subcycle (bonds +
         // contact + mutual gravity + gas drag), replicated identically on every tile. the bodies
@@ -684,6 +716,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
     F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
     let stages = ts.stages();
     let multistage = crate::driver::needs_step_snapshot(stages);
@@ -693,9 +726,6 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     // bodies are replicated identically on every tile; the per-step backward feedback + prescribed
     // advance run once per step when any tile carries them.
     let has_bodies = stores.iter().any(|s| s.immersed.is_some());
-    // lagrangian tracers advance once per step at the step tail (below), against each tile's
-    // halo-filled velocity, then migrate across cuts -- the decomposed analog of the single-grid
-    // `advance_tracers`.
     let has_tracers = stores.iter().any(|s| s.has_tracers());
 
     // a fresh SHARED reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
@@ -768,15 +798,24 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         let a_n: Vec<f64> = stores.iter().map(|s| s.motion.a).collect();
         for s in stores.iter_mut() {
             s.dt = dt;
+            if has_tracers {
+                crate::tracers::snapshot_transport_state(&mut **s);
+            }
         }
         {
             for stage in crate::driver::stage_schedule(stages) {
                 for (i, s) in stores.iter_mut().enumerate() {
                     let t_entry = s.time + stage.entry * dt;
-                    let law_value = s.motion_law.as_ref()
+                    let law_value = s
+                        .motion_law
+                        .as_ref()
                         .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
                     crate::driver::set_stage_motion(
-                        &mut s.motion, law_value, dt, a_n[i], stage.entry,
+                        &mut s.motion,
+                        law_value,
+                        dt,
+                        a_n[i],
+                        stage.entry,
                     );
                 }
                 let sh = shared!();
@@ -825,6 +864,25 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
                 }
+                drop(sh);
+                if has_tracers {
+                    for store in stores.iter_mut() {
+                        if store.geom.coords != symbi_geometry::Geometry::Cartesian {
+                            panic!(
+                                "decomposed mass-transport tracers require explicit curvilinear geometry"
+                            );
+                        }
+                        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                        crate::tracers::advance_stage_mass_transport_store(
+                            &mut **store,
+                            &geometry,
+                            stage.a0,
+                            stage.ac,
+                            stage.index,
+                        )
+                        .unwrap_or_else(|err| panic!("tracer mass transport failed: {err}"));
+                    }
+                }
             }
         }
         // the stage refresh mutated a; the step-tail advance below starts from the
@@ -839,7 +897,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             // the final halo exchange (the +-1 stencil reads the neighbor's
             // exchanged edge). body-independent; inert when inviscid.
             for i in 0..n {
-                symbi_xpu::with_device(devices[i], || prof("viscous", || kernels[i].viscous(sh[i], dt)));
+                symbi_xpu::with_device(devices[i], || {
+                    prof("viscous", || kernels[i].viscous(sh[i], dt))
+                });
             }
             drain_devices::<M>(devices);
             // horizon excision, once per step after the RK combination, mirroring
@@ -849,7 +909,10 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             // monolithic K sweeps; a final exchange publishes the finalized
             // (rebuilt) excised state into the neighbors' halos before the next
             // step's stencils read them. inert (zero passes) when unexcised.
-            let passes = (0..n).map(|i| kernels[i].excise_pass_count(sh[i])).max().unwrap_or(0);
+            let passes = (0..n)
+                .map(|i| kernels[i].excise_pass_count(sh[i]))
+                .max()
+                .unwrap_or(0);
             if passes > 0 {
                 for _ in 0..passes {
                     for i in 0..n {
@@ -888,8 +951,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 // the domain; reduce the per-tile maxima and publish the global value to every tile
                 // so a magnetized wall straddling a cut relaxes at the monolithic rate (a per-tile
                 // local max would diverge from the monolithic single-grid run). inert (0) off MHD.
-                let global_c_a2 =
-                    (0..n).map(|i| crate::state::local_c_a2_max(sh[i])).fold(0.0_f64, f64::max);
+                let global_c_a2 = (0..n)
+                    .map(|i| crate::state::local_c_a2_max(sh[i]))
+                    .fold(0.0_f64, f64::max);
                 for i in 0..n {
                     if let Some(im) = sh[i].immersed.as_ref() {
                         im.set_c_a2_override(global_c_a2);
@@ -900,13 +964,17 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     // (receipt == removal; see evolve.rs), then the feedback —
                     // gated like the other drivers: only bodies whose dynamics
                     // consume the reduction (two-way or accreting) pay for it.
-                    symbi_xpu::with_device(devices[i], || prof("penalize", || kernels[i].penalize(sh[i], dt)));
+                    symbi_xpu::with_device(devices[i], || {
+                        prof("penalize", || kernels[i].penalize(sh[i], dt))
+                    });
                     let needs_fb = sh[i]
                         .immersed
                         .as_ref()
                         .is_some_and(|im| im.bodies.needs_feedback());
                     if needs_fb {
-                        symbi_xpu::with_device(devices[i], || prof("body_feedback", || kernels[i].body_feedback(sh[i], dt)));
+                        symbi_xpu::with_device(devices[i], || {
+                            prof("body_feedback", || kernels[i].body_feedback(sh[i], dt))
+                        });
                     }
                 }
                 drain_devices::<M>(devices);
@@ -919,13 +987,6 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         }
         if has_bodies {
             step_bodies_decomposed(stores, dt);
-        }
-        // lagrangian tracers, once per step after the field + body update, against the post-step
-        // primitive velocity (cut ghosts current from the last stage exchange -- nothing in the
-        // tail recomputes prim). each tile advects its own population, then tracers that crossed a
-        // cut migrate to the owning tile. matches the single-grid `advance_tracers` order.
-        if has_tracers {
-            crate::tracers::advance_tracers_decomposed(stores, counts);
         }
         // per-tile clocks + mesh-motion advance, in lockstep (identical law + identical dt on
         // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the
@@ -1055,8 +1116,11 @@ impl HaloTransport for StagedCopy {
             let buf_ptr = bufs.buf.as_mut_ptr::<f64>() as u64;
 
             // gather: buf[i] = src[sidx[i]] -- pack the strided strip into the contiguous buffer.
-            let gather =
-                current_dispatcher().jit_kernel_keyed(HALO_GATHER_KERNEL, "decomp/halo_gather", "halo_gather");
+            let gather = current_dispatcher().jit_kernel_keyed(
+                HALO_GATHER_KERNEL,
+                "decomp/halo_gather",
+                "halo_gather",
+            );
             let mut g = KernelArgs::new();
             g.push(&src_ptr);
             g.push(&buf_ptr);
@@ -1234,11 +1298,19 @@ impl HaloTransport for PeerCopy {
                 ensure_peer_bufs(&mut pool, src_dev, n);
                 ensure_peer_bufs(&mut pool, dst_dev, n);
 
-                let sp = pool[src_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
+                let sp = pool[src_dev as usize]
+                    .as_mut()
+                    .unwrap()
+                    .idx
+                    .as_mut_ptr::<u32>();
                 for (i, sc) in src_region.iter().enumerate() {
                     unsafe { *sp.add(i) = sdom.flat_index(sc) as u32 };
                 }
-                let dp = pool[dst_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
+                let dp = pool[dst_dev as usize]
+                    .as_mut()
+                    .unwrap()
+                    .idx
+                    .as_mut_ptr::<u32>();
                 for (i, dc) in dst_region.iter().enumerate() {
                     unsafe { *dp.add(i) = ddom.flat_index(dc) as u32 };
                 }

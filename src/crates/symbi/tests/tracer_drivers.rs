@@ -1,13 +1,11 @@
 // =============================================================================
 // tracer_drivers.rs
 //
-// lagrangian tracers through BOTH production drivers: the uni-grid evolve loop
-// and the single-level hierarchy every python run drives must advect an
-// identically-seeded tracer population to BITWISE-identical trajectories (the
-// advance is shared driver code invisible to the kernel-set recorder law, so
-// this trajectory gate is its cross-driver guard — the same pattern as the
-// horizon ledger). also pins: tracers actually MOVE, mass-weighted seeding
-// puts more tracers where the gas is denser, and an undyed run is untouched.
+// mass-transport tracers through both production drivers: the uni-grid evolve
+// loop and the single-level hierarchy must transport an identically seeded
+// population to identical discrete owners. also pins that tracers cross cell
+// faces, mass-weighted seeding puts more tracers where the gas is denser, and
+// an undyed run is untouched.
 //
 // run: cargo test -p symbi --test tracer_drivers
 // =============================================================================
@@ -54,12 +52,12 @@ fn build() -> Sim {
 }
 
 #[test]
-fn both_drivers_advect_identical_trajectories() {
+fn both_drivers_produce_identical_mass_ownership() {
     const T: f64 = 0.3;
 
     let mut sim_a = build();
     sim_a.tracers = Some(seed_mass_weighted(&sim_a, N_TRACERS));
-    let x0: Vec<[f64; 2]> = sim_a.tracers.as_ref().unwrap().x.clone();
+    let owner_0 = sim_a.tracers.as_ref().unwrap().owner.clone();
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim_a.geom.allocated);
     evolve(&mut sim_a, &sub, T).expect("uni-grid tracer drive");
@@ -75,26 +73,20 @@ fn both_drivers_advect_identical_trajectories() {
 
     assert_eq!(tr_a.len(), N_TRACERS);
     assert_eq!(tr_a.len(), tr_b.len());
-    let mut moved = 0usize;
-    for i in 0..tr_a.len() {
-        for a in 0..2 {
-            assert_eq!(
-                tr_a.x[i][a].to_bits(),
-                tr_b.x[i][a].to_bits(),
-                "tracer {i} axis {a} diverged between drivers: {} vs {}",
-                tr_a.x[i][a],
-                tr_b.x[i][a],
-            );
-        }
-        if tr_a.x[i] != x0[i] {
-            moved += 1;
-        }
-    }
-    // the shear carries the population: a frozen tracer subsystem (a driver
-    // missing the advance call) fails HERE, not in a plot.
+    assert_eq!(tr_a.id, tr_b.id);
+    assert_eq!(tr_a.owner, tr_b.owner);
+    assert_eq!(tr_a.flags, tr_b.flags);
+    let moved = tr_a
+        .owner
+        .iter()
+        .zip(&owner_0)
+        .filter(|(owner, initial)| owner != initial)
+        .count();
+    // the shear transports the population across cell faces, so a driver
+    // missing the stage transport call cannot pass vacuously.
     assert!(
         moved > N_TRACERS / 2,
-        "tracers did not advect: only {moved} of {} moved",
+        "tracers did not cross cell faces: only {moved} of {} moved",
         tr_a.len()
     );
 }
@@ -105,7 +97,7 @@ fn seeding_follows_the_mass() {
     let tr = seed_mass_weighted(&sim, N_TRACERS);
     // the band carries rho = 3 over 40% of the area vs rho = 1 elsewhere:
     // mass fraction in the band = 1.2 / (1.2 + 0.6) = 2/3 of the tracers.
-    // the expectation comes from the DISCRETE density field itself (the
+    // the expectation comes from the discrete density field itself (the
     // band edge lands between cell centers, so a continuum 2/3 is off by the
     // edge rows): band mass fraction over the interior, cell by cell.
     let dx = 2.0 * L / N as f64;

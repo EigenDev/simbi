@@ -12,11 +12,11 @@
 //   evolve(&mut sim, &kernels, t_final)?;
 // =============================================================================
 
-use symbi_hydro::regime::Regime;
-use symbi_hydro::eos::Eos;
-use symbi_geometry::Metric;
-use symbi_xpu::{ExecutionSpace, MemorySpace};
 use crate::sim::state::*;
+use symbi_geometry::Metric;
+use symbi_hydro::eos::Eos;
+use symbi_hydro::regime::Regime;
+use symbi_xpu::{ExecutionSpace, MemorySpace};
 // the KernelSet trait lives at the sim<->substrate seam; the driver only consumes
 // the contract. re-exported so the `sim::evolve::KernelSet` path
 // resolves for downstream callers.
@@ -25,8 +25,8 @@ pub use crate::sim::substrate_seam::KernelSet;
 // sim-state core so the AMR driver shares them DRY. the public profiler API is
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
-    advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request,
-    needs_step_snapshot, prof, select_timestep, set_stage_motion, stage_schedule,
+    advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request, needs_step_snapshot,
+    prof, select_timestep, set_stage_motion, stage_schedule,
 };
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -100,7 +100,10 @@ where
                 "mesh motion: uniform translation is cartesian-only"
             );
         }
-        assert!(!sim.has_bodies(), "mesh motion: immersed bodies are not wired");
+        assert!(
+            !sim.has_bodies(),
+            "mesh motion: immersed bodies are not wired"
+        );
         assert!(
             sim.fields.mhd.is_none(),
             "mesh motion: the mhd substrates are not wired (comoving-field convention pending)"
@@ -114,7 +117,8 @@ where
     // one-time check at entry (zero per-step cost); every real MHD IC sets the flag via seed_face.
     if let Some(mhd) = sim.fields.mhd.as_ref() {
         assert!(
-            mhd.bface_initialized.load(std::sync::atomic::Ordering::Relaxed),
+            mhd.bface_initialized
+                .load(std::sync::atomic::Ordering::Relaxed),
             "evolve: this MHD sim's staggered face B is un-seeded (bface_initialized = false). \
              seed the face-normal B before evolve — `sim.seed_face(d, b0)` or \
              `sim.seed_face_with(d, |x| ..)` for each face axis d (these set the flag) — so the \
@@ -149,16 +153,18 @@ where
     // each iter writes one line to stderr: iter,time,den,mom0,mom1[,mom2],
     // nrg,bcell0,bcell1[,bcell2]. redirect stderr to file on both backends
     // and `diff` to find the first iter that disagrees.
-    let trace_coord: Option<[isize; D]> = std::env::var("SYMBI_TRACE_CELL").ok()
-        .and_then(|s| {
-            let parts: Vec<isize> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            if parts.len() == D {
-                Some(std::array::from_fn(|i| parts[i]))
-            } else {
-                eprintln!("SYMBI_TRACE_CELL: expected {} comma-separated ints, got {:?}", D, parts);
-                None
-            }
-        });
+    let trace_coord: Option<[isize; D]> = std::env::var("SYMBI_TRACE_CELL").ok().and_then(|s| {
+        let parts: Vec<isize> = s.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+        if parts.len() == D {
+            Some(std::array::from_fn(|i| parts[i]))
+        } else {
+            eprintln!(
+                "SYMBI_TRACE_CELL: expected {} comma-separated ints, got {:?}",
+                D, parts
+            );
+            None
+        }
+    });
     if let Some(c) = trace_coord {
         eprintln!("SYMBI_TRACE: tracing cell {:?} +/- 1 neighborhood", c);
         emit_trace_neighborhood(sim, c);
@@ -172,8 +178,8 @@ where
             Err(err) => {
                 // terminal NaN/inf cascade only: name the first bad cell before returning. one-time
                 // host scan at the failure boundary — never on the happy path (see report fn).
-            crate::regimes::substrate_gpu::device_sync::<Mem>();
-            let _ = report_first_nonfinite_cell(sim);
+                crate::regimes::substrate_gpu::device_sync::<Mem>();
+                let _ = report_first_nonfinite_cell(sim);
                 return Err(err);
             }
         };
@@ -251,13 +257,6 @@ where
             prof("body_motion", || evolve_bodies(sim));
         }
 
-        // lagrangian tracers, ONCE per step against the post-step primitive
-        // velocity (ghost bands current). shared driver code on every driver;
-        // guarded by the cross-driver bitwise trajectory gate.
-        if sim.has_tracers() {
-            prof("tracers", || symbi_sim::tracers::advance_tracers(&mut *sim));
-        }
-
         if sim.iteration - last_cb >= interval {
             last_cb = sim.iteration;
             // the callback reads fields from the host: drain the device queue
@@ -291,14 +290,25 @@ where
     let mhd = sim.fields.mhd.as_ref();
     for c in sim.geom.interior.iter() {
         let den = *sim.fields.cons.den.view().at(c);
-        let nrg = sim.fields.cons.nrg_field().map(|f| *f.view().at(c)).unwrap_or(0.0);
-        let b_bad = mhd.map_or(false, |m| (0..DOF).any(|k| !(*m.bcell[k].view().at(c)).is_finite()));
+        let nrg = sim
+            .fields
+            .cons
+            .nrg_field()
+            .map(|f| *f.view().at(c))
+            .unwrap_or(0.0);
+        let b_bad = mhd.map_or(false, |m| {
+            (0..DOF).any(|k| !(*m.bcell[k].view().at(c)).is_finite())
+        });
         if !den.is_finite() || !nrg.is_finite() || b_bad {
             let x = sim.geom.cell_coord(c);
             eprintln!(
                 "[nan-locator] iter {}: first non-finite interior cell at index {:?} (x = {:?}): \
                  den={:e} nrg={:e}{}",
-                sim.iteration, c, x, den, nrg,
+                sim.iteration,
+                c,
+                x,
+                den,
+                nrg,
                 if b_bad { " cell-B non-finite" } else { "" },
             );
             return Some(c);
@@ -345,14 +355,12 @@ where
 
 // the stage table + fold live in symbi-sim::stage (the ONE sequence every
 // driver folds); this driver keeps only per-step scaffolding.
-use symbi_sim::stage::{fold_stage, StageArgs};
-
+use symbi_sim::stage::{StageArgs, fold_stage};
 
 fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     k: &impl KernelSet<D, DOF, Mem, f64>,
-)
-where
+) where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
@@ -370,6 +378,9 @@ where
     if needs_step_snapshot(stages) {
         prof("snapshot", || k.snapshot(sim));
     }
+    if sim.has_tracers() {
+        symbi_sim::tracers::snapshot_transport_state(sim);
+    }
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
     // scalars from sim.motion, so a stage must see a(t) at its shu-osher ENTRY time
     // (the time of its input state — the same clock the amr cf ghosts use). a is
@@ -378,11 +389,12 @@ where
     let a_n = sim.motion.a;
     for stage in stage_schedule(stages) {
         let t_entry = sim.time + stage.entry * sim.dt;
-        let law_value = sim.motion_law.as_ref()
+        let law_value = sim
+            .motion_law
+            .as_ref()
             .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
         let dt = sim.dt;
         set_stage_motion(&mut sim.motion, law_value, dt, a_n, stage.entry);
-        let sim = &*sim;
         // FOLD the stage pipeline. each phase's semantics, in execution order:
         //  - snapshot_stage: cons BEFORE godunov overwrites it, so the additive source pass
         //    evaluates S at the stage input (the state the fused stage uses).
@@ -397,7 +409,7 @@ where
         // `snapshot_stage` copy — `stage_input()` binds u_n for this stage. forward-Euler (n == 1)
         // takes no snapshot, so u_n is stale there and the copy stands.
         fold_stage(
-            sim,
+            &*sim,
             k,
             StageArgs {
                 dt: sim.dt,
@@ -409,6 +421,17 @@ where
             },
             &mut |_| {},
         );
+        if sim.has_tracers() {
+            prof("tracers", || {
+                symbi_sim::tracers::advance_stage_mass_transport(
+                    sim,
+                    stage.a0,
+                    stage.ac,
+                    stage.index,
+                )
+                .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
+            });
+        }
     }
     sim.motion.a = a_n;
 }
@@ -423,8 +446,7 @@ where
 fn emit_trace_neighborhood<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     center: [isize; D],
-)
-where
+) where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
@@ -436,8 +458,7 @@ where
         center: [isize; D],
         offset: [isize; D],
         axis: usize,
-    )
-    where
+    ) where
         R: Regime<f64, D>,
         M: Metric<f64, D> + Copy,
         E: Eos<f64>,
@@ -446,13 +467,17 @@ where
     {
         if axis == D {
             let mut c = center;
-            for a in 0..D { c[a] += offset[a]; }
+            for a in 0..D {
+                c[a] += offset[a];
+            }
             emit_trace_line(sim, c, &offset);
         } else {
             // SYMBI_TRACE_RADIUS env var sets the half-width; default 1 -> 3x3.
             // 2 -> 5x5 covers PLM stencil reach (radius-2 along each axis).
-            let r: isize = std::env::var("SYMBI_TRACE_RADIUS").ok()
-                .and_then(|s| s.parse().ok()).unwrap_or(1);
+            let r: isize = std::env::var("SYMBI_TRACE_RADIUS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1);
             for d in -r..=r {
                 let mut o = offset;
                 o[axis] = d;
@@ -471,8 +496,7 @@ fn emit_trace_line<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     coord: [isize; D],
     offset: &[isize; D],
-)
-where
+) where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
@@ -493,40 +517,74 @@ where
         _ => format!("{:?}", offset),
     };
     let den = *sim.fields.cons.den.view().at(coord);
-    let mut parts = format!("iter={} off={} t={:.6e} den={}", sim.iteration, off_tag, sim.time, fmt(den));
+    let mut parts = format!(
+        "iter={} off={} t={:.6e} den={}",
+        sim.iteration,
+        off_tag,
+        sim.time,
+        fmt(den)
+    );
     for dd in 0..D {
-        parts.push_str(&format!(" mom{}={}", dd, fmt(*sim.fields.cons.mom[dd].view().at(coord))));
+        parts.push_str(&format!(
+            " mom{}={}",
+            dd,
+            fmt(*sim.fields.cons.mom[dd].view().at(coord))
+        ));
     }
     if let Some(nrg) = sim.fields.cons.nrg_field() {
         parts.push_str(&format!(" nrg={}", fmt(*nrg.view().at(coord))));
     }
-    parts.push_str(&format!(" rho={}", fmt(*sim.fields.prim.rho.view().at(coord))));
+    parts.push_str(&format!(
+        " rho={}",
+        fmt(*sim.fields.prim.rho.view().at(coord))
+    ));
     for dd in 0..D {
-        parts.push_str(&format!(" v{}={}", dd, fmt(*sim.fields.prim.vel[dd].view().at(coord))));
+        parts.push_str(&format!(
+            " v{}={}",
+            dd,
+            fmt(*sim.fields.prim.vel[dd].view().at(coord))
+        ));
     }
     if let Some(pre) = sim.fields.prim.pre_field() {
         parts.push_str(&format!(" p={}", fmt(*pre.view().at(coord))));
     }
     if let Some(mhd) = sim.fields.mhd.as_ref() {
         for dd in 0..D {
-            parts.push_str(&format!(" bcell{}={}", dd, fmt(*mhd.bcell[dd].view().at(coord))));
+            parts.push_str(&format!(
+                " bcell{}={}",
+                dd,
+                fmt(*mhd.bcell[dd].view().at(coord))
+            ));
         }
         // bface[d] at coord = value at lower-d face of cell coord
         for dd in 0..D {
-            parts.push_str(&format!(" bface{}={}", dd, fmt(*mhd.bface[dd].view().at(coord))));
+            parts.push_str(&format!(
+                " bface{}={}",
+                dd,
+                fmt(*mhd.bface[dd].view().at(coord))
+            ));
         }
         // bflux[dir][k] = direction-dir flux of B-component-k. value at the
         // lower-dir face of cell coord. dump all D*D for full visibility into
         // the magnetic chain (some are zero by construction in pure MHD).
         for dir in 0..D {
             for k in 0..D {
-                parts.push_str(&format!(" bflux{}{}={}", dir, k, fmt(*mhd.bflux[dir][k].view().at(coord))));
+                parts.push_str(&format!(
+                    " bflux{}{}={}",
+                    dir,
+                    k,
+                    fmt(*mhd.bflux[dir][k].view().at(coord))
+                ));
             }
         }
         // efield[d] at coord. for 2D only efield[0] (= Ez at cell corner)
         // is meaningful; for 3D all three components.
         for dd in 0..D {
-            parts.push_str(&format!(" ef{}={}", dd, fmt(*mhd.efield[dd].view().at(coord))));
+            parts.push_str(&format!(
+                " ef{}={}",
+                dd,
+                fmt(*mhd.efield[dd].view().at(coord))
+            ));
         }
     }
     eprintln!("SYMBI_TRACE: {}", parts);
@@ -550,7 +608,11 @@ mod tests {
         .bounds([0.0], [1.0])
         .finish()
         .unwrap();
-        sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 });
+        sim.seed_cells(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        });
         // a clean conserved field has no non-finite cell.
         assert_eq!(super::report_first_nonfinite_cell(&sim), None);
         // poison one interior cell's conserved density; the locator returns exactly it.
