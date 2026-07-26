@@ -1270,8 +1270,15 @@ where
         }
     }
 
-    // primitives (optional). RegimeSpec-driven iteration mirrors the write.
-    if let Some(prim) = level_0.find_group("primitives") {
+    // primitives (optional). the canonical v2 tree nests visualization fields
+    // under partition_0/hydro; accept the former flat location for old files.
+    let hydro = level_0
+        .find_group("partition_0")
+        .and_then(|partition| partition.find_group("hydro"));
+    let primitives = hydro
+        .and_then(|group| group.find_group("primitives"))
+        .or_else(|| level_0.find_group("primitives"));
+    if let Some(prim) = primitives {
         for fs in R::SPEC.primitive_fields {
             let n = symbi_io::component_count(fs, DOF);
             for idx in 0..n {
@@ -1321,12 +1328,21 @@ where
 
     // face-centered B (CT truth — restores div(B)=0 exactly)
     if let Some(ref mhd) = sim.fields.mhd {
-        if let Some(mag) = level_0.find_group("magnetic") {
+        let magnetic = hydro
+            .and_then(|group| group.find_group("magnetic"))
+            .or_else(|| level_0.find_group("magnetic"));
+        if let Some(mag) = magnetic {
             let mut all_ok = true;
             for d in 0..D {
                 let face_dom = interior.extend(d, 0, 1);
                 let name = format!("B{}", d + 1);
-                if restore_field(mag, &name, &mhd.bface[d], &face_dom).is_err() {
+                let restored = mag
+                    .find_group(&name)
+                    .map_or_else(
+                        || restore_field(mag, &name, &mhd.bface[d], &face_dom),
+                        |face| restore_field(face, "data", &mhd.bface[d], &face_dom),
+                    );
+                if restored.is_err() {
                     all_ok = false;
                 }
             }

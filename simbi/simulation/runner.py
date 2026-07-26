@@ -110,6 +110,9 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     if not data_dir.endswith("/"):
         data_dir += "/"
     model_dict["data_directory"] = data_dir
+    checkpoint_file = model_dict.get("checkpoint_file")
+    if isinstance(checkpoint_file, Path):
+        model_dict["checkpoint_file"] = str(checkpoint_file)
 
     # add computed fields (honor explicit problem attributes, then derive sensible defaults)
     computed_fields = [

@@ -53,3 +53,19 @@ def test_missing_sound_speed_reads_as_none(tmp_path) -> None:
     with h5py.File(path, "r") as f:
         meta = read_metadata(f["metadata"]).unwrap()
     assert meta.sound_speed is None
+
+
+def test_boundary_conditions_read_from_scalar_metadata(tmp_path) -> None:
+    path = tmp_path / "boundaries.h5"
+    _write_meta(
+        path,
+        {"boundary_conditions": "periodic,periodic,reflecting,outflow"},
+    )
+    with h5py.File(path, "r") as f:
+        meta = read_metadata(f["metadata"]).unwrap()
+    assert meta.boundary_conditions == (
+        "periodic",
+        "periodic",
+        "reflecting",
+        "outflow",
+    )

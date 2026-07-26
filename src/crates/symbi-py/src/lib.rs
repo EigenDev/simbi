@@ -43,7 +43,7 @@ use symbi_hydro::regime::Regime;
 use symbi_hydro::state::PrimG;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
-use symbi_sim::checkpoint::write_hierarchy_checkpoint;
+use symbi_sim::checkpoint::{load_checkpoint, write_hierarchy_checkpoint};
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::state::CtMethod;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
@@ -119,6 +119,7 @@ struct Config {
     max_steps: u64,
     checkpoint_interval: f64,
     data_dir: String,
+    restart_path: Option<String>,
     // natural time unit for checkpoint names + display: reported time is
     // `time / time_unit`, labeled `time_unit_label` ("t" = code units).
     time_unit: f64,
@@ -847,6 +848,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .get_item("data_directory")?
             .ok_or_else(|| PyValueError::new_err("sim_info missing 'data_directory'"))?
             .extract()?,
+        restart_path: dict
+            .get_item("checkpoint_file")
+            .ok()
+            .flatten()
+            .and_then(|value| value.extract::<String>().ok())
+            .filter(|path| !path.is_empty()),
         time_unit: {
             let u = get_f64_or(dict, "time_unit", 1.0);
             if u > 0.0 { u } else { 1.0 }
@@ -1381,6 +1388,16 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
 {
     let data_dir = &cfg.data_dir;
+    if let Some(path) = cfg.restart_path.as_deref() {
+        if hier.levels.len() != 1 {
+            return Err(format!(
+                "checkpoint restart requires one level; '{path}' cannot yet restore a refined hierarchy"
+            )
+            .into());
+        }
+        hier.levels[0].state.tracers = None;
+        load_checkpoint(&mut hier.levels[0].state, path)?;
+    }
     // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
     // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
     // orbital `time_unit` means "every 0.1 orbits". default time_unit = 1.0 keeps
@@ -1553,7 +1570,9 @@ where
     // checkpoint carries real primitives (the reader reads primitives — an
     // unprimed IC's zeroed scratch buffers plot as all zeros). idempotent
     // with the prime the evolve driver runs at its own start.
-    hier.prime();
+    if cfg.restart_path.is_none() {
+        hier.prime();
+    }
 
     // save the initial condition (t = 0) as the start-index checkpoint: a fresh
     // run (clock at zero, or index 0) writes its IC so the first output is the
@@ -1599,7 +1618,7 @@ where
     // requests a graceful stop, handled exactly like a caught signal.
     let mut user_quit = false;
 
-    hier.evolve_with_callback(cfg.t_final, 1, |h| {
+    let callback = |h: &Hierarchy<R, D, DOF, M, E, S, Mem, K>| {
         let st = &h.levels[0].state;
         let (iter, time, dt) = (st.iteration, st.time, st.dt);
         let mut dirty = false;
@@ -1903,7 +1922,12 @@ where
             publish_or_refresh(dash.as_ref(), &mut table);
         }
         std::ops::ControlFlow::Continue(())
-    })?;
+    };
+    if cfg.restart_path.is_some() {
+        hier.resume_with_callback(cfg.t_final, 1, callback)?;
+    } else {
+        hier.evolve_with_callback(cfg.t_final, 1, callback)?;
+    }
 
     // the run loop is done: stop + join the render thread so the main thread has
     // sole terminal ownership for leaving the alt screen + printing the exit frame.
@@ -5991,6 +6015,20 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
 /// is_mhd, is_relativistic). these are the spatial-scheme + run-control fields,
 /// authored from the python config dict (the single source of truth).
 fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
+    let boundary_conditions = cfg
+        .boundaries
+        .iter()
+        .map(|boundary| match boundary {
+            BoundaryType::Periodic => "periodic",
+            BoundaryType::Outflow => "outflow",
+            BoundaryType::Reflect => "reflecting",
+            BoundaryType::CoarseFine => "coarse_fine",
+            BoundaryType::Driven(_) => "dynamic",
+            BoundaryType::Neumann(_) => "neumann",
+            BoundaryType::Robin(_) => "robin",
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     Metadata::new()
         .with("solver", cfg.solver_name.as_str())
         .with("reconstruction", cfg.reconstruction_name.as_str())
@@ -6006,6 +6044,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("x2_spacing_ratio", cfg.x2_spacing_ratio)
         .with("x3_spacing", cfg.x3_spacing.as_str())
         .with("x3_spacing_ratio", cfg.x3_spacing_ratio)
+        .with("boundary_conditions", boundary_conditions)
         .with("initial_time", cfg.start_time)
         .with("time_unit", cfg.time_unit)
         .with("time_unit_label", cfg.time_unit_label.as_str())
@@ -6550,6 +6589,14 @@ fn run_simulation(
 
 fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     validate_gpu_request(cfg.n_gpus)?;
+    if cfg.restart_path.is_some() && cfg.n_gpus > 1 {
+        return Err("checkpoint restart is not yet supported with decomposition".to_string());
+    }
+    if cfg.restart_path.is_some() && cfg.refinement_enabled {
+        return Err(
+            "checkpoint restart is not yet supported for refined hierarchies".to_string(),
+        );
+    }
     check_horizon_containment(
         &cfg.spacetime,
         cfg.schwarzschild_mass,
