@@ -73,8 +73,9 @@ pub struct ContinuousTracerSet<const D: usize, Mem: symbi_xpu::MemorySpace> {
     pub injection_remainder: f64,
 }
 
+/// complete move-only payload for relocation between storage partitions.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ContinuousTracerRecord<const D: usize> {
+pub struct ContinuousTracerRecord<const D: usize> {
     pub x: [f64; D],
     pub step_x: [f64; D],
     pub id: u64,
@@ -618,7 +619,7 @@ impl<const D: usize, Mem: symbi_xpu::MemorySpace> ContinuousTracerSet<D, Mem> {
         Ok(())
     }
 
-    pub(crate) fn swap_remove_host(
+    pub fn swap_remove_host(
         &mut self,
         index: usize,
     ) -> Result<ContinuousTracerRecord<D>, String> {
@@ -680,7 +681,7 @@ impl<const D: usize, Mem: symbi_xpu::MemorySpace> ContinuousTracerSet<D, Mem> {
         }
     }
 
-    pub(crate) fn push_host(
+    pub fn push_host(
         &mut self,
         record: ContinuousTracerRecord<D>,
     ) -> Result<(), String> {
