@@ -17,8 +17,6 @@ movies/
 deprecated/
 literature/
 scripts/
-simbi/**/*.md
-src/**/*.md
 simbi/tools/extras/*
 version.py
 Doxyfile
