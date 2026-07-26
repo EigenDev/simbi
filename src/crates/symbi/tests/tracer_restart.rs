@@ -12,7 +12,8 @@ use symbi::sim::checkpoint::{load_checkpoint, write_checkpoint};
 use symbi_hydro::expr_bridge::build_user_source;
 use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_io::Metadata;
-use symbi_sim::tracers::seed_mass_weighted;
+use symbi_sim::mass_transport::ItoOrder;
+use symbi_sim::tracers::{ContinuousTracerRecord, ContinuousTracerSet, seed_mass_weighted};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -45,12 +46,39 @@ fn make() -> (Sim, Kern) {
             pre: 1.0,
         })
         .build();
-    sim.tracers = Some(seed_mass_weighted(&sim, 1000));
+    let tracers = seed_mass_weighted(&sim, 1000);
+    sim.continuous_tracers = Some(
+        ContinuousTracerSet::from_discrete(&tracers, ItoOrder::Three).unwrap(),
+    );
+    sim.tracers = Some(tracers);
     let kernels = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_runtime_source(
         build_user_source(&source, &NEWTONIAN_SPEC).unwrap(),
         source.params,
     );
     (sim, kernels)
+}
+
+fn continuous_records(
+    tracers: &ContinuousTracerSet<1, HostMemory>,
+) -> Vec<ContinuousTracerRecord<1>> {
+    unsafe {
+        (0..tracers.len)
+            .map(|ii| ContinuousTracerRecord {
+                x: [*tracers.x[0].as_ptr::<f64>().add(ii)],
+                step_x: [*tracers.step_x[0].as_ptr::<f64>().add(ii)],
+                id: *tracers.id.as_ptr::<u64>().add(ii),
+                cohort: *tracers.cohort.as_ptr::<u16>().add(ii),
+                owner: *tracers
+                    .owner
+                    .as_ptr::<symbi_sim::mass_transport::ContainerId>()
+                    .add(ii),
+                escaped: *tracers.escaped.as_ptr::<u8>().add(ii),
+                crossed_sink: *tracers.crossed_sink.as_ptr::<u8>().add(ii),
+                crossing_time: *tracers.crossing_time.as_ptr::<f64>().add(ii),
+                random_counter: *tracers.random_counter.as_ptr::<u64>().add(ii),
+            })
+            .collect()
+    }
 }
 
 #[test]
@@ -90,5 +118,20 @@ fn source_spawning_continues_identically_after_restart() {
     assert!(
         actual.next_id > 1000,
         "restart gate never exercised source spawning"
+    );
+    let expected = uninterrupted.continuous_tracers.as_ref().unwrap();
+    let actual = restarted.continuous_tracers.as_ref().unwrap();
+    assert_eq!(continuous_records(actual), continuous_records(expected));
+    assert_eq!(actual.order, expected.order);
+    assert_eq!(actual.next_id, expected.next_id);
+    assert_eq!(actual.run_seed, expected.run_seed);
+    assert_eq!(actual.weight.to_bits(), expected.weight.to_bits());
+    assert_eq!(
+        actual.injection_remainder.to_bits(),
+        expected.injection_remainder.to_bits()
+    );
+    assert!(
+        actual.next_id > 1000,
+        "continuous restart gate never exercised source spawning"
     );
 }
