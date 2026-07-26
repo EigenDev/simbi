@@ -882,6 +882,71 @@ pub fn spawn_injected_tracers<const D: usize>(
     Ok(count)
 }
 
+/// spawn continuous tracers for accepted injected mass without a jump process.
+pub fn spawn_continuous_injected_tracers<
+    const D: usize,
+    Mem: symbi_xpu::MemorySpace,
+>(
+    tracers: &mut ContinuousTracerSet<D, Mem>,
+    injections: impl IntoIterator<Item = crate::mass_transport::MassTransfer>,
+    cell_box: impl Fn(crate::mass_transport::ContainerId) -> ([f64; D], [f64; D]),
+    key: crate::mass_transport::SamplingKey,
+) -> Result<usize, String> {
+    use std::collections::BTreeMap;
+
+    if !tracers.weight.is_finite() || tracers.weight <= 0.0 {
+        return Err(format!(
+            "continuous injection requires positive finite weight, got {:?}",
+            tracers.weight
+        ));
+    }
+    let mut combined = BTreeMap::new();
+    for injection in injections {
+        if !injection.mass.is_finite() || injection.mass < 0.0 {
+            return Err(format!("invalid injected mass {:?}", injection.mass));
+        }
+        *combined.entry(injection.destination).or_insert(0.0) += injection.mass;
+    }
+    let injected_mass: f64 = combined.values().sum();
+    let available = tracers.injection_remainder + injected_mass;
+    let count = (available / tracers.weight).floor() as usize;
+    tracers.injection_remainder = available - count as f64 * tracers.weight;
+    if count == 0 {
+        return Ok(0);
+    }
+    let destinations: Vec<_> = combined.into_iter().collect();
+    let masses: Vec<_> = destinations.iter().map(|(_, mass)| *mass).collect();
+    let counts = systematic_counts(&masses, count);
+    for ((owner, _), destination_count) in destinations.into_iter().zip(counts) {
+        let (lo, width) = cell_box(owner);
+        for _ii in 0..destination_count {
+            let id = tracers.next_id;
+            tracers.next_id = tracers.next_id.checked_add(1).expect("tracer id overflow");
+            let x = std::array::from_fn(|dd| {
+                let unit = crate::mass_transport::ito_unit_sample(
+                    key.run_seed ^ key.epoch,
+                    id,
+                    0,
+                    dd,
+                );
+                lo[dd] + unit * width[dd]
+            });
+            tracers.push_host(ContinuousTracerRecord {
+                x,
+                step_x: x,
+                id,
+                cohort: u16::MAX,
+                owner,
+                escaped: 0,
+                crossed_sink: 0,
+                crossing_time: 0.0,
+                random_counter: 0,
+            })?;
+        }
+    }
+    Ok(count)
+}
+
 /// accumulate one stage's injected masses through the same shu-osher
 /// recurrence as the conserved state.
 pub fn fold_injection_ledger(
@@ -1074,6 +1139,53 @@ where
     Ok(count)
 }
 
+pub fn spawn_continuous_boundary_injection_store<
+    const D: usize,
+    const DOF: usize,
+    M,
+    Mem,
+>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    ledger: std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>,
+) -> Result<usize, String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let Some(mut tracers) = sim.continuous_tracers.take() else {
+        return Ok(0);
+    };
+    let key = crate::mass_transport::SamplingKey {
+        run_seed: tracers.run_seed,
+        epoch: sim.iteration | (1 << 62),
+    };
+    let count = spawn_continuous_injected_tracers(
+        &mut tracers,
+        ledger
+            .into_iter()
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer {
+                destination,
+                mass,
+            }),
+        |owner| {
+            let coord = container_cell(owner, &interior, layout)
+                .expect("boundary injection destination belongs to this grid");
+            let lo = std::array::from_fn(|dd| match sim.geom.maps {
+                Some(maps) => maps[dd].face(coord[dd]),
+                None => sim.geom.x_lo[dd] + coord[dd] as f64 * sim.geom.dx[dd],
+            });
+            let width = std::array::from_fn(|dd| geometry.cell_width(coord, dd));
+            (lo, width)
+        },
+        key,
+    )?;
+    sim.continuous_tracers = Some(tracers);
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1241,6 +1353,57 @@ mod tests {
         assert!(tracers.injection_remainder.abs() < 1.0e-15);
         assert_eq!(tracers.id, [10, 11, 12]);
         assert_eq!(tracers.cohort, [u16::MAX; 3]);
+    }
+
+    #[test]
+    fn continuous_injection_preserves_mass_ids_and_subcell_positions() {
+        use crate::mass_transport::{ContainerId, MassTransfer, SamplingKey};
+        use symbi_xpu::HostMemory;
+
+        let mut tracers =
+            ContinuousTracerSet::<2, HostMemory>::allocate(0, crate::mass_transport::ItoOrder::Two)
+                .unwrap();
+        tracers.weight = 0.1;
+        tracers.run_seed = 7;
+        tracers.next_id = 10;
+        let spawned = spawn_continuous_injected_tracers(
+            &mut tracers,
+            [MassTransfer {
+                destination: ContainerId(3),
+                mass: 0.35,
+            }],
+            |_| ([2.0, 4.0], [1.0, 2.0]),
+            SamplingKey {
+                run_seed: 7,
+                epoch: 5,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(spawned, 3);
+        assert_eq!(tracers.len, 3);
+        assert_eq!(tracers.next_id, 13);
+        assert!((tracers.injection_remainder - 0.05).abs() < 1.0e-15);
+        unsafe {
+            let ids = std::slice::from_raw_parts(tracers.id.as_ptr::<u64>(), 3);
+            let cohorts = std::slice::from_raw_parts(tracers.cohort.as_ptr::<u16>(), 3);
+            let owners = std::slice::from_raw_parts(
+                tracers.owner.as_ptr::<ContainerId>(),
+                3,
+            );
+            assert_eq!(ids, [10, 11, 12]);
+            assert_eq!(cohorts, [u16::MAX; 3]);
+            assert_eq!(owners, [ContainerId(3); 3]);
+            for ii in 0..3 {
+                let x = *tracers.x[0].as_ptr::<f64>().add(ii);
+                let y = *tracers.x[1].as_ptr::<f64>().add(ii);
+                assert!((2.0..3.0).contains(&x));
+                assert!((4.0..6.0).contains(&y));
+                assert_eq!(*tracers.step_x[0].as_ptr::<f64>().add(ii), x);
+                assert_eq!(*tracers.step_x[1].as_ptr::<f64>().add(ii), y);
+                assert_eq!(*tracers.random_counter.as_ptr::<u64>().add(ii), 0);
+            }
+        }
     }
 
     #[test]
