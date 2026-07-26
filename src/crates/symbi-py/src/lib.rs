@@ -128,7 +128,7 @@ struct Config {
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
     bodies: Vec<BodyParams>,
     bonded_assembly: Option<BondedAssemblyParams>,
-    /// lagrangian tracer count (0 = none): mass-weighted deterministic
+    /// mass-transport tracer count (0 = none): deterministic mass-weighted
     /// seeding over the initial interior density.
     n_tracers: usize,
     // the passive-scalar (dye) initial condition: one value per interior cell,
@@ -3413,6 +3413,7 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
+    Cartesian: Metric<f64, D>,
 {
     use symbi::sim::decomp::{
         enable_peer_mesh, evolve_decomposed, gather_faces, gather_interiors, gather_tracers,
@@ -5834,9 +5835,9 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             );
         }
     }
-    // lagrangian tracers ride the uni-grid cartesian flat-spacetime hydro/iso
-    // paths (host sampler over prim velocity; the advance is fenced off the
-    // decomposed and refined drivers in rust). fail loud elsewhere.
+    // mass-transport tracers consume the accepted finite-volume density flux.
+    // curvilinear decomposition and mesh motion still require explicit
+    // material-volume geometry in the decomposed driver.
     if cfg.n_tracers > 0 {
         if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
             return Err(format!(
@@ -5846,8 +5847,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         }
         if cfg.coord_system != "cartesian" || cfg.spacetime != "minkowski" {
             return Err(format!(
-                "n_tracers = {} requires a flat cartesian chart (the velocity sampler and \
-                 the coordinate transport dx/dt = v assume it); got ({}, {})",
+                "n_tracers = {} requires a flat cartesian chart until curvilinear decomposed \
+                 transport geometry is wired; got ({}, {})",
                 cfg.n_tracers, cfg.coord_system, cfg.spacetime
             ));
         }
@@ -5856,10 +5857,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 "n_tracers does not support refinement or mesh motion yet".to_string(),
             );
         }
-        // gpus > 1 IS wired: the decomposed hydro build seeds + partitions tracers per tile and
-        // the driver advects + MIGRATES them across cuts (decomp_tracers_equivalence). the per-tile
-        // seed lives on the hydro decomposed path only, so other regimes stay refused rather than
-        // run silently tracerless.
+        // multi-device hydro uses global container identities and migrates
+        // complete tracer records across decomposition cuts.
         if cfg.n_gpus > 1 && !matches!(cfg.regime.as_str(), "newtonian" | "rhd") {
             return Err(format!(
                 "n_tracers with gpus > 1 is wired for newtonian/rhd hydro; regime '{}' not yet",

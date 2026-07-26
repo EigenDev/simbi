@@ -1533,9 +1533,8 @@ pub struct FieldStore<
     pub geom: PartitionGeometry<NDIM>,
     pub boundaries: Boundaries<NDIM>,
 
-    /// lagrangian tracer particles (run-level opt-in; host-side, f64). `None`
-    /// costs nothing anywhere; the drivers advance them once per step against
-    /// the post-step primitive velocity.
+    /// discrete mass-transport tracers. position is derived output state;
+    /// material ownership is authoritative.
     pub tracers: Option<crate::tracers::TracerSet<NDIM>>,
 
     // ---- time state ----
@@ -1596,7 +1595,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
         self.immersed.as_ref().map_or(false, |im| !im.bodies.is_empty())
     }
 
-    /// whether this run carries lagrangian tracers.
+    /// whether this run carries mass-transport tracers.
     #[inline]
     pub fn has_tracers(&self) -> bool {
         self.tracers.is_some()
