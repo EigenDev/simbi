@@ -201,6 +201,15 @@ where
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
         let dt = sim.dt;
         advance_state_clock(sim, dt);
+        if sim.has_tracers() {
+            let geometry = sim.geom.block_geometry(sim.physics.metric);
+            let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
+            symbi_sim::tracers::refresh_derived_positions_store(
+                &mut sim.store,
+                &geometry,
+                layout,
+            );
+        }
 
         if let Some(c) = trace_coord {
             crate::regimes::substrate_gpu::device_sync::<Mem>();

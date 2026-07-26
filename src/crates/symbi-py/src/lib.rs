@@ -6012,11 +6012,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.n_tracers, cfg.coord_system, cfg.spacetime
             ));
         }
-        if cfg.mesh_motion {
-            return Err(
-                "n_tracers does not support mesh motion yet".to_string(),
-            );
-        }
         if !cfg.cohort_ic.is_empty() && cfg.refinement_enabled {
             return Err(
                 "tracer_cohort seeding on a refined hierarchy requires a composite-level \

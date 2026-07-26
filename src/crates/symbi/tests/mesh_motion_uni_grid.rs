@@ -28,6 +28,7 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
+use symbi::sim::tracers::{TracerSet, cell_container_id};
 use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, MotionState, Spherical};
 use symbi_hydro::eos::{IdealGas, Isothermal};
@@ -404,4 +405,131 @@ fn free_expansion_stays_self_similar_on_the_comoving_grid() {
         "mesh-motion time integration degraded below second order \
          (rho {order_rho:.2}, pre {order_pre:.2})"
     );
+}
+
+#[test]
+fn homologous_mesh_tracers_follow_accepted_geometry() {
+    let adot = 0.25;
+    let (mut sim, kernels) = build(MotionState::homologous(1.0, adot), CFL, |sim| {
+        for coord in sim.geom.interior.iter() {
+            let x = sim.geom.centroid(coord);
+            set_prim(
+                sim,
+                coord,
+                &Prim {
+                    rho: 1.0,
+                    vel: Tensor::new(std::array::from_fn(|dd| adot * x[dd])),
+                    pre: 1.0e-3,
+                },
+            );
+        }
+    });
+    let center = N / 2;
+    let owner = cell_container_id(center + N * (center + N * center), 0);
+    sim.tracers = Some(TracerSet::seed_stratified_owned(
+        &[([0.0; 3], [1.0 / N as f64; 3])],
+        &[owner],
+        &[2048],
+        1.0,
+    ));
+    {
+        let tracers = sim.tracers.as_mut().unwrap();
+        tracers.step_owner = tracers.owner.clone();
+        tracers.step_flags = tracers.flags.clone();
+    }
+    let initial = sim.tracers.as_ref().unwrap().clone();
+
+    evolve(&mut sim, &kernels, 0.1).unwrap();
+
+    let accepted = sim.tracers.as_ref().unwrap();
+    assert_eq!(accepted.owner, initial.owner);
+    assert_eq!(accepted.id, initial.id);
+    assert!(
+        accepted
+            .owner
+            .iter()
+            .all(|owner| owner.0 < (N * N * N) as u64),
+        "homologous coasting sent material to a non-cell reservoir"
+    );
+    for (position, owner) in accepted.x.iter().zip(&accepted.owner) {
+        let linear = owner.0 as usize;
+        let nx = N;
+        let index = [
+            linear % nx,
+            (linear / nx) % nx,
+            linear / (nx * nx),
+        ];
+        let expected: [f64; 3] = std::array::from_fn(|dd| {
+            sim.motion.a * (-0.5 + (index[dd] as f64 + 0.5) / N as f64)
+        });
+        for dd in 0..3 {
+            assert!(
+                (position[dd] - expected[dd]).abs() < 1.0e-12,
+                "tracer position used stale mesh geometry on axis {dd}: {} vs {}",
+                position[dd],
+                expected[dd]
+            );
+        }
+    }
+}
+
+#[test]
+fn translating_mesh_tracers_follow_accepted_ale_mass_flux() {
+    let velocity = 0.25;
+    let (mut sim, kernels) = build(MotionState::uniform(1.0, velocity), CFL, |sim| {
+        for coord in sim.geom.interior.iter() {
+            set_prim(
+                sim,
+                coord,
+                &Prim {
+                    rho: 1.0,
+                    vel: Tensor::zeros(),
+                    pre: 1.0,
+                },
+            );
+        }
+    });
+    let center = N / 2;
+    let owner = cell_container_id(center + N * (center + N * center), 0);
+    sim.tracers = Some(TracerSet::seed_stratified_owned(
+        &[([0.0; 3], [1.0 / N as f64; 3])],
+        &[owner],
+        &[2048],
+        1.0,
+    ));
+    {
+        let tracers = sim.tracers.as_mut().unwrap();
+        tracers.step_owner = tracers.owner.clone();
+        tracers.step_flags = tracers.flags.clone();
+    }
+
+    evolve(&mut sim, &kernels, 0.1).unwrap();
+
+    let accepted = sim.tracers.as_ref().unwrap();
+    assert!(
+        accepted.owner != [owner; 2048],
+        "the setup exercised no accepted ALE face transfers"
+    );
+    assert!(
+        accepted
+            .owner
+            .iter()
+            .all(|owner| owner.0 < (N * N * N) as u64),
+        "interior translating material reached a reservoir"
+    );
+    for (position, owner) in accepted.x.iter().zip(&accepted.owner) {
+        let linear = owner.0 as usize;
+        let index = [
+            linear % N,
+            (linear / N) % N,
+            linear / (N * N),
+        ];
+        let expected: [f64; 3] = std::array::from_fn(|dd| {
+            -0.5 + (index[dd] as f64 + 0.5) / N as f64
+                + if dd == 0 { velocity * sim.time } else { 0.0 }
+        });
+        for dd in 0..3 {
+            assert!((position[dd] - expected[dd]).abs() < 1.0e-12);
+        }
+    }
 }
