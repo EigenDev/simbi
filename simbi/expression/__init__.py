@@ -40,6 +40,7 @@ from .dag_expression import (
     tanh,
     tabulated_1d,
     tabulated_2d,
+    tabulated_3d,
     variable,
     velocity,
     where,
@@ -90,4 +91,5 @@ __all__ = [
     "ceil",
     "tabulated_1d",
     "tabulated_2d",
+    "tabulated_3d",
 ]

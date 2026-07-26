@@ -25,6 +25,7 @@ from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.rotating_sponge import RotatingSponge
 from simbi_configs.examples.newtonian.tabulated_source_1d import TabulatedSource1D
 from simbi_configs.examples.newtonian.tabulated_source_2d import TabulatedSource2D
+from simbi_configs.examples.newtonian.tabulated_source_3d import TabulatedSource3D
 from simbi_configs.examples.newtonian.traced_kh import TracedKelvinHelmholtz
 
 
@@ -33,6 +34,7 @@ EXAMPLE_FACTORIES = [
     RotatingSponge,
     TabulatedSource1D,
     TabulatedSource2D,
+    TabulatedSource3D,
     GeometricBoundaries,
     DecomposedTabulatedGeometric,
     TracedKelvinHelmholtz,
