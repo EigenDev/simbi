@@ -3,8 +3,8 @@
 #
 # the tracer chain end to end through the python runner: n_tracers on a problem
 # seeds a mass-weighted population, the checkpoint carries the `tracers` group
-# (positions, ids, flags, weight), the population MOVED from its seed (a driver
-# missing the advance freezes it — the chi lesson), and an untraced run writes
+# (owners, derived positions, ids, flags, weight), the population moved from
+# its seed, and an untraced run writes
 # no group.
 # =============================================================================
 import glob
@@ -52,6 +52,11 @@ def test_traced_checkpoint_carries_a_moving_population():
         # x-distribution decorrelates from any lattice. cheap detector: the
         # population's x-spread of fractional cell coordinates is non-lattice.
         ids = g["id"][:]
+        owners = g["owner"][:]
+        assert ids.dtype == np.dtype("uint64")
+        assert owners.dtype == np.dtype("uint64")
+        assert len(owners) == N_TRACERS
+        assert int(g.attrs["next_id"]) == N_TRACERS
         assert len(np.unique(ids)) == N_TRACERS, "tracer ids must be unique"
         dx = 1.0 / 256  # kh domain [-0.5, 0.5] over 256 cells
         frac = np.mod((x[:, 0] + 0.5) / dx, 1.0)

@@ -2,9 +2,9 @@
 # tracers.py
 #
 # load + scatter lagrangian tracer particles from a checkpoint. reads the
-# `tracers` group (position / id / provenance flags / mass weight) and scatters
-# the particle positions on a 2D field plot, so the winding of a shear layer or
-# the infall onto a sink is visible as the particle cloud at its current state.
+# `tracers` group (cell/reservoir ownership, derived position, exact identity,
+# provenance flags, and mass weight) and scatters the derived positions on a
+# 2D field plot.
 # the eulerian complement is a `chi` field plot (see the passive scalar); this is
 # the lagrangian view of the same transport.
 #
@@ -24,16 +24,19 @@ import numpy as np
 
 @dataclass
 class TracerCloud:
-    """the persisted tracer population: positions (n, D), ids, provenance flag masks over
-    the n particles, per-tracer crossing time, and the shared mass weight one tracer
-    represents (sampled mass / population)."""
+    """the persisted mass-transport population. owner is the authoritative
+    cell or reservoir address; position is derived display state."""
 
     position: np.ndarray  # (n, D)
-    id: np.ndarray  # (n,) int
+    id: np.ndarray  # (n,) uint64
+    owner: np.ndarray  # (n,) uint64 cell or reservoir address
     escaped: np.ndarray  # (n,) bool -- left the domain, frozen at exit
     crossed_sink: np.ndarray  # (n,) bool -- crossed an accretion radius, frozen
     crossing_time: np.ndarray  # (n,) float -- time of the sink crossing (0 if none)
     weight: float
+    run_seed: int
+    next_id: int
+    injection_remainder: float
 
     def __len__(self) -> int:
         return len(self.id)
@@ -48,11 +51,15 @@ def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
         g = f["tracers"]
         return TracerCloud(
             position=np.asarray(g["position"], dtype=float),
-            id=np.asarray(g["id"], dtype=float).astype(np.int64),
+            id=np.asarray(g["id"], dtype=np.uint64),
+            owner=np.asarray(g["owner"], dtype=np.uint64),
             escaped=np.asarray(g["escaped"], dtype=float) > 0.5,
             crossed_sink=np.asarray(g["crossed_sink"], dtype=float) > 0.5,
             crossing_time=np.asarray(g["crossing_time"], dtype=float),
             weight=float(np.asarray(g["weight"], dtype=float)[0]),
+            run_seed=int(g.attrs["run_seed"]),
+            next_id=int(g.attrs["next_id"]),
+            injection_remainder=float(g.attrs["injection_remainder"]),
         )
 
 

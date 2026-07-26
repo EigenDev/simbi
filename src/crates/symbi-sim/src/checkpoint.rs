@@ -1410,6 +1410,13 @@ where
         tr.step_owner = tr.owner.clone();
         tr.step_flags = tr.flags.clone();
         sim.tracers = Some(tr);
+        let geometry = sim.geom.block_geometry(sim.physics.metric);
+        let layout = symbi_sim_tracers::TransportLayout::single(&sim.geom.interior);
+        symbi_sim_tracers::refresh_derived_positions_store(
+            &mut sim.store,
+            &geometry,
+            layout,
+        );
     }
 
     if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), sim.immersed.as_mut()) {
@@ -1739,7 +1746,7 @@ mod tests {
         };
         let mut sim = build();
         sim.tracers = Some(symbi_sim_tracers::TracerSet {
-            x: vec![[0.25, 0.5, 0.5], [0.75, 0.5, 0.5]],
+            x: vec![[91.0, 92.0, 93.0], [94.0, 95.0, 96.0]],
             id: vec![u64::MAX - 1, u64::MAX],
             flags: vec![Default::default(); 2],
             weight: 3.5,
@@ -1769,6 +1776,8 @@ mod tests {
         assert_eq!(actual.id, expected.id);
         assert_eq!(actual.owner, expected.owner);
         assert_eq!(actual.step_owner, expected.owner);
+        assert_eq!(actual.x, vec![[0.25, 0.5, 0.5], [0.75, 0.5, 0.5]]);
+        assert_ne!(actual.x, expected.x);
         assert_eq!(actual.run_seed, expected.run_seed);
         assert_eq!(actual.next_id, expected.next_id);
         assert_eq!(

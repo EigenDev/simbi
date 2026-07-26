@@ -1230,6 +1230,26 @@ pub fn cell_container_address(
     Some((level, linear))
 }
 
+pub fn refresh_derived_positions_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+) where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let Some(tracers) = sim.tracers.as_mut() else {
+        return;
+    };
+    for (ii, &owner) in tracers.owner.iter().enumerate() {
+        let Some(coord) = container_cell(owner, &interior, layout) else {
+            continue;
+        };
+        tracers.x[ii] = geometry.centroid(coord).into();
+    }
+}
+
 fn cell_container<const D: usize>(
     coord: [isize; D],
     domain: &symbi_algebra::Domain<D>,
