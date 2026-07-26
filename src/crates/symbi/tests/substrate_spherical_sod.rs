@@ -98,7 +98,11 @@ fn full_substrate_spherical_adiabatic_sod() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sizing sim")
-            .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+            .set_initial(|_| Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0]),
+                pre: 1.0,
+            })
             .build();
         tmp.geom.allocated.clone()
     });
@@ -111,11 +115,19 @@ fn full_substrate_spherical_adiabatic_sod() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("spherical sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
         .build();
     set_sod_ic(&mut sph);
     // the spherical SimState reports its coordinate system through the metric.
-    assert_eq!(sph.geom.coords, symbi_geometry::Geometry::Spherical, "coords must be Spherical");
+    assert_eq!(
+        sph.geom.coords,
+        symbi_geometry::Geometry::Spherical,
+        "coords must be Spherical"
+    );
 
     evolve(&mut sph, &sub, T_FINAL).expect("spherical evolution failed");
 
@@ -142,16 +154,18 @@ fn full_substrate_spherical_adiabatic_sod() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("cartesian sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
         .build();
     set_sod_ic(&mut cart);
     evolve(&mut cart, &sub, T_FINAL).expect("cartesian evolution failed");
 
     let max_diff = cells
         .iter()
-        .map(|c| {
-            (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()
-        })
+        .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
         .fold(0.0_f64, f64::max);
     assert!(
         max_diff > 1e-3,
@@ -181,7 +195,11 @@ fn full_substrate_spherical_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso spherical sim")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: Default::default(),
+        })
         .build();
     set_iso_ic(&mut sph);
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(cs, 0.4, &sph.geom.allocated);
@@ -190,7 +208,10 @@ fn full_substrate_spherical_iso() {
     let cells: Vec<[isize; 1]> = sph.geom.interior.iter().collect();
     for c in &cells {
         let rho = *sph.fields.prim.rho.view().at(*c);
-        assert!(rho.is_finite() && rho > 0.0, "iso: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "iso: bad density {rho} at {c:?}"
+        );
     }
     let mut cart = SimCart::build(IsoNewtonian, Isothermal { cs }, Cartesian)
         .cells([N])
@@ -199,7 +220,11 @@ fn full_substrate_spherical_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso cartesian sim")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: Default::default(),
+        })
         .build();
     set_iso_ic(&mut cart);
     evolve(&mut cart, &sub, T_FINAL).expect("iso cartesian evolution failed");
@@ -207,8 +232,14 @@ fn full_substrate_spherical_iso() {
         .iter()
         .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
         .fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-3, "iso: spherical == cartesian (geometric source idle): {max_diff:e}");
-    println!("SPHERICAL ISO: {} steps, max |drho vs cartesian| {:.4}", sph.iteration, max_diff);
+    assert!(
+        max_diff > 1e-3,
+        "iso: spherical == cartesian (geometric source idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL ISO: {} steps, max |drho vs cartesian| {:.4}",
+        sph.iteration, max_diff
+    );
 }
 
 // the same M-generic RhdSubstrateKernelSet on Spherical vs Cartesian. for v=0 the
@@ -226,7 +257,11 @@ fn full_substrate_spherical_rhd() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rhd spherical sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
         .build();
     set_rhd_ic(&mut sph);
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
@@ -237,7 +272,10 @@ fn full_substrate_spherical_rhd() {
     for c in &cells {
         let rho = *sph.fields.prim.rho.view().at(*c);
         let p = *pre.view().at(*c);
-        assert!(rho.is_finite() && rho > 0.0, "rhd: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "rhd: bad density {rho} at {c:?}"
+        );
         assert!(p.is_finite() && p > 0.0, "rhd: bad pressure {p} at {c:?}");
     }
     let mut cart = SimCart::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
@@ -247,7 +285,11 @@ fn full_substrate_spherical_rhd() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rhd cartesian sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
         .build();
     set_rhd_ic(&mut cart);
     evolve(&mut cart, &sub, T_FINAL).expect("rhd cartesian evolution failed");
@@ -255,8 +297,14 @@ fn full_substrate_spherical_rhd() {
         .iter()
         .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
         .fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-3, "rhd: spherical == cartesian (geometric source idle): {max_diff:e}");
-    println!("SPHERICAL RHD: {} steps, max |drho vs cartesian| {:.4}", sph.iteration, max_diff);
+    assert!(
+        max_diff > 1e-3,
+        "rhd: spherical == cartesian (geometric source idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL RHD: {} steps, max |drho vs cartesian| {:.4}",
+        sph.iteration, max_diff
+    );
 }
 
 // D-generic radial-gradient ICs for the ndim>=2 curvilinear smokes (rho or p decreasing in
@@ -336,10 +384,15 @@ fn full_substrate_spherical_2d_adiabatic() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sph 2d")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
     set_grad_newton(&mut sph, r_lo, dr);
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sph.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sph.geom.allocated);
     evolve(&mut sph, &sub, 0.03).expect("2d spherical evolve failed");
 
     let cells: Vec<[isize; 2]> = sph.geom.interior.iter().collect();
@@ -348,13 +401,20 @@ fn full_substrate_spherical_2d_adiabatic() {
     for c in &cells {
         let rho = *sph.fields.prim.rho.view().at(*c);
         let p = *pre.view().at(*c);
-        assert!(rho.is_finite() && rho > 0.0, "2d: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "2d: bad density {rho} at {c:?}"
+        );
         assert!(p.is_finite() && p > 0.0, "2d: bad pressure {p} at {c:?}");
         let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2)
-            + (*sph.fields.prim.vel[1].view().at(*c)).powi(2)).sqrt();
+            + (*sph.fields.prim.vel[1].view().at(*c)).powi(2))
+        .sqrt();
         max_vel = max_vel.max(v);
     }
-    assert!(max_vel > 0.005, "2d: no flow developed (max |v| = {max_vel})");
+    assert!(
+        max_vel > 0.005,
+        "2d: no flow developed (max |v| = {max_vel})"
+    );
 
     let mut cart = Cart::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([nr, nt])
@@ -363,7 +423,11 @@ fn full_substrate_spherical_2d_adiabatic() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("cart 2d")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
     set_grad_newton(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.03).expect("2d cartesian evolve failed");
@@ -373,8 +437,14 @@ fn full_substrate_spherical_2d_adiabatic() {
         .fold(0.0_f64, f64::max);
     // 2e-4 >> machine noise (a Cartesian-vs-Cartesian run would be bit-identical, diff 0):
     // the area-weighted divergence + geometric source are active in the spherical run.
-    assert!(max_diff > 1e-4, "2d: spherical == cartesian (geometric source idle): {max_diff:e}");
-    println!("SPHERICAL 2D ADIABATIC: {} steps, max |v| {:.3}, max |drho vs cart| {:.4}", sph.iteration, max_vel, max_diff);
+    assert!(
+        max_diff > 1e-4,
+        "2d: spherical == cartesian (geometric source idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL 2D ADIABATIC: {} steps, max |v| {:.3}, max |drho vs cart| {:.4}",
+        sph.iteration, max_vel, max_diff
+    );
 }
 
 // ---- ndim>=2 spherical smokes: close the (regime x dim x spherical) matrix ----
@@ -404,17 +474,28 @@ fn full_substrate_spherical_3d_adiabatic() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 3d")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     set_grad_newton(&mut sph, r_lo, dr);
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sph.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sph.geom.allocated);
     evolve(&mut sph, &sub, 0.02).expect("3d sph adiabatic evolve failed");
     let cells: Vec<[isize; 3]> = sph.geom.interior.iter().collect();
     let pre = sph.fields.prim.pre_field().expect("prim.pre");
     for c in &cells {
         let (rho, p) = (*sph.fields.prim.rho.view().at(*c), *pre.view().at(*c));
-        assert!(rho.is_finite() && rho > 0.0, "3d adiabatic: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "3d adiabatic: bad pressure {p} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "3d adiabatic: bad density {rho} at {c:?}"
+        );
+        assert!(
+            p.is_finite() && p > 0.0,
+            "3d adiabatic: bad pressure {p} at {c:?}"
+        );
     }
     let mut cart = Cart::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(dims)
@@ -423,13 +504,26 @@ fn full_substrate_spherical_3d_adiabatic() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 3d")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     set_grad_newton(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.02).expect("3d cart adiabatic evolve failed");
-    let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "3d adiabatic: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 3D ADIABATIC: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    let max_diff = cells
+        .iter()
+        .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_diff > 1e-6,
+        "3d adiabatic: spherical == cartesian (geometry idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL 3D ADIABATIC: {} steps, max |drho vs cart| {:.4}",
+        sph.iteration, max_diff
+    );
 }
 
 #[test]
@@ -449,7 +543,11 @@ fn full_substrate_spherical_2d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 2d iso")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: Default::default(),
+        })
         .build();
     set_grad_iso(&mut sph, r_lo, dr);
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.4, &sph.geom.allocated);
@@ -457,7 +555,10 @@ fn full_substrate_spherical_2d_iso() {
     let cells: Vec<[isize; 2]> = sph.geom.interior.iter().collect();
     for c in &cells {
         let rho = *sph.fields.prim.rho.view().at(*c);
-        assert!(rho.is_finite() && rho > 0.0, "2d iso: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "2d iso: bad density {rho} at {c:?}"
+        );
     }
     let mut cart = Cart::build(IsoNewtonian, Isothermal { cs }, Cartesian)
         .cells(dims)
@@ -466,13 +567,26 @@ fn full_substrate_spherical_2d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 2d iso")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: Default::default(),
+        })
         .build();
     set_grad_iso(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.03).expect("2d cart iso evolve failed");
-    let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "2d iso: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 2D ISO: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    let max_diff = cells
+        .iter()
+        .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_diff > 1e-6,
+        "2d iso: spherical == cartesian (geometry idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL 2D ISO: {} steps, max |drho vs cart| {:.4}",
+        sph.iteration, max_diff
+    );
 }
 
 #[test]
@@ -492,7 +606,11 @@ fn full_substrate_spherical_3d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 3d iso")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: Default::default(),
+        })
         .build();
     set_grad_iso(&mut sph, r_lo, dr);
     let sub = IsoSubstrateKernelSet::<HostMemory, f64, 3>::new(cs, 0.4, &sph.geom.allocated);
@@ -500,7 +618,10 @@ fn full_substrate_spherical_3d_iso() {
     let cells: Vec<[isize; 3]> = sph.geom.interior.iter().collect();
     for c in &cells {
         let rho = *sph.fields.prim.rho.view().at(*c);
-        assert!(rho.is_finite() && rho > 0.0, "3d iso: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "3d iso: bad density {rho} at {c:?}"
+        );
     }
     let mut cart = Cart::build(IsoNewtonian, Isothermal { cs }, Cartesian)
         .cells(dims)
@@ -509,13 +630,26 @@ fn full_substrate_spherical_3d_iso() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 3d iso")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: Default::default(),
+        })
         .build();
     set_grad_iso(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.02).expect("3d cart iso evolve failed");
-    let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "3d iso: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 3D ISO: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    let max_diff = cells
+        .iter()
+        .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_diff > 1e-6,
+        "3d iso: spherical == cartesian (geometry idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL 3D ISO: {} steps, max |drho vs cart| {:.4}",
+        sph.iteration, max_diff
+    );
 }
 
 #[test]
@@ -535,7 +669,11 @@ fn full_substrate_spherical_2d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 2d rhd")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
     set_grad_rhd(&mut sph, r_lo, dr);
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sph.geom.allocated);
@@ -544,9 +682,17 @@ fn full_substrate_spherical_2d_rhd() {
     let pre = sph.fields.prim.pre_field().expect("prim.pre");
     for c in &cells {
         let (rho, p) = (*sph.fields.prim.rho.view().at(*c), *pre.view().at(*c));
-        let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2) + (*sph.fields.prim.vel[1].view().at(*c)).powi(2)).sqrt();
-        assert!(rho.is_finite() && rho > 0.0, "2d rhd: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "2d rhd: bad pressure {p} at {c:?}");
+        let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2)
+            + (*sph.fields.prim.vel[1].view().at(*c)).powi(2))
+        .sqrt();
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "2d rhd: bad density {rho} at {c:?}"
+        );
+        assert!(
+            p.is_finite() && p > 0.0,
+            "2d rhd: bad pressure {p} at {c:?}"
+        );
         assert!(v < 1.0, "2d rhd: superluminal |v| = {v} at {c:?}");
     }
     let mut cart = Cart::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
@@ -556,13 +702,26 @@ fn full_substrate_spherical_2d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 2d rhd")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
     set_grad_rhd(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.03).expect("2d cart rhd evolve failed");
-    let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "2d rhd: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 2D RHD: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    let max_diff = cells
+        .iter()
+        .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_diff > 1e-6,
+        "2d rhd: spherical == cartesian (geometry idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL 2D RHD: {} steps, max |drho vs cart| {:.4}",
+        sph.iteration, max_diff
+    );
 }
 
 #[test]
@@ -581,7 +740,11 @@ fn full_substrate_spherical_3d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("sph 3d rhd")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     set_grad_rhd(&mut sph, r_lo, dr);
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sph.geom.allocated);
@@ -590,9 +753,18 @@ fn full_substrate_spherical_3d_rhd() {
     let pre = sph.fields.prim.pre_field().expect("prim.pre");
     for c in &cells {
         let (rho, p) = (*sph.fields.prim.rho.view().at(*c), *pre.view().at(*c));
-        let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2) + (*sph.fields.prim.vel[1].view().at(*c)).powi(2) + (*sph.fields.prim.vel[2].view().at(*c)).powi(2)).sqrt();
-        assert!(rho.is_finite() && rho > 0.0, "3d rhd: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "3d rhd: bad pressure {p} at {c:?}");
+        let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2)
+            + (*sph.fields.prim.vel[1].view().at(*c)).powi(2)
+            + (*sph.fields.prim.vel[2].view().at(*c)).powi(2))
+        .sqrt();
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "3d rhd: bad density {rho} at {c:?}"
+        );
+        assert!(
+            p.is_finite() && p > 0.0,
+            "3d rhd: bad pressure {p} at {c:?}"
+        );
         assert!(v < 1.0, "3d rhd: superluminal |v| = {v} at {c:?}");
     }
     let mut cart = Cart::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
@@ -602,11 +774,24 @@ fn full_substrate_spherical_3d_rhd() {
         .boundaries(bcs)
         .allocate()
         .expect("cart 3d rhd")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     set_grad_rhd(&mut cart, r_lo, dr);
     evolve(&mut cart, &sub, 0.02).expect("3d cart rhd evolve failed");
-    let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "3d rhd: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 3D RHD: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    let max_diff = cells
+        .iter()
+        .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
+        .fold(0.0_f64, f64::max);
+    assert!(
+        max_diff > 1e-6,
+        "3d rhd: spherical == cartesian (geometry idle): {max_diff:e}"
+    );
+    println!(
+        "SPHERICAL 3D RHD: {} steps, max |drho vs cart| {:.4}",
+        sph.iteration, max_diff
+    );
 }

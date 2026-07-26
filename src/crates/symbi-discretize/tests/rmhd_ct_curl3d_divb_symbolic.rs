@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use symbi_discretize::{rmhd_ct_curl_3d_dir_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, rmhd_ct_curl_3d_dir_gv};
 use symbi_ir::proof::{LinForm, Poly};
 
 // the curl reads exactly these edge-emf fields plus the in-place b; scalars are
@@ -69,7 +69,10 @@ fn divb_symbolic_telescoping() {
         // the dt*curl linear form (b stripped), canonicalized to physical axes.
         let raw = curl_only(LinForm::extract(&kernel.graph, root, FIELDS, SCALARS));
         let curl = raw.canonicalize(&physical_rename(dir));
-        assert!(!curl.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+        assert!(
+            !curl.is_zero(),
+            "dir {dir}: curl is empty — extractor saw no emf reads"
+        );
 
         // the divergence's id_dir-weighted forward difference along `dir`:
         //   id_dir * (curl[+e_dir] - curl[+0]).
@@ -94,8 +97,14 @@ fn divb_symbolic_telescoping() {
 #[test]
 fn divb_symbolic_detects_broken_telescoping() {
     let mut lf = LinForm::default();
-    lf.add(&LinForm::single(("e_0".into(), vec![0, 0, 0]), Poly::var("id_0")));
-    lf.add(&LinForm::single(("e_0".into(), vec![1, 0, 0]), Poly::var("id_1")));
+    lf.add(&LinForm::single(
+        ("e_0".into(), vec![0, 0, 0]),
+        Poly::var("id_0"),
+    ));
+    lf.add(&LinForm::single(
+        ("e_0".into(), vec![1, 0, 0]),
+        Poly::var("id_1"),
+    ));
     assert!(!lf.is_zero(), "mismatched coefficients must NOT cancel");
     assert_eq!(lf.residual().len(), 2);
 }

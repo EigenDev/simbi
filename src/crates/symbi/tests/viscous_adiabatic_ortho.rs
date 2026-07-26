@@ -59,22 +59,31 @@ const DT: f64 = 1.0e-4;
 fn rigid_null_residual(nr: usize) -> f64 {
     let omega = 0.4;
     let dr = (R_HI - R_LO) / nr as f64;
-    let sim = SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Newtonian,
-        IdealGas { gamma: GAMMA },
-        CylindricalRPhi,
-    )
-    .cells([nr, NP])
-    .origin([R_LO, 0.0])
-    .spacing([dr, DP])
-    .boundaries(Boundaries(std::array::from_fn(|a| {
-        if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
-    })))
-    .cfl(CFL)
-    .allocate()
-    .expect("sim")
-    .set_initial(|x| Prim { rho: 1.0, vel: Tensor::new([0.0, omega * x[0]]), pre: 1.0 })
-    .build();
+    let sim =
+        SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
+            Newtonian,
+            IdealGas { gamma: GAMMA },
+            CylindricalRPhi,
+        )
+        .cells([nr, NP])
+        .origin([R_LO, 0.0])
+        .spacing([dr, DP])
+        .boundaries(Boundaries(std::array::from_fn(|a| {
+            if a == 1 {
+                [BoundaryType::Periodic; 2]
+            } else {
+                [BoundaryType::Outflow; 2]
+            }
+        })))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim")
+        .set_initial(|x| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, omega * x[0]]),
+            pre: 1.0,
+        })
+        .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(0.05);
     // the production stage-entry invariant: prims current AND ghosts filled —
     // the viscous stencil reads +-1, and an unfilled ghost band is garbage the
@@ -82,7 +91,11 @@ fn rigid_null_residual(nr: usize) -> f64 {
     k.c2p(&sim);
     k.ghost_fill(&sim);
     let grab = |c_ax: usize| -> Vec<f64> {
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[c_ax].view().at(c)).collect()
+        sim.geom
+            .interior
+            .iter()
+            .map(|c| *sim.fields.cons.mom[c_ax].view().at(c))
+            .collect()
     };
     let (b0, b1) = (grab(0), grab(1));
     k.viscous(&sim, DT);
@@ -113,12 +126,20 @@ fn build(vphi: impl Fn(f64) -> f64, with_body: bool) -> Sim {
         .origin([R_LO, 0.0])
         .spacing([DR, DP])
         .boundaries(Boundaries(std::array::from_fn(|a| {
-            if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
+            if a == 1 {
+                [BoundaryType::Periodic; 2]
+            } else {
+                [BoundaryType::Outflow; 2]
+            }
         })))
         .cfl(CFL)
         .allocate()
         .expect("sim")
-        .set_initial(|x| Prim { rho: 1.0, vel: Tensor::new([0.0, vphi(x[0])]), pre: 1.0 })
+        .set_initial(|x| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, vphi(x[0])]),
+            pre: 1.0,
+        })
         .build();
     if !with_body {
         return sim;
@@ -146,7 +167,10 @@ fn snapshot(sim: &Sim) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
 }
 
 fn max_abs_diff(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 #[test]
@@ -160,10 +184,16 @@ fn differential_shear_diffuses_and_heats_on_the_cylindrical_chart() {
     let (m0b, m1b, enb) = snapshot(&sim);
     k.viscous(&sim, DT);
     let (m0a, m1a, ena) = snapshot(&sim);
-    assert!(max_abs_diff(&m1b, &m1a) > 1e-12, "the shear stress never touched u_phi");
+    assert!(
+        max_abs_diff(&m1b, &m1a) > 1e-12,
+        "the shear stress never touched u_phi"
+    );
     let _ = (m0b, m0a);
     let den = max_abs_diff(&enb, &ena);
-    assert!(den > 1e-14, "no viscous energy flux booked on the shear ({den:e})");
+    assert!(
+        den > 1e-14,
+        "no viscous energy flux booked on the shear ({den:e})"
+    );
 }
 
 #[test]
@@ -195,7 +225,10 @@ fn alpha_ortho_acts_and_differs_from_constant_nu() {
     let (_, m1b, _) = snapshot(&sim_a);
     ka.viscous(&sim_a, DT);
     let (_, m1a, _) = snapshot(&sim_a);
-    assert!(max_abs_diff(&m1b, &m1a) > 1e-12, "the alpha ortho pass never acted");
+    assert!(
+        max_abs_diff(&m1b, &m1a) > 1e-12,
+        "the alpha ortho pass never acted"
+    );
 
     let sim_c = build(|r| 0.5 / r, true);
     let kc = Kern::new(GAMMA, CFL, &sim_c.geom.allocated).with_viscosity(0.05);
@@ -216,22 +249,31 @@ fn isolation_probe_rigid_null_with_hand_set_prims() {
     // physical rigid profile v_phi = Omega r evaluated at every allocated cell
     // center (the formula extends smoothly through the ghost bands).
     let omega = 0.4;
-    let sim = SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Newtonian,
-        IdealGas { gamma: GAMMA },
-        CylindricalRPhi,
-    )
-    .cells([NR, NP])
-    .origin([R_LO, 0.0])
-    .spacing([DR, DP])
-    .boundaries(Boundaries(std::array::from_fn(|a| {
-        if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
-    })))
-    .cfl(CFL)
-    .allocate()
-    .expect("sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
-    .build();
+    let sim =
+        SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
+            Newtonian,
+            IdealGas { gamma: GAMMA },
+            CylindricalRPhi,
+        )
+        .cells([NR, NP])
+        .origin([R_LO, 0.0])
+        .spacing([DR, DP])
+        .boundaries(Boundaries(std::array::from_fn(|a| {
+            if a == 1 {
+                [BoundaryType::Periodic; 2]
+            } else {
+                [BoundaryType::Outflow; 2]
+            }
+        })))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
+        .build();
     let ilo = sim.geom.interior.spaces[0].lo;
     let pre = sim.fields.prim.pre_field().expect("pre");
     for c in sim.geom.allocated.iter() {

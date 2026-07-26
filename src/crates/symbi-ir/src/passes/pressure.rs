@@ -29,8 +29,8 @@
 //   }
 // =============================================================================
 
-use crate::passes::scalarize::{LoweredFn, ScalarStmt};
 use crate::KernelScalarized;
+use crate::passes::scalarize::{LoweredFn, ScalarStmt};
 
 /// the outcome of a peak-pressure analysis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,9 +72,9 @@ pub fn peak_pressure_fn(f: &LoweredFn) -> PressureReport {
 // ----- internals -----
 
 struct PressureState {
-    peak:          usize,
+    peak: usize,
     at_scope_path: Vec<String>,
-    current_path:  Vec<String>,
+    current_path: Vec<String>,
 }
 
 impl PressureState {
@@ -100,8 +100,7 @@ fn walk(body: &[ScalarStmt], live_in: usize, state: &mut PressureState) {
                 live += 1;
                 state.observe(live);
             }
-            ScalarStmt::Assign { .. } | ScalarStmt::CompoundAssign { .. }
-              | ScalarStmt::Break => {
+            ScalarStmt::Assign { .. } | ScalarStmt::CompoundAssign { .. } | ScalarStmt::Break => {
                 // no new binding; assignments mutate existing slots.
             }
             ScalarStmt::For { iter, body, .. } => {
@@ -118,7 +117,11 @@ fn walk(body: &[ScalarStmt], live_in: usize, state: &mut PressureState) {
                 walk(then_body, live, state);
                 state.current_path.pop();
             }
-            ScalarStmt::Scope { name, body: scope_body, .. } => {
+            ScalarStmt::Scope {
+                name,
+                body: scope_body,
+                ..
+            } => {
                 // *** the load-bearing case for the design. ***
                 //
                 // inside the scope BODY, peak = max(scope_internal_peak)
@@ -137,7 +140,12 @@ fn walk(body: &[ScalarStmt], live_in: usize, state: &mut PressureState) {
                 live += 1;
                 state.observe(live);
             }
-            ScalarStmt::IfElse { outs, then_body, else_body, .. } => {
+            ScalarStmt::IfElse {
+                outs,
+                then_body,
+                else_body,
+                ..
+            } => {
                 // each arm inherits the outer `live` (outer bindings stay
                 // visible); the arm's own lets die at its `}`. the two arms are
                 // mutually exclusive, so peak = max over the two arm walks, not
@@ -194,15 +202,28 @@ mod tests {
     use crate::{ConstValue, ElementTy};
 
     fn let_f64(name: &str, value: ScalarExpr) -> ScalarStmt {
-        ScalarStmt::Let { name: name.to_string(), element: ElementTy::F64, value }
+        ScalarStmt::Let {
+            name: name.to_string(),
+            element: ElementTy::F64,
+            value,
+        }
     }
 
-    fn v(name: &str) -> ScalarExpr { ScalarExpr::Var(name.to_string()) }
+    fn v(name: &str) -> ScalarExpr {
+        ScalarExpr::Var(name.to_string())
+    }
 
-    fn lit(x: f64) -> ScalarExpr { ScalarExpr::Const(ConstValue::F64(x)) }
+    fn lit(x: f64) -> ScalarExpr {
+        ScalarExpr::Const(ConstValue::F64(x))
+    }
 
     fn scope(name: &str, body: Vec<ScalarStmt>, result: ScalarExpr) -> ScalarStmt {
-        ScalarStmt::Scope { name: name.to_string(), element: ElementTy::F64, body, result }
+        ScalarStmt::Scope {
+            name: name.to_string(),
+            element: ElementTy::F64,
+            body,
+            result,
+        }
     }
 
     /// empty body: peak = 0.
@@ -222,7 +243,10 @@ mod tests {
             .collect();
         let r = peak_pressure(&body);
         assert_eq!(r.peak, 10, "10 flat lets should peak at 10");
-        assert!(r.at_scope_path.is_empty(), "peak should be at function root");
+        assert!(
+            r.at_scope_path.is_empty(),
+            "peak should be at function root"
+        );
     }
 
     /// the seq law: `peak(seq(K1, K2)) = max(peak(K1), peak(K2))` ONLY when
@@ -231,8 +255,12 @@ mod tests {
     #[test]
     fn flat_seq_accumulates() {
         let mut body = Vec::new();
-        for i in 0..5 { body.push(let_f64(&format!("a{i}"), lit(i as f64))); }
-        for i in 0..5 { body.push(let_f64(&format!("b{i}"), lit(i as f64))); }
+        for i in 0..5 {
+            body.push(let_f64(&format!("a{i}"), lit(i as f64)));
+        }
+        for i in 0..5 {
+            body.push(let_f64(&format!("b{i}"), lit(i as f64)));
+        }
         let r = peak_pressure(&body);
         // flat seq: 5 a's + 5 b's all live = 10.
         assert_eq!(r.peak, 10);
@@ -250,8 +278,11 @@ mod tests {
         let outer = vec![scope("phase", scope_body, v("t4"))];
         let r = peak_pressure(&outer);
         assert_eq!(r.peak, 5, "scope peak = body's internal peak");
-        assert_eq!(r.at_scope_path, vec!["phase".to_string()],
-            "peak observed INSIDE phase");
+        assert_eq!(
+            r.at_scope_path,
+            vec!["phase".to_string()],
+            "peak observed INSIDE phase"
+        );
     }
 
     /// the share law: `peak(share(v, K1, K2)) = peak(K1) + size(v) + peak(K2)`
@@ -310,9 +341,11 @@ mod tests {
         ];
         let r = peak_pressure(&body);
         assert_eq!(r.peak, 7, "peak inside nested inner scope");
-        assert_eq!(r.at_scope_path,
+        assert_eq!(
+            r.at_scope_path,
             vec!["outer_name".to_string(), "inner_name".to_string()],
-            "path leads into both scopes");
+            "path leads into both scopes"
+        );
     }
 
     /// the design pathology: **flat = 200 lets peaks at 200, scoped = same
@@ -345,8 +378,10 @@ mod tests {
         let r = peak_pressure(&body);
         // inside phase3: 3 prior phase-results live + 50 internals = 53.
         // (each earlier scope leaves +1; phase3's internal is 50.)
-        assert_eq!(r.peak, 53,
-            "scoped form peaks at phase-internal + prior surviving results");
+        assert_eq!(
+            r.peak, 53,
+            "scoped form peaks at phase-internal + prior surviving results"
+        );
         // and the peak is observed INSIDE phase3 — the last scope's body.
         assert_eq!(r.at_scope_path, vec!["phase3".to_string()]);
     }

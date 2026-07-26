@@ -17,7 +17,7 @@
 
 #![cfg(feature = "cuda")]
 
-use symbi_aot::{rhd_c2p_1d__raw as rhd_c2p_1d, CpuField, CpuFieldMut, RHD_C2P_1D_IR};
+use symbi_aot::{CpuField, CpuFieldMut, RHD_C2P_1D_IR, rhd_c2p_1d__raw as rhd_c2p_1d};
 use symbi_ir::emit::{Precision, Target};
 use symbi_ir::render_from_ir;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
@@ -31,19 +31,19 @@ const GAMMA: f64 = 5.0 / 3.0;
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct DeviceView {
-    data:    *const std::ffi::c_void,
-    lo:      [i32; 4],
+    data: *const std::ffi::c_void,
+    lo: [i32; 4],
     strides: [i32; 4],
-    extent:  [i32; 4],
+    extent: [i32; 4],
 }
 
 // a 1D view over a contiguous `n`-element buffer at origin 0 (stride 1).
 fn view_1d(ptr: *const f64, n: usize) -> DeviceView {
     DeviceView {
-        data:    ptr as *const std::ffi::c_void,
-        lo:      [0; 4],
+        data: ptr as *const std::ffi::c_void,
+        lo: [0; 4],
         strides: [1, 0, 0, 0],
-        extent:  [n as i32, 0, 0, 0],
+        extent: [n as i32, 0, 0, 0],
     }
 }
 
@@ -83,21 +83,38 @@ fn compile_to_ptx(src: &str) -> Vec<u8> {
     std::fs::write(&cu, src).unwrap();
     let out = std::process::Command::new("nvcc")
         .args([
-            "-ptx", "-O3", "--gpu-architecture=native",
-            "-o", ptx.to_str().unwrap(), cu.to_str().unwrap(),
+            "-ptx",
+            "-O3",
+            "--gpu-architecture=native",
+            "-o",
+            ptx.to_str().unwrap(),
+            cu.to_str().unwrap(),
         ])
         .output()
         .expect("nvcc not found");
-    assert!(out.status.success(), "nvcc failed:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "nvcc failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     std::fs::read(&ptx).unwrap()
 }
 
 #[test]
 fn rhd_c2p_gpu_matches_cpu_and_analytic() {
     let n = CASES.len();
-    let den: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0).collect();
-    let mom: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1).collect();
-    let nrg: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2).collect();
+    let den: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0)
+        .collect();
+    let mom: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1)
+        .collect();
+    let nrg: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2)
+        .collect();
 
     // ---- CPU backend (the AOT Rust kernel) ----
     // the __raw kernel takes view-wrapped buffers (CpuField/CpuFieldMut) + grid +
@@ -113,7 +130,9 @@ fn rhd_c2p_gpu_matches_cpu_and_analytic() {
         let mut rout = CpuFieldMut::from_layout(&mut rho_cpu, &lo, &ext);
         let mut vout = CpuFieldMut::from_layout(&mut vel_cpu, &lo, &ext);
         let mut pout = CpuFieldMut::from_layout(&mut pre_cpu, &lo, &ext);
-        rhd_c2p_1d(&din, &min, &nin, &mut rout, &mut vout, &mut pout, n as i32, 0, GAMMA);
+        rhd_c2p_1d(
+            &din, &min, &nin, &mut rout, &mut vout, &mut pout, n as i32, 0, GAMMA,
+        );
     }
 
     // ---- GPU backend (the CUDA emit of the SAME IR graph) ----
@@ -129,7 +148,9 @@ fn rhd_c2p_gpu_matches_cpu_and_analytic() {
     for (blk, src) in [(&mut b_den, &den), (&mut b_mom, &mom), (&mut b_nrg, &nrg)] {
         let p = blk.as_mut_ptr::<f64>();
         for i in 0..n {
-            unsafe { *p.add(i) = src[i]; }
+            unsafe {
+                *p.add(i) = src[i];
+            }
         }
     }
 
@@ -154,22 +175,48 @@ fn rhd_c2p_gpu_matches_cpu_and_analytic() {
     args.push(&GAMMA);
 
     unsafe {
-        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args).unwrap();
+        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args)
+            .unwrap();
     }
     exec.sync().unwrap();
 
-    let (gr, gv, gp) = (b_rho.as_ptr::<f64>(), b_vel.as_ptr::<f64>(), b_pre.as_ptr::<f64>());
+    let (gr, gv, gp) = (
+        b_rho.as_ptr::<f64>(),
+        b_vel.as_ptr::<f64>(),
+        b_pre.as_ptr::<f64>(),
+    );
     for (i, &(r0, v0, p0)) in CASES.iter().enumerate() {
         let (rg, vg, pg) = unsafe { (*gr.add(i), *gv.add(i), *gp.add(i)) };
         // GPU vs analytic ground truth (round-trip). nvcc fuses FMA, so allow a
         // loose-but-meaningful relative tolerance (project_fma_discipline).
         let rel = |got: f64, want: f64| (got - want).abs() / want.abs().max(1.0);
-        assert!(rel(rg, r0) < 1e-7, "case {i}: GPU rho {rg} != analytic {r0}");
-        assert!(rel(vg, v0) < 1e-7, "case {i}: GPU vel {vg} != analytic {v0}");
-        assert!(rel(pg, p0) < 1e-7, "case {i}: GPU pre {pg} != analytic {p0}");
+        assert!(
+            rel(rg, r0) < 1e-7,
+            "case {i}: GPU rho {rg} != analytic {r0}"
+        );
+        assert!(
+            rel(vg, v0) < 1e-7,
+            "case {i}: GPU vel {vg} != analytic {v0}"
+        );
+        assert!(
+            rel(pg, p0) < 1e-7,
+            "case {i}: GPU pre {pg} != analytic {p0}"
+        );
         // GPU vs CPU (same IR graph, two backends): agree modulo FMA drift.
-        assert!(rel(rg, rho_cpu[i]) < 1e-9, "case {i}: GPU rho {rg} != CPU {}", rho_cpu[i]);
-        assert!(rel(vg, vel_cpu[i]) < 1e-9, "case {i}: GPU vel {vg} != CPU {}", vel_cpu[i]);
-        assert!(rel(pg, pre_cpu[i]) < 1e-9, "case {i}: GPU pre {pg} != CPU {}", pre_cpu[i]);
+        assert!(
+            rel(rg, rho_cpu[i]) < 1e-9,
+            "case {i}: GPU rho {rg} != CPU {}",
+            rho_cpu[i]
+        );
+        assert!(
+            rel(vg, vel_cpu[i]) < 1e-9,
+            "case {i}: GPU vel {vg} != CPU {}",
+            vel_cpu[i]
+        );
+        assert!(
+            rel(pg, pre_cpu[i]) < 1e-9,
+            "case {i}: GPU pre {pg} != CPU {}",
+            pre_cpu[i]
+        );
     }
 }

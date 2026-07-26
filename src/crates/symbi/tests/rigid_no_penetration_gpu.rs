@@ -48,20 +48,30 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>() -> Sim<S, Mem> {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([V_INF, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([V_INF, 0.0]),
+            pre: 1.0,
+        })
         .build();
-    let mut sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(
-            0,
-            Tensor::new([0.0, 0.0]),
-            Tensor::new([0.0, 0.0]),
-            1.0,
-            R_BODY,
-            0.1,
-            false,
-        )
-        .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 }),
-    ));
+    let mut sim = sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new([0.0, 0.0]),
+                Tensor::new([0.0, 0.0]),
+                1.0,
+                R_BODY,
+                0.1,
+                false,
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 1.0e3,
+                k_eta_t: 0.0,
+            }),
+        ),
+    );
     // the CSG shape routes the runtime shaped kernel (host cranelift / device NVRTC), whose
     // cartesian bbox floors the bounding ball to an index box — the branch under test.
     sim.immersed.as_mut().unwrap().shapes[0] =
@@ -87,7 +97,10 @@ fn cons_rel_gap(h: &HostSim, d: &DevSim) -> f64 {
     for k in 0..2 {
         cmp(&h.fields.cons.mom[k], &d.fields.cons.mom[k], &mut gap);
     }
-    let (hn, dn) = (h.fields.cons.nrg_field().unwrap(), d.fields.cons.nrg_field().unwrap());
+    let (hn, dn) = (
+        h.fields.cons.nrg_field().unwrap(),
+        d.fields.cons.nrg_field().unwrap(),
+    );
     cmp(hn, dn, &mut gap);
     gap
 }
@@ -101,7 +114,10 @@ fn cartesian_shaped_wall_penalize_matches_cpu_on_device() {
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
 
     let gap = cons_rel_gap(&h, &d);
-    assert!(gap < 1e-9, "cartesian shaped-wall cons host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-9,
+        "cartesian shaped-wall cons host!=device: rel gap {gap:e}"
+    );
     let hf = h.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let df = d.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     // combined rel+abs tolerance against the force magnitude: the transverse component is a
@@ -124,10 +140,14 @@ fn cartesian_shaped_wall_evolved_matches_cpu_on_device() {
     let mut h = build::<CpuSpace, HostMemory>();
     let mut d = build::<CudaSpace, UnifiedMemory>();
     let hk = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &h.geom.allocated);
-    let dk = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, &d.geom.allocated);
+    let dk =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, &d.geom.allocated);
     evolve(&mut h, &hk, 0.3).expect("host run");
     evolve(&mut d, &dk, 0.3).expect("device run");
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
     let gap = cons_rel_gap(&h, &d);
-    assert!(gap < 1e-7, "evolved cartesian shaped-wall cons host!=device: rel gap {gap:e}");
+    assert!(
+        gap < 1e-7,
+        "evolved cartesian shaped-wall cons host!=device: rel gap {gap:e}"
+    );
 }

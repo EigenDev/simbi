@@ -84,11 +84,22 @@ fn fill_ot(sim: &Sim) {
         let bx_c = -B0 * (2.0 * PI * y).sin();
         let by_c = B0 * (4.0 * PI * x).sin();
         let prim = MhdPrim {
-            hydro: Prim { rho: rho0, vel: Tensor::new([vx, vy, 0.0]), pre: p0 },
+            hydro: Prim {
+                rho: rho0,
+                vel: Tensor::new([vx, vy, 0.0]),
+                pre: p0,
+            },
             mag: Tensor::new([bx_c, by_c, 0.0]),
         };
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
-        sim.fields.cons.scatter(c, Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg });
+        sim.fields.cons.scatter(
+            c,
+            Cons {
+                den: cons.den,
+                mom: cons.mom,
+                nrg: cons.nrg,
+            },
+        );
         mhd.bcell[0].view_mut().set(c, bx_c);
         mhd.bcell[1].view_mut().set(c, by_c);
         mhd.bcell[2].view_mut().set(c, 0.0);
@@ -159,7 +170,11 @@ fn single_level_control_drift(t: f64) -> f64 {
     let k = Kset::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
     let vol = dx * dx * dz;
     let mass = |s: &Sim| -> f64 {
-        s.geom.interior.iter().map(|c| *s.fields.cons.den.view().at(c) * vol).sum()
+        s.geom
+            .interior
+            .iter()
+            .map(|c| *s.fields.cons.den.view().at(c) * vol)
+            .sum()
     };
     let m0 = mass(&sim);
     symbi::sim::evolve::evolve(&mut sim, &k, t).unwrap();
@@ -181,7 +196,10 @@ fn nmhd_two_level_preserves_divb_across_the_interface() {
     let ck = Kset::new(GAMMA, CFL, 1.0, &coarse.geom.allocated);
 
     // refine the vortex core in x/y; z spans the whole (thin periodic) axis.
-    let regions = [RefinementRegion { x_lo: [0.25, 0.25, 0.0], x_hi: [0.75, 0.75, 1.0] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25, 0.25, 0.0],
+        x_hi: [0.75, 0.75, 1.0],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, 1.0, &s.geom.allocated)
     })

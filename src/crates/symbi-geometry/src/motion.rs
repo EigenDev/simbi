@@ -45,12 +45,20 @@ impl<S: Scalar> MotionState<S> {
 
     /// homologous expansion with given scale factor and rate.
     pub fn homologous(a: S, a_dot: S) -> Self {
-        MotionState { a, a_dot, homologous: true }
+        MotionState {
+            a,
+            a_dot,
+            homologous: true,
+        }
     }
 
     /// uniform translation at velocity a_dot.
     pub fn uniform(a: S, a_dot: S) -> Self {
-        MotionState { a, a_dot, homologous: false }
+        MotionState {
+            a,
+            a_dot,
+            homologous: false,
+        }
     }
 
     /// hubble parameter H = a_dot / a.
@@ -122,7 +130,9 @@ mod tests {
 
     fn approx(a: f64, b: f64) -> bool {
         let diff = (a - b).abs();
-        if diff < 1e-14 { return true; }
+        if diff < 1e-14 {
+            return true;
+        }
         diff / a.abs().max(b.abs()) < 1e-12
     }
 

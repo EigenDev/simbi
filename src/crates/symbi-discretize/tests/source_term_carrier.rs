@@ -67,9 +67,14 @@ fn carrier_generic_point_mass_gravity_traces_to_analytical_source() {
             ("prim_v2", vel[2]),
         ])
         .scalars(&[
-            ("gm", gm), ("eps", eps),
-            ("x_0", x[0]), ("x_1", x[1]), ("x_2", x[2]),
-            ("xm_0", xm[0]), ("xm_1", xm[1]), ("xm_2", xm[2]),
+            ("gm", gm),
+            ("eps", eps),
+            ("x_0", x[0]),
+            ("x_1", x[1]),
+            ("x_2", x[2]),
+            ("xm_0", xm[0]),
+            ("xm_1", xm[1]),
+            ("xm_2", xm[2]),
         ])
         .run();
 
@@ -149,13 +154,23 @@ fn user_force_source_cannot_desync_energy_from_work() {
         .run();
     let out_nrg = KernelRun::new(splice_user_source_gv(&nrg))
         .grid([1usize])
-        .scalars(&[("rho", rho), ("vel_0", vel[0]), ("vel_1", vel[1]), ("x_0", x0v), ("p0", p0v)])
+        .scalars(&[
+            ("rho", rho),
+            ("vel_0", vel[0]),
+            ("vel_1", vel[1]),
+            ("x_0", x0v),
+            ("p0", p0v),
+        ])
         .run();
 
     // analytical: a = [p0*x0, 0.4]; S_mom_k = rho*a_k; S_nrg = rho*(a.v).
     let a = [p0v * x0v, 0.4_f64];
     out_mom.expect([0usize], &[("s_0", rho * a[0]), ("s_1", rho * a[1])], 1e-12);
-    out_nrg.expect([0usize], &[("s_0", rho * (a[0] * vel[0] + a[1] * vel[1]))], 1e-12);
+    out_nrg.expect(
+        [0usize],
+        &[("s_0", rho * (a[0] * vel[0] + a[1] * vel[1]))],
+        1e-12,
+    );
 
     // structural: the energy source equals the momentum source dotted with velocity — the
     // work-energy coupling, in the RENDERED outputs alone (no reference to `a`).
@@ -200,8 +215,8 @@ fn front_door_json_force_config_renders_axiomatic_source() {
     // mom + nrg BuiltSources render. accel = [p0*x_0, 0.4]; the coupling S_nrg == S_mom.v holds,
     // driven entirely from the serialized config (python -> json -> rust -> kernel, no recompile).
     use symbi_expr::SourceConfig;
-    use symbi_hydro::expr_bridge::build_user_source;
     use symbi_hydro::NEWTONIAN_SPEC;
+    use symbi_hydro::expr_bridge::build_user_source;
 
     let json = r#"{
         "kind": "force", "dim": 2, "outputs": [2, 3], "params": [],
@@ -227,12 +242,22 @@ fn front_door_json_force_config_renders_axiomatic_source() {
         .run();
     let out_nrg = KernelRun::new(splice_user_source_gv(&built[1].1))
         .grid([1usize])
-        .scalars(&[("rho", rho), ("vel_0", vel[0]), ("vel_1", vel[1]), ("x_0", x0v), ("p0", p0v)])
+        .scalars(&[
+            ("rho", rho),
+            ("vel_0", vel[0]),
+            ("vel_1", vel[1]),
+            ("x_0", x0v),
+            ("p0", p0v),
+        ])
         .run();
 
     let a = [p0v * x0v, 0.4_f64];
     out_mom.expect([0usize], &[("s_0", rho * a[0]), ("s_1", rho * a[1])], 1e-12);
-    out_nrg.expect([0usize], &[("s_0", rho * (a[0] * vel[0] + a[1] * vel[1]))], 1e-12);
+    out_nrg.expect(
+        [0usize],
+        &[("s_0", rho * (a[0] * vel[0] + a[1] * vel[1]))],
+        1e-12,
+    );
 
     let s_mom = [out_mom.get([0usize], "s_0"), out_mom.get([0usize], "s_1")];
     let work = s_mom[0] * vel[0] + s_mom[1] * vel[1];

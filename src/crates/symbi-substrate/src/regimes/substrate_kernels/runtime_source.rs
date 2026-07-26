@@ -9,12 +9,12 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_geometry::Geometry;
 use symbi_grid::Field;
-use symbi_hydro::source_spec::BuiltSource;
 use symbi_hydro::SourceEvaluator;
+use symbi_hydro::source_spec::BuiltSource;
+use symbi_ir::algebra::Scalar;
+use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
 
 use std::sync::{Arc, OnceLock};
@@ -25,9 +25,9 @@ use crate::regimes::substrate_gpu::dispatch;
 use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, parse_manifest, resolve_path};
-use super::exec::{policy_for, ExecPolicy};
+use super::exec::{ExecPolicy, policy_for};
 use super::layout::{alloc_layout, exec_layout};
-use super::params::{body_scalar, geom_scalar, motion_scalar, physical_geom, ScalarBind};
+use super::params::{ScalarBind, body_scalar, geom_scalar, motion_scalar, physical_geom};
 
 use symbi_ib::collection::MAX_SOURCE_BODIES;
 
@@ -40,9 +40,9 @@ use symbi_ib::collection::MAX_SOURCE_BODIES;
 /// unreachable. the manifest folds in-place fields (cons.*: read + write) into the output
 /// group, so there is no input/output aliasing.
 pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
-    sim:  &FieldStore<D, DOF, Mem, Sc>,
+    sim: &FieldStore<D, DOF, Mem, Sc>,
     name: &str,
-    ir:   &str,
+    ir: &str,
     exec: &Domain<D>,
     resolve_scalar: impl Fn(&ScalarBind) -> Sc,
 ) where
@@ -74,7 +74,10 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
     // the scalar order).
     let mut scalars: Vec<Sc> = Vec::with_capacity(kinds.len());
     for (bind, is_int) in kinds.iter() {
-        assert!(!*is_int, "dispatch_runtime_ir('{name}'): unexpected int scalar param {bind:?}");
+        assert!(
+            !*is_int,
+            "dispatch_runtime_ir('{name}'): unexpected int scalar param {bind:?}"
+        );
         scalars.push(resolve_scalar(bind));
     }
 
@@ -84,10 +87,17 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
     // centered: the shared allocated layout, replicated per field for the constructor.
     let (grid, dlo) = exec_layout(exec);
     let shared = alloc_layout(&sim.geom.allocated);
-    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> =
-        std::iter::repeat(shared).take(inputs_slice.len() + outputs_slice.len()).collect();
+    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = std::iter::repeat(shared)
+        .take(inputs_slice.len() + outputs_slice.len())
+        .collect();
     let buffers = super::exec::disjoint_host_buffers(name, inputs_slice, outputs_slice, &layouts);
-    let inv = KernelInvocation { buffers, grid: &grid, dom_lo: &dlo, ints: &[], scalars: &scalars };
+    let inv = KernelInvocation {
+        buffers,
+        grid: &grid,
+        dom_lo: &dlo,
+        ints: &[],
+        scalars: &scalars,
+    };
     dispatch::<Sc, Mem, _>(inv, ir, name, |_, _, _, _, _, _| {
         unreachable!("dispatch_runtime_ir is device-only; the cpu arm cannot be reached")
     });
@@ -152,7 +162,10 @@ impl RuntimeSource {
     pub fn new(built: Vec<(String, BuiltSource)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);
         Arc::new(Self {
-            eval, built, params, has_energy,
+            eval,
+            built,
+            params,
+            has_energy,
             gpu_ir: OnceLock::new(),
             fused_cpu: OnceLock::new(),
             source_cpu: OnceLock::new(),
@@ -240,7 +253,10 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
             // JIT path. sources have a handful of params (rho, vel_k, pre, x_k, t, p_i); 32 is ample.
             const MAX_PARAMS: usize = 32;
             const MAX_OUT: usize = 8;
-            assert!(params.len() <= MAX_PARAMS, "runtime source: > {MAX_PARAMS} params");
+            assert!(
+                params.len() <= MAX_PARAMS,
+                "runtime source: > {MAX_PARAMS} params"
+            );
             let mut inbuf = [0.0f64; MAX_PARAMS];
             for (i, p) in params.iter().enumerate() {
                 inbuf[i] = resolve_runtime_param::<D, DOF>(p, rho, &vel, pre, &x, t, rs_params);
@@ -257,8 +273,11 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
                 }
                 jit.len()
             } else {
-                let values: Vec<(&str, f64)> =
-                    params.iter().zip(inputs).map(|(n, v)| (n.as_str(), *v)).collect();
+                let values: Vec<(&str, f64)> = params
+                    .iter()
+                    .zip(inputs)
+                    .map(|(n, v)| (n.as_str(), *v))
+                    .collect();
                 let s = eval.eval(field, &values).expect("runtime source: eval");
                 out[..s.len()].copy_from_slice(&s);
                 s.len()
@@ -290,7 +309,10 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
                     f.add_assign_checked(c, Sc::from_f64(weight * out[0]));
                 }
                 "den" => {
-                    sim.fields.cons.den.add_assign_checked(c, Sc::from_f64(weight * out[0]));
+                    sim.fields
+                        .cons
+                        .den
+                        .add_assign_checked(c, Sc::from_f64(weight * out[0]));
                 }
                 other => panic!(
                     "runtime source: unsupported target field '{other}' (expected mom | nrg | den)"
@@ -320,7 +342,17 @@ fn build_fused_cpu_kernel<const D: usize>(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
         // baked at MAX_SOURCE_BODIES to match the standalone `body_source` kernel (unused slots zero via mass = 0).
-        coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false, n_bodies,
+        coords,
+        symbi_discretize::Spacetime::Minkowski,
+        spacing,
+        axes,
+        D as u8,
+        ncomp,
+        has_energy,
+        geo,
+        &src_refs,
+        false,
+        n_bodies,
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
     // an error: the gate is "compile when possible, else interpret", never miscompile.
@@ -329,15 +361,25 @@ fn build_fused_cpu_kernel<const D: usize>(
     // wiring bug (these kernels are closed-vocabulary), so demand `Ref` loudly.
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
-        FieldBind::Raw(s) => panic!("fused runtime source: manifest path '{s}' is not a known FieldRef"),
+        FieldBind::Raw(s) => {
+            panic!("fused runtime source: manifest path '{s}' is not a known FieldRef")
+        }
     };
     Some(FusedCpuKernel {
         kernel,
-        in_refs: gvk.field_inputs.iter().map(|(_, rt)| bind_ref(rt)).collect(),
+        in_refs: gvk
+            .field_inputs
+            .iter()
+            .map(|(_, rt)| bind_ref(rt))
+            .collect(),
         out_refs: writes.iter().map(|(_, rt, _)| bind_ref(rt)).collect(),
         // the producer's GvKernel scalar names (raw strings) are classified to typed binds ONCE at
         // build (off the per-stage host resolve).
-        scalar_params: gvk.scalar_params.iter().map(|s| ScalarBind::from_name(s)).collect(),
+        scalar_params: gvk
+            .scalar_params
+            .iter()
+            .map(|s| ScalarBind::from_name(s))
+            .collect(),
     })
 }
 
@@ -356,13 +398,23 @@ fn build_source_only_cpu_kernel<const D: usize>(
     let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
     let bind_ref = |b: &FieldBind| match b {
         FieldBind::Ref(f) => *f,
-        FieldBind::Raw(s) => panic!("compiled runtime source: manifest path '{s}' is not a known FieldRef"),
+        FieldBind::Raw(s) => {
+            panic!("compiled runtime source: manifest path '{s}' is not a known FieldRef")
+        }
     };
     Some(FusedCpuKernel {
         kernel,
-        in_refs: gvk.field_inputs.iter().map(|(_, rt)| bind_ref(rt)).collect(),
+        in_refs: gvk
+            .field_inputs
+            .iter()
+            .map(|(_, rt)| bind_ref(rt))
+            .collect(),
         out_refs: writes.iter().map(|(_, rt, _)| bind_ref(rt)).collect(),
-        scalar_params: gvk.scalar_params.iter().map(|s| ScalarBind::from_name(s)).collect(),
+        scalar_params: gvk
+            .scalar_params
+            .iter()
+            .map(|s| ScalarBind::from_name(s))
+            .collect(),
     })
 }
 
@@ -386,7 +438,14 @@ where
     rs.source_cpu
         .get_or_init(|| {
             symbi_sim::driver::prof("jit_build", || {
-                build_source_only_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, &rs.built)
+                build_source_only_cpu_kernel::<D>(
+                    coords,
+                    &spacing,
+                    &axes,
+                    DOF,
+                    rs.has_energy,
+                    &rs.built,
+                )
             })
         })
         .as_ref()
@@ -405,12 +464,19 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    debug_assert!(!Mem::IS_DEVICE_ACCESSIBLE, "compiled runtime source is the host path");
+    debug_assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "compiled runtime source is the host path"
+    );
     let pre = sim.fields.prim.pre_field();
-    let in_bases: Vec<*const f64> = sk.in_refs.iter()
+    let in_bases: Vec<*const f64> = sk
+        .in_refs
+        .iter()
         .map(|&fref| resolve_path(sim, pre, None, 0, fref).as_ptr() as *const f64)
         .collect();
-    let out_bases: Vec<*mut f64> = sk.out_refs.iter()
+    let out_bases: Vec<*mut f64> = sk
+        .out_refs
+        .iter()
         .map(|&fref| resolve_path(sim, pre, None, 0, fref).as_mut_ptr() as *mut f64)
         .collect();
     let t = sim.time;
@@ -438,12 +504,12 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     // read-before-write per cell, cell-disjoint blocks.
     unsafe {
         match policy_for(&sim.geom.interior, Mem::IS_DEVICE_ACCESSIBLE) {
-            ExecPolicy::Cover(block) => sk
+            ExecPolicy::Cover(block) => sk.kernel.run_cover_raw(
+                &grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases,
+            ),
+            ExecPolicy::Whole => sk
                 .kernel
-                .run_cover_raw(&grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases),
-            ExecPolicy::Whole => {
-                sk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases)
-            }
+                .run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases),
         }
     }
 }
@@ -485,11 +551,24 @@ where
     let (coords, spacing, axes) = sim_gv_geom(sim);
     // fold the immersed body only when the caller asks (Newtonian). baked at MAX_SOURCE_BODIES to match the
     // standalone `body_source` kernel; 0 leaves the body out (iso, rhd, or no bodies).
-    let n_bodies = if fold_body && sim.immersed.is_some() { MAX_SOURCE_BODIES } else { 0 };
+    let n_bodies = if fold_body && sim.immersed.is_some() {
+        MAX_SOURCE_BODIES
+    } else {
+        0
+    };
     rs.fused_cpu
         .get_or_init(|| {
             symbi_sim::driver::prof("jit_build", || {
-                build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, geo, &rs.built, n_bodies)
+                build_fused_cpu_kernel::<D>(
+                    coords,
+                    &spacing,
+                    &axes,
+                    DOF,
+                    rs.has_energy,
+                    geo,
+                    &rs.built,
+                    n_bodies,
+                )
             })
         })
         .as_ref()
@@ -529,8 +608,12 @@ where
 fn fuse_override() -> bool {
     static FUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FUSE.get_or_init(|| {
-        std::env::var("SYMBI_FUSE").map(|v| v == "1").unwrap_or(false)
-            && std::env::var("SYMBI_UNFUSE").map(|v| v != "1").unwrap_or(true)
+        std::env::var("SYMBI_FUSE")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+            && std::env::var("SYMBI_UNFUSE")
+                .map(|v| v != "1")
+                .unwrap_or(true)
     })
 }
 
@@ -561,7 +644,16 @@ where
     let (coords, spacing, axes) = sim_gv_geom(sim);
     cache
         .get_or_init(|| {
-            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, has_energy, geo, &[], MAX_SOURCE_BODIES)
+            build_fused_cpu_kernel::<D>(
+                coords,
+                &spacing,
+                &axes,
+                DOF,
+                has_energy,
+                geo,
+                &[],
+                MAX_SOURCE_BODIES,
+            )
         })
         .as_ref()
 }
@@ -588,9 +680,13 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    debug_assert!(!Mem::IS_DEVICE_ACCESSIBLE, "fused runtime host path on device memory");
+    debug_assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "fused runtime host path on device memory"
+    );
     debug_assert_eq!(
-        std::any::TypeId::of::<Sc>(), std::any::TypeId::of::<f64>(),
+        std::any::TypeId::of::<Sc>(),
+        std::any::TypeId::of::<f64>(),
         "fused runtime host path requires Sc = f64",
     );
 
@@ -598,10 +694,14 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     // backing buffer IS f64. in-place cons.* appear in BOTH in_paths and out_paths -> the same
     // `Field` -> the same base (intended alias); all other inputs (u_n.*, flux.*, prim.pre) are
     // distinct + read-only.
-    let in_bases: Vec<*const f64> = fk.in_refs.iter()
+    let in_bases: Vec<*const f64> = fk
+        .in_refs
+        .iter()
         .map(|&fref| resolve_path(sim, Some(pre), None, 0, fref).as_ptr() as *const f64)
         .collect();
-    let out_bases: Vec<*mut f64> = fk.out_refs.iter()
+    let out_bases: Vec<*mut f64> = fk
+        .out_refs
+        .iter()
         .map(|&fref| resolve_path(sim, Some(pre), None, 0, fref).as_mut_ptr() as *mut f64)
         .collect();
 
@@ -658,12 +758,12 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     // distinct cells write distinct indices on distinct threads (blocks are cell-disjoint).
     unsafe {
         match policy_for(&sim.geom.interior, Mem::IS_DEVICE_ACCESSIBLE) {
-            ExecPolicy::Cover(block) => fk
+            ExecPolicy::Cover(block) => fk.kernel.run_cover_raw(
+                &grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases,
+            ),
+            ExecPolicy::Whole => fk
                 .kernel
-                .run_cover_raw(&grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases),
-            ExecPolicy::Whole => {
-                fk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases)
-            }
+                .run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases),
         }
     }
 }
@@ -671,7 +771,13 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
 /// resolve one source param name to its value at a cell: `rho`, `vel_k` (k < DOF), `x_k` (k < D),
 /// `t` (sim time), or `p{i}` (the config's tunable params).
 pub(crate) fn resolve_runtime_param<const D: usize, const DOF: usize>(
-    name: &str, rho: f64, vel: &[f64; DOF], pre: f64, x: &[f64; D], t: f64, params: &[f64],
+    name: &str,
+    rho: f64,
+    vel: &[f64; DOF],
+    pre: f64,
+    x: &[f64; D],
+    t: f64,
+    params: &[f64],
 ) -> f64 {
     if name == "rho" {
         return rho;
@@ -767,7 +873,11 @@ where
 /// shared head of every runtime GvKernel build (source AND boundary).
 pub(crate) fn sim_gv_geom<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-) -> (symbi_discretize::Coords, Vec<symbi_discretize::Spacing>, Vec<usize>)
+) -> (
+    symbi_discretize::Coords,
+    Vec<symbi_discretize::Spacing>,
+    Vec<usize>,
+)
 where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
@@ -803,23 +913,26 @@ pub(crate) fn gv_kernel_to_ir(
 ) -> (String, String) {
     use std::hash::{Hash, Hasher};
     use symbi_ir::emit::{Precision, Target, TargetConfig};
-    use symbi_ir::{prepare, prepared_to_ir, KernelEmitInputs};
+    use symbi_ir::{KernelEmitInputs, prepare, prepared_to_ir};
     let mk_ir = |nm: &str| {
         let inputs = KernelEmitInputs {
-            kernel_name:      nm,
+            kernel_name: nm,
             ndim,
             // inert token: `prepare` does NOT bake the target into the neutral `Prepared` IR
             // (it carries no target field — one blob renders every backend).
             // the LIVE render target is `GpuBackend::TARGET` in `run_gpu`; this stays a fixed
             // value only so the content-hash below is stable.
-            target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
-            coalesce_layout:  symbi_discretize::kernel_coalesces_layout(nm),
-            field_inputs:     &gvk.field_inputs,
-            scalar_params:    &gvk.scalar_params,
-            field_writes:     writes,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
+            coalesce_layout: symbi_discretize::kernel_coalesces_layout(nm),
+            field_inputs: &gvk.field_inputs,
+            scalar_params: &gvk.scalar_params,
+            field_writes: writes,
             coord_components: &gvk.coord_components,
-            device_preamble:  &[],
-            tile_spec:        None,
+            device_preamble: &[],
+            tile_spec: None,
         };
         prepared_to_ir(&prepare(&gvk.graph, &inputs))
     };

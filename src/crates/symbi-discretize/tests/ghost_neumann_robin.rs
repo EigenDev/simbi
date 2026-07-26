@@ -14,7 +14,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{neumann_ghost_fill_gv, robin_ghost_fill_gv, Spacing};
+use symbi_discretize::{Spacing, neumann_ghost_fill_gv, robin_ghost_fill_gv};
 
 const NX: usize = 5; // allocated [0,5); interior starts at EDGE, lo ghosts are {0, 1}.
 const EDGE: usize = 2;
@@ -48,16 +48,31 @@ fn neumann_ghost_extrapolates_the_prescribed_gradient() {
         .scalars(&[
             ("map_type_0", 3.0), // outflow edge source
             ("arg_0", EDGE as f64),
-            ("x_lo_0", X0), ("dx_0", DX),
-            ("neu_q_rho", q_rho), ("neu_q_v0", q_vel), ("neu_q_pre", q_pre),
+            ("x_lo_0", X0),
+            ("dx_0", DX),
+            ("neu_q_rho", q_rho),
+            ("neu_q_v0", q_vel),
+            ("neu_q_pre", q_pre),
         ])
         .run();
 
     for i in 0..2 {
         let d = dist(i);
-        close(out.get([i], "prim_rho"), RHO + q_rho * d, &format!("neumann rho ghost {i}"));
-        close(out.get([i], "prim_v0"), VEL + q_vel * d, &format!("neumann vel ghost {i}"));
-        close(out.get([i], "prim_pre"), PRE + q_pre * d, &format!("neumann pre ghost {i}"));
+        close(
+            out.get([i], "prim_rho"),
+            RHO + q_rho * d,
+            &format!("neumann rho ghost {i}"),
+        );
+        close(
+            out.get([i], "prim_v0"),
+            VEL + q_vel * d,
+            &format!("neumann vel ghost {i}"),
+        );
+        close(
+            out.get([i], "prim_pre"),
+            PRE + q_pre * d,
+            &format!("neumann pre ghost {i}"),
+        );
     }
     // zero-gradient recovers the plain outflow copy (edge value at every ghost).
     let copy = KernelRun::new(neumann_ghost_fill_gv(1, 1, true, &[Spacing::Uniform]))
@@ -65,11 +80,20 @@ fn neumann_ghost_extrapolates_the_prescribed_gradient() {
         .compute_window([0], [2])
         .fields(&[("prim_rho", RHO), ("prim_v0", VEL), ("prim_pre", PRE)])
         .scalars(&[
-            ("map_type_0", 3.0), ("arg_0", EDGE as f64), ("x_lo_0", X0), ("dx_0", DX),
-            ("neu_q_rho", 0.0), ("neu_q_v0", 0.0), ("neu_q_pre", 0.0),
+            ("map_type_0", 3.0),
+            ("arg_0", EDGE as f64),
+            ("x_lo_0", X0),
+            ("dx_0", DX),
+            ("neu_q_rho", 0.0),
+            ("neu_q_v0", 0.0),
+            ("neu_q_pre", 0.0),
         ])
         .run();
-    close(copy.get([0], "prim_rho"), RHO, "zero-gradient copy is the outflow fill");
+    close(
+        copy.get([0], "prim_rho"),
+        RHO,
+        "zero-gradient copy is the outflow fill",
+    );
 }
 
 #[test]
@@ -80,10 +104,19 @@ fn robin_ghost_solves_the_mixed_relation() {
         .compute_window([0], [2])
         .fields(&[("prim_rho", RHO), ("prim_v0", VEL), ("prim_pre", PRE)])
         .scalars(&[
-            ("map_type_0", 3.0), ("arg_0", EDGE as f64), ("x_lo_0", X0), ("dx_0", DX),
-            ("rob_a_rho", 2.0), ("rob_b_rho", 0.0), ("rob_c_rho", 6.0),
-            ("rob_a_v0", 0.0), ("rob_b_v0", 1.0), ("rob_c_v0", 0.4),
-            ("rob_a_pre", 1.3), ("rob_b_pre", 0.7), ("rob_c_pre", 2.1),
+            ("map_type_0", 3.0),
+            ("arg_0", EDGE as f64),
+            ("x_lo_0", X0),
+            ("dx_0", DX),
+            ("rob_a_rho", 2.0),
+            ("rob_b_rho", 0.0),
+            ("rob_c_rho", 6.0),
+            ("rob_a_v0", 0.0),
+            ("rob_b_v0", 1.0),
+            ("rob_c_v0", 0.4),
+            ("rob_a_pre", 1.3),
+            ("rob_b_pre", 0.7),
+            ("rob_c_pre", 2.1),
         ])
         .run();
 
@@ -91,14 +124,26 @@ fn robin_ghost_solves_the_mixed_relation() {
         let h = dist(i);
         // rho: Dirichlet -> U_face = (u_edge + U_ghost)/2 = c/a = 3.
         let rho_g = out.get([i], "prim_rho");
-        close((RHO + rho_g) / 2.0, 3.0, &format!("robin->dirichlet rho face {i}"));
+        close(
+            (RHO + rho_g) / 2.0,
+            3.0,
+            &format!("robin->dirichlet rho face {i}"),
+        );
         // vel: Neumann -> (U_ghost - u_edge)/h = c/b = 0.4.
         let vel_g = out.get([i], "prim_v0");
-        close((vel_g - VEL) / h, 0.4, &format!("robin->neumann vel gradient {i}"));
+        close(
+            (vel_g - VEL) / h,
+            0.4,
+            &format!("robin->neumann vel gradient {i}"),
+        );
         // pre: general -> a*U_face + b*dU/dn = c.
         let pre_g = out.get([i], "prim_pre");
         let u_face = (PRE + pre_g) / 2.0;
         let dudn = (pre_g - PRE) / h;
-        close(1.3 * u_face + 0.7 * dudn, 2.1, &format!("robin pre relation {i}"));
+        close(
+            1.3 * u_face + 0.7 * dudn,
+            2.1,
+            &format!("robin pre relation {i}"),
+        );
     }
 }

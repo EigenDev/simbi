@@ -9,11 +9,11 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
+use symbi_aot::{CpuField, CpuFieldMut, kernel_by_name};
 use symbi_hydro::energy::Adiabatic;
 use symbi_hydro::state::ConsG;
-use symbi_ib::penalize::{penalize_cell, BodyKin, Property, Relax};
-use symbi_ib::sdf::{chi, SdfExpr};
+use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
+use symbi_ib::sdf::{SdfExpr, chi};
 use symbi_ir::kernel_output_support_from_ir;
 
 const N: usize = 48;
@@ -48,18 +48,32 @@ fn run_pen(
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
         let v = scalar(&bind.name());
-        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
     }
     let lo = [0i32; 2];
     let ext = [(n2 as f64).sqrt() as u32; 2];
-    let in_fields: Vec<CpuField<f64>> =
-        inputs.iter().map(|b| CpuField::from_layout(b, &lo, &ext)).collect();
+    let in_fields: Vec<CpuField<f64>> = inputs
+        .iter()
+        .map(|b| CpuField::from_layout(b, &lo, &ext))
+        .collect();
     let mut out: Vec<Vec<f64>> = (0..n_out)
-        .map(|k| if k < inputs.len() { inputs[k].to_vec() } else { vec![7.7; n2] })
+        .map(|k| {
+            if k < inputs.len() {
+                inputs[k].to_vec()
+            } else {
+                vec![7.7; n2]
+            }
+        })
         .collect();
     {
-        let mut out_fields: Vec<CpuFieldMut<f64>> =
-            out.iter_mut().map(|b| CpuFieldMut::from_layout(b, &lo, &ext)).collect();
+        let mut out_fields: Vec<CpuFieldMut<f64>> = out
+            .iter_mut()
+            .map(|b| CpuFieldMut::from_layout(b, &lo, &ext))
+            .collect();
         kern(&in_fields, &mut out_fields, &ext, &lo, &ints, &scalars);
     }
     out
@@ -110,7 +124,11 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
         let v = scalar(&bind.name());
-        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
     }
     let lo = [0i32; 2];
     let ext = [N as u32; 2];
@@ -151,7 +169,14 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
         ];
-        kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        kernel(
+            &inputs,
+            &mut outs,
+            &[N as u32; 2],
+            &[0i32; 2],
+            &ints,
+            &scalars,
+        );
         drop(outs);
         den = den_o;
         mx = mx_o;
@@ -177,16 +202,18 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             // the kernel's centroid is the arithmetic mid of the FACE
             // positions; the algebraically equal x_lo + (i+0.5)dx differs in the last
             // bit, so mirror the face-mid form.
-            let mid = |i: usize| {
-                ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5
-            };
+            let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
             let x = [mid(ii), mid(jj)];
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
             let ch = chi(sphere.dist(x), DX);
             let mom_sq = cons.mom.dot(&cons.mom);
             let cs = symbi_ib::drain::sound_speed_from_cons(cons.den, mom_sq, cons.nrg, GAMMA);
             let inv_tau = cs / (C_DRAIN * DX);
-            let kin = BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::zeros(),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
             let mut acc = Relax::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
@@ -195,9 +222,21 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
             assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
             assert_eq!(nrg[c].to_bits(), out.nrg.to_bits(), "nrg at ({ii},{jj})");
-            assert_eq!(pm[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
-            assert_eq!(pfx[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
-            assert_eq!(pe[c].to_bits(), delta.energy_delta.to_bits(), "energy at ({ii},{jj})");
+            assert_eq!(
+                pm[c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
+            assert_eq!(
+                pfx[c].to_bits(),
+                delta.force_delta[0].to_bits(),
+                "fx at ({ii},{jj})"
+            );
+            assert_eq!(
+                pe[c].to_bits(),
+                delta.energy_delta.to_bits(),
+                "energy at ({ii},{jj})"
+            );
             // the angular-momentum receipt: the z moment of the force receipt
             // about the body center, same helper, same bits.
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
@@ -214,7 +253,10 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             }
         }
     }
-    assert!(interior_nonzero > 20, "the drain never fired — the gate is vacuous");
+    assert!(
+        interior_nonzero > 20,
+        "the drain never fired — the gate is vacuous"
+    );
 }
 
 // the ISOTHERMAL kernel: constant sound speed, no energy channel — the same
@@ -257,7 +299,11 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
         let v = scalar(&bind.name());
-        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
     }
     let lo = [0i32; 2];
     let ext = [N as u32; 2];
@@ -288,7 +334,14 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
         ];
-        kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        kernel(
+            &inputs,
+            &mut outs,
+            &[N as u32; 2],
+            &[0i32; 2],
+            &ints,
+            &scalars,
+        );
         drop(outs);
         den = den_o;
         mx = mx_o;
@@ -309,7 +362,11 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
             let ch = chi(sphere.dist([mid(ii), mid(jj)]), DX);
             let inv_tau = CS / (C_DRAIN * DX);
-            let kin = BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::zeros(),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
             let mut acc = Relax::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
@@ -317,7 +374,11 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             assert_eq!(den[c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
             assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
             assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
-            assert_eq!(pm[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(
+                pm[c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
             let x_rel = Tensor::new([mid(ii) - POS[0], mid(jj) - POS[1]]);
             let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
             assert_eq!(pt[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
@@ -357,7 +418,10 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            let (rr, pp) = (
+                R_LO + (ii as f64 + 0.5) * DR,
+                PHI_LO + (jj as f64 + 0.5) * DPHI,
+            );
             den[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
             mx[c] = den[c] * 0.3 * (rr + pp).cos();
             my[c] = den[c] * -0.2 * (rr - 2.0 * pp).sin();
@@ -385,7 +449,11 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     let (mut ints, mut scalars) = (Vec::new(), Vec::new());
     for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
         let v = scalar(&bind.name());
-        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
     }
     let lo = [0i32; 2];
     let ext = [N as u32; 2];
@@ -411,7 +479,14 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
         ];
-        kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        kernel(
+            &inputs,
+            &mut outs,
+            &[N as u32; 2],
+            &[0i32; 2],
+            &ints,
+            &scalars,
+        );
         drop(outs);
         den = den_o;
         mx = mx_o;
@@ -446,8 +521,11 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
             let inv_tau = CS / (C_DRAIN * min_w);
-            let kin =
-                BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::zeros(),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
             let mut acc = Relax::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
@@ -455,7 +533,11 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             assert_eq!(den[c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
             assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
             assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
-            assert_eq!(pm[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(
+                pm[c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
             // lab-frame torque: rotate the physical force to Cartesian, cross with r_cart.
             let e = metric.vector_to_cartesian(
                 Tensor::new([cr(ii), cphi(jj)]),
@@ -470,7 +552,10 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             }
         }
     }
-    assert!(fired > 20, "the cylindrical drain never fired — the gate is vacuous");
+    assert!(
+        fired > 20,
+        "the cylindrical drain never fired — the gate is vacuous"
+    );
 }
 
 // the CYLINDRICAL (R, phi) torque-free accretor gate: the surface normal is
@@ -505,7 +590,10 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            let (rr, pp) = (
+                R_LO + (ii as f64 + 0.5) * DR,
+                PHI_LO + (jj as f64 + 0.5) * DPHI,
+            );
             den0[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
             mx0[c] = den0[c] * 0.3 * (rr + pp).cos();
             my0[c] = den0[c] * -0.2 * (rr - 2.0 * pp).sin();
@@ -516,7 +604,15 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     let run = |kern: symbi_aot::KernelFn<f64>,
                kern_ir,
                xi_val: f64|
-     -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+     -> (
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+    ) {
         let scalar = |name: &str| -> f64 {
             match name {
                 "dt" => DT,
@@ -540,7 +636,11 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
         let (mut ints, mut scalars) = (Vec::new(), Vec::new());
         for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(kern_ir) {
             let v = scalar(&bind.name());
-            if is_int { ints.push(v as i32) } else { scalars.push(v) }
+            if is_int {
+                ints.push(v as i32)
+            } else {
+                scalars.push(v)
+            }
         }
         let lo = [0i32; 2];
         let ext = [N as u32; 2];
@@ -566,7 +666,14 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
             ];
-            kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+            kern(
+                &inputs,
+                &mut outs,
+                &[N as u32; 2],
+                &[0i32; 2],
+                &ints,
+                &scalars,
+            );
         }
         (d, mx, my, pm, pfx, pfy, pt)
     };
@@ -621,10 +728,26 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
             Property::TorqueFreeAccretor { inv_tau, xi: XI }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
-            assert_eq!(out.0[c].to_bits(), expect.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
-            assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
-            assert_eq!(out.3[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(
+                out.0[c].to_bits(),
+                expect.den.to_bits(),
+                "den at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.1[c].to_bits(),
+                expect.mom[0].to_bits(),
+                "mom0 at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.2[c].to_bits(),
+                expect.mom[1].to_bits(),
+                "mom1 at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.3[c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
             // the force receipt is booked in the CARTESIAN world frame: local
             // physical components rotate cell to cell and their raw sum is not
             // a net force on the body.
@@ -690,7 +813,15 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
     let run = |kern: symbi_aot::KernelFn<f64>,
                kern_ir,
                xi_val: f64|
-     -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+     -> (
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+    ) {
         let scalar = |name: &str| -> f64 {
             match name {
                 "dt" => DT,
@@ -712,7 +843,11 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
         let (mut ints, mut scalars) = (Vec::new(), Vec::new());
         for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(kern_ir) {
             let v = scalar(&bind.name());
-            if is_int { ints.push(v as i32) } else { scalars.push(v) }
+            if is_int {
+                ints.push(v as i32)
+            } else {
+                scalars.push(v)
+            }
         }
         let lo = [0i32; 2];
         let ext = [N as u32; 2];
@@ -738,7 +873,14 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
             ];
-            kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+            kern(
+                &inputs,
+                &mut outs,
+                &[N as u32; 2],
+                &[0i32; 2],
+                &ints,
+                &scalars,
+            );
         }
         (d, mx, my, pm, pfx, pfy, pt)
     };
@@ -773,12 +915,36 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
             Property::TorqueFreeAccretor { inv_tau, xi: XI }.contribute(ch, &kin, &mut acc);
             let dv = width(ii) * width(jj);
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
-            assert_eq!(out.0[c].to_bits(), expect.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
-            assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
-            assert_eq!(out.3[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
-            assert_eq!(out.4[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
-            assert_eq!(out.5[c].to_bits(), delta.force_delta[1].to_bits(), "fy at ({ii},{jj})");
+            assert_eq!(
+                out.0[c].to_bits(),
+                expect.den.to_bits(),
+                "den at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.1[c].to_bits(),
+                expect.mom[0].to_bits(),
+                "mom0 at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.2[c].to_bits(),
+                expect.mom[1].to_bits(),
+                "mom1 at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.3[c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.4[c].to_bits(),
+                delta.force_delta[0].to_bits(),
+                "fx at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.5[c].to_bits(),
+                delta.force_delta[1].to_bits(),
+                "fy at ({ii},{jj})"
+            );
             let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
             assert_eq!(out.6[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
             if out.3[c] != 0.0 {
@@ -835,7 +1001,17 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
     let run = |kern: symbi_aot::KernelFn<f64>,
                kern_ir,
                p_val: f64|
-     -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+     -> (
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+        Vec<f64>,
+    ) {
         let scalar = |name: &str| -> f64 {
             match name {
                 "dt" => DT,
@@ -859,7 +1035,11 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
         let (mut ints, mut scalars) = (Vec::new(), Vec::new());
         for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(kern_ir) {
             let v = scalar(&bind.name());
-            if is_int { ints.push(v as i32) } else { scalars.push(v) }
+            if is_int {
+                ints.push(v as i32)
+            } else {
+                scalars.push(v)
+            }
         }
         let lo = [0i32; 2];
         let ext = [N as u32; 2];
@@ -895,7 +1075,14 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 CpuFieldMut::from_layout(&mut pfnx, &lo, &ext),
                 CpuFieldMut::from_layout(&mut pfny, &lo, &ext),
             ];
-            kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+            kern(
+                &inputs,
+                &mut outs,
+                &[N as u32; 2],
+                &[0i32; 2],
+                &ints,
+                &scalars,
+            );
         }
         (den_o, mx_o, my_o, nrg_o, pm, pfx, pfy, pe, pt)
     };
@@ -942,14 +1129,46 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
             .contribute(ch, &kin, &mut acc);
             let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
 
-            assert_eq!(out.0[c].to_bits(), expect.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
-            assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
-            assert_eq!(out.3[c].to_bits(), expect.nrg.to_bits(), "nrg at ({ii},{jj})");
-            assert_eq!(out.4[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
-            assert_eq!(out.5[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
-            assert_eq!(out.6[c].to_bits(), delta.force_delta[1].to_bits(), "fy at ({ii},{jj})");
-            assert_eq!(out.7[c].to_bits(), delta.energy_delta.to_bits(), "energy at ({ii},{jj})");
+            assert_eq!(
+                out.0[c].to_bits(),
+                expect.den.to_bits(),
+                "den at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.1[c].to_bits(),
+                expect.mom[0].to_bits(),
+                "mom0 at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.2[c].to_bits(),
+                expect.mom[1].to_bits(),
+                "mom1 at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.3[c].to_bits(),
+                expect.nrg.to_bits(),
+                "nrg at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.4[c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.5[c].to_bits(),
+                delta.force_delta[0].to_bits(),
+                "fx at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.6[c].to_bits(),
+                delta.force_delta[1].to_bits(),
+                "fy at ({ii},{jj})"
+            );
+            assert_eq!(
+                out.7[c].to_bits(),
+                delta.energy_delta.to_bits(),
+                "energy at ({ii},{jj})"
+            );
             let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
             assert_eq!(out.8[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
             if out.4[c] != 0.0 {
@@ -979,12 +1198,36 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
     let porous_p1 = run(porous, ir, 1.0);
     let drain_out = run(drain, drain_ir, 1.0);
     for c in 0..n2 {
-        assert_eq!(porous_p1.0[c].to_bits(), drain_out.0[c].to_bits(), "p=1 den at {c}");
-        assert_eq!(porous_p1.1[c].to_bits(), drain_out.1[c].to_bits(), "p=1 mom0 at {c}");
-        assert_eq!(porous_p1.2[c].to_bits(), drain_out.2[c].to_bits(), "p=1 mom1 at {c}");
-        assert_eq!(porous_p1.3[c].to_bits(), drain_out.3[c].to_bits(), "p=1 nrg at {c}");
-        assert_eq!(porous_p1.4[c].to_bits(), drain_out.4[c].to_bits(), "p=1 mass at {c}");
-        assert_eq!(porous_p1.8[c].to_bits(), drain_out.8[c].to_bits(), "p=1 torque at {c}");
+        assert_eq!(
+            porous_p1.0[c].to_bits(),
+            drain_out.0[c].to_bits(),
+            "p=1 den at {c}"
+        );
+        assert_eq!(
+            porous_p1.1[c].to_bits(),
+            drain_out.1[c].to_bits(),
+            "p=1 mom0 at {c}"
+        );
+        assert_eq!(
+            porous_p1.2[c].to_bits(),
+            drain_out.2[c].to_bits(),
+            "p=1 mom1 at {c}"
+        );
+        assert_eq!(
+            porous_p1.3[c].to_bits(),
+            drain_out.3[c].to_bits(),
+            "p=1 nrg at {c}"
+        );
+        assert_eq!(
+            porous_p1.4[c].to_bits(),
+            drain_out.4[c].to_bits(),
+            "p=1 mass at {c}"
+        );
+        assert_eq!(
+            porous_p1.8[c].to_bits(),
+            drain_out.8[c].to_bits(),
+            "p=1 torque at {c}"
+        );
     }
 }
 
@@ -1115,7 +1358,10 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
     for jj in 0..N {
         for ii in 0..N {
             let c = ii + jj * N;
-            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            let (rr, pp) = (
+                R_LO + (ii as f64 + 0.5) * DR,
+                PHI_LO + (jj as f64 + 0.5) * DPHI,
+            );
             den[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
             mx[c] = den[c] * 0.3 * (rr + pp).cos();
             my[c] = den[c] * -0.2 * (rr - 2.0 * pp).sin();
@@ -1163,18 +1409,28 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
             let inv_tau = CS / (C_DRAIN * min_w);
-            let kin =
-                BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::zeros(),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
             let mut acc = Relax::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
             assert_eq!(o[0][c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
-            assert_eq!(o[3][c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(
+                o[3][c].to_bits(),
+                delta.mass_delta.to_bits(),
+                "mass at ({ii},{jj})"
+            );
             if o[3][c] != 0.0 {
                 fired += 1;
             }
         }
     }
-    assert!(fired > 8, "the off-center mask never fired around the Cartesian point");
+    assert!(
+        fired > 8,
+        "the off-center mask never fired around the Cartesian point"
+    );
 }

@@ -14,7 +14,7 @@
 // with B = dt*curl(E), every E read cancels to the ZERO rational function. r is AFFINE; no sin.
 // =============================================================================
 
-use symbi_discretize::{rmhd_ct_curl_cyl_rphi_gv, Spacing};
+use symbi_discretize::{Spacing, rmhd_ct_curl_cyl_rphi_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
@@ -37,7 +37,11 @@ fn r_at(off: i64) -> Poly {
 fn two_rc() -> Poly {
     Poly::var("x_lo_0")
         .times(&Poly::constant(2))
-        .plus(&Poly::var("c_0").times(&Poly::var("dx_0")).times(&Poly::constant(2)))
+        .plus(
+            &Poly::var("c_0")
+                .times(&Poly::var("dx_0"))
+                .times(&Poly::constant(2)),
+        )
         .plus(&Poly::var("dx_0"))
 }
 
@@ -48,8 +52,16 @@ fn dx(ax: usize) -> Poly {
 fn curl(dir: usize) -> LinFormR {
     let (kernel, writes) = rmhd_ct_curl_cyl_rphi_gv(dir, &[Spacing::Uniform; 2]);
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
-    let lf = curl_only(LinFormR::extract_rat(&kernel.graph, writes[0].2, FIELDS, SCALARS));
-    assert!(!lf.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+    let lf = curl_only(LinFormR::extract_rat(
+        &kernel.graph,
+        writes[0].2,
+        FIELDS,
+        SCALARS,
+    ));
+    assert!(
+        !lf.is_zero(),
+        "dir {dir}: curl is empty — extractor saw no emf reads"
+    );
     lf
 }
 

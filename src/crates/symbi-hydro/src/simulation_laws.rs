@@ -530,8 +530,7 @@ mod tests {
     use super::*;
     use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
     use crate::source_spec::{
-        point_mass_gravity_sources, rigid_body_penalty_sources,
-        spherical_geometric_sources,
+        point_mass_gravity_sources, rigid_body_penalty_sources, spherical_geometric_sources,
     };
 
     #[test]
@@ -607,7 +606,11 @@ mod tests {
 
         // mom is targeted by THREE overlays (geometric + gravity + rigid) and must dedupe to one.
         let fields = sim.fields_with_overlays();
-        assert_eq!(fields.len(), 2, "mom + nrg are targeted (mom deduped across overlays)");
+        assert_eq!(
+            fields.len(),
+            2,
+            "mom + nrg are targeted (mom deduped across overlays)"
+        );
         assert!(fields.contains("mom"));
         assert!(fields.contains("nrg"));
     }

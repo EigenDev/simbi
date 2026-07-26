@@ -20,7 +20,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_boundary_dag;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 
 type DevSim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CudaSpace, UnifiedMemory>;
@@ -37,7 +37,11 @@ fn driven_inflow_prescribes_ghost_state_on_gpu() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
 
     let json = r#"{
         "kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
@@ -47,7 +51,8 @@ fn driven_inflow_prescribes_ghost_state_on_gpu() {
     let cfg = SourceConfig::from_json(json).expect("parse");
     let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("driven boundary");
 
-    let base = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(1.4, 0.4, &sim.geom.allocated);
+    let base =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(1.4, 0.4, &sim.geom.allocated);
     let (sub, id) = base.with_driven_boundary(built, cfg.params.clone());
     assert_eq!(id, 0);
 
@@ -62,8 +67,14 @@ fn driven_inflow_prescribes_ghost_state_on_gpu() {
             let v0 = *sim.fields.prim.vel[0].view().at(c);
             let v1 = *sim.fields.prim.vel[1].view().at(c);
             let p = *sim.fields.prim.pre_field().unwrap().view().at(c);
-            assert!(rho.is_finite() && (rho - 2.0).abs() < 1e-12, "gpu x_lo ghost rho = {rho}, want 2");
-            assert!((v0 - 1.0).abs() < 1e-12, "gpu x_lo ghost vel_0 = {v0}, want 1");
+            assert!(
+                rho.is_finite() && (rho - 2.0).abs() < 1e-12,
+                "gpu x_lo ghost rho = {rho}, want 2"
+            );
+            assert!(
+                (v0 - 1.0).abs() < 1e-12,
+                "gpu x_lo ghost vel_0 = {v0}, want 1"
+            );
             assert!(v1.abs() < 1e-12, "gpu x_lo ghost vel_1 = {v1}, want 0");
             assert!((p - 3.0).abs() < 1e-12, "gpu x_lo ghost pre = {p}, want 3");
             checked += 1;

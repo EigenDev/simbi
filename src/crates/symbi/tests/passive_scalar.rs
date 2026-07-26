@@ -106,13 +106,7 @@ fn dye_mass_is_conserved_on_a_periodic_domain() {
         vel: Tensor::new([0.4, -0.25 * (std::f64::consts::PI * y / L).cos()]),
         pre: 1.0,
     });
-    seed_chi(&sim, |x, y| {
-        if x * x + y * y < 0.25 {
-            1.0
-        } else {
-            0.0
-        }
-    });
+    seed_chi(&sim, |x, y| if x * x + y * y < 0.25 { 1.0 } else { 0.0 });
     let (_, _, total0) = chi_stats(&sim);
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
@@ -123,7 +117,10 @@ fn dye_mass_is_conserved_on_a_periodic_domain() {
         "dye mass drifted: {total0} -> {total1}"
     );
     // donor-cell upwinding is monotone: the dye stays inside its initial range.
-    assert!(lo > -1e-12 && hi < 1.0 + 1e-12, "dye left [0,1]: [{lo}, {hi}]");
+    assert!(
+        lo > -1e-12 && hi < 1.0 + 1e-12,
+        "dye left [0,1]: [{lo}, {hi}]"
+    );
 }
 
 #[test]
@@ -136,7 +133,10 @@ fn dye_front_advects_at_the_flow_speed() {
         vel: Tensor::new([V, 0.0]),
         pre: 1.0,
     });
-    seed_chi(&sim, |x, _| if (-0.5..0.0).contains(&x) { 1.0 } else { 0.0 });
+    seed_chi(
+        &sim,
+        |x, _| if (-0.5..0.0).contains(&x) { 1.0 } else { 0.0 },
+    );
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
     let t_final = 0.6;
@@ -159,7 +159,10 @@ fn dye_front_advects_at_the_flow_speed() {
         "dye center of mass at {com}, expected {expected}"
     );
     let (lo, hi, _) = chi_stats(&sim);
-    assert!(lo > -1e-12 && hi < 1.0 + 1e-12, "dye left [0,1]: [{lo}, {hi}]");
+    assert!(
+        lo > -1e-12 && hi < 1.0 + 1e-12,
+        "dye left [0,1]: [{lo}, {hi}]"
+    );
 }
 
 // the python driver ALWAYS wraps the sim in a single-level hierarchy (fofc
@@ -175,7 +178,10 @@ fn dye_advects_under_the_hierarchy_driver() {
         vel: Tensor::new([V, 0.0]),
         pre: 1.0,
     });
-    seed_chi(&sim, |x, _| if (-0.5..0.0).contains(&x) { 1.0 } else { 0.0 });
+    seed_chi(
+        &sim,
+        |x, _| if (-0.5..0.0).contains(&x) { 1.0 } else { 0.0 },
+    );
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
     let mut hier = Hierarchy::single(sim, sub);
@@ -201,8 +207,7 @@ fn dye_advects_under_the_hierarchy_driver() {
 }
 
 #[test]
-fn undyed_run_carries_no_scalar()
-{
+fn undyed_run_carries_no_scalar() {
     let dx = 2.0 * L / N as f64;
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N])
@@ -211,7 +216,11 @@ fn undyed_run_carries_no_scalar()
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build();
     assert!(!sim.has_passive_scalar());
     assert!(sim.fields.cons.chi_field().is_none());

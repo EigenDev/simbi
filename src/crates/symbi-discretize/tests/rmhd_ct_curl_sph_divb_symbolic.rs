@@ -28,14 +28,13 @@
 
 use std::collections::HashMap;
 
-use symbi_discretize::{rmhd_ct_curl_3d_dir_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, rmhd_ct_curl_3d_dir_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 // the curl reads exactly these edge-emf fields plus the in-place b; the scalars
 // are dt and the geometry grid scalars (x_lo_N / dx_N, in coordinate order).
 const FIELDS: &[&str] = &["e_p1", "e_p2", "b"];
-const SCALARS: &[&str] =
-    &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2"];
+const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2"];
 
 // strip the old-field `b` leaf: it reproduces div(B_old), invariant under the
 // update — not part of the "the update preserves div" proof.
@@ -73,7 +72,11 @@ fn r_at(off: i64) -> Poly {
 fn r_center() -> RatFun {
     // 2 r_c = 2 x_lo_0 + (2 c_0 + 1) dx_0.
     let mut num = Poly::var("x_lo_0").times(&Poly::constant(2));
-    num = num.plus(&Poly::var("c_0").times(&Poly::var("dx_0")).times(&Poly::constant(2)));
+    num = num.plus(
+        &Poly::var("c_0")
+            .times(&Poly::var("dx_0"))
+            .times(&Poly::constant(2)),
+    );
     num = num.plus(&Poly::var("dx_0"));
     RatFun::new(num, Poly::constant(2))
 }
@@ -100,7 +103,11 @@ fn dx(ax: usize) -> Poly {
 fn area(dir: usize) -> RatFun {
     match dir {
         0 => {
-            let num = r_at(0).times(&r_at(0)).times(&sin_center()).times(&dx(1)).times(&dx(2));
+            let num = r_at(0)
+                .times(&r_at(0))
+                .times(&sin_center())
+                .times(&dx(1))
+                .times(&dx(2));
             RatFun::new(num, Poly::constant(1))
         }
         1 => {
@@ -132,7 +139,10 @@ fn divb_sph_symbolic_telescoping() {
         // the dt*curl rational linear form (b stripped), keys -> physical axes.
         let raw = curl_only(LinFormR::extract_rat(&kernel.graph, root, FIELDS, SCALARS));
         let curl = raw.canonicalize_keys(&physical_rename(dir));
-        assert!(!curl.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+        assert!(
+            !curl.is_zero(),
+            "dir {dir}: curl is empty — extractor saw no emf reads"
+        );
 
         // weight the curl by the dir-face area at the cell, then form the
         // covariant forward difference along `dir`:
@@ -159,7 +169,10 @@ fn divb_sph_symbolic_telescoping() {
 #[test]
 fn divb_sph_symbolic_detects_residual() {
     let mut lf = LinFormR::default();
-    lf.add(&LinFormR::single_var(("e_0".into(), vec![0, 0, 0]), "x_lo_0"));
+    lf.add(&LinFormR::single_var(
+        ("e_0".into(), vec![0, 0, 0]),
+        "x_lo_0",
+    ));
     lf.add(&LinFormR::single_var(("e_0".into(), vec![1, 0, 0]), "dx_0"));
     assert!(!lf.is_zero(), "mismatched coefficients must NOT cancel");
     assert_eq!(lf.residual().len(), 2);

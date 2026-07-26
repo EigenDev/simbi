@@ -29,7 +29,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_user_source;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -59,9 +59,17 @@ fn sod(left_pressure: f64) -> Sim {
         .expect("sim")
         .set_initial(move |[x]| {
             if x < 0.5 {
-                Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: left_pressure }
+                Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.0]),
+                    pre: left_pressure,
+                }
             } else {
-                Prim { rho: 0.125, vel: Tensor::new([0.0]), pre: 0.1 }
+                Prim {
+                    rho: 0.125,
+                    vel: Tensor::new([0.0]),
+                    pre: 0.1,
+                }
             }
         })
         .build()
@@ -79,7 +87,13 @@ fn unrecoverable_sink_trips_the_persistent_freeze_halt() {
             .with_runtime_source(built, cfg.params.clone());
         let mut hier = Hierarchy::single(sim, kset);
         hier.evolve(0.2).expect("hierarchy evolve returned");
-        let rho0 = *hier.levels[0].state.fields.prim.rho.view().at([N as isize / 2]);
+        let rho0 = *hier.levels[0]
+            .state
+            .fields
+            .prim
+            .rho
+            .view()
+            .at([N as isize / 2]);
         panic!("no-halt: the poisoned run completed (mid rho = {rho0})");
     });
 
@@ -135,11 +149,8 @@ fn colliding_streams_conserve_with_zero_freezes() {
         }
         (d, m, e)
     };
-    let mut kset = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(
-        4.0 / 3.0,
-        0.4,
-        &sim.geom.allocated,
-    );
+    let mut kset =
+        RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(4.0 / 3.0, 0.4, &sim.geom.allocated);
     // the production default reconstruction: minmod-MC at theta = 1.5 (the plain
     // minmod theta = 1 is diffusive enough that the collision never overshoots
     // and the gate would not exercise the redo at all).
@@ -150,11 +161,29 @@ fn colliding_streams_conserve_with_zero_freezes() {
     let s = &hier.levels[0].state;
 
     let (fired, froze) = fofc_stats();
-    assert!(fired > 0, "FOFC never fired — the gate does not exercise the redo");
-    assert_eq!(froze, 0, "the recoverable collision froze {froze} cell-substages");
+    assert!(
+        fired > 0,
+        "FOFC never fired — the gate does not exercise the redo"
+    );
+    assert_eq!(
+        froze, 0,
+        "the recoverable collision froze {froze} cell-substages"
+    );
 
     let (d1, m1, e1) = totals(&s.fields.cons);
-    assert!(((d1 - d0) / d0).abs() < 1e-11, "D drifted: {:.3e}", (d1 - d0) / d0);
-    assert!(((m1 - m0) / d0).abs() < 1e-11, "S drifted: {:.3e}", (m1 - m0) / d0);
-    assert!(((e1 - e0) / e0).abs() < 1e-11, "tau drifted: {:.3e}", (e1 - e0) / e0);
+    assert!(
+        ((d1 - d0) / d0).abs() < 1e-11,
+        "D drifted: {:.3e}",
+        (d1 - d0) / d0
+    );
+    assert!(
+        ((m1 - m0) / d0).abs() < 1e-11,
+        "S drifted: {:.3e}",
+        (m1 - m0) / d0
+    );
+    assert!(
+        ((e1 - e0) / e0).abs() < 1e-11,
+        "tau drifted: {:.3e}",
+        (e1 - e0) / e0
+    );
 }

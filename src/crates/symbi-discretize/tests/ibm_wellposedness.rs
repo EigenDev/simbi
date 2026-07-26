@@ -77,7 +77,11 @@ fn gravity_is_conservative_grad_of_potential() {
             let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
             [d[0] / n, d[1] / n, d[2] / n]
         };
-        let pos = [bpos[0] + r * dir[0], bpos[1] + r * dir[1], bpos[2] + r * dir[2]];
+        let pos = [
+            bpos[0] + r * dir[0],
+            bpos[1] + r * dir[1],
+            bpos[2] + r * dir[2],
+        ];
 
         let rvec_f = [pos[0] - bpos[0], pos[1] - bpos[1], pos[2] - bpos[2]];
         let g = softened_gravity(rvec_f, mass, soft);
@@ -85,7 +89,11 @@ fn gravity_is_conservative_grad_of_potential() {
         for j in 0..3 {
             // seed d/d pos_j via the Dual carrier; rvec_i = pos_i - bpos_i.
             let rvec: [Dual<f64>; 3] = std::array::from_fn(|i| {
-                let p = if i == j { Dual::variable(pos[i]) } else { Dual::constant(pos[i]) };
+                let p = if i == j {
+                    Dual::variable(pos[i])
+                } else {
+                    Dual::constant(pos[i])
+                };
                 p - Dual::constant(bpos[i])
             });
             let phi = softened_potential(rvec, Dual::constant(mass), Dual::constant(soft));
@@ -97,7 +105,8 @@ fn gravity_is_conservative_grad_of_potential() {
             assert!(
                 (g[j] + dphi_dxj).abs() <= 1e-11 * scale,
                 "g not conservative: g_{j} = {}, -dphi/dx_{j} = {} (mass={mass}, soft={soft}, r={r})",
-                g[j], -dphi_dxj,
+                g[j],
+                -dphi_dxj,
             );
         }
     });
@@ -111,7 +120,11 @@ fn gravity_is_curl_free() {
     // d g_i / d x_k via autodiff on the gravity itself.
     let dg = |pos: [f64; 3], mass: f64, soft: f64, i: usize, k: usize| -> f64 {
         let rvec: [Dual<f64>; 3] = std::array::from_fn(|a| {
-            let p = if a == k { Dual::variable(pos[a]) } else { Dual::constant(pos[a]) };
+            let p = if a == k {
+                Dual::variable(pos[a])
+            } else {
+                Dual::constant(pos[a])
+            };
             p - Dual::constant(bpos[a])
         });
         softened_gravity(rvec, Dual::constant(mass), Dual::constant(soft))[i].tangent
@@ -145,7 +158,10 @@ fn drain_factor_is_a_contraction() {
                         let rate = drain_rate(r_mag, r_mask, min_w, sink, cs);
                         assert!(rate >= 0.0, "drain rate negative: {rate}");
                         // the mollified mask is bounded: rate <= min(sink, cs/w) since chi in (0,1).
-                        assert!(rate <= sink.min(cs / min_w) + 1e-12, "rate exceeds the mask cap");
+                        assert!(
+                            rate <= sink.min(cs / min_w) + 1e-12,
+                            "rate exceeds the mask cap"
+                        );
                         // THEOREM 2: den -> den f lands in [0, den] for ANY dt (no CFL on the sink) —
                         // nonnegative (positivity-preserving) and non-expansive.
                         for &dt in &[0.0_f64, 1e-6, 0.03, 5.0, 1e6] {

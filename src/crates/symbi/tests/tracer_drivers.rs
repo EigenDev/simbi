@@ -136,14 +136,9 @@ fn continuous_tracer_concentration_tracks_gas_mass() {
     for order in [ItoOrder::Two, ItoOrder::Three] {
         let mut sim = build();
         let seed = seed_mass_weighted(&sim, PARTICLES);
-        sim.continuous_tracers =
-            Some(ContinuousTracerSet::from_discrete(&seed, order).unwrap());
+        sim.continuous_tracers = Some(ContinuousTracerSet::from_discrete(&seed, order).unwrap());
         let kernels =
-            AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(
-                GAMMA,
-                0.4,
-                &sim.geom.allocated,
-            );
+            AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
 
         evolve(&mut sim, &kernels, T).unwrap();
 
@@ -208,11 +203,8 @@ fn tracing_is_numerically_inert_to_the_hydro_solution() {
         0.4,
         &untraced.geom.allocated,
     );
-    let traced_kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(
-        GAMMA,
-        0.4,
-        &traced.geom.allocated,
-    );
+    let traced_kernels =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &traced.geom.allocated);
     evolve(&mut untraced, &untraced_kernels, T).expect("untraced drive");
     evolve(&mut traced, &traced_kernels, T).expect("traced drive");
 

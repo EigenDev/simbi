@@ -7,16 +7,17 @@
 //   - mhd_init_bcell_from_bface  — seed cell B from face-centered B (MHD IC setup)
 // =============================================================================
 
+use crate::state::*;
 use symbi_algebra::Domain;
 use symbi_xpu::MemorySpace;
-use crate::state::*;
 
 /// scan the c2p error field and return the bitwise OR of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.
 pub fn scan_c2p_errors<const D: usize, const DOF: usize, Mem: MemorySpace>(
     sim: &FieldStore<D, DOF, Mem, f64>,
 ) -> symbi_hydro::c2p_result::ErrorCode
-where Mem: Sync,
+where
+    Mem: Sync,
 {
     let mut combined = 0u8;
     for coord in sim.geom.interior.iter() {
@@ -43,7 +44,8 @@ pub fn mhd_init_bface_from_bcell<const D: usize, const DOF: usize, Mem: MemorySp
             mhd.bface[dd].view_mut().set(coord, 0.5 * (bl + br));
         }
     }
-    mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+    mhd.bface_initialized
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// initialize cell-centered B from face-centered B via arithmetic average.
@@ -63,5 +65,6 @@ pub fn mhd_init_bcell_from_bface<const D: usize, const DOF: usize, Mem: MemorySp
             mhd.bcell[dd].view_mut().set(coord, 0.5 * (bl + br));
         }
     }
-    mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+    mhd.bface_initialized
+        .store(true, std::sync::atomic::Ordering::Relaxed);
 }

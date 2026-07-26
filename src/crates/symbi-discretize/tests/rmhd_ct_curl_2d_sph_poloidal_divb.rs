@@ -27,7 +27,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gv, Spacing};
+use symbi_discretize::{Spacing, rmhd_ct_curl_2d_sph_gv};
 
 const M: usize = 8; // buffer extent per axis (r, theta)
 const R0: f64 = 1.0;
@@ -85,7 +85,13 @@ fn run_curl(b_in: &[Vec<f64>; 2], ez: &[f64], dt: f64) -> [Vec<f64>; 2] {
             .compute_window([0, 0], [M - 1, M - 1])
             .field_with("b", move |c| bvec[idx2(c[0], c[1])])
             .field_with("ez", move |c| ezv[idx2(c[0], c[1])])
-            .scalars(&[("dt", dt), ("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", T0), ("dx_1", DTH)])
+            .scalars(&[
+                ("dt", dt),
+                ("x_lo_0", R0),
+                ("dx_0", DR),
+                ("x_lo_1", T0),
+                ("dx_1", DTH),
+            ])
             .run();
         new_b[dir] = out.values("b_new").to_vec();
     }
@@ -127,7 +133,10 @@ fn ct_curl_2d_sph_poloidal_preserves_div_b() {
             max_b = max_b.max(at(&b[0], i, j).abs()).max(at(&b[1], i, j).abs());
         }
     }
-    assert!(max_b > 1e-2, "poloidal init is ~zero ({max_b:e}) — test would be vacuously div-free");
+    assert!(
+        max_b > 1e-2,
+        "poloidal init is ~zero ({max_b:e}) — test would be vacuously div-free"
+    );
 
     // sanity: the init is area-weighted divergence-free to machine precision (div(curl)=0).
     let mut max_init = 0.0_f64;
@@ -136,7 +145,10 @@ fn ct_curl_2d_sph_poloidal_preserves_div_b() {
             max_init = max_init.max(div_b(&b[0], &b[1], i, j).abs());
         }
     }
-    assert!(max_init < 1e-10, "init area-weighted div(B) not zero: max = {max_init:e}");
+    assert!(
+        max_init < 1e-10,
+        "init area-weighted div(B) not zero: max = {max_init:e}"
+    );
 
     // evolve one CT step by curl(E_phi).
     let b2 = run_curl(&b, &e, DT);
@@ -152,8 +164,14 @@ fn ct_curl_2d_sph_poloidal_preserves_div_b() {
             max_change = max_change.max((after - before).abs());
         }
     }
-    assert!(max_after < 1e-10, "post-update poloidal div(B) not zero: max = {max_after:e}");
-    assert!(max_change < 1e-11, "poloidal div(B) changed under CT: max delta = {max_change:e}");
+    assert!(
+        max_after < 1e-10,
+        "post-update poloidal div(B) not zero: max = {max_after:e}"
+    );
+    assert!(
+        max_change < 1e-11,
+        "poloidal div(B) changed under CT: max delta = {max_change:e}"
+    );
     eprintln!(
         "2d spherical poloidal CT div(B): |B|={max_b:e} init={max_init:e} after={max_after:e} change={max_change:e}"
     );

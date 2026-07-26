@@ -92,7 +92,12 @@ fn lapse_shift_and_spatial_metric_agree_at_zero_spin() {
         for ii in 0..3 {
             for jj in 0..3 {
                 close(gk[(ii, jj)], gs[(ii, jj)], &format!("gamma[{ii}{jj}]"), p);
-                close(ik[(ii, jj)], is[(ii, jj)], &format!("gamma_inv[{ii}{jj}]"), p);
+                close(
+                    ik[(ii, jj)],
+                    is[(ii, jj)],
+                    &format!("gamma_inv[{ii}{jj}]"),
+                    p,
+                );
             }
         }
         close(

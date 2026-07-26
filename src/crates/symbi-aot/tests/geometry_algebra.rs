@@ -21,7 +21,10 @@ const PI: f64 = std::f64::consts::PI;
 
 fn close(got: f64, want: f64, what: &str, i: usize) {
     let rel = (got - want).abs() / want.abs().max(1.0);
-    assert!(rel < 1e-12, "{what} cell {i}: got {got} want {want} (rel {rel:e})");
+    assert!(
+        rel < 1e-12,
+        "{what} cell {i}: got {got} want {want} (rel {rel:e})"
+    );
 }
 
 // the analytic 1D spherical factors for a radial shell [r_lo, r_hi]: the
@@ -44,9 +47,15 @@ fn cartesian_uniform_1d_matches_analytic() {
     let (start, dx) = (0.5_f64, 0.1_f64);
     let (mut iv, mut al, mut ah, mut ct) = (vec![0.0; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     NamedKernel::new("geom_cart_unif_1d")
-        .output("inv_volume", &mut iv).output("area_lo_0", &mut al)
-        .output("area_hi_0", &mut ah).output("centroid_0", &mut ct)
-        .grid(&[n as u32]).dom_lo(&[0]).scalar("x_lo_0", start).scalar("dx_0", dx).run();
+        .output("inv_volume", &mut iv)
+        .output("area_lo_0", &mut al)
+        .output("area_hi_0", &mut ah)
+        .output("centroid_0", &mut ct)
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("x_lo_0", start)
+        .scalar("dx_0", dx)
+        .run();
     for i in 0..n {
         let lo = start + i as f64 * dx;
         let hi = lo + dx;
@@ -63,9 +72,15 @@ fn spherical_uniform_1d_matches_analytic() {
     let (start, dx) = (1.0_f64, 0.1_f64); // r in [1.0, 1.8], away from r=0
     let (mut iv, mut al, mut ah, mut ct) = (vec![0.0; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     NamedKernel::new("geom_sph_unif_1d")
-        .output("inv_volume", &mut iv).output("area_lo_0", &mut al)
-        .output("area_hi_0", &mut ah).output("centroid_0", &mut ct)
-        .grid(&[n as u32]).dom_lo(&[0]).scalar("x_lo_0", start).scalar("dx_0", dx).run();
+        .output("inv_volume", &mut iv)
+        .output("area_lo_0", &mut al)
+        .output("area_hi_0", &mut ah)
+        .output("centroid_0", &mut ct)
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("x_lo_0", start)
+        .scalar("dx_0", dx)
+        .run();
     for i in 0..n {
         let r_lo = start + i as f64 * dx;
         let r_hi = r_lo + dx;
@@ -76,7 +91,10 @@ fn spherical_uniform_1d_matches_analytic() {
         close(ct[i], ect, "centroid", i);
         // the volume-weighted centroid sits ABOVE the arithmetic midpoint (more
         // volume at larger r) — the whole point of distinguishing them.
-        assert!(ct[i] > 0.5 * (r_lo + r_hi), "centroid not volume-weighted at cell {i}");
+        assert!(
+            ct[i] > 0.5 * (r_lo + r_hi),
+            "centroid not volume-weighted at cell {i}"
+        );
     }
 }
 
@@ -87,10 +105,16 @@ fn spherical_log_1d_matches_analytic() {
     let (start, slope) = (1.0_f64, 0.05_f64);
     let (mut iv, mut al, mut ah, mut ct) = (vec![0.0; n], vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     NamedKernel::new("geom_sph_log_1d")
-        .output("inv_volume", &mut iv).output("area_lo_0", &mut al)
-        .output("area_hi_0", &mut ah).output("centroid_0", &mut ct)
-        .grid(&[n as u32]).dom_lo(&[0]).scalar("x_lo_0", start).scalar("dx_0", slope)
-        .scalar("map_kind_0", 1.0).run();
+        .output("inv_volume", &mut iv)
+        .output("area_lo_0", &mut al)
+        .output("area_hi_0", &mut ah)
+        .output("centroid_0", &mut ct)
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("x_lo_0", start)
+        .scalar("dx_0", slope)
+        .scalar("map_kind_0", 1.0)
+        .run();
     for i in 0..n {
         let r_lo = start * 10f64.powf(i as f64 * slope);
         let r_hi = start * 10f64.powf((i as f64 + 1.0) * slope);
@@ -102,8 +126,12 @@ fn spherical_log_1d_matches_analytic() {
     }
     // log zones grow: widths increase with i (geometric spacing actually applied).
     let w0 = (start * 10f64.powf(slope)) - start;
-    let w_last = start * 10f64.powf(n as f64 * slope) - start * 10f64.powf((n as f64 - 1.0) * slope);
-    assert!(w_last > w0 * 1.5, "log spacing not applied: w0 {w0} w_last {w_last}");
+    let w_last =
+        start * 10f64.powf(n as f64 * slope) - start * 10f64.powf((n as f64 - 1.0) * slope);
+    assert!(
+        w_last > w0 * 1.5,
+        "log spacing not applied: w0 {w0} w_last {w_last}"
+    );
 }
 
 // the analytic AREA-WEIGHTED divergence. the spherical mass-law godunov computes
@@ -120,20 +148,31 @@ fn spherical_weighted_divergence_matches_analytic() {
     let mass_flux = vec![1.0_f64; sz]; // uniform flux F = 1
     let mut rho_new = vec![0.0_f64; sz];
     NamedKernel::new("godunov_mass_sph_1d")
-        .input("cons.den", &rho).input("mass_flux[0]", &mass_flux)
+        .input("cons.den", &rho)
+        .input("mass_flux[0]", &mass_flux)
         .output("cons.den_new", &mut rho_new)
-        .grid(&[n as u32]).dom_lo(&[0])
-        .scalar("dt", 1.0).scalar("x_lo_0", x_lo).scalar("dx_0", dx).run();
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("dt", 1.0)
+        .scalar("x_lo_0", x_lo)
+        .scalar("dx_0", dx)
+        .run();
     let mut max_div = 0.0_f64;
     for i in 0..n {
         let r_lo = x_lo + i as f64 * dx;
         let r_hi = r_lo + dx;
         let div = 3.0 * (r_hi.powi(2) - r_lo.powi(2)) / (r_hi.powi(3) - r_lo.powi(3));
         close(rho_new[i], -div, "rho_new = -div", i);
-        assert!(div > 0.0, "spherical div of uniform flux must be positive (geometric) at {i}");
+        assert!(
+            div > 0.0,
+            "spherical div of uniform flux must be positive (geometric) at {i}"
+        );
         max_div = max_div.max(div);
     }
-    assert!(max_div > 0.1, "divergence implausibly small — area weighting not applied");
+    assert!(
+        max_div > 0.1,
+        "divergence implausibly small — area weighting not applied"
+    );
 }
 
 // exact discrete HYDROSTATIC BALANCE. the spherical adiabatic godunov_euler with
@@ -163,19 +202,42 @@ fn spherical_hydrostatic_balance_exact() {
     // (u_n, flux) pair, then the in-place cons outputs. scalar order [dt, a0, ac, x_lo, dx].
     let (u_n_den, u_n_mom, u_n_nrg) = (den.clone(), mom.clone(), nrg.clone());
     NamedKernel::new("adiabatic_godunov_stage_sph_1d")
-        .input("prim.pre", &pre).input("u_n.den", &u_n_den).input("mass_flux[0]", &mass_flux)
-        .input("u_n.mom_0", &u_n_mom).input("mom_flux_0[0]", &mom_flux)
-        .input("u_n.nrg", &u_n_nrg).input("nrg_flux[0]", &nrg_flux)
-        .output("cons.den", &mut den).output("cons.mom_0", &mut mom).output("cons.nrg", &mut nrg)
-        .grid(&[n as u32]).dom_lo(&[0])
-        .scalar("dt", dt).scalar("a0", 0.0).scalar("ac", 1.0).scalar("x_lo_0", x_lo).scalar("dx_0", dx)
+        .input("prim.pre", &pre)
+        .input("u_n.den", &u_n_den)
+        .input("mass_flux[0]", &mass_flux)
+        .input("u_n.mom_0", &u_n_mom)
+        .input("mom_flux_0[0]", &mom_flux)
+        .input("u_n.nrg", &u_n_nrg)
+        .input("nrg_flux[0]", &nrg_flux)
+        .output("cons.den", &mut den)
+        .output("cons.mom_0", &mut mom)
+        .output("cons.nrg", &mut nrg)
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("dt", dt)
+        .scalar("a0", 0.0)
+        .scalar("ac", 1.0)
+        .scalar("x_lo_0", x_lo)
+        .scalar("dx_0", dx)
         .run();
 
     for i in 0..n {
         // bit-exact: the geometric source cancels the geometric pressure divergence.
-        assert_eq!(mom[i], 0.0, "HSE broken: cons.mom_0[{i}] = {} (should stay exactly 0)", mom[i]);
-        assert_eq!(den[i], 1.0, "density drifted at {i}: {} (mass flux is 0)", den[i]);
-        assert_eq!(nrg[i], 5.0, "energy drifted at {i}: {} (nrg flux is 0)", nrg[i]);
+        assert_eq!(
+            mom[i], 0.0,
+            "HSE broken: cons.mom_0[{i}] = {} (should stay exactly 0)",
+            mom[i]
+        );
+        assert_eq!(
+            den[i], 1.0,
+            "density drifted at {i}: {} (mass flux is 0)",
+            den[i]
+        );
+        assert_eq!(
+            nrg[i], 5.0,
+            "energy drifted at {i}: {} (nrg flux is 0)",
+            nrg[i]
+        );
     }
 }
 
@@ -194,11 +256,17 @@ fn log_spherical_cfl_uses_per_cell_widths() {
     let pre = vec![p; n];
     let mut lambda = vec![0.0_f64; n];
     NamedKernel::new("iso_wave_speed_map_sph_log_1d")
-        .input("prim.rho", &rho_v).input("prim.vel[0]", &vel).input("prim.pre", &pre)
+        .input("prim.rho", &rho_v)
+        .input("prim.vel[0]", &vel)
+        .input("prim.pre", &pre)
         .output("scratch", &mut lambda)
-        .grid(&[n as u32]).dom_lo(&[0])
-        .scalar("gamma", gamma).scalar("x_lo_0", start).scalar("dx_0", slope)
-        .scalar("map_kind_0", 1.0).run();
+        .grid(&[n as u32])
+        .dom_lo(&[0])
+        .scalar("gamma", gamma)
+        .scalar("x_lo_0", start)
+        .scalar("dx_0", slope)
+        .scalar("map_kind_0", 1.0)
+        .run();
     let mut prev = f64::INFINITY;
     for i in 0..n {
         let r_lo = start * 10f64.powf(i as f64 * slope);
@@ -206,7 +274,10 @@ fn log_spherical_cfl_uses_per_cell_widths() {
         let dr_i = r_hi - r_lo;
         close(lambda[i], cs / dr_i, "lambda = cs/dr_i", i); // h_r = 1
         // log zones grow with i -> the per-cell lambda strictly decreases.
-        assert!(lambda[i] < prev, "lambda not per-cell (should shrink as dr grows) at {i}");
+        assert!(
+            lambda[i] < prev,
+            "lambda not per-cell (should shrink as dr grows) at {i}"
+        );
         prev = lambda[i];
     }
 }
@@ -234,12 +305,18 @@ fn spherical_inertial_source_matches_analytic() {
         let mut s1 = vec![0.0_f64; nr];
         // 2D grid nr x 1 (single theta cell); buffers are 1D-flat (trailing axis = 1).
         NamedKernel::new("inertial_momentum_sph_2d")
-            .input("cons.mom_0", &mom0).input("cons.mom_1", &mom1)
-            .input("prim.vel[0]", &v0).input("prim.vel[1]", &v1)
-            .output("s_0", &mut s0).output("s_1", &mut s1)
-            .grid(&[nr as u32, 1]).dom_lo(&[0, 0])
-            .scalar("x_lo_0", x_lo_r).scalar("dx_0", dr)
-            .scalar("x_lo_1", 0.0).scalar("dx_1", std::f64::consts::PI)
+            .input("cons.mom_0", &mom0)
+            .input("cons.mom_1", &mom1)
+            .input("prim.vel[0]", &v0)
+            .input("prim.vel[1]", &v1)
+            .output("s_0", &mut s0)
+            .output("s_1", &mut s1)
+            .grid(&[nr as u32, 1])
+            .dom_lo(&[0, 0])
+            .scalar("x_lo_0", x_lo_r)
+            .scalar("dx_0", dr)
+            .scalar("x_lo_1", 0.0)
+            .scalar("dx_1", std::f64::consts::PI)
             .run();
         (s0, s1)
     };
@@ -258,9 +335,22 @@ fn spherical_inertial_source_matches_analytic() {
             let r_h = r_l + dr;
             // volume-weighted radial centroid.
             let r_c = 0.75 * (r_h.powi(4) - r_l.powi(4)) / (r_h.powi(3) - r_l.powi(3));
-            close(s0[i], factor * vt * vt / r_c, &format!("{label}: s_0 centrifugal"), i);
-            close(s1[i], -factor * vr * vt / r_c, &format!("{label}: s_1 coriolis"), i);
-            assert!(s0[i] > 0.0, "{label}: centrifugal must push outward (+) at {i}");
+            close(
+                s0[i],
+                factor * vt * vt / r_c,
+                &format!("{label}: s_0 centrifugal"),
+                i,
+            );
+            close(
+                s1[i],
+                -factor * vr * vt / r_c,
+                &format!("{label}: s_1 coriolis"),
+                i,
+            );
+            assert!(
+                s0[i] > 0.0,
+                "{label}: centrifugal must push outward (+) at {i}"
+            );
         }
     }
 }
@@ -286,12 +376,26 @@ fn rmhd_spherical_source_radial_matches_analytic() {
     // 3D grid nr x 1 x 1; buffers 1D-flat (theta/phi axes length 1). scalar order
     // [x_lo_0, dx_0, x_lo_1, dx_1, x_lo_2, dx_2, gamma] — all routed by name.
     NamedKernel::new("rmhd_geometric_source_sph_3d")
-        .input("prim.rho", &den).input("prim.vel[0]", &v0).input("prim.vel[1]", &v1).input("prim.vel[2]", &v2)
-        .input("prim.pre", &pre).input("prim.mag[0]", &b0).input("prim.mag[1]", &b1).input("prim.mag[2]", &b2)
-        .output("s_0", &mut s0).output("s_1", &mut s1).output("s_2", &mut s2)
-        .grid(&[nr as u32, 1, 1]).dom_lo(&[0, 0, 0])
-        .scalar("x_lo_0", r_lo).scalar("dx_0", dr).scalar("x_lo_1", 0.5).scalar("dx_1", 0.3)
-        .scalar("x_lo_2", 0.0).scalar("dx_2", 0.4).scalar("gamma", gamma)
+        .input("prim.rho", &den)
+        .input("prim.vel[0]", &v0)
+        .input("prim.vel[1]", &v1)
+        .input("prim.vel[2]", &v2)
+        .input("prim.pre", &pre)
+        .input("prim.mag[0]", &b0)
+        .input("prim.mag[1]", &b1)
+        .input("prim.mag[2]", &b2)
+        .output("s_0", &mut s0)
+        .output("s_1", &mut s1)
+        .output("s_2", &mut s2)
+        .grid(&[nr as u32, 1, 1])
+        .dom_lo(&[0, 0, 0])
+        .scalar("x_lo_0", r_lo)
+        .scalar("dx_0", dr)
+        .scalar("x_lo_1", 0.5)
+        .scalar("dx_1", 0.3)
+        .scalar("x_lo_2", 0.0)
+        .scalar("dx_2", 0.4)
+        .scalar("gamma", gamma)
         .run();
 
     // the RMHD source quantities (rmhd_side closed forms).
@@ -314,7 +418,12 @@ fn rmhd_spherical_source_radial_matches_analytic() {
         let r_c = 0.75 * (r_h.powi(4) - r_l.powi(4)) / (r_h.powi(3) - r_l.powi(3));
         // gas inertial wgam2(vt^2+vp^2)/r_c  -  magnetic tension (bmu_t^2+bmu_p^2)/r_c.
         let want = pre_src + (wgam2 * (vt * vt + vp * vp) - (bmu_t * bmu_t + bmu_p * bmu_p)) / r_c;
-        close(s0[i], want, "RMHD radial source = pressure + gas inertial + magnetic tension", i);
+        close(
+            s0[i],
+            want,
+            "RMHD radial source = pressure + gas inertial + magnetic tension",
+            i,
+        );
     }
 }
 
@@ -340,12 +449,26 @@ fn rmhd_cylindrical_source_matches_analytic() {
     // scalar order [x_lo_0, dx_0, x_lo_1, dx_1, x_lo_2, dx_2, gamma]; phi/z axes length 1
     // (their extents cancel in the source area ratios) — all bound by name.
     NamedKernel::new("rmhd_geometric_source_cyl_3d")
-        .input("prim.rho", &den).input("prim.vel[0]", &v0).input("prim.vel[1]", &v1).input("prim.vel[2]", &v2)
-        .input("prim.pre", &pre).input("prim.mag[0]", &b0).input("prim.mag[1]", &b1).input("prim.mag[2]", &b2)
-        .output("s_0", &mut s0).output("s_1", &mut s1).output("s_2", &mut s2)
-        .grid(&[nr as u32, 1, 1]).dom_lo(&[0, 0, 0])
-        .scalar("x_lo_0", r_lo).scalar("dx_0", dr).scalar("x_lo_1", 0.5).scalar("dx_1", 0.3)
-        .scalar("x_lo_2", 0.0).scalar("dx_2", 0.4).scalar("gamma", gamma)
+        .input("prim.rho", &den)
+        .input("prim.vel[0]", &v0)
+        .input("prim.vel[1]", &v1)
+        .input("prim.vel[2]", &v2)
+        .input("prim.pre", &pre)
+        .input("prim.mag[0]", &b0)
+        .input("prim.mag[1]", &b1)
+        .input("prim.mag[2]", &b2)
+        .output("s_0", &mut s0)
+        .output("s_1", &mut s1)
+        .output("s_2", &mut s2)
+        .grid(&[nr as u32, 1, 1])
+        .dom_lo(&[0, 0, 0])
+        .scalar("x_lo_0", r_lo)
+        .scalar("dx_0", dr)
+        .scalar("x_lo_1", 0.5)
+        .scalar("dx_1", 0.3)
+        .scalar("x_lo_2", 0.0)
+        .scalar("dx_2", 0.4)
+        .scalar("gamma", gamma)
         .run();
 
     // RMHD source quantities (same closed forms as spherical — they're coordinate-independent).
@@ -372,9 +495,18 @@ fn rmhd_cylindrical_source_matches_analytic() {
         let want_r = pre_src + (wgam2 * vphi * vphi - bmu_phi * bmu_phi) / r_c;
         // S_phi = (-gas coriolis wgam2 v_r v_phi + magnetic bmu_r bmu_phi)/r_c (no phi pressure: uniform).
         let want_phi = (-wgam2 * vr * vphi + bmu_r * bmu_phi) / r_c;
-        close(s0[i], want_r, "RMHD cyl S_r = pressure + centrifugal - magnetic tension", i);
+        close(
+            s0[i],
+            want_r,
+            "RMHD cyl S_r = pressure + centrifugal - magnetic tension",
+            i,
+        );
         close(s1[i], want_phi, "RMHD cyl S_phi = -coriolis + magnetic", i);
         // S_z: z carries no inertial/tension; with uniform ptot the z pressure faces cancel.
-        assert!(s2[i].abs() < 1e-13, "RMHD cyl S_z must vanish (no z geometric source), got {}", s2[i]);
+        assert!(
+            s2[i].abs() < 1e-13,
+            "RMHD cyl S_z must vanish (no z geometric source), got {}",
+            s2[i]
+        );
     }
 }

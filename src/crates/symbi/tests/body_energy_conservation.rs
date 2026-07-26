@@ -44,17 +44,36 @@ fn build() -> Sim {
         .cfl(0.3)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            // a free (two-way) no-slip spinner: the tangential drag drives the reaction torque that
-            // spins it down, converting body rotational KE into gas energy.
-            Body::rigid_sphere(0, Tensor::new([0.0, 0.0]), Tensor::new([0.0, 0.0]), 1.0, 0.3, INERTIA, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
+        .with_bodies(
+            BodyCollection::new().add(
+                // a free (two-way) no-slip spinner: the tangential drag drives the reaction torque that
+                // spins it down, converting body rotational KE into gas energy.
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.0, 0.0]),
+                    Tensor::new([0.0, 0.0]),
+                    1.0,
+                    0.3,
+                    INERTIA,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 50.0,
+                    k_eta_t: 50.0,
+                })
                 .with_spin(OMEGA)
                 .with_two_way_coupling(true),
-        ));
-    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], 0.3));
+            ),
+        );
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], 0.3));
     sim
 }
 
@@ -78,8 +97,14 @@ fn two_way_body_ke_change_balances_gas_energy() {
     let dke = ke1 - ke0;
 
     // non-vacuous: the spinner actually spun down (lost rotational KE) and the gas gained energy.
-    assert!(dke < -1e-8, "the two-way spinner did not lose KE ({dke:e}); test vacuous");
-    assert!(gas_energy_change < 0.0, "the gas did not gain energy ({gas_energy_change:e})");
+    assert!(
+        dke < -1e-8,
+        "the two-way spinner did not lose KE ({dke:e}); test vacuous"
+    );
+    assert!(
+        gas_energy_change < 0.0,
+        "the gas did not gain energy ({gas_energy_change:e})"
+    );
 
     // CONSERVATION: the body's mechanical KE change equals the gas total-energy change. energy_delta
     // is (nrg_old - nrg_new), NEGATIVE when the gas gains, so it matches d(KE_body) < 0. the

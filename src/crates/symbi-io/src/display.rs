@@ -25,8 +25,18 @@ impl<'a, 'b> fmt::Display for TreeDisplay<'a, 'b> {
 }
 
 fn render(f: &mut fmt::Formatter<'_>, t: &Tree<'_>, prefix: &str, is_last: bool) -> fmt::Result {
-    let connector = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
-    let name = if t.name.is_empty() { "<root>" } else { t.name.as_str() };
+    let connector = if prefix.is_empty() {
+        ""
+    } else if is_last {
+        "└── "
+    } else {
+        "├── "
+    };
+    let name = if t.name.is_empty() {
+        "<root>"
+    } else {
+        t.name.as_str()
+    };
     writeln!(f, "{prefix}{connector}{name}/")?;
 
     // attribute + dataset count summary on a single line per group when
@@ -34,15 +44,22 @@ fn render(f: &mut fmt::Formatter<'_>, t: &Tree<'_>, prefix: &str, is_last: bool)
     let child_prefix = format!("{prefix}{}", if is_last { "    " } else { "│   " });
 
     for (i, (k, v)) in t.attrs.iter().enumerate() {
-        let is_last_attr = i + 1 == t.attrs.len()
-            && t.datasets.is_empty() && t.groups.is_empty();
-        let c = if is_last_attr { "└── " } else { "├── " };
+        let is_last_attr = i + 1 == t.attrs.len() && t.datasets.is_empty() && t.groups.is_empty();
+        let c = if is_last_attr {
+            "└── "
+        } else {
+            "├── "
+        };
         writeln!(f, "{child_prefix}{c}@{k} = {}", render_attr(v))?;
     }
 
     for (i, d) in t.datasets.iter().enumerate() {
         let is_last_ds = i + 1 == t.datasets.len() && t.groups.is_empty();
-        let c = if is_last_ds { "└── " } else { "├── " };
+        let c = if is_last_ds {
+            "└── "
+        } else {
+            "├── "
+        };
         writeln!(f, "{child_prefix}{c}{}", render_dataset(d))?;
     }
 
@@ -56,18 +73,24 @@ fn render(f: &mut fmt::Formatter<'_>, t: &Tree<'_>, prefix: &str, is_last: bool)
 fn render_attr(a: &Attr) -> String {
     match a {
         Attr::Bool(v) => format!("{v} : bool"),
-        Attr::I64(v)  => format!("{v} : i64"),
-        Attr::U64(v)  => format!("{v} : u64"),
-        Attr::F64(v)  => format!("{v:.6e} : f64"),
-        Attr::Str(s)  => format!("{s:?} : str"),
+        Attr::I64(v) => format!("{v} : i64"),
+        Attr::U64(v) => format!("{v} : u64"),
+        Attr::F64(v) => format!("{v:.6e} : f64"),
+        Attr::Str(s) => format!("{s:?} : str"),
     }
 }
 
 fn render_dataset(d: &Dataset<'_>) -> String {
     let nelems: usize = d.shape.iter().product();
     let bytes = nelems * d.data.dtype().size_bytes();
-    format!("{}: {:?}{} = {} elements ({} bytes)",
-        d.name, d.data.dtype(), shape_str(&d.shape), nelems, bytes)
+    format!(
+        "{}: {:?}{} = {} elements ({} bytes)",
+        d.name,
+        d.data.dtype(),
+        shape_str(&d.shape),
+        nelems,
+        bytes
+    )
 }
 
 fn shape_str(shape: &[usize]) -> String {
@@ -103,20 +126,37 @@ pub fn display_tree_buf<'a>(tree: &'a TreeBuf, _prefix: &str) -> TreeBufDisplay<
 }
 
 fn render_buf(f: &mut fmt::Formatter<'_>, t: &TreeBuf, prefix: &str, is_last: bool) -> fmt::Result {
-    let connector = if prefix.is_empty() { "" } else if is_last { "└── " } else { "├── " };
-    let name = if t.name.is_empty() { "<root>" } else { t.name.as_str() };
+    let connector = if prefix.is_empty() {
+        ""
+    } else if is_last {
+        "└── "
+    } else {
+        "├── "
+    };
+    let name = if t.name.is_empty() {
+        "<root>"
+    } else {
+        t.name.as_str()
+    };
     writeln!(f, "{prefix}{connector}{name}/")?;
     let child_prefix = format!("{prefix}{}", if is_last { "    " } else { "│   " });
 
     for (i, (k, v)) in t.attrs.iter().enumerate() {
-        let is_last_attr = i + 1 == t.attrs.len()
-            && t.datasets.is_empty() && t.groups.is_empty();
-        let c = if is_last_attr { "└── " } else { "├── " };
+        let is_last_attr = i + 1 == t.attrs.len() && t.datasets.is_empty() && t.groups.is_empty();
+        let c = if is_last_attr {
+            "└── "
+        } else {
+            "├── "
+        };
         writeln!(f, "{child_prefix}{c}@{k} = {}", render_attr(v))?;
     }
     for (i, d) in t.datasets.iter().enumerate() {
         let is_last_ds = i + 1 == t.datasets.len() && t.groups.is_empty();
-        let c = if is_last_ds { "└── " } else { "├── " };
+        let c = if is_last_ds {
+            "└── "
+        } else {
+            "├── "
+        };
         writeln!(f, "{child_prefix}{c}{}", render_dataset_buf(d))?;
     }
     for (i, g) in t.groups.iter().enumerate() {
@@ -129,6 +169,12 @@ fn render_buf(f: &mut fmt::Formatter<'_>, t: &TreeBuf, prefix: &str, is_last: bo
 fn render_dataset_buf(d: &DatasetBuf) -> String {
     let nelems: usize = d.shape.iter().product();
     let bytes = nelems * d.data.dtype().size_bytes();
-    format!("{}: {:?}{} = {} elements ({} bytes)",
-        d.name, d.data.dtype(), shape_str(&d.shape), nelems, bytes)
+    format!(
+        "{}: {:?}{} = {} elements ({} bytes)",
+        d.name,
+        d.data.dtype(),
+        shape_str(&d.shape),
+        nelems,
+        bytes
+    )
 }

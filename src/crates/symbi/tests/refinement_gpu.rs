@@ -44,14 +44,24 @@ const N: usize = 16;
 type HydroSim<S, Mem> = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, S, Mem>;
 
 fn hydro_hier<S: ExecutionSpace, Mem: MemorySpace + Sync>() -> Hierarchy<
-    Newtonian, 3, 3, Cartesian, IdealGas<f64>, S, Mem,
+    Newtonian,
+    3,
+    3,
+    Cartesian,
+    IdealGas<f64>,
+    S,
+    Mem,
     AdiabaticSubstrateKernelSet<Mem, f64, 3>,
 > {
     let dx = 1.0 / N as f64;
     let ic = |x: [f64; 3]| {
         let r2 = x.iter().map(|&q| (q - 0.5) * (q - 0.5)).sum::<f64>();
         let pre = if r2 < 0.01 { 10.0 } else { 0.1 };
-        Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre }
+        Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre,
+        }
     };
     let coarse = HydroSim::<S, Mem>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N; 3])
@@ -63,7 +73,10 @@ fn hydro_hier<S: ExecutionSpace, Mem: MemorySpace + Sync>() -> Hierarchy<
         .set_initial(ic)
         .build();
     let ck = AdiabaticSubstrateKernelSet::<Mem, f64, 3>::new(GAMMA, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.375; 3], x_hi: [0.625; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.375; 3],
+        x_hi: [0.625; 3],
+    }];
     let hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         AdiabaticSubstrateKernelSet::<Mem, f64, 3>::new(GAMMA, CFL, &s.geom.allocated)
     })
@@ -146,7 +159,10 @@ fn gpu_two_level_blast_conserves_and_matches_host() {
             "gpu vs cpu density diverged on level {ll}: max {max_diff:e}"
         );
     }
-    assert_eq!(dev.levels[0].state.iteration, host.levels[0].state.iteration);
+    assert_eq!(
+        dev.levels[0].state.iteration,
+        host.levels[0].state.iteration
+    );
 }
 
 // =============================================================================
@@ -165,12 +181,18 @@ fn fill_ot<S: ExecutionSpace, Mem: MemorySpace>(sim: &MhdSim<S, Mem>) {
     for c in &sim.geom.interior.extend(0, 0, 1) {
         let y0 = sim.geom.x_lo[1] + c[1] as f64 * dy;
         let y1 = y0 + dy;
-        mhd.bface[0].view_mut().set(c, B0 * ((2.0 * PI * y1).cos() - (2.0 * PI * y0).cos()) / (2.0 * PI * dy));
+        mhd.bface[0].view_mut().set(
+            c,
+            B0 * ((2.0 * PI * y1).cos() - (2.0 * PI * y0).cos()) / (2.0 * PI * dy),
+        );
     }
     for c in &sim.geom.interior.extend(1, 0, 1) {
         let x0 = sim.geom.x_lo[0] + c[0] as f64 * dxx;
         let x1 = x0 + dxx;
-        mhd.bface[1].view_mut().set(c, B0 * ((4.0 * PI * x0).cos() - (4.0 * PI * x1).cos()) / (4.0 * PI * dxx));
+        mhd.bface[1].view_mut().set(
+            c,
+            B0 * ((4.0 * PI * x0).cos() - (4.0 * PI * x1).cos()) / (4.0 * PI * dxx),
+        );
     }
     for c in &sim.geom.interior.extend(2, 0, 1) {
         mhd.bface[2].view_mut().set(c, 0.0);
@@ -188,7 +210,14 @@ fn fill_ot<S: ExecutionSpace, Mem: MemorySpace>(sim: &MhdSim<S, Mem>) {
             mag: Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]),
         };
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
-        sim.fields.cons.scatter(c, Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg });
+        sim.fields.cons.scatter(
+            c,
+            Cons {
+                den: cons.den,
+                mom: cons.mom,
+                nrg: cons.nrg,
+            },
+        );
         mhd.bcell[0].view_mut().set(c, prim.mag[0]);
         mhd.bcell[1].view_mut().set(c, prim.mag[1]);
         mhd.bcell[2].view_mut().set(c, 0.0);
@@ -203,22 +232,35 @@ fn gpu_two_level_mhd_preserves_divb() {
     let dz = 1.0 / NZ as f64;
     // build to Ready with a trivial seed (cells + uniform faces); fill_ot then overwrites the full
     // staggered OT state raw — a post-construction fill of the seeded state.
-    let coarse = MhdSim::<CudaSpace, UnifiedMemory>::build(NewtonianMhd, IdealGas { gamma: G }, Cartesian)
-        .cells([N, N, NZ])
-        .spacing([dx, dx, dz])
-        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
-        .cfl(0.3)
-        .allocate()
-        .unwrap()
-        .set_initial(|_| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 },
-            mag: Tensor::new([0.0; 3]),
-        })
-        .seed_faces_uniform([0.0; 3])
-        .build();
+    let coarse =
+        MhdSim::<CudaSpace, UnifiedMemory>::build(NewtonianMhd, IdealGas { gamma: G }, Cartesian)
+            .cells([N, N, NZ])
+            .spacing([dx, dx, dz])
+            .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+            .cfl(0.3)
+            .allocate()
+            .unwrap()
+            .set_initial(|_| MhdPrim {
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.0; 3]),
+                    pre: 1.0,
+                },
+                mag: Tensor::new([0.0; 3]),
+            })
+            .seed_faces_uniform([0.0; 3])
+            .build();
     fill_ot(&coarse);
-    let ck = NewtonianMhdSubstrateKernelSet3D::<UnifiedMemory, f64>::new(G, 0.3, 1.0, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25, 0.25, 0.0], x_hi: [0.75, 0.75, 1.0] }];
+    let ck = NewtonianMhdSubstrateKernelSet3D::<UnifiedMemory, f64>::new(
+        G,
+        0.3,
+        1.0,
+        &coarse.geom.allocated,
+    );
+    let regions = [RefinementRegion {
+        x_lo: [0.25, 0.25, 0.0],
+        x_hi: [0.75, 0.75, 1.0],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         NewtonianMhdSubstrateKernelSet3D::<UnifiedMemory, f64>::new(G, 0.3, 1.0, &s.geom.allocated)
     })

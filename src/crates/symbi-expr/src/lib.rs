@@ -21,16 +21,16 @@
 //   assert_eq!(expr.eval(3.0, 0.0, 0.0, 0.0)[0], 6.0);
 // =============================================================================
 
-pub mod op;
 pub mod dag;
-pub mod linearize;
 pub mod eval;
+pub mod linearize;
 pub mod load;
+pub mod op;
 pub mod strength;
 
-pub use op::Op;
 pub use dag::{Dag, Node, Payload};
-pub use linearize::{Instr, linearize, max_register};
 pub use eval::{Expression, evaluate};
-pub use load::{NodeDesc, LoadError, SourceConfig, load_expression, nodes_from_descs};
+pub use linearize::{Instr, linearize, max_register};
+pub use load::{LoadError, NodeDesc, SourceConfig, load_expression, nodes_from_descs};
+pub use op::Op;
 pub use strength::strength_reduce;

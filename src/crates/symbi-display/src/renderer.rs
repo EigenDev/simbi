@@ -123,7 +123,11 @@ impl Renderer {
         // (em-dash, unicode paths) and a byte count would over-reserve width.
         for ii in 0..n_cols {
             let header_len = headers[ii].chars().count();
-            let data_len = if ii < data.len() { data[ii].chars().count() } else { 0 };
+            let data_len = if ii < data.len() {
+                data[ii].chars().count()
+            } else {
+                0
+            };
             self.layout.widths[ii] = header_len.max(data_len);
         }
 

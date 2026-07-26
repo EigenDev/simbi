@@ -11,13 +11,13 @@
 // =============================================================================
 
 use symbi_discretize::{
-    iso_flux_gv, iso_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv,
-    rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv, rhd_flux_gv, rhd_wave_speed_map_gv, Coords,
-    GvKernel, Spacing, Spacetime,
+    Coords, GvKernel, Spacetime, Spacing, iso_flux_gv, iso_wave_speed_map_gv, rhd_flux_gv,
+    rhd_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv, rmhd_hlld_flux_gv,
+    rmhd_wave_speed_map_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
-use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
+use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
 
 type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
 
@@ -32,13 +32,21 @@ const TRANSCENDENTALS: &[&str] = &[
 ];
 
 fn render_rust(name: &str, ndim: u8, k: GvKernel, writes: Writes) -> String {
-    assert!(!k.graph.has_errors(), "{name} graph errors: {:?}", k.graph.errors());
+    assert!(
+        !k.graph.has_errors(),
+        "{name} graph errors: {:?}",
+        k.graph.errors()
+    );
     let desc = emit_kernel_from_lowering(
         &k.graph,
         &KernelEmitInputs {
             kernel_name: name,
-            coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),            ndim,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),
+            ndim,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &k.field_inputs,
             scalar_params: &k.scalar_params,
             field_writes: &writes,

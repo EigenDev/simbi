@@ -41,7 +41,7 @@
 use std::collections::HashMap;
 
 use symbi_ir::backends::interp::{Backend, Cpu};
-use symbi_ir::passes::scalarize::{scalarize, LoweredFn};
+use symbi_ir::passes::scalarize::{LoweredFn, scalarize};
 
 use crate::simulation_laws::SimulationLaws;
 
@@ -75,7 +75,11 @@ impl FieldKernel {
             .iter()
             .map(|lf| symbi_jit::compile(lf).ok())
             .collect();
-        Self { params, components, jit }
+        Self {
+            params,
+            components,
+            jit,
+        }
     }
 }
 
@@ -88,7 +92,9 @@ pub struct SourceEvaluator {
 
 impl std::fmt::Debug for SourceEvaluator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut entries: Vec<(&String, usize)> = self.field_kernels.iter()
+        let mut entries: Vec<(&String, usize)> = self
+            .field_kernels
+            .iter()
             .map(|(name, k)| (name, k.components.len()))
             .collect();
         entries.sort_by(|a, b| a.0.cmp(b.0));
@@ -151,7 +157,10 @@ impl SourceEvaluator {
                 .map(|(k, &out)| scalarize(&built.graph, out, &format!("{field}_source_{k}")))
                 .collect();
             if field_kernels
-                .insert(field.clone(), FieldKernel::build(built.params.clone(), components))
+                .insert(
+                    field.clone(),
+                    FieldKernel::build(built.params.clone(), components),
+                )
                 .is_some()
             {
                 panic!("SourceEvaluator::from_built: duplicate target field '{field}'");
@@ -176,9 +185,9 @@ impl SourceEvaluator {
                     .iter()
                     .find(|(n, _)| *n == pname.as_str())
                     .map(|(_, v)| *v)
-                    .unwrap_or_else(|| panic!(
-                        "SourceEvaluator::eval: missing param '{pname}' for field '{field}'"
-                    ))
+                    .unwrap_or_else(|| {
+                        panic!("SourceEvaluator::eval: missing param '{pname}' for field '{field}'")
+                    })
             })
             .collect();
 
@@ -227,10 +236,10 @@ impl SourceEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{law_params, NEWTONIAN_SPEC, ISO_NEWTONIAN_SPEC};
+    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, law_params};
     use crate::source_spec::{
-        cylindrical_geometric_sources, gravity_params, ib_params,
-        point_mass_gravity_sources, rigid_body_penalty_sources, source_params,
+        cylindrical_geometric_sources, gravity_params, ib_params, point_mass_gravity_sources,
+        rigid_body_penalty_sources, source_params,
     };
 
     #[test]
@@ -261,8 +270,8 @@ mod tests {
         // sanity: the evaluator's per-cell value equals the analytical
         // gravity formula. proves the runtime hook produces the right
         // numbers for the simplest non-trivial case.
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, false));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, false));
         let evaluator = SourceEvaluator::new(&sim, 3).expect("gravity validates");
 
         // single body at origin; cell at (1, 2, 3); gm = 1, rho = 1.5.
@@ -272,24 +281,42 @@ mod tests {
         let gm = 1.0;
         let r3 = (x.iter().map(|v| v * v).sum::<f64>()).sqrt().powi(3);
 
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1); let xm2 = gravity_params::xm(2);
-        let s = evaluator.eval("mom", &[
-            (law_params::RHO, rho),
-            (v0.as_str(), 0.0), (v1.as_str(), 0.0), (v2.as_str(), 0.0),
-            (x0.as_str(), x[0]), (x1.as_str(), x[1]), (x2.as_str(), x[2]),
-            (xm0.as_str(), 0.0), (xm1.as_str(), 0.0), (xm2.as_str(), 0.0),
-            (gravity_params::GM, gm),
-            (gravity_params::EPS, 0.0),
-        ]).expect("mom has overlay");
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
+        let xm2 = gravity_params::xm(2);
+        let s = evaluator
+            .eval(
+                "mom",
+                &[
+                    (law_params::RHO, rho),
+                    (v0.as_str(), 0.0),
+                    (v1.as_str(), 0.0),
+                    (v2.as_str(), 0.0),
+                    (x0.as_str(), x[0]),
+                    (x1.as_str(), x[1]),
+                    (x2.as_str(), x[2]),
+                    (xm0.as_str(), 0.0),
+                    (xm1.as_str(), 0.0),
+                    (xm2.as_str(), 0.0),
+                    (gravity_params::GM, gm),
+                    (gravity_params::EPS, 0.0),
+                ],
+            )
+            .expect("mom has overlay");
 
         assert_eq!(s.len(), 3);
         for k in 0..3 {
             let expected = -rho * gm * x[k] / r3;
             assert!(
                 (s[k] - expected).abs() < 1e-12,
-                "evaluator gravity mom k={k}: {} != {expected}", s[k],
+                "evaluator gravity mom k={k}: {} != {expected}",
+                s[k],
             );
         }
     }
@@ -319,18 +346,35 @@ mod tests {
         let xm = [0.0_f64, 0.0, 0.0];
         let gm = 1.0;
 
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1); let xm2 = gravity_params::xm(2);
-        let s = evaluator.eval("mom", &[
-            (law_params::RHO, rho),
-            (v0.as_str(), vr), (v1.as_str(), vp), (v2.as_str(), vz),
-            (law_params::PRE, p),
-            (x0.as_str(), r), (x1.as_str(), phi), (x2.as_str(), z),
-            (xm0.as_str(), xm[0]), (xm1.as_str(), xm[1]), (xm2.as_str(), xm[2]),
-            (gravity_params::GM, gm),
-            (gravity_params::EPS, 0.0),
-        ]).expect("mom has overlays");
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
+        let xm2 = gravity_params::xm(2);
+        let s = evaluator
+            .eval(
+                "mom",
+                &[
+                    (law_params::RHO, rho),
+                    (v0.as_str(), vr),
+                    (v1.as_str(), vp),
+                    (v2.as_str(), vz),
+                    (law_params::PRE, p),
+                    (x0.as_str(), r),
+                    (x1.as_str(), phi),
+                    (x2.as_str(), z),
+                    (xm0.as_str(), xm[0]),
+                    (xm1.as_str(), xm[1]),
+                    (xm2.as_str(), xm[2]),
+                    (gravity_params::GM, gm),
+                    (gravity_params::EPS, 0.0),
+                ],
+            )
+            .expect("mom has overlays");
 
         // analytical sum: cylindrical S_r = (ρ*vp² + p)/r,  S_p = -ρ*vr*vp/r,  S_z = 0
         // gravity:        -ρ*GM*x_k/|x|³ (note: x here is the (r, phi, z) tuple
@@ -354,7 +398,8 @@ mod tests {
             assert!(
                 (s[k] - expected[k]).abs() < 1e-12,
                 "composed mom k={k}: {} != {} = {} (geom) + {} (grav)",
-                s[k], expected[k],
+                s[k],
+                expected[k],
                 [geom_sr, geom_sp, geom_sz][k],
                 [grav_sr, grav_sp, grav_sz][k],
             );
@@ -368,9 +413,9 @@ mod tests {
         // overlays). the runtime walks this list to know which kernels
         // to call per step.
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_geometric(cylindrical_geometric_sources(3))     // mom
-            .with_gravity(point_mass_gravity_sources(3, true))    // mom + nrg
-            .with_ib(rigid_body_penalty_sources(3));              // mom
+            .with_geometric(cylindrical_geometric_sources(3)) // mom
+            .with_gravity(point_mass_gravity_sources(3, true)) // mom + nrg
+            .with_ib(rigid_body_penalty_sources(3)); // mom
         let evaluator = SourceEvaluator::new(&sim, 3).expect("composes");
 
         let fields: std::collections::HashSet<&str> = evaluator.fields().collect();
@@ -384,8 +429,8 @@ mod tests {
     fn evaluator_component_count_matches_field_kind() {
         // scalar fields ('nrg', 'den') -> 1 component; vector fields
         // ('mom') -> D components at D=3.
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(3, true));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(3, true));
         let evaluator = SourceEvaluator::new(&sim, 3).expect("composes");
 
         assert_eq!(evaluator.component_count("mom"), Some(3));
@@ -399,29 +444,50 @@ mod tests {
         // discipline (S::select on a carrier-generic mask) survives
         // through scalarize + interp. outside the body, the runtime
         // evaluator returns EXACTLY 0.0 per component.
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_ib(rigid_body_penalty_sources(3));
+        let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_ib(rigid_body_penalty_sources(3));
         let evaluator = SourceEvaluator::new(&sim, 3).expect("composes");
 
         // body at origin, radius 1.0; cell at (3, 0, 0) - outside.
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let bxm0 = ib_params::body_xm(0); let bxm1 = ib_params::body_xm(1); let bxm2 = ib_params::body_xm(2);
-        let vb0 = ib_params::vbody(0); let vb1 = ib_params::vbody(1); let vb2 = ib_params::vbody(2);
-        let s = evaluator.eval("mom", &[
-            (law_params::RHO, 1.0),
-            (v0.as_str(), 0.5), (v1.as_str(), 0.0), (v2.as_str(), 0.0),
-            (x0.as_str(), 3.0), (x1.as_str(), 0.0), (x2.as_str(), 0.0),
-            (bxm0.as_str(), 0.0), (bxm1.as_str(), 0.0), (bxm2.as_str(), 0.0),
-            (ib_params::BODY_RADIUS, 1.0),
-            (vb0.as_str(), 0.0), (vb1.as_str(), 0.0), (vb2.as_str(), 0.0),
-            (ib_params::PENALTY_STRENGTH, 100.0),
-        ]).expect("mom has overlay");
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let bxm0 = ib_params::body_xm(0);
+        let bxm1 = ib_params::body_xm(1);
+        let bxm2 = ib_params::body_xm(2);
+        let vb0 = ib_params::vbody(0);
+        let vb1 = ib_params::vbody(1);
+        let vb2 = ib_params::vbody(2);
+        let s = evaluator
+            .eval(
+                "mom",
+                &[
+                    (law_params::RHO, 1.0),
+                    (v0.as_str(), 0.5),
+                    (v1.as_str(), 0.0),
+                    (v2.as_str(), 0.0),
+                    (x0.as_str(), 3.0),
+                    (x1.as_str(), 0.0),
+                    (x2.as_str(), 0.0),
+                    (bxm0.as_str(), 0.0),
+                    (bxm1.as_str(), 0.0),
+                    (bxm2.as_str(), 0.0),
+                    (ib_params::BODY_RADIUS, 1.0),
+                    (vb0.as_str(), 0.0),
+                    (vb1.as_str(), 0.0),
+                    (vb2.as_str(), 0.0),
+                    (ib_params::PENALTY_STRENGTH, 100.0),
+                ],
+            )
+            .expect("mom has overlay");
 
         for k in 0..3 {
             assert_eq!(
                 s[k], 0.0,
-                "outside body: evaluator mom k={k} must be EXACTLY 0.0; got {}", s[k],
+                "outside body: evaluator mom k={k} must be EXACTLY 0.0; got {}",
+                s[k],
             );
         }
     }

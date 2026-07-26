@@ -32,7 +32,7 @@
 // =============================================================================
 
 use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
-use symbi_ir::{with_trace, ElementTy, Gv};
+use symbi_ir::{ElementTy, Gv, with_trace};
 
 use crate::regime_spec::law_params;
 use crate::source_term::{PointMassGravity, UniformAccel};
@@ -105,7 +105,9 @@ impl std::hash::Hash for SourceSpec {
 /// `law_params` with the spatial coords the source builders need.
 pub mod source_params {
     /// per-axis coordinate value `x_<k>` (e.g., `x_0 = r` in spherical).
-    pub fn x(k: usize) -> String { format!("x_{k}") }
+    pub fn x(k: usize) -> String {
+        format!("x_{k}")
+    }
 }
 
 // =============================================================================
@@ -188,29 +190,33 @@ pub fn splice_built_source_into(
 /// extends `law_params`'s primitive vocabulary with the position components.
 struct SourceCtx {
     rho: NodeId,
-    vel: Vec<NodeId>,    // D
+    vel: Vec<NodeId>, // D
     pre: NodeId,
-    x: Vec<NodeId>,      // D — position
+    x: Vec<NodeId>, // D — position
 }
 
 fn declare_source_ctx(g: &mut Graph, d: usize) -> (SourceCtx, Vec<String>) {
     let mut params: Vec<String> = Vec::new();
     let rho = g.add_scalar_param(law_params::RHO, ElementTy::F64);
     params.push(law_params::RHO.to_string());
-    let vel: Vec<NodeId> = (0..d).map(|k| {
-        let name = law_params::vel(k);
-        let id = g.add_scalar_param(&name, ElementTy::F64);
-        params.push(name);
-        id
-    }).collect();
+    let vel: Vec<NodeId> = (0..d)
+        .map(|k| {
+            let name = law_params::vel(k);
+            let id = g.add_scalar_param(&name, ElementTy::F64);
+            params.push(name);
+            id
+        })
+        .collect();
     let pre = g.add_scalar_param(law_params::PRE, ElementTy::F64);
     params.push(law_params::PRE.to_string());
-    let x: Vec<NodeId> = (0..d).map(|k| {
-        let name = source_params::x(k);
-        let id = g.add_scalar_param(&name, ElementTy::F64);
-        params.push(name);
-        id
-    }).collect();
+    let x: Vec<NodeId> = (0..d)
+        .map(|k| {
+            let name = source_params::x(k);
+            let id = g.add_scalar_param(&name, ElementTy::F64);
+            params.push(name);
+            id
+        })
+        .collect();
     (SourceCtx { rho, vel, pre, x }, params)
 }
 
@@ -222,7 +228,11 @@ fn spherical_1d_momentum_source(d: usize) -> BuiltSource {
     let two = g.add_const(ConstValue::F64(2.0), None);
     let two_p = g.element_wise(ElementWiseOp::Mul, vec![two, ctx.pre], None);
     let s_r = g.element_wise(ElementWiseOp::Div, vec![two_p, ctx.x[0]], None);
-    BuiltSource { graph: g, params, outputs: vec![s_r] }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs: vec![s_r],
+    }
 }
 
 /// spherical 2D momentum source:
@@ -262,7 +272,11 @@ fn spherical_2d_momentum_source(d: usize) -> BuiltSource {
     let s_t_num = g.element_wise(ElementWiseOp::Sub, vec![p_cot, rho_vr_vt], None);
     let s_t = g.element_wise(ElementWiseOp::Div, vec![s_t_num, r], None);
 
-    BuiltSource { graph: g, params, outputs: vec![s_r, s_t] }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs: vec![s_r, s_t],
+    }
 }
 
 /// spherical 3D momentum source (r, theta, phi):
@@ -318,7 +332,11 @@ fn spherical_3d_momentum_source(d: usize) -> BuiltSource {
     let s_p_num = g.element_wise(ElementWiseOp::Neg, vec![prod], None);
     let s_p = g.element_wise(ElementWiseOp::Div, vec![s_p_num, r], None);
 
-    BuiltSource { graph: g, params, outputs: vec![s_r, s_t, s_p] }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs: vec![s_r, s_t, s_p],
+    }
 }
 
 /// the geometric sources `Spherical` contributes to a regime's momentum
@@ -364,7 +382,11 @@ fn cylindrical_1d_momentum_source(d: usize) -> BuiltSource {
     let mut g = Graph::new();
     let (ctx, params) = declare_source_ctx(&mut g, d);
     let s_r = g.element_wise(ElementWiseOp::Div, vec![ctx.pre, ctx.x[0]], None);
-    BuiltSource { graph: g, params, outputs: vec![s_r] }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs: vec![s_r],
+    }
 }
 
 /// cylindrical 2D (r, z) momentum source: S_r = p / r, S_z = 0.
@@ -374,7 +396,11 @@ fn cylindrical_2d_momentum_source(d: usize) -> BuiltSource {
     let (ctx, params) = declare_source_ctx(&mut g, d);
     let s_r = g.element_wise(ElementWiseOp::Div, vec![ctx.pre, ctx.x[0]], None);
     let zero = g.add_const(ConstValue::F64(0.0), None);
-    BuiltSource { graph: g, params, outputs: vec![s_r, zero] }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs: vec![s_r, zero],
+    }
 }
 
 /// cylindrical 3D (r, phi, z) momentum source.
@@ -402,7 +428,11 @@ fn cylindrical_3d_momentum_source(d: usize) -> BuiltSource {
     // S_z = 0
     let s_z = g.add_const(ConstValue::F64(0.0), None);
 
-    BuiltSource { graph: g, params, outputs: vec![s_r, s_p, s_z] }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs: vec![s_r, s_p, s_z],
+    }
 }
 
 /// the geometric sources `Cylindrical` contributes to a regime's momentum
@@ -471,7 +501,9 @@ pub mod gravity_params {
     pub const GM: &str = "gm";
     /// the gravitating mass's position component `xm_<k>`. callers update
     /// these per timestep when the mass moves (Kepler / binary).
-    pub fn xm(k: usize) -> String { format!("xm_{k}") }
+    pub fn xm(k: usize) -> String {
+        format!("xm_{k}")
+    }
     /// the Plummer softening length `eps`. the acceleration is
     /// `-GM (x-xm)/(|x-xm|^2 + eps^2)^{3/2}`; `eps > 0` keeps it finite at the mass
     /// position. `eps = 0` recovers the bare `1/r^3` point particle.
@@ -500,9 +532,18 @@ fn point_mass_gv<const D: usize>() -> (Gv, [Gv; D], [Gv; D], PointMassGravity<Gv
 /// recovers the bare `1/r^3` form.
 fn point_mass_momentum_source(d: usize) -> BuiltSource {
     lift_to_built(|| match d {
-        1 => { let (rho, _v, x, src) = point_mass_gv::<1>(); src.momentum(rho, &x) }
-        2 => { let (rho, _v, x, src) = point_mass_gv::<2>(); src.momentum(rho, &x) }
-        3 => { let (rho, _v, x, src) = point_mass_gv::<3>(); src.momentum(rho, &x) }
+        1 => {
+            let (rho, _v, x, src) = point_mass_gv::<1>();
+            src.momentum(rho, &x)
+        }
+        2 => {
+            let (rho, _v, x, src) = point_mass_gv::<2>();
+            src.momentum(rho, &x)
+        }
+        3 => {
+            let (rho, _v, x, src) = point_mass_gv::<3>();
+            src.momentum(rho, &x)
+        }
         _ => panic!("point-mass gravity supports D in 1..=3, got {d}"),
     })
 }
@@ -512,9 +553,18 @@ fn point_mass_momentum_source(d: usize) -> BuiltSource {
 /// `point_mass_gravity_sources` when the parent regime has energy; isothermal regimes drop it.
 fn point_mass_energy_source(d: usize) -> BuiltSource {
     lift_to_built(|| match d {
-        1 => { let (rho, vel, x, src) = point_mass_gv::<1>(); vec![src.energy(rho, &vel, &x)] }
-        2 => { let (rho, vel, x, src) = point_mass_gv::<2>(); vec![src.energy(rho, &vel, &x)] }
-        3 => { let (rho, vel, x, src) = point_mass_gv::<3>(); vec![src.energy(rho, &vel, &x)] }
+        1 => {
+            let (rho, vel, x, src) = point_mass_gv::<1>();
+            vec![src.energy(rho, &vel, &x)]
+        }
+        2 => {
+            let (rho, vel, x, src) = point_mass_gv::<2>();
+            vec![src.energy(rho, &vel, &x)]
+        }
+        3 => {
+            let (rho, vel, x, src) = point_mass_gv::<3>();
+            vec![src.energy(rho, &vel, &x)]
+        }
         _ => panic!("point-mass gravity supports D in 1..=3, got {d}"),
     })
 }
@@ -555,13 +605,17 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 /// immersed-body parameter naming.
 pub mod ib_params {
     /// the body's center position component `body_xm_<k>`.
-    pub fn body_xm(k: usize) -> String { format!("body_xm_{k}") }
+    pub fn body_xm(k: usize) -> String {
+        format!("body_xm_{k}")
+    }
     /// the body's radius. mask fires when `|x - body_xm| < body_radius`.
     pub const BODY_RADIUS: &str = "body_radius";
     /// rigid penalty relaxation strength (1/time). larger = stiffer body.
     pub const PENALTY_STRENGTH: &str = "penalty_strength";
     /// the body's velocity component `vbody_<k>` (penalty target velocity).
-    pub fn vbody(k: usize) -> String { format!("vbody_{k}") }
+    pub fn vbody(k: usize) -> String {
+        format!("vbody_{k}")
+    }
     /// accretion sink rate (1/time). mass removal per unit density per unit time.
     pub const SINK_RATE: &str = "sink_rate";
 }
@@ -571,37 +625,52 @@ pub mod ib_params {
 /// RADIUS (the mask threshold) and may need a body velocity (rigid penalty).
 struct IbCtx {
     rho: NodeId,
-    vel: Vec<NodeId>,         // D — primitive velocity
-    x: Vec<NodeId>,           // D — field point
-    body_xm: Vec<NodeId>,     // D — body center
-    body_radius: NodeId,      // mask radius
+    vel: Vec<NodeId>,     // D — primitive velocity
+    x: Vec<NodeId>,       // D — field point
+    body_xm: Vec<NodeId>, // D — body center
+    body_radius: NodeId,  // mask radius
 }
 
 fn declare_ib_ctx(g: &mut Graph, d: usize) -> (IbCtx, Vec<String>) {
     let mut params: Vec<String> = Vec::new();
     let rho = g.add_scalar_param(law_params::RHO, ElementTy::F64);
     params.push(law_params::RHO.to_string());
-    let vel: Vec<NodeId> = (0..d).map(|k| {
-        let name = law_params::vel(k);
-        let id = g.add_scalar_param(&name, ElementTy::F64);
-        params.push(name);
-        id
-    }).collect();
-    let x: Vec<NodeId> = (0..d).map(|k| {
-        let name = source_params::x(k);
-        let id = g.add_scalar_param(&name, ElementTy::F64);
-        params.push(name);
-        id
-    }).collect();
-    let body_xm: Vec<NodeId> = (0..d).map(|k| {
-        let name = ib_params::body_xm(k);
-        let id = g.add_scalar_param(&name, ElementTy::F64);
-        params.push(name);
-        id
-    }).collect();
+    let vel: Vec<NodeId> = (0..d)
+        .map(|k| {
+            let name = law_params::vel(k);
+            let id = g.add_scalar_param(&name, ElementTy::F64);
+            params.push(name);
+            id
+        })
+        .collect();
+    let x: Vec<NodeId> = (0..d)
+        .map(|k| {
+            let name = source_params::x(k);
+            let id = g.add_scalar_param(&name, ElementTy::F64);
+            params.push(name);
+            id
+        })
+        .collect();
+    let body_xm: Vec<NodeId> = (0..d)
+        .map(|k| {
+            let name = ib_params::body_xm(k);
+            let id = g.add_scalar_param(&name, ElementTy::F64);
+            params.push(name);
+            id
+        })
+        .collect();
     let body_radius = g.add_scalar_param(ib_params::BODY_RADIUS, ElementTy::F64);
     params.push(ib_params::BODY_RADIUS.to_string());
-    (IbCtx { rho, vel, x, body_xm, body_radius }, params)
+    (
+        IbCtx {
+            rho,
+            vel,
+            x,
+            body_xm,
+            body_radius,
+        },
+        params,
+    )
 }
 
 /// build the carrier-generic "inside body" mask:
@@ -610,11 +679,15 @@ fn declare_ib_ctx(g: &mut Graph, d: usize) -> (IbCtx, Vec<String>) {
 /// full_source, zero)` to localize a source value.
 fn build_inside_body_mask(g: &mut Graph, ctx: &IbCtx) -> NodeId {
     let d = ctx.x.len();
-    let dx: Vec<NodeId> = (0..d).map(|k| {
-        g.element_wise(ElementWiseOp::Sub, vec![ctx.x[k], ctx.body_xm[k]], None)
-    }).collect();
+    let dx: Vec<NodeId> = (0..d)
+        .map(|k| g.element_wise(ElementWiseOp::Sub, vec![ctx.x[k], ctx.body_xm[k]], None))
+        .collect();
     let d_sq = crate::regime_spec::build_dot(g, &dx, &dx);
-    let r_sq = g.element_wise(ElementWiseOp::Mul, vec![ctx.body_radius, ctx.body_radius], None);
+    let r_sq = g.element_wise(
+        ElementWiseOp::Mul,
+        vec![ctx.body_radius, ctx.body_radius],
+        None,
+    );
     g.element_wise(ElementWiseOp::Lt, vec![d_sq, r_sq], None)
 }
 
@@ -628,12 +701,14 @@ fn rigid_body_penalty_source(d: usize) -> BuiltSource {
     let (ctx, mut params) = declare_ib_ctx(&mut g, d);
 
     // rigid penalty needs a body velocity — declare it ALONGSIDE the base ctx.
-    let vbody: Vec<NodeId> = (0..d).map(|k| {
-        let name = ib_params::vbody(k);
-        let id = g.add_scalar_param(&name, ElementTy::F64);
-        params.push(name);
-        id
-    }).collect();
+    let vbody: Vec<NodeId> = (0..d)
+        .map(|k| {
+            let name = ib_params::vbody(k);
+            let id = g.add_scalar_param(&name, ElementTy::F64);
+            params.push(name);
+            id
+        })
+        .collect();
     let k_strength = g.add_scalar_param(ib_params::PENALTY_STRENGTH, ElementTy::F64);
     params.push(ib_params::PENALTY_STRENGTH.to_string());
 
@@ -642,17 +717,23 @@ fn rigid_body_penalty_source(d: usize) -> BuiltSource {
 
     let k_rho = g.element_wise(ElementWiseOp::Mul, vec![k_strength, ctx.rho], None);
 
-    let outputs: Vec<NodeId> = (0..d).map(|i| {
-        // dv_i = vel_i - vbody_i
-        let dv = g.element_wise(ElementWiseOp::Sub, vec![ctx.vel[i], vbody[i]], None);
-        // full source: -k * rho * dv
-        let prod = g.element_wise(ElementWiseOp::Mul, vec![k_rho, dv], None);
-        let full = g.element_wise(ElementWiseOp::Neg, vec![prod], None);
-        // localized: mask ? full : 0
-        g.select(inside, full, zero, None)
-    }).collect();
+    let outputs: Vec<NodeId> = (0..d)
+        .map(|i| {
+            // dv_i = vel_i - vbody_i
+            let dv = g.element_wise(ElementWiseOp::Sub, vec![ctx.vel[i], vbody[i]], None);
+            // full source: -k * rho * dv
+            let prod = g.element_wise(ElementWiseOp::Mul, vec![k_rho, dv], None);
+            let full = g.element_wise(ElementWiseOp::Neg, vec![prod], None);
+            // localized: mask ? full : 0
+            g.select(inside, full, zero, None)
+        })
+        .collect();
 
-    BuiltSource { graph: g, params, outputs }
+    BuiltSource {
+        graph: g,
+        params,
+        outputs,
+    }
 }
 
 /// the rigid-body penalty source spec — a single localized momentum source.
@@ -704,7 +785,9 @@ pub mod user_params {
     /// reserved name for the constant-gravity example. user sources
     /// introducing their own scalar params should pick names that don't
     /// shadow these.
-    pub fn g_ext(k: usize) -> String { format!("g_ext_{k}") }
+    pub fn g_ext(k: usize) -> String {
+        format!("g_ext_{k}")
+    }
 }
 
 /// the universal user-source constructor — wrap any
@@ -763,10 +846,13 @@ pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
     // partway through the godunov trace (the AOT/substrate fused-source bake calls `build_source`
     // mid-trace). `in_isolated_trace` saves/restores any open outer trace so the inner build
     // cannot clobber it. node ids are collected INSIDE the closure, while the inner trace is live.
-    let (kernel, outputs) = symbi_ir::in_isolated_trace(|| {
-        build().iter().map(|g| g.node()).collect::<Vec<NodeId>>()
-    });
-    BuiltSource { graph: kernel.graph, params: kernel.scalar_params, outputs }
+    let (kernel, outputs) =
+        symbi_ir::in_isolated_trace(|| build().iter().map(|g| g.node()).collect::<Vec<NodeId>>());
+    BuiltSource {
+        graph: kernel.graph,
+        params: kernel.scalar_params,
+        outputs,
+    }
 }
 
 /// splice a user FIELD (its own lowered graph) into the active trace, binding each of its
@@ -832,11 +918,7 @@ pub fn user_rotating_frame_momentum_source(field: &BuiltSource, d: usize) -> Bui
         let vel: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&law_params::vel(kk))).collect();
         let values = splice_field_into_trace(field);
         let accel = crate::source_term::rotating_frame_acceleration(
-            &position,
-            &vel,
-            values[0],
-            values[1],
-            values[2],
+            &position, &vel, values[0], values[1], values[2],
         );
         crate::source_term::force_momentum(rho, &accel)
     })
@@ -852,11 +934,7 @@ pub fn user_rotating_frame_energy_source(field: &BuiltSource, d: usize) -> Built
         let vel: Vec<Gv> = (0..d).map(|kk| Gv::scalar(&law_params::vel(kk))).collect();
         let values = splice_field_into_trace(field);
         let accel = crate::source_term::rotating_frame_acceleration(
-            &position,
-            &vel,
-            values[0],
-            values[1],
-            values[2],
+            &position, &vel, values[0], values[1], values[2],
         );
         vec![crate::source_term::force_energy(rho, &vel, &accel)]
     })
@@ -916,7 +994,12 @@ pub fn user_relax_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
         let rho = Gv::scalar(law_params::RHO);
         let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
         let f = splice_field_into_trace(field);
-        vec![crate::source_term::relax_energy(rho, &vel, f[0], &f[1..1 + d])]
+        vec![crate::source_term::relax_energy(
+            rho,
+            &vel,
+            f[0],
+            &f[1..1 + d],
+        )]
     })
 }
 
@@ -975,7 +1058,14 @@ pub fn user_sponge_energy_source(field: &BuiltSource, d: usize, inv_gm1: f64) ->
         let pre = Gv::scalar(law_params::PRE);
         let f = splice_field_into_trace(field);
         let inv_gm1 = <Gv as symbi_algebra::Numeric>::from_f64(inv_gm1);
-        vec![crate::source_term::sponge_energy(rho, &vel, pre, f[0], f[2 + d], inv_gm1)]
+        vec![crate::source_term::sponge_energy(
+            rho,
+            &vel,
+            pre,
+            f[0],
+            f[2 + d],
+            inv_gm1,
+        )]
     })
 }
 
@@ -985,7 +1075,10 @@ pub fn user_sponge_energy_source(field: &BuiltSource, d: usize, inv_gm1: f64) ->
 /// this is the mechanism that splits ONE multi-output injection field across the den/mom/nrg slots,
 /// so a single config additively deposits mass, momentum, and energy at once. `outputs` selects
 /// which of `field`'s outputs feed this slot (den: `0..1`; mom: `1..1+D`; nrg: `1+D..2+D`).
-pub fn user_inject_slot_source(field: &BuiltSource, outputs: std::ops::Range<usize>) -> BuiltSource {
+pub fn user_inject_slot_source(
+    field: &BuiltSource,
+    outputs: std::ops::Range<usize>,
+) -> BuiltSource {
     lift_to_built(|| {
         let f = splice_field_into_trace(field);
         f[outputs].to_vec()
@@ -1010,18 +1103,39 @@ fn uniform_accel_gv<const D: usize>() -> (Gv, UniformAccel<Gv, D>) {
 
 fn uniform_acceleration_momentum_source(d: usize) -> BuiltSource {
     lift_to_built(|| match d {
-        1 => { let (rho, src) = uniform_accel_gv::<1>(); src.momentum(rho) }
-        2 => { let (rho, src) = uniform_accel_gv::<2>(); src.momentum(rho) }
-        3 => { let (rho, src) = uniform_accel_gv::<3>(); src.momentum(rho) }
+        1 => {
+            let (rho, src) = uniform_accel_gv::<1>();
+            src.momentum(rho)
+        }
+        2 => {
+            let (rho, src) = uniform_accel_gv::<2>();
+            src.momentum(rho)
+        }
+        3 => {
+            let (rho, src) = uniform_accel_gv::<3>();
+            src.momentum(rho)
+        }
         _ => panic!("uniform acceleration supports D in 1..=3, got {d}"),
     })
 }
 
 fn uniform_acceleration_energy_source(d: usize) -> BuiltSource {
     lift_to_built(|| match d {
-        1 => { let (rho, src) = uniform_accel_gv::<1>(); let v = uniform_vel::<1>(); vec![src.energy(rho, &v)] }
-        2 => { let (rho, src) = uniform_accel_gv::<2>(); let v = uniform_vel::<2>(); vec![src.energy(rho, &v)] }
-        3 => { let (rho, src) = uniform_accel_gv::<3>(); let v = uniform_vel::<3>(); vec![src.energy(rho, &v)] }
+        1 => {
+            let (rho, src) = uniform_accel_gv::<1>();
+            let v = uniform_vel::<1>();
+            vec![src.energy(rho, &v)]
+        }
+        2 => {
+            let (rho, src) = uniform_accel_gv::<2>();
+            let v = uniform_vel::<2>();
+            vec![src.energy(rho, &v)]
+        }
+        3 => {
+            let (rho, src) = uniform_accel_gv::<3>();
+            let v = uniform_vel::<3>();
+            vec![src.energy(rho, &v)]
+        }
         _ => panic!("uniform acceleration supports D in 1..=3, got {d}"),
     })
 }
@@ -1038,11 +1152,13 @@ fn uniform_vel<const D: usize>() -> [Gv; D] {
 /// one + serves as a test vehicle with known analytical form.
 pub fn uniform_acceleration_sources(_d: usize, has_energy: bool) -> Vec<SourceSpec> {
     let mut sources = vec![user_defined_source(
-        "mom", uniform_acceleration_momentum_source,
+        "mom",
+        uniform_acceleration_momentum_source,
     )];
     if has_energy {
         sources.push(user_defined_source(
-            "nrg", uniform_acceleration_energy_source,
+            "nrg",
+            uniform_acceleration_energy_source,
         ));
     }
     sources
@@ -1085,11 +1201,17 @@ mod tests {
 
     fn eval_source(built: &BuiltSource, output: NodeId, values: &[(&str, f64)]) -> f64 {
         let lowered = scalarize(&built.graph, output, "source_term");
-        let inputs: Vec<f64> = built.params.iter().map(|pname| {
-            values.iter().find(|(n, _)| *n == pname.as_str())
-                .map(|(_, v)| *v)
-                .unwrap_or_else(|| panic!("eval_source: missing param '{pname}'"))
-        }).collect();
+        let inputs: Vec<f64> = built
+            .params
+            .iter()
+            .map(|pname| {
+                values
+                    .iter()
+                    .find(|(n, _)| *n == pname.as_str())
+                    .map(|(_, v)| *v)
+                    .unwrap_or_else(|| panic!("eval_source: missing param '{pname}'"))
+            })
+            .collect();
         Cpu.eval_elemental(&lowered, &inputs)[0]
     }
 
@@ -1123,7 +1245,11 @@ mod tests {
         let p = 0.9;
 
         let specs = spherical_geometric_sources(1);
-        assert_eq!(specs.len(), 1, "spherical 1D has exactly one source spec (momentum)");
+        assert_eq!(
+            specs.len(),
+            1,
+            "spherical 1D has exactly one source spec (momentum)"
+        );
         assert_eq!(specs[0].kind, SourceKind::Geometric);
         assert_eq!(specs[0].target_field, "mom");
 
@@ -1132,22 +1258,25 @@ mod tests {
 
         let x0 = source_params::x(0);
         let v0 = law_params::vel(0);
-        let s_data = eval_source(&built, built.outputs[0], &[
-            (law_params::RHO, rho),
-            (v0.as_str(), vr),
-            (law_params::PRE, p),
-            (x0.as_str(), r),
-        ]);
+        let s_data = eval_source(
+            &built,
+            built.outputs[0],
+            &[
+                (law_params::RHO, rho),
+                (v0.as_str(), vr),
+                (law_params::PRE, p),
+                (x0.as_str(), r),
+            ],
+        );
 
         let metric = Spherical;
-        let s_metric = metric.momentum_source(
-            Tensor::new([r]), rho, Tensor::new([vr]), p,
-        );
+        let s_metric = metric.momentum_source(Tensor::new([r]), rho, Tensor::new([vr]), p);
 
         assert!(
             (s_data - s_metric[0]).abs() < 1e-12,
             "1D spherical momentum source: data {s_data} != metric {} (expected ~{})",
-            s_metric[0], 2.0 * p / r,
+            s_metric[0],
+            2.0 * p / r,
         );
     }
 
@@ -1174,10 +1303,16 @@ mod tests {
         assert_eq!(specs[0].target_field, "mom");
 
         let built = (specs[0].build_source)(2);
-        assert_eq!(built.outputs.len(), 2, "2D momentum source has 2 components");
+        assert_eq!(
+            built.outputs.len(),
+            2,
+            "2D momentum source has 2 components"
+        );
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
         let values_ref: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
             (v0.as_str(), vr),
@@ -1188,9 +1323,8 @@ mod tests {
         ];
 
         let metric = Spherical;
-        let s_metric = metric.momentum_source(
-            Tensor::new([r, theta]), rho, Tensor::new([vr, vt]), p,
-        );
+        let s_metric =
+            metric.momentum_source(Tensor::new([r, theta]), rho, Tensor::new([vr, vt]), p);
 
         for k in 0..2 {
             let s_data = eval_source(&built, built.outputs[k], &values_ref);
@@ -1223,10 +1357,18 @@ mod tests {
         let specs = spherical_geometric_sources(3);
         assert_eq!(specs.len(), 1);
         let built = (specs[0].build_source)(3);
-        assert_eq!(built.outputs.len(), 3, "3D momentum source has 3 components");
+        assert_eq!(
+            built.outputs.len(),
+            3,
+            "3D momentum source has 3 components"
+        );
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
         let values_ref: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
             (v0.as_str(), vr),
@@ -1240,7 +1382,10 @@ mod tests {
 
         let metric = Spherical;
         let s_metric = metric.momentum_source(
-            Tensor::new([r, theta, phi]), rho, Tensor::new([vr, vt, vp]), p,
+            Tensor::new([r, theta, phi]),
+            rho,
+            Tensor::new([vr, vt, vp]),
+            p,
         );
 
         for k in 0..3 {
@@ -1273,12 +1418,16 @@ mod tests {
 
         let x0 = source_params::x(0);
         let v0 = law_params::vel(0);
-        let s_data = eval_source(&built, built.outputs[0], &[
-            (law_params::RHO, rho),
-            (v0.as_str(), vr),
-            (law_params::PRE, p),
-            (x0.as_str(), r),
-        ]);
+        let s_data = eval_source(
+            &built,
+            built.outputs[0],
+            &[
+                (law_params::RHO, rho),
+                (v0.as_str(), vr),
+                (law_params::PRE, p),
+                (x0.as_str(), r),
+            ],
+        );
 
         let metric = Cylindrical;
         let s_metric = metric.momentum_source(Tensor::new([r]), rho, Tensor::new([vr]), p);
@@ -1304,8 +1453,10 @@ mod tests {
         let built = (specs[0].build_source)(2);
         assert_eq!(built.outputs.len(), 2);
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
         let values_ref: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
             (v0.as_str(), vr),
@@ -1316,9 +1467,7 @@ mod tests {
         ];
 
         let metric = Cylindrical;
-        let s_metric = metric.momentum_source(
-            Tensor::new([r, z]), rho, Tensor::new([vr, vz]), p,
-        );
+        let s_metric = metric.momentum_source(Tensor::new([r, z]), rho, Tensor::new([vr, vz]), p);
 
         for k in 0..2 {
             let s_data = eval_source(&built, built.outputs[k], &values_ref);
@@ -1330,7 +1479,8 @@ mod tests {
         }
         // explicit S_z = 0 guard.
         assert_eq!(
-            eval_source(&built, built.outputs[1], &values_ref), 0.0,
+            eval_source(&built, built.outputs[1], &values_ref),
+            0.0,
             "2D cyl S_z must be exactly 0 (axisymmetric)",
         );
     }
@@ -1353,8 +1503,12 @@ mod tests {
         let built = (specs[0].build_source)(3);
         assert_eq!(built.outputs.len(), 3);
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
         let values_ref: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
             (v0.as_str(), vr),
@@ -1367,9 +1521,8 @@ mod tests {
         ];
 
         let metric = Cylindrical;
-        let s_metric = metric.momentum_source(
-            Tensor::new([r, phi, z]), rho, Tensor::new([vr, vp, vz]), p,
-        );
+        let s_metric =
+            metric.momentum_source(Tensor::new([r, phi, z]), rho, Tensor::new([vr, vp, vz]), p);
 
         for k in 0..3 {
             let s_data = eval_source(&built, built.outputs[k], &values_ref);
@@ -1380,8 +1533,11 @@ mod tests {
             );
         }
         // explicit S_z = 0 guard.
-        assert_eq!(eval_source(&built, built.outputs[2], &values_ref), 0.0,
-                   "3D cyl S_z must be exactly 0");
+        assert_eq!(
+            eval_source(&built, built.outputs[2], &values_ref),
+            0.0,
+            "3D cyl S_z must be exactly 0"
+        );
     }
 
     // ----- canary extension: cartesian remains empty -----------------------
@@ -1407,9 +1563,7 @@ mod tests {
     // existing helper, which is what makes the abstraction load-bearing
     // for the "no-metric" overlays (gravity / IB / user).
 
-    fn analytical_gravity_acceleration(
-        x: &[f64], xm: &[f64], gm: f64,
-    ) -> Vec<f64> {
+    fn analytical_gravity_acceleration(x: &[f64], xm: &[f64], gm: f64) -> Vec<f64> {
         let d = x.len();
         let dx: Vec<f64> = (0..d).map(|k| x[k] - xm[k]).collect();
         let r_sq: f64 = dx.iter().map(|v| v * v).sum();
@@ -1430,7 +1584,11 @@ mod tests {
         assert_eq!(adiabatic[1].target_field, "nrg");
 
         let isothermal = point_mass_gravity_sources(3, false);
-        assert_eq!(isothermal.len(), 1, "has_energy=false drops the energy source");
+        assert_eq!(
+            isothermal.len(),
+            1,
+            "has_energy=false drops the energy source"
+        );
         assert_eq!(isothermal[0].target_field, "mom");
         // explicit guard: no `nrg` target leaks into the isothermal overlay.
         assert!(!isothermal.iter().any(|s| s.target_field == "nrg"));
@@ -1450,9 +1608,15 @@ mod tests {
         let built = (specs[0].build_source)(3);
         assert_eq!(built.outputs.len(), 3);
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1); let xm2 = gravity_params::xm(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
+        let xm2 = gravity_params::xm(2);
         let values_ref: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
             (v0.as_str(), vel[0]),
@@ -1492,23 +1656,33 @@ mod tests {
         let built = (specs[1].build_source)(3); // [1] = energy
         assert_eq!(built.outputs.len(), 1);
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1); let xm2 = gravity_params::xm(2);
-        let s_data = eval_source(&built, built.outputs[0], &[
-            (law_params::RHO, rho),
-            (v0.as_str(), vel[0]),
-            (v1.as_str(), vel[1]),
-            (v2.as_str(), vel[2]),
-            (x0.as_str(), x[0]),
-            (x1.as_str(), x[1]),
-            (x2.as_str(), x[2]),
-            (xm0.as_str(), xm[0]),
-            (xm1.as_str(), xm[1]),
-            (xm2.as_str(), xm[2]),
-            (gravity_params::GM, gm),
-            (gravity_params::EPS, 0.0), // eps = 0 recovers the bare 1/r^3 reference
-        ]);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
+        let xm2 = gravity_params::xm(2);
+        let s_data = eval_source(
+            &built,
+            built.outputs[0],
+            &[
+                (law_params::RHO, rho),
+                (v0.as_str(), vel[0]),
+                (v1.as_str(), vel[1]),
+                (v2.as_str(), vel[2]),
+                (x0.as_str(), x[0]),
+                (x1.as_str(), x[1]),
+                (x2.as_str(), x[2]),
+                (xm0.as_str(), xm[0]),
+                (xm1.as_str(), xm[1]),
+                (xm2.as_str(), xm[2]),
+                (gravity_params::GM, gm),
+                (gravity_params::EPS, 0.0), // eps = 0 recovers the bare 1/r^3 reference
+            ],
+        );
 
         // S_nrg = ρ * v · g.
         let g_a = analytical_gravity_acceleration(&x, &xm, gm);
@@ -1534,14 +1708,26 @@ mod tests {
         let specs = point_mass_gravity_sources(3, false); // momentum only
         let built = (specs[0].build_source)(3);
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1); let x2 = source_params::x(2);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1); let xm2 = gravity_params::xm(2);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let x2 = source_params::x(2);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
+        let xm2 = gravity_params::xm(2);
         let vals: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
-            (v0.as_str(), 0.0), (v1.as_str(), 0.0), (v2.as_str(), 0.0),
-            (x0.as_str(), x[0]), (x1.as_str(), x[1]), (x2.as_str(), x[2]),
-            (xm0.as_str(), xm[0]), (xm1.as_str(), xm[1]), (xm2.as_str(), xm[2]),
+            (v0.as_str(), 0.0),
+            (v1.as_str(), 0.0),
+            (v2.as_str(), 0.0),
+            (x0.as_str(), x[0]),
+            (x1.as_str(), x[1]),
+            (x2.as_str(), x[2]),
+            (xm0.as_str(), xm[0]),
+            (xm1.as_str(), xm[1]),
+            (xm2.as_str(), xm[2]),
             (gravity_params::GM, gm),
             (gravity_params::EPS, 0.0),
         ];
@@ -1569,14 +1755,20 @@ mod tests {
         let specs = point_mass_gravity_sources(2, false);
         let built = (specs[0].build_source)(2);
 
-        let x0 = source_params::x(0); let x1 = source_params::x(1);
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
         let vals: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
-            (v0.as_str(), 0.0), (v1.as_str(), 0.0),
-            (x0.as_str(), x[0]), (x1.as_str(), x[1]),
-            (xm0.as_str(), xm[0]), (xm1.as_str(), xm[1]),
+            (v0.as_str(), 0.0),
+            (v1.as_str(), 0.0),
+            (x0.as_str(), x[0]),
+            (x1.as_str(), x[1]),
+            (xm0.as_str(), xm[0]),
+            (xm1.as_str(), xm[1]),
             (gravity_params::GM, gm),
             (gravity_params::EPS, 0.0),
         ];
@@ -1602,7 +1794,11 @@ mod tests {
     /// helper: build the standard IB parameter vec at D=3, plus optional
     /// extras (vbody, penalty_strength, sink_rate) appended in declared order.
     fn ib_values_3d(
-        rho: f64, vel: [f64; 3], x: [f64; 3], body_xm: [f64; 3], body_radius: f64,
+        rho: f64,
+        vel: [f64; 3],
+        x: [f64; 3],
+        body_xm: [f64; 3],
+        body_radius: f64,
     ) -> Vec<(String, f64)> {
         vec![
             (law_params::RHO.to_string(), rho),
@@ -1782,7 +1978,9 @@ mod tests {
         let specs = rigid_body_penalty_sources(3);
         let built = (specs[0].build_source)(3);
 
-        let has_select = built.graph.iter()
+        let has_select = built
+            .graph
+            .iter()
             .any(|(_, node, _)| matches!(node.op, GOp::Select(..)));
         assert!(
             has_select,
@@ -1790,9 +1988,10 @@ mod tests {
              — clause 3 requires branchless conditionals via S::select"
         );
 
-        let has_lt = built.graph.iter().any(|(_, node, _)| {
-            matches!(&node.op, GOp::ElementWise(ElementWiseOp::Lt, _))
-        });
+        let has_lt = built
+            .graph
+            .iter()
+            .any(|(_, node, _)| matches!(&node.op, GOp::ElementWise(ElementWiseOp::Lt, _)));
         assert!(
             has_lt,
             "rigid penalty graph MUST contain ElementWise(Lt, ..) \
@@ -1826,7 +2025,9 @@ mod tests {
         assert_eq!(specs.len(), 1, "no energy => one source");
         let built = (specs[0].build_source)(3);
 
-        let g0 = user_params::g_ext(0); let g1 = user_params::g_ext(1); let g2 = user_params::g_ext(2);
+        let g0 = user_params::g_ext(0);
+        let g1 = user_params::g_ext(1);
+        let g2 = user_params::g_ext(2);
         let vals: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
             (g0.as_str(), g_ext[0]),
@@ -1856,17 +2057,25 @@ mod tests {
         let built = (specs[1].build_source)(3);
         assert_eq!(specs[1].target_field, "nrg");
 
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1); let v2 = law_params::vel(2);
-        let g0 = user_params::g_ext(0); let g1 = user_params::g_ext(1); let g2 = user_params::g_ext(2);
-        let s_data = eval_source(&built, built.outputs[0], &[
-            (law_params::RHO, rho),
-            (v0.as_str(), vel[0]),
-            (v1.as_str(), vel[1]),
-            (v2.as_str(), vel[2]),
-            (g0.as_str(), g_ext[0]),
-            (g1.as_str(), g_ext[1]),
-            (g2.as_str(), g_ext[2]),
-        ]);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let v2 = law_params::vel(2);
+        let g0 = user_params::g_ext(0);
+        let g1 = user_params::g_ext(1);
+        let g2 = user_params::g_ext(2);
+        let s_data = eval_source(
+            &built,
+            built.outputs[0],
+            &[
+                (law_params::RHO, rho),
+                (v0.as_str(), vel[0]),
+                (v1.as_str(), vel[1]),
+                (v2.as_str(), vel[2]),
+                (g0.as_str(), g_ext[0]),
+                (g1.as_str(), g_ext[1]),
+                (g2.as_str(), g_ext[2]),
+            ],
+        );
         let v_dot_g: f64 = (0..3).map(|k| vel[k] * g_ext[k]).sum();
         let s_expected = rho * v_dot_g;
         assert!(

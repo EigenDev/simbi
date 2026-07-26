@@ -15,7 +15,7 @@
 mod harness;
 use harness::{KernelRun, Out};
 
-use symbi_discretize::{body_feedback_gv, body_source_gv, Coords};
+use symbi_discretize::{Coords, body_feedback_gv, body_source_gv};
 
 const NX: usize = 6;
 const NY: usize = 5;
@@ -38,14 +38,30 @@ const DELTA0: f64 = 0.3;
 // disable body 0's accretion.
 fn body_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
     vec![
-        ("dt", DT), ("gamma", GAMMA),
-        ("x_lo_0", X0), ("dx_0", DX), ("x_lo_1", Y0), ("dx_1", DY),
-        ("body_0_mass", M0), ("body_0_soft", SOFT0), ("body_0_pos_0", 0.0), ("body_0_pos_1", 0.0),
-        ("body_0_racc", RACC0), ("body_0_sink", sink0), ("body_0_delta", DELTA0),
-        ("body_0_vel_0", 0.0), ("body_0_vel_1", 0.0),
-        ("body_1_mass", 0.0), ("body_1_soft", 1.0), ("body_1_pos_0", 5.0), ("body_1_pos_1", -3.0),
-        ("body_1_racc", 1.0), ("body_1_sink", 0.0), ("body_1_delta", 1.0),
-        ("body_1_vel_0", 0.0), ("body_1_vel_1", 0.0),
+        ("dt", DT),
+        ("gamma", GAMMA),
+        ("x_lo_0", X0),
+        ("dx_0", DX),
+        ("x_lo_1", Y0),
+        ("dx_1", DY),
+        ("body_0_mass", M0),
+        ("body_0_soft", SOFT0),
+        ("body_0_pos_0", 0.0),
+        ("body_0_pos_1", 0.0),
+        ("body_0_racc", RACC0),
+        ("body_0_sink", sink0),
+        ("body_0_delta", DELTA0),
+        ("body_0_vel_0", 0.0),
+        ("body_0_vel_1", 0.0),
+        ("body_1_mass", 0.0),
+        ("body_1_soft", 1.0),
+        ("body_1_pos_0", 5.0),
+        ("body_1_pos_1", -3.0),
+        ("body_1_racc", 1.0),
+        ("body_1_sink", 0.0),
+        ("body_1_delta", 1.0),
+        ("body_1_vel_0", 0.0),
+        ("body_1_vel_1", 0.0),
     ]
 }
 
@@ -55,7 +71,12 @@ fn body_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
 fn run(sink0: f64, den_in: f64, m0_in: f64, m1_in: f64, nrg_in: f64) -> Out {
     KernelRun::new(body_source_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
         .grid([NX, NY])
-        .fields(&[("den", den_in), ("mom_0", m0_in), ("mom_1", m1_in), ("nrg", nrg_in)])
+        .fields(&[
+            ("den", den_in),
+            ("mom_0", m0_in),
+            ("mom_1", m1_in),
+            ("nrg", nrg_in),
+        ])
         .scalars(&body_scalars(sink0))
         .run()
 }
@@ -77,10 +98,24 @@ fn body_source_gravity_only_matches_analytic() {
             let gx = -M0 * x * inv_r3;
             let gy = -M0 * y * inv_r3;
             let c = [i, j];
-            assert!(rel(out.get(c, "den_new"), 2.0) < 1e-12, "den unchanged by gravity ({i},{j}): {}", out.get(c, "den_new"));
-            assert!(rel(out.get(c, "mom_0_new"), DT * 2.0 * gx) < 1e-12, "mom0 ({i},{j})");
-            assert!(rel(out.get(c, "mom_1_new"), DT * 2.0 * gy) < 1e-12, "mom1 ({i},{j})");
-            assert!(rel(out.get(c, "nrg_new"), 5.0) < 1e-12, "nrg (mom=0 -> no work) ({i},{j}): {}", out.get(c, "nrg_new"));
+            assert!(
+                rel(out.get(c, "den_new"), 2.0) < 1e-12,
+                "den unchanged by gravity ({i},{j}): {}",
+                out.get(c, "den_new")
+            );
+            assert!(
+                rel(out.get(c, "mom_0_new"), DT * 2.0 * gx) < 1e-12,
+                "mom0 ({i},{j})"
+            );
+            assert!(
+                rel(out.get(c, "mom_1_new"), DT * 2.0 * gy) < 1e-12,
+                "mom1 ({i},{j})"
+            );
+            assert!(
+                rel(out.get(c, "nrg_new"), 5.0) < 1e-12,
+                "nrg (mom=0 -> no work) ({i},{j}): {}",
+                out.get(c, "nrg_new")
+            );
         }
     }
 }
@@ -122,10 +157,26 @@ fn body_source_accretion_matches_spec() {
             let want_nrg = nrg_grav * f;
 
             let c = [i, j];
-            assert!(rel(out.get(c, "den_new"), want_den) < 1e-11, "den ({i},{j}): got {} want {want_den}", out.get(c, "den_new"));
-            assert!(rel(out.get(c, "mom_0_new"), want_m0) < 1e-11, "mom0 ({i},{j}): got {} want {want_m0}", out.get(c, "mom_0_new"));
-            assert!(rel(out.get(c, "mom_1_new"), want_m1) < 1e-11, "mom1 ({i},{j}): got {} want {want_m1}", out.get(c, "mom_1_new"));
-            assert!(rel(out.get(c, "nrg_new"), want_nrg) < 1e-11, "nrg ({i},{j}): got {} want {want_nrg}", out.get(c, "nrg_new"));
+            assert!(
+                rel(out.get(c, "den_new"), want_den) < 1e-11,
+                "den ({i},{j}): got {} want {want_den}",
+                out.get(c, "den_new")
+            );
+            assert!(
+                rel(out.get(c, "mom_0_new"), want_m0) < 1e-11,
+                "mom0 ({i},{j}): got {} want {want_m0}",
+                out.get(c, "mom_0_new")
+            );
+            assert!(
+                rel(out.get(c, "mom_1_new"), want_m1) < 1e-11,
+                "mom1 ({i},{j}): got {} want {want_m1}",
+                out.get(c, "mom_1_new")
+            );
+            assert!(
+                rel(out.get(c, "nrg_new"), want_nrg) < 1e-11,
+                "nrg ({i},{j}): got {} want {want_nrg}",
+                out.get(c, "nrg_new")
+            );
         }
     }
 
@@ -143,7 +194,12 @@ fn body_feedback_matches_spec() {
     let (den_in, m0_in, m1_in, nrg_in) = (1.5, 0.4, -0.3, 6.0);
     let out = KernelRun::new(body_feedback_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
         .grid([NX, NY])
-        .fields(&[("den", den_in), ("mom_0", m0_in), ("mom_1", m1_in), ("nrg", nrg_in)])
+        .fields(&[
+            ("den", den_in),
+            ("mom_0", m0_in),
+            ("mom_1", m1_in),
+            ("nrg", nrg_in),
+        ])
         .scalars(&body_scalars(SINK0))
         .run();
 
@@ -175,14 +231,38 @@ fn body_feedback_matches_spec() {
             let want_e = nrg_in * frac * dv; // absorbed total energy (accretion power * dt)
 
             let c = [i, j];
-            assert!(rel(out.get(c, "b0_f0"), want_fx) < 1e-11, "f0x ({i},{j}): {} vs {want_fx}", out.get(c, "b0_f0"));
-            assert!(rel(out.get(c, "b0_f1"), want_fy) < 1e-11, "f0y ({i},{j}): {} vs {want_fy}", out.get(c, "b0_f1"));
-            assert!(rel(out.get(c, "b0_t2"), want_tz) < 1e-11, "t0z ({i},{j}): {} vs {want_tz}", out.get(c, "b0_t2"));
-            assert!(rel(out.get(c, "b0_m"), want_m) < 1e-11, "m0 ({i},{j}): {} vs {want_m}", out.get(c, "b0_m"));
-            assert!(rel(out.get(c, "b0_e"), want_e) < 1e-11, "e0 ({i},{j}): {} vs {want_e}", out.get(c, "b0_e"));
+            assert!(
+                rel(out.get(c, "b0_f0"), want_fx) < 1e-11,
+                "f0x ({i},{j}): {} vs {want_fx}",
+                out.get(c, "b0_f0")
+            );
+            assert!(
+                rel(out.get(c, "b0_f1"), want_fy) < 1e-11,
+                "f0y ({i},{j}): {} vs {want_fy}",
+                out.get(c, "b0_f1")
+            );
+            assert!(
+                rel(out.get(c, "b0_t2"), want_tz) < 1e-11,
+                "t0z ({i},{j}): {} vs {want_tz}",
+                out.get(c, "b0_t2")
+            );
+            assert!(
+                rel(out.get(c, "b0_m"), want_m) < 1e-11,
+                "m0 ({i},{j}): {} vs {want_m}",
+                out.get(c, "b0_m")
+            );
+            assert!(
+                rel(out.get(c, "b0_e"), want_e) < 1e-11,
+                "e0 ({i},{j}): {} vs {want_e}",
+                out.get(c, "b0_e")
+            );
             // inactive body 1 contributes nothing across all seven of its writes.
             for w in ["b1_f0", "b1_f1", "b1_t0", "b1_t1", "b1_t2", "b1_m", "b1_e"] {
-                assert!(out.get(c, w).abs() < 1e-14, "inactive body 1 {w} ({i},{j}) = {}", out.get(c, w));
+                assert!(
+                    out.get(c, w).abs() < 1e-14,
+                    "inactive body 1 {w} ({i},{j}) = {}",
+                    out.get(c, w)
+                );
             }
         }
     }

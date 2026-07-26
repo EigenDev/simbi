@@ -28,25 +28,47 @@ impl ErrorCode {
     pub const NEGATIVE_ENERGY: Self = Self(1 << 5);
 
     #[inline]
-    pub fn is_ok(self) -> bool { self.0 == 0 }
+    pub fn is_ok(self) -> bool {
+        self.0 == 0
+    }
 
     #[inline]
-    pub fn is_err(self) -> bool { self.0 != 0 }
+    pub fn is_err(self) -> bool {
+        self.0 != 0
+    }
 
     #[inline]
-    pub fn merge(self, other: Self) -> Self { Self(self.0 | other.0) }
+    pub fn merge(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
 
     #[inline]
-    pub fn contains(self, flag: Self) -> bool { (self.0 & flag.0) == flag.0 }
+    pub fn contains(self, flag: Self) -> bool {
+        (self.0 & flag.0) == flag.0
+    }
 
     pub fn describe(self) -> &'static str {
-        if self.0 == 0 { return "ok"; }
-        if self.contains(Self::NEGATIVE_DENSITY) { return "negative density"; }
-        if self.contains(Self::NEGATIVE_PRESSURE) { return "negative pressure"; }
-        if self.contains(Self::NON_FINITE) { return "non-finite value"; }
-        if self.contains(Self::SUPERLUMINAL) { return "superluminal velocity"; }
-        if self.contains(Self::MAX_ITER) { return "max iterations reached"; }
-        if self.contains(Self::NEGATIVE_ENERGY) { return "negative energy"; }
+        if self.0 == 0 {
+            return "ok";
+        }
+        if self.contains(Self::NEGATIVE_DENSITY) {
+            return "negative density";
+        }
+        if self.contains(Self::NEGATIVE_PRESSURE) {
+            return "negative pressure";
+        }
+        if self.contains(Self::NON_FINITE) {
+            return "non-finite value";
+        }
+        if self.contains(Self::SUPERLUMINAL) {
+            return "superluminal velocity";
+        }
+        if self.contains(Self::MAX_ITER) {
+            return "max iterations reached";
+        }
+        if self.contains(Self::NEGATIVE_ENERGY) {
+            return "negative energy";
+        }
         "unknown error"
     }
 }
@@ -64,12 +86,16 @@ impl std::fmt::Display for ErrorCode {
         ];
         for (flag, name) in &flags {
             if self.contains(*flag) {
-                if !first { write!(f, "|")?; }
+                if !first {
+                    write!(f, "|")?;
+                }
                 write!(f, "{}", name)?;
                 first = false;
             }
         }
-        if first { write!(f, "ok")?; }
+        if first {
+            write!(f, "ok")?;
+        }
         Ok(())
     }
 }
@@ -86,7 +112,10 @@ pub struct C2pResult<T: Copy> {
 impl<T: Copy> C2pResult<T> {
     #[inline]
     pub fn ok(value: T) -> Self {
-        Self { value, error: ErrorCode::NONE }
+        Self {
+            value,
+            error: ErrorCode::NONE,
+        }
     }
 
     #[inline]
@@ -95,7 +124,9 @@ impl<T: Copy> C2pResult<T> {
     }
 
     #[inline]
-    pub fn is_ok(&self) -> bool { self.error.is_ok() }
+    pub fn is_ok(&self) -> bool {
+        self.error.is_ok()
+    }
 
     #[inline]
     pub fn unwrap(self) -> T {
@@ -125,12 +156,20 @@ pub const C2P_FAILURE_FLOOR: f64 = 1e-12;
 //   * SUPERLUMINAL     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
 //                        is NaN. no luminal margin.
 pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
-    rho: S, pre: S, v_sq: S,
+    rho: S,
+    pre: S,
+    v_sq: S,
 ) -> ErrorCode {
     let mut code = ErrorCode::NONE;
-    if !(rho == rho) || !(pre == pre) { code = code.merge(ErrorCode::NON_FINITE); }
-    if pre < S::ZERO { code = code.merge(ErrorCode::NEGATIVE_PRESSURE); }
-    if v_sq >= S::ONE || !(v_sq == v_sq) { code = code.merge(ErrorCode::SUPERLUMINAL); }
+    if !(rho == rho) || !(pre == pre) {
+        code = code.merge(ErrorCode::NON_FINITE);
+    }
+    if pre < S::ZERO {
+        code = code.merge(ErrorCode::NEGATIVE_PRESSURE);
+    }
+    if v_sq >= S::ONE || !(v_sq == v_sq) {
+        code = code.merge(ErrorCode::SUPERLUMINAL);
+    }
     code
 }
 
@@ -142,7 +181,9 @@ pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::
 ) -> Option<ErrorCode> {
     if dd <= S::ZERO || !(dd == dd) {
         let mut code = ErrorCode::NEGATIVE_DENSITY;
-        if !(dd == dd) { code = code.merge(ErrorCode::NON_FINITE); }
+        if !(dd == dd) {
+            code = code.merge(ErrorCode::NON_FINITE);
+        }
         Some(code)
     } else {
         None

@@ -19,8 +19,10 @@ use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
 
-fn seed_rho<R, M2>(sim: &SimState<R, 2, M2, IdealGas<f64>, CpuSpace, HostMemory>, f: impl Fn(f64, f64) -> f64)
-where
+fn seed_rho<R, M2>(
+    sim: &SimState<R, 2, M2, IdealGas<f64>, CpuSpace, HostMemory>,
+    f: impl Fn(f64, f64) -> f64,
+) where
     R: symbi_hydro::regime::Regime<f64, 2, Prim = Prim<f64, 2>>,
     M2: symbi_geometry::Metric<f64, 2> + Copy,
 {
@@ -44,7 +46,11 @@ fn spherical_sim() -> SimState<Newtonian, 2, Spherical, IdealGas<f64>, CpuSpace,
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
         .build()
 }
 
@@ -55,7 +61,11 @@ fn spherical_slice_is_a_meridional_half_annulus() {
     let fd = sim.field_slice(120, 0).expect("slice");
 
     // meridional: x in [0, 1] (half the y span), pole up.
-    assert_eq!((fd.width, fd.height), (60, 120), "meridional half-plane dims");
+    assert_eq!(
+        (fd.width, fd.height),
+        (60, 120),
+        "meridional half-plane dims"
+    );
     assert!(fd.name.contains("meridional"), "label: {}", fd.name);
 
     let n_inside = fd.data.iter().filter(|v| !v.is_nan()).count();
@@ -68,7 +78,10 @@ fn spherical_slice_is_a_meridional_half_annulus() {
     assert!((0.6..0.95).contains(&frac), "inside fraction {frac}");
     // the four corners are outside the half-disk.
     for (px, py) in [(fd.width - 1, 0), (fd.width - 1, fd.height - 1)] {
-        assert!(fd.data[py * fd.width + px].is_nan(), "corner ({px},{py}) not NaN");
+        assert!(
+            fd.data[py * fd.width + px].is_nan(),
+            "corner ({px},{py}) not NaN"
+        );
     }
 }
 
@@ -78,7 +91,13 @@ fn meridional_orientation_puts_small_theta_at_the_top() {
     // of the display (y > 0, near the pole) must read 1 and the bottom rows 2 —
     // the orientation gate a constant field cannot catch.
     let sim = spherical_sim();
-    seed_rho(&sim, |_, theta| if theta < std::f64::consts::FRAC_PI_2 { 1.0 } else { 2.0 });
+    seed_rho(&sim, |_, theta| {
+        if theta < std::f64::consts::FRAC_PI_2 {
+            1.0
+        } else {
+            2.0
+        }
+    });
     let fd = sim.field_slice(120, 0).expect("slice");
     let row_val = |py: usize| -> Vec<f32> {
         (0..fd.width)
@@ -90,8 +109,14 @@ fn meridional_orientation_puts_small_theta_at_the_top() {
     };
     let top = row_val(2);
     let bot = row_val(fd.height - 3);
-    assert!(!top.is_empty() && top.iter().all(|&v| v == 1.0), "top rows must be northern");
-    assert!(!bot.is_empty() && bot.iter().all(|&v| v == 2.0), "bottom rows must be southern");
+    assert!(
+        !top.is_empty() && top.iter().all(|&v| v == 1.0),
+        "top rows must be northern"
+    );
+    assert!(
+        !bot.is_empty() && bot.iter().all(|&v| v == 2.0),
+        "bottom rows must be southern"
+    );
 }
 
 #[test]
@@ -111,19 +136,30 @@ fn quadrant_wedge_gets_a_tight_square_box() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::zeros(),
+        pre: 1.0,
+    })
     .build();
     seed_rho(&sim, |_, _| 5.5);
     let fd = sim.field_slice(120, 0).expect("slice");
 
-    assert_eq!((fd.width, fd.height), (120, 120), "quadrant wedge box must be square");
+    assert_eq!(
+        (fd.width, fd.height),
+        (120, 120),
+        "quadrant wedge box must be square"
+    );
     // the quarter annulus fills ~ pi/4 (1 - s0^2) ~ 0.78 of its tight box.
-    let frac = fd.data.iter().filter(|v| !v.is_nan()).count() as f64
-        / (fd.width * fd.height) as f64;
+    let frac =
+        fd.data.iter().filter(|v| !v.is_nan()).count() as f64 / (fd.width * fd.height) as f64;
     assert!((0.6..0.95).contains(&frac), "inside fraction {frac}");
     // the origin corner (bottom-left, inside the hole) and the far corner
     // (top-right, outside the arc) are NaN; the mid-radius diagonal is inside.
-    assert!(fd.data[(fd.height - 1) * fd.width].is_nan(), "origin corner not NaN");
+    assert!(
+        fd.data[(fd.height - 1) * fd.width].is_nan(),
+        "origin corner not NaN"
+    );
     assert!(fd.data[fd.width - 1].is_nan(), "far corner not NaN");
     let mid = (fd.height / 2) * fd.width + fd.width / 2;
     assert_eq!(fd.data[mid], 5.5, "mid-wedge sample");
@@ -134,21 +170,26 @@ fn cylindrical_rphi_slice_is_a_disk_with_wraparound() {
     // R in [0.5, 2], phi in [0, 2 pi]: the full disk with a central hole.
     let (n_r, n_p) = (48usize, 128usize);
     let two_pi = 2.0 * std::f64::consts::PI;
-    let sim = SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Newtonian,
-        IdealGas { gamma: GAMMA },
-        CylindricalRPhi,
-    )
-    .cells([n_r, n_p])
-    .origin([0.5, 0.0])
-    .spacing([1.5 / n_r as f64, two_pi / n_p as f64])
-    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-    .allocate()
-    .expect("sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
-    .build()
-    // the 2d cylindrical default is the (R, z) plane; the disk view needs (R, phi).
-    .with_cyl_plane(CylPlane::RPhi);
+    let sim =
+        SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
+            Newtonian,
+            IdealGas { gamma: GAMMA },
+            CylindricalRPhi,
+        )
+        .cells([n_r, n_p])
+        .origin([0.5, 0.0])
+        .spacing([1.5 / n_r as f64, two_pi / n_p as f64])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
+        .build()
+        // the 2d cylindrical default is the (R, z) plane; the disk view needs (R, phi).
+        .with_cyl_plane(CylPlane::RPhi);
     seed_rho(&sim, |_, _| 7.5);
     let fd = sim.field_slice(120, 0).expect("slice");
 
@@ -157,8 +198,8 @@ fn cylindrical_rphi_slice_is_a_disk_with_wraparound() {
     assert!(fd.data.iter().all(|v| v.is_nan() || *v == 7.5));
     // the annulus fills ~ pi (1 - s0^2) / 4 ~ 0.78 of the square; the center
     // (the hole) and the corners are NaN.
-    let frac = fd.data.iter().filter(|v| !v.is_nan()).count() as f64
-        / (fd.width * fd.height) as f64;
+    let frac =
+        fd.data.iter().filter(|v| !v.is_nan()).count() as f64 / (fd.width * fd.height) as f64;
     assert!((0.6..0.95).contains(&frac), "inside fraction {frac}");
     let mid = fd.height / 2 * fd.width + fd.width / 2;
     assert!(fd.data[mid].is_nan(), "central hole missing");
@@ -184,13 +225,23 @@ fn thin_shell_on_a_fine_grid_renders_as_a_continuous_arc() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::zeros(),
+        pre: 1.0,
+    })
     .build();
     // the shell: radial cells [510, 512) at 10x ambient, at every angle.
     let dr = 4.0 / nr as f64;
     let r_shell_lo = 1.0 + 510.0 * dr;
     let r_shell_hi = 1.0 + 512.0 * dr;
-    seed_rho(&sim, |r, _| if (r_shell_lo..r_shell_hi).contains(&r) { 10.0 } else { 1.0 });
+    seed_rho(&sim, |r, _| {
+        if (r_shell_lo..r_shell_hi).contains(&r) {
+            10.0
+        } else {
+            1.0
+        }
+    });
     let fd = sim.field_slice(120, 0).expect("slice");
 
     // the shell's display radius (index fraction, s0 hole = 0.08): rows crossing it
@@ -206,10 +257,16 @@ fn thin_shell_on_a_fine_grid_renders_as_a_continuous_arc() {
                 let v = fd.data[jj * fd.width + ii];
                 !v.is_nan() && v > 1.5
             });
-            assert!(hit, "row {jj} (y={y_row:.3}) crosses the shell but shows no arc pixel");
+            assert!(
+                hit,
+                "row {jj} (y={y_row:.3}) crosses the shell but shows no arc pixel"
+            );
         }
     }
-    assert!(rows_checked > 50, "the shell must cross many rows (got {rows_checked})");
+    assert!(
+        rows_checked > 50,
+        "the shell must cross many rows (got {rows_checked})"
+    );
 }
 
 #[test]
@@ -217,7 +274,14 @@ fn cartesian_slice_is_unchanged_by_the_polar_path() {
     // a 2D cartesian grid keeps the plain index-space decimation: full rectangle,
     // no NaN, unlabeled projection.
     let n = 32usize;
-    let sim = SimState::<Newtonian, 2, symbi_geometry::Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
+    let sim = SimState::<
+        Newtonian,
+        2,
+        symbi_geometry::Cartesian,
+        IdealGas<f64>,
+        CpuSpace,
+        HostMemory,
+    >::build(
         Newtonian,
         IdealGas { gamma: GAMMA },
         symbi_geometry::Cartesian,
@@ -228,10 +292,17 @@ fn cartesian_slice_is_unchanged_by_the_polar_path() {
     .boundaries(Boundaries::uniform(BoundaryType::Outflow))
     .allocate()
     .expect("sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::zeros(),
+        pre: 1.0,
+    })
     .build();
     seed_rho(&sim, |_, _| 2.0);
     let fd = sim.field_slice(120, 0).expect("slice");
-    assert!(fd.data.iter().all(|v| !v.is_nan()), "cartesian slice must be dense");
+    assert!(
+        fd.data.iter().all(|v| !v.is_nan()),
+        "cartesian slice must be dense"
+    );
     assert!(!fd.name.contains("meridional") && !fd.name.contains("disk"));
 }

@@ -57,13 +57,20 @@ fn two_level(fused: bool) -> Hier {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| Prim { rho: 2.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_x: [f64; 3]| Prim {
+            rho: 2.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     let ck = {
         let ks = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
         if fused { ks.with_source_fusion() } else { ks }
     };
-    let regions = [RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 3],
+        x_hi: [0.75; 3],
+    }];
     Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, move |s| {
         let ks = Kset::new(GAMMA, CFL, &s.geom.allocated);
         if fused { ks.with_source_fusion() } else { ks }
@@ -85,7 +92,8 @@ fn fused_fine_level_equals_two_pass() {
 
     // GUARD: the finest fused kernel-set actually compiled the body fold (else two-pass vs two-pass).
     assert_eq!(
-        h_fused.levels[1].kernels.body_only_fused_state(), Some(true),
+        h_fused.levels[1].kernels.body_only_fused_state(),
+        Some(true),
         "fine-level body fusion did not compile — fell back to the two-pass",
     );
 

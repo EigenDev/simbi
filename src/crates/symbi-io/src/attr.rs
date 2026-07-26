@@ -24,27 +24,71 @@ impl Attr {
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::Bool(_) => "bool",
-            Self::I64(_)  => "i64",
-            Self::U64(_)  => "u64",
-            Self::F64(_)  => "f64",
-            Self::Str(_)  => "str",
+            Self::I64(_) => "i64",
+            Self::U64(_) => "u64",
+            Self::F64(_) => "f64",
+            Self::Str(_) => "str",
         }
     }
 }
 
 // ---- ergonomic From impls so call sites pass naked values ----
 
-impl From<bool> for Attr { fn from(v: bool) -> Self { Self::Bool(v) } }
-impl From<i32>  for Attr { fn from(v: i32)  -> Self { Self::I64(v as i64) } }
-impl From<i64>  for Attr { fn from(v: i64)  -> Self { Self::I64(v) } }
-impl From<u32>  for Attr { fn from(v: u32)  -> Self { Self::U64(v as u64) } }
-impl From<u64>  for Attr { fn from(v: u64)  -> Self { Self::U64(v) } }
-impl From<usize> for Attr { fn from(v: usize) -> Self { Self::U64(v as u64) } }
-impl From<f32>  for Attr { fn from(v: f32)  -> Self { Self::F64(v as f64) } }
-impl From<f64>  for Attr { fn from(v: f64)  -> Self { Self::F64(v) } }
-impl From<&str> for Attr { fn from(v: &str) -> Self { Self::Str(v.to_string()) } }
-impl From<String> for Attr { fn from(v: String) -> Self { Self::Str(v) } }
-impl From<&String> for Attr { fn from(v: &String) -> Self { Self::Str(v.clone()) } }
+impl From<bool> for Attr {
+    fn from(v: bool) -> Self {
+        Self::Bool(v)
+    }
+}
+impl From<i32> for Attr {
+    fn from(v: i32) -> Self {
+        Self::I64(v as i64)
+    }
+}
+impl From<i64> for Attr {
+    fn from(v: i64) -> Self {
+        Self::I64(v)
+    }
+}
+impl From<u32> for Attr {
+    fn from(v: u32) -> Self {
+        Self::U64(v as u64)
+    }
+}
+impl From<u64> for Attr {
+    fn from(v: u64) -> Self {
+        Self::U64(v)
+    }
+}
+impl From<usize> for Attr {
+    fn from(v: usize) -> Self {
+        Self::U64(v as u64)
+    }
+}
+impl From<f32> for Attr {
+    fn from(v: f32) -> Self {
+        Self::F64(v as f64)
+    }
+}
+impl From<f64> for Attr {
+    fn from(v: f64) -> Self {
+        Self::F64(v)
+    }
+}
+impl From<&str> for Attr {
+    fn from(v: &str) -> Self {
+        Self::Str(v.to_string())
+    }
+}
+impl From<String> for Attr {
+    fn from(v: String) -> Self {
+        Self::Str(v)
+    }
+}
+impl From<&String> for Attr {
+    fn from(v: &String) -> Self {
+        Self::Str(v.clone())
+    }
+}
 
 // ---- typed extractors with proper TypeMismatch errors ----
 
@@ -57,7 +101,9 @@ impl Attr {
             Self::I64(v) => Ok(*v as f64), // safe widening
             Self::U64(v) => Ok(*v as f64),
             other => Err(IoError::TypeMismatch {
-                path: path.into(), expected: "f64", actual: other.type_name(),
+                path: path.into(),
+                expected: "f64",
+                actual: other.type_name(),
             }),
         }
     }
@@ -66,7 +112,9 @@ impl Attr {
             Self::I64(v) => Ok(*v),
             Self::U64(v) => Ok(*v as i64),
             other => Err(IoError::TypeMismatch {
-                path: path.into(), expected: "i64", actual: other.type_name(),
+                path: path.into(),
+                expected: "i64",
+                actual: other.type_name(),
             }),
         }
     }
@@ -75,7 +123,9 @@ impl Attr {
             Self::U64(v) => Ok(*v),
             Self::I64(v) if *v >= 0 => Ok(*v as u64),
             other => Err(IoError::TypeMismatch {
-                path: path.into(), expected: "u64", actual: other.type_name(),
+                path: path.into(),
+                expected: "u64",
+                actual: other.type_name(),
             }),
         }
     }
@@ -83,7 +133,9 @@ impl Attr {
         match self {
             Self::Bool(v) => Ok(*v),
             other => Err(IoError::TypeMismatch {
-                path: path.into(), expected: "bool", actual: other.type_name(),
+                path: path.into(),
+                expected: "bool",
+                actual: other.type_name(),
             }),
         }
     }
@@ -91,7 +143,9 @@ impl Attr {
         match self {
             Self::Str(s) => Ok(s.as_str()),
             other => Err(IoError::TypeMismatch {
-                path: path.into(), expected: "str", actual: other.type_name(),
+                path: path.into(),
+                expected: "str",
+                actual: other.type_name(),
             }),
         }
     }
@@ -111,7 +165,9 @@ pub struct Metadata {
 }
 
 impl Metadata {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// append (key, value). returns `self` for chaining:
     /// ```ignore
@@ -135,11 +191,17 @@ impl Metadata {
     }
 
     pub fn get(&self, key: &str) -> Option<&Attr> {
-        self.entries.iter().find_map(|(k, v)| (k == key).then_some(v))
+        self.entries
+            .iter()
+            .find_map(|(k, v)| (k == key).then_some(v))
     }
 
-    pub fn len(&self) -> usize { self.entries.len() }
-    pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 impl<'a> IntoIterator for &'a Metadata {

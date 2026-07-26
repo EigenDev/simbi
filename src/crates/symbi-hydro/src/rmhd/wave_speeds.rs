@@ -8,11 +8,11 @@
 // GPU-traceable: all paths computed unconditionally, selected via S::select.
 // =============================================================================
 
-use symbi_algebra::Tensor;
-use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::mhd_state::MhdPrim;
 use crate::rhd;
+use symbi_algebra::Tensor;
+use symbi_ir::algebra::Scalar;
 
 /// RMHD wave speeds via the full quartic dispersion relation (Mignone & Del Zanna
 /// Eq. 56), with fast paths for vsq~0 (Eq. 57) and bn~0 (Eq. 58). returns
@@ -62,57 +62,64 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
             let lambda_r_1 = (S::from_f64(0.5) * (S::ZERO - bb_1 + disq_1)).safe_sqrt();
             [S::ZERO - lambda_r_1, lambda_r_1]
         },
-        || S::cond_vec(
-            cond_bn,
-            // path 2: bn ~ 0 (Eq. 58) — quadratic in lambda.
-            || {
-                let vdbperp = vdb - vn * bn;
-                let qq = bmu_sq - cssq * vdbperp * vdbperp;
-                let a2_p2 = rho * hh * (cssq + w2 * (S::ONE - cssq)) + qq;
-                let a1_p2 = S::ZERO - S::from_f64(2.0) * rho * hh * w2 * vn * (S::ONE - cssq);
-                let a0_p2 = rho * hh * (S::ZERO - cssq + w2 * vn * vn * (S::ONE - cssq)) - qq;
-                let disq_2 = (a1_p2 * a1_p2 - S::from_f64(4.0) * a2_p2 * a0_p2).max(S::ZERO);
-                let sr_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 + disq_2.sqrt()) / a2_p2;
-                let sl_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 - disq_2.sqrt()) / a2_p2;
-                [sl_2, sr_2]
-            },
-            // path 3: the FULL quartic (Eq. 56) — computed ONLY when both fast
-            // paths fail. this is the ~750-op + ~10-transcendental body.
-            || {
-                let vn2 = vn * vn;
-                let a4 = S::ZERO - bmu0 * bmu0 * cssq + bmu_sq * w2
-                    - cssq * w2 * w2 * hh * rho + cssq * w2 * hh * rho
-                    + w2 * w2 * hh * rho;
-                let inv_a4 = S::ONE / a4;
+        || {
+            S::cond_vec(
+                cond_bn,
+                // path 2: bn ~ 0 (Eq. 58) — quadratic in lambda.
+                || {
+                    let vdbperp = vdb - vn * bn;
+                    let qq = bmu_sq - cssq * vdbperp * vdbperp;
+                    let a2_p2 = rho * hh * (cssq + w2 * (S::ONE - cssq)) + qq;
+                    let a1_p2 = S::ZERO - S::from_f64(2.0) * rho * hh * w2 * vn * (S::ONE - cssq);
+                    let a0_p2 = rho * hh * (S::ZERO - cssq + w2 * vn * vn * (S::ONE - cssq)) - qq;
+                    let disq_2 = (a1_p2 * a1_p2 - S::from_f64(4.0) * a2_p2 * a0_p2).max(S::ZERO);
+                    let sr_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 + disq_2.sqrt()) / a2_p2;
+                    let sl_2 = S::from_f64(0.5) * (S::ZERO - a1_p2 - disq_2.sqrt()) / a2_p2;
+                    [sl_2, sr_2]
+                },
+                // path 3: the FULL quartic (Eq. 56) — computed ONLY when both fast
+                // paths fail. this is the ~750-op + ~10-transcendental body.
+                || {
+                    let vn2 = vn * vn;
+                    let a4 = S::ZERO - bmu0 * bmu0 * cssq + bmu_sq * w2 - cssq * w2 * w2 * hh * rho
+                        + cssq * w2 * hh * rho
+                        + w2 * w2 * hh * rho;
+                    let inv_a4 = S::ONE / a4;
 
-                let a3 = inv_a4 * (S::from_f64(2.0) * bmu0 * bmun * cssq
-                    - S::from_f64(2.0) * bmu_sq * w2 * vn
-                    + S::from_f64(4.0) * cssq * w2 * w2 * hh * rho * vn
-                    - S::from_f64(2.0) * cssq * w2 * hh * rho * vn
-                    - S::from_f64(4.0) * w2 * w2 * hh * rho * vn);
+                    let a3 = inv_a4
+                        * (S::from_f64(2.0) * bmu0 * bmun * cssq
+                            - S::from_f64(2.0) * bmu_sq * w2 * vn
+                            + S::from_f64(4.0) * cssq * w2 * w2 * hh * rho * vn
+                            - S::from_f64(2.0) * cssq * w2 * hh * rho * vn
+                            - S::from_f64(4.0) * w2 * w2 * hh * rho * vn);
 
-                let a2_q = inv_a4 * (bmu0 * bmu0 * cssq + bmu_sq * w2 * vn2 - bmu_sq * w2
-                    - bmun * bmun * cssq
-                    - S::from_f64(6.0) * cssq * w2 * w2 * hh * rho * vn2
-                    + cssq * w2 * hh * rho * vn2
-                    - cssq * w2 * hh * rho
-                    + S::from_f64(6.0) * w2 * w2 * hh * rho * vn2);
+                    let a2_q = inv_a4
+                        * (bmu0 * bmu0 * cssq + bmu_sq * w2 * vn2
+                            - bmu_sq * w2
+                            - bmun * bmun * cssq
+                            - S::from_f64(6.0) * cssq * w2 * w2 * hh * rho * vn2
+                            + cssq * w2 * hh * rho * vn2
+                            - cssq * w2 * hh * rho
+                            + S::from_f64(6.0) * w2 * w2 * hh * rho * vn2);
 
-                let a1_q = inv_a4 * (S::ZERO - S::from_f64(2.0) * bmu0 * bmun * cssq
-                    + S::from_f64(2.0) * bmu_sq * w2 * vn
-                    + S::from_f64(4.0) * cssq * w2 * w2 * hh * rho * vn * vn2
-                    + S::from_f64(2.0) * cssq * w2 * hh * rho * vn
-                    - S::from_f64(4.0) * w2 * w2 * hh * rho * vn * vn2);
+                    let a1_q = inv_a4
+                        * (S::ZERO - S::from_f64(2.0) * bmu0 * bmun * cssq
+                            + S::from_f64(2.0) * bmu_sq * w2 * vn
+                            + S::from_f64(4.0) * cssq * w2 * w2 * hh * rho * vn * vn2
+                            + S::from_f64(2.0) * cssq * w2 * hh * rho * vn
+                            - S::from_f64(4.0) * w2 * w2 * hh * rho * vn * vn2);
 
-                let a0_q = inv_a4 * (S::ZERO - bmu_sq * w2 * vn2 + bmun * bmun * cssq
-                    - cssq * w2 * w2 * hh * rho * vn2 * vn2
-                    - cssq * w2 * hh * rho * vn2
-                    + w2 * w2 * hh * rho * vn2 * vn2);
+                    let a0_q = inv_a4
+                        * (S::ZERO - bmu_sq * w2 * vn2 + bmun * bmun * cssq
+                            - cssq * w2 * w2 * hh * rho * vn2 * vn2
+                            - cssq * w2 * hh * rho * vn2
+                            + w2 * w2 * hh * rho * vn2 * vn2);
 
-                let (sl_3, sr_3) = solve_quartic_minmax(a3, a2_q, a1_q, a0_q);
-                [sl_3, sr_3]
-            },
-        ),
+                    let (sl_3, sr_3) = solve_quartic_minmax(a3, a2_q, a1_q, a0_q);
+                    [sl_3, sr_3]
+                },
+            )
+        },
     );
 
     (sl, sr)
@@ -179,8 +186,9 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let q = S::from_f64(0.125) * b * b * b - S::from_f64(0.5) * b * c + d;
     let m = solve_cubic_resolvent(
         p,
-        S::from_f64(0.25) * p * p + S::from_f64(0.01171875) * b * b * b * b
-            - e + S::from_f64(0.25) * b * d - S::from_f64(0.0625) * b * b * c,
+        S::from_f64(0.25) * p * p + S::from_f64(0.01171875) * b * b * b * b - e
+            + S::from_f64(0.25) * b * d
+            - S::from_f64(0.0625) * b * b * c,
         S::from_f64(-0.125) * q * q,
     );
 
@@ -249,7 +257,10 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let smax = S::select(q_near_zero, smax_q0, smax_nz);
 
     // guard against m < 0 (no real roots)
-    (S::select(m_valid, smin, S::ZERO), S::select(m_valid, smax, S::ZERO))
+    (
+        S::select(m_valid, smin, S::ZERO),
+        S::select(m_valid, smax, S::ZERO),
+    )
 }
 
 /// solve resolvent cubic x^3 + bx^2 + cx + d = 0 for one real root.
@@ -277,57 +288,70 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
             let scq = S::select(q.cmp_gt(S::ZERO), cq, S::ZERO - cq); // cheap sign flip
             S::ZERO - scq - b3
         },
-        || S::cond(
-            q.abs().cmp_lt(eps),
-            // case 2: q ~ 0 -> trivial root.
-            || S::ZERO - b3,
-            // general case: the shared sqrt/divide setup, then the four
-            // mutually-exclusive transcendental cases — each evaluated only
-            // when its branch is taken.
-            || {
-                let safe_p = S::select(p.abs().cmp_gt(eps), p, S::ONE);
-                let t = (p.abs().max(S::from_f64(1e-30)) / S::from_f64(3.0)).sqrt();
-                let g = S::from_f64(1.5) * q / (safe_p * t);
-                let disc = S::from_f64(4.0) * p * p * p + S::from_f64(27.0) * q * q;
-                S::cond(
-                    p.cmp_gt(S::ZERO),
-                    // case 3: p > 0 -> sinh formula.
-                    || S::ZERO - S::from_f64(2.0) * t * (g.asinh() * third).sinh() - b3,
-                    || S::cond(
-                        disc.cmp_lt(S::ZERO),
-                        // case 4: three real roots -> cos formula (g in [-1,1]).
+        || {
+            S::cond(
+                q.abs().cmp_lt(eps),
+                // case 2: q ~ 0 -> trivial root.
+                || S::ZERO - b3,
+                // general case: the shared sqrt/divide setup, then the four
+                // mutually-exclusive transcendental cases — each evaluated only
+                // when its branch is taken.
+                || {
+                    let safe_p = S::select(p.abs().cmp_gt(eps), p, S::ONE);
+                    let t = (p.abs().max(S::from_f64(1e-30)) / S::from_f64(3.0)).sqrt();
+                    let g = S::from_f64(1.5) * q / (safe_p * t);
+                    let disc = S::from_f64(4.0) * p * p * p + S::from_f64(27.0) * q * q;
+                    S::cond(
+                        p.cmp_gt(S::ZERO),
+                        // case 3: p > 0 -> sinh formula.
+                        || S::ZERO - S::from_f64(2.0) * t * (g.asinh() * third).sinh() - b3,
                         || {
-                            let g_clamp = g.max(-S::ONE).min(S::ONE);
-                            S::from_f64(2.0) * t * (g_clamp.acos() * third).cos() - b3
+                            S::cond(
+                                disc.cmp_lt(S::ZERO),
+                                // case 4: three real roots -> cos formula (g in [-1,1]).
+                                || {
+                                    let g_clamp = g.max(-S::ONE).min(S::ONE);
+                                    S::from_f64(2.0) * t * (g_clamp.acos() * third).cos() - b3
+                                },
+                                || {
+                                    S::cond(
+                                        q.cmp_gt(S::ZERO),
+                                        // case 5: q > 0 -> cosh formula (negative sign).
+                                        || {
+                                            let ng_clamp = (S::ZERO - g).max(S::ONE);
+                                            S::ZERO
+                                                - S::from_f64(2.0)
+                                                    * t
+                                                    * (ng_clamp.acosh() * third).cosh()
+                                                - b3
+                                        },
+                                        // case 6: q <= 0 -> cosh formula (positive sign).
+                                        || {
+                                            let g_clamp_hi = g.max(S::ONE);
+                                            S::from_f64(2.0)
+                                                * t
+                                                * (g_clamp_hi.acosh() * third).cosh()
+                                                - b3
+                                        },
+                                    )
+                                },
+                            )
                         },
-                        || S::cond(
-                            q.cmp_gt(S::ZERO),
-                            // case 5: q > 0 -> cosh formula (negative sign).
-                            || {
-                                let ng_clamp = (S::ZERO - g).max(S::ONE);
-                                S::ZERO - S::from_f64(2.0) * t * (ng_clamp.acosh() * third).cosh() - b3
-                            },
-                            // case 6: q <= 0 -> cosh formula (positive sign).
-                            || {
-                                let g_clamp_hi = g.max(S::ONE);
-                                S::from_f64(2.0) * t * (g_clamp_hi.acosh() * third).cosh() - b3
-                            },
-                        ),
-                    ),
-                )
-            },
-        ),
+                    )
+                },
+            )
+        },
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rmhd::Rmhd;
-    use crate::regime::Regime;
-    use crate::state::Prim;
     use crate::eos::IdealGas;
-    use symbi_ir::gv::{begin_trace, end_trace, Gv};
+    use crate::regime::Regime;
+    use crate::rmhd::Rmhd;
+    use crate::state::Prim;
+    use symbi_ir::gv::{Gv, begin_trace, end_trace};
     use symbi_ir::passes::{cse, pressure, scalarize};
 
     // trace rmhd_wave_speeds at S=Gv (axis 0), scalarize through the same
@@ -344,7 +368,11 @@ mod tests {
         let gamma = Gv::scalar("gamma");
         let eos = IdealGas { gamma };
         let prim = MhdPrim::<Gv, 3> {
-            hydro: Prim { rho, vel: Tensor::new(vel), pre },
+            hydro: Prim {
+                rho,
+                vel: Tensor::new(vel),
+                pre,
+            },
             mag: Tensor::new(mag),
         };
         let nhat = Tensor::<Gv, 3>::unit(0);
@@ -419,22 +447,36 @@ mod tests {
         let rhos = [0.1_f64, 1.0, 10.0];
         let pres = [0.01_f64, 1.0, 100.0];
         let vels = [
-            [0.0, 0.0, 0.0], [0.5, 0.0, 0.0], [0.0, 0.6, 0.3], [0.7, -0.4, 0.2],
-            [0.9, 0.0, 0.0], [-0.3, 0.3, 0.85],
+            [0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0],
+            [0.0, 0.6, 0.3],
+            [0.7, -0.4, 0.2],
+            [0.9, 0.0, 0.0],
+            [-0.3, 0.3, 0.85],
         ];
         let mags = [
-            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.5, -1.0, 3.0],
-            [10.0, 0.0, 0.0], [0.0, 0.0, 5.0],
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [0.5, -1.0, 3.0],
+            [10.0, 0.0, 0.0],
+            [0.0, 0.0, 5.0],
         ];
         let mut worst_margin = f64::INFINITY;
         for &rho in &rhos {
             for &pre in &pres {
                 for v in &vels {
                     let vsq: f64 = v.iter().map(|x| x * x).sum();
-                    if vsq >= 1.0 { continue; } // physical only
+                    if vsq >= 1.0 {
+                        continue;
+                    } // physical only
                     for b in &mags {
                         let prim = MhdPrim::<f64, 3> {
-                            hydro: Prim { rho, vel: Tensor::new(*v), pre },
+                            hydro: Prim {
+                                rho,
+                                vel: Tensor::new(*v),
+                                pre,
+                            },
                             mag: Tensor::new(*b),
                         };
                         for axis in 0..3 {
@@ -469,10 +511,38 @@ mod tests {
         let nan = f64::NAN;
         let cases = [
             // NaN in density, pressure, a velocity component, a field component.
-            MhdPrim::<f64, 3> { hydro: Prim { rho: nan, vel: Tensor::new([0.1, 0.0, 0.0]), pre: 1.0 }, mag: Tensor::new([1.0, 0.0, 0.0]) },
-            MhdPrim::<f64, 3> { hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.0, 0.0]), pre: nan }, mag: Tensor::new([1.0, 0.0, 0.0]) },
-            MhdPrim::<f64, 3> { hydro: Prim { rho: 1.0, vel: Tensor::new([nan, 0.0, 0.0]), pre: 1.0 }, mag: Tensor::new([1.0, 0.0, 0.0]) },
-            MhdPrim::<f64, 3> { hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.0, 0.0]), pre: 1.0 }, mag: Tensor::new([nan, 0.0, 0.0]) },
+            MhdPrim::<f64, 3> {
+                hydro: Prim {
+                    rho: nan,
+                    vel: Tensor::new([0.1, 0.0, 0.0]),
+                    pre: 1.0,
+                },
+                mag: Tensor::new([1.0, 0.0, 0.0]),
+            },
+            MhdPrim::<f64, 3> {
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.1, 0.0, 0.0]),
+                    pre: nan,
+                },
+                mag: Tensor::new([1.0, 0.0, 0.0]),
+            },
+            MhdPrim::<f64, 3> {
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([nan, 0.0, 0.0]),
+                    pre: 1.0,
+                },
+                mag: Tensor::new([1.0, 0.0, 0.0]),
+            },
+            MhdPrim::<f64, 3> {
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.1, 0.0, 0.0]),
+                    pre: 1.0,
+                },
+                mag: Tensor::new([nan, 0.0, 0.0]),
+            },
         ];
         for (i, prim) in cases.iter().enumerate() {
             let nhat = Tensor::<f64, 3>::unit(0);
@@ -488,9 +558,10 @@ mod tests {
     // monic quartic coefficients from 4 real roots: x^4 + b x^3 + c x^2 + d x + e.
     fn quartic_from_roots(r: [f64; 4]) -> (f64, f64, f64, f64) {
         let b = -(r[0] + r[1] + r[2] + r[3]);
-        let c = r[0]*r[1] + r[0]*r[2] + r[0]*r[3] + r[1]*r[2] + r[1]*r[3] + r[2]*r[3];
-        let d = -(r[0]*r[1]*r[2] + r[0]*r[1]*r[3] + r[0]*r[2]*r[3] + r[1]*r[2]*r[3]);
-        let e = r[0]*r[1]*r[2]*r[3];
+        let c = r[0] * r[1] + r[0] * r[2] + r[0] * r[3] + r[1] * r[2] + r[1] * r[3] + r[2] * r[3];
+        let d =
+            -(r[0] * r[1] * r[2] + r[0] * r[1] * r[3] + r[0] * r[2] * r[3] + r[1] * r[2] * r[3]);
+        let e = r[0] * r[1] * r[2] * r[3];
         (b, c, d, e)
     }
 
@@ -508,8 +579,16 @@ mod tests {
         for r in &root_sets {
             let (b, c, d, e) = quartic_from_roots(*r);
             let (lo, hi) = solve_quartic_minmax::<f64>(b, c, d, e);
-            assert!((lo - r[0]).abs() <= 1e-7 * (1.0 + r[0].abs()), "lo: {lo} != {}", r[0]);
-            assert!((hi - r[3]).abs() <= 1e-7 * (1.0 + r[3].abs()), "hi: {hi} != {}", r[3]);
+            assert!(
+                (lo - r[0]).abs() <= 1e-7 * (1.0 + r[0].abs()),
+                "lo: {lo} != {}",
+                r[0]
+            );
+            assert!(
+                (hi - r[3]).abs() <= 1e-7 * (1.0 + r[3].abs()),
+                "hi: {hi} != {}",
+                r[3]
+            );
         }
     }
 
@@ -517,18 +596,34 @@ mod tests {
     fn solve_cubic_resolvent_is_a_root() {
         // the resolvent returns ONE real root of x^3 + b x^2 + c x + d; verify it nulls
         // the polynomial across the trig / hyperbolic branches.
-        let cases = [(0.0, -1.0, 0.0), (-1.0, 0.5, 0.2), (2.0, -2.0, 1.0), (-3.0, 1.0, -0.5), (1.5, 0.3, -0.7)];
+        let cases = [
+            (0.0, -1.0, 0.0),
+            (-1.0, 0.5, 0.2),
+            (2.0, -2.0, 1.0),
+            (-3.0, 1.0, -0.5),
+            (1.5, 0.3, -0.7),
+        ];
         for (b, c, d) in cases {
             let x = solve_cubic_resolvent::<f64>(b, c, d);
-            let val = x*x*x + b*x*x + c*x + d;
-            assert!(val.abs() < 1e-7, "cubic({b},{c},{d}) root {x} leaves residual {val}");
+            let val = x * x * x + b * x * x + c * x + d;
+            assert!(
+                val.abs() < 1e-7,
+                "cubic({b},{c},{d}) root {x} leaves residual {val}"
+            );
         }
     }
 
     // direct analytic rmhd wave_speeds (3-velocity / lab B), the ground-truth
     // reference the substrate Expr form is validated against.
-    fn ref_wave_speeds(rho: f64, vel: [f64; 3], p: f64, mag: [f64; 3], gamma: f64, dir: usize) -> (f64, f64) {
-        let dot = |a: &[f64; 3], b: &[f64; 3]| a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    fn ref_wave_speeds(
+        rho: f64,
+        vel: [f64; 3],
+        p: f64,
+        mag: [f64; 3],
+        gamma: f64,
+        dir: usize,
+    ) -> (f64, f64) {
+        let dot = |a: &[f64; 3], b: &[f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
         let eps = 1e-12;
         let vsq = dot(&vel, &vel);
         let w = 1.0 / (1.0 - vsq).sqrt();
@@ -536,42 +631,76 @@ mod tests {
         let cssq = gamma * p / (rho * h);
         let vdb = dot(&vel, &mag);
         let bmu0 = w * vdb;
-        let bmu_s = [mag[0]/w + w*vel[0]*vdb, mag[1]/w + w*vel[1]*vdb, mag[2]/w + w*vel[2]*vdb];
-        let bmusq = -bmu0*bmu0 + bmu_s[0]*bmu_s[0] + bmu_s[1]*bmu_s[1] + bmu_s[2]*bmu_s[2];
+        let bmu_s = [
+            mag[0] / w + w * vel[0] * vdb,
+            mag[1] / w + w * vel[1] * vdb,
+            mag[2] / w + w * vel[2] * vdb,
+        ];
+        let bmusq = -bmu0 * bmu0 + bmu_s[0] * bmu_s[0] + bmu_s[1] * bmu_s[1] + bmu_s[2] * bmu_s[2];
         let bn = mag[dir];
         let bnsq = bn * bn;
         let vn = vel[dir];
         if vsq < eps {
-            let fac = 1.0 / (rho*h + bmusq);
-            let b = -(bmusq + rho*h*cssq + bnsq*cssq) * fac;
+            let fac = 1.0 / (rho * h + bmusq);
+            let b = -(bmusq + rho * h * cssq + bnsq * cssq) * fac;
             let cc = cssq * bnsq * fac;
-            let disq = (b*b - 4.0*cc).sqrt();
+            let disq = (b * b - 4.0 * cc).sqrt();
             let lr = (0.5 * (-b + disq)).sqrt();
             (-lr, lr)
         } else if bnsq < eps {
             let g2 = w * w;
             let vdbperp = vdb - vn * bn;
             let q = bmusq - cssq * vdbperp * vdbperp;
-            let a2 = rho*h*(cssq + g2*(1.0 - cssq)) + q;
-            let a1 = -2.0*rho*h*g2*vn*(1.0 - cssq);
-            let a0 = rho*h*(-cssq + g2*vn*vn*(1.0 - cssq)) - q;
-            let disq = a1*a1 - 4.0*a2*a0;
-            (0.5*(-a1 - disq.sqrt())/a2, 0.5*(-a1 + disq.sqrt())/a2)
+            let a2 = rho * h * (cssq + g2 * (1.0 - cssq)) + q;
+            let a1 = -2.0 * rho * h * g2 * vn * (1.0 - cssq);
+            let a0 = rho * h * (-cssq + g2 * vn * vn * (1.0 - cssq)) - q;
+            let disq = a1 * a1 - 4.0 * a2 * a0;
+            (
+                0.5 * (-a1 - disq.sqrt()) / a2,
+                0.5 * (-a1 + disq.sqrt()) / a2,
+            )
         } else {
             let bmun = bmu_s[dir];
             let w2 = w * w;
             let vn2 = vn * vn;
-            let a4 = -bmu0*bmu0*cssq + bmusq*w2 - cssq*w2*w2*h*rho + cssq*w2*h*rho + w2*w2*h*rho;
+            let a4 = -bmu0 * bmu0 * cssq + bmusq * w2 - cssq * w2 * w2 * h * rho
+                + cssq * w2 * h * rho
+                + w2 * w2 * h * rho;
             let fac = 1.0 / a4;
-            let a3 = fac * (2.0*bmu0*bmun*cssq - 2.0*bmusq*w2*vn + 4.0*cssq*w2*w2*h*rho*vn - 2.0*cssq*w2*h*rho*vn - 4.0*w2*w2*h*rho*vn);
-            let a2 = fac * (bmu0*bmu0*cssq + bmusq*w2*vn2 - bmusq*w2 - bmun*bmun*cssq - 6.0*cssq*w2*w2*h*rho*vn2 + cssq*w2*h*rho*vn2 - cssq*w2*h*rho + 6.0*w2*w2*h*rho*vn2);
-            let a1 = fac * (-2.0*bmu0*bmun*cssq + 2.0*bmusq*w2*vn + 4.0*cssq*w2*w2*h*rho*vn*vn2 + 2.0*cssq*w2*h*rho*vn - 4.0*w2*w2*h*rho*vn*vn2);
-            let a0 = fac * (-bmusq*w2*vn2 + bmun*bmun*cssq - cssq*w2*w2*h*rho*vn2*vn2 - cssq*w2*h*rho*vn2 + w2*w2*h*rho*vn2*vn2);
+            let a3 = fac
+                * (2.0 * bmu0 * bmun * cssq - 2.0 * bmusq * w2 * vn
+                    + 4.0 * cssq * w2 * w2 * h * rho * vn
+                    - 2.0 * cssq * w2 * h * rho * vn
+                    - 4.0 * w2 * w2 * h * rho * vn);
+            let a2 = fac
+                * (bmu0 * bmu0 * cssq + bmusq * w2 * vn2
+                    - bmusq * w2
+                    - bmun * bmun * cssq
+                    - 6.0 * cssq * w2 * w2 * h * rho * vn2
+                    + cssq * w2 * h * rho * vn2
+                    - cssq * w2 * h * rho
+                    + 6.0 * w2 * w2 * h * rho * vn2);
+            let a1 = fac
+                * (-2.0 * bmu0 * bmun * cssq
+                    + 2.0 * bmusq * w2 * vn
+                    + 4.0 * cssq * w2 * w2 * h * rho * vn * vn2
+                    + 2.0 * cssq * w2 * h * rho * vn
+                    - 4.0 * w2 * w2 * h * rho * vn * vn2);
+            let a0 = fac
+                * (-bmusq * w2 * vn2 + bmun * bmun * cssq
+                    - cssq * w2 * w2 * h * rho * vn2 * vn2
+                    - cssq * w2 * h * rho * vn2
+                    + w2 * w2 * h * rho * vn2 * vn2);
             let (ll, lr) = {
                 let (b, c, d, e) = (a3, a2, a1, a0);
-                let p = c - 0.375*b*b;
-                let q = 0.125*b*b*b - 0.5*b*c + d;
-                let m = solve_cubic_ref(p, 0.25*p*p + 0.01171875*b*b*b*b - e + 0.25*b*d - 0.0625*b*b*c, -0.125*q*q);
+                let p = c - 0.375 * b * b;
+                let q = 0.125 * b * b * b - 0.5 * b * c + d;
+                let m = solve_cubic_ref(
+                    p,
+                    0.25 * p * p + 0.01171875 * b * b * b * b - e + 0.25 * b * d
+                        - 0.0625 * b * b * c,
+                    -0.125 * q * q,
+                );
                 quartic_minmax_ref(b, p, q, m)
             };
             if ll.is_nan() { (0.0, 0.0) } else { (ll, lr) }
@@ -579,44 +708,73 @@ mod tests {
     }
 
     fn solve_cubic_ref(b: f64, c: f64, d: f64) -> f64 {
-        let p = c - b*b/3.0;
-        let q = 2.0*b*b*b/27.0 - b*c/3.0 + d;
-        if p.abs() < 1e-12 { return q.powf(1.0/3.0); }
-        if q.abs() < 1e-12 { return 0.0; }
-        let t = (p.abs()/3.0).sqrt();
-        let g = 1.5*q/(p*t);
-        if p > 0.0 { -2.0*t*(g.asinh()/3.0).sinh() - b/3.0 }
-        else if 4.0*p*p*p + 27.0*q*q < 0.0 { 2.0*t*(g.acos()/3.0).cos() - b/3.0 }
-        else if q > 0.0 { -2.0*t*((-g).acosh()/3.0).cosh() - b/3.0 }
-        else { 2.0*t*(g.acosh()/3.0).cosh() - b/3.0 }
+        let p = c - b * b / 3.0;
+        let q = 2.0 * b * b * b / 27.0 - b * c / 3.0 + d;
+        if p.abs() < 1e-12 {
+            return q.powf(1.0 / 3.0);
+        }
+        if q.abs() < 1e-12 {
+            return 0.0;
+        }
+        let t = (p.abs() / 3.0).sqrt();
+        let g = 1.5 * q / (p * t);
+        if p > 0.0 {
+            -2.0 * t * (g.asinh() / 3.0).sinh() - b / 3.0
+        } else if 4.0 * p * p * p + 27.0 * q * q < 0.0 {
+            2.0 * t * (g.acos() / 3.0).cos() - b / 3.0
+        } else if q > 0.0 {
+            -2.0 * t * ((-g).acosh() / 3.0).cosh() - b / 3.0
+        } else {
+            2.0 * t * (g.acosh() / 3.0).cosh() - b / 3.0
+        }
     }
 
     fn quartic_minmax_ref(b: f64, p: f64, q: f64, m: f64) -> (f64, f64) {
         let nan = f64::NAN;
         let (mut smin, mut smax) = (f64::INFINITY, f64::NEG_INFINITY);
-        let mut track = |r: f64| { if r < smin { smin = r; } if r > smax { smax = r; } };
+        let mut track = |r: f64| {
+            if r < smin {
+                smin = r;
+            }
+            if r > smax {
+                smax = r;
+            }
+        };
         if q.abs() < 1e-12 {
-            if m < 0.0 { return (nan, nan); }
-            let s = (2.0*m).sqrt();
+            if m < 0.0 {
+                return (nan, nan);
+            }
+            let s = (2.0 * m).sqrt();
             if -m - p > 0.0 {
-                let dl = (2.0*(-m - p)).sqrt();
-                track(-0.25*b + 0.5*(s - dl)); track(-0.25*b - 0.5*(s - dl));
-                track(-0.25*b + 0.5*(s + dl)); track(-0.25*b - 0.5*(s + dl));
+                let dl = (2.0 * (-m - p)).sqrt();
+                track(-0.25 * b + 0.5 * (s - dl));
+                track(-0.25 * b - 0.5 * (s - dl));
+                track(-0.25 * b + 0.5 * (s + dl));
+                track(-0.25 * b - 0.5 * (s + dl));
             }
-            if (-m - p).abs() < 1e-12 { track(-0.25*b - 0.5*s); track(-0.25*b + 0.5*s); }
+            if (-m - p).abs() < 1e-12 {
+                track(-0.25 * b - 0.5 * s);
+                track(-0.25 * b + 0.5 * s);
+            }
         } else {
-            if m < 0.0 { return (nan, nan); }
-            let s = (2.0*m).sqrt();
-            if -m - p + q/s >= 0.0 {
-                let dl = (2.0*(-m - p + q/s)).sqrt();
-                track(0.5*(-s + dl) - 0.25*b); track(0.5*(-s - dl) - 0.25*b);
+            if m < 0.0 {
+                return (nan, nan);
             }
-            if -m - p - q/s >= 0.0 {
-                let dl = (2.0*(-m - p - q/s)).sqrt();
-                track(0.5*(s + dl) - 0.25*b); track(0.5*(s - dl) - 0.25*b);
+            let s = (2.0 * m).sqrt();
+            if -m - p + q / s >= 0.0 {
+                let dl = (2.0 * (-m - p + q / s)).sqrt();
+                track(0.5 * (-s + dl) - 0.25 * b);
+                track(0.5 * (-s - dl) - 0.25 * b);
+            }
+            if -m - p - q / s >= 0.0 {
+                let dl = (2.0 * (-m - p - q / s)).sqrt();
+                track(0.5 * (s + dl) - 0.25 * b);
+                track(0.5 * (s - dl) - 0.25 * b);
             }
         }
-        if smin > smax { return (nan, nan); }
+        if smin > smax {
+            return (nan, nan);
+        }
         (smin, smax)
     }
 
@@ -631,22 +789,35 @@ mod tests {
             ([0.2, 0.1, 0.0], [0.0, 0.4, 0.3], 0),      // Eq.58: bn ~ 0
             ([0.3, 0.1, 0.2], [0.5, 0.3, 0.2], 0),      // Eq.56: quartic
             ([0.1, 0.4, 0.1], [0.6, 0.1, 0.4], 0),
-            ([0.3, 0.1, 0.2], [0.5, 0.3, 0.2], 1),      // direction indexing
+            ([0.3, 0.1, 0.2], [0.5, 0.3, 0.2], 1), // direction indexing
             ([0.3, 0.1, 0.2], [0.5, 0.3, 0.2], 2),
         ];
         for (i, (vel, mag, dir)) in states.iter().enumerate() {
             let (rho, p) = (1.0, 1.0);
             let prim = MhdPrim {
-                hydro: Prim { rho, vel: Tensor::new(*vel), pre: p },
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new(*vel),
+                    pre: p,
+                },
                 mag: Tensor::new(*mag),
             };
             let mut nh = [0.0; 3];
             nh[*dir] = 1.0;
             let (sl, sr) = Rmhd.wave_speeds(&eos, &prim, &Tensor::new(nh));
-            let (wl, wr) = ref_wave_speeds(rho, *vel, p, *mag, 5.0/3.0, *dir);
-            assert!((sl - wl).abs() <= 1e-9 * (1.0 + wl.abs()), "state {i} dir {dir} sl: {sl} != {wl}");
-            assert!((sr - wr).abs() <= 1e-9 * (1.0 + wr.abs()), "state {i} dir {dir} sr: {sr} != {wr}");
-            assert!(sl <= sr + 1e-12 && sr.abs() <= 1.0 + 1e-9, "state {i}: unphysical ({sl}, {sr})");
+            let (wl, wr) = ref_wave_speeds(rho, *vel, p, *mag, 5.0 / 3.0, *dir);
+            assert!(
+                (sl - wl).abs() <= 1e-9 * (1.0 + wl.abs()),
+                "state {i} dir {dir} sl: {sl} != {wl}"
+            );
+            assert!(
+                (sr - wr).abs() <= 1e-9 * (1.0 + wr.abs()),
+                "state {i} dir {dir} sr: {sr} != {wr}"
+            );
+            assert!(
+                sl <= sr + 1e-12 && sr.abs() <= 1.0 + 1e-9,
+                "state {i}: unphysical ({sl}, {sr})"
+            );
         }
     }
 
@@ -702,6 +873,9 @@ mod tests {
         eprintln!("\n=== cubic resolvent: compute-all-paths tax (n={n}) ===");
         eprintln!("native single-branch : {ns_native:6.2} ns/call  ({dt_native:?})");
         eprintln!("carrier cond   (f64) : {ns_carrier:6.2} ns/call  ({dt_carrier:?})");
-        eprintln!("ratio                : {:.2}x  (was 2.16x under nested select)", ns_carrier / ns_native);
+        eprintln!(
+            "ratio                : {:.2}x  (was 2.16x under nested select)",
+            ns_carrier / ns_native
+        );
     }
 }

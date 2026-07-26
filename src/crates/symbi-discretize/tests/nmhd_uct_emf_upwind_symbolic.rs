@@ -41,9 +41,9 @@ const SCALARS: &[&str] = &[
 // the symbolic param leaves carry no LoadAt, so every field read resolves to the
 // zero-length (offset-free) stencil key.
 fn coeff<'a>(lf: &'a LinForm, key: &str) -> &'a symbi_ir::proof::Poly {
-    lf.terms
-        .get(&(key.to_string(), vec![]))
-        .unwrap_or_else(|| panic!("emf has no coefficient for face `{key}` — extraction changed shape"))
+    lf.terms.get(&(key.to_string(), vec![])).unwrap_or_else(|| {
+        panic!("emf has no coefficient for face `{key}` — extraction changed shape")
+    })
 }
 
 #[test]
@@ -56,22 +56,62 @@ fn uct_emf_upwind_pairing_symbolic() {
     // downwind East face by_e. the products are -vbar_x*al_x and -vbar_x*ar_x.
     let by_w = coeff(&lf, "by_w");
     let by_e = coeff(&lf, "by_e");
-    assert_eq!(by_w.coefficient_of(&["vbar_x", "al_x"]), -1, "a^L must weight the upwind face by_w");
-    assert_eq!(by_w.coefficient_of(&["vbar_x", "ar_x"]), 0, "a^R must NOT weight the upwind face by_w");
-    assert_eq!(by_e.coefficient_of(&["vbar_x", "ar_x"]), -1, "a^R must weight the downwind face by_e");
-    assert_eq!(by_e.coefficient_of(&["vbar_x", "al_x"]), 0, "a^L must NOT weight the downwind face by_e");
+    assert_eq!(
+        by_w.coefficient_of(&["vbar_x", "al_x"]),
+        -1,
+        "a^L must weight the upwind face by_w"
+    );
+    assert_eq!(
+        by_w.coefficient_of(&["vbar_x", "ar_x"]),
+        0,
+        "a^R must NOT weight the upwind face by_w"
+    );
+    assert_eq!(
+        by_e.coefficient_of(&["vbar_x", "ar_x"]),
+        -1,
+        "a^R must weight the downwind face by_e"
+    );
+    assert_eq!(
+        by_e.coefficient_of(&["vbar_x", "al_x"]),
+        0,
+        "a^L must NOT weight the downwind face by_e"
+    );
 
     // the diffusion pairing rides along the same faces: d^L->West (by_w), d^R->East (by_e).
-    assert_eq!(by_w.coefficient_of(&["dl_x"]), -1, "d^L must weight the West face by_w");
-    assert_eq!(by_e.coefficient_of(&["dr_x"]), 1, "d^R must weight the East face by_e");
+    assert_eq!(
+        by_w.coefficient_of(&["dl_x"]),
+        -1,
+        "d^L must weight the West face by_w"
+    );
+    assert_eq!(
+        by_e.coefficient_of(&["dr_x"]),
+        1,
+        "d^R must weight the East face by_e"
+    );
 
     // +y advection: a^L (al_y) weights the UPWIND South face bx_s; a^R (ar_y) the North bx_n.
     let bx_s = coeff(&lf, "bx_s");
     let bx_n = coeff(&lf, "bx_n");
-    assert_eq!(bx_s.coefficient_of(&["vbar_y", "al_y"]), 1, "a^L must weight the upwind face bx_s");
-    assert_eq!(bx_s.coefficient_of(&["vbar_y", "ar_y"]), 0, "a^R must NOT weight the upwind face bx_s");
-    assert_eq!(bx_n.coefficient_of(&["vbar_y", "ar_y"]), 1, "a^R must weight the downwind face bx_n");
-    assert_eq!(bx_n.coefficient_of(&["vbar_y", "al_y"]), 0, "a^L must NOT weight the downwind face bx_n");
+    assert_eq!(
+        bx_s.coefficient_of(&["vbar_y", "al_y"]),
+        1,
+        "a^L must weight the upwind face bx_s"
+    );
+    assert_eq!(
+        bx_s.coefficient_of(&["vbar_y", "ar_y"]),
+        0,
+        "a^R must NOT weight the upwind face bx_s"
+    );
+    assert_eq!(
+        bx_n.coefficient_of(&["vbar_y", "ar_y"]),
+        1,
+        "a^R must weight the downwind face bx_n"
+    );
+    assert_eq!(
+        bx_n.coefficient_of(&["vbar_y", "al_y"]),
+        0,
+        "a^L must NOT weight the downwind face bx_n"
+    );
 }
 
 // the negative control: feeding the master the anti-upwind (swapped by_w/by_e)
@@ -86,6 +126,14 @@ fn uct_emf_anti_upwind_pairing_is_rejected() {
     // with by_w/by_e swapped, a^L now lands on the DOWNWIND face: the upwind face
     // by_w carries a^R. the production invariant above would fail.
     let by_w = coeff(&lf, "by_w");
-    assert_eq!(by_w.coefficient_of(&["vbar_x", "al_x"]), 0, "bug: a^L no longer on by_w");
-    assert_eq!(by_w.coefficient_of(&["vbar_x", "ar_x"]), -1, "bug: a^R wrongly weights the upwind face");
+    assert_eq!(
+        by_w.coefficient_of(&["vbar_x", "al_x"]),
+        0,
+        "bug: a^L no longer on by_w"
+    );
+    assert_eq!(
+        by_w.coefficient_of(&["vbar_x", "ar_x"]),
+        -1,
+        "bug: a^R wrongly weights the upwind face"
+    );
 }

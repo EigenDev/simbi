@@ -9,9 +9,9 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
+use symbi_grid::Field;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::{FieldBind, FieldRef};
-use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
@@ -54,7 +54,11 @@ where
     let mut outputs: FieldVec<'a, Sc, D, Mem> = FieldVec::new();
     for &(fref, is_out) in bindings {
         let fld = resolve(fref);
-        if is_out { outputs.push(fld); } else { inputs.push(fld); }
+        if is_out {
+            outputs.push(fld);
+        } else {
+            inputs.push(fld);
+        }
     }
     (inputs, outputs)
 }
@@ -221,9 +225,9 @@ where
             StateComp::Den => &group.den,
             StateComp::Nrg => group.nrg_field().expect("state slot has no energy field"),
             StateComp::Mom(k) => &group.mom[k as usize],
-            StateComp::Chi => group
-                .chi_field()
-                .expect("state slot has no passive-scalar field (run not built with_passive_scalar)"),
+            StateComp::Chi => group.chi_field().expect(
+                "state slot has no passive-scalar field (run not built with_passive_scalar)",
+            ),
         }
     };
     let mhd = || f.mhd.as_ref().expect("mhd path requires MHD fields");
@@ -237,7 +241,9 @@ where
         // iso passes the kernel-set's substrate-owned pressure (`cs^2*rho`). the override is
         // authoritative: iso ALSO allocates `sim.fields.prim.pre` for GPU as an empty field, so
         // deriving pressure from the sim binds the wrong, unfilled buffer.
-        FieldRef::PrimPre => pre.expect("resolve_path: 'prim.pre' bound but no pressure override provided"),
+        FieldRef::PrimPre => {
+            pre.expect("resolve_path: 'prim.pre' bound but no pressure override provided")
+        }
         FieldRef::PrimVel(k) => &f.prim.vel[k as usize],
         FieldRef::PrimChi => f
             .prim

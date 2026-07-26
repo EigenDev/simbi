@@ -254,7 +254,10 @@ pub fn device_count() -> error::Result<i32> {
 /// ops need a handle to ANOTHER device's context (for cuMemcpyPeer / cuCtxEnablePeerAccess)
 /// while the current device stays put, so the context creation is split from the rebind.
 fn device_ctx(ord: i32) -> CUcontext {
-    assert!((ord as usize) < MAX_GPUS, "device ordinal {ord} exceeds MAX_GPUS");
+    assert!(
+        (ord as usize) < MAX_GPUS,
+        "device ordinal {ord} exceeds MAX_GPUS"
+    );
     CUDA_CTX[ord as usize]
         .get_or_init(|| {
             unsafe {
@@ -276,7 +279,8 @@ fn device_ctx(ord: i32) -> CUcontext {
                         .expect("cuDeviceGetCount failed");
                     let physical = if count > 0 { ord % count } else { 0 };
                     let mut dev: CUdevice = 0;
-                    check(cuDeviceGet(&mut dev, physical), "cuDeviceGet").expect("cuDeviceGet failed");
+                    check(cuDeviceGet(&mut dev, physical), "cuDeviceGet")
+                        .expect("cuDeviceGet failed");
                     check(cuCtxCreate_v2(&mut ctx, 0, dev), "cuCtxCreate")
                         .expect("cuCtxCreate failed");
                 }
@@ -337,7 +341,10 @@ pub fn can_access_peer(ord: i32, peer: i32) -> error::Result<bool> {
     unsafe {
         check(cuDeviceGet(&mut a, ord % count), "cuDeviceGet")?;
         check(cuDeviceGet(&mut b, peer % count), "cuDeviceGet")?;
-        check(cuDeviceCanAccessPeer(&mut flag, a, b), "cuDeviceCanAccessPeer")?;
+        check(
+            cuDeviceCanAccessPeer(&mut flag, a, b),
+            "cuDeviceCanAccessPeer",
+        )?;
     }
     Ok(flag != 0)
 }
@@ -361,12 +368,24 @@ pub fn enable_peer_access(ord: i32, peer: i32) -> error::Result<()> {
 /// synchronously, over the peer link. takes the two device contexts, so it honors the same
 /// logical->physical mapping as every other binding. this is the one new primitive in the
 /// multi-gpu transport -- the gather/scatter halves are already proven by `StagedCopy`.
-pub fn memcpy_peer(dst: u64, dst_ord: i32, src: u64, src_ord: i32, bytes: usize) -> error::Result<()> {
+pub fn memcpy_peer(
+    dst: u64,
+    dst_ord: i32,
+    src: u64,
+    src_ord: i32,
+    bytes: usize,
+) -> error::Result<()> {
     let dst_ctx = device_ctx(dst_ord);
     let src_ctx = device_ctx(src_ord);
     unsafe {
         check(
-            cuMemcpyPeer(dst as CUdeviceptr, dst_ctx, src as CUdeviceptr, src_ctx, bytes),
+            cuMemcpyPeer(
+                dst as CUdeviceptr,
+                dst_ctx,
+                src as CUdeviceptr,
+                src_ctx,
+                bytes,
+            ),
             "cuMemcpyPeer",
         )
     }

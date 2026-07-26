@@ -21,7 +21,7 @@
 // A1-sph(b) added. deferred.)
 // =============================================================================
 
-use symbi_discretize::{godunov_mass_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, godunov_mass_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const NDIM: usize = 2;
@@ -40,17 +40,31 @@ fn flux_only(mut lf: LinFormR) -> LinFormR {
 // single-term linear form at the cell's LOW face (offset 0).
 fn g_face(d: usize) -> LinFormR {
     let key = format!("mass_flux_{d}");
-    LinFormR::single_var((key, vec![0; NDIM]), "dt")
-        .scale_rat(&RatFun::new(Poly::constant(-1), Poly::var(&format!("dx_{d}"))))
+    LinFormR::single_var((key, vec![0; NDIM]), "dt").scale_rat(&RatFun::new(
+        Poly::constant(-1),
+        Poly::var(&format!("dx_{d}")),
+    ))
 }
 
 #[test]
 fn godunov_mass_conservation_symbolic() {
-    let (kernel, writes) =
-        godunov_mass_gv(Coords::Cartesian, &[Spacing::Uniform; NDIM], &[0, 1], NDIM as u8);
+    let (kernel, writes) = godunov_mass_gv(
+        Coords::Cartesian,
+        &[Spacing::Uniform; NDIM],
+        &[0, 1],
+        NDIM as u8,
+    );
     assert_eq!(writes.len(), 1, "mass builder must write exactly rho_new");
-    let flux = flux_only(LinFormR::extract_rat(&kernel.graph, writes[0].2, FIELDS, SCALARS));
-    assert!(!flux.is_zero(), "flux update is empty — extractor saw no flux reads");
+    let flux = flux_only(LinFormR::extract_rat(
+        &kernel.graph,
+        writes[0].2,
+        FIELDS,
+        SCALARS,
+    ));
+    assert!(
+        !flux.is_zero(),
+        "flux update is empty — extractor saw no flux reads"
+    );
 
     // the telescoping target: sum_d (G_d[+e_d] - G_d), a discrete divergence per direction.
     let mut telescoping = LinFormR::default();
@@ -77,8 +91,17 @@ fn godunov_mass_conservation_symbolic() {
 #[test]
 fn conservation_symbolic_detects_nonconservative() {
     let mut lf = LinFormR::default();
-    lf.add(&LinFormR::single_var(("mass_flux_0".into(), vec![1, 0]), "dt"));
-    lf.add(&LinFormR::single_var(("mass_flux_0".into(), vec![0, 0]), "dt")); // same sign: not -dt
-    assert!(!lf.is_zero(), "a same-sign (non-conservative) flux pair must NOT cancel");
+    lf.add(&LinFormR::single_var(
+        ("mass_flux_0".into(), vec![1, 0]),
+        "dt",
+    ));
+    lf.add(&LinFormR::single_var(
+        ("mass_flux_0".into(), vec![0, 0]),
+        "dt",
+    )); // same sign: not -dt
+    assert!(
+        !lf.is_zero(),
+        "a same-sign (non-conservative) flux pair must NOT cancel"
+    );
     assert_eq!(lf.residual().len(), 2);
 }

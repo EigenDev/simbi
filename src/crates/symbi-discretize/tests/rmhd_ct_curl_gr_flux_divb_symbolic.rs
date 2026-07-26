@@ -22,12 +22,18 @@
 // `(dt w)/w` compares equal to `dt` and the shared corner reads across directions cancel.
 // =============================================================================
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Coords, Spacetime, Spacing};
+use symbi_discretize::{Coords, Spacetime, Spacing, rmhd_ct_curl_2d_sph_gr_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
 const SCALARS: &[&str] = &[
-    "dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "schwarzschild_mass", "kerr_spin",
+    "dt",
+    "x_lo_0",
+    "dx_0",
+    "x_lo_1",
+    "dx_1",
+    "schwarzschild_mass",
+    "kerr_spin",
 ];
 
 fn curl_only(mut lf: LinFormR) -> LinFormR {
@@ -41,7 +47,12 @@ fn bare(dir: usize, spacetime: Spacetime, coords: Coords, axes: &[usize]) -> Lin
     let (kernel, writes) =
         rmhd_ct_curl_2d_sph_gr_gv(dir, spacetime, coords, &[Spacing::Uniform; 2], axes);
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
-    let curl = curl_only(LinFormR::extract_rat(&kernel.graph, writes[0].2, FIELDS, SCALARS));
+    let curl = curl_only(LinFormR::extract_rat(
+        &kernel.graph,
+        writes[0].2,
+        FIELDS,
+        SCALARS,
+    ));
     let c00 = curl
         .terms
         .get(&("ez".to_string(), vec![0, 0]))
@@ -69,7 +80,11 @@ fn div(spacetime: Spacetime, coords: Coords, axes: &[usize]) -> LinFormR {
 fn divb_cartesian_kerr_schild_symbolic() {
     // r = sqrt(x^2 + y^2): a NESTED sqrt in sqrt(gamma) = sqrt(1 + 2M/r).
     let d = div(Spacetime::KerrSchild, Coords::Cartesian, &[0, 1]);
-    assert!(d.is_zero(), "cartesian KS div(curl B) != 0:\n{:#?}", d.residual());
+    assert!(
+        d.is_zero(),
+        "cartesian KS div(curl B) != 0:\n{:#?}",
+        d.residual()
+    );
 }
 
 #[test]
@@ -77,7 +92,11 @@ fn divb_cylindrical_rphi_kerr_schild_symbolic() {
     // the (R, phi) equatorial disk: r = R on the equator, so this chart is diagonal + affine, but the
     // extract-the-weight method binds it uniformly with the rest.
     let d = div(Spacetime::KerrSchild, Coords::Cylindrical, &[0, 1]);
-    assert!(d.is_zero(), "cylindrical r-phi KS div(curl B) != 0:\n{:#?}", d.residual());
+    assert!(
+        d.is_zero(),
+        "cylindrical r-phi KS div(curl B) != 0:\n{:#?}",
+        d.residual()
+    );
 }
 
 #[test]
@@ -85,7 +104,11 @@ fn divb_cylindrical_rz_kerr_schild_symbolic() {
     // the (R, z) poloidal chart: r = sqrt(R^2 + z^2), NON-diagonal spatial metric (gamma_Rz), nested
     // sqrt in the measure. axes = [R=0, z=2].
     let d = div(Spacetime::KerrSchild, Coords::Cylindrical, &[0, 2]);
-    assert!(d.is_zero(), "cylindrical r-z KS div(curl B) != 0:\n{:#?}", d.residual());
+    assert!(
+        d.is_zero(),
+        "cylindrical r-z KS div(curl B) != 0:\n{:#?}",
+        d.residual()
+    );
 }
 
 #[test]
@@ -93,7 +116,11 @@ fn divb_spherical_kerr_symbolic() {
     // spinning Kerr (r, theta): sqrt(gamma) = Sigma sin(theta) sqrt(1 + b), Sigma = r^2 + a^2 cos^2,
     // b = 2Mr/Sigma — non-affine radius AND a transcendental (cos) argument.
     let d = div(Spacetime::Kerr, Coords::Spherical, &[0, 1]);
-    assert!(d.is_zero(), "spherical Kerr div(curl B) != 0:\n{:#?}", d.residual());
+    assert!(
+        d.is_zero(),
+        "spherical Kerr div(curl B) != 0:\n{:#?}",
+        d.residual()
+    );
 }
 
 // negative control: dropping the weight (using the raw curl, metric NOT cancelled) leaves the lapse
@@ -102,9 +129,18 @@ fn divb_spherical_kerr_symbolic() {
 fn divb_gr_flux_symbolic_detects_missing_weight() {
     let raw = |dir: usize| -> LinFormR {
         let (kernel, writes) = rmhd_ct_curl_2d_sph_gr_gv(
-            dir, Spacetime::KerrSchild, Coords::Cartesian, &[Spacing::Uniform; 2], &[0, 1],
+            dir,
+            Spacetime::KerrSchild,
+            Coords::Cartesian,
+            &[Spacing::Uniform; 2],
+            &[0, 1],
         );
-        curl_only(LinFormR::extract_rat(&kernel.graph, writes[0].2, FIELDS, SCALARS))
+        curl_only(LinFormR::extract_rat(
+            &kernel.graph,
+            writes[0].2,
+            FIELDS,
+            SCALARS,
+        ))
     };
     let q0 = raw(0);
     let q1 = raw(1);

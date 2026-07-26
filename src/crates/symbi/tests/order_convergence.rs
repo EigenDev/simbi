@@ -52,11 +52,16 @@ fn l1_after_one_period(n: usize, solver: Solver) -> f64 {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|[x]| Prim { rho: rho_exact(x), vel: Tensor::new([V]), pre: P })
+        .set_initial(|[x]| Prim {
+            rho: rho_exact(x),
+            vel: Tensor::new([V]),
+            pre: P,
+        })
         .build();
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)
-        .with_solver(solver)
-        .expect("solver/regime mismatch");
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)
+            .with_solver(solver)
+            .expect("solver/regime mismatch");
     evolve(&mut sim, &sub, 1.0).expect("evolve failed");
     let rho = &sim.fields.prim.rho;
     let mut l1 = 0.0;
@@ -71,7 +76,10 @@ fn assert_second_order(solver: Solver, tag: &str) {
     let e1 = l1_after_one_period(64, solver);
     let e2 = l1_after_one_period(128, solver);
     let ratio = e1 / e2;
-    eprintln!("{tag}: L1(64)={e1:.3e}  L1(128)={e2:.3e}  order~{:.2} (ratio {ratio:.2})", ratio.log2());
+    eprintln!(
+        "{tag}: L1(64)={e1:.3e}  L1(128)={e2:.3e}  order~{:.2} (ratio {ratio:.2})",
+        ratio.log2()
+    );
     // 2nd order -> ratio ~4; 1st order -> ~2. the > 3 threshold cleanly separates them and leaves
     // margin for the smooth-problem constant. a NON-decreasing error (ratio <= 1) means the scheme
     // is not even converging.
@@ -109,7 +117,11 @@ fn l1_after_one_period_rhd(n: usize, solver: Solver) -> f64 {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("rhd sim construction failed")
-        .set_initial(|[x]| Prim { rho: rho_exact(x), vel: Tensor::new([V_REL]), pre: P })
+        .set_initial(|[x]| Prim {
+            rho: rho_exact(x),
+            vel: Tensor::new([V_REL]),
+            pre: P,
+        })
         .build();
     let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated)
         .with_solver(solver)
@@ -129,7 +141,10 @@ fn rhd_plm_rk2_second_order_hllc() {
     let e1 = l1_after_one_period_rhd(64, Solver::Hllc);
     let e2 = l1_after_one_period_rhd(128, Solver::Hllc);
     let ratio = e1 / e2;
-    eprintln!("RHD HLLC: L1(64)={e1:.3e}  L1(128)={e2:.3e}  order~{:.2} (ratio {ratio:.2})", ratio.log2());
+    eprintln!(
+        "RHD HLLC: L1(64)={e1:.3e}  L1(128)={e2:.3e}  order~{:.2} (ratio {ratio:.2})",
+        ratio.log2()
+    );
     assert!(
         e2 < e1 && ratio > 3.0,
         "RHD PLM+RK2 is not ~2nd order — L1(64)={e1:.3e}, L1(128)={e2:.3e}, ratio={ratio:.2} \

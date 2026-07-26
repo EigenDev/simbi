@@ -40,7 +40,11 @@ fn make_sim(b0: f64) -> Sim {
         .allocate()
         .expect("iso-mhd sim construction failed")
         .set_initial(move |_| MhdPrimG::<f64, 3, IsoModel> {
-            hydro: PrimG { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: Default::default() },
+            hydro: PrimG {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: Default::default(),
+            },
             mag: Tensor::new([b0, 0.0, 0.0]),
         })
         .seed_faces(move |axis, _| if axis == 0 { b0 } else { 0.0 })
@@ -48,7 +52,11 @@ fn make_sim(b0: f64) -> Sim {
 }
 
 fn total_mass(s: &Sim) -> f64 {
-    s.geom.interior.iter().map(|c| *s.fields.cons.den.view().at(c)).sum()
+    s.geom
+        .interior
+        .iter()
+        .map(|c| *s.fields.cons.den.view().at(c))
+        .sum()
 }
 
 fn bcell_snapshot(s: &Sim) -> Vec<f64> {
@@ -66,11 +74,18 @@ fn setup(b0: f64) -> Sim {
     let mut sim = make_sim(b0);
     // a shaped subgrid sink at the origin: a pure-drain porous wall (porosity 1), removing plasma.
     sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
-            .with_surface(SurfaceSpec::Porous { porosity: 1.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
+        Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true).with_surface(
+            SurfaceSpec::Porous {
+                porosity: 1.0,
+                k_eta_n: 50.0,
+                k_eta_t: 50.0,
+            },
+        ),
     ));
-    sim.immersed.as_mut().unwrap().shapes[0] =
-        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.25, 0.25]));
+    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::cuboid(
+        [0.0, 0.0, 0.0],
+        [0.25, 0.25, 0.25],
+    ));
     sim
 }
 
@@ -98,7 +113,11 @@ fn imhd_sink_drains_plasma_and_leaves_the_field() {
     assert!(total_mass(&sim) < mass0);
     // constrained transport owns B; the drain never touches it (bit-exact). there is no energy
     // slot, so there is nothing else to check -- the sandwich correctly does nothing here.
-    assert_eq!(bcell_snapshot(&sim), bcell0, "the iso drain modified the magnetic field");
+    assert_eq!(
+        bcell_snapshot(&sim),
+        bcell0,
+        "the iso drain modified the magnetic field"
+    );
 }
 
 #[test]

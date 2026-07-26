@@ -8,15 +8,15 @@
 // "scalars are rank-0 tensors anyway" framing real at the IR level.
 // =============================================================================
 
-use crate::{ElementTy, DimExpr};
+use crate::{DimExpr, ElementTy};
 
 /// fully-typed tensor type. one of these is attached to every node in
 /// a tensor IR graph.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TensorTy {
-    pub element:  ElementTy,
-    pub rank:     u32,
-    pub shape:    Vec<DimExpr>,
+    pub element: ElementTy,
+    pub rank: u32,
+    pub shape: Vec<DimExpr>,
 }
 
 impl TensorTy {
@@ -50,7 +50,9 @@ impl std::fmt::Display for TensorTy {
         // Tensor<element, [d0, d1, …]>
         write!(f, "Tensor<{}, [", self.element)?;
         for (i, d) in self.shape.iter().enumerate() {
-            if i > 0 { f.write_str(", ")?; }
+            if i > 0 {
+                f.write_str(", ")?;
+            }
             write!(f, "{}", d)?;
         }
         write!(f, "]>")
@@ -61,7 +63,9 @@ impl std::fmt::Display for TensorTy {
 mod tests {
     use super::*;
 
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
 
     #[test]
     fn scalar_constructor() {

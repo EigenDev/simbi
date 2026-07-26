@@ -85,7 +85,11 @@ fn e2_steady_state_step_loop_allocation_is_bounded() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(bodies);
     let sub =
@@ -104,7 +108,9 @@ fn e2_steady_state_step_loop_allocation_is_bounded() {
     assert!(steps >= 4, "measurement window too short ({steps} steps)");
     let calls_per_step = (ALLOC_CALLS.load(Ordering::Relaxed) - calls_before) / steps;
     let bytes_per_step = (ALLOC_BYTES.load(Ordering::Relaxed) - bytes_before) / steps;
-    println!("e2: {calls_per_step} allocator calls/step, {bytes_per_step} bytes/step over {steps} steps");
+    println!(
+        "e2: {calls_per_step} allocator calls/step, {bytes_per_step} bytes/step over {steps} steps"
+    );
 
     // the named budget, measured at 126 calls / 15.3 KB per step (deterministic
     // across runs). the residue is small-object traffic: per-dispatch kernel-name

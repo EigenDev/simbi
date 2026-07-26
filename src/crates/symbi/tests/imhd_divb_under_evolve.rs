@@ -60,7 +60,11 @@ fn make_sim() -> Sim {
             let vy = V0 * (2.0 * PI * x).sin();
             let mag = Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), 0.0]);
             MhdPrimG::<f64, 3, IsoModel> {
-                hydro: PrimG { rho: RHO0, vel: Tensor::new([vx, vy, 0.0]), pre: Default::default() },
+                hydro: PrimG {
+                    rho: RHO0,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: Default::default(),
+                },
                 mag,
             }
         })
@@ -90,7 +94,9 @@ fn max_divb_and_b(sim: &Sim, idx: f64, idy: f64, idz: f64) -> (f64, f64, [isize;
             worst = c;
         }
         let b_mag = (bx_lo * bx_lo + by_lo * by_lo + bz_lo * bz_lo).sqrt();
-        if b_mag > max_b { max_b = b_mag; }
+        if b_mag > max_b {
+            max_b = b_mag;
+        }
     }
     (max_div, max_b, worst)
 }
@@ -105,8 +111,14 @@ fn run_solver(solver: Solver) {
         "iso OT IC is not divergence-free: max|divB|={div0:e}",
     );
 
-    let sub = IsothermalMhdSubstrateKernelSet3D::<HostMemory, f64>::new(CS, CFL, 1.0, &sim.geom.allocated)
-        .with_solver(solver).expect("valid solver/regime pair");
+    let sub = IsothermalMhdSubstrateKernelSet3D::<HostMemory, f64>::new(
+        CS,
+        CFL,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_solver(solver)
+    .expect("valid solver/regime pair");
 
     let mut max_seen_rel = 0.0_f64;
     let mut steps_seen: u64 = 0;
@@ -122,7 +134,10 @@ fn run_solver(solver: Solver) {
         steps_seen = s.iteration;
     }).expect("iso-MHD evolve failed");
 
-    assert!(steps_seen >= 5, "iso evolve produced only {steps_seen} steps — gate barely exercised");
+    assert!(
+        steps_seen >= 5,
+        "iso evolve produced only {steps_seen} steps — gate barely exercised"
+    );
 
     // PHYSICALITY: the trivial iso c2p is rho = den; every interior cell must stay positive.
     for c in sim.geom.interior.iter() {

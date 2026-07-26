@@ -53,13 +53,19 @@ mod tests {
     fn assert_centering<C: Centering>() {}
 
     #[test]
-    fn cell_is_centering() { assert_centering::<Cell>(); }
+    fn cell_is_centering() {
+        assert_centering::<Cell>();
+    }
 
     #[test]
-    fn face_is_centering() { assert_centering::<Face>(); }
+    fn face_is_centering() {
+        assert_centering::<Face>();
+    }
 
     #[test]
-    fn edge_is_centering() { assert_centering::<Edge>(); }
+    fn edge_is_centering() {
+        assert_centering::<Edge>();
+    }
 
     #[test]
     fn markers_are_zero_sized() {

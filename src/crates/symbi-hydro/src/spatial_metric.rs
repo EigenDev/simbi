@@ -115,7 +115,10 @@ impl<S: Scalar, const D: usize> SpatialMetric<S, D> {
     /// the flat / orthonormal-frame metric: gamma = gamma_inv = identity. every norm
     /// reduces to the euclidean `.dot()` bit-identically — the SR / curvilinear-flat case.
     pub fn flat() -> Self {
-        Self { gamma: Gamma::identity(), gamma_inv: GammaInv::identity() }
+        Self {
+            gamma: Gamma::identity(),
+            gamma_inv: GammaInv::identity(),
+        }
     }
 
     /// the squared norm of a COVARIANT vector w_i: `gamma^{ij} w_i w_j` (raise + contract).

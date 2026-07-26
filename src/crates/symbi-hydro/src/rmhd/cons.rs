@@ -9,13 +9,13 @@
 // multi-accumulator IterateInline, at S=f64/f32 it is the false-position loop.
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use crate::spatial_metric::SpatialMetric;
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::state::Prim;
-use crate::mhd_state::{MhdPrim, MhdCons};
 use crate::c2p_result::C2pResult;
+use crate::eos::Eos;
+use crate::mhd_state::{MhdCons, MhdPrim};
+use crate::spatial_metric::SpatialMetric;
+use crate::state::Prim;
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 /// host bound on the false-position; the substrate kernel bakes its own (build.rs).
 const RMHD_MAX_ITER: usize = 100;
@@ -223,7 +223,11 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // neighbour's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
     // routes the zone through first-order correction instead. r_sq is metric-raised (line ~115).
     let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
-    let pre = S::select(cone_ok, pre, S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE));
+    let pre = S::select(
+        cone_ok,
+        pre,
+        S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE),
+    );
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
     // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the
@@ -231,7 +235,10 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // gamma -> the euclidean form bit-for-bit (raise = id).
     let vel = (metric.raise(&rvec) + hvec.scale(rdb_mu)).scale(mu_x);
 
-    MhdPrim { hydro: Prim { rho, vel, pre }, mag: bfield }
+    MhdPrim {
+        hydro: Prim { rho, vel, pre },
+        mag: bfield,
+    }
 }
 
 /// the host RMHD cons->prim: the branch-free `rmhd_recover` plus post-hoc C2pResult
@@ -251,8 +258,11 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     // kernel path). B passes through. shared RHD/RMHD guard (now NaN-checked too; tier-1 #5).
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = MhdPrim {
-            hydro: Prim { rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR), vel: Tensor::zeros(),
-                          pre: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR) },
+            hydro: Prim {
+                rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+                vel: Tensor::zeros(),
+                pre: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+            },
             mag: cons.mag,
         };
         return C2pResult::err(floored, code);
@@ -263,7 +273,11 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
     let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
-    if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
+    if code.is_ok() {
+        C2pResult::ok(prim)
+    } else {
+        C2pResult::err(prim, code)
+    }
 }
 
 #[cfg(test)]
@@ -280,7 +294,16 @@ mod tests {
 
     // direct f64 reference for `kkc_fmu44` (KKC Eq. 44).
     #[allow(clippy::too_many_arguments)]
-    fn ref_fmu44(mu: f64, r: f64, rperp: f64, beesq: f64, beedrsq: f64, qterm: f64, dterm: f64, gamma: f64) -> f64 {
+    fn ref_fmu44(
+        mu: f64,
+        r: f64,
+        rperp: f64,
+        beesq: f64,
+        beedrsq: f64,
+        qterm: f64,
+        dterm: f64,
+        gamma: f64,
+    ) -> f64 {
         let x = 1.0 / (1.0 + mu * beesq);
         let rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
         let qbar = qterm - 0.5 * (beesq + mu * mu * x * x * beesq * rperp);
@@ -306,11 +329,16 @@ mod tests {
     // allow(dead_code) preserves the reference.
     #[allow(dead_code)]
     fn ref_find_mu_plus(beesq: f64, beedrsq: f64, r: f64) -> f64 {
-        if r < 1.0 { return 1.0; }
+        if r < 1.0 {
+            return 1.0;
+        }
         let mut mu_lower = 0.0;
         let mut mu_upper = 1.0;
         let mut f_upper = ref_fmu49(mu_upper, beesq, beedrsq, r);
-        while f_upper < 0.0 { mu_upper *= 2.0; f_upper = ref_fmu49(mu_upper, beesq, beedrsq, r); }
+        while f_upper < 0.0 {
+            mu_upper *= 2.0;
+            f_upper = ref_fmu49(mu_upper, beesq, beedrsq, r);
+        }
         let eps = 1.0e-12;
         let mut mu_mid = 1.0;
         let mut f_lower = ref_fmu49(mu_lower, beesq, beedrsq, r);
@@ -318,8 +346,15 @@ mod tests {
         while iter < 50 && (mu_upper - mu_lower) > eps {
             mu_mid = 0.5 * (mu_lower + mu_upper);
             let f_mid = ref_fmu49(mu_mid, beesq, beedrsq, r);
-            if f_mid.abs() < eps { break; }
-            if f_mid * f_lower < 0.0 { mu_upper = mu_mid; } else { mu_lower = mu_mid; f_lower = f_mid; }
+            if f_mid.abs() < eps {
+                break;
+            }
+            if f_mid * f_lower < 0.0 {
+                mu_upper = mu_mid;
+            } else {
+                mu_lower = mu_mid;
+                f_lower = f_mid;
+            }
             iter += 1;
         }
         mu_mid * 1.000001
@@ -327,22 +362,37 @@ mod tests {
 
     #[test]
     fn kkc_fmu49_matches_cpp_reference() {
-        let cases = [(0.2, 0.4, 0.01, 0.3), (0.5, 0.8, 0.05, 0.6), (0.8, 1.2, 0.1, 0.9), (1.5, 0.3, 0.02, 1.2)];
+        let cases = [
+            (0.2, 0.4, 0.01, 0.3),
+            (0.5, 0.8, 0.05, 0.6),
+            (0.8, 1.2, 0.1, 0.9),
+            (1.5, 0.3, 0.02, 1.2),
+        ];
         for (mu, beesq, beedrsq, r) in cases {
             let got = kkc_fmu49::<f64>(mu, beesq, beedrsq, r);
             let want = ref_fmu49(mu, beesq, beedrsq, r);
-            assert!((got - want).abs() < 1e-12, "fmu49(mu={mu}): {got} != {want}");
+            assert!(
+                (got - want).abs() < 1e-12,
+                "fmu49(mu={mu}): {got} != {want}"
+            );
         }
     }
 
     #[test]
     fn kkc_fmu44_matches_cpp_reference() {
         let g = 5.0 / 3.0;
-        let cases = [(0.2, 0.3, 0.05, 0.4, 0.01, 0.5, 1.0), (0.5, 0.6, 0.1, 0.8, 0.05, 1.0, 1.5), (0.8, 0.9, 0.2, 1.2, 0.1, 1.5, 2.0)];
+        let cases = [
+            (0.2, 0.3, 0.05, 0.4, 0.01, 0.5, 1.0),
+            (0.5, 0.6, 0.1, 0.8, 0.05, 1.0, 1.5),
+            (0.8, 0.9, 0.2, 1.2, 0.1, 1.5, 2.0),
+        ];
         for (mu, r, rperp, beesq, beedrsq, q, d) in cases {
             let got = kkc_fmu44::<f64>(mu, r, rperp, beesq, beedrsq, q, d, g);
             let want = ref_fmu44(mu, r, rperp, beesq, beedrsq, q, d, g);
-            assert!((got - want).abs() < 1e-12, "fmu44(mu={mu}): {got} != {want}");
+            assert!(
+                (got - want).abs() < 1e-12,
+                "fmu44(mu={mu}): {got} != {want}"
+            );
         }
     }
 
@@ -352,19 +402,36 @@ mod tests {
         // is a genuine root (|f_a(mu_+)| ~ 0) and a valid UPPER bracket (f_a(mu_+) >= 0 >= f_a below
         // it). the r >= 1 cases are exactly where the old `return 1` bracket spanned the spurious
         // second root of the master function.
-        let cases = [(0.3, 0.02, 1.2), (0.8, 0.1, 2.0), (1.5, 0.3, 5.0), (0.5, 0.05, 1.0), (3.29, 18.7, 2.43)];
+        let cases = [
+            (0.3, 0.02, 1.2),
+            (0.8, 0.1, 2.0),
+            (1.5, 0.3, 5.0),
+            (0.5, 0.05, 1.0),
+            (3.29, 18.7, 2.43),
+        ];
         for (beesq, beedrsq, r) in cases {
             let mu_plus = find_mu_plus::<f64>(beesq, beedrsq, r);
             let f_at = kkc_fmu49::<f64>(mu_plus, beesq, beedrsq, r);
-            assert!(mu_plus > 0.0 && mu_plus <= 1.0, "mu_+ out of (0,1] for r={r}: {mu_plus}");
+            assert!(
+                mu_plus > 0.0 && mu_plus <= 1.0,
+                "mu_+ out of (0,1] for r={r}: {mu_plus}"
+            );
             // the correctness invariant is a TIGHT UPPER bracket: f_a(mu_+) >= 0 (so it exceeds the
             // f_a root => f_master(mu_+) >= 0, straddle holds) AND close to the root (Illinois returns
             // the hi endpoint within ~tol of the root, so f_a(hi) ~ f_a'*tol, a few e-12).
-            assert!(f_at >= 0.0, "mu_+ is not an upper bracket of the f_a root for r={r}: f_a={f_at}");
-            assert!(f_at < 1e-10, "mu_+ not a tight bracket for r={r}: f_a={f_at}");
+            assert!(
+                f_at >= 0.0,
+                "mu_+ is not an upper bracket of the f_a root for r={r}: f_a={f_at}"
+            );
+            assert!(
+                f_at < 1e-10,
+                "mu_+ not a tight bracket for r={r}: f_a={f_at}"
+            );
             // upper bracket: f_a strictly increasing, so just below mu_+ it is negative.
-            assert!(kkc_fmu49::<f64>(mu_plus - 1e-9, beesq, beedrsq, r) < f_at,
-                "f_a not increasing through mu_+ for r={r}");
+            assert!(
+                kkc_fmu49::<f64>(mu_plus - 1e-9, beesq, beedrsq, r) < f_at,
+                "f_a not increasing through mu_+ for r={r}"
+            );
         }
     }
 
@@ -388,11 +455,27 @@ mod tests {
         let got = rmhd_recover(&eos, &cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
         let v_sq = got.hydro.vel.dot(&got.hydro.vel);
         assert!(v_sq < 1.0, "recovered superluminal velocity: v^2 = {v_sq}");
-        assert!(got.hydro.pre > 0.0, "recovered non-positive pressure: p = {}", got.hydro.pre);
-        assert!(got.hydro.rho > 0.0, "recovered non-positive density: rho = {}", got.hydro.rho);
+        assert!(
+            got.hydro.pre > 0.0,
+            "recovered non-positive pressure: p = {}",
+            got.hydro.pre
+        );
+        assert!(
+            got.hydro.rho > 0.0,
+            "recovered non-positive density: rho = {}",
+            got.hydro.rho
+        );
         // the physical root recovered by an independent mu-scan of the master function.
-        assert!((got.hydro.pre - 0.3805).abs() < 1e-3, "pressure off physical root: {}", got.hydro.pre);
-        assert!((v_sq.sqrt() - 0.4741).abs() < 1e-3, "velocity off physical root: {}", v_sq.sqrt());
+        assert!(
+            (got.hydro.pre - 0.3805).abs() < 1e-3,
+            "pressure off physical root: {}",
+            got.hydro.pre
+        );
+        assert!(
+            (v_sq.sqrt() - 0.4741).abs() < 1e-3,
+            "velocity off physical root: {}",
+            v_sq.sqrt()
+        );
     }
 
     // =========================================================================
@@ -426,7 +509,12 @@ mod tests {
                 break;
             }
             let cond = f_mid * f_l < 0.0;
-            if cond { mu_u = mid; } else { mu_l = mid; f_l = f_mid; }
+            if cond {
+                mu_u = mid;
+            } else {
+                mu_l = mid;
+                f_l = f_mid;
+            }
             mu_mid = mid;
         }
         let result = if r < 1.0 { 1.0 } else { mu_mid * 1.000001 };
@@ -497,13 +585,17 @@ mod tests {
         let rho = gamma * gamma;
         let pre = gamma;
         let vx = -v0 * (2.0 * pi * y).sin();
-        let vy =  v0 * (2.0 * pi * x).sin();
+        let vy = v0 * (2.0 * pi * x).sin();
         let vz = 0.0;
         let bx = -b0 * (2.0 * pi * y).sin();
-        let by =  b0 * (4.0 * pi * x).sin();
+        let by = b0 * (4.0 * pi * x).sin();
         let bz = 0.0;
         MhdPrim {
-            hydro: Prim { rho, vel: Tensor::new([vx, vy, vz]), pre },
+            hydro: Prim {
+                rho,
+                vel: Tensor::new([vx, vy, vz]),
+                pre,
+            },
             mag: Tensor::new([bx, by, bz]),
         }
     }
@@ -540,13 +632,13 @@ mod tests {
         let max_fp = 100_usize;
 
         let mut fmp_hist = vec![0_usize; 65];
-        let mut fp_hist  = vec![0_usize; max_fp + 1];
+        let mut fp_hist = vec![0_usize; max_fp + 1];
         let mut total = 0_usize;
         let mut fmp_sum = 0_usize;
-        let mut fp_sum  = 0_usize;
+        let mut fp_sum = 0_usize;
         let mut fp_failed = 0_usize;
         let mut fmp_max = 0_usize;
-        let mut fp_max  = 0_usize;
+        let mut fp_max = 0_usize;
 
         for j in 0..n {
             for i in 0..n {
@@ -555,19 +647,25 @@ mod tests {
                 let prim = orszag_tang_prim(x, y, gamma, v0, b0);
                 let cons = rmhd_prim_to_cons(&prim, gamma);
                 let (_, fmp_iters, fp_iters) = instrumented_c2p(cons, gamma, max_fp, tol);
-                if fmp_iters < fmp_hist.len() { fmp_hist[fmp_iters] += 1; }
-                if fp_iters < fp_hist.len() { fp_hist[fp_iters] += 1; }
-                if fp_iters == max_fp { fp_failed += 1; }
+                if fmp_iters < fmp_hist.len() {
+                    fmp_hist[fmp_iters] += 1;
+                }
+                if fp_iters < fp_hist.len() {
+                    fp_hist[fp_iters] += 1;
+                }
+                if fp_iters == max_fp {
+                    fp_failed += 1;
+                }
                 fmp_sum += fmp_iters;
-                fp_sum  += fp_iters;
+                fp_sum += fp_iters;
                 fmp_max = fmp_max.max(fmp_iters);
-                fp_max  = fp_max.max(fp_iters);
+                fp_max = fp_max.max(fp_iters);
                 total += 1;
             }
         }
 
         let fmp_avg = fmp_sum as f64 / total as f64;
-        let fp_avg  = fp_sum  as f64 / total as f64;
+        let fp_avg = fp_sum as f64 / total as f64;
 
         // percentiles from cumulative histogram.
         let pct = |hist: &[usize], pct: f64| -> usize {
@@ -575,45 +673,82 @@ mod tests {
             let mut cum = 0_usize;
             for (k, &v) in hist.iter().enumerate() {
                 cum += v;
-                if cum >= target { return k; }
+                if cum >= target {
+                    return k;
+                }
             }
             hist.len() - 1
         };
         let fmp_p50 = pct(&fmp_hist, 0.50);
         let fmp_p90 = pct(&fmp_hist, 0.90);
         let fmp_p99 = pct(&fmp_hist, 0.99);
-        let fp_p50  = pct(&fp_hist,  0.50);
-        let fp_p90  = pct(&fp_hist,  0.90);
-        let fp_p99  = pct(&fp_hist,  0.99);
+        let fp_p50 = pct(&fp_hist, 0.50);
+        let fp_p90 = pct(&fp_hist, 0.90);
+        let fp_p99 = pct(&fp_hist, 0.99);
 
         eprintln!("\n=== c2p iter distribution on orszag_tang n={n} (tol={tol:e}) ===");
         eprintln!("total cells: {total}\n");
         eprintln!("find_mu_plus (bisection on [0,1]):");
-        eprintln!("  avg = {:.2}, p50 = {}, p90 = {}, p99 = {}, max = {}", fmp_avg, fmp_p50, fmp_p90, fmp_p99, fmp_max);
-        eprintln!("  production runs FIXED 50 iters always -> {} wasted iters per cell on avg",
-            (50.0 - fmp_avg).max(0.0));
+        eprintln!(
+            "  avg = {:.2}, p50 = {}, p90 = {}, p99 = {}, max = {}",
+            fmp_avg, fmp_p50, fmp_p90, fmp_p99, fmp_max
+        );
+        eprintln!(
+            "  production runs FIXED 50 iters always -> {} wasted iters per cell on avg",
+            (50.0 - fmp_avg).max(0.0)
+        );
         eprintln!();
         eprintln!("false-position (Illinois, post-bracket):");
-        eprintln!("  avg = {:.2}, p50 = {}, p90 = {}, p99 = {}, max = {}", fp_avg, fp_p50, fp_p90, fp_p99, fp_max);
+        eprintln!(
+            "  avg = {:.2}, p50 = {}, p90 = {}, p99 = {}, max = {}",
+            fp_avg, fp_p50, fp_p90, fp_p99, fp_max
+        );
         eprintln!("  production runs UP TO 100 iters w/ sticky-done freeze");
-        eprintln!("  non-converged cells: {} / {} ({:.1}%)", fp_failed, total, 100.0 * fp_failed as f64 / total as f64);
+        eprintln!(
+            "  non-converged cells: {} / {} ({:.1}%)",
+            fp_failed,
+            total,
+            100.0 * fp_failed as f64 / total as f64
+        );
         eprintln!();
-        eprintln!("total avg iters/cell (both loops) = {:.1}", fmp_avg + fp_avg);
+        eprintln!(
+            "total avg iters/cell (both loops) = {:.1}",
+            fmp_avg + fp_avg
+        );
         eprintln!("production worst-case = 50 + 100 = 150 iters/cell\n");
 
         // dump compact histogram for fp.
         eprintln!("fp iter histogram (count per iter, 0..30):");
         for (k, &v) in fp_hist.iter().enumerate().take(31) {
-            if v > 0 { eprintln!("  iter {:2}: {:5} cells ({:5.1}%)", k, v, 100.0 * v as f64 / total as f64); }
+            if v > 0 {
+                eprintln!(
+                    "  iter {:2}: {:5} cells ({:5.1}%)",
+                    k,
+                    v,
+                    100.0 * v as f64 / total as f64
+                );
+            }
         }
         eprintln!();
         eprintln!("fmp iter histogram (count per iter, 0..60):");
         for (k, &v) in fmp_hist.iter().enumerate().take(61) {
-            if v > 0 { eprintln!("  iter {:2}: {:5} cells ({:5.1}%)", k, v, 100.0 * v as f64 / total as f64); }
+            if v > 0 {
+                eprintln!(
+                    "  iter {:2}: {:5} cells ({:5.1}%)",
+                    k,
+                    v,
+                    100.0 * v as f64 / total as f64
+                );
+            }
         }
 
         // sanity: any cell should converge well under the 100 cap.
-        assert!(fp_failed == 0, "{} cells failed to converge in {} fp iters", fp_failed, max_fp);
+        assert!(
+            fp_failed == 0,
+            "{} cells failed to converge in {} fp iters",
+            fp_failed,
+            max_fp
+        );
     }
 
     // item 3: resolves the find_mu_plus=1 / kkc_fmu44-bracket concern. the proof on
@@ -629,17 +764,21 @@ mod tests {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         // (rho, |v|, pre, |B|): push W and magnetization well past orszag_tang.
         let cases = [
-            (1.0_f64, 0.99,   0.1,  5.0),  // W~7, strong field
-            (1.0,     0.999,  0.1,  10.0), // W~22, very strong field
-            (0.1,     0.9999, 1.0,  1.0),  // W~71, low density
-            (10.0,    0.95,   0.1,  50.0), // magnetization-dominated
-            (1.0,     0.5,    0.1,  1e-3), // near-vacuum field
+            (1.0_f64, 0.99, 0.1, 5.0), // W~7, strong field
+            (1.0, 0.999, 0.1, 10.0),   // W~22, very strong field
+            (0.1, 0.9999, 1.0, 1.0),   // W~71, low density
+            (10.0, 0.95, 0.1, 50.0),   // magnetization-dominated
+            (1.0, 0.5, 0.1, 1e-3),     // near-vacuum field
         ];
         for (rho, v, pre, b) in cases {
             // physical prim: velocity along x, B along y. v perp B => r.b = 0 here (the r.b != 0
             // shock-normal case is covered by rmhd_recover_selects_physical_root_with_normal_field).
             let prim = MhdPrim::<f64, 3> {
-                hydro: Prim { rho, vel: Tensor::new([v, 0.0, 0.0]), pre },
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new([v, 0.0, 0.0]),
+                    pre,
+                },
                 mag: Tensor::new([0.0, b, 0.0]),
             };
             let cons = rmhd_prim_to_cons(&prim, eos.gamma);
@@ -655,11 +794,13 @@ mod tests {
 
             let got = rmhd_recover(&eos, &cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
             assert!(
-                got.hydro.rho.is_finite() && got.hydro.pre.is_finite()
+                got.hydro.rho.is_finite()
+                    && got.hydro.pre.is_finite()
                     && got.hydro.vel.dot(&got.hydro.vel).is_finite(),
                 "physical evolved state (rho={rho}, v={v}, pre={pre}, b={b}) failed to \
                  recover finite: rho={}, pre={}",
-                got.hydro.rho, got.hydro.pre
+                got.hydro.rho,
+                got.hydro.pre
             );
             // floor-less KKC: without the eps_min zero-T floor smoothing the master function near
             // the velocity ceiling, false-position converges to ~1e-5 at the pathological W~71 low-

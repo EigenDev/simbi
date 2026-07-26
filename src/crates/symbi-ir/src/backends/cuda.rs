@@ -98,7 +98,8 @@ pub fn emit_source_kernel(
             s.push('\n');
         }
         debug_assert_eq!(
-            f.results.len(), 1,
+            f.results.len(),
+            1,
             "source-kernel output node must be rank-0 (one scalar component)",
         );
         s.push_str(&format!("        out_{k}[i] = "));
@@ -157,7 +158,9 @@ fn emit_signature(out: &mut String, f: &LoweredFn, needs_struct: bool) {
     out.push_str(&f.name);
     out.push('(');
     for (i, p) in f.params.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         match &p.array_len {
             None => {
                 out.push_str(cuda_type_name(p.element));
@@ -185,7 +188,11 @@ fn emit_signature(out: &mut String, f: &LoweredFn, needs_struct: bool) {
 
 pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
     match stmt {
-        ScalarStmt::Let { name, element, value } => {
+        ScalarStmt::Let {
+            name,
+            element,
+            value,
+        } => {
             out.push_str(cuda_type_name(*element));
             out.push(' ');
             out.push_str(name);
@@ -193,7 +200,11 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             emit_expr(out, value);
             out.push(';');
         }
-        ScalarStmt::LetMut { name, element, init } => {
+        ScalarStmt::LetMut {
+            name,
+            element,
+            init,
+        } => {
             // CUDA doesn't distinguish mut/non-mut; emit a plain decl.
             out.push_str(cuda_type_name(*element));
             out.push(' ');
@@ -251,7 +262,12 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
         ScalarStmt::Break => {
             out.push_str("break;");
         }
-        ScalarStmt::Scope { name, element, body, result } => {
+        ScalarStmt::Scope {
+            name,
+            element,
+            body,
+            result,
+        } => {
             // CUDA has no block-expression form, so declare `name` in the
             // outer scope, write inside the inner `{ }`, and rely on the
             // brace to kill all inner locals. nvcc gets clean lifetime
@@ -269,7 +285,12 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             emit_expr(out, result);
             out.push_str("; }");
         }
-        ScalarStmt::IfElse { outs, cond, then_body, else_body } => {
+        ScalarStmt::IfElse {
+            outs,
+            cond,
+            then_body,
+            else_body,
+        } => {
             // declare the N result slots in the outer scope; each arm body ends
             // with `outs[j] = <arm result j>`. a real C `if (cond) { } else { }`
             // — ONE arm runs (a divergent warp runs both, never worse than a
@@ -306,7 +327,9 @@ fn emit_return(out: &mut String, f: &LoweredFn, needs_struct: bool) {
     out.push_str(&f.name);
     out.push_str("_out { ");
     for (i, e) in f.results.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         emit_expr(out, e);
     }
     out.push_str(" }");
@@ -344,7 +367,11 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             emit_expr(out, value);
             out.push(')');
         }
-        ScalarExpr::MethodCall { receiver, method, args } => {
+        ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             // emit `min`/`max`/`abs` as INLINE TERNARIES (`a<b?a:b`). the
             // libdevice functions follow IEEE 754-2008 NaN / signed-zero semantics
             // that differ from the plain `a<b?a:b` ternary; at shock cells the
@@ -475,7 +502,9 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             out.push_str(name);
             out.push('(');
             for (i, a) in args.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
+                if i > 0 {
+                    out.push_str(", ");
+                }
                 emit_expr(out, a);
             }
             out.push(')');
@@ -508,7 +537,11 @@ fn emit_const(out: &mut String, v: &ConstValue) {
             if x.is_nan() {
                 out.push_str("__int_as_float(0x7fc00000)");
             } else if x.is_infinite() {
-                out.push_str(if *x > 0.0 { "__int_as_float(0x7f800000)" } else { "(-__int_as_float(0x7f800000))" });
+                out.push_str(if *x > 0.0 {
+                    "__int_as_float(0x7f800000)"
+                } else {
+                    "(-__int_as_float(0x7f800000))"
+                });
             } else {
                 out.push_str(&format!("{:?}f", x));
             }
@@ -521,22 +554,27 @@ fn emit_const(out: &mut String, v: &ConstValue) {
 
 pub(crate) fn cuda_type_name(e: ElementTy) -> &'static str {
     match e {
-        ElementTy::F64  => "double",
-        ElementTy::F32  => "float",
-        ElementTy::I32  => "int",
-        ElementTy::U32  => "unsigned int",
+        ElementTy::F64 => "double",
+        ElementTy::F32 => "float",
+        ElementTy::I32 => "int",
+        ElementTy::U32 => "unsigned int",
         ElementTy::Bool => "bool",
     }
 }
 
 fn cuda_binop(kind: BinaryKind) -> &'static str {
     match kind {
-        BinaryKind::Add => "+", BinaryKind::Sub => "-",
-        BinaryKind::Mul => "*", BinaryKind::Div => "/",
-        BinaryKind::Eq => "==", BinaryKind::Ne => "!=",
-        BinaryKind::Lt => "<",  BinaryKind::Le => "<=",
-        BinaryKind::Gt => ">",  BinaryKind::Ge => ">=",
-        BinaryKind::BitOr  => "|",
+        BinaryKind::Add => "+",
+        BinaryKind::Sub => "-",
+        BinaryKind::Mul => "*",
+        BinaryKind::Div => "/",
+        BinaryKind::Eq => "==",
+        BinaryKind::Ne => "!=",
+        BinaryKind::Lt => "<",
+        BinaryKind::Le => "<=",
+        BinaryKind::Gt => ">",
+        BinaryKind::Ge => ">=",
+        BinaryKind::BitOr => "|",
         BinaryKind::BitAnd => "&",
         BinaryKind::BitXor => "^",
     }
@@ -582,11 +620,7 @@ fn powi_product(receiver: &ScalarExpr, n: i32) -> String {
         }
     }
     let pos = acc.expect("n != 0 implies acc is set");
-    if n < 0 {
-        format!("(1.0 / {pos})")
-    } else {
-        pos
-    }
+    if n < 0 { format!("(1.0 / {pos})") } else { pos }
 }
 
 fn cuda_method_to_fn(method: &str) -> &str {
@@ -601,26 +635,26 @@ fn cuda_method_to_fn(method: &str) -> &str {
         // from the plain ternary. these fallthrough entries are kept
         // only for a hypothetical caller that bypasses the special-case path; they
         // are not reached during normal emission.
-        "abs"    => "fabs",
-        "sqrt"   => "sqrt",
-        "floor"  => "floor",
-        "ceil"   => "ceil",
-        "round"  => "round",
-        "trunc"  => "trunc",
-        "min"    => "fmin",
-        "max"    => "fmax",
+        "abs" => "fabs",
+        "sqrt" => "sqrt",
+        "floor" => "floor",
+        "ceil" => "ceil",
+        "round" => "round",
+        "trunc" => "trunc",
+        "min" => "fmin",
+        "max" => "fmax",
         "is_finite" => "isfinite",
-        "is_nan"    => "isnan",
+        "is_nan" => "isnan",
         "sin" | "cos" | "tan" => method,
         "asin" | "acos" | "atan" | "atan2" => method,
         "exp" | "exp2" => method,
         // Rust .ln() -> C++ log(); .log2() / .log10() are direct.
-        "ln"    => "log",
-        "log2"  => "log2",
+        "ln" => "log",
+        "log2" => "log2",
         "log10" => "log10",
         "sinh" | "cosh" | "tanh" => method,
         "asinh" | "acosh" | "atanh" => method,
-        "powf"  => "pow",
+        "powf" => "pow",
         "hypot" => "hypot",
         // fallback: pass through and trust nvcc to either find or error.
         other => other,
@@ -633,11 +667,13 @@ fn cuda_method_to_fn(method: &str) -> &str {
 mod tests {
     use super::*;
     use crate::{
-        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy,
-        TranscendentalOp, scalarize,
+        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy, TranscendentalOp,
+        scalarize,
     };
 
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
 
     #[test]
     fn rank_0_emits_scalar_return() {
@@ -664,7 +700,9 @@ mod tests {
         let f = scalarize(&g, r, "scale2");
         let src = emit_cuda(&f);
         assert!(src.contains("struct scale2_out { double _0; double _1; };"));
-        assert!(src.contains("__device__ inline scale2_out scale2(double s, double v_0, double v_1)"));
+        assert!(
+            src.contains("__device__ inline scale2_out scale2(double s, double v_0, double v_1)")
+        );
         assert!(src.contains("return scale2_out { (s * v_0), (s * v_1) };"));
     }
 
@@ -698,10 +736,16 @@ mod tests {
         let a = g.element_wise(ElementWiseOp::Abs, vec![x], None);
         let f = scalarize(&g, a, "absx");
         let src = emit_cuda(&f);
-        assert!(src.contains("(x < 0.0 ? -x : x)"),
-            "expected ternary, got:\n{}", src);
-        assert!(!src.contains("fabs"),
-            "should not emit fabs(), got:\n{}", src);
+        assert!(
+            src.contains("(x < 0.0 ? -x : x)"),
+            "expected ternary, got:\n{}",
+            src
+        );
+        assert!(
+            !src.contains("fabs"),
+            "should not emit fabs(), got:\n{}",
+            src
+        );
     }
 
     #[test]
@@ -716,10 +760,14 @@ mod tests {
         let src = emit_cuda(&f);
         assert!(
             src.contains("(a / b - ((a % b != 0 && (a ^ b) < 0) ? 1 : 0))"),
-            "expected floor-division correction, got:\n{}", src
+            "expected floor-division correction, got:\n{}",
+            src
         );
-        assert!(!src.contains("div_euclid"),
-            "rust method name must not leak into cuda source:\n{}", src);
+        assert!(
+            !src.contains("div_euclid"),
+            "rust method name must not leak into cuda source:\n{}",
+            src
+        );
     }
 
     #[test]
@@ -731,10 +779,16 @@ mod tests {
         let m = g.element_wise(ElementWiseOp::Min, vec![a, b], None);
         let f = scalarize(&g, m, "mn");
         let src = emit_cuda(&f);
-        assert!(src.contains("(a < b ? a : b)"),
-            "expected ternary, got:\n{}", src);
-        assert!(!src.contains("fmin"),
-            "should not emit fmin(), got:\n{}", src);
+        assert!(
+            src.contains("(a < b ? a : b)"),
+            "expected ternary, got:\n{}",
+            src
+        );
+        assert!(
+            !src.contains("fmin"),
+            "should not emit fmin(), got:\n{}",
+            src
+        );
     }
 
     #[test]
@@ -746,10 +800,16 @@ mod tests {
         let m = g.element_wise(ElementWiseOp::Max, vec![a, b], None);
         let f = scalarize(&g, m, "mx");
         let src = emit_cuda(&f);
-        assert!(src.contains("(a > b ? a : b)"),
-            "expected ternary, got:\n{}", src);
-        assert!(!src.contains("fmax"),
-            "should not emit fmax(), got:\n{}", src);
+        assert!(
+            src.contains("(a > b ? a : b)"),
+            "expected ternary, got:\n{}",
+            src
+        );
+        assert!(
+            !src.contains("fmax"),
+            "should not emit fmax(), got:\n{}",
+            src
+        );
     }
 
     #[test]
@@ -771,7 +831,11 @@ mod tests {
         let src = emit_cuda(&f);
         // Rust's ln -> C++ log(double)
         assert!(src.contains("log(x)"), "{}", src);
-        assert!(!src.contains("ln("), "should not emit Rust-style ln(), got:\n{}", src);
+        assert!(
+            !src.contains("ln("),
+            "should not emit Rust-style ln(), got:\n{}",
+            src
+        );
     }
 
     #[test]
@@ -795,8 +859,8 @@ mod tests {
         let x = ScalarExpr::Var("x".to_string());
         let pow3 = ScalarExpr::MethodCall {
             receiver: Box::new(x.clone()),
-            method:   "powi".to_string(),
-            args:     vec![ScalarExpr::Const(ConstValue::I32(3))],
+            method: "powi".to_string(),
+            args: vec![ScalarExpr::Const(ConstValue::I32(3))],
         };
         let mut src = String::new();
         emit_expr(&mut src, &pow3);
@@ -807,8 +871,8 @@ mod tests {
         // negative exponent -> reciprocal of the positive chain.
         let powm2 = ScalarExpr::MethodCall {
             receiver: Box::new(x.clone()),
-            method:   "powi".to_string(),
-            args:     vec![ScalarExpr::Const(ConstValue::I32(-2))],
+            method: "powi".to_string(),
+            args: vec![ScalarExpr::Const(ConstValue::I32(-2))],
         };
         let mut src = String::new();
         emit_expr(&mut src, &powm2);
@@ -817,8 +881,8 @@ mod tests {
         // zero exponent -> 1.0.
         let pow0 = ScalarExpr::MethodCall {
             receiver: Box::new(x),
-            method:   "powi".to_string(),
-            args:     vec![ScalarExpr::Const(ConstValue::I32(0))],
+            method: "powi".to_string(),
+            args: vec![ScalarExpr::Const(ConstValue::I32(0))],
         };
         let mut src = String::new();
         emit_expr(&mut src, &pow0);
@@ -886,7 +950,10 @@ mod tests {
         let src = emit_source_kernel(&g, &params, &[out], "test_source");
 
         // signature: extern "C" __global__ with param/out ptrs + n_cells.
-        assert!(src.contains("extern \"C\" __global__ void test_source("), "{src}");
+        assert!(
+            src.contains("extern \"C\" __global__ void test_source("),
+            "{src}"
+        );
         assert!(src.contains("const double* param_0,"));
         assert!(src.contains("const double* param_2,"));
         assert!(src.contains("double* out_0,"));
@@ -901,7 +968,10 @@ mod tests {
         // component scope + the actual arithmetic (sqrt via libdevice).
         assert!(src.contains("{ /* component 0 */"));
         assert!(src.contains("sqrt(d)"), "{src}");
-        assert!(!src.contains(".sqrt()"), "cuda must not use carrier-generic method form");
+        assert!(
+            !src.contains(".sqrt()"),
+            "cuda must not use carrier-generic method form"
+        );
         assert!(src.contains("out_0[i] = "));
     }
 
@@ -917,7 +987,10 @@ mod tests {
         let params = vec!["a".to_string(), "b".to_string()];
         let src = emit_source_kernel(&g, &params, &[out], "sel_source");
 
-        assert!(src.contains(" ? ") && src.contains(" : "), "missing ternary; {src}");
+        assert!(
+            src.contains(" ? ") && src.contains(" : "),
+            "missing ternary; {src}"
+        );
         assert!(src.contains("(a < b)"), "{src}");
     }
 
@@ -951,7 +1024,9 @@ mod tests {
     /// the inner braces kill body-local lets; nvcc gets explicit liveness.
     #[test]
     fn scope_emits_cuda_decl_then_braced_assign() {
-        use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind};
+        use crate::passes::scalarize::{
+            BinaryKind, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt,
+        };
         let a_var = || ScalarExpr::Var("a".to_string());
         let b_var = || ScalarExpr::Var("b".to_string());
 
@@ -961,28 +1036,20 @@ mod tests {
                 LoweredParam::scalar("a".to_string(), ElementTy::F64),
                 LoweredParam::scalar("b".to_string(), ElementTy::F64),
             ],
-            body: vec![
-                ScalarStmt::Scope {
-                    name:    "out".to_string(),
+            body: vec![ScalarStmt::Scope {
+                name: "out".to_string(),
+                element: ElementTy::F64,
+                body: vec![ScalarStmt::Let {
+                    name: "__t1".to_string(),
                     element: ElementTy::F64,
-                    body: vec![
-                        ScalarStmt::Let {
-                            name:    "__t1".to_string(),
-                            element: ElementTy::F64,
-                            value: ScalarExpr::BinOp(
-                                BinaryKind::Add,
-                                Box::new(a_var()),
-                                Box::new(b_var()),
-                            ),
-                        },
-                    ],
-                    result: ScalarExpr::BinOp(
-                        BinaryKind::Mul,
-                        Box::new(ScalarExpr::Var("__t1".to_string())),
-                        Box::new(a_var()),
-                    ),
-                },
-            ],
+                    value: ScalarExpr::BinOp(BinaryKind::Add, Box::new(a_var()), Box::new(b_var())),
+                }],
+                result: ScalarExpr::BinOp(
+                    BinaryKind::Mul,
+                    Box::new(ScalarExpr::Var("__t1".to_string())),
+                    Box::new(a_var()),
+                ),
+            }],
             results: vec![ScalarExpr::Var("out".to_string())],
             result_element: ElementTy::F64,
             result_shape: vec![],
@@ -1001,41 +1068,33 @@ mod tests {
     /// balanced — render output must be at least syntactically valid C++.
     #[test]
     fn scope_nests_correctly_cuda() {
-        use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind};
+        use crate::passes::scalarize::{
+            BinaryKind, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt,
+        };
         let x = || ScalarExpr::Var("x".to_string());
 
         let fun = LoweredFn {
             name: "nested".to_string(),
             params: vec![LoweredParam::scalar("x".to_string(), ElementTy::F64)],
-            body: vec![
-                ScalarStmt::Scope {
-                    name: "outer".to_string(),
+            body: vec![ScalarStmt::Scope {
+                name: "outer".to_string(),
+                element: ElementTy::F64,
+                body: vec![ScalarStmt::Scope {
+                    name: "inner".to_string(),
                     element: ElementTy::F64,
-                    body: vec![
-                        ScalarStmt::Scope {
-                            name: "inner".to_string(),
-                            element: ElementTy::F64,
-                            body: vec![
-                                ScalarStmt::Let {
-                                    name: "q".to_string(),
-                                    element: ElementTy::F64,
-                                    value: ScalarExpr::BinOp(
-                                        BinaryKind::Mul,
-                                        Box::new(x()),
-                                        Box::new(x()),
-                                    ),
-                                },
-                            ],
-                            result: ScalarExpr::Var("q".to_string()),
-                        },
-                    ],
-                    result: ScalarExpr::BinOp(
-                        BinaryKind::Add,
-                        Box::new(ScalarExpr::Var("inner".to_string())),
-                        Box::new(x()),
-                    ),
-                },
-            ],
+                    body: vec![ScalarStmt::Let {
+                        name: "q".to_string(),
+                        element: ElementTy::F64,
+                        value: ScalarExpr::BinOp(BinaryKind::Mul, Box::new(x()), Box::new(x())),
+                    }],
+                    result: ScalarExpr::Var("q".to_string()),
+                }],
+                result: ScalarExpr::BinOp(
+                    BinaryKind::Add,
+                    Box::new(ScalarExpr::Var("inner".to_string())),
+                    Box::new(x()),
+                ),
+            }],
             results: vec![ScalarExpr::Var("outer".to_string())],
             result_element: ElementTy::F64,
             result_shape: vec![],

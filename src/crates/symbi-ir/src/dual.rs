@@ -24,10 +24,10 @@
 //   // a.value == alpha(3),  a.tangent == d alpha/dr at r = 3
 // =============================================================================
 
+use crate::algebra::Scalar;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::element::FieldElement;
-use crate::algebra::Scalar;
 
 /// a value + its tangent (forward-mode derivative w.r.t. one seeded input).
 #[derive(Clone, Copy, Debug, Default)]
@@ -40,13 +40,19 @@ impl<S: Scalar> Dual<S> {
     /// a CONSTANT (derivative zero): a value that does not depend on the seeded input.
     #[inline]
     pub fn constant(value: S) -> Self {
-        Self { value, tangent: S::ZERO }
+        Self {
+            value,
+            tangent: S::ZERO,
+        }
     }
 
     /// the SEEDED variable (derivative one): the single input differentiated with respect to.
     #[inline]
     pub fn variable(value: S) -> Self {
-        Self { value, tangent: S::ONE }
+        Self {
+            value,
+            tangent: S::ONE,
+        }
     }
 }
 
@@ -55,14 +61,20 @@ impl<S: Scalar> Add for Dual<S> {
     type Output = Self;
     #[inline]
     fn add(self, o: Self) -> Self {
-        Self { value: self.value + o.value, tangent: self.tangent + o.tangent }
+        Self {
+            value: self.value + o.value,
+            tangent: self.tangent + o.tangent,
+        }
     }
 }
 impl<S: Scalar> Sub for Dual<S> {
     type Output = Self;
     #[inline]
     fn sub(self, o: Self) -> Self {
-        Self { value: self.value - o.value, tangent: self.tangent - o.tangent }
+        Self {
+            value: self.value - o.value,
+            tangent: self.tangent - o.tangent,
+        }
     }
 }
 impl<S: Scalar> Mul for Dual<S> {
@@ -91,24 +103,35 @@ impl<S: Scalar> Neg for Dual<S> {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Self { value: -self.value, tangent: -self.tangent }
+        Self {
+            value: -self.value,
+            tangent: -self.tangent,
+        }
     }
 }
 impl<S: Scalar> AddAssign for Dual<S> {
     #[inline]
-    fn add_assign(&mut self, o: Self) { *self = *self + o; }
+    fn add_assign(&mut self, o: Self) {
+        *self = *self + o;
+    }
 }
 impl<S: Scalar> SubAssign for Dual<S> {
     #[inline]
-    fn sub_assign(&mut self, o: Self) { *self = *self - o; }
+    fn sub_assign(&mut self, o: Self) {
+        *self = *self - o;
+    }
 }
 impl<S: Scalar> MulAssign for Dual<S> {
     #[inline]
-    fn mul_assign(&mut self, o: Self) { *self = *self * o; }
+    fn mul_assign(&mut self, o: Self) {
+        *self = *self * o;
+    }
 }
 impl<S: Scalar> DivAssign for Dual<S> {
     #[inline]
-    fn div_assign(&mut self, o: Self) { *self = *self / o; }
+    fn div_assign(&mut self, o: Self) {
+        *self = *self / o;
+    }
 }
 impl<S: Scalar> std::iter::Sum for Dual<S> {
     #[inline]
@@ -129,8 +152,14 @@ unsafe impl<S: Scalar> FieldElement for Dual<S> {
 
 // ── Numeric (constants + the closed sqrt/abs/min/max) ────────────────────────
 impl<S: Scalar> Numeric for Dual<S> {
-    const ZERO: Self = Dual { value: S::ZERO, tangent: S::ZERO };
-    const ONE: Self = Dual { value: S::ONE, tangent: S::ZERO };
+    const ZERO: Self = Dual {
+        value: S::ZERO,
+        tangent: S::ZERO,
+    };
+    const ONE: Self = Dual {
+        value: S::ONE,
+        tangent: S::ZERO,
+    };
 
     #[inline]
     fn from_f64(v: f64) -> Self {
@@ -140,13 +169,19 @@ impl<S: Scalar> Numeric for Dual<S> {
     fn sqrt(self) -> Self {
         // (sqrt a)' = a' / (2 sqrt a).
         let sv = self.value.sqrt();
-        Self { value: sv, tangent: self.tangent / (S::from_f64(2.0) * sv) }
+        Self {
+            value: sv,
+            tangent: self.tangent / (S::from_f64(2.0) * sv),
+        }
     }
     #[inline]
     fn abs(self) -> Self {
         // |a|' = sign(a) a'  (undefined at 0; the geometry never hits it).
         let neg = self.value.cmp_lt(S::ZERO);
-        Self { value: self.value.abs(), tangent: S::select(neg, -self.tangent, self.tangent) }
+        Self {
+            value: self.value.abs(),
+            tangent: S::select(neg, -self.tangent, self.tangent),
+        }
     }
     #[inline]
     fn min(self, o: Self) -> Self {
@@ -171,9 +206,18 @@ impl<S: Scalar> Numeric for Dual<S> {
 impl<S: Scalar> Scalar for Dual<S> {
     type Mask = S::Mask;
 
-    const INFINITY: Self = Dual { value: S::INFINITY, tangent: S::ZERO };
-    const NEG_INFINITY: Self = Dual { value: S::NEG_INFINITY, tangent: S::ZERO };
-    const NAN: Self = Dual { value: S::NAN, tangent: S::NAN };
+    const INFINITY: Self = Dual {
+        value: S::INFINITY,
+        tangent: S::ZERO,
+    };
+    const NEG_INFINITY: Self = Dual {
+        value: S::NEG_INFINITY,
+        tangent: S::ZERO,
+    };
+    const NAN: Self = Dual {
+        value: S::NAN,
+        tangent: S::NAN,
+    };
 
     #[inline]
     fn to_f64(self) -> f64 {
@@ -182,20 +226,33 @@ impl<S: Scalar> Scalar for Dual<S> {
 
     // comparisons decide on the VALUE (the tangent does not order points).
     #[inline]
-    fn cmp_lt(self, b: Self) -> S::Mask { self.value.cmp_lt(b.value) }
+    fn cmp_lt(self, b: Self) -> S::Mask {
+        self.value.cmp_lt(b.value)
+    }
     #[inline]
-    fn cmp_le(self, b: Self) -> S::Mask { self.value.cmp_le(b.value) }
+    fn cmp_le(self, b: Self) -> S::Mask {
+        self.value.cmp_le(b.value)
+    }
     #[inline]
-    fn cmp_gt(self, b: Self) -> S::Mask { self.value.cmp_gt(b.value) }
+    fn cmp_gt(self, b: Self) -> S::Mask {
+        self.value.cmp_gt(b.value)
+    }
     #[inline]
-    fn cmp_ge(self, b: Self) -> S::Mask { self.value.cmp_ge(b.value) }
+    fn cmp_ge(self, b: Self) -> S::Mask {
+        self.value.cmp_ge(b.value)
+    }
     #[inline]
-    fn cmp_eq(self, b: Self) -> S::Mask { self.value.cmp_eq(b.value) }
+    fn cmp_eq(self, b: Self) -> S::Mask {
+        self.value.cmp_eq(b.value)
+    }
 
     #[inline]
     fn select(m: S::Mask, t: Self, f: Self) -> Self {
         // piecewise-differentiable: pick the value AND the matching tangent branch.
-        Self { value: S::select(m, t.value, f.value), tangent: S::select(m, t.tangent, f.tangent) }
+        Self {
+            value: S::select(m, t.value, f.value),
+            tangent: S::select(m, t.tangent, f.tangent),
+        }
     }
     #[inline]
     fn cond(m: S::Mask, t: impl FnOnce() -> Self, f: impl FnOnce() -> Self) -> Self {
@@ -215,31 +272,49 @@ impl<S: Scalar> Scalar for Dual<S> {
     #[inline]
     fn recip(self) -> Self {
         // (1/a)' = -a' / a^2.
-        Self { value: self.value.recip(), tangent: -self.tangent / (self.value * self.value) }
+        Self {
+            value: self.value.recip(),
+            tangent: -self.tangent / (self.value * self.value),
+        }
     }
 
     #[inline]
     fn sin(self) -> Self {
-        Self { value: self.value.sin(), tangent: self.tangent * self.value.cos() }
+        Self {
+            value: self.value.sin(),
+            tangent: self.tangent * self.value.cos(),
+        }
     }
     #[inline]
     fn cos(self) -> Self {
-        Self { value: self.value.cos(), tangent: -(self.tangent * self.value.sin()) }
+        Self {
+            value: self.value.cos(),
+            tangent: -(self.tangent * self.value.sin()),
+        }
     }
     #[inline]
     fn tan(self) -> Self {
         let tv = self.value.tan();
-        Self { value: tv, tangent: self.tangent * (S::ONE + tv * tv) } // sec^2 = 1 + tan^2
+        Self {
+            value: tv,
+            tangent: self.tangent * (S::ONE + tv * tv),
+        } // sec^2 = 1 + tan^2
     }
     #[inline]
     fn asin(self) -> Self {
         let d = (S::ONE - self.value * self.value).sqrt();
-        Self { value: self.value.asin(), tangent: self.tangent / d }
+        Self {
+            value: self.value.asin(),
+            tangent: self.tangent / d,
+        }
     }
     #[inline]
     fn acos(self) -> Self {
         let d = (S::ONE - self.value * self.value).sqrt();
-        Self { value: self.value.acos(), tangent: -self.tangent / d }
+        Self {
+            value: self.value.acos(),
+            tangent: -self.tangent / d,
+        }
     }
     #[inline]
     fn atan2(self, x: Self) -> Self {
@@ -253,20 +328,32 @@ impl<S: Scalar> Scalar for Dual<S> {
     #[inline]
     fn exp(self) -> Self {
         let ev = self.value.exp();
-        Self { value: ev, tangent: self.tangent * ev }
+        Self {
+            value: ev,
+            tangent: self.tangent * ev,
+        }
     }
     #[inline]
     fn ln(self) -> Self {
-        Self { value: self.value.ln(), tangent: self.tangent / self.value }
+        Self {
+            value: self.value.ln(),
+            tangent: self.tangent / self.value,
+        }
     }
     #[inline]
     fn log10(self) -> Self {
-        Self { value: self.value.log10(), tangent: self.tangent / (self.value * S::from_f64(std::f64::consts::LN_10)) }
+        Self {
+            value: self.value.log10(),
+            tangent: self.tangent / (self.value * S::from_f64(std::f64::consts::LN_10)),
+        }
     }
     #[inline]
     fn powi(self, n: i32) -> Self {
         // (a^n)' = n a^{n-1} a'.
-        Self { value: self.value.powi(n), tangent: S::from_f64(n as f64) * self.value.powi(n - 1) * self.tangent }
+        Self {
+            value: self.value.powi(n),
+            tangent: S::from_f64(n as f64) * self.value.powi(n - 1) * self.tangent,
+        }
     }
     #[inline]
     fn powf(self, e: Self) -> Self {
@@ -279,42 +366,73 @@ impl<S: Scalar> Scalar for Dual<S> {
     }
     #[inline]
     fn floor(self) -> Self {
-        Self { value: self.value.floor(), tangent: S::ZERO } // piecewise constant
+        Self {
+            value: self.value.floor(),
+            tangent: S::ZERO,
+        } // piecewise constant
     }
     #[inline]
     fn ceil(self) -> Self {
-        Self { value: self.value.ceil(), tangent: S::ZERO }
+        Self {
+            value: self.value.ceil(),
+            tangent: S::ZERO,
+        }
     }
     #[inline]
     fn sinh(self) -> Self {
-        Self { value: self.value.sinh(), tangent: self.tangent * self.value.cosh() }
+        Self {
+            value: self.value.sinh(),
+            tangent: self.tangent * self.value.cosh(),
+        }
     }
     #[inline]
     fn cosh(self) -> Self {
-        Self { value: self.value.cosh(), tangent: self.tangent * self.value.sinh() }
+        Self {
+            value: self.value.cosh(),
+            tangent: self.tangent * self.value.sinh(),
+        }
     }
     #[inline]
     fn tanh(self) -> Self {
         let tv = self.value.tanh();
-        Self { value: tv, tangent: self.tangent * (S::ONE - tv * tv) }
+        Self {
+            value: tv,
+            tangent: self.tangent * (S::ONE - tv * tv),
+        }
     }
     #[inline]
     fn asinh(self) -> Self {
         let d = (self.value * self.value + S::ONE).sqrt();
-        Self { value: self.value.asinh(), tangent: self.tangent / d }
+        Self {
+            value: self.value.asinh(),
+            tangent: self.tangent / d,
+        }
     }
     #[inline]
     fn acosh(self) -> Self {
         let d = (self.value * self.value - S::ONE).sqrt();
-        Self { value: self.value.acosh(), tangent: self.tangent / d }
+        Self {
+            value: self.value.acosh(),
+            tangent: self.tangent / d,
+        }
     }
     #[inline]
     fn atanh(self) -> Self {
-        Self { value: self.value.atanh(), tangent: self.tangent / (S::ONE - self.value * self.value) }
+        Self {
+            value: self.value.atanh(),
+            tangent: self.tangent / (S::ONE - self.value * self.value),
+        }
     }
 
-    fn iterate(self, _n: usize, _body: impl Fn(Self) -> Self, _c: impl Fn(Self, Self) -> S::Mask) -> Self {
-        unimplemented!("Dual autodiff does not differentiate fixed-point iteration (metric geometry is straight-line)")
+    fn iterate(
+        self,
+        _n: usize,
+        _body: impl Fn(Self) -> Self,
+        _c: impl Fn(Self, Self) -> S::Mask,
+    ) -> Self {
+        unimplemented!(
+            "Dual autodiff does not differentiate fixed-point iteration (metric geometry is straight-line)"
+        )
     }
     fn iterate_vec<const N: usize>(
         _init: [Self; N],
@@ -348,7 +466,10 @@ mod tests {
             assert!(approx(d.recip().tangent, -1.0 / (x * x)));
             // product/quotient: d/dx (x^2 / (x+1)) = (x^2 + 2x)/(x+1)^2
             let g = (d * d) / (d + Dual::constant(1.0));
-            assert!(approx(g.tangent, (x * x + 2.0 * x) / ((x + 1.0) * (x + 1.0))));
+            assert!(approx(
+                g.tangent,
+                (x * x + 2.0 * x) / ((x + 1.0) * (x + 1.0))
+            ));
             // chain: d/dx sqrt(1 + x^2) = x / sqrt(1 + x^2)
             let h = Numeric::sqrt(Dual::constant(1.0) + d * d);
             assert!(approx(h.tangent, x / (1.0 + x * x).sqrt()));

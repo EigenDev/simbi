@@ -22,10 +22,10 @@ use symbi::sim::evolve::evolve_with_callback;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{AxisMap, Cylindrical};
-use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
-use symbi_hydro::state::{Cons, Prim};
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -47,8 +47,14 @@ fn make_sim() -> Sim {
     // face(i) = R_LO * 10^(i * log_slope); log_slope spans [R_LO, R_HI] over NR cells.
     let log_slope = (R_HI / R_LO).log10() / NR as f64;
     let maps = [
-        AxisMap::Log { start: R_LO, log_slope },
-        AxisMap::Uniform { start: Z_LO, dx: dz },
+        AxisMap::Log {
+            start: R_LO,
+            log_slope,
+        },
+        AxisMap::Uniform {
+            start: Z_LO,
+            dx: dz,
+        },
     ];
     // nominal linear dr for the builder; the log map overrides the radial axis geometry.
     let dr = (R_HI - R_LO) / NR as f64;
@@ -66,7 +72,11 @@ fn make_sim() -> Sim {
             // B = (B_r, B_phi, B_z) = (0, 0, B0): uniform vertical field, div-free.
             let pre = 1.0 + 0.5 * (-((r - 3.0) / 0.8).powi(2)).exp();
             MhdPrim {
-                hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre },
+                hydro: Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.0, 0.0, 0.0]),
+                    pre,
+                },
                 mag: Tensor::new([0.0, 0.0, B0]),
             }
         })
@@ -133,7 +143,10 @@ fn nmhd_cyl_rz_logr_preserves_divb_and_stays_physical() {
     );
 
     let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
-        GAMMA, CFL, /* theta */ 1.5, &sim.geom.allocated,
+        GAMMA,
+        CFL,
+        /* theta */ 1.5,
+        &sim.geom.allocated,
     );
 
     let mut steps = 0u64;

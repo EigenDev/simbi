@@ -38,7 +38,7 @@ use symbi_hydro::source_spec::{
     gravity_params, point_mass_gravity_sources, source_params, splice_built_source_into,
 };
 use symbi_ir::graph::NodeId;
-use symbi_ir::gv::{begin_trace, end_trace, with_trace, Gv};
+use symbi_ir::gv::{Gv, begin_trace, end_trace, with_trace};
 
 /// helper: evaluate a Gv-trace NodeId at f64 against a known parameter state,
 /// using scalarize + the Cpu interpreter on the trace's graph as it stands.
@@ -54,11 +54,16 @@ fn eval_in_trace(out: NodeId, values: &[(&str, f64)]) -> f64 {
         let params: Vec<String> = lowered.params.iter().map(|p| p.name.clone()).collect();
         (lowered, params)
     });
-    let inputs: Vec<f64> = param_order.iter().map(|pname| {
-        values.iter().find(|(n, _)| *n == pname.as_str())
-            .map(|(_, v)| *v)
-            .unwrap_or_else(|| panic!("eval_in_trace: missing param '{pname}'"))
-    }).collect();
+    let inputs: Vec<f64> = param_order
+        .iter()
+        .map(|pname| {
+            values
+                .iter()
+                .find(|(n, _)| *n == pname.as_str())
+                .map(|(_, v)| *v)
+                .unwrap_or_else(|| panic!("eval_in_trace: missing param '{pname}'"))
+        })
+        .collect();
     Cpu.eval_elemental(&lowered, &inputs)[0]
 }
 
@@ -101,13 +106,16 @@ fn splice_produces_valid_gv_node_ids() {
 
     // build the spec source standalone, then splice into the active trace.
     let built = (point_mass_gravity_sources(3, false)[0].build_source)(3);
-    let spliced: Vec<NodeId> = with_trace(|t| {
-        splice_built_source_into(&built, t.graph(), &name_to_node)
-    });
+    let spliced: Vec<NodeId> =
+        with_trace(|t| splice_built_source_into(&built, t.graph(), &name_to_node));
 
     // wrap as Gv values — this is the contract the godunov fusion needs.
     let s_mom: Vec<Gv> = spliced.iter().map(|&n| Gv::of(n)).collect();
-    assert_eq!(s_mom.len(), 3, "3D gravity momentum source emits 3 components");
+    assert_eq!(
+        s_mom.len(),
+        3,
+        "3D gravity momentum source emits 3 components"
+    );
 
     // every component resolves to a valid NodeId in the trace's graph.
     // (`Gv::node()` panics if the underlying node is invalid; surviving this
@@ -133,30 +141,32 @@ fn spliced_outputs_match_standalone_at_same_param_state() {
 
     // ----- standalone reference -----
     let built = (point_mass_gravity_sources(3, false)[0].build_source)(3);
-    let standalone: Vec<f64> = (0..3).map(|k| {
-        let lowered = scalarize(&built.graph, built.outputs[k], "ref");
-        // route inputs by name, in the order scalarize declared.
-        let inputs: Vec<f64> = lowered.params.iter().map(|p| {
-            sample_param_value(&p.name)
-        }).collect();
-        Cpu.eval_elemental(&lowered, &inputs)[0]
-    }).collect();
+    let standalone: Vec<f64> = (0..3)
+        .map(|k| {
+            let lowered = scalarize(&built.graph, built.outputs[k], "ref");
+            // route inputs by name, in the order scalarize declared.
+            let inputs: Vec<f64> = lowered
+                .params
+                .iter()
+                .map(|p| sample_param_value(&p.name))
+                .collect();
+            Cpu.eval_elemental(&lowered, &inputs)[0]
+        })
+        .collect();
 
     // ----- in-trace splice + per-output eval -----
     begin_trace();
     let leaves = declare_gravity_leaves();
     let built2 = (point_mass_gravity_sources(3, false)[0].build_source)(3);
-    let spliced: Vec<NodeId> = with_trace(|t| {
-        splice_built_source_into(&built2, t.graph(), &leaves)
-    });
+    let spliced: Vec<NodeId> =
+        with_trace(|t| splice_built_source_into(&built2, t.graph(), &leaves));
 
     // sample values for each declared leaf.
-    let sample_vals: Vec<(String, f64)> = leaves.keys()
+    let sample_vals: Vec<(String, f64)> = leaves
+        .keys()
         .map(|name| (name.clone(), sample_param_value(name)))
         .collect();
-    let vals_ref: Vec<(&str, f64)> = sample_vals.iter()
-        .map(|(n, v)| (n.as_str(), *v))
-        .collect();
+    let vals_ref: Vec<(&str, f64)> = sample_vals.iter().map(|(n, v)| (n.as_str(), *v)).collect();
 
     for k in 0..3 {
         let traced = eval_in_trace(spliced[k], &vals_ref);
@@ -182,11 +192,12 @@ fn splice_panics_loudly_on_missing_param_substitute() {
 
     let built = (point_mass_gravity_sources(3, false)[0].build_source)(3);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        with_trace(|t| {
-            splice_built_source_into(&built, t.graph(), &sparse_leaves)
-        })
+        with_trace(|t| splice_built_source_into(&built, t.graph(), &sparse_leaves))
     }));
-    assert!(result.is_err(), "splice must panic on missing param substitute");
+    assert!(
+        result.is_err(),
+        "splice must panic on missing param substitute"
+    );
     let _ = end_trace();
 }
 
@@ -194,18 +205,36 @@ fn splice_panics_loudly_on_missing_param_substitute() {
 
 fn declare_gravity_leaves() -> HashMap<String, NodeId> {
     let mut m: HashMap<String, NodeId> = HashMap::new();
-    m.insert(law_params::RHO.to_string(),    Gv::scalar(law_params::RHO).node());
-    m.insert(law_params::vel(0),             Gv::scalar(&law_params::vel(0)).node());
-    m.insert(law_params::vel(1),             Gv::scalar(&law_params::vel(1)).node());
-    m.insert(law_params::vel(2),             Gv::scalar(&law_params::vel(2)).node());
-    m.insert(source_params::x(0),            Gv::scalar(&source_params::x(0)).node());
-    m.insert(source_params::x(1),            Gv::scalar(&source_params::x(1)).node());
-    m.insert(source_params::x(2),            Gv::scalar(&source_params::x(2)).node());
-    m.insert(gravity_params::xm(0),          Gv::scalar(&gravity_params::xm(0)).node());
-    m.insert(gravity_params::xm(1),          Gv::scalar(&gravity_params::xm(1)).node());
-    m.insert(gravity_params::xm(2),          Gv::scalar(&gravity_params::xm(2)).node());
-    m.insert(gravity_params::GM.to_string(), Gv::scalar(gravity_params::GM).node());
-    m.insert(gravity_params::EPS.to_string(), Gv::scalar(gravity_params::EPS).node());
+    m.insert(
+        law_params::RHO.to_string(),
+        Gv::scalar(law_params::RHO).node(),
+    );
+    m.insert(law_params::vel(0), Gv::scalar(&law_params::vel(0)).node());
+    m.insert(law_params::vel(1), Gv::scalar(&law_params::vel(1)).node());
+    m.insert(law_params::vel(2), Gv::scalar(&law_params::vel(2)).node());
+    m.insert(source_params::x(0), Gv::scalar(&source_params::x(0)).node());
+    m.insert(source_params::x(1), Gv::scalar(&source_params::x(1)).node());
+    m.insert(source_params::x(2), Gv::scalar(&source_params::x(2)).node());
+    m.insert(
+        gravity_params::xm(0),
+        Gv::scalar(&gravity_params::xm(0)).node(),
+    );
+    m.insert(
+        gravity_params::xm(1),
+        Gv::scalar(&gravity_params::xm(1)).node(),
+    );
+    m.insert(
+        gravity_params::xm(2),
+        Gv::scalar(&gravity_params::xm(2)).node(),
+    );
+    m.insert(
+        gravity_params::GM.to_string(),
+        Gv::scalar(gravity_params::GM).node(),
+    );
+    m.insert(
+        gravity_params::EPS.to_string(),
+        Gv::scalar(gravity_params::EPS).node(),
+    );
     m
 }
 

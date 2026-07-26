@@ -32,15 +32,15 @@ use crate::units::{Energy, Time, Volume};
 #[derive(Clone, Copy, Debug)]
 pub struct Cell {
     /// cell-center position [cm].
-    pub position:   [f64; 3],
+    pub position: [f64; 3],
     /// fluid three-velocity (units of c) as a Cartesian VECTOR — direction captures spreading.
-    pub beta_vec:   [f64; 3],
+    pub beta_vec: [f64; 3],
     /// proper mass density [g/cm^3].
-    pub rho:        f64,
+    pub rho: f64,
     /// pressure [erg/cm^3].
-    pub pre:        f64,
+    pub pre: f64,
     /// proper cell volume [cm^3].
-    pub volume:     f64,
+    pub volume: f64,
     /// lab-frame emission time [s] (the checkpoint's time).
     pub t_emission: f64,
 }
@@ -75,11 +75,11 @@ impl Cell {
 /// needs). `dt` is the emission timestep [s] each cell radiates over (the checkpoint spacing).
 #[derive(Clone, Copy, Debug)]
 pub struct Microphysics {
-    pub p:               f64,
-    pub eps_e:           f64,
-    pub eps_b:           f64,
+    pub p: f64,
+    pub eps_e: f64,
+    pub eps_b: f64,
     pub adiabatic_index: f64,
-    pub dt:              f64,
+    pub dt: f64,
 }
 
 /// generate synchrotron photon packets from a list of Cartesian hydro cells (any geometry, any
@@ -107,14 +107,24 @@ pub fn generate_events_from_cells(
             + c.beta_vec[2] * c.beta_vec[2])
             .sqrt();
         let vhat = if beta > 1e-300 {
-            [c.beta_vec[0] / beta, c.beta_vec[1] / beta, c.beta_vec[2] / beta]
+            [
+                c.beta_vec[0] / beta,
+                c.beta_vec[1] / beta,
+                c.beta_vec[2] / beta,
+            ]
         } else {
             [0.0, 0.0, 1.0] // at rest: no beaming, direction is irrelevant
         };
         let w = 1.0 / (1.0 - (beta * beta).min(1.0 - 1e-15)).sqrt();
 
         let cell = CellState::from_physical(
-            c.rho, c.pre, beta, micro.adiabatic_index, micro.eps_e, micro.eps_b, micro.p,
+            c.rho,
+            c.pre,
+            beta,
+            micro.adiabatic_index,
+            micro.eps_e,
+            micro.eps_b,
+            micro.p,
             c.t_emission / w,
         );
 
@@ -126,8 +136,17 @@ pub fn generate_events_from_cells(
         let packet_weight = (total_energy / photons_per_cell as f64).value();
 
         emit_packets(
-            &mut events, &mut rng, &cell, micro.p, c.t_emission, c.position, vhat, packet_weight,
-            photons_per_cell, max_events, id as u32,
+            &mut events,
+            &mut rng,
+            &cell,
+            micro.p,
+            c.t_emission,
+            c.position,
+            vhat,
+            packet_weight,
+            photons_per_cell,
+            max_events,
+            id as u32,
         );
     }
 
@@ -142,7 +161,13 @@ mod tests {
     use std::f64::consts::PI;
 
     fn micro() -> Microphysics {
-        Microphysics { p: 2.5, eps_e: 0.1, eps_b: 0.01, adiabatic_index: 4.0 / 3.0, dt: 1.0e5 }
+        Microphysics {
+            p: 2.5,
+            eps_e: 0.1,
+            eps_b: 0.01,
+            adiabatic_index: 4.0 / 3.0,
+            dt: 1.0e5,
+        }
     }
 
     fn norm(v: [f64; 3]) -> f64 {
@@ -158,14 +183,42 @@ mod tests {
         let rmag = norm(pos);
         let rhat = [pos[0] / rmag, pos[1] / rmag, pos[2] / rmag];
 
-        let radial = Cell::from_coords(Coords::Spherical, x, [0.6, 0.0, 0.0], 1e-24, 1e-3, 1e45, 0.0);
+        let radial = Cell::from_coords(
+            Coords::Spherical,
+            x,
+            [0.6, 0.0, 0.0],
+            1e-24,
+            1e-3,
+            1e45,
+            0.0,
+        );
         // radial velocity is parallel to r-hat.
-        let cos = (radial.beta_vec[0] * rhat[0] + radial.beta_vec[1] * rhat[1] + radial.beta_vec[2] * rhat[2]) / norm(radial.beta_vec);
-        assert!((cos - 1.0).abs() < 1e-12, "radial velocity should be along r-hat");
+        let cos = (radial.beta_vec[0] * rhat[0]
+            + radial.beta_vec[1] * rhat[1]
+            + radial.beta_vec[2] * rhat[2])
+            / norm(radial.beta_vec);
+        assert!(
+            (cos - 1.0).abs() < 1e-12,
+            "radial velocity should be along r-hat"
+        );
 
-        let spreading = Cell::from_coords(Coords::Spherical, x, [0.6, 0.3, 0.0], 1e-24, 1e-3, 1e45, 0.0);
-        let cos2 = (spreading.beta_vec[0] * rhat[0] + spreading.beta_vec[1] * rhat[1] + spreading.beta_vec[2] * rhat[2]) / norm(spreading.beta_vec);
-        assert!(cos2 < 0.999, "a polar (spreading) component tilts beta off-radial: cos={cos2}");
+        let spreading = Cell::from_coords(
+            Coords::Spherical,
+            x,
+            [0.6, 0.3, 0.0],
+            1e-24,
+            1e-3,
+            1e45,
+            0.0,
+        );
+        let cos2 = (spreading.beta_vec[0] * rhat[0]
+            + spreading.beta_vec[1] * rhat[1]
+            + spreading.beta_vec[2] * rhat[2])
+            / norm(spreading.beta_vec);
+        assert!(
+            cos2 < 0.999,
+            "a polar (spreading) component tilts beta off-radial: cos={cos2}"
+        );
     }
 
     // generation from cells is reproducible and emits finite positive-weight packets carrying the
@@ -176,7 +229,13 @@ mod tests {
             .map(|i| {
                 let theta = PI * (i as f64 + 0.5) / 20.0;
                 Cell::from_coords(
-                    Coords::Spherical, [1.0e16, theta, 0.3], [0.9, 0.1, 0.0], 1e-24, 1e-3, 1e45, 0.0,
+                    Coords::Spherical,
+                    [1.0e16, theta, 0.3],
+                    [0.9, 0.1, 0.0],
+                    1e-24,
+                    1e-3,
+                    1e45,
+                    0.0,
                 )
             })
             .collect();
@@ -184,7 +243,10 @@ mod tests {
         let b = generate_events_from_cells(&cells, &micro(), 1, 5, 1_000_000);
         assert_eq!(a, b, "same seed -> identical catalog");
         assert!(!a.is_empty());
-        assert!(a.iter().all(|e| e.energy_weight.is_finite() && e.energy_weight > 0.0));
+        assert!(
+            a.iter()
+                .all(|e| e.energy_weight.is_finite() && e.energy_weight > 0.0)
+        );
     }
 
     // SPREADING is captured: a cell whose lateral velocity points TOWARD the observer images
@@ -206,14 +268,22 @@ mod tests {
             let cell = Cell {
                 position: pos,
                 beta_vec: [vx, 0.0, 0.7], // mostly radial (+z) with a lateral x component
-                rho: 1e-24, pre: 1e-3, volume: 1e45, t_emission: t_emit,
+                rho: 1e-24,
+                pre: 1e-3,
+                volume: 1e45,
+                t_emission: t_emit,
             };
             let ev = generate_events_from_cells(&[cell], &micro(), 2, 200, 1_000_000);
-            let img = compute_skymap(&ev, obs, t_arr_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1);
+            let img = compute_skymap(
+                &ev, obs, t_arr_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1,
+            );
             img.intensity.iter().sum::<f64>()
         };
         // lateral velocity toward the observer (+x) beams more flux at it than away (-x) — a
         // purely radial treatment (ignoring the lateral component) could not tell them apart.
-        assert!(mk(0.3) > mk(-0.3), "lateral velocity toward the observer must brighten the image");
+        assert!(
+            mk(0.3) > mk(-0.3),
+            "lateral velocity toward the observer must brighten the image"
+        );
     }
 }

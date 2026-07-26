@@ -12,16 +12,15 @@
 //   let v = f.view();
 // =============================================================================
 
-pub mod view;
+pub mod centering;
 pub mod field;
 pub mod ghost;
-pub mod centering;
+pub mod view;
 
-pub use view::{View, ViewMut};
+pub use centering::{Cell, Centering, Edge, Face};
 pub use field::Field;
-pub use centering::{Centering, Cell, Face, Edge};
 pub use ghost::{
-    BcType, FaceSide, GhostType, GhostRegion,
-    analyze_ghost_regions, ghost_fill_field, ghost_fill_all,
-    periodic_remap, clamp_remap, mirror_remap, build_bc_map,
+    BcType, FaceSide, GhostRegion, GhostType, analyze_ghost_regions, build_bc_map, clamp_remap,
+    ghost_fill_all, ghost_fill_field, mirror_remap, periodic_remap,
 };
+pub use view::{View, ViewMut};

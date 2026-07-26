@@ -129,9 +129,14 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// 0-based) is what the sim's `Boundaries` must carry as `BoundaryType::Driven(id)` on the
     /// prescribed face. build `built` from `expr_bridge::build_boundary_dag(&cfg, RHD_SPEC)` —
     /// a complete prim prescription `[rho, vel.., pre]`.
-    pub fn with_driven_boundary(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> (Self, u16) {
+    pub fn with_driven_boundary(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
-        self.boundary_dags.push(RuntimeSource::new(built, params, true));
+        self.boundary_dags
+            .push(RuntimeSource::new(built, params, true));
         (self, id)
     }
 
@@ -196,7 +201,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 {
     fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        dispatch_flux(sim, pre, "rhd", dir, self.gamma, self.theta, self.solver, false);
+        dispatch_flux(
+            sim,
+            pre,
+            "rhd",
+            dir,
+            self.gamma,
+            self.theta,
+            self.solver,
+            false,
+        );
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -234,7 +248,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             (name, scalars)
         } else {
             let name = format!("rhd_c2p{geom_sfx}{st_sfx}_{D}d");
-            let (x_lo, dx) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+            let (x_lo, dx) = kernel_geom(
+                &sim.geom.x_lo,
+                &sim.geom.dx,
+                &sim.geom.maps,
+                sim.geom.coords,
+                sim.motion.a,
+            );
             let scalars = scalars_for(&name, |bind| {
                 let ScalarBind::Ref(sref) = bind else {
                     panic!("rhd GR c2p: unexpected spec scalar {bind:?}");
@@ -242,13 +262,19 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 match *sref {
                     ScalarRef::Gamma => Sc::from_f64(self.gamma),
                     ScalarRef::SchwarzschildMass => Sc::from_f64(
-                        sim.geom.spacetime_scalars.iter()
+                        sim.geom
+                            .spacetime_scalars
+                            .iter()
                             .find(|(n, _)| n == "schwarzschild_mass")
                             .map(|(_, v)| *v)
-                            .expect("rhd GR c2p needs schwarzschild_mass but the metric supplied none"),
+                            .expect(
+                                "rhd GR c2p needs schwarzschild_mass but the metric supplied none",
+                            ),
                     ),
                     ScalarRef::KerrSpin => Sc::from_f64(
-                        sim.geom.spacetime_scalars.iter()
+                        sim.geom
+                            .spacetime_scalars
+                            .iter()
                             .find(|(n, _)| n == "kerr_spin")
                             .map(|(_, v)| *v)
                             .expect("rhd GR c2p needs kerr_spin but the metric supplied none"),
@@ -280,7 +306,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // false — RHD has no Newtonian immersed body.
         if self.fuse_runtime && matches!(sim.geom.spacetime, Spacetime::Minkowski) {
             if let Some(rs) = &self.runtime_source {
-                if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false) {
+                if let Some(fk) =
+                    fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false)
+                {
                     dispatch_fused_runtime_cpu(sim, pre, fk, Some(rs), dt, a0, ac, self.gamma);
                     return;
                 }
@@ -303,7 +331,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             // the separate pass would double-count — skip it.
             if self.fuse_runtime
                 && matches!(sim.geom.spacetime, Spacetime::Minkowski)
-                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false).is_some()
+                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false)
+                    .is_some()
             {
                 return;
             }
@@ -366,7 +395,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         )
     }
 
-    fn horizon_accretion(&self, sim: &FieldStore<D, DOF, Mem, Sc>, diagnostic_radius: f64) -> (f64, f64) {
+    fn horizon_accretion(
+        &self,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
+        diagnostic_radius: f64,
+    ) -> (f64, f64) {
         // the shell-flux kernels are baked for the cartesian kerr-schild chart (the only chart that
         // excises). reuse the (already-consumed) cfl scratch for the per-quantity Add-reduction.
         if sim.geom.spacetime != Spacetime::KerrSchild
@@ -387,7 +420,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the ghost's own radius), so it reads the metric scalars + the radial grid map.
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let geom_sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         // the dragging-consistent w-copy is a spherical-azimuth construct (gamma_{r phi} on the
         // swirl DOF); the cartesian kerr chart has DOF == D and copies the raw prims like any
         // other background.
@@ -398,7 +435,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         } else {
             format!("iso_ghost_fill{geom_sfx}_{D}d")
         };
-        let (x_lo, dx) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+        let (x_lo, dx) = kernel_geom(
+            &sim.geom.x_lo,
+            &sim.geom.dx,
+            &sim.geom.maps,
+            sim.geom.coords,
+            sim.motion.a,
+        );
 
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
@@ -424,20 +467,25 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
                         ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                            sim.geom.spacetime_scalars.iter()
+                            sim.geom
+                                .spacetime_scalars
+                                .iter()
                                 .find(|(n, _)| n == "schwarzschild_mass")
                                 .map(|(_, v)| *v)
                                 .expect("kerr ghost fill needs schwarzschild_mass"),
                         ),
                         ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                            sim.geom.spacetime_scalars.iter()
+                            sim.geom
+                                .spacetime_scalars
+                                .iter()
                                 .find(|(n, _)| n == "kerr_spin")
                                 .map(|(_, v)| *v)
                                 .expect("kerr ghost fill needs kerr_spin"),
                         ),
                         ScalarBind::Ref(other) => Sc::from_f64(
-                            geom_scalar(&x_lo, &dx, &sim.geom.maps, *other)
-                                .unwrap_or_else(|| panic!("ghost_fill: unexpected scalar {other:?}")),
+                            geom_scalar(&x_lo, &dx, &sim.geom.maps, *other).unwrap_or_else(|| {
+                                panic!("ghost_fill: unexpected scalar {other:?}")
+                            }),
                         ),
                         o => panic!("ghost_fill: unexpected scalar {o:?}"),
                     },
@@ -482,7 +530,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
         outputs.push(unrg);
 
-        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let geom_sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         let name = format!("rhd_snapshot{geom_sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
             &name,
@@ -510,10 +562,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             outputs.push(&sim.workspace.u_stage.mom[k]);
         }
         outputs.push(unrg);
-        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let geom_sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         let name = format!("rhd_snapshot{geom_sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.allocated, &inputs, &outputs, &[], &[],
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.allocated,
+            &inputs,
+            &outputs,
+            &[],
+            &[],
         );
     }
 
@@ -532,7 +594,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // geom tag; the ghost-band finiteness halt provides the FOFC-surviving fail-loud.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         let curved = sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
-        let dof_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let dof_sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "rhd",
@@ -552,7 +618,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 // parachute with a provable map into the physical set. flat SRHD keeps the freeze.
                 if curved {
                     crate::regimes::substrate_kernels::fofc_project(
-                        sim, "rhd", dof_sfx, sim.stage_input(), &sim.fields.cons, &sim.fields.prim,
+                        sim,
+                        "rhd",
+                        dof_sfx,
+                        sim.stage_input(),
+                        &sim.fields.cons,
+                        &sim.fields.prim,
                         None, // hydro: the admissible cone carries no magnetic term
                     );
                 }

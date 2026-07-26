@@ -21,7 +21,7 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -55,15 +55,36 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .timestepping(ts)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([V_INF, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([V_INF, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::new([0.0, 0.0]), Tensor::zeros(), 1.0, R_BODY, 0.1, false)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 }),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.0, 0.0]),
+                    Tensor::zeros(),
+                    1.0,
+                    R_BODY,
+                    0.1,
+                    false,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 1.0e3,
+                    k_eta_t: 0.0,
+                }),
+            ),
+        );
     // the CSG shape routes dispatch to the runtime shaped kernel.
-    sim.immersed.as_mut().unwrap().shapes[0] =
-        Some(SdfExpr::<f64, 3>::capped_cylinder([0.0, 0.0, 0.0], R_BODY, 1.0));
+    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::capped_cylinder(
+        [0.0, 0.0, 0.0],
+        R_BODY,
+        1.0,
+    ));
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
     (sim, k)
 }
@@ -79,8 +100,16 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd, ts)
@@ -110,7 +139,11 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
     );
 }
 
-fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [isize; 2]) -> f64) -> Vec<f64> {
+fn global_field(
+    tiles: &[(Sim, Kern)],
+    counts: [usize; 2],
+    pick: impl Fn(&Sim, [isize; 2]) -> f64,
+) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let mut out = vec![f64::NAN; N * N];
     for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
@@ -125,7 +158,10 @@ fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_decomposed_matches(counts: [usize; 2], ts: Timestepping) {
@@ -147,16 +183,25 @@ fn assert_decomposed_matches(counts: [usize; 2], ts: Timestepping) {
     ] {
         let mv = global_field(&mono, [1, 1], &pick);
         let dv = global_field(&dec, counts, &pick);
-        assert!(mv.iter().all(|v| v.is_finite()) && dv.iter().all(|v| v.is_finite()), "unwritten cells");
+        assert!(
+            mv.iter().all(|v| v.is_finite()) && dv.iter().all(|v| v.is_finite()),
+            "unwritten cells"
+        );
         let e = max_err(&mv, &dv);
-        assert!(e < 1e-12, "{counts:?} {ts:?} {name} decomposed!=mono under shaped wall: err {e:e}");
+        assert!(
+            e < 1e-12,
+            "{counts:?} {ts:?} {name} decomposed!=mono under shaped wall: err {e:e}"
+        );
     }
 
     // non-vacuous: the sealed wall must have suppressed the wall-normal momentum somewhere, so the
     // fluid genuinely deviates from the free stream (else the test passes on an untouched flow).
     let mono_momy = global_field(&mono, [1, 1], &momy);
     let dev_from_stream = mono_momy.iter().map(|m| m.abs()).fold(0.0_f64, f64::max);
-    assert!(dev_from_stream > 1e-3, "the shaped wall never perturbed the flow ({dev_from_stream:e}); test vacuous");
+    assert!(
+        dev_from_stream > 1e-3,
+        "the shaped wall never perturbed the flow ({dev_from_stream:e}); test vacuous"
+    );
 }
 
 #[test]

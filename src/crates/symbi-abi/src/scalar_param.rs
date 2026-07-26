@@ -77,14 +77,30 @@ mod tests {
             .flat_map(|a| [MeshScalar::Adot(a), MeshScalar::Vtrans(a)])
             .chain([MeshScalar::Hdil]);
         for s in cases {
-            assert_eq!(MeshScalar::parse(&s.name()), Some(s), "round-trip failed for {s:?}");
+            assert_eq!(
+                MeshScalar::parse(&s.name()),
+                Some(s),
+                "round-trip failed for {s:?}"
+            );
         }
     }
 
     #[test]
     fn parse_rejects_foreign_names() {
-        for n in ["gamma", "theta", "inv_dx_0", "x_lo_1", "mesh_adot", "mesh_adotx", ""] {
-            assert_eq!(MeshScalar::parse(n), None, "'{n}' should not parse as a mesh scalar");
+        for n in [
+            "gamma",
+            "theta",
+            "inv_dx_0",
+            "x_lo_1",
+            "mesh_adot",
+            "mesh_adotx",
+            "",
+        ] {
+            assert_eq!(
+                MeshScalar::parse(n),
+                None,
+                "'{n}' should not parse as a mesh scalar"
+            );
         }
     }
 }

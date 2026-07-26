@@ -26,8 +26,8 @@ mod harness;
 
 use harness::KernelRun;
 use symbi_discretize::body_source_gv;
-use symbi_discretize::coords::{Coords, Spacing, Spacetime};
-use symbi_discretize::gv::{godunov_stage_gv, godunov_stage_gv_with_fused_built, GeoSource};
+use symbi_discretize::coords::{Coords, Spacetime, Spacing};
+use symbi_discretize::gv::{GeoSource, godunov_stage_gv, godunov_stage_gv_with_fused_built};
 
 const GAMMA: f64 = 1.4;
 const DT: f64 = 0.01;
@@ -112,8 +112,17 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
 
     // FUSED: godunov + body welded into one kernel (n_bodies = 1, no user sources).
     let out_fused = KernelRun::new(godunov_stage_gv_with_fused_built(
-        Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true,
-        GeoSource::Hydro { inertial: true }, &[], false, 1,
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 2],
+        &[0, 1],
+        2,
+        2,
+        true,
+        GeoSource::Hydro { inertial: true },
+        &[],
+        false,
+        1,
     ))
     .grid(GRID)
     .compute_window(WLO, WSIZE)
@@ -123,7 +132,13 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
 
     // TWO-PASS step 1: the plain godunov stage (n_bodies = 0).
     let out_god = KernelRun::new(godunov_stage_gv(
-        Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true,
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 2],
+        &[0, 1],
+        2,
+        2,
+        true,
         GeoSource::Hydro { inertial: true },
     ))
     .grid(GRID)
@@ -156,16 +171,39 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     for j in 1..3 {
         for i in 1..3 {
             let cell = [i, j];
-            assert_bits_eq(out_fused.get(cell, "rho"), out_body.get(cell, "den_new"), cell, "den");
-            assert_bits_eq(out_fused.get(cell, "mom_0"), out_body.get(cell, "mom_0_new"), cell, "mom_0");
-            assert_bits_eq(out_fused.get(cell, "mom_1"), out_body.get(cell, "mom_1_new"), cell, "mom_1");
-            assert_bits_eq(out_fused.get(cell, "nrg"), out_body.get(cell, "nrg_new"), cell, "nrg");
+            assert_bits_eq(
+                out_fused.get(cell, "rho"),
+                out_body.get(cell, "den_new"),
+                cell,
+                "den",
+            );
+            assert_bits_eq(
+                out_fused.get(cell, "mom_0"),
+                out_body.get(cell, "mom_0_new"),
+                cell,
+                "mom_0",
+            );
+            assert_bits_eq(
+                out_fused.get(cell, "mom_1"),
+                out_body.get(cell, "mom_1_new"),
+                cell,
+                "mom_1",
+            );
+            assert_bits_eq(
+                out_fused.get(cell, "nrg"),
+                out_body.get(cell, "nrg_new"),
+                cell,
+                "nrg",
+            );
             if out_fused.get(cell, "rho") != out_god.get(cell, "rho") {
                 body_changed = true;
             }
         }
     }
-    assert!(body_changed, "{stage}: body wrap was a no-op (drain + gravity inert) — oracle is vacuous");
+    assert!(
+        body_changed,
+        "{stage}: body wrap was a no-op (drain + gravity inert) — oracle is vacuous"
+    );
 }
 
 #[test]

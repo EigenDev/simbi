@@ -18,7 +18,7 @@
 #![allow(non_camel_case_types)]
 
 use crate::error::{self, XpuError};
-use std::ffi::{c_char, c_int, c_void, CString};
+use std::ffi::{CString, c_char, c_int, c_void};
 
 type nvrtcResult = c_int;
 type nvrtcProgram = *mut c_void;
@@ -34,7 +34,11 @@ unsafe extern "C" {
         headers: *const *const c_char,
         include_names: *const *const c_char,
     ) -> nvrtcResult;
-    fn nvrtcCompileProgram(prog: nvrtcProgram, num_options: c_int, options: *const *const c_char) -> nvrtcResult;
+    fn nvrtcCompileProgram(
+        prog: nvrtcProgram,
+        num_options: c_int,
+        options: *const *const c_char,
+    ) -> nvrtcResult;
     fn nvrtcGetPTXSize(prog: nvrtcProgram, size: *mut usize) -> nvrtcResult;
     fn nvrtcGetPTX(prog: nvrtcProgram, ptx: *mut c_char) -> nvrtcResult;
     fn nvrtcGetProgramLogSize(prog: nvrtcProgram, size: *mut usize) -> nvrtcResult;
@@ -58,15 +62,28 @@ pub fn compile_ptx(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     // there is no perf left on the table here. do NOT add it back without
     // confirming the NVRTC version actually accepts it.
 
-    let src = CString::new(source)
-        .map_err(|_| XpuError { operation: "nvrtc source", code: -1, detail: "kernel source has an interior NUL".into() })?;
-    let name = CString::new(format!("{kernel_name}.cu"))
-        .map_err(|_| XpuError { operation: "nvrtc name", code: -1, detail: "kernel name has an interior NUL".into() })?;
+    let src = CString::new(source).map_err(|_| XpuError {
+        operation: "nvrtc source",
+        code: -1,
+        detail: "kernel source has an interior NUL".into(),
+    })?;
+    let name = CString::new(format!("{kernel_name}.cu")).map_err(|_| XpuError {
+        operation: "nvrtc name",
+        code: -1,
+        detail: "kernel name has an interior NUL".into(),
+    })?;
 
     let mut prog: nvrtcProgram = std::ptr::null_mut();
     check(
         unsafe {
-            nvrtcCreateProgram(&mut prog, src.as_ptr(), name.as_ptr(), 0, std::ptr::null(), std::ptr::null())
+            nvrtcCreateProgram(
+                &mut prog,
+                src.as_ptr(),
+                name.as_ptr(),
+                0,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
         },
         "nvrtcCreateProgram",
     )?;
@@ -75,7 +92,9 @@ pub fn compile_ptx(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     let res = unsafe { nvrtcCompileProgram(prog, opts.len() as c_int, opts.as_ptr()) };
     if res != NVRTC_SUCCESS {
         let log = program_log(prog);
-        unsafe { let _ = nvrtcDestroyProgram(&mut prog); }
+        unsafe {
+            let _ = nvrtcDestroyProgram(&mut prog);
+        }
         return Err(XpuError {
             operation: "nvrtcCompileProgram",
             code: res,
@@ -84,10 +103,18 @@ pub fn compile_ptx(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     }
 
     let mut size: usize = 0;
-    check(unsafe { nvrtcGetPTXSize(prog, &mut size) }, "nvrtcGetPTXSize")?;
+    check(
+        unsafe { nvrtcGetPTXSize(prog, &mut size) },
+        "nvrtcGetPTXSize",
+    )?;
     let mut ptx = vec![0u8; size];
-    check(unsafe { nvrtcGetPTX(prog, ptx.as_mut_ptr() as *mut c_char) }, "nvrtcGetPTX")?;
-    unsafe { let _ = nvrtcDestroyProgram(&mut prog); }
+    check(
+        unsafe { nvrtcGetPTX(prog, ptx.as_mut_ptr() as *mut c_char) },
+        "nvrtcGetPTX",
+    )?;
+    unsafe {
+        let _ = nvrtcDestroyProgram(&mut prog);
+    }
     Ok(ptx)
 }
 

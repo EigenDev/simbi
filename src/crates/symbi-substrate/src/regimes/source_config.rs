@@ -27,9 +27,9 @@
 //  );
 // =============================================================================
 
+use symbi_algebra::OrderedNumeric;
 use symbi_hydro::Overlay;
 use symbi_ir::algebra::Scalar;
-use symbi_algebra::OrderedNumeric;
 use symbi_xpu::MemorySpace;
 
 use crate::regimes::substrate::IsoSubstrateKernelSet;
@@ -106,16 +106,24 @@ pub fn configure_source_with<K: ConfigureSource>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_hydro::{point_mass, uniform_accel, Overlay};
-    use symbi_xpu::HostMemory;
     use symbi_algebra::{Domain, Space};
+    use symbi_hydro::{Overlay, point_mass, uniform_accel};
+    use symbi_xpu::HostMemory;
 
     fn iso_set() -> IsoSubstrateKernelSet<HostMemory, f64, 2> {
         // a tiny alloc domain just to size the kernel-set scratch fields; the
         // configure_source decision is independent of grid size.
         let alloc = Domain::<2>::new([
-            Space { name: "x", lo: 0, hi: 8 },
-            Space { name: "y", lo: 0, hi: 8 },
+            Space {
+                name: "x",
+                lo: 0,
+                hi: 8,
+            },
+            Space {
+                name: "y",
+                lo: 0,
+                hi: 8,
+            },
         ]);
         IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(0.1, 0.4, &alloc)
     }
@@ -123,19 +131,46 @@ mod tests {
     #[test]
     fn picks_fused_when_baked() {
         // is_baked = true -> the binding folds into godunov; no additive pass.
-        let ks = configure_source_with(iso_set(), &point_mass(1.0, vec![0.0, 0.0], 0.0), "iso", 2, |_| true);
+        let ks = configure_source_with(
+            iso_set(),
+            &point_mass(1.0, vec![0.0, 0.0], 0.0),
+            "iso",
+            2,
+            |_| true,
+        );
         assert!(ks.fused_source.is_some(), "baked family must route fused");
-        assert!(ks.additive_source.is_none(), "fused path must NOT also set additive");
-        assert_eq!(ks.fused_source.as_ref().unwrap().source_id, "point_mass_grav");
+        assert!(
+            ks.additive_source.is_none(),
+            "fused path must NOT also set additive"
+        );
+        assert_eq!(
+            ks.fused_source.as_ref().unwrap().source_id,
+            "point_mass_grav"
+        );
     }
 
     #[test]
     fn falls_back_to_additive_when_unbaked() {
         // is_baked = false -> the SAME binding routes to the additive pass.
-        let ks = configure_source_with(iso_set(), &point_mass(1.0, vec![0.0, 0.0], 0.0), "iso", 2, |_| false);
-        assert!(ks.additive_source.is_some(), "unbaked family must route additive");
-        assert!(ks.fused_source.is_none(), "additive fallback must NOT also set fused");
-        assert_eq!(ks.additive_source.as_ref().unwrap().source_id, "point_mass_grav");
+        let ks = configure_source_with(
+            iso_set(),
+            &point_mass(1.0, vec![0.0, 0.0], 0.0),
+            "iso",
+            2,
+            |_| false,
+        );
+        assert!(
+            ks.additive_source.is_some(),
+            "unbaked family must route additive"
+        );
+        assert!(
+            ks.fused_source.is_none(),
+            "additive fallback must NOT also set fused"
+        );
+        assert_eq!(
+            ks.additive_source.as_ref().unwrap().source_id,
+            "point_mass_grav"
+        );
     }
 
     #[test]
@@ -150,13 +185,19 @@ mod tests {
         // iso 2d, so the production `configure_source` routes it fused — proves
         // the kernel-name format + the registry consult agree with the bake.
         let ks = configure_source(iso_set(), &point_mass(1.0, vec![0.0, 0.0], 0.0), "iso", 2);
-        assert!(ks.fused_source.is_some(), "point_mass IS baked for iso 2d -> fused");
+        assert!(
+            ks.fused_source.is_some(),
+            "point_mass IS baked for iso 2d -> fused"
+        );
     }
 
     #[test]
     fn uniform_accel_routes_too() {
         // the other family resolves its own slug + scalars (g_ext_k).
-        let ks = configure_source_with(iso_set(), &uniform_accel(vec![0.0, -1.0]), "iso", 2, |_| true);
+        let ks =
+            configure_source_with(iso_set(), &uniform_accel(vec![0.0, -1.0]), "iso", 2, |_| {
+                true
+            });
         assert_eq!(ks.fused_source.as_ref().unwrap().source_id, "uniform_accel");
     }
 }

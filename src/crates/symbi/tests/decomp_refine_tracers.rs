@@ -7,8 +7,8 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_kernels::GradientBc;
+use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::LocalCopy;
 use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
@@ -117,9 +117,14 @@ fn region() -> RefinementRegion<1> {
 
 fn global() -> Hier {
     let coarse = root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic));
-    let hierarchy =
-        Hier::with_refinement(coarse, kernels(&root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic))), &[region()], ProlongOrder::Plm, kernels)
-            .unwrap();
+    let hierarchy = Hier::with_refinement(
+        coarse,
+        kernels(&root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic))),
+        &[region()],
+        ProlongOrder::Plm,
+        kernels,
+    )
+    .unwrap();
     hierarchy.seed_fine_from_coarse().unwrap();
     hierarchy
 }
@@ -140,10 +145,7 @@ fn source_global() -> Hier {
 }
 
 fn driven_global() -> Hier {
-    let boundaries = Boundaries([[
-        BoundaryType::Driven(0),
-        BoundaryType::Outflow,
-    ]]);
+    let boundaries = Boundaries([[BoundaryType::Driven(0), BoundaryType::Outflow]]);
     let coarse = resting_root(N, 0.0, boundaries);
     let coarse_kernels = driven_kernels(&coarse);
     let hierarchy = Hier::with_refinement(
@@ -159,10 +161,7 @@ fn driven_global() -> Hier {
 }
 
 fn gradient_global() -> Hier {
-    let boundaries = Boundaries([[
-        BoundaryType::Neumann(0),
-        BoundaryType::Outflow,
-    ]]);
+    let boundaries = Boundaries([[BoundaryType::Neumann(0), BoundaryType::Outflow]]);
     let coarse = resting_root(N, 0.0, boundaries);
     let coarse_kernels = gradient_kernels(&coarse);
     let hierarchy = Hier::with_refinement(
@@ -181,15 +180,9 @@ fn tiles() -> Vec<Hier> {
     let mut result = Vec::new();
     for tile in 0..2 {
         let boundaries = if tile == 0 {
-            Boundaries([[
-                BoundaryType::Periodic,
-                BoundaryType::CoarseFine,
-            ]])
+            Boundaries([[BoundaryType::Periodic, BoundaryType::CoarseFine]])
         } else {
-            Boundaries([[
-                BoundaryType::CoarseFine,
-                BoundaryType::Periodic,
-            ]])
+            Boundaries([[BoundaryType::CoarseFine, BoundaryType::Periodic]])
         };
         let coarse = root(N / 2, tile as f64 * 0.5, boundaries);
         let coarse_kernels = kernels(&coarse);
@@ -218,15 +211,9 @@ fn source_tiles() -> Vec<Hier> {
     let mut result = Vec::new();
     for tile in 0..2 {
         let boundaries = if tile == 0 {
-            Boundaries([[
-                BoundaryType::Periodic,
-                BoundaryType::CoarseFine,
-            ]])
+            Boundaries([[BoundaryType::Periodic, BoundaryType::CoarseFine]])
         } else {
-            Boundaries([[
-                BoundaryType::CoarseFine,
-                BoundaryType::Periodic,
-            ]])
+            Boundaries([[BoundaryType::CoarseFine, BoundaryType::Periodic]])
         };
         let coarse = root(N / 2, tile as f64 * 0.5, boundaries);
         let coarse_kernels = source_kernels(&coarse);
@@ -255,15 +242,9 @@ fn driven_tiles() -> Vec<Hier> {
     let mut result = Vec::new();
     for tile in 0..2 {
         let boundaries = if tile == 0 {
-            Boundaries([[
-                BoundaryType::Driven(0),
-                BoundaryType::CoarseFine,
-            ]])
+            Boundaries([[BoundaryType::Driven(0), BoundaryType::CoarseFine]])
         } else {
-            Boundaries([[
-                BoundaryType::CoarseFine,
-                BoundaryType::Outflow,
-            ]])
+            Boundaries([[BoundaryType::CoarseFine, BoundaryType::Outflow]])
         };
         let coarse = resting_root(N / 2, tile as f64 * 0.5, boundaries);
         let coarse_kernels = driven_kernels(&coarse);
@@ -292,15 +273,9 @@ fn gradient_tiles() -> Vec<Hier> {
     let mut result = Vec::new();
     for tile in 0..2 {
         let boundaries = if tile == 0 {
-            Boundaries([[
-                BoundaryType::Neumann(0),
-                BoundaryType::CoarseFine,
-            ]])
+            Boundaries([[BoundaryType::Neumann(0), BoundaryType::CoarseFine]])
         } else {
-            Boundaries([[
-                BoundaryType::CoarseFine,
-                BoundaryType::Outflow,
-            ]])
+            Boundaries([[BoundaryType::CoarseFine, BoundaryType::Outflow]])
         };
         let coarse = resting_root(N / 2, tile as f64 * 0.5, boundaries);
         let coarse_kernels = gradient_kernels(&coarse);
@@ -330,10 +305,7 @@ fn composite_mass(hierarchy: &[Hier]) -> f64 {
         .iter()
         .flat_map(|tile| &tile.levels)
         .map(|level| {
-            let geometry = level
-                .state
-                .geom
-                .block_geometry(level.state.physics.metric);
+            let geometry = level.state.geom.block_geometry(level.state.physics.metric);
             level
                 .state
                 .geom
@@ -345,22 +317,25 @@ fn composite_mass(hierarchy: &[Hier]) -> f64 {
                         .as_ref()
                         .is_some_and(|coverage| coverage.contains(*coord))
                 })
-                .map(|coord| {
-                    *level.state.fields.cons.den.view().at(coord)
-                        * geometry.volume(coord)
-                })
+                .map(|coord| *level.state.fields.cons.den.view().at(coord) * geometry.volume(coord))
                 .sum::<f64>()
         })
         .sum()
 }
 
-fn owners(hierarchy: &[Hier]) -> std::collections::BTreeMap<u64, symbi_sim::mass_transport::ContainerId> {
+fn owners(
+    hierarchy: &[Hier],
+) -> std::collections::BTreeMap<u64, symbi_sim::mass_transport::ContainerId> {
     hierarchy
         .iter()
         .flat_map(|tile| &tile.levels)
         .flat_map(|level| {
             let tracers = level.state.tracers.as_ref().unwrap();
-            tracers.id.iter().copied().zip(tracers.owner.iter().copied())
+            tracers
+                .id
+                .iter()
+                .copied()
+                .zip(tracers.owner.iter().copied())
         })
         .collect()
 }
@@ -420,9 +395,7 @@ fn decomposed_refined_tracers_migrate_across_level_and_tile_cuts() {
                         != level_index,
                 );
                 assert_eq!(
-                    symbi_sim::tracers::cell_container_address(owner)
-                        .unwrap()
-                        .0 as usize,
+                    symbi_sim::tracers::cell_container_address(owner).unwrap().0 as usize,
                     level_index,
                     "tracer {id} is stored on the wrong refinement level"
                 );
@@ -465,12 +438,16 @@ fn decomposed_refined_source_spawning_matches_composite_added_mass() {
         .collect();
     let unique: std::collections::BTreeSet<_> = all_ids.iter().copied().collect();
     let tracers = decomposed[0].levels[0].state.tracers.as_ref().unwrap();
-    let represented_added = (all_ids.len() - N_TRACERS) as f64 * tracers.weight
-        + tracers.injection_remainder;
+    let represented_added =
+        (all_ids.len() - N_TRACERS) as f64 * tracers.weight + tracers.injection_remainder;
     let fluid_added = composite_mass(&decomposed) - mass_before;
     let expected_added = 0.2 * 0.04;
 
-    assert_eq!(unique.len(), all_ids.len(), "spawned tracer IDs are not global");
+    assert_eq!(
+        unique.len(),
+        all_ids.len(),
+        "spawned tracer IDs are not global"
+    );
     assert!(
         all_ids.len() > N_TRACERS,
         "the decomposed source spawned no tracers"
@@ -525,11 +502,15 @@ fn decomposed_refined_driven_inflow_uses_one_global_spawn_stream() {
         .collect();
     let unique: std::collections::BTreeSet<_> = all_ids.iter().copied().collect();
     let tracers = decomposed[0].levels[0].state.tracers.as_ref().unwrap();
-    let represented_added = (all_ids.len() - N_TRACERS) as f64 * tracers.weight
-        + tracers.injection_remainder;
+    let represented_added =
+        (all_ids.len() - N_TRACERS) as f64 * tracers.weight + tracers.injection_remainder;
     let fluid_added = composite_mass(&decomposed) - mass_before;
 
-    assert_eq!(unique.len(), all_ids.len(), "inflow tracer IDs are not global");
+    assert_eq!(
+        unique.len(),
+        all_ids.len(),
+        "inflow tracer IDs are not global"
+    );
     assert!(
         all_ids.len() > N_TRACERS,
         "the decomposed driven boundary spawned no tracers"
@@ -567,8 +548,8 @@ fn decomposed_refined_gradient_inflow_uses_one_global_spawn_stream() {
         .collect();
     let unique: std::collections::BTreeSet<_> = all_ids.iter().copied().collect();
     let tracers = decomposed[0].levels[0].state.tracers.as_ref().unwrap();
-    let represented_added = (all_ids.len() - N_TRACERS) as f64 * tracers.weight
-        + tracers.injection_remainder;
+    let represented_added =
+        (all_ids.len() - N_TRACERS) as f64 * tracers.weight + tracers.injection_remainder;
     let fluid_added = composite_mass(&decomposed) - mass_before;
 
     assert_eq!(

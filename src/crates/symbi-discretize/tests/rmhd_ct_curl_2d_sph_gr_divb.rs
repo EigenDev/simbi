@@ -19,7 +19,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Coords, Spacetime, Spacing};
+use symbi_discretize::{Coords, Spacetime, Spacing, rmhd_ct_curl_2d_sph_gr_gv};
 
 const M: usize = 8; // buffer extent per axis (r, theta)
 const R0: f64 = 3.0; // outside the horizon (mass 1)
@@ -123,7 +123,10 @@ fn gr_ct_curl_2d_sph_poloidal_preserves_weighted_div_b() {
             max_b = max_b.max(at(&b[0], i, j).abs()).max(at(&b[1], i, j).abs());
         }
     }
-    assert!(max_b > 1e-2, "poloidal init is ~zero ({max_b:e}) — vacuously div-free");
+    assert!(
+        max_b > 1e-2,
+        "poloidal init is ~zero ({max_b:e}) — vacuously div-free"
+    );
 
     let mut max_init = 0.0_f64;
     for i in 0..M - 2 {
@@ -131,7 +134,10 @@ fn gr_ct_curl_2d_sph_poloidal_preserves_weighted_div_b() {
             max_init = max_init.max(div_b(&b[0], &b[1], i, j).abs());
         }
     }
-    assert!(max_init < 1e-10, "init w-weighted div(B) not zero: max = {max_init:e}");
+    assert!(
+        max_init < 1e-10,
+        "init w-weighted div(B) not zero: max = {max_init:e}"
+    );
 
     let b2 = run_curl(&b, &e, DT);
 
@@ -145,8 +151,14 @@ fn gr_ct_curl_2d_sph_poloidal_preserves_weighted_div_b() {
             max_change = max_change.max((after - before).abs());
         }
     }
-    assert!(max_after < 1e-10, "post-update w-weighted div(B) not zero: max = {max_after:e}");
-    assert!(max_change < 1e-11, "w-weighted div(B) changed under CT: max delta = {max_change:e}");
+    assert!(
+        max_after < 1e-10,
+        "post-update w-weighted div(B) not zero: max = {max_after:e}"
+    );
+    assert!(
+        max_change < 1e-11,
+        "w-weighted div(B) changed under CT: max delta = {max_change:e}"
+    );
     eprintln!(
         "gr 2d spherical poloidal CT div(B): |B|={max_b:e} init={max_init:e} after={max_after:e} change={max_change:e}"
     );

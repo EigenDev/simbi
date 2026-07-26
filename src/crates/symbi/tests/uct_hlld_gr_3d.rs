@@ -125,7 +125,10 @@ macro_rules! gr_divb_gate {
             .set_initial(|[x, y, z]| swirl_prim(x, y, z))
             .seed_faces(|axis, [x, y, z]| {
                 if axis == 0 {
-                    B0 / symbi_geometry::Metric::<f64, 3>::sqrt_det_gamma(&metric, Tensor::new([x, y, z]))
+                    B0 / symbi_geometry::Metric::<f64, 3>::sqrt_det_gamma(
+                        &metric,
+                        Tensor::new([x, y, z]),
+                    )
                 } else {
                     0.0
                 }
@@ -133,11 +136,16 @@ macro_rules! gr_divb_gate {
             .build();
         let inv_d = [N as f64; 3];
         let (div0, _) = max_divb(&sim, &metric, $x_lo, inv_d);
-        assert!(div0 < 1e-13, "{}: densitized IC not div-free: {div0:e}", $what);
-        let sub = RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
-            .with_solver(Solver::Hlld)
-            .expect("hlld")
-            .ct_method(CtMethod::Uct);
+        assert!(
+            div0 < 1e-13,
+            "{}: densitized IC not div-free: {div0:e}",
+            $what
+        );
+        let sub =
+            RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
+                .with_solver(Solver::Hlld)
+                .expect("hlld")
+                .ct_method(CtMethod::Uct);
         let mut steps: u64 = 0;
         evolve_with_callback(&mut sim, &sub, $t_final, 1, |s| {
             let (max_div, max_b) = max_divb(s, &metric, $x_lo, inv_d);
@@ -145,12 +153,18 @@ macro_rules! gr_divb_gate {
             assert!(
                 rel < DIVB_TOL,
                 "{}: div(B) grew at iter {} t={:.3e}: rel {rel:e}",
-                $what, s.iteration, s.time,
+                $what,
+                s.iteration,
+                s.time,
             );
             steps = s.iteration;
         })
         .expect("gr evolve");
-        assert!(steps >= $min_steps, "{}: only {steps} steps — gate barely exercised", $what);
+        assert!(
+            steps >= $min_steps,
+            "{}: only {steps} steps — gate barely exercised",
+            $what
+        );
         sim
     }};
 }
@@ -159,13 +173,23 @@ macro_rules! gr_divb_gate {
 fn schwarzschild_ks_3d_uct_hlld_preserves_divb() {
     // the box sits outside the horizon: x_lo = 1.2 puts every cell at
     // r >= sqrt(3) * 1.2 > 2M = 0.4.
-    gr_divb_gate!(SchwarzschildKSCartesian { mass: MASS }, SchwarzschildKSCartesian<f64>, 1.2, T_FINAL, 5, "ks 3d uct-hlld");
+    gr_divb_gate!(
+        SchwarzschildKSCartesian { mass: MASS },
+        SchwarzschildKSCartesian<f64>,
+        1.2,
+        T_FINAL,
+        5,
+        "ks 3d uct-hlld"
+    );
 }
 
 #[test]
 fn spinning_kerr_3d_uct_hlld_preserves_divb() {
     gr_divb_gate!(
-        KerrKSCartesian { mass: MASS, spin: 0.5 },
+        KerrKSCartesian {
+            mass: MASS,
+            spin: 0.5
+        },
         KerrKSCartesian<f64>,
         1.2,
         T_FINAL,
@@ -187,7 +211,14 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
     // GR and flat wave-speed maps are different, both valid, bounds — free
     // stepping would diverge in step count while agreeing on physics).
     const T_ONE: f64 = 0.005;
-    let sim_gr = gr_divb_gate!(SchwarzschildKSCartesian { mass: 0.0 }, SchwarzschildKSCartesian<f64>, 1.2, T_ONE, 1, "ks M=0");
+    let sim_gr = gr_divb_gate!(
+        SchwarzschildKSCartesian { mass: 0.0 },
+        SchwarzschildKSCartesian<f64>,
+        1.2,
+        T_ONE,
+        1,
+        "ks M=0"
+    );
 
     type FlatSim = SimState<Rmhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 1.0 / N as f64;
@@ -202,22 +233,38 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
         .set_initial(|[x, y, z]| swirl_prim(x, y, z))
         .seed_faces(|axis, _| if axis == 0 { B0 } else { 0.0 })
         .build();
-    let sub = RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &flat.geom.allocated)
-        .with_solver(Solver::Hlld)
-        .expect("hlld")
-        .ct_method(CtMethod::Uct);
+    let sub =
+        RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &flat.geom.allocated)
+            .with_solver(Solver::Hlld)
+            .expect("hlld")
+            .ct_method(CtMethod::Uct);
     evolve_with_callback(&mut flat, &sub, T_ONE, 1, |_| {}).expect("flat evolve");
 
-    assert_eq!(sim_gr.iteration, flat.iteration, "step counts diverged at M = 0");
+    assert_eq!(
+        sim_gr.iteration, flat.iteration,
+        "step counts diverged at M = 0"
+    );
     let mhd_g = sim_gr.fields.mhd.as_ref().expect("mhd");
     let mhd_f = flat.fields.mhd.as_ref().expect("mhd");
     let mut worst = 0.0_f64;
     for c in sim_gr.geom.interior.iter() {
         let pairs = [
-            (*sim_gr.fields.cons.den.view().at(c), *flat.fields.cons.den.view().at(c)),
-            (*sim_gr.fields.cons.mom[0].view().at(c), *flat.fields.cons.mom[0].view().at(c)),
-            (*sim_gr.fields.cons.mom[1].view().at(c), *flat.fields.cons.mom[1].view().at(c)),
-            (*sim_gr.fields.cons.mom[2].view().at(c), *flat.fields.cons.mom[2].view().at(c)),
+            (
+                *sim_gr.fields.cons.den.view().at(c),
+                *flat.fields.cons.den.view().at(c),
+            ),
+            (
+                *sim_gr.fields.cons.mom[0].view().at(c),
+                *flat.fields.cons.mom[0].view().at(c),
+            ),
+            (
+                *sim_gr.fields.cons.mom[1].view().at(c),
+                *flat.fields.cons.mom[1].view().at(c),
+            ),
+            (
+                *sim_gr.fields.cons.mom[2].view().at(c),
+                *flat.fields.cons.mom[2].view().at(c),
+            ),
             (*mhd_g.bface[0].view().at(c), *mhd_f.bface[0].view().at(c)),
             (*mhd_g.bface[1].view().at(c), *mhd_f.bface[1].view().at(c)),
             (*mhd_g.bface[2].view().at(c), *mhd_f.bface[2].view().at(c)),
@@ -226,5 +273,8 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
             worst = worst.max((g - f).abs() / f.abs().max(1.0));
         }
     }
-    assert!(worst < 1e-12, "M = 0 kerr-schild diverges from flat: rel {worst:e}");
+    assert!(
+        worst < 1e-12,
+        "M = 0 kerr-schild diverges from flat: rel {worst:e}"
+    );
 }

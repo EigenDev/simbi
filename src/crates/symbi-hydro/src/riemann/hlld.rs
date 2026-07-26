@@ -10,18 +10,18 @@
 // success mask. ONE Riemann source, two backends (host f64 + traced Gv).
 // =============================================================================
 
+use crate::energy::Zero;
+use crate::eos::Eos;
+use crate::isothermal_mhd::IsothermalMhd;
+use crate::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
+use crate::newtonian_mhd::NewtonianMhd;
+use crate::regime::Regime;
+use crate::riemann::hlle;
+use crate::rmhd::Rmhd;
+use crate::spatial_metric::SpatialMetric;
+use crate::state::{Cons, ConsG, Prim};
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::{Scalar, Selectable};
-use crate::eos::Eos;
-use crate::state::{Cons, ConsG, Prim};
-use crate::energy::Zero;
-use crate::regime::Regime;
-use crate::rmhd::Rmhd;
-use crate::mhd_state::{MhdPrim, MhdCons, IsoMhdPrim, IsoMhdCons};
-use crate::spatial_metric::SpatialMetric;
-use crate::newtonian_mhd::NewtonianMhd;
-use crate::isothermal_mhd::IsothermalMhd;
-use crate::riemann::hlle;
 
 use super::{DIVZERO_GUARD, NULL_FIELD_THRESHOLD};
 
@@ -53,12 +53,12 @@ const ALFVEN_DEGENERACY_TOL: f64 = 1e-3;
 /// `DIVERGENCE_GUARD * 10` (so the secant + final-select treat them as
 /// divergent without needing a host bool sentinel).
 struct VdiffOut<S: Scalar, const D: usize> {
-    f:   S,
-    vv:  [Tensor<S, D>; 2],
-    bv:  [Tensor<S, D>; 2],
+    f: S,
+    vv: [Tensor<S, D>; 2],
+    bv: [Tensor<S, D>; 2],
     alf: [S; 2],
-    vc:  Tensor<S, D>,
-    bc:  Tensor<S, D>,
+    vc: Tensor<S, D>,
+    bc: Tensor<S, D>,
 }
 
 /// branchless HLLD intermediate-state + f-function. carrier-generic: no
@@ -155,7 +155,8 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let dkn = alf_r - alf_l + eps;
     let inv_dkn = one / dkn;
     let bc = ((bv[1].scale(alf_r - vn_r) + vv[1].scale(bn))
-            - (bv[0].scale(alf_l - vn_l) + vv[0].scale(bn))).scale(inv_dkn);
+        - (bv[0].scale(alf_l - vn_l) + vv[0].scale(bn)))
+    .scale(inv_dkn);
 
     // Eq (47): contact velocity.
     let ksq_l = metric.norm_sq_contra(&kv[0]);
@@ -175,7 +176,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     // Eq (48), three-way branchless select on the magnitude of dkn and bn.
     let null_thresh = S::from_f64(NULL_FIELD_THRESHOLD);
     let dkn_small = dkn.abs().cmp_lt(null_thresh);
-    let bn_small  = bn.abs().cmp_lt(null_thresh);
+    let bn_small = bn.abs().cmp_lt(null_thresh);
     let f_default = dkn * (one - bn * (y_r - y_l));
     let f_when_bn_small = dkn;
     let f_inner = S::select(bn_small, f_when_bn_small, f_default);
@@ -198,7 +199,14 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let f = S::select(physical, f_val_pre, big);
     let vc = (vc_l + vc_r).scale(S::from_f64(0.5));
 
-    VdiffOut { f, vv, bv, alf, vc, bc }
+    VdiffOut {
+        f,
+        vv,
+        bv,
+        alf,
+        vc,
+        bc,
+    }
 }
 
 /// the converged five-wave fan: the secant-final intermediate state + the success mask. SHARED by
@@ -258,7 +266,11 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
     let v = hlld_vdiff(result_acc, r_pair, lam, bn, nhat, metric);
     let ok = v.f.abs().cmp_lt(div_guard) & v.f.abs().cmp_lt(feps * S::from_f64(1e6));
     let success = S::select(ok, one, zero);
-    HlldConverged { p_final: result_acc, v, success }
+    HlldConverged {
+        p_final: result_acc,
+        v,
+        success,
+    }
 }
 
 /// HLLD five-wave solver for RMHD. carrier-generic — single body for f64 host
@@ -293,12 +305,24 @@ pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
     // V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a. the covariant momentum flux maps back with
     // T^{-T} = gamma E (F_S = E_dd gamma (E F_hat_S)); the contravariant field maps with E.
     let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
-        hydro: Prim { rho: p.hydro.rho, vel: e_t.mul_vec(&metric.lower(&p.hydro.vel)), pre: p.hydro.pre },
+        hydro: Prim {
+            rho: p.hydro.rho,
+            vel: e_t.mul_vec(&metric.lower(&p.hydro.vel)),
+            pre: p.hydro.pre,
+        },
         mag: e_t.mul_vec(&metric.lower(&p.mag)),
     };
     let hat_l = to_hat(prim_l);
     let hat_r = to_hat(prim_r);
-    let fhat = hlld_rmhd(&Rmhd, eos, &hat_l, &hat_r, &nhat, vface / e_dd, &SpatialMetric::flat());
+    let fhat = hlld_rmhd(
+        &Rmhd,
+        eos,
+        &hat_l,
+        &hat_r,
+        &nhat,
+        vface / e_dd,
+        &SpatialMetric::flat(),
+    );
     MhdCons {
         hydro: Cons {
             den: fhat.hydro.den * e_dd,
@@ -330,10 +354,21 @@ pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
     let e_dd = e[(dir, dir)];
     // forward map (no inverse): V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a.
     let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
-        hydro: Prim { rho: p.hydro.rho, vel: e_t.mul_vec(&metric.lower(&p.hydro.vel)), pre: p.hydro.pre },
+        hydro: Prim {
+            rho: p.hydro.rho,
+            vel: e_t.mul_vec(&metric.lower(&p.hydro.vel)),
+            pre: p.hydro.pre,
+        },
         mag: e_t.mul_vec(&metric.lower(&p.mag)),
     };
-    let st = hlld_rmhd_states(&Rmhd, eos, &to_hat(prim_l), &to_hat(prim_r), &nhat, &SpatialMetric::flat());
+    let st = hlld_rmhd_states(
+        &Rmhd,
+        eos,
+        &to_hat(prim_l),
+        &to_hat(prim_r),
+        &nhat,
+        &SpatialMetric::flat(),
+    );
     // contravariant field/velocity: X = E X_hat.
     let up = |v: &Tensor<S, D>| e.mul_vec(v);
     HlldStates {
@@ -384,7 +419,7 @@ where
 
     let inv_dwave = one / (a_r - a_l + eps);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
-    let hll_flux  = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
+    let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
     let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
 
     // r-vectors for prim_l and prim_r (Eq. 12).
@@ -442,11 +477,10 @@ where
     let make_fast = |u_side: MhdCons<S, D>,
                      f_side: MhdCons<S, D>,
                      r_side: MhdCons<S, D>,
-                     lc:     S,
-                     va:     Tensor<S, D>,
-                     ba:     Tensor<S, D>|
-        -> (MhdCons<S, D>, MhdCons<S, D>)
-    {
+                     lc: S,
+                     va: Tensor<S, D>,
+                     ba: Tensor<S, D>|
+     -> (MhdCons<S, D>, MhdCons<S, D>) {
         let vdba = metric.contract_contra(&va, &ba); // v.B (contravariant)
         let vna = va.dot(nhat); // v.n (contravariant)
         let inv_lc_vna = one / (lc - vna + eps);
@@ -454,7 +488,11 @@ where
         let ea = (r_side.nrg + r_side.den + p_final * vna - vdba * bn) * inv_lc_vna;
         let ma = va.scale(ea + p_final) - ba.scale(vdba);
         let ua = MhdCons {
-            hydro: Cons { den: da, mom: ma, nrg: ea - da },
+            hydro: Cons {
+                den: da,
+                mom: ma,
+                nrg: ea - da,
+            },
             mag: ba,
         };
         let fa = f_side + (ua - u_side) * lc;
@@ -478,9 +516,7 @@ where
 
     // ---- contact-wave state (Section 3.3) ----
     let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
-    let vna_used = S::select(on_left,
-        vv_iso[0].dot(nhat),
-        vv_iso[1].dot(nhat));
+    let vna_used = S::select(on_left, vv_iso[0].dot(nhat), vv_iso[1].dot(nhat));
     let inv_la_vnc = one / (la - vnc + eps);
     let dc = ua.den * (la - vna_used) * inv_la_vnc;
     let man = ua.mom.dot(nhat);
@@ -488,13 +524,17 @@ where
     let ec = (ec - man + p_final * vnc - vdbc * bn) * inv_la_vnc;
     let mc = vc.scale(ec + p_final) - bc.scale(vdbc);
     let ut = MhdCons {
-        hydro: Cons { den: dc, mom: mc, nrg: ec - dc },
+        hydro: Cons {
+            den: dc,
+            mom: mc,
+            nrg: ec - dc,
+        },
         mag: bc,
     };
 
-    let flux_fast    = fa - ua * vface;
+    let flux_fast = fa - ua * vface;
     let flux_contact = fa + (ut - ua) * la - ut * vface;
-    let flux_hlld    = MhdCons::select(at_contact, flux_contact, flux_fast);
+    let flux_hlld = MhdCons::select(at_contact, flux_contact, flux_fast);
 
     // wave-bracket select chain.
     let flux_supersonic_l = f_l - u_l * vface;
@@ -515,10 +555,10 @@ pub struct HlldStates<S: Scalar, const D: usize> {
     pub alf: [S; 2],              // rotational/Alfvén speeds [lambda*^L, lambda*^R] (MUB09)
     pub lstar: S,                 // contact speed lambda* = vc . n
     pub bstar: [Tensor<S, D>; 2], // per-side single-star B (lab-frame): B*^{L}, B*^{R}
-    pub bc: Tensor<S, D>,         // CONTACT transverse field B_c (MUB09 Eq. 45) — B_t^{ss}, the EMF chi-jump target
-    pub vc: Tensor<S, D>,         // CONTACT velocity v_c (MUB09 Eq. 47); v_c.n == lstar
-    pub bn: S,                    // the (single, div-free) normal field
-    pub success: S,               // 1.0 = HLLD converged + physical; 0.0 = HLLE fallback (garbage)
+    pub bc: Tensor<S, D>, // CONTACT transverse field B_c (MUB09 Eq. 45) — B_t^{ss}, the EMF chi-jump target
+    pub vc: Tensor<S, D>, // CONTACT velocity v_c (MUB09 Eq. 47); v_c.n == lstar
+    pub bn: S,            // the (single, div-free) normal field
+    pub success: S,       // 1.0 = HLLD converged + physical; 0.0 = HLLE fallback (garbage)
 }
 
 /// extract the converged HLLD fan for the edge-EMF coefficients WITHOUT building the flux. shares
@@ -559,7 +599,8 @@ where
     let r_pair = [&r_l, &r_r];
     let lam = [a_l, a_r];
 
-    let p_total = |prim: &MhdPrim<S, D>| -> S { prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) };
+    let p_total =
+        |prim: &MhdPrim<S, D>| -> S { prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) };
     let p_hll_raw = (p_total(prim_l) + p_total(prim_r)) * half;
     let p_hll = S::select(p_hll_raw.cmp_le(zero), p_floor_val, p_hll_raw);
     let lowb_thresh = S::from_f64(LOW_B_PRESSURE_RATIO);
@@ -603,7 +644,9 @@ where
         + std::ops::BitOr<Output = M>
         + std::ops::Not<Output = M>,
 {
-    fn select_mask(c: Self, a: Self, b: Self) -> Self { (c & a) | (!c & b) }
+    fn select_mask(c: Self, a: Self, b: Self) -> Self {
+        (c & a) | (!c & b)
+    }
 }
 
 /// the Newtonian (non-relativistic) ideal-MHD HLLD five-wave solver
@@ -637,7 +680,10 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
     let bn_sq = bn * bn;
     let with_bn = |p: &MhdPrim<S, D>| -> MhdPrim<S, D> {
-        MhdPrim { hydro: p.hydro, mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)) }
+        MhdPrim {
+            hydro: p.hydro,
+            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+        }
     };
     let pl = with_bn(prim_l);
     let pr = with_bn(prim_r);
@@ -676,9 +722,14 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
 
     // per-side single-star (*) state (eqs 43-48). the Alfven-resonant denominator
     // selects to the single-state limit (transverse fields unchanged).
-    let star = |u_k: &MhdCons<S, D>, f_k: &MhdCons<S, D>, prim_k: &MhdPrim<S, D>,
-                s_k: S, un_k: S, rho_k: S, pt_k: S|
-        -> (MhdCons<S, D>, MhdCons<S, D>, Tensor<S, D>, Tensor<S, D>, S) {
+    let star = |u_k: &MhdCons<S, D>,
+                f_k: &MhdCons<S, D>,
+                prim_k: &MhdPrim<S, D>,
+                s_k: S,
+                un_k: S,
+                rho_k: S,
+                pt_k: S|
+     -> (MhdCons<S, D>, MhdCons<S, D>, Tensor<S, D>, Tensor<S, D>, S) {
         let smk = s_k - s_m;
         let smk_s = S::select(smk.abs().cmp_lt(eps), eps, smk);
         let rho_star = rho_k * (s_k - un_k) / smk_s;
@@ -690,19 +741,33 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
         // they blow up. (an absolute 1e-30 guard never fires — the diagnostic bug.)
         let term = rho_k * (s_k - un_k) * smk;
         let den = term - bn_sq;
-        let small = den.abs().cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (term.abs() + bn_sq) + eps);
+        let small = den
+            .abs()
+            .cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (term.abs() + bn_sq) + eps);
         let den_s = S::select(small, one, den);
         let v_tang = tang(&prim_k.vel, un_k);
         let b_tang = tang(&prim_k.mag, bn);
         let fac_v = S::select(small, zero, bn * (s_m - un_k) / den_s);
-        let fac_b = S::select(small, one, (rho_k * (s_k - un_k) * (s_k - un_k) - bn_sq) / den_s);
+        let fac_b = S::select(
+            small,
+            one,
+            (rho_k * (s_k - un_k) * (s_k - un_k) - bn_sq) / den_s,
+        );
         let v_star = nhat.scale(s_m) + (v_tang - b_tang.scale(fac_v));
         let b_star = nhat.scale(bn) + b_tang.scale(fac_b);
         let e_k = u_k.nrg; // newtonian total energy (no D split)
         let vdb_k = prim_k.vel.dot(&prim_k.mag);
         let vdb_s = v_star.dot(&b_star);
-        let e_star = ((s_k - un_k) * e_k - pt_k * un_k + pt_star * s_m + bn * (vdb_k - vdb_s)) / smk_s;
-        let u_star = MhdCons { hydro: Cons { den: rho_star, mom: v_star.scale(rho_star), nrg: e_star }, mag: b_star };
+        let e_star =
+            ((s_k - un_k) * e_k - pt_k * un_k + pt_star * s_m + bn * (vdb_k - vdb_s)) / smk_s;
+        let u_star = MhdCons {
+            hydro: Cons {
+                den: rho_star,
+                mom: v_star.scale(rho_star),
+                nrg: e_star,
+            },
+            mag: b_star,
+        };
         let f_star = *f_k + (u_star - *u_k) * s_k;
         (u_star, f_star, v_star, b_star, rho_star)
     };
@@ -723,26 +788,55 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let vsr_t = tang(&vs_r, s_m);
     let bsl_t = tang(&bs_l, bn);
     let bsr_t = tang(&bs_r, bn);
-    let vss_t = (vsl_t.scale(sqrt_rl) + vsr_t.scale(sqrt_rr) + (bsr_t - bsl_t).scale(sgn)).scale(inv_sden);
-    let bss_t = (bsr_t.scale(sqrt_rl) + bsl_t.scale(sqrt_rr) + (vsr_t - vsl_t).scale(sgn * sqrt_rl * sqrt_rr)).scale(inv_sden);
+    let vss_t =
+        (vsl_t.scale(sqrt_rl) + vsr_t.scale(sqrt_rr) + (bsr_t - bsl_t).scale(sgn)).scale(inv_sden);
+    let bss_t = (bsr_t.scale(sqrt_rl)
+        + bsl_t.scale(sqrt_rr)
+        + (vsr_t - vsl_t).scale(sgn * sqrt_rl * sqrt_rr))
+    .scale(inv_sden);
     let v_ss = nhat.scale(s_m) + vss_t;
     let b_ss = nhat.scale(bn) + bss_t;
     let vdb_ss = v_ss.dot(&b_ss);
     let e_ss_l = us_l.nrg - sqrt_rl * (vs_l.dot(&bs_l) - vdb_ss) * sgn;
     let e_ss_r = us_r.nrg + sqrt_rr * (vs_r.dot(&bs_r) - vdb_ss) * sgn;
-    let uss_l = MhdCons { hydro: Cons { den: rs_l, mom: v_ss.scale(rs_l), nrg: e_ss_l }, mag: b_ss };
-    let uss_r = MhdCons { hydro: Cons { den: rs_r, mom: v_ss.scale(rs_r), nrg: e_ss_r }, mag: b_ss };
+    let uss_l = MhdCons {
+        hydro: Cons {
+            den: rs_l,
+            mom: v_ss.scale(rs_l),
+            nrg: e_ss_l,
+        },
+        mag: b_ss,
+    };
+    let uss_r = MhdCons {
+        hydro: Cons {
+            den: rs_r,
+            mom: v_ss.scale(rs_r),
+            nrg: e_ss_r,
+        },
+        mag: b_ss,
+    };
     let fss_l = fs_l + (uss_l - us_l) * sa_l;
     let fss_r = fs_r + (uss_r - us_r) * sa_r;
 
     // ALE: each region's interface flux is F_region - vface * U_region.
     let reg = |f: MhdCons<S, D>, u: MhdCons<S, D>| -> MhdCons<S, D> { f - u * vface };
-    let pick = MhdCons::select(vface.cmp_lt(s_l), reg(f_l, u_l),
-               MhdCons::select(vface.cmp_lt(sa_l), reg(fs_l, us_l),
-               MhdCons::select(vface.cmp_lt(s_m), reg(fss_l, uss_l),
-               MhdCons::select(vface.cmp_lt(sa_r), reg(fss_r, uss_r),
-               MhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r),
-               reg(f_r, u_r))))));
+    let pick = MhdCons::select(
+        vface.cmp_lt(s_l),
+        reg(f_l, u_l),
+        MhdCons::select(
+            vface.cmp_lt(sa_l),
+            reg(fs_l, us_l),
+            MhdCons::select(
+                vface.cmp_lt(s_m),
+                reg(fss_l, uss_l),
+                MhdCons::select(
+                    vface.cmp_lt(sa_r),
+                    reg(fss_r, uss_r),
+                    MhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r), reg(f_r, u_r)),
+                ),
+            ),
+        ),
+    );
 
     // physicality: any non-positive star density / pressure routes to HLLE.
     let ok = rs_l.cmp_gt(zero) & rs_r.cmp_gt(zero) & pt_star.cmp_gt(zero);
@@ -773,7 +867,10 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     // single continuous normal field (div B = 0), identical to `hlld_newtonian`.
     let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
     let with_bn = |p: &MhdPrim<S, D>| -> MhdPrim<S, D> {
-        MhdPrim { hydro: p.hydro, mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)) }
+        MhdPrim {
+            hydro: p.hydro,
+            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+        }
     };
     let pl = with_bn(prim_l);
     let pr = with_bn(prim_r);
@@ -814,7 +911,11 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     let nul = (sa_l + s_l) / (sa_l.abs() + s_l.abs() + eps);
     let nur = (sa_r + s_r) / (sa_r.abs() + s_r.abs() + eps);
     let nustar_raw = (sa_r + sa_l) / (sa_r.abs() + sa_l.abs() + eps);
-    let nustar = S::select((sa_r - sa_l).abs().cmp_gt(eps_deg * (s_r - s_l).abs()), nustar_raw, zero);
+    let nustar = S::select(
+        (sa_r - sa_l).abs().cmp_gt(eps_deg * (s_r - s_l).abs()),
+        nustar_raw,
+        zero,
+    );
     let dl = half * (nul - nustar) * chitl + half * (sa_l.abs() - nustar * sa_l);
     let dr = half * (nur - nustar) * chitr + half * (sa_r.abs() - nustar * sa_r);
     (half * (one + nustar), dl, dr)
@@ -846,7 +947,10 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
     let bn_abs = bn.abs();
     let with_bn = |p: &IsoMhdPrim<S, D>| -> IsoMhdPrim<S, D> {
-        IsoMhdPrim { hydro: p.hydro, mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)) }
+        IsoMhdPrim {
+            hydro: p.hydro,
+            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+        }
     };
     let pl = with_bn(prim_l);
     let pr = with_bn(prim_r);
@@ -883,7 +987,11 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let nul = (sa_l + s_l) / (sa_l.abs() + s_l.abs() + eps);
     let nur = (sa_r + s_r) / (sa_r.abs() + s_r.abs() + eps);
     let nustar_raw = (sa_r + sa_l) / (sa_r.abs() + sa_l.abs() + eps);
-    let nustar = S::select((sa_r - sa_l).abs().cmp_gt(eps_deg * (s_r - s_l).abs()), nustar_raw, zero);
+    let nustar = S::select(
+        (sa_r - sa_l).abs().cmp_gt(eps_deg * (s_r - s_l).abs()),
+        nustar_raw,
+        zero,
+    );
     let dl = half * (nul - nustar) * chitl + half * (sa_l.abs() - nustar * sa_l);
     let dr = half * (nur - nustar) * chitr + half * (sa_r.abs() - nustar * sa_r);
     (half * (one + nustar), dl, dr)
@@ -923,7 +1031,10 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let bn_sq = bn * bn;
     let bn_abs = bn_sq.safe_sqrt();
     let with_bn = |p: &IsoMhdPrim<S, D>| -> IsoMhdPrim<S, D> {
-        IsoMhdPrim { hydro: p.hydro, mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)) }
+        IsoMhdPrim {
+            hydro: p.hydro,
+            mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)),
+        }
     };
     let pl = with_bn(prim_l);
     let pr = with_bn(prim_r);
@@ -974,15 +1085,22 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     // against the magnitude of the two cancelling terms `(S_k-u*)^2` and `cax^2` — the
     // product-form twin of the newtonian guard (an absolute 1e-30 guard never fires; the
     // diagnostic bug). same `ALFVEN_DEGENERACY_TOL` so both MHD HLLD solvers agree.
-    let star = |rho_k: S, un_k: S, s_k: S, vt_k: &Tensor<S, D>, bt_k: &Tensor<S, D>|
-        -> (Tensor<S, D>, Tensor<S, D>) {
+    let star = |rho_k: S,
+                un_k: S,
+                s_k: S,
+                vt_k: &Tensor<S, D>,
+                bt_k: &Tensor<S, D>|
+     -> (Tensor<S, D>, Tensor<S, D>) {
         let su = s_k - u_star;
         let den = (s_k - sa_l) * (s_k - sa_r);
-        let small = den.abs().cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (su * su + cax * cax) + eps);
+        let small = den
+            .abs()
+            .cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (su * su + cax * cax) + eps);
         let den_s = S::select(small, one, den);
         let fac_v = S::select(small, zero, bn * (u_star - un_k) / den_s);
         let fac_b = S::select(
-            small, one,
+            small,
+            one,
             (rho_k * (s_k - un_k) * (s_k - un_k) - bn_sq) / (rho_s_safe * den_s),
         );
         // mv = rho* v_k* (eqs 30-31);  b* = B_k* (eqs 32-33).
@@ -991,13 +1109,29 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
         (mv, bs)
     };
 
-    let (mv_l, bs_l) = star(rho_l, un_l, s_l, &tang(&prim_l.vel, un_l), &tang(&prim_l.mag, bn));
-    let (mv_r, bs_r) = star(rho_r, un_r, s_r, &tang(&prim_r.vel, un_r), &tang(&prim_r.mag, bn));
+    let (mv_l, bs_l) = star(
+        rho_l,
+        un_l,
+        s_l,
+        &tang(&prim_l.vel, un_l),
+        &tang(&prim_l.mag, bn),
+    );
+    let (mv_r, bs_r) = star(
+        rho_r,
+        un_r,
+        s_r,
+        &tang(&prim_r.vel, un_r),
+        &tang(&prim_r.mag, bn),
+    );
 
     // conserved star state: den=rho*, normal mom = m_x^hll, transverse mom = mv, B = n*bn + b*.
     let mk_cons = |mv: Tensor<S, D>, bs: Tensor<S, D>| -> IsoMhdCons<S, D> {
         IsoMhdCons {
-            hydro: ConsG { den: rho_s, mom: nhat.scale(mx_hll) + mv, nrg: Zero::default() },
+            hydro: ConsG {
+                den: rho_s,
+                mom: nhat.scale(mx_hll) + mv,
+                nrg: Zero::default(),
+            },
             mag: nhat.scale(bn) + bs,
         }
     };
@@ -1019,11 +1153,19 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
 
     // 5-region sample (eq 38), ALE: F_region - vface * U_region.
     let reg = |f: IsoMhdCons<S, D>, u: IsoMhdCons<S, D>| -> IsoMhdCons<S, D> { f - u * vface };
-    let pick = IsoMhdCons::select(vface.cmp_lt(s_l), reg(f_l, u_l),
-               IsoMhdCons::select(vface.cmp_lt(sa_l), reg(fs_l, us_l),
-               IsoMhdCons::select(vface.cmp_lt(sa_r), reg(fs_c, us_c),
-               IsoMhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r),
-               reg(f_r, u_r)))));
+    let pick = IsoMhdCons::select(
+        vface.cmp_lt(s_l),
+        reg(f_l, u_l),
+        IsoMhdCons::select(
+            vface.cmp_lt(sa_l),
+            reg(fs_l, us_l),
+            IsoMhdCons::select(
+                vface.cmp_lt(sa_r),
+                reg(fs_c, us_c),
+                IsoMhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r), reg(f_r, u_r)),
+            ),
+        ),
+    );
 
     // positivity fallback: rho* (the HLL density) must be positive.
     IsoMhdCons::select(rho_s.cmp_gt(zero), pick, hlle_flux)
@@ -1032,10 +1174,10 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eos::{IdealGas, Isothermal};
     use crate::rmhd::{Rmhd, RmhdGr};
     use crate::spatial_metric::{Gamma, GammaInv};
     use crate::state::{Prim, PrimG};
-    use crate::eos::{IdealGas, Isothermal};
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-10 * a.abs().max(b.abs()).max(1.0)
@@ -1046,17 +1188,45 @@ mod tests {
         let eos = IdealGas { gamma: 2.0 };
         let regime = Rmhd;
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.3, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.3, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
         let nhat = Tensor::unit(0);
-        let flux = hlld_rmhd(&regime, &eos, &prim, &prim, &nhat, 0.0, &SpatialMetric::flat());
+        let flux = hlld_rmhd(
+            &regime,
+            &eos,
+            &prim,
+            &prim,
+            &nhat,
+            0.0,
+            &SpatialMetric::flat(),
+        );
         let exact = regime.to_flux(&prim, &nhat, &eos);
-        assert!(approx(flux.den, exact.den), "den: {} vs {}", flux.den, exact.den);
+        assert!(
+            approx(flux.den, exact.den),
+            "den: {} vs {}",
+            flux.den,
+            exact.den
+        );
         for dd in 0..3 {
-            assert!(approx(flux.mom[dd], exact.mom[dd]), "mom[{}]: {} vs {}", dd, flux.mom[dd], exact.mom[dd]);
+            assert!(
+                approx(flux.mom[dd], exact.mom[dd]),
+                "mom[{}]: {} vs {}",
+                dd,
+                flux.mom[dd],
+                exact.mom[dd]
+            );
         }
-        assert!(approx(flux.nrg, exact.nrg), "nrg: {} vs {}", flux.nrg, exact.nrg);
+        assert!(
+            approx(flux.nrg, exact.nrg),
+            "nrg: {} vs {}",
+            flux.nrg,
+            exact.nrg
+        );
     }
 
     #[test]
@@ -1064,16 +1234,36 @@ mod tests {
         let eos = IdealGas { gamma: 2.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.125, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 0.1 },
+            hydro: Prim {
+                rho: 0.125,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 0.1,
+            },
             mag: Tensor::new([0.5, -1.0, 0.0]),
         };
         let nhat = Tensor::unit(0);
-        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, &SpatialMetric::flat());
-        assert!(flux.den > 0.0, "density flux should be positive: {}", flux.den);
+        let flux = hlld_rmhd(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            0.0,
+            &SpatialMetric::flat(),
+        );
+        assert!(
+            flux.den > 0.0,
+            "density flux should be positive: {}",
+            flux.den
+        );
     }
 
     #[test]
@@ -1085,26 +1275,64 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.2, 0.1, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.8, 0.4]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            hydro: Prim {
+                rho: 0.3,
+                vel: Tensor::new([-0.1, -0.2, 0.05]),
+                pre: 0.4,
+            },
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
+        let s = hlld_rmhd_states(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            &SpatialMetric::flat(),
+        );
         println!(
             "GATE: success={} lam={:?} alf={:?} lstar={} bn={}",
             s.success, s.lam, s.alf, s.lstar, s.bn
         );
         println!("GATE: B*_L={:?} B*_R={:?}", s.bstar[0], s.bstar[1]);
-        assert!(s.success > 0.5, "HLLD must converge on this state (else the gate is meaningless)");
+        assert!(
+            s.success > 0.5,
+            "HLLD must converge on this state (else the gate is meaningless)"
+        );
         let t = 1e-9;
-        assert!(s.lam[0] <= s.alf[0] + t, "lam_L <= alf_L: {} vs {}", s.lam[0], s.alf[0]);
-        assert!(s.alf[0] <= s.lstar + t, "alf_L <= lstar: {} vs {}", s.alf[0], s.lstar);
-        assert!(s.lstar <= s.alf[1] + t, "lstar <= alf_R: {} vs {}", s.lstar, s.alf[1]);
-        assert!(s.alf[1] <= s.lam[1] + t, "alf_R <= lam_R: {} vs {}", s.alf[1], s.lam[1]);
+        assert!(
+            s.lam[0] <= s.alf[0] + t,
+            "lam_L <= alf_L: {} vs {}",
+            s.lam[0],
+            s.alf[0]
+        );
+        assert!(
+            s.alf[0] <= s.lstar + t,
+            "alf_L <= lstar: {} vs {}",
+            s.alf[0],
+            s.lstar
+        );
+        assert!(
+            s.lstar <= s.alf[1] + t,
+            "lstar <= alf_R: {} vs {}",
+            s.lstar,
+            s.alf[1]
+        );
+        assert!(
+            s.alf[1] <= s.lam[1] + t,
+            "alf_R <= lam_R: {} vs {}",
+            s.alf[1],
+            s.lam[1]
+        );
         // coplanarity: B*^s_t parallel to B^s_t. chi^s is extracted by PROJECTION (robust to the
         // tiny non-parallel residual the HLLD star state carries — a componentwise ratio amplifies
         // it because chi itself is small). the GATE is that the NON-PARALLEL residual is negligible.
@@ -1122,7 +1350,10 @@ mod tests {
             // with the amplification |chi| (0.09% at chi=-0.05, 0.74% at chi=0.48 here). projection
             // is the principled scalar extraction; the residual is the HLLD approximation error and
             // is negligible vs the HLL/HLLD diffusion gap. MONITOR it for the high-sigma wind.
-            assert!(res_rel < 2e-2, "B*^{side}_t coplanarity residual too large: {res_rel:.2e}");
+            assert!(
+                res_rel < 2e-2,
+                "B*^{side}_t coplanarity residual too large: {res_rel:.2e}"
+            );
         }
     }
 
@@ -1138,18 +1369,48 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.2, 0.1, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.8, 0.4]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            hydro: Prim {
+                rho: 0.3,
+                vel: Tensor::new([-0.1, -0.2, 0.05]),
+                pre: 0.4,
+            },
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
-        assert!(s.success > 0.5, "HLLD must converge for the reduction gate to be meaningful");
-        assert!(s.alf[0] < 0.0 && s.alf[1] > 0.0, "need the double-star region to straddle the interface: alf={:?}", s.alf);
-        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, &SpatialMetric::flat());
+        let s = hlld_rmhd_states(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            &SpatialMetric::flat(),
+        );
+        assert!(
+            s.success > 0.5,
+            "HLLD must converge for the reduction gate to be meaningful"
+        );
+        assert!(
+            s.alf[0] < 0.0 && s.alf[1] > 0.0,
+            "need the double-star region to straddle the interface: alf={:?}",
+            s.alf
+        );
+        let flux = hlld_rmhd(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            0.0,
+            &SpatialMetric::flat(),
+        );
         let f_by = flux.mag[1]; // F_x[B_y], the induction flux == -E_z
         let identity = s.lstar * s.bc[1] - s.vc[1] * s.bn; // lambda* B_c^y - v_c^y B^x
         println!(
@@ -1173,15 +1434,30 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.2, 0.1, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.8, 0.4]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            hydro: Prim {
+                rho: 0.3,
+                vel: Tensor::new([-0.1, -0.2, 0.05]),
+                pre: 0.4,
+            },
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
+        let s = hlld_rmhd_states(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            &SpatialMetric::flat(),
+        );
         assert!(s.success > 0.5, "HLLD must converge");
         let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
         // speed-only weights (classical kernel forms): v^s, v*, a^L=(1+v*)/2.
@@ -1201,9 +1477,20 @@ mod tests {
                 - alf[0].abs() * (bc_y - by_ss_l)
                 - alf[1].abs() * (by_ss_r - bc_y)
                 - lam[1].abs() * (by[1] - by_ss_r));
-        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, &SpatialMetric::flat());
+        let flux = hlld_rmhd(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            0.0,
+            &SpatialMetric::flat(),
+        );
         let f_ref = flux.mag[1];
-        println!("TELESCOPE: F_hat={f_hat:.10} vs flux.mag[1]={f_ref:.10}  diff={:.2e}", (f_hat - f_ref).abs());
+        println!(
+            "TELESCOPE: F_hat={f_hat:.10} vs flux.mag[1]={f_ref:.10}  diff={:.2e}",
+            (f_hat - f_ref).abs()
+        );
         assert!(
             (f_hat - f_ref).abs() < 1e-8,
             "UCT master form does NOT telescope to the HLLD flux: {f_hat} vs {f_ref} (diff {})",
@@ -1218,7 +1505,11 @@ mod tests {
     fn mild_curved_metric() -> SpatialMetric<f64, 3> {
         SpatialMetric::new(
             Gamma::new(symbi_algebra::Matrix::diag(Tensor::new([1.3, 1.15, 1.15]))),
-            GammaInv::new(symbi_algebra::Matrix::diag(Tensor::new([1.0 / 1.3, 1.0 / 1.15, 1.0 / 1.15]))),
+            GammaInv::new(symbi_algebra::Matrix::diag(Tensor::new([
+                1.0 / 1.3,
+                1.0 / 1.15,
+                1.0 / 1.15,
+            ]))),
         )
     }
 
@@ -1226,11 +1517,8 @@ mod tests {
     // couplings), exercising the FULL tetrad path in the orthonormal-frame HLLD (including the
     // off-diagonal couplings beyond the diagonal sqrt(g) scaling). the inverse is computed exactly from the closed-form 3x3 inv.
     fn mild_nondiag_metric() -> SpatialMetric<f64, 3> {
-        let gamma = symbi_algebra::Matrix::new([
-            [1.3, 0.2, 0.05],
-            [0.2, 1.15, 0.1],
-            [0.05, 0.1, 1.15],
-        ]);
+        let gamma =
+            symbi_algebra::Matrix::new([[1.3, 0.2, 0.05], [0.2, 1.15, 0.1], [0.05, 0.1, 1.15]]);
         SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma.inv()))
     }
 
@@ -1244,20 +1532,34 @@ mod tests {
         // components, so the telescoping FORMULA is unchanged; only the star fields carry gamma.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_curved_metric();
-        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let gr = RmhdGr {
+            metric: m,
+            alpha: 0.9,
+        };
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.15, 0.05, -0.03]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.15, 0.05, -0.03]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.4, 0.6, 0.3]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.08, 0.04]), pre: 0.4 },
+            hydro: Prim {
+                rho: 0.3,
+                vel: Tensor::new([-0.1, -0.08, 0.04]),
+                pre: 0.4,
+            },
             mag: Tensor::new([0.4, -0.5, 0.25]),
         };
         let dir = 0usize;
         let _ = &gr;
         assert!(m.norm_sq_contra(&prim_l.vel) < 1.0 && m.norm_sq_contra(&prim_r.vel) < 1.0);
         let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, dir, &m);
-        assert!(s.success > 0.5, "GR HLLD must converge on the curved metric");
+        assert!(
+            s.success > 0.5,
+            "GR HLLD must converge on the curved metric"
+        );
         let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
         let by = [prim_l.mag[1], prim_r.mag[1]];
         let vx = [prim_l.vel[0], prim_r.vel[0]];
@@ -1288,13 +1590,24 @@ mod tests {
         // theta-face flux has a directional metric bug.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_curved_metric();
-        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let gr = RmhdGr {
+            metric: m,
+            alpha: 0.9,
+        };
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.05, 0.15, -0.03]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.05, 0.15, -0.03]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.6, 0.4, 0.3]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.08, -0.1, 0.04]), pre: 0.4 },
+            hydro: Prim {
+                rho: 0.3,
+                vel: Tensor::new([-0.08, -0.1, 0.04]),
+                pre: 0.4,
+            },
             mag: Tensor::new([-0.5, 0.4, 0.25]),
         };
         let dir = 1usize;
@@ -1326,7 +1639,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn hlld_rmhd_gr_ortho_reduces_to_flat_at_identity() {
         // the GR orthonormal wrapper at the identity metric (sqrt(g_i) = 1) must be BIT-IDENTICAL
@@ -1335,26 +1647,45 @@ mod tests {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let flat = SpatialMetric::<f64, 3>::flat();
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.2, vel: Tensor::new([0.1, -0.04, 0.02]), pre: 0.8 },
+            hydro: Prim {
+                rho: 1.2,
+                vel: Tensor::new([0.1, -0.04, 0.02]),
+                pre: 0.8,
+            },
             mag: Tensor::new([0.3, 0.5, -0.2]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.5, vel: Tensor::new([-0.05, 0.06, -0.03]), pre: 0.5 },
+            hydro: Prim {
+                rho: 0.5,
+                vel: Tensor::new([-0.05, 0.06, -0.03]),
+                pre: 0.5,
+            },
             mag: Tensor::new([0.3, -0.4, 0.15]),
         };
         for d in 0..3usize {
             let nhat = Tensor::<f64, 3>::unit(d);
             let ortho = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, d, 0.0, &flat);
             let flat_flux = hlld_rmhd(&Rmhd, &eos, &prim_l, &prim_r, &nhat, 0.0, &flat);
-            assert_eq!(ortho.den, flat_flux.den, "d{d} den not bit-identical at flat");
-            assert_eq!(ortho.nrg, flat_flux.nrg, "d{d} nrg not bit-identical at flat");
+            assert_eq!(
+                ortho.den, flat_flux.den,
+                "d{d} den not bit-identical at flat"
+            );
+            assert_eq!(
+                ortho.nrg, flat_flux.nrg,
+                "d{d} nrg not bit-identical at flat"
+            );
             for k in 0..3 {
-                assert_eq!(ortho.mom[k], flat_flux.mom[k], "d{d} mom{k} not bit-identical at flat");
-                assert_eq!(ortho.mag[k], flat_flux.mag[k], "d{d} mag{k} not bit-identical at flat");
+                assert_eq!(
+                    ortho.mom[k], flat_flux.mom[k],
+                    "d{d} mom{k} not bit-identical at flat"
+                );
+                assert_eq!(
+                    ortho.mag[k], flat_flux.mag[k],
+                    "d{d} mag{k} not bit-identical at flat"
+                );
             }
         }
     }
-
 
     #[test]
     fn hlld_rmhd_gr_uniform_state_equals_flux() {
@@ -1366,21 +1697,48 @@ mod tests {
         // covariant-variance sqrt(gamma) factors in the transverse star fields).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_curved_metric();
-        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let gr = RmhdGr {
+            metric: m,
+            alpha: 0.9,
+        };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.05, -0.03]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.2, 0.05, -0.03]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.6, 0.3]),
         };
         for d in 0..2 {
             let nhat = Tensor::<f64, 3>::unit(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
             let exact = gr.to_flux(&prim, &nhat, &eos);
-            assert!((flux.den - exact.den).abs() < 1e-12, "d{d} den: {} vs {}", flux.den, exact.den);
+            assert!(
+                (flux.den - exact.den).abs() < 1e-12,
+                "d{d} den: {} vs {}",
+                flux.den,
+                exact.den
+            );
             for k in 0..3 {
-                assert!((flux.mom[k] - exact.mom[k]).abs() < 1e-12, "d{d} mom{k}: {} vs {}", flux.mom[k], exact.mom[k]);
-                assert!((flux.mag[k] - exact.mag[k]).abs() < 1e-12, "d{d} mag{k}: {} vs {}", flux.mag[k], exact.mag[k]);
+                assert!(
+                    (flux.mom[k] - exact.mom[k]).abs() < 1e-12,
+                    "d{d} mom{k}: {} vs {}",
+                    flux.mom[k],
+                    exact.mom[k]
+                );
+                assert!(
+                    (flux.mag[k] - exact.mag[k]).abs() < 1e-12,
+                    "d{d} mag{k}: {} vs {}",
+                    flux.mag[k],
+                    exact.mag[k]
+                );
             }
-            assert!((flux.nrg - exact.nrg).abs() < 1e-12, "d{d} nrg: {} vs {}", flux.nrg, exact.nrg);
+            assert!(
+                (flux.nrg - exact.nrg).abs() < 1e-12,
+                "d{d} nrg: {} vs {}",
+                flux.nrg,
+                exact.nrg
+            );
         }
     }
 
@@ -1391,21 +1749,48 @@ mod tests {
         // (off-diagonal gamma), beyond the diagonal sqrt(g) scaling. all three coordinate normals.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_nondiag_metric();
-        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let gr = RmhdGr {
+            metric: m,
+            alpha: 0.9,
+        };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.18, 0.06, -0.04]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.18, 0.06, -0.04]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.6, 0.3]),
         };
         for d in 0..3 {
             let nhat = Tensor::<f64, 3>::unit(d);
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
             let exact = gr.to_flux(&prim, &nhat, &eos);
-            assert!((flux.den - exact.den).abs() < 1e-11, "d{d} den: {} vs {}", flux.den, exact.den);
+            assert!(
+                (flux.den - exact.den).abs() < 1e-11,
+                "d{d} den: {} vs {}",
+                flux.den,
+                exact.den
+            );
             for k in 0..3 {
-                assert!((flux.mom[k] - exact.mom[k]).abs() < 1e-11, "d{d} mom{k}: {} vs {}", flux.mom[k], exact.mom[k]);
-                assert!((flux.mag[k] - exact.mag[k]).abs() < 1e-11, "d{d} mag{k}: {} vs {}", flux.mag[k], exact.mag[k]);
+                assert!(
+                    (flux.mom[k] - exact.mom[k]).abs() < 1e-11,
+                    "d{d} mom{k}: {} vs {}",
+                    flux.mom[k],
+                    exact.mom[k]
+                );
+                assert!(
+                    (flux.mag[k] - exact.mag[k]).abs() < 1e-11,
+                    "d{d} mag{k}: {} vs {}",
+                    flux.mag[k],
+                    exact.mag[k]
+                );
             }
-            assert!((flux.nrg - exact.nrg).abs() < 1e-11, "d{d} nrg: {} vs {}", flux.nrg, exact.nrg);
+            assert!(
+                (flux.nrg - exact.nrg).abs() < 1e-11,
+                "d{d} nrg: {} vs {}",
+                flux.nrg,
+                exact.nrg
+            );
         }
     }
 
@@ -1417,9 +1802,16 @@ mod tests {
         // alpha). validates the shifted HLLD; tested on the non-diagonal metric, all three normals.
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let m = mild_nondiag_metric();
-        let gr = RmhdGr { metric: m, alpha: 0.8 };
+        let gr = RmhdGr {
+            metric: m,
+            alpha: 0.8,
+        };
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.15, 0.05, -0.03]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.15, 0.05, -0.03]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 0.6, 0.3]),
         };
         let vface = 0.2;
@@ -1428,12 +1820,24 @@ mod tests {
             let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, vface, &m);
             let f = gr.to_flux(&prim, &nhat, &eos);
             let u = gr.to_conserved(&eos, &prim);
-            assert!((flux.den - (f.den - vface * u.den)).abs() < 1e-11, "d{d} den");
+            assert!(
+                (flux.den - (f.den - vface * u.den)).abs() < 1e-11,
+                "d{d} den"
+            );
             for k in 0..3 {
-                assert!((flux.mom[k] - (f.mom[k] - vface * u.mom[k])).abs() < 1e-11, "d{d} mom{k}");
-                assert!((flux.mag[k] - (f.mag[k] - vface * u.mag[k])).abs() < 1e-11, "d{d} mag{k}");
+                assert!(
+                    (flux.mom[k] - (f.mom[k] - vface * u.mom[k])).abs() < 1e-11,
+                    "d{d} mom{k}"
+                );
+                assert!(
+                    (flux.mag[k] - (f.mag[k] - vface * u.mag[k])).abs() < 1e-11,
+                    "d{d} mag{k}"
+                );
             }
-            assert!((flux.nrg - (f.nrg - vface * u.nrg)).abs() < 1e-11, "d{d} nrg");
+            assert!(
+                (flux.nrg - (f.nrg - vface * u.nrg)).abs() < 1e-11,
+                "d{d} nrg"
+            );
         }
     }
 
@@ -1449,16 +1853,27 @@ mod tests {
         let m = mild_nondiag_metric();
         let dir = 0usize;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.15, 0.05, -0.03]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.15, 0.05, -0.03]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.4, 0.6, 0.3]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.08, 0.04]), pre: 0.4 },
+            hydro: Prim {
+                rho: 0.3,
+                vel: Tensor::new([-0.1, -0.08, 0.04]),
+                pre: 0.4,
+            },
             mag: Tensor::new([0.4, -0.5, 0.25]),
         };
         assert!(m.norm_sq_contra(&prim_l.vel) < 1.0 && m.norm_sq_contra(&prim_r.vel) < 1.0);
         let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, dir, &m);
-        assert!(s.success > 0.5, "tetrad HLLD must converge on the non-diagonal metric");
+        assert!(
+            s.success > 0.5,
+            "tetrad HLLD must converge on the non-diagonal metric"
+        );
         let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
         let by = [prim_l.mag[1], prim_r.mag[1]];
         let vx = [prim_l.vel[0], prim_r.vel[0]];
@@ -1474,7 +1889,8 @@ mod tests {
         assert!(
             (f_hat - flux.mag[1]).abs() < 1e-8,
             "tetrad wave-sum does NOT telescope: {f_hat} vs {} (diff {})",
-            flux.mag[1], (f_hat - flux.mag[1]).abs()
+            flux.mag[1],
+            (f_hat - flux.mag[1]).abs()
         );
     }
 
@@ -1484,13 +1900,24 @@ mod tests {
         // lam^L <= alf^L <= lstar <= alf^R <= lam^R (MUB09), and the normal field single-valued.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let m = mild_curved_metric();
-        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let gr = RmhdGr {
+            metric: m,
+            alpha: 0.9,
+        };
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.2, vel: Tensor::new([0.1, -0.04, 0.02]), pre: 0.8 },
+            hydro: Prim {
+                rho: 1.2,
+                vel: Tensor::new([0.1, -0.04, 0.02]),
+                pre: 0.8,
+            },
             mag: Tensor::new([0.3, 0.5, -0.2]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.5, vel: Tensor::new([-0.05, 0.06, -0.03]), pre: 0.5 },
+            hydro: Prim {
+                rho: 0.5,
+                vel: Tensor::new([-0.05, 0.06, -0.03]),
+                pre: 0.5,
+            },
             mag: Tensor::new([0.3, -0.4, 0.15]),
         };
         let dir = 0usize;
@@ -1511,36 +1938,87 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.2, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.1, 0.2, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.8, 0.4]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.5, vel: Tensor::new([-0.1, 0.1, 0.0]), pre: 0.5 },
+            hydro: Prim {
+                rho: 0.5,
+                vel: Tensor::new([-0.1, 0.1, 0.0]),
+                pre: 0.5,
+            },
             mag: Tensor::new([0.0, -0.5, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
-        println!("GATE Bx=0: success={} lam={:?} alf={:?} lstar={}", s.success, s.lam, s.alf, s.lstar);
-        assert!(s.lstar.is_finite() && s.alf[0].is_finite() && s.alf[1].is_finite(), "states finite at Bx=0");
+        let s = hlld_rmhd_states(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            &SpatialMetric::flat(),
+        );
+        println!(
+            "GATE Bx=0: success={} lam={:?} alf={:?} lstar={}",
+            s.success, s.lam, s.alf, s.lstar
+        );
+        assert!(
+            s.lstar.is_finite() && s.alf[0].is_finite() && s.alf[1].is_finite(),
+            "states finite at Bx=0"
+        );
         for k in 0..3 {
-            assert!(s.bstar[0][k].is_finite() && s.bstar[1][k].is_finite(), "B* finite at Bx=0");
+            assert!(
+                s.bstar[0][k].is_finite() && s.bstar[1][k].is_finite(),
+                "B* finite at Bx=0"
+            );
         }
     }
 
     // ---- Newtonian HLLD (Miyoshi-Kusano) ----
 
     fn nm_prim(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> MhdPrim<f64, 3> {
-        MhdPrim { hydro: Prim { rho, vel: Tensor::new(v), pre: p }, mag: Tensor::new(b) }
+        MhdPrim {
+            hydro: Prim {
+                rho,
+                vel: Tensor::new(v),
+                pre: p,
+            },
+            mag: Tensor::new(b),
+        }
     }
 
     fn assert_flux_eq(got: &MhdCons<f64, 3>, want: &MhdCons<f64, 3>, ctx: &str) {
-        assert!(approx(got.den, want.den), "{ctx} den: {} vs {}", got.den, want.den);
+        assert!(
+            approx(got.den, want.den),
+            "{ctx} den: {} vs {}",
+            got.den,
+            want.den
+        );
         for dd in 0..3 {
-            assert!(approx(got.mom[dd], want.mom[dd]), "{ctx} mom[{dd}]: {} vs {}", got.mom[dd], want.mom[dd]);
+            assert!(
+                approx(got.mom[dd], want.mom[dd]),
+                "{ctx} mom[{dd}]: {} vs {}",
+                got.mom[dd],
+                want.mom[dd]
+            );
         }
-        assert!(approx(got.nrg, want.nrg), "{ctx} nrg: {} vs {}", got.nrg, want.nrg);
+        assert!(
+            approx(got.nrg, want.nrg),
+            "{ctx} nrg: {} vs {}",
+            got.nrg,
+            want.nrg
+        );
         for dd in 0..3 {
-            assert!(approx(got.mag[dd], want.mag[dd]), "{ctx} mag[{dd}]: {} vs {}", got.mag[dd], want.mag[dd]);
+            assert!(
+                approx(got.mag[dd], want.mag[dd]),
+                "{ctx} mag[{dd}]: {} vs {}",
+                got.mag[dd],
+                want.mag[dd]
+            );
         }
     }
 
@@ -1550,9 +2028,9 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let nhat = Tensor::<f64, 3>::unit(0);
         let cases = [
-            nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.5, 1.0, 0.0]),     // static, oblique B
-            nm_prim(0.7, [0.3, -0.2, 0.1], 0.9, [0.4, 0.2, -0.6]),   // moving, full 3D B
-            nm_prim(1.2, [-0.4, 0.0, 0.3], 1.5, [0.0, 0.8, -0.3]),   // Bn = 0 (perpendicular)
+            nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.5, 1.0, 0.0]), // static, oblique B
+            nm_prim(0.7, [0.3, -0.2, 0.1], 0.9, [0.4, 0.2, -0.6]), // moving, full 3D B
+            nm_prim(1.2, [-0.4, 0.0, 0.3], 1.5, [0.0, 0.8, -0.3]), // Bn = 0 (perpendicular)
         ];
         for (ii, prim) in cases.iter().enumerate() {
             let flux = hlld_newtonian(&eos, prim, prim, &nhat, 0.0);
@@ -1605,28 +2083,57 @@ mod tests {
         let prim_l = nm_prim(1.0, [0.0, 0.0, 0.0], 1.0, [0.75, 1.0, 0.0]);
         let prim_r = nm_prim(0.125, [0.0, 0.0, 0.0], 0.1, [0.75, -1.0, 0.0]);
         let flux = hlld_newtonian(&eos, &prim_l, &prim_r, &nhat, 0.0);
-        assert!(flux.den.is_finite() && flux.nrg.is_finite(), "flux must be finite");
+        assert!(
+            flux.den.is_finite() && flux.nrg.is_finite(),
+            "flux must be finite"
+        );
         for dd in 0..3 {
-            assert!(flux.mom[dd].is_finite() && flux.mag[dd].is_finite(), "flux comp {dd} finite");
+            assert!(
+                flux.mom[dd].is_finite() && flux.mag[dd].is_finite(),
+                "flux comp {dd} finite"
+            );
         }
         // Bn is continuous across the fan -> the normal-B flux is 0 (induction F(Bn)=0).
-        assert!(flux.mag[0].abs() < 1e-12, "normal-B flux must vanish: {}", flux.mag[0]);
+        assert!(
+            flux.mag[0].abs() < 1e-12,
+            "normal-B flux must vanish: {}",
+            flux.mag[0]
+        );
     }
 
     // ---- isothermal HLLD (Mignone 2007) ----
 
     fn im_prim(rho: f64, v: [f64; 3], b: [f64; 3]) -> IsoMhdPrim<f64, 3> {
         IsoMhdPrim {
-            hydro: PrimG { rho, vel: Tensor::new(v), pre: Zero::default() },
+            hydro: PrimG {
+                rho,
+                vel: Tensor::new(v),
+                pre: Zero::default(),
+            },
             mag: Tensor::new(b),
         }
     }
 
     fn assert_iso_flux_eq(got: &IsoMhdCons<f64, 3>, want: &IsoMhdCons<f64, 3>, ctx: &str) {
-        assert!(approx(got.den, want.den), "{ctx} den: {} vs {}", got.den, want.den);
+        assert!(
+            approx(got.den, want.den),
+            "{ctx} den: {} vs {}",
+            got.den,
+            want.den
+        );
         for dd in 0..3 {
-            assert!(approx(got.mom[dd], want.mom[dd]), "{ctx} mom[{dd}]: {} vs {}", got.mom[dd], want.mom[dd]);
-            assert!(approx(got.mag[dd], want.mag[dd]), "{ctx} mag[{dd}]: {} vs {}", got.mag[dd], want.mag[dd]);
+            assert!(
+                approx(got.mom[dd], want.mom[dd]),
+                "{ctx} mom[{dd}]: {} vs {}",
+                got.mom[dd],
+                want.mom[dd]
+            );
+            assert!(
+                approx(got.mag[dd], want.mag[dd]),
+                "{ctx} mag[{dd}]: {} vs {}",
+                got.mag[dd],
+                want.mag[dd]
+            );
         }
     }
 
@@ -1637,9 +2144,9 @@ mod tests {
         let eos = Isothermal { cs: 0.7 };
         let nhat = Tensor::<f64, 3>::unit(0);
         let cases = [
-            im_prim(1.0, [0.0, 0.0, 0.0], [0.3, 1.0, 0.0]),     // static, weak normal B (no resonance)
-            im_prim(0.8, [0.2, -0.1, 0.15], [0.2, 0.4, -0.5]),  // moving, full 3D B
-            im_prim(1.2, [-0.3, 0.0, 0.2], [0.0, 0.8, -0.3]),   // Bn = 0 (perpendicular)
+            im_prim(1.0, [0.0, 0.0, 0.0], [0.3, 1.0, 0.0]), // static, weak normal B (no resonance)
+            im_prim(0.8, [0.2, -0.1, 0.15], [0.2, 0.4, -0.5]), // moving, full 3D B
+            im_prim(1.2, [-0.3, 0.0, 0.2], [0.0, 0.8, -0.3]), // Bn = 0 (perpendicular)
         ];
         for (ii, prim) in cases.iter().enumerate() {
             let flux = hlld_isothermal(&eos, prim, prim, &nhat, 0.0);
@@ -1657,12 +2164,20 @@ mod tests {
         let pl = im_prim(1.0, [5.0, 0.2, 0.0], [0.3, 0.5, 0.0]);
         let pr = im_prim(0.5, [5.0, -0.1, 0.2], [0.3, -0.4, 0.1]);
         let flux_r = hlld_isothermal(&eos, &pl, &pr, &nhat, 0.0);
-        assert_iso_flux_eq(&flux_r, &IsothermalMhd.to_flux(&pl, &nhat, &eos), "iso supersonic-right");
+        assert_iso_flux_eq(
+            &flux_r,
+            &IsothermalMhd.to_flux(&pl, &nhat, &eos),
+            "iso supersonic-right",
+        );
 
         let ql = im_prim(1.0, [-5.0, 0.2, 0.0], [0.3, 0.5, 0.0]);
         let qr = im_prim(0.5, [-5.0, -0.1, 0.2], [0.3, -0.4, 0.1]);
         let flux_l = hlld_isothermal(&eos, &ql, &qr, &nhat, 0.0);
-        assert_iso_flux_eq(&flux_l, &IsothermalMhd.to_flux(&qr, &nhat, &eos), "iso supersonic-left");
+        assert_iso_flux_eq(
+            &flux_l,
+            &IsothermalMhd.to_flux(&qr, &nhat, &eos),
+            "iso supersonic-left",
+        );
     }
 
     #[test]
@@ -1673,7 +2188,11 @@ mod tests {
         let pl = im_prim(1.0, [0.1, 0.2, 0.0], [0.5, 0.6, 0.0]);
         let pr = im_prim(0.7, [-0.2, 0.1, 0.1], [0.5, -0.3, 0.2]);
         let flux = hlld_isothermal(&eos, &pl, &pr, &nhat, 0.0);
-        assert!(flux.mag[0].abs() < 1e-12, "normal-B flux must vanish: {}", flux.mag[0]);
+        assert!(
+            flux.mag[0].abs() < 1e-12,
+            "normal-B flux must vanish: {}",
+            flux.mag[0]
+        );
     }
 
     #[test]
@@ -1697,14 +2216,28 @@ mod tests {
             let pl = im_prim(1.0, [0.3, 0.1, 0.0], [1.0, by, 0.0]);
             let pr = im_prim(0.6, [-0.2, -0.15, 0.0], [1.0, by, 0.0]);
             let flux = hlld_isothermal(&eos, &pl, &pr, &nhat, 0.0);
-            assert!(flux.den.is_finite(), "den flux non-finite at By={by}: {}", flux.den);
+            assert!(
+                flux.den.is_finite(),
+                "den flux non-finite at By={by}: {}",
+                flux.den
+            );
             for dd in 0..3 {
                 assert!(
                     flux.mom[dd].is_finite() && flux.mag[dd].is_finite(),
-                    "comp {dd} non-finite at By={by}: mom {} mag {}", flux.mom[dd], flux.mag[dd],
+                    "comp {dd} non-finite at By={by}: mom {} mag {}",
+                    flux.mom[dd],
+                    flux.mag[dd],
                 );
-                assert!(flux.mom[dd].abs() < 50.0, "mom[{dd}] unbounded at By={by}: {}", flux.mom[dd]);
-                assert!(flux.mag[dd].abs() < 50.0, "mag[{dd}] unbounded at By={by}: {}", flux.mag[dd]);
+                assert!(
+                    flux.mom[dd].abs() < 50.0,
+                    "mom[{dd}] unbounded at By={by}: {}",
+                    flux.mom[dd]
+                );
+                assert!(
+                    flux.mag[dd].abs() < 50.0,
+                    "mag[{dd}] unbounded at By={by}: {}",
+                    flux.mag[dd]
+                );
             }
         }
     }

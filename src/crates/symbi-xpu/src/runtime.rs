@@ -12,9 +12,9 @@
 //   DISPATCHER.runtime().launch(&kernel, config, args);
 // =============================================================================
 
+use crate::config::LaunchConfig;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::config::LaunchConfig;
 
 // =============================================================================
 // the trait
@@ -100,11 +100,17 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
 
         let mut cache = self.cache.lock().unwrap();
         let entry = cache.entry(internal_key).or_insert_with(|| {
-            let binary = self.runtime.compile(source, entry_name)
+            let binary = self
+                .runtime
+                .compile(source, entry_name)
                 .unwrap_or_else(|e| panic!("JIT compile of '{}' failed: {:?}", entry_name, e));
-            let module = self.runtime.load_binary(&binary)
+            let module = self
+                .runtime
+                .load_binary(&binary)
                 .unwrap_or_else(|e| panic!("failed to load JIT module '{}': {:?}", entry_name, e));
-            let func = self.runtime.get_kernel(&module, entry_name)
+            let func = self
+                .runtime
+                .get_kernel(&module, entry_name)
                 .unwrap_or_else(|e| panic!("failed to get kernel '{}': {:?}", entry_name, e));
             (module, func)
         });
@@ -159,8 +165,8 @@ pub fn compute_internal_cache_key(name: &str, content: &[u8]) -> String {
 #[cfg(feature = "cuda")]
 pub mod cuda_runtime {
     use super::*;
-    use crate::cuda::{CudaSpace, CudaModule, CudaKernel, CudaStream};
     use crate::ExecutionSpace;
+    use crate::cuda::{CudaKernel, CudaModule, CudaSpace, CudaStream};
 
     pub struct CudaRuntime;
 
@@ -198,10 +204,10 @@ pub mod cuda_runtime {
     // one dispatcher per device ordinal: cuda modules are bound to the context they were
     // loaded into, so device N's kernels must live in device N's dispatcher.
     // each is initialized on first use, in whatever context is current at that point.
-    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<CudaRuntime>>; crate::cuda::MAX_GPUS] =
-        [const {
-            std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<CudaRuntime>)
-        }; crate::cuda::MAX_GPUS];
+    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<CudaRuntime>>;
+        crate::cuda::MAX_GPUS] = [const {
+        std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<CudaRuntime>)
+    }; crate::cuda::MAX_GPUS];
 
     /// the dispatcher for the device whose context is current on this thread. callers JIT and
     /// launch inside `cuda::with_device(ord, ...)`, so the modules land in the right context.
@@ -220,8 +226,8 @@ pub mod cuda_runtime {
 #[cfg(feature = "hip")]
 pub mod hip_runtime {
     use super::*;
-    use crate::hip::{HipSpace, HipModule, HipKernel, HipStream};
     use crate::ExecutionSpace;
+    use crate::hip::{HipKernel, HipModule, HipSpace, HipStream};
 
     pub struct HipRuntime;
 
@@ -258,10 +264,10 @@ pub mod hip_runtime {
 
     // one dispatcher per device ordinal: hip modules are bound to the device they were loaded
     // for, so device N's kernels must live in device N's dispatcher.
-    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<HipRuntime>>; crate::hip::MAX_GPUS] =
-        [const {
-            std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<HipRuntime>)
-        }; crate::hip::MAX_GPUS];
+    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<HipRuntime>>; crate::hip::MAX_GPUS] = [const {
+        std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<HipRuntime>)
+    };
+        crate::hip::MAX_GPUS];
 
     /// the dispatcher for the device bound on this thread. callers JIT and launch inside
     /// `hip::with_device(ord, ...)`, so the modules land for the right device.
@@ -277,8 +283,7 @@ pub mod hip_runtime {
 // =============================================================================
 
 #[cfg(feature = "cuda")]
-pub use cuda_runtime::{current_dispatcher, CudaRuntime as DeviceRuntime};
+pub use cuda_runtime::{CudaRuntime as DeviceRuntime, current_dispatcher};
 
 #[cfg(all(feature = "hip", not(feature = "cuda")))]
-pub use hip_runtime::{current_dispatcher, HipRuntime as DeviceRuntime};
-
+pub use hip_runtime::{HipRuntime as DeviceRuntime, current_dispatcher};

@@ -11,10 +11,10 @@
 
 #![cfg(feature = "cuda")]
 
-use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
-use symbi_xpu::runtime::cuda_runtime::current_dispatcher;
+use symbi_xpu::cuda::{UnifiedMemory, ctx_sync};
 use symbi_xpu::runtime::GpuRuntime;
-use symbi_xpu::{with_device, KernelArgs, LaunchConfig, MemoryBlock};
+use symbi_xpu::runtime::cuda_runtime::current_dispatcher;
+use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock, with_device};
 
 const FILL: &str = r#"
 extern "C" __global__ void fill(double* out, double val, unsigned int n) {
@@ -59,5 +59,8 @@ fn kernels_run_on_distinct_logical_devices() {
     // back to device 0 after the switch: confirms `with_device` restores the prior context
     // and device 0's module/dispatcher is still valid.
     let c = with_device(0, || fill_on_current_device(5.0));
-    assert_eq!(c, 5.0, "device 0 kernel after a device switch produced wrong value");
+    assert_eq!(
+        c, 5.0,
+        "device 0 kernel after a device switch produced wrong value"
+    );
 }

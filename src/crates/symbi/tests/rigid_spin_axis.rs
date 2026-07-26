@@ -56,11 +56,17 @@ fn orientation_rolls_about_the_x_axis() {
     }
     let r = b.orientation;
     // R maps body-frame y to world z (a quarter turn about x): column 1 = (0, 0, 1).
-    assert!((r[0][1]).abs() < 1e-9 && (r[1][1]).abs() < 1e-6 && (r[2][1] - 1.0).abs() < 1e-6,
+    assert!(
+        (r[0][1]).abs() < 1e-9 && (r[1][1]).abs() < 1e-6 && (r[2][1] - 1.0).abs() < 1e-6,
         "quarter turn about x did not map y -> z: column 1 = ({}, {}, {})",
-        r[0][1], r[1][1], r[2][1]);
+        r[0][1],
+        r[1][1],
+        r[2][1]
+    );
     // omega unchanged (isotropic, torque-free).
-    assert!((b.omega[0] - OMEGA).abs() < 1e-12 && b.omega[1].abs() < 1e-12 && b.omega[2].abs() < 1e-12);
+    assert!(
+        (b.omega[0] - OMEGA).abs() < 1e-12 && b.omega[1].abs() < 1e-12 && b.omega[2].abs() < 1e-12
+    );
 }
 
 #[test]
@@ -78,21 +84,31 @@ fn shaped_wall_spinning_about_x_swirls_the_gas_about_x() {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
-    let mut sim = sim.with_bodies(BodyCollection::new().add(
-        Body::rigid_sphere(
-            0,
-            Tensor::new([0.0; 3]),
-            Tensor::new([0.0; 3]),
-            1.0,
-            0.3,
-            0.1,
-            true, // no-slip: the tangential drag is the whole point here
-        )
-        .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 1.0e3 })
-        .with_spin_about(OMEGA, Tensor::new([1.0, 0.0, 0.0])),
-    ));
+    let mut sim = sim.with_bodies(
+        BodyCollection::new().add(
+            Body::rigid_sphere(
+                0,
+                Tensor::new([0.0; 3]),
+                Tensor::new([0.0; 3]),
+                1.0,
+                0.3,
+                0.1,
+                true, // no-slip: the tangential drag is the whole point here
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 1.0e3,
+                k_eta_t: 1.0e3,
+            })
+            .with_spin_about(OMEGA, Tensor::new([1.0, 0.0, 0.0])),
+        ),
+    );
     sim.attach_body_shapes(vec![Some(SdfExpr::sphere([0.0; 3], 0.3))]);
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
     evolve(&mut sim, &k, T_FINAL).expect("spinning-shaped run");

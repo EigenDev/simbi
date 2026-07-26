@@ -17,10 +17,10 @@
 //  let bind = symbi_abi::FieldBind::from_path("cons.mom_1");
 // =============================================================================
 
-pub mod scalar_param;
 pub mod field_ref;
+pub mod scalar_param;
 pub mod scalar_ref;
 
-pub use scalar_param::MeshScalar;
 pub use field_ref::{FieldBind, FieldRef, StateComp, StateSlot};
+pub use scalar_param::MeshScalar;
 pub use scalar_ref::{BodyScalar, ScalarBind, ScalarRef};

@@ -32,9 +32,9 @@
 //   let substeps = advance_bonded(&mut coll, &mut bonds, None, None, dt, &[]);
 // =============================================================================
 
-use symbi_algebra::Tensor;
-use crate::body::{cross3, Body};
+use crate::body::{Body, cross3};
 use crate::collection::BodyCollection;
+use symbi_algebra::Tensor;
 
 /// material parameters of a bond: stiffnesses, damping, and the strength
 /// envelope. `area` is the bond cross-section the stress criteria divide by
@@ -52,7 +52,14 @@ pub struct BondMaterial {
 impl BondMaterial {
     /// an unbreakable, undamped, normal-only bond; override fields as needed.
     pub fn rigid() -> Self {
-        Self { k_n: 0.0, k_t: 0.0, gamma: 0.0, area: 1.0, sigma_t: f64::MAX, tau_s: f64::MAX }
+        Self {
+            k_n: 0.0,
+            k_t: 0.0,
+            gamma: 0.0,
+            area: 1.0,
+            sigma_t: f64::MAX,
+            tau_s: f64::MAX,
+        }
     }
 }
 
@@ -89,7 +96,14 @@ impl Bond {
             let d = body_j.position[a] - body_i.position[a];
             d2 += d * d;
         }
-        Self { i, j, rest_length: d2.sqrt(), material, slip: Tensor::zeros(), intact: true }
+        Self {
+            i,
+            j,
+            rest_length: d2.sqrt(),
+            material,
+            slip: Tensor::zeros(),
+            intact: true,
+        }
     }
 }
 
@@ -104,7 +118,10 @@ pub struct ExternalLoad<const D: usize> {
 
 impl<const D: usize> ExternalLoad<D> {
     pub fn zero() -> Self {
-        Self { force: Tensor::zeros(), torque: Tensor::zeros() }
+        Self {
+            force: Tensor::zeros(),
+            torque: Tensor::zeros(),
+        }
     }
 }
 
@@ -173,8 +190,16 @@ fn apply_kick<const D: usize>(
     let f = kick.force_on_i;
     let xi = lift(&bi.position);
     let xj = lift(&bj.position);
-    let ri = [kick.midpoint[0] - xi[0], kick.midpoint[1] - xi[1], kick.midpoint[2] - xi[2]];
-    let rj = [kick.midpoint[0] - xj[0], kick.midpoint[1] - xj[1], kick.midpoint[2] - xj[2]];
+    let ri = [
+        kick.midpoint[0] - xi[0],
+        kick.midpoint[1] - xi[1],
+        kick.midpoint[2] - xi[2],
+    ];
+    let rj = [
+        kick.midpoint[0] - xj[0],
+        kick.midpoint[1] - xj[1],
+        kick.midpoint[2] - xj[2],
+    ];
     let ti = cross3(ri, f);
     let tj = cross3(rj, [-f[0], -f[1], -f[2]]);
     for a in 0..3 {
@@ -211,7 +236,11 @@ fn eval_bond<const D: usize>(
     // re-projected during the drift phase; the projection here keeps the
     // force exactly tangential between re-projections).
     let sn = bond.slip[0] * n[0] + bond.slip[1] * n[1] + bond.slip[2] * n[2];
-    let st = [bond.slip[0] - sn * n[0], bond.slip[1] - sn * n[1], bond.slip[2] - sn * n[2]];
+    let st = [
+        bond.slip[0] - sn * n[0],
+        bond.slip[1] - sn * n[1],
+        bond.slip[2] - sn * n[2],
+    ];
     let ft = [m.k_t * st[0], m.k_t * st[1], m.k_t * st[2]];
     let ft_mag = (ft[0] * ft[0] + ft[1] * ft[1] + ft[2] * ft[2]).sqrt();
 
@@ -241,18 +270,16 @@ fn eval_bond<const D: usize>(
         m.k_n * e * n[1] + ft[1] + m.gamma * vrel[1],
         m.k_n * e * n[2] + ft[2] + m.gamma * vrel[2],
     ];
-    Some(Kick { force_on_i, midpoint })
+    Some(Kick {
+        force_on_i,
+        midpoint,
+    })
 }
 
 // accumulate tangential slip over the drift: rotate the accumulator
 // perpendicular to the current normal, then add the tangential part of the
 // relative material displacement `v_rel_t * h` at the midpoint.
-fn accumulate_slip<const D: usize>(
-    bond: &mut Bond,
-    bi: &Body<f64, D>,
-    bj: &Body<f64, D>,
-    h: f64,
-) {
+fn accumulate_slip<const D: usize>(bond: &mut Bond, bi: &Body<f64, D>, bj: &Body<f64, D>, h: f64) {
     if !bond.intact || bond.material.k_t == 0.0 {
         return;
     }
@@ -350,7 +377,9 @@ fn stable_substep<const D: usize>(
         if g_trans[b] > 0.0 {
             h = h.min(body.mass / g_trans[b] / 5.0);
         }
-        let i_min = body.inertia_body[0].min(body.inertia_body[1]).min(body.inertia_body[2]);
+        let i_min = body.inertia_body[0]
+            .min(body.inertia_body[1])
+            .min(body.inertia_body[2]);
         if i_min > 0.0 {
             if k_rot[b] > 0.0 {
                 h = h.min(two_pi * (i_min / k_rot[b]).sqrt() / 10.0);
@@ -400,17 +429,21 @@ pub fn advance_bonded<const D: usize>(
         nb,
     );
     let h_stable = stable_substep(bodies, bonds, contacts.as_deref(), gravity);
-    let n_sub = if h_stable.is_finite() { (dt / h_stable).ceil().max(1.0) as usize } else { 1 };
+    let n_sub = if h_stable.is_finite() {
+        (dt / h_stable).ceil().max(1.0) as usize
+    } else {
+        1
+    };
     let h = dt / n_sub as f64;
 
     // per-body force (3-space) + torque accumulators, rebuilt each evaluation.
     let mut force = vec![[0.0f64; 3]; nb];
     let mut torque = vec![[0.0f64; 3]; nb];
     let accumulate = |force: &mut Vec<[f64; 3]>,
-                          torque: &mut Vec<[f64; 3]>,
-                          bodies: &BodyCollection<f64, D>,
-                          bonds: &mut [Bond],
-                          contacts: Option<&crate::contact::Contacts>| {
+                      torque: &mut Vec<[f64; 3]>,
+                      bodies: &BodyCollection<f64, D>,
+                      bonds: &mut [Bond],
+                      contacts: Option<&crate::contact::Contacts>| {
         for f in force.iter_mut() {
             *f = [0.0; 3];
         }
@@ -429,9 +462,7 @@ pub fn advance_bonded<const D: usize>(
             for i in 0..nb {
                 for j in (i + 1)..nb {
                     let (bi, bj) = (bodies.get(i), bodies.get(j));
-                    if bonded.contains(&(i, j))
-                        || (!bi.two_way_coupling && !bj.two_way_coupling)
-                    {
+                    if bonded.contains(&(i, j)) || (!bi.two_way_coupling && !bj.two_way_coupling) {
                         continue;
                     }
                     if let Some(kick) = cts.kick((i, j), bi, bj) {
@@ -476,7 +507,11 @@ pub fn advance_bonded<const D: usize>(
                     body.velocity[a] += 0.5 * h * force[b][a] / body.mass;
                 }
             }
-            let t = if body.two_way_coupling { Tensor::new(torque[b]) } else { Tensor::zeros() };
+            let t = if body.two_way_coupling {
+                Tensor::new(torque[b])
+            } else {
+                Tensor::zeros()
+            };
             body.advance_rotation(t, 0.5 * h);
         }
     }
@@ -553,8 +588,16 @@ mod tests {
     type V2 = Tensor<f64, 2>;
 
     fn sphere(idx: usize, x: f64, y: f64, vx: f64, vy: f64, mobile: bool) -> Body<f64, 2> {
-        Body::rigid_sphere(idx, V2::new([x, y]), V2::new([vx, vy]), 1.0, 0.45, 0.05, true)
-            .with_two_way_coupling(mobile)
+        Body::rigid_sphere(
+            idx,
+            V2::new([x, y]),
+            V2::new([vx, vy]),
+            1.0,
+            0.45,
+            0.05,
+            true,
+        )
+        .with_two_way_coupling(mobile)
     }
 
     fn total_momentum(coll: &BodyCollection<f64, 2>) -> [f64; 2] {
@@ -594,7 +637,10 @@ mod tests {
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(sphere(0, 0.0, 0.0, 0.0, 0.0, true))
             .add_fragment(sphere(0, 1.0, 0.0, 0.0, 0.0, true));
-        let mat = BondMaterial { k_n: 250.0, ..BondMaterial::rigid() };
+        let mat = BondMaterial {
+            k_n: 250.0,
+            ..BondMaterial::rigid()
+        };
         let mut bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
         // stretch after formation: rest length stays 1.0, extension 0.1.
         coll.get_mut(1).position[0] = 1.1;
@@ -614,9 +660,12 @@ mod tests {
             }
             prev = e;
         }
-        assert!(crossings.len() >= 8, "expected many periods, got {}", crossings.len());
-        let period =
-            (crossings.last().unwrap() - crossings[0]) / (crossings.len() as f64 - 1.0);
+        assert!(
+            crossings.len() >= 8,
+            "expected many periods, got {}",
+            crossings.len()
+        );
+        let period = (crossings.last().unwrap() - crossings[0]) / (crossings.len() as f64 - 1.0);
         // m_eff = 1/2, omega = sqrt(k_n / m_eff), period = 2 pi / omega
         let expected = 2.0 * std::f64::consts::PI * (0.5 / 250.0_f64).sqrt();
         assert!(
@@ -625,11 +674,17 @@ mod tests {
         );
 
         let p = total_momentum(&coll);
-        assert!(p[0].abs() < 1e-12 && p[1].abs() < 1e-12, "momentum drift {p:?}");
+        assert!(
+            p[0].abs() < 1e-12 && p[1].abs() < 1e-12,
+            "momentum drift {p:?}"
+        );
         // velocity-verlet energy oscillates within an O((h omega)^2) band and
         // does not drift secularly; h omega ~ 0.11 puts the band at ~0.3%.
         let e1 = total_ke(&coll) + bond_potential_energy(&bonds, &coll);
-        assert!((e1 - e0).abs() < 1e-2 * e0, "undamped energy drift {e0} -> {e1}");
+        assert!(
+            (e1 - e0).abs() < 1e-2 * e0,
+            "undamped energy drift {e0} -> {e1}"
+        );
     }
 
     #[test]
@@ -637,7 +692,11 @@ mod tests {
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(sphere(0, 0.0, 0.0, 0.0, 0.0, true))
             .add_fragment(sphere(0, 1.0, 0.0, 0.0, 0.0, true));
-        let mat = BondMaterial { k_n: 250.0, gamma: 2.0, ..BondMaterial::rigid() };
+        let mat = BondMaterial {
+            k_n: 250.0,
+            gamma: 2.0,
+            ..BondMaterial::rigid()
+        };
         let mut bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
         coll.get_mut(1).position[0] = 1.1;
 
@@ -657,13 +716,20 @@ mod tests {
             prev_de = de;
             prev_e = e;
         }
-        assert!(peaks.len() >= 4, "expected several maxima, got {}", peaks.len());
+        assert!(
+            peaks.len() >= 4,
+            "expected several maxima, got {}",
+            peaks.len()
+        );
         let (t0, a0) = peaks[0];
         let (t1, a1) = *peaks.last().unwrap();
         let rate = (a0 / a1).ln() / (t1 - t0);
         // gamma / (2 m_eff) = 2.0 / (2 * 0.5)
         let expected = 2.0;
-        assert!((rate - expected).abs() < 0.05 * expected, "decay rate {rate} vs {expected}");
+        assert!(
+            (rate - expected).abs() < 0.05 * expected,
+            "decay rate {rate} vs {expected}"
+        );
     }
 
     #[test]
@@ -675,7 +741,12 @@ mod tests {
             .add_fragment(sphere(0, 0.0, 0.0, 0.3, 0.0, true))
             .add_fragment(sphere(0, 1.05, 0.0, -0.3, 0.0, true));
         coll.get_mut(0).omega = Tensor::new([0.0, 0.0, 1.5]);
-        let mat = BondMaterial { k_n: 200.0, k_t: 150.0, gamma: 3.0, ..BondMaterial::rigid() };
+        let mat = BondMaterial {
+            k_n: 200.0,
+            k_t: 150.0,
+            gamma: 3.0,
+            ..BondMaterial::rigid()
+        };
         let mut bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
 
         let lz0 = total_lz(&coll);
@@ -686,12 +757,21 @@ mod tests {
             let e = total_ke(&coll) + bond_potential_energy(&bonds, &coll);
             // the damper dissipates; the integrator adds a bounded
             // O((h omega)^2) oscillation on top, never sustained growth.
-            assert!(e <= e0 * (1.0 + 5e-3), "damped energy exceeded start: {e0} -> {e}");
+            assert!(
+                e <= e0 * (1.0 + 5e-3),
+                "damped energy exceeded start: {e0} -> {e}"
+            );
             e_prev = e;
         }
-        assert!(e_prev < 0.25 * e0, "damping dissipated almost nothing: {e0} -> {e_prev}");
+        assert!(
+            e_prev < 0.25 * e0,
+            "damping dissipated almost nothing: {e0} -> {e_prev}"
+        );
         let p = total_momentum(&coll);
-        assert!(p[0].abs() < 1e-12 && p[1].abs() < 1e-12, "momentum drift {p:?}");
+        assert!(
+            p[0].abs() < 1e-12 && p[1].abs() < 1e-12,
+            "momentum drift {p:?}"
+        );
         let lz1 = total_lz(&coll);
         assert!(
             (lz1 - lz0).abs() < 1e-9 * lz0.abs().max(1.0),
@@ -714,16 +794,44 @@ mod tests {
                 coll = coll.add_fragment(sphere(0, col as f64, row as f64, 0.0, 0.0, mobile));
             }
         }
-        let mat = BondMaterial { k_n: 4000.0, gamma: 8.0, ..BondMaterial::rigid() };
+        let mat = BondMaterial {
+            k_n: 4000.0,
+            gamma: 8.0,
+            ..BondMaterial::rigid()
+        };
         let mut bonds = Vec::new();
         for col in 0..COLS {
-            bonds.push(Bond::form(idx(col, 0), idx(col, 1), coll.get(idx(col, 0)), coll.get(idx(col, 1)), mat));
+            bonds.push(Bond::form(
+                idx(col, 0),
+                idx(col, 1),
+                coll.get(idx(col, 0)),
+                coll.get(idx(col, 1)),
+                mat,
+            ));
             if col + 1 < COLS {
                 for row in 0..2 {
-                    bonds.push(Bond::form(idx(col, row), idx(col + 1, row), coll.get(idx(col, row)), coll.get(idx(col + 1, row)), mat));
+                    bonds.push(Bond::form(
+                        idx(col, row),
+                        idx(col + 1, row),
+                        coll.get(idx(col, row)),
+                        coll.get(idx(col + 1, row)),
+                        mat,
+                    ));
                 }
-                bonds.push(Bond::form(idx(col, 0), idx(col + 1, 1), coll.get(idx(col, 0)), coll.get(idx(col + 1, 1)), mat));
-                bonds.push(Bond::form(idx(col, 1), idx(col + 1, 0), coll.get(idx(col, 1)), coll.get(idx(col + 1, 0)), mat));
+                bonds.push(Bond::form(
+                    idx(col, 0),
+                    idx(col + 1, 1),
+                    coll.get(idx(col, 0)),
+                    coll.get(idx(col + 1, 1)),
+                    mat,
+                ));
+                bonds.push(Bond::form(
+                    idx(col, 1),
+                    idx(col + 1, 0),
+                    coll.get(idx(col, 1)),
+                    coll.get(idx(col + 1, 0)),
+                    mat,
+                ));
             }
         }
 
@@ -738,8 +846,7 @@ mod tests {
         // descends its potential; settled when the ke regained between
         // quenches vanishes and the tip stops moving.
         let tip_of = |coll: &BodyCollection<f64, 2>| {
-            0.5 * (coll.get(idx(COLS - 1, 0)).position[1]
-                + coll.get(idx(COLS - 1, 1)).position[1]
+            0.5 * (coll.get(idx(COLS - 1, 0)).position[1] + coll.get(idx(COLS - 1, 1)).position[1]
                 - 1.0)
         };
         let mut settled = false;
@@ -763,7 +870,11 @@ mod tests {
                 tip_prev = tip_now;
             }
         }
-        assert!(settled, "cantilever did not reach statics, ke = {}", total_ke(&coll));
+        assert!(
+            settled,
+            "cantilever did not reach statics, ke = {}",
+            total_ke(&coll)
+        );
 
         let tip = tip_of(&coll);
         // euler-bernoulli tip deflection P L^3 / (3 EI), beam length measured
@@ -786,8 +897,15 @@ mod tests {
             let vx = if k == 4 { 0.02 } else { 0.0 };
             coll = coll.add_fragment(sphere(0, k as f64, 0.0, vx, 0.0, mobile));
         }
-        let strong = BondMaterial { k_n: 500.0, gamma: 10.0, ..BondMaterial::rigid() };
-        let weak = BondMaterial { sigma_t: 5.0, ..strong };
+        let strong = BondMaterial {
+            k_n: 500.0,
+            gamma: 10.0,
+            ..BondMaterial::rigid()
+        };
+        let weak = BondMaterial {
+            sigma_t: 5.0,
+            ..strong
+        };
         let mut bonds: Vec<Bond> = (0..4)
             .map(|k| {
                 let m = if k == 1 { weak } else { strong };
@@ -804,7 +922,10 @@ mod tests {
             }
         }
         assert!(break_step > 0, "weak bond never broke");
-        assert!(bonds[0].intact && bonds[2].intact && bonds[3].intact, "wrong bond broke");
+        assert!(
+            bonds[0].intact && bonds[2].intact && bonds[3].intact,
+            "wrong bond broke"
+        );
         // quasi-static series chain: every bond carries the same tension, the
         // weak one parts at e = sigma_t area / k_n = 0.01, so the end
         // separation at breakage is 4 (1 + 0.01) to quasi-static accuracy.
@@ -832,7 +953,11 @@ mod tests {
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(sphere(0, 0.0, 0.0, 0.0, 0.0, true))
             .add_fragment(sphere(0, 1.0, 0.0, 0.0, 0.0, true));
-        let mat = BondMaterial { k_n: 1e6, gamma: 1.0, ..BondMaterial::rigid() };
+        let mat = BondMaterial {
+            k_n: 1e6,
+            gamma: 1.0,
+            ..BondMaterial::rigid()
+        };
         let mut bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
         coll.get_mut(1).position[0] = 1.001;
 
@@ -845,6 +970,9 @@ mod tests {
             advance_bonded(&mut coll, &mut bonds, None, None, 0.05, &[]);
         }
         let e1 = total_ke(&coll) + bond_potential_energy(&bonds, &coll);
-        assert!(e1.is_finite() && e1 <= e0 * 1.001, "stiff network gained energy {e0} -> {e1}");
+        assert!(
+            e1.is_finite() && e1 <= e0 * 1.001,
+            "stiff network gained energy {e0} -> {e1}"
+        );
     }
 }

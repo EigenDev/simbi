@@ -13,9 +13,9 @@
 //   let iso:  ConsG<f64, 2, IsoModel>  = ...; // has .nrg: Zero<f64> (ZST)
 // =============================================================================
 
-use symbi_ir::algebra::Scalar;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use symbi_ir::algebra::Scalar;
 
 // ---- energy slot trait ----
 
@@ -48,21 +48,37 @@ pub trait EnergySlot<S: Scalar>: Copy + Default + Debug + Send + Sync + 'static 
 
 impl<S: Scalar> EnergySlot<S> for S {
     #[inline(always)]
-    fn zero() -> Self { S::ZERO }
+    fn zero() -> Self {
+        S::ZERO
+    }
     #[inline(always)]
-    fn add(self, rhs: Self) -> Self { self + rhs }
+    fn add(self, rhs: Self) -> Self {
+        self + rhs
+    }
     #[inline(always)]
-    fn sub(self, rhs: Self) -> Self { self - rhs }
+    fn sub(self, rhs: Self) -> Self {
+        self - rhs
+    }
     #[inline(always)]
-    fn neg(self) -> Self { -self }
+    fn neg(self) -> Self {
+        -self
+    }
     #[inline(always)]
-    fn scale(self, s: S) -> Self { self * s }
+    fn scale(self, s: S) -> Self {
+        self * s
+    }
     #[inline(always)]
-    fn value(self) -> S { self }
+    fn value(self) -> S {
+        self
+    }
     #[inline(always)]
-    fn from_scalar(s: S) -> Self { s }
+    fn from_scalar(s: S) -> Self {
+        s
+    }
     #[inline(always)]
-    fn select_mask(m: S::Mask, yes: Self, no: Self) -> Self { <S as Scalar>::select(m, yes, no) }
+    fn select_mask(m: S::Mask, yes: Self, no: Self) -> Self {
+        <S as Scalar>::select(m, yes, no)
+    }
 }
 
 // ---- isothermal: zero-sized energy slot ----
@@ -73,26 +89,44 @@ impl<S: Scalar> EnergySlot<S> for S {
 pub struct Zero<S>(PhantomData<S>);
 
 impl<S: Scalar> Default for Zero<S> {
-    fn default() -> Self { Zero(PhantomData) }
+    fn default() -> Self {
+        Zero(PhantomData)
+    }
 }
 
 impl<S: Scalar> EnergySlot<S> for Zero<S> {
     #[inline(always)]
-    fn zero() -> Self { Zero(PhantomData) }
+    fn zero() -> Self {
+        Zero(PhantomData)
+    }
     #[inline(always)]
-    fn add(self, _rhs: Self) -> Self { self }
+    fn add(self, _rhs: Self) -> Self {
+        self
+    }
     #[inline(always)]
-    fn sub(self, _rhs: Self) -> Self { self }
+    fn sub(self, _rhs: Self) -> Self {
+        self
+    }
     #[inline(always)]
-    fn neg(self) -> Self { self }
+    fn neg(self) -> Self {
+        self
+    }
     #[inline(always)]
-    fn scale(self, _s: S) -> Self { self }
+    fn scale(self, _s: S) -> Self {
+        self
+    }
     #[inline(always)]
-    fn value(self) -> S { S::ZERO }
+    fn value(self) -> S {
+        S::ZERO
+    }
     #[inline(always)]
-    fn from_scalar(_s: S) -> Self { Zero(PhantomData) }
+    fn from_scalar(_s: S) -> Self {
+        Zero(PhantomData)
+    }
     #[inline(always)]
-    fn select_mask(_m: S::Mask, _yes: Self, _no: Self) -> Self { Zero(PhantomData) }
+    fn select_mask(_m: S::Mask, _yes: Self, _no: Self) -> Self {
+        Zero(PhantomData)
+    }
 }
 
 // ---- energy model marker types ----
@@ -141,12 +175,18 @@ mod tests {
 
     #[test]
     fn adiabatic_slot_is_scalar() {
-        assert_eq!(std::mem::size_of::<<Adiabatic as EnergyModel>::Slot<f64>>(), 8);
+        assert_eq!(
+            std::mem::size_of::<<Adiabatic as EnergyModel>::Slot<f64>>(),
+            8
+        );
     }
 
     #[test]
     fn isothermal_slot_is_zst() {
-        assert_eq!(std::mem::size_of::<<IsoModel as EnergyModel>::Slot<f64>>(), 0);
+        assert_eq!(
+            std::mem::size_of::<<IsoModel as EnergyModel>::Slot<f64>>(),
+            0
+        );
     }
 
     #[test]

@@ -21,10 +21,10 @@ use symbi::sim::evolve::evolve_with_callback;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{Cylindrical, Spherical};
-use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
-use symbi_hydro::state::{Cons, Prim};
 use symbi_hydro::eos::IdealGas;
+use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::state::{Cons, Prim};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const N: usize = 128;
@@ -81,7 +81,10 @@ fn run_shell<M>(
     M: symbi_geometry::Metric<f64, 1> + symbi_geometry::Metric<f64, 3> + Copy + Send + Sync,
 {
     let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 1>::new(
-        GAMMA, CFL, /* theta */ 1.5, &sim.geom.allocated,
+        GAMMA,
+        CFL,
+        /* theta */ 1.5,
+        &sim.geom.allocated,
     );
 
     // sample the toroidal B_phi IC per cell (it must move off this by the end).
@@ -108,7 +111,10 @@ fn run_shell<M>(
     })
     .unwrap_or_else(|e| panic!("{label}: 1.5D curvilinear MHD evolve failed: {e:?}"));
 
-    assert!(steps >= 10, "{label}: only {steps} steps — gate barely exercised");
+    assert!(
+        steps >= 10,
+        "{label}: only {steps} steps — gate barely exercised"
+    );
 
     // physicality on the shell + the out-of-plane toroidal field actually evolved.
     let mhd = sim.fields.mhd.as_ref().unwrap();
@@ -126,7 +132,10 @@ fn run_shell<M>(
          1.5D induction path is not running",
     );
 
-    eprintln!("[{label}] DONE iter={} t={:.4e} max |dB_phi| = {:e}", sim.iteration, sim.time, max_dphi);
+    eprintln!(
+        "[{label}] DONE iter={} t={:.4e} max |dB_phi| = {:e}",
+        sim.iteration, sim.time, max_dphi
+    );
 }
 
 // build the common 1.5D shell IC: div-free radial B_r on the r-faces + cell-centered
@@ -136,7 +145,9 @@ where
     M: symbi_geometry::Metric<f64, 1> + symbi_geometry::Metric<f64, 3> + Copy + Send + Sync,
 {
     let sim = SimStateGeneric::<NewtonianMhd, 1, 3, M, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        NewtonianMhd, IdealGas { gamma: GAMMA }, geometry,
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        geometry,
     )
     .cells([N])
     .origin([R_LO])
@@ -148,11 +159,21 @@ where
         let br = radial_bfield(spherical, r);
         let pre = 1.0 + 0.4 * (-((r - (R_LO + 0.5 * N as f64 * DR)) / (4.0 * DR)).powi(2)).exp();
         MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre,
+            },
             mag: Tensor::new([br, 0.0, BPHI0]),
         }
     })
-    .seed_faces(|axis, [r]| if axis == 0 { radial_bfield(spherical, r) } else { 0.0 })
+    .seed_faces(|axis, [r]| {
+        if axis == 0 {
+            radial_bfield(spherical, r)
+        } else {
+            0.0
+        }
+    })
     .build();
     run_shell(sim, spherical, label);
 }

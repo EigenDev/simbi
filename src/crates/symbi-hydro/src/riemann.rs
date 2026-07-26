@@ -18,13 +18,16 @@
 //   let flux = hlle(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
 // =============================================================================
 
-mod hlle;
 mod hllc;
 mod hlld;
+mod hlle;
 
+pub use hllc::{hllc, hllc_newtonian, hllc_rhd, hllc_rmhd};
+pub use hlld::{
+    HlldStates, hlld_isothermal, hlld_isothermal_coeffs, hlld_newtonian, hlld_newtonian_coeffs,
+    hlld_rmhd, hlld_rmhd_gr_ortho, hlld_rmhd_states, hlld_rmhd_states_gr_ortho,
+};
 pub use hlle::{hlle, hlle_with_speeds};
-pub use hllc::{hllc, hllc_rmhd, hllc_rhd, hllc_newtonian};
-pub use hlld::{hlld_rmhd, hlld_rmhd_gr_ortho, hlld_rmhd_states, hlld_rmhd_states_gr_ortho, hlld_newtonian, hlld_newtonian_coeffs, hlld_isothermal, hlld_isothermal_coeffs, HlldStates};
 
 // shared solver tolerances (visible to the submodules via `super::`).
 /// guard against division by zero in intermediate expressions.

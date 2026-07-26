@@ -18,7 +18,13 @@
 /// clamp (transmissive/outflow): ghost reads nearest interior cell.
 /// extrapolates zero-gradient: the ghost cell gets the boundary value.
 pub fn clamp(ii: isize, lo: isize, hi: isize) -> isize {
-    if ii < lo { lo } else if ii >= hi { hi - 1 } else { ii }
+    if ii < lo {
+        lo
+    } else if ii >= hi {
+        hi - 1
+    } else {
+        ii
+    }
 }
 
 /// mirror (reflecting): ghost reads the cell reflected across the boundary.
@@ -129,8 +135,8 @@ mod tests {
     #[test]
     fn test_mirror_nonzero_origin() {
         // interior = [5, 15)
-        assert_eq!(mirror(4, 5, 15), 5);   // 2*5 - 4 - 1 = 5
-        assert_eq!(mirror(3, 5, 15), 6);   // 2*5 - 3 - 1 = 6
+        assert_eq!(mirror(4, 5, 15), 5); // 2*5 - 4 - 1 = 5
+        assert_eq!(mirror(3, 5, 15), 6); // 2*5 - 3 - 1 = 6
         assert_eq!(mirror(15, 5, 15), 14); // 2*15 - 15 - 1 = 14
         assert_eq!(mirror(16, 5, 15), 13); // 2*15 - 16 - 1 = 13
     }
@@ -180,8 +186,8 @@ mod tests {
         let lo = [0, 0];
         let hi = [10, 10];
         let result = map_nd(idx, lo, hi, [clamp, periodic]);
-        assert_eq!(result[0], 0);  // clamp: -1 -> 0
-        assert_eq!(result[1], 2);  // periodic: 12 -> 2
+        assert_eq!(result[0], 0); // clamp: -1 -> 0
+        assert_eq!(result[1], 2); // periodic: 12 -> 2
     }
 
     #[test]
@@ -190,9 +196,9 @@ mod tests {
         let lo = [0, 0, 0];
         let hi = [10, 10, 10];
         let result = map_nd(idx, lo, hi, [mirror, clamp, periodic]);
-        assert_eq!(result[0], 1);  // mirror: -2 -> 1
-        assert_eq!(result[1], 5);  // clamp: 5 -> 5 (interior)
-        assert_eq!(result[2], 0);  // periodic: 20 -> 0
+        assert_eq!(result[0], 1); // mirror: -2 -> 1
+        assert_eq!(result[1], 5); // clamp: 5 -> 5 (interior)
+        assert_eq!(result[2], 0); // periodic: 20 -> 0
     }
 
     #[test]

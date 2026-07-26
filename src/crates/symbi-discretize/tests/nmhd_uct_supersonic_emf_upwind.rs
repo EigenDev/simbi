@@ -194,7 +194,11 @@ impl Sim {
             for j in NG..NG + NY {
                 let (bxc, byc) = self.bcell(i, j);
                 let p = MhdPrim {
-                    hydro: Prim { rho: RHO0, vel: Tensor::new([self.vx, self.vy, 0.0]), pre: PRE0 },
+                    hydro: Prim {
+                        rho: RHO0,
+                        vel: Tensor::new([self.vx, self.vy, 0.0]),
+                        pre: PRE0,
+                    },
                     mag: Tensor::new([bxc, byc, 0.0]),
                 };
                 for ax in 0..2 {
@@ -263,13 +267,21 @@ fn build_emf_inputs(sim: &Sim) -> EmfInputs {
     for i in 0..BX {
         for j in 0..BY {
             let in_bounds = i + 1 < BX && j + 1 < BY;
-            let (bxc, byc) = if in_bounds { sim.bcell(i, j) } else { (0.0, 0.0) };
+            let (bxc, byc) = if in_bounds {
+                sim.bcell(i, j)
+            } else {
+                (0.0, 0.0)
+            };
             let f = idx(i, j);
             e.bp1[f] = bxc;
             e.bp2[f] = byc;
             e.bout[f] = 0.0;
             let p = MhdPrim {
-                hydro: Prim { rho: RHO0, vel: Tensor::new([sim.vx, sim.vy, 0.0]), pre: PRE0 },
+                hydro: Prim {
+                    rho: RHO0,
+                    vel: Tensor::new([sim.vx, sim.vy, 0.0]),
+                    pre: PRE0,
+                },
                 mag: Tensor::new([bxc, byc, 0.0]),
             };
             let (sl1, sr1) = wave_speeds_axis(&p, 0);
@@ -361,10 +373,16 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
     // sanity: the supersonic regime is real (Mach > 1) — the bug is invisible otherwise.
     let cs = (GAMMA * PRE0 / RHO0).sqrt();
     let speed = (sim.vx * sim.vx + sim.vy * sim.vy).sqrt();
-    assert!(speed > cs, "advection must be supersonic: |v|={speed:.3} cs={cs:.3}");
+    assert!(
+        speed > cs,
+        "advection must be supersonic: |v|={speed:.3} cs={cs:.3}"
+    );
 
     let e0 = sim.mag_energy();
-    assert!(e0 > 0.0 && e0.is_finite(), "init magnetic energy degenerate: {e0}");
+    assert!(
+        e0 > 0.0 && e0.is_finite(),
+        "init magnetic energy degenerate: {e0}"
+    );
 
     // a CFL dt from the (constant) max signal speed. CFL=0.1 sits comfortably inside the
     // forward-Euler CT stability limit, so the UCT diffusion makes the CORRECT scheme
@@ -389,7 +407,10 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
         sim.by = by_new;
         sim.wrap_all();
 
-        assert!(sim.all_finite(), "step {step}: B went non-finite (NaN/Inf) — EMF blew up");
+        assert!(
+            sim.all_finite(),
+            "step {step}: B went non-finite (NaN/Inf) — EMF blew up"
+        );
         let e = sim.mag_energy();
         e_max = e_max.max(e);
         // the correct upwind pairing keeps the loop coherent: magnetic energy stays

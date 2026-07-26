@@ -14,8 +14,10 @@
 use std::f64::consts::PI;
 use std::time::Instant;
 
-use symbi::regimes::substrate_newtonian_mhd::{NewtonianMhdSubstrateKernelSet, NewtonianMhdSubstrateKernelSet3D};
 use symbi::regimes::substrate_kernels::Solver;
+use symbi::regimes::substrate_newtonian_mhd::{
+    NewtonianMhdSubstrateKernelSet, NewtonianMhdSubstrateKernelSet3D,
+};
 use symbi::sim::evolve::evolve_with_callback;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -27,10 +29,10 @@ use symbi_hydro::state::Prim;
 
 // backend: device (DeviceMemory + DeviceSpace) under --features cuda, else host CPU.
 // the same substrate code path; this bench measures whichever the build selects.
-#[cfg(feature = "gpu")]
-use symbi_xpu::{DeviceSpace as Space, DeviceMemory as Mem};
 #[cfg(not(feature = "gpu"))]
 use symbi_xpu::{CpuSpace as Space, HostMemory as Mem};
+#[cfg(feature = "gpu")]
+use symbi_xpu::{DeviceMemory as Mem, DeviceSpace as Space};
 
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.4;
@@ -48,8 +50,12 @@ fn bench_2p5d(nx: usize, t_final: f64) -> (f64, u64) {
     let rho0 = GAMMA * GAMMA;
     let p0 = GAMMA;
     let b0 = 1.0 / (4.0 * PI).sqrt();
-    let mut sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, Space, Mem>::build(
-        NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
+    let mut sim =
+        SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, Space, Mem>::build(
+            NewtonianMhd,
+            IdealGas { gamma: GAMMA },
+            Cartesian,
+        )
         .cells([nx, nx])
         .spacing([dx, dx])
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
@@ -59,16 +65,24 @@ fn bench_2p5d(nx: usize, t_final: f64) -> (f64, u64) {
         .expect("2.5d sim")
         .set_initial(|[x, y]| {
             let (vel, mag) = ot_vectors(x, y, b0);
-            MhdPrim { hydro: Prim { rho: rho0, vel, pre: p0 }, mag }
+            MhdPrim {
+                hydro: Prim {
+                    rho: rho0,
+                    vel,
+                    pre: p0,
+                },
+                mag,
+            }
         })
         .seed_faces(|axis, [x, y]| match axis {
             0 => -b0 * (2.0 * PI * y).sin(),
             _ => b0 * (4.0 * PI * x).sin(),
         })
         .build();
-    let sub = NewtonianMhdSubstrateKernelSet::<Mem, f64, 2>::new(GAMMA, CFL, THETA, &sim.geom.allocated)
-        .with_solver(Solver::Hlld)
-        .expect("HLLD is valid for Newtonian MHD");
+    let sub =
+        NewtonianMhdSubstrateKernelSet::<Mem, f64, 2>::new(GAMMA, CFL, THETA, &sim.geom.allocated)
+            .with_solver(Solver::Hlld)
+            .expect("HLLD is valid for Newtonian MHD");
     let cells = sim.geom.interior.volume() as u64;
     let t0 = Instant::now();
     evolve_with_callback(&mut sim, &sub, t_final, 1_000_000, |_| {}).expect("2.5d evolve");
@@ -83,27 +97,38 @@ fn bench_3d_nz1(nx: usize, t_final: f64) -> (f64, u64) {
     let p0 = GAMMA;
     let b0 = 1.0 / (4.0 * PI).sqrt();
     let mut sim = SimState::<NewtonianMhd, 3, Cartesian, IdealGas<f64>, Space, Mem>::build(
-        NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([nx, nx, 1])
-        .spacing([dx, dx, dx])
-        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
-        .cfl(CFL)
-        .timestepping(Timestepping::Rk2)
-        .allocate()
-        .expect("3d sim")
-        .set_initial(|[x, y, _z]| {
-            let (vel, mag) = ot_vectors(x, y, b0);
-            MhdPrim { hydro: Prim { rho: rho0, vel, pre: p0 }, mag }
-        })
-        .seed_faces(|axis, [x, y, _z]| match axis {
-            0 => -b0 * (2.0 * PI * y).sin(),
-            1 => b0 * (4.0 * PI * x).sin(),
-            _ => 0.0,
-        })
-        .build();
-    let sub = NewtonianMhdSubstrateKernelSet3D::<Mem, f64>::new(GAMMA, CFL, THETA, &sim.geom.allocated)
-        .with_solver(Solver::Hlld)
-        .expect("HLLD is valid for Newtonian MHD");
+        NewtonianMhd,
+        IdealGas { gamma: GAMMA },
+        Cartesian,
+    )
+    .cells([nx, nx, 1])
+    .spacing([dx, dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(CFL)
+    .timestepping(Timestepping::Rk2)
+    .allocate()
+    .expect("3d sim")
+    .set_initial(|[x, y, _z]| {
+        let (vel, mag) = ot_vectors(x, y, b0);
+        MhdPrim {
+            hydro: Prim {
+                rho: rho0,
+                vel,
+                pre: p0,
+            },
+            mag,
+        }
+    })
+    .seed_faces(|axis, [x, y, _z]| match axis {
+        0 => -b0 * (2.0 * PI * y).sin(),
+        1 => b0 * (4.0 * PI * x).sin(),
+        _ => 0.0,
+    })
+    .build();
+    let sub =
+        NewtonianMhdSubstrateKernelSet3D::<Mem, f64>::new(GAMMA, CFL, THETA, &sim.geom.allocated)
+            .with_solver(Solver::Hlld)
+            .expect("HLLD is valid for Newtonian MHD");
     let cells = sim.geom.interior.volume() as u64;
     #[cfg(feature = "gpu")]
     let launches0 = symbi::regimes::substrate_gpu::gpu_launch_count();

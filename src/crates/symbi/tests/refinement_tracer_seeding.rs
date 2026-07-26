@@ -7,20 +7,19 @@
 // =============================================================================
 
 use symbi::prelude::*;
-use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_kernels::GradientBc;
+use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
-use symbi_hydro::state::Prim;
 use symbi_hydro::expr_bridge::{build_boundary_dag, build_user_source};
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::state::Prim;
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_sim::tracers::cell_container_address;
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
 const N: usize = 16;
 
-type Sim =
-    SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+type Sim = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 1>;
 
 #[test]
@@ -87,9 +86,10 @@ fn composite_seed_uses_uncovered_coarse_and_covered_fine_mass_once() {
     for (level, data) in hierarchy.levels.iter().enumerate() {
         let attached = data.state.tracers.as_ref().unwrap();
         assert!(
-            attached.owner.iter().all(|&owner| {
-                cell_container_address(owner).unwrap().0 as usize == level
-            }),
+            attached
+                .owner
+                .iter()
+                .all(|&owner| { cell_container_address(owner).unwrap().0 as usize == level }),
             "a tracer was attached to a level that does not own its cell"
         );
         assert_eq!(attached.weight, 0.01);
@@ -134,7 +134,13 @@ fn translating_flow_crosses_refinement_interfaces_without_losing_tracers() {
         .levels
         .iter()
         .filter_map(|level| level.state.tracers.as_ref())
-        .flat_map(|tracers| tracers.id.iter().copied().zip(tracers.owner.iter().copied()))
+        .flat_map(|tracers| {
+            tracers
+                .id
+                .iter()
+                .copied()
+                .zip(tracers.owner.iter().copied())
+        })
         .collect();
 
     hierarchy.evolve_steps(2).unwrap();
@@ -163,7 +169,10 @@ fn translating_flow_crosses_refinement_interfaces_without_losing_tracers() {
     ids.sort_unstable();
     assert_eq!(ids, (0..4096).collect::<Vec<_>>());
     assert!(moved > 0, "no tracer crossed a cell face");
-    assert!(crossed_level > 0, "no tracer crossed a refinement interface");
+    assert!(
+        crossed_level > 0,
+        "no tracer crossed a refinement interface"
+    );
 }
 
 #[test]
@@ -215,10 +224,7 @@ fn refined_density_source_spawns_only_the_composite_added_mass() {
 
     let mut composite_mass = 0.0;
     for level in &hierarchy.levels {
-        let geometry = level
-            .state
-            .geom
-            .block_geometry(level.state.physics.metric);
+        let geometry = level.state.geom.block_geometry(level.state.physics.metric);
         for coord in level.state.geom.interior.iter() {
             if level
                 .coverage
@@ -238,8 +244,7 @@ fn refined_density_source_spawns_only_the_composite_added_mass() {
         .sum();
     let root_tracers = hierarchy.levels[0].state.tracers.as_ref().unwrap();
     let represented_added =
-        (tracer_count - 1000) as f64 * root_tracers.weight
-            + root_tracers.injection_remainder;
+        (tracer_count - 1000) as f64 * root_tracers.weight + root_tracers.injection_remainder;
 
     assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
     let mut ids: Vec<_> = hierarchy
@@ -249,7 +254,11 @@ fn refined_density_source_spawns_only_the_composite_added_mass() {
         .collect();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), tracer_count, "source spawning duplicated tracer ids");
+    assert_eq!(
+        ids.len(),
+        tracer_count,
+        "source spawning duplicated tracer ids"
+    );
 }
 
 #[test]
@@ -307,10 +316,7 @@ fn refined_driven_inflow_spawns_only_the_composite_entering_mass() {
 
     let mut composite_mass = 0.0;
     for level in &hierarchy.levels {
-        let geometry = level
-            .state
-            .geom
-            .block_geometry(level.state.physics.metric);
+        let geometry = level.state.geom.block_geometry(level.state.physics.metric);
         for coord in level.state.geom.interior.iter() {
             if level
                 .coverage
@@ -330,10 +336,12 @@ fn refined_driven_inflow_spawns_only_the_composite_entering_mass() {
         .sum();
     let root_tracers = hierarchy.levels[0].state.tracers.as_ref().unwrap();
     let represented_added =
-        (tracer_count - 1000) as f64 * root_tracers.weight
-            + root_tracers.injection_remainder;
+        (tracer_count - 1000) as f64 * root_tracers.weight + root_tracers.injection_remainder;
 
-    assert!(represented_added > 0.0, "driven boundary injected no tracers");
+    assert!(
+        represented_added > 0.0,
+        "driven boundary injected no tracers"
+    );
     assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
 }
 
@@ -380,10 +388,7 @@ fn refined_neumann_inflow_spawns_only_the_accepted_entering_mass() {
 
     let mut composite_mass = 0.0;
     for level in &hierarchy.levels {
-        let geometry = level
-            .state
-            .geom
-            .block_geometry(level.state.physics.metric);
+        let geometry = level.state.geom.block_geometry(level.state.physics.metric);
         for coord in level.state.geom.interior.iter() {
             if level
                 .coverage
@@ -402,8 +407,8 @@ fn refined_neumann_inflow_spawns_only_the_accepted_entering_mass() {
         .map(|level| level.state.tracers.as_ref().unwrap().len())
         .sum();
     let root_tracers = hierarchy.levels[0].state.tracers.as_ref().unwrap();
-    let represented_added = (tracer_count - 1000) as f64 * root_tracers.weight
-        + root_tracers.injection_remainder;
+    let represented_added =
+        (tracer_count - 1000) as f64 * root_tracers.weight + root_tracers.injection_remainder;
 
     assert!(
         tracer_count > 1000,

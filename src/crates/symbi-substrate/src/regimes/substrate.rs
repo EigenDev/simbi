@@ -32,9 +32,9 @@ use symbi_hydro::source_spec::BuiltSource;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
-    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_fields, dispatch_flux,
-    dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source,
-    dispatch_driven_boundaries, dispatch_gradient_boundaries, dispatch_runtime_source,
+    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_driven_boundaries,
+    dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
+    dispatch_godunov_with_body_source, dispatch_gradient_boundaries, dispatch_runtime_source,
     dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
 };
 use symbi_discretize::gv::GeoSource;
@@ -147,7 +147,9 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// no body — the alpha dispatch then fails loud.
     fn alpha_nu_max(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
-        let Some(im) = sim.immersed.as_ref() else { return 0.0 };
+        let Some(im) = sim.immersed.as_ref() else {
+            return 0.0;
+        };
         if im.bodies.is_empty() {
             return 0.0;
         }
@@ -161,9 +163,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         // the outer R edge. cartesian forms it as the farthest domain corner from
         // the body in the disk plane (the first two axes; the vertical z in 3D does
         // not enter Omega_k) — matching the kernel's nu(x, y) exactly.
-        let r_max = if geom.coords == Geometry::Cylindrical
-            || geom.coords == Geometry::Spherical
-        {
+        let r_max = if geom.coords == Geometry::Cylindrical || geom.coords == Geometry::Spherical {
             let sp = &geom.interior.spaces[0];
             geom.x_lo[0] + geom.dx[0] * (sp.hi as f64)
         } else {
@@ -281,7 +281,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     ) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
         // has_energy = false: no prim.pre assignment rides the dag.
-        self.boundary_dags.push(RuntimeSource::new(built, params, false));
+        self.boundary_dags
+            .push(RuntimeSource::new(built, params, false));
         (self, id)
     }
 
@@ -429,8 +430,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             // smallest at the inner edge — using the raw angle would leave the inner
             // annulus under-resolved and unstable. cartesian widths are already
             // physical.
-            let curvilinear = sim.geom.coords == Geometry::Cylindrical
-                || sim.geom.coords == Geometry::Spherical;
+            let curvilinear =
+                sim.geom.coords == Geometry::Cylindrical || sim.geom.coords == Geometry::Spherical;
             let min_dx = if curvilinear {
                 // h2 = the radial coordinate on both curvilinear charts, so the x2
                 // physical width is r*dx2, smallest at the inner edge.
@@ -496,7 +497,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // the substrate-owned pressure field; Some(cs^2) makes the shared kernel honour the
         // isothermal closure pre = cs^2*rho at the ghost.
         if !self.gradient_bcs.is_empty() {
-            dispatch_gradient_boundaries(sim, &self.pre, &self.gradient_bcs, Some(self.cs * self.cs));
+            dispatch_gradient_boundaries(
+                sim,
+                &self.pre,
+                &self.gradient_bcs,
+                Some(self.cs * self.cs),
+            );
         }
         // re-derive the eos law p = cs^2 * rho over the FULL allocated lattice. the
         // substrate pressure lives outside the prim batch, so the coarse-fine ghost
@@ -562,11 +568,26 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &self.cfl_scratch,
             &sim.fields.cons.den,
             &self.freeze_streak,
-            |dir| dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, 0.0, Solver::Hlle, false),
+            |dir| {
+                dispatch_flux(
+                    sim,
+                    &self.pre,
+                    "iso",
+                    dir,
+                    ISO_GAMMA,
+                    0.0,
+                    Solver::Hlle,
+                    false,
+                )
+            },
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
-            || if sim.immersed.is_some() { self.body_source(sim, ac * dt) },
+            || {
+                if sim.immersed.is_some() {
+                    self.body_source(sim, ac * dt)
+                }
+            },
             || {}, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
@@ -607,7 +628,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
         if let Some(rs) = &self.runtime_source {
             if self.fuse_runtime
-                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false).is_some()
+                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false)
+                    .is_some()
             {
                 return; // already fused into the godunov stage
             }

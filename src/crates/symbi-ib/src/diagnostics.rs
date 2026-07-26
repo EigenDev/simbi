@@ -22,8 +22,8 @@
 // =============================================================================
 
 use crate::body_delta::BodyDelta;
-use symbi_ir::algebra::Scalar;
 use std::sync::Mutex;
+use symbi_ir::algebra::Scalar;
 
 /// diagnostic accumulator for body-fluid feedback.
 /// thread-safe via interior mutex. the mutex is taken once per tile merge,

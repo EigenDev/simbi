@@ -12,8 +12,8 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::refinement::Hierarchy;
 use symbi::sim::evolve::evolve;
+use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
@@ -89,14 +89,21 @@ fn single_level_hierarchy_matches_evolve_sod_1d_rk2() {
             .unwrap()
             .set_initial(|x: [f64; 1]| {
                 let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-                Prim { rho, vel: symbi_algebra::Tensor::new([0.0]), pre }
+                Prim {
+                    rho,
+                    vel: symbi_algebra::Tensor::new([0.0]),
+                    pre,
+                }
             })
             .build()
     };
 
     let mut reference = make_sim();
-    let ref_kernels =
-        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &reference.geom.allocated);
+    let ref_kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(
+        GAMMA,
+        0.4,
+        &reference.geom.allocated,
+    );
     evolve(&mut reference, &ref_kernels, 0.1).expect("reference evolve failed");
 
     let sim = make_sim();
@@ -105,7 +112,11 @@ fn single_level_hierarchy_matches_evolve_sod_1d_rk2() {
     let mut hier = Hierarchy::single(sim, kernels);
     hier.evolve(0.1).expect("hierarchy evolve failed");
 
-    assert!(reference.iteration > 5, "reference took only {} steps", reference.iteration);
+    assert!(
+        reference.iteration > 5,
+        "reference took only {} steps",
+        reference.iteration
+    );
     assert_fields_bit_identical(&reference, &hier.levels[0].state);
 }
 
@@ -127,14 +138,21 @@ fn single_level_hierarchy_matches_evolve_pulse_3d_rk3() {
             .set_initial(|x: [f64; 3]| {
                 let rho = 1.0 + 0.1 * (2.0 * pi * x[0]).sin() * (2.0 * pi * x[1]).cos();
                 let pre = 1.0 + 0.1 * (2.0 * pi * x[2]).sin();
-                Prim { rho, vel: symbi_algebra::Tensor::new([0.0; 3]), pre }
+                Prim {
+                    rho,
+                    vel: symbi_algebra::Tensor::new([0.0; 3]),
+                    pre,
+                }
             })
             .build()
     };
 
     let mut reference = make_sim();
-    let ref_kernels =
-        AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &reference.geom.allocated);
+    let ref_kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        GAMMA,
+        0.4,
+        &reference.geom.allocated,
+    );
     evolve(&mut reference, &ref_kernels, 0.05).expect("reference evolve failed");
 
     let sim = make_sim();
@@ -143,6 +161,10 @@ fn single_level_hierarchy_matches_evolve_pulse_3d_rk3() {
     let mut hier = Hierarchy::single(sim, kernels);
     hier.evolve(0.05).expect("hierarchy evolve failed");
 
-    assert!(reference.iteration > 1, "reference took only {} steps", reference.iteration);
+    assert!(
+        reference.iteration > 1,
+        "reference took only {} steps",
+        reference.iteration
+    );
     assert_fields_bit_identical(&reference, &hier.levels[0].state);
 }

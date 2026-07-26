@@ -80,7 +80,10 @@ fn covered_coarse_cells_are_the_restriction_adiabatic() {
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25; 2], x_hi: [0.75; 2] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 2],
+        x_hi: [0.75; 2],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
     })
@@ -100,9 +103,18 @@ fn covered_coarse_cells_are_the_restriction_adiabatic() {
         alloc,
         cov,
     );
-    assert!(m_den < 1e-13, "adiabatic covered den out of sync with restriction: {m_den:e}");
-    assert!(m_m0 < 1e-13, "adiabatic covered mom out of sync with restriction: {m_m0:e}");
-    assert!(m_nrg < 1e-13, "adiabatic covered nrg out of sync with restriction: {m_nrg:e}");
+    assert!(
+        m_den < 1e-13,
+        "adiabatic covered den out of sync with restriction: {m_den:e}"
+    );
+    assert!(
+        m_m0 < 1e-13,
+        "adiabatic covered mom out of sync with restriction: {m_m0:e}"
+    );
+    assert!(
+        m_nrg < 1e-13,
+        "adiabatic covered nrg out of sync with restriction: {m_nrg:e}"
+    );
 }
 
 #[test]
@@ -126,7 +138,10 @@ fn covered_coarse_cells_are_the_restriction_iso() {
         })
         .build();
     let ck = IKset::new(cs, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25; 2], x_hi: [0.75; 2] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 2],
+        x_hi: [0.75; 2],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         IKset::new(cs, CFL, &s.geom.allocated)
     })
@@ -141,7 +156,16 @@ fn covered_coarse_cells_are_the_restriction_iso() {
     let m_den = max_covered_mismatch(&f.fields.cons.den, &c.fields.cons.den, alloc, cov);
     let m_m0 = max_covered_mismatch(&f.fields.cons.mom[0], &c.fields.cons.mom[0], alloc, cov);
     let m_m1 = max_covered_mismatch(&f.fields.cons.mom[1], &c.fields.cons.mom[1], alloc, cov);
-    assert!(m_den < 1e-13, "iso covered den out of sync with restriction: {m_den:e}");
-    assert!(m_m0 < 1e-13, "iso covered mom_x out of sync with restriction: {m_m0:e}");
-    assert!(m_m1 < 1e-13, "iso covered mom_y out of sync with restriction: {m_m1:e}");
+    assert!(
+        m_den < 1e-13,
+        "iso covered den out of sync with restriction: {m_den:e}"
+    );
+    assert!(
+        m_m0 < 1e-13,
+        "iso covered mom_x out of sync with restriction: {m_m0:e}"
+    );
+    assert!(
+        m_m1 < 1e-13,
+        "iso covered mom_y out of sync with restriction: {m_m1:e}"
+    );
 }

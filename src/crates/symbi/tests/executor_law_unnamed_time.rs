@@ -55,7 +55,11 @@ fn e1_every_step_phase_is_named() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(bodies);
     let sub =
@@ -75,7 +79,11 @@ fn e1_every_step_phase_is_named() {
     let phases = report_profile();
     let named: f64 = phases.iter().map(|(_, ms)| ms / 1e3).sum();
     let coverage = named / wall;
-    println!("e1: {:.1}% of {wall:.3}s named across {} phases, {steps} steps", coverage * 100.0, phases.len());
+    println!(
+        "e1: {:.1}% of {wall:.3}s named across {} phases, {steps} steps",
+        coverage * 100.0,
+        phases.len()
+    );
     for (name, ms) in &phases {
         println!("  {name}: {ms:.2} ms");
     }

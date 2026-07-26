@@ -31,7 +31,11 @@ pub fn strides_from_extent<T>(extent: &[T], out: &mut [T])
 where
     T: Copy + core::ops::Mul<Output = T> + From<u8>,
 {
-    debug_assert_eq!(extent.len(), out.len(), "strides_from_extent: length mismatch");
+    debug_assert_eq!(
+        extent.len(),
+        out.len(),
+        "strides_from_extent: length mismatch"
+    );
     if extent.is_empty() {
         return;
     }
@@ -80,7 +84,11 @@ pub fn nest_order(ndim: usize) -> impl DoubleEndedIterator<Item = usize> + Clone
 /// exactly one place. a coordinate left of its origin (`coord < lo`) is a caller bug (out of the
 /// buffer); the subtraction wraps in release like any index past the end.
 #[inline]
-pub fn flat_offset<const D: usize>(coord: [isize; D], lo: [isize; D], strides: [usize; D]) -> usize {
+pub fn flat_offset<const D: usize>(
+    coord: [isize; D],
+    lo: [isize; D],
+    strides: [usize; D],
+) -> usize {
     let mut idx = 0usize;
     for a in 0..D {
         idx += (coord[a] - lo[a]) as usize * strides[a];
@@ -104,8 +112,15 @@ impl<const D: usize> Layout<D> {
         let mut strides = [0i32; D];
         strides_from_extent(&ext_i32, &mut strides);
         // contiguous-axis invariant: physical-x-fastest => axis 0 has stride 1.
-        debug_assert!(D == 0 || strides[0] == 1, "Layout: contiguous axis 0 must have stride 1");
-        Layout { lo, strides, extent }
+        debug_assert!(
+            D == 0 || strides[0] == 1,
+            "Layout: contiguous axis 0 must have stride 1"
+        );
+        Layout {
+            lo,
+            strides,
+            extent,
+        }
     }
 
     /// the layout of a `Domain`'s allocated cells (origin + size per axis).
@@ -194,12 +209,20 @@ mod laws {
             let dom = Domain::new(std::array::from_fn(|a| {
                 let lo = rng.in_range(-4, 4);
                 let size = rng.in_range(1, 9);
-                crate::domain::Space { name: ["i", "j", "k"][a], lo, hi: lo + size }
+                crate::domain::Space {
+                    name: ["i", "j", "k"][a],
+                    lo,
+                    hi: lo + size,
+                }
             }));
             let lay = Layout::from_domain(&dom);
             for p in dom.iter() {
                 let coord = [p[0] as i32, p[1] as i32, p[2] as i32];
-                assert_eq!(lay.at(coord), dom.flat_index(p), "Layout::at != Domain::flat_index at {p:?}");
+                assert_eq!(
+                    lay.at(coord),
+                    dom.flat_index(p),
+                    "Layout::at != Domain::flat_index at {p:?}"
+                );
             }
         }
     }
@@ -208,7 +231,11 @@ mod laws {
     // over the same allocated domain share one Layout).
     #[test]
     fn layout_is_a_pure_function_of_the_domain() {
-        let d = domain([index("i").over((-2, 30)), index("j").over(20), index("k").over((1, 9))]);
+        let d = domain([
+            index("i").over((-2, 30)),
+            index("j").over(20),
+            index("k").over((1, 9)),
+        ]);
         assert_eq!(Layout::from_domain(&d), Layout::from_domain(&d));
         assert_eq!(Layout::from_domain(&d).contiguous_axis(), 0);
         assert_eq!(Layout::from_domain(&d).len(), d.volume());
@@ -291,7 +318,11 @@ mod laws {
             );
             let mut seen: Vec<usize> = order.clone();
             seen.sort_unstable();
-            assert_eq!(seen, (0..ndim).collect::<Vec<_>>(), "nest_order must be a permutation");
+            assert_eq!(
+                seen,
+                (0..ndim).collect::<Vec<_>>(),
+                "nest_order must be a permutation"
+            );
         }
     }
 
@@ -318,7 +349,11 @@ mod laws {
         let mut c = vec![0usize; 3];
         for (flat, v) in visited.iter().enumerate() {
             unflatten(flat, &extent, &mut c);
-            assert_eq!(&c[..], &v[..], "nest walk diverges from unflatten at {flat}");
+            assert_eq!(
+                &c[..],
+                &v[..],
+                "nest walk diverges from unflatten at {flat}"
+            );
         }
     }
 }

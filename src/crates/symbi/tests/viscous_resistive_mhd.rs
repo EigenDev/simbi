@@ -43,10 +43,20 @@ fn make() -> Sim {
         .allocate()
         .expect("3d mhd sim")
         .set_initial(|[_x, y, _z]| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([V0 * (k * y).sin(), 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([V0 * (k * y).sin(), 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([B0 * (k * y).sin(), 0.0, 0.0]),
         })
-        .seed_faces(|axis, x| if axis == 0 { B0 * (k * x[1]).sin() } else { 0.0 })
+        .seed_faces(|axis, x| {
+            if axis == 0 {
+                B0 * (k * x[1]).sin()
+            } else {
+                0.0
+            }
+        })
         .build()
 }
 
@@ -59,9 +69,15 @@ fn energies(s: &Sim) -> (f64, f64, f64) {
     for c in s.geom.interior.iter() {
         let rho = *den.view().at(c);
         let mut msq = 0.0;
-        for k in 0..3 { let mo = *s.fields.cons.mom[k].view().at(c); msq += mo * mo; }
+        for k in 0..3 {
+            let mo = *s.fields.cons.mom[k].view().at(c);
+            msq += mo * mo;
+        }
         let mut bsq = 0.0;
-        for k in 0..3 { let b = *m.bcell[k].view().at(c); bsq += b * b; }
+        for k in 0..3 {
+            let b = *m.bcell[k].view().at(c);
+            bsq += b * b;
+        }
         let kin = 0.5 * msq / rho;
         let mag = 0.5 * bsq;
         ke += kin;
@@ -74,9 +90,14 @@ fn energies(s: &Sim) -> (f64, f64, f64) {
 fn run(eta: f64, nu: f64) -> ((f64, f64, f64), (f64, f64, f64)) {
     let mut sim = make();
     let e0 = energies(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
-        .with_resistivity(eta)
-        .with_viscosity(nu);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        GAMMA,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_resistivity(eta)
+    .with_viscosity(nu);
     evolve(&mut sim, &sub, T_FINAL).expect("viscous-resistive mhd evolve failed");
     let e1 = energies(&sim);
     (e0, e1)
@@ -105,7 +126,15 @@ fn resistive_viscous_mhd_runs_both_diffusivities() {
         "resistivity not acting: magnetic-energy loss resistive {me_loss_res:.3e} vs ideal {me_loss_ideal:.3e}"
     );
     // the dissipations (viscous + Ohmic) raised the gas internal energy.
-    assert!(b1.2 > b0.2, "viscous heating did not warm the gas: internal {} -> {}", b0.2, b1.2);
+    assert!(
+        b1.2 > b0.2,
+        "viscous heating did not warm the gas: internal {} -> {}",
+        b0.2,
+        b1.2
+    );
     // and everything stayed finite.
-    assert!(b1.0.is_finite() && b1.1.is_finite() && b1.2.is_finite(), "state went non-finite");
+    assert!(
+        b1.0.is_finite() && b1.1.is_finite() && b1.2.is_finite(),
+        "state went non-finite"
+    );
 }

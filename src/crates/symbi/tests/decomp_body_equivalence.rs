@@ -20,7 +20,7 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, gather_interiors, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, gather_interiors, unflatten};
 use symbi::sim::state::*;
 use symbi::sim::tracers::{body_accretion_reservoir, seed_mass_weighted};
 use symbi_algebra::Tensor;
@@ -49,12 +49,12 @@ fn central_bh() -> BodyCollection<f64, 2> {
         0,
         Tensor::new([0.0, 0.0]),
         Tensor::zeros(),
-        1.0, // gravitating mass (held fixed)
-        0.1, // radius
-        0.2, // softening
+        1.0,  // gravitating mass (held fixed)
+        0.1,  // radius
+        0.2,  // softening
         10.0, // sink_rate
-        0.5, // sink_delta
-        0.5, // accretion_radius
+        0.5,  // sink_delta
+        0.5,  // accretion_radius
     ))
 }
 
@@ -90,8 +90,22 @@ fn two_accretors() -> BodyCollection<f64, 2> {
 // rotating gravity the fluid feels is consistent across cuts.
 fn binary() -> BodyCollection<f64, 2> {
     BodyCollection::new()
-        .add(Body::gravitational(0, Tensor::new([0.25, 0.0]), Tensor::new([0.0, 0.3]), 0.5, 0.1, 0.2))
-        .add(Body::gravitational(1, Tensor::new([-0.25, 0.0]), Tensor::new([0.0, -0.3]), 0.5, 0.1, 0.2))
+        .add(Body::gravitational(
+            0,
+            Tensor::new([0.25, 0.0]),
+            Tensor::new([0.0, 0.3]),
+            0.5,
+            0.1,
+            0.2,
+        ))
+        .add(Body::gravitational(
+            1,
+            Tensor::new([-0.25, 0.0]),
+            Tensor::new([0.0, -0.3]),
+            0.5,
+            0.1,
+            0.2,
+        ))
         .as_binary()
         .with_frame(ReferenceFrame::Inertial)
         .with_binary_params(BinaryParams::new(1.0, 0.5, 0.0, 1.0))
@@ -117,7 +131,11 @@ fn make(
         .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim { rho: 2.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 2.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(bodies());
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -126,7 +144,11 @@ fn make(
 
 // build the tile grid: each tile an equal slice with its own global origin (so the body's global
 // position maps to the right local cells), CoarseFine on internal faces, Outflow on the boundary.
-fn grid_tiles(counts: [usize; 2], ts: Timestepping, bodies: fn() -> BodyCollection<f64, 2>) -> Vec<(Sim, Kern)> {
+fn grid_tiles(
+    counts: [usize; 2],
+    ts: Timestepping,
+    bodies: fn() -> BodyCollection<f64, 2>,
+) -> Vec<(Sim, Kern)> {
     let m: [usize; 2] = std::array::from_fn(|a| {
         assert!(N % counts[a] == 0, "N must split evenly into counts[{a}]");
         N / counts[a]
@@ -137,8 +159,16 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping, bodies: fn() -> BodyCollecti
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd, ts, bodies)
@@ -170,7 +200,11 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
     );
 }
 
-fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [isize; 2]) -> f64) -> Vec<f64> {
+fn global_field(
+    tiles: &[(Sim, Kern)],
+    counts: [usize; 2],
+    pick: impl Fn(&Sim, [isize; 2]) -> f64,
+) -> Vec<f64> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let mut out = vec![f64::NAN; N * N];
     for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
@@ -185,14 +219,20 @@ fn global_field(tiles: &[(Sim, Kern)], counts: [usize; 2], pick: impl Fn(&Sim, [
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 // read a body's (position, total_accreted_mass). gravitational bodies report 0 accretion.
 fn body_state(sim: &Sim, idx: usize) -> ([f64; 2], f64) {
     let b = sim.immersed.as_ref().unwrap().bodies.get(idx);
     let acc = match b.kind {
-        BodyKind::BlackHole { total_accreted_mass, .. } => total_accreted_mass,
+        BodyKind::BlackHole {
+            total_accreted_mass,
+            ..
+        } => total_accreted_mass,
         _ => 0.0,
     };
     ([b.position[0], b.position[1]], acc)
@@ -234,7 +274,10 @@ fn assert_body_matches(
         let mv = global_field(&mono, [1, 1], &pick);
         let dv = global_field(&dec, counts, &pick);
         let e = max_err(&mv, &dv);
-        assert!(e < 1e-12, "{counts:?} {ts:?} {name} err {e:e} under immersed body");
+        assert!(
+            e < 1e-12,
+            "{counts:?} {ts:?} {name} err {e:e} under immersed body"
+        );
     }
 
     // BODY-STATE equivalence: every decomposed tile's body must match the monolithic body's
@@ -249,8 +292,14 @@ fn assert_body_matches(
         for (s, _) in dec.iter() {
             let (p, a) = body_state(s, bi);
             let dp = ((p[0] - mono_pos[0]).powi(2) + (p[1] - mono_pos[1]).powi(2)).sqrt();
-            assert!(dp < 1e-12, "{counts:?} {ts:?} body {bi} position desync/mismatch: {dp:e}");
-            assert!((a - mono_acc).abs() < 1e-10, "{counts:?} {ts:?} body {bi} accreted-mass mismatch: {a} vs {mono_acc}");
+            assert!(
+                dp < 1e-12,
+                "{counts:?} {ts:?} body {bi} position desync/mismatch: {dp:e}"
+            );
+            assert!(
+                (a - mono_acc).abs() < 1e-10,
+                "{counts:?} {ts:?} body {bi} accreted-mass mismatch: {a} vs {mono_acc}"
+            );
         }
         // distance the body moved from its initial position (binary non-vacuous check).
         let r0 = (mono_pos[0].powi(2) + mono_pos[1].powi(2)).sqrt();
@@ -258,10 +307,19 @@ fn assert_body_matches(
     }
     if expect_accretion {
         let max_removed = mono_den.iter().map(|d| 2.0 - d).fold(0.0_f64, f64::max);
-        assert!(max_removed > 1e-3, "sink removed no mass ({max_removed:e}); test is vacuous");
-        assert!(accreted > 1e-6, "body recorded no accretion ({accreted:e}); diagnostic test vacuous");
+        assert!(
+            max_removed > 1e-3,
+            "sink removed no mass ({max_removed:e}); test is vacuous"
+        );
+        assert!(
+            accreted > 1e-6,
+            "body recorded no accretion ({accreted:e}); diagnostic test vacuous"
+        );
     } else {
-        assert!(moved > 1e-4, "binary did not move ({moved:e}); prescribed-orbit test vacuous");
+        assert!(
+            moved > 1e-4,
+            "binary did not move ({moved:e}); prescribed-orbit test vacuous"
+        );
     }
 
     // the production gather path (the python checkpoint output).

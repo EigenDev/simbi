@@ -18,13 +18,13 @@
 // run: cargo test -p symbi-hydro --test covariant_energy_conditioning -- --nocapture
 // =============================================================================
 
+use symbi_algebra::Matrix;
 use symbi_algebra::Tensor;
+use symbi_hydro::RhdGr;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
-use symbi_hydro::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
-use symbi_algebra::Matrix;
 
 const GAMMA: f64 = 4.0 / 3.0;
 
@@ -50,7 +50,11 @@ fn ks_regime(r: f64) -> RhdGr<f64, 1> {
 fn round_trip_pressure_error(r: f64, rho: f64, pre: f64, vel: f64) -> f64 {
     let eos = IdealGas { gamma: GAMMA };
     let gr = ks_regime(r);
-    let prim = Prim { rho, vel: Tensor::new([vel]), pre };
+    let prim = Prim {
+        rho,
+        vel: Tensor::new([vel]),
+        pre,
+    };
     let cons = gr.to_conserved(&eos, &prim);
     let back = gr.to_primitive(&eos, &cons).unwrap();
     (back.pre - pre).abs() / pre
@@ -63,7 +67,10 @@ fn the_round_trip_degrades_as_the_gas_gets_cold() {
     // error must grow roughly in proportion as p falls.
     let r = 6.0; // alpha ~ 0.866, so (alpha - 1) D ~ -0.134 rho
     println!("\n  r = {r}, alpha = {:.6}", ks_regime(r).alpha);
-    println!("  {:>10}  {:>12}  {:>12}", "p/rho", "rel err", "binding/tau");
+    println!(
+        "  {:>10}  {:>12}  {:>12}",
+        "p/rho", "rel err", "binding/tau"
+    );
     let mut worst_cold = 0.0_f64;
     for k in 2..=12 {
         let pre = 10f64.powi(-k);
@@ -110,7 +117,11 @@ fn flat_round_trip_pressure_error(rho: f64, pre: f64, vel: f64) -> f64 {
         shift: Tensor::zeros(),
         sqrt_gamma: 1.0,
     };
-    let prim = Prim { rho, vel: Tensor::new([vel]), pre };
+    let prim = Prim {
+        rho,
+        vel: Tensor::new([vel]),
+        pre,
+    };
     let cons = gr.to_conserved(&eos, &prim);
     let back = gr.to_primitive(&eos, &cons).unwrap();
     (back.pre - pre).abs() / pre
@@ -133,7 +144,10 @@ fn the_cold_gas_error_floor_is_the_solver_not_the_binding_term() {
     );
     // the curved floors agree with each other to within a small factor...
     let ratio = (deep / shallow).max(shallow / deep);
-    assert!(ratio < 10.0, "curved floor is lapse-dependent: {deep:.3e} vs {shallow:.3e}");
+    assert!(
+        ratio < 10.0,
+        "curved floor is lapse-dependent: {deep:.3e} vs {shallow:.3e}"
+    );
     // ...and the curved chart is no worse than the flat one by more than a small
     // factor, so the covariant energy is not what limits cold-gas recovery.
     assert!(

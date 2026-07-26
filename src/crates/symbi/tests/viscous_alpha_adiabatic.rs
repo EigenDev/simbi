@@ -21,8 +21,8 @@ use symbi::sim::substrate_seam::{KernelSet, WithViscosity};
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::state::Prim;
 use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -49,7 +49,11 @@ fn build() -> Sim {
         // uniform (rho, p) — the one constant local cs^2 — with a linear shear
         // v_x(y), so the stress has one dominant component and the heating is
         // strictly positive where the gradient lives.
-        .set_initial(|x| Prim { rho: 1.0, vel: Tensor::new([0.3 * x[1], 0.0]), pre: 1.0 })
+        .set_initial(|x| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3 * x[1], 0.0]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(BodyCollection::new().add(Body::gravitational(
             0,
@@ -91,13 +95,19 @@ fn alpha_viscosity_acts_heats_and_carries_the_radial_law() {
         .zip(&m0_before)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
-    assert!(dmom > 1e-12, "the alpha viscous pass never touched the momentum");
+    assert!(
+        dmom > 1e-12,
+        "the alpha viscous pass never touched the momentum"
+    );
     let dnrg_max = en_alpha
         .iter()
         .zip(&en_before)
         .map(|(a, b)| a - b)
         .fold(f64::NEG_INFINITY, f64::max);
-    assert!(dnrg_max > 0.0, "no viscous heating booked (max dE {dnrg_max:e})");
+    assert!(
+        dnrg_max > 0.0,
+        "no viscous heating booked (max dE {dnrg_max:e})"
+    );
 
     // the radial law: a constant-nu pass with nu = alpha cs0^2 / Omega_K(r_ref)
     // matches the alpha pass ONLY at r_ref; anywhere else Omega_K differs, so the

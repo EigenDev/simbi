@@ -107,7 +107,11 @@ pub enum SurfaceSpec {
     /// the wall channels; the wall rates are `k_eta_* c_s / dx`
     /// (multiplicative dials — zero is an exact off switch, so `k_eta_t = 0`
     /// is a free-slip surface).
-    Porous { porosity: f64, k_eta_n: f64, k_eta_t: f64 },
+    Porous {
+        porosity: f64,
+        k_eta_n: f64,
+        k_eta_t: f64,
+    },
     /// the torque-free accretor: the drain plus a tangential
     /// anti-relaxation `lambda_t = -xi lambda_rho`, so the accreted mass carries
     /// no net angular momentum to the body (the Dittmann sink). `xi in [0, 1]`:
@@ -178,13 +182,22 @@ pub struct Body<S: Scalar, const D: usize> {
 // -- factory functions --
 
 impl<S: Scalar, const D: usize> Body<S, D> {
-    fn base(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
-            mass: S, radius: S, kind: BodyKind<S>) -> Self {
+    fn base(
+        idx: usize,
+        position: Tensor<S, D>,
+        velocity: Tensor<S, D>,
+        mass: S,
+        radius: S,
+        kind: BodyKind<S>,
+    ) -> Self {
         Self {
-            idx, position, velocity,
+            idx,
+            position,
+            velocity,
             force: Tensor::zeros(),
             torque: Tensor::zeros(),
-            mass, radius,
+            mass,
+            radius,
             two_way_coupling: false,
             kind,
             spec: BodySpec::default(),
@@ -284,7 +297,10 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             ke = ke + half * self.mass * self.velocity[a] * self.velocity[a];
         }
         // omega in the body frame, weighted by the principal moments.
-        let wb = matvec3(transpose3(self.orientation), [self.omega[0], self.omega[1], self.omega[2]]);
+        let wb = matvec3(
+            transpose3(self.orientation),
+            [self.omega[0], self.omega[1], self.omega[2]],
+        );
         for k in 0..3 {
             ke = ke + half * self.inertia_body[k] * wb[k] * wb[k];
         }
@@ -294,7 +310,10 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     /// the world-frame angular momentum `L = I omega = R (inertia_body ⊙ (R^T omega))` — the rigid-
     /// body spin state a viz glyph draws, and the conserved quantity a torque-free sink must not gain.
     pub fn angular_momentum(&self) -> Tensor<S, 3> {
-        let wb = matvec3(transpose3(self.orientation), [self.omega[0], self.omega[1], self.omega[2]]);
+        let wb = matvec3(
+            transpose3(self.orientation),
+            [self.omega[0], self.omega[1], self.omega[2]],
+        );
         let lb = [
             self.inertia_body[0] * wb[0],
             self.inertia_body[1] * wb[1],
@@ -316,7 +335,10 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     /// the rotational kinetic energy `0.5 omega . I . omega = 0.5 sum_k inertia_body[k] (R^T omega)_k^2`.
     pub fn rotational_ke(&self) -> S {
         let half = S::from_f64(0.5);
-        let wb = matvec3(transpose3(self.orientation), [self.omega[0], self.omega[1], self.omega[2]]);
+        let wb = matvec3(
+            transpose3(self.orientation),
+            [self.omega[0], self.omega[1], self.omega[2]],
+        );
         let mut ke = S::ZERO;
         for k in 0..3 {
             ke = ke + half * self.inertia_body[k] * wb[k] * wb[k];
@@ -324,56 +346,123 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         ke
     }
 
-    pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
-                   mass: S, radius: S) -> Self {
+    pub fn passive(
+        idx: usize,
+        position: Tensor<S, D>,
+        velocity: Tensor<S, D>,
+        mass: S,
+        radius: S,
+    ) -> Self {
         Self::base(idx, position, velocity, mass, radius, BodyKind::Passive)
     }
 
-    pub fn gravitational(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
-                         mass: S, radius: S, softening: S) -> Self {
-        Self::base(idx, position, velocity, mass, radius,
-                   BodyKind::Gravitational { softening })
+    pub fn gravitational(
+        idx: usize,
+        position: Tensor<S, D>,
+        velocity: Tensor<S, D>,
+        mass: S,
+        radius: S,
+        softening: S,
+    ) -> Self {
+        Self::base(
+            idx,
+            position,
+            velocity,
+            mass,
+            radius,
+            BodyKind::Gravitational { softening },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn black_hole(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
-                      mass: S, radius: S, softening: S,
-                      sink_rate: S, sink_delta: S, accretion_radius: S) -> Self {
-        Self::base(idx, position, velocity, mass, radius,
-                   BodyKind::BlackHole {
-                       softening,
-                       sink_rate,
-                       accretion_radius,
-                       total_accreted_mass: S::ZERO,
-                       accretion_rate: S::ZERO,
-                       sink_delta,
-                   })
+    pub fn black_hole(
+        idx: usize,
+        position: Tensor<S, D>,
+        velocity: Tensor<S, D>,
+        mass: S,
+        radius: S,
+        softening: S,
+        sink_rate: S,
+        sink_delta: S,
+        accretion_radius: S,
+    ) -> Self {
+        Self::base(
+            idx,
+            position,
+            velocity,
+            mass,
+            radius,
+            BodyKind::BlackHole {
+                softening,
+                sink_rate,
+                accretion_radius,
+                total_accreted_mass: S::ZERO,
+                accretion_rate: S::ZERO,
+                sink_delta,
+            },
+        )
     }
 
     /// the GR excision horizon: a static, massless (metric-gravity), diagnostic-only immersed
     /// boundary at the chart origin. `radius` is set to `diagnostic_radius` (the measurement shell).
     pub fn horizon(idx: usize, excision_radius: S, diagnostic_radius: S) -> Self {
-        Self::base(idx, Tensor::zeros(), Tensor::zeros(), S::ZERO, diagnostic_radius,
-                   BodyKind::Horizon {
-                       excision_radius,
-                       diagnostic_radius,
-                       total_accreted_mass: S::ZERO,
-                       total_accreted_energy: S::ZERO,
-                       mdot: S::ZERO,
-                       edot: S::ZERO,
-                   })
+        Self::base(
+            idx,
+            Tensor::zeros(),
+            Tensor::zeros(),
+            S::ZERO,
+            diagnostic_radius,
+            BodyKind::Horizon {
+                excision_radius,
+                diagnostic_radius,
+                total_accreted_mass: S::ZERO,
+                total_accreted_energy: S::ZERO,
+                mdot: S::ZERO,
+                edot: S::ZERO,
+            },
+        )
     }
 
-    pub fn planet(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
-                  mass: S, radius: S, inertia: S, no_slip: bool) -> Self {
-        Self::base(idx, position, velocity, mass, radius,
-                   BodyKind::Planet { softening: S::ZERO, inertia, no_slip })
+    pub fn planet(
+        idx: usize,
+        position: Tensor<S, D>,
+        velocity: Tensor<S, D>,
+        mass: S,
+        radius: S,
+        inertia: S,
+        no_slip: bool,
+    ) -> Self {
+        Self::base(
+            idx,
+            position,
+            velocity,
+            mass,
+            radius,
+            BodyKind::Planet {
+                softening: S::ZERO,
+                inertia,
+                no_slip,
+            },
+        )
     }
 
-    pub fn rigid_sphere(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
-                        mass: S, radius: S, inertia: S, no_slip: bool) -> Self {
-        let mut b = Self::base(idx, position, velocity, mass, radius,
-                   BodyKind::RigidSphere { inertia, no_slip });
+    pub fn rigid_sphere(
+        idx: usize,
+        position: Tensor<S, D>,
+        velocity: Tensor<S, D>,
+        mass: S,
+        radius: S,
+        inertia: S,
+        no_slip: bool,
+    ) -> Self {
+        let mut b = Self::base(
+            idx,
+            position,
+            velocity,
+            mass,
+            radius,
+            BodyKind::RigidSphere { inertia, no_slip },
+        );
         // isotropic by default: the scalar inertia on all three principal axes.
         b.inertia_body = [inertia, inertia, inertia];
         b
@@ -423,20 +512,24 @@ impl<S: Scalar, const D: usize> Body<S, D> {
 
 impl<S: Scalar, const D: usize> Body<S, D> {
     pub fn has_gravity(&self) -> bool {
-        matches!(self.kind,
-            BodyKind::Gravitational { .. } |
-            BodyKind::BlackHole { .. } |
-            BodyKind::Planet { .. })
+        matches!(
+            self.kind,
+            BodyKind::Gravitational { .. } | BodyKind::BlackHole { .. } | BodyKind::Planet { .. }
+        )
     }
 
     pub fn has_accretion(&self) -> bool {
-        matches!(self.kind, BodyKind::BlackHole { .. } | BodyKind::Horizon { .. })
+        matches!(
+            self.kind,
+            BodyKind::BlackHole { .. } | BodyKind::Horizon { .. }
+        )
     }
 
     pub fn has_rigid(&self) -> bool {
-        matches!(self.kind,
-            BodyKind::RigidSphere { .. } |
-            BodyKind::Planet { .. })
+        matches!(
+            self.kind,
+            BodyKind::RigidSphere { .. } | BodyKind::Planet { .. }
+        )
     }
 
     /// softening length, or None if the body has no gravitational capability.
@@ -452,7 +545,9 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     /// accretion radius, or None if the body has no accretion capability.
     pub fn accretion_radius(&self) -> Option<S> {
         match self.kind {
-            BodyKind::BlackHole { accretion_radius, .. } => Some(accretion_radius),
+            BodyKind::BlackHole {
+                accretion_radius, ..
+            } => Some(accretion_radius),
             _ => None,
         }
     }
@@ -463,7 +558,9 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     /// penalization (passive / purely gravitational), which gates it out of the penalize step.
     pub fn mask_radius(&self) -> Option<S> {
         match self.kind {
-            BodyKind::BlackHole { accretion_radius, .. } => Some(accretion_radius),
+            BodyKind::BlackHole {
+                accretion_radius, ..
+            } => Some(accretion_radius),
             BodyKind::RigidSphere { .. } => Some(self.radius),
             _ => None,
         }
@@ -530,8 +627,15 @@ mod tests {
     #[test]
     fn black_hole() {
         let b = Body::black_hole(
-            0, V3::new([1.0, 0.0, 0.0]), V3::zeros(),
-            1.0, 0.1, 0.04, 10.0, 0.0, 0.2,
+            0,
+            V3::new([1.0, 0.0, 0.0]),
+            V3::zeros(),
+            1.0,
+            0.1,
+            0.04,
+            10.0,
+            0.0,
+            0.2,
         );
         assert!(b.has_gravity());
         assert!(b.has_accretion());
@@ -576,8 +680,7 @@ mod tests {
 
     #[test]
     fn with_two_way_coupling() {
-        let b = Body::passive(0, V2::zeros(), V2::zeros(), 1.0, 0.1)
-            .with_two_way_coupling(true);
+        let b = Body::passive(0, V2::zeros(), V2::zeros(), 1.0, 0.1).with_two_way_coupling(true);
         assert!(b.two_way_coupling);
     }
 
@@ -592,7 +695,11 @@ mod tests {
         assert_eq!(b.spec.magnetic, MagneticSpec::None);
         // the builders route through `spec`, and the surface stack is untouched by the
         // magnetic declaration.
-        let wall = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+        let wall = SurfaceSpec::Porous {
+            porosity: 0.0,
+            k_eta_n: 50.0,
+            k_eta_t: 50.0,
+        };
         let b = b.with_surface(wall).with_magnetic(MagneticSpec::None);
         assert_eq!(b.spec.surface, wall);
         assert_eq!(b.spec.magnetic, MagneticSpec::None);

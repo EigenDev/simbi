@@ -15,7 +15,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_wave_speed_map_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, rmhd_wave_speed_map_gv};
 
 fn dot(a: &[f64; 3], b: &[f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
@@ -102,7 +102,14 @@ fn solve_quartic_ref(b: f64, c: f64, d: f64, e: f64) -> (f64, f64) {
     (smin, smax)
 }
 
-fn ref_wave_speeds(rho: f64, vel: [f64; 3], p: f64, mag: [f64; 3], gamma: f64, dir: usize) -> (f64, f64) {
+fn ref_wave_speeds(
+    rho: f64,
+    vel: [f64; 3],
+    p: f64,
+    mag: [f64; 3],
+    gamma: f64,
+    dir: usize,
+) -> (f64, f64) {
     let eps = 1e-12;
     let vsq = dot(&vel, &vel);
     let w = 1.0 / (1.0 - vsq).sqrt();
@@ -110,7 +117,11 @@ fn ref_wave_speeds(rho: f64, vel: [f64; 3], p: f64, mag: [f64; 3], gamma: f64, d
     let cssq = gamma * p / (rho * h);
     let vdb = dot(&vel, &mag);
     let bmu0 = w * vdb;
-    let bmu_s = [mag[0] / w + w * vel[0] * vdb, mag[1] / w + w * vel[1] * vdb, mag[2] / w + w * vel[2] * vdb];
+    let bmu_s = [
+        mag[0] / w + w * vel[0] * vdb,
+        mag[1] / w + w * vel[1] * vdb,
+        mag[2] / w + w * vel[2] * vdb,
+    ];
     let bmusq = -bmu0 * bmu0 + bmu_s[0] * bmu_s[0] + bmu_s[1] * bmu_s[1] + bmu_s[2] * bmu_s[2];
     let bn = mag[dir];
     let bnsq = bn * bn;
@@ -130,23 +141,44 @@ fn ref_wave_speeds(rho: f64, vel: [f64; 3], p: f64, mag: [f64; 3], gamma: f64, d
         let a1 = -2.0 * rho * h * g2 * vn * (1.0 - cssq);
         let a0 = rho * h * (-cssq + g2 * vn * vn * (1.0 - cssq)) - q;
         let disq = a1 * a1 - 4.0 * a2 * a0;
-        (0.5 * (-a1 - disq.sqrt()) / a2, 0.5 * (-a1 + disq.sqrt()) / a2)
+        (
+            0.5 * (-a1 - disq.sqrt()) / a2,
+            0.5 * (-a1 + disq.sqrt()) / a2,
+        )
     } else {
         let bmun = bmu_s[dir];
         let w2 = w * w;
         let vn2 = vn * vn;
-        let a4 = -bmu0 * bmu0 * cssq + bmusq * w2 - cssq * w2 * w2 * h * rho + cssq * w2 * h * rho + w2 * w2 * h * rho;
+        let a4 = -bmu0 * bmu0 * cssq + bmusq * w2 - cssq * w2 * w2 * h * rho
+            + cssq * w2 * h * rho
+            + w2 * w2 * h * rho;
         let fac = 1.0 / a4;
-        let a3 = fac * (2.0 * bmu0 * bmun * cssq - 2.0 * bmusq * w2 * vn + 4.0 * cssq * w2 * w2 * h * rho * vn - 2.0 * cssq * w2 * h * rho * vn - 4.0 * w2 * w2 * h * rho * vn);
-        let a2 = fac * (bmu0 * bmu0 * cssq + bmusq * w2 * vn2 - bmusq * w2 - bmun * bmun * cssq - 6.0 * cssq * w2 * w2 * h * rho * vn2 + cssq * w2 * h * rho * vn2 - cssq * w2 * h * rho + 6.0 * w2 * w2 * h * rho * vn2);
-        let a1 = fac * (-2.0 * bmu0 * bmun * cssq + 2.0 * bmusq * w2 * vn + 4.0 * cssq * w2 * w2 * h * rho * vn * vn2 + 2.0 * cssq * w2 * h * rho * vn - 4.0 * w2 * w2 * h * rho * vn * vn2);
-        let a0 = fac * (-bmusq * w2 * vn2 + bmun * bmun * cssq - cssq * w2 * w2 * h * rho * vn2 * vn2 - cssq * w2 * h * rho * vn2 + w2 * w2 * h * rho * vn2 * vn2);
+        let a3 = fac
+            * (2.0 * bmu0 * bmun * cssq - 2.0 * bmusq * w2 * vn
+                + 4.0 * cssq * w2 * w2 * h * rho * vn
+                - 2.0 * cssq * w2 * h * rho * vn
+                - 4.0 * w2 * w2 * h * rho * vn);
+        let a2 = fac
+            * (bmu0 * bmu0 * cssq + bmusq * w2 * vn2
+                - bmusq * w2
+                - bmun * bmun * cssq
+                - 6.0 * cssq * w2 * w2 * h * rho * vn2
+                + cssq * w2 * h * rho * vn2
+                - cssq * w2 * h * rho
+                + 6.0 * w2 * w2 * h * rho * vn2);
+        let a1 = fac
+            * (-2.0 * bmu0 * bmun * cssq
+                + 2.0 * bmusq * w2 * vn
+                + 4.0 * cssq * w2 * w2 * h * rho * vn * vn2
+                + 2.0 * cssq * w2 * h * rho * vn
+                - 4.0 * w2 * w2 * h * rho * vn * vn2);
+        let a0 = fac
+            * (-bmusq * w2 * vn2 + bmun * bmun * cssq
+                - cssq * w2 * w2 * h * rho * vn2 * vn2
+                - cssq * w2 * h * rho * vn2
+                + w2 * w2 * h * rho * vn2 * vn2);
         let (ll, lr) = solve_quartic_ref(a3, a2, a1, a0);
-        if ll.is_nan() {
-            (0.0, 0.0)
-        } else {
-            (ll, lr)
-        }
+        if ll.is_nan() { (0.0, 0.0) } else { (ll, lr) }
     }
 }
 
@@ -161,7 +193,12 @@ fn run_map(inputs: &[(&str, Vec<f64>)], gamma: f64) -> Vec<f64> {
     let built = rmhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3);
     assert_eq!(
         built.0.scalar_params,
-        vec!["gamma".to_string(), "inv_dx_0".into(), "inv_dx_1".into(), "inv_dx_2".into()],
+        vec![
+            "gamma".to_string(),
+            "inv_dx_0".into(),
+            "inv_dx_1".into(),
+            "inv_dx_2".into()
+        ],
         "the gv map declares gamma + the cartesian-uniform inv_dx widths, in that order"
     );
     let mut k = KernelRun::new(built).grid([n, 1, 1]);
@@ -169,10 +206,15 @@ fn run_map(inputs: &[(&str, Vec<f64>)], gamma: f64) -> Vec<f64> {
         let owned = col.clone();
         k = k.field_with(key, move |c| owned[c[0]]);
     }
-    k.scalars(&[("gamma", gamma), ("inv_dx_0", 1.0), ("inv_dx_1", 1.0), ("inv_dx_2", 1.0)])
-        .run()
-        .values("lambda")
-        .to_vec()
+    k.scalars(&[
+        ("gamma", gamma),
+        ("inv_dx_0", 1.0),
+        ("inv_dx_1", 1.0),
+        ("inv_dx_2", 1.0),
+    ])
+    .run()
+    .values("lambda")
+    .to_vec()
 }
 
 #[test]
@@ -214,12 +256,18 @@ fn rmhd_wave_speed_map_bounds_cpp_quartic() {
             })
             .fold(0.0_f64, f64::max);
         // never under-estimate (CFL-safe): the magnetosonic bound dominates the exact quartic.
-        assert!(got[i] >= exact - 1e-9,
-            "map state {i}: bound {} under-estimates exact quartic {exact} -> CFL-unsafe", got[i]);
+        assert!(
+            got[i] >= exact - 1e-9,
+            "map state {i}: bound {} under-estimates exact quartic {exact} -> CFL-unsafe",
+            got[i]
+        );
         // the bound MAY exceed c = 1 by design (a simplified discriminant that over-estimates
         // only shrinks dt — safe). it must stay finite, though: a NaN would poison the dt
         // max-reduction. (per rmhd_magnetosonic_cfl_speeds: "over-estimating only shrinks dt".)
-        assert!(got[i].is_finite(),
-            "map state {i}: bound {} must be finite", got[i]);
+        assert!(
+            got[i].is_finite(),
+            "map state {i}: bound {} must be finite",
+            got[i]
+        );
     }
 }

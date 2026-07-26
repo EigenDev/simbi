@@ -28,11 +28,11 @@
 //   advance_bonded(&mut coll, &mut bonds, Some(&mut contacts), None, dt, &[]);
 // =============================================================================
 
-use std::collections::{BTreeMap, BTreeSet};
-use symbi_algebra::Tensor;
 use crate::body::Body;
 use crate::bond::{Bond, Kick};
 use crate::collection::BodyCollection;
+use std::collections::{BTreeMap, BTreeSet};
+use symbi_algebra::Tensor;
 
 /// contact-law parameters shared by every fragment pair: normal spring `k_n`,
 /// tangential spring `k_t`, normal dashpot `gamma_n`, friction coefficient
@@ -83,7 +83,11 @@ fn overlap_of<const D: usize>(bi: &Body<f64, D>, bj: &Body<f64, D>) -> Option<Ov
     let n = [s[0] / dist, s[1] / dist, s[2] / dist];
     // the center of the overlap lens along the line of centers.
     let reach = bi.radius - 0.5 * delta;
-    let point = [xi[0] + n[0] * reach, xi[1] + n[1] * reach, xi[2] + n[2] * reach];
+    let point = [
+        xi[0] + n[0] * reach,
+        xi[1] + n[1] * reach,
+        xi[2] + n[2] * reach,
+    ];
     let vi = material_velocity(bi, point);
     let vj = material_velocity(bj, point);
     Some(Overlap {
@@ -119,7 +123,10 @@ pub(crate) fn bonded_pairs(bonds: &[Bond]) -> BTreeSet<(usize, usize)> {
 
 impl Contacts {
     pub fn new(material: ContactMaterial) -> Self {
-        Self { material, slip: BTreeMap::new() }
+        Self {
+            material,
+            slip: BTreeMap::new(),
+        }
     }
 
     /// number of pairs currently carrying contact state.
@@ -185,7 +192,9 @@ impl Contacts {
                 if bonded.contains(&(i, j)) || (!bi.two_way_coupling && !bj.two_way_coupling) {
                     continue;
                 }
-                let Some(ov) = overlap_of(bi, bj) else { continue };
+                let Some(ov) = overlap_of(bi, bj) else {
+                    continue;
+                };
                 touching.insert((i, j));
                 let m = self.material;
                 let slip = self.slip.entry((i, j)).or_insert_with(Tensor::zeros);
@@ -199,8 +208,7 @@ impl Contacts {
                 if m.k_t > 0.0 && m.mu.is_finite() {
                     let f_n = normal_magnitude(&m, ov.delta, vn);
                     let cap = m.mu * f_n / m.k_t;
-                    let mag =
-                        (slip[0] * slip[0] + slip[1] * slip[1] + slip[2] * slip[2]).sqrt();
+                    let mag = (slip[0] * slip[0] + slip[1] * slip[1] + slip[2] * slip[2]).sqrt();
                     if mag > cap && mag > 0.0 {
                         let scale = cap / mag;
                         for a in 0..3 {
@@ -229,7 +237,7 @@ impl Contacts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bond::{advance_bonded, Bond, BondMaterial};
+    use crate::bond::{Bond, BondMaterial, advance_bonded};
 
     type V2 = Tensor<f64, 2>;
 
@@ -280,14 +288,24 @@ mod tests {
         for _ in 0..440 {
             advance_bonded(&mut coll, &mut bonds, Some(&mut contacts), None, 0.005, &[]);
         }
-        assert!(separation(&coll) > 1.5, "pair did not separate: {}", separation(&coll));
+        assert!(
+            separation(&coll) > 1.5,
+            "pair did not separate: {}",
+            separation(&coll)
+        );
         let (v0, v1) = (coll.get(0).velocity[0], coll.get(1).velocity[0]);
         assert!((v0 + 0.5).abs() < 0.005, "left exit velocity {v0}");
         assert!((v1 - 0.5).abs() < 0.005, "right exit velocity {v1}");
         let p = total_momentum(&coll);
-        assert!(p[0].abs() < 1e-12 && p[1].abs() < 1e-12, "momentum drift {p:?}");
+        assert!(
+            p[0].abs() < 1e-12 && p[1].abs() < 1e-12,
+            "momentum drift {p:?}"
+        );
         let ke1: f64 = coll.bodies().iter().map(|b| b.mechanical_ke()).sum();
-        assert!((ke1 - ke0).abs() < 1e-2 * ke0, "elastic bounce energy {ke0} -> {ke1}");
+        assert!(
+            (ke1 - ke0).abs() < 1e-2 * ke0,
+            "elastic bounce energy {ke0} -> {ke1}"
+        );
         assert_eq!(contacts.active(), 0, "slip state leaked past separation");
     }
 
@@ -364,7 +382,10 @@ mod tests {
             "coulomb cone violated: |J_t|/|J_n| = {}",
             j_t / j_n
         );
-        assert!(coll.get(1).omega[2].abs() > 1e-3, "friction imparted no spin");
+        assert!(
+            coll.get(1).omega[2].abs() > 1e-3,
+            "friction imparted no spin"
+        );
         let p = total_momentum(&coll);
         assert!(
             (p[0] - 0.6).abs() < 1e-12 && p[1].abs() < 1e-12,
@@ -413,7 +434,10 @@ mod tests {
         for _ in 0..400 {
             advance_bonded(&mut coll, &mut bonds, Some(&mut contacts), None, 0.005, &[]);
             let sep = separation(&coll);
-            assert!(sep >= prev_sep, "separating pair pulled back: {prev_sep} -> {sep}");
+            assert!(
+                sep >= prev_sep,
+                "separating pair pulled back: {prev_sep} -> {sep}"
+            );
             prev_sep = sep;
         }
         let rel = coll.get(1).velocity[0] - coll.get(0).velocity[0];
@@ -429,7 +453,11 @@ mod tests {
         let mut coll = BodyCollection::<f64, 2>::new()
             .add_fragment(ball(0.0, 0.0, 0.0, 0.0))
             .add_fragment(ball(0.8, 0.0, 0.0, 0.0));
-        let mat = BondMaterial { k_n: 500.0, gamma: 5.0, ..BondMaterial::rigid() };
+        let mat = BondMaterial {
+            k_n: 500.0,
+            gamma: 5.0,
+            ..BondMaterial::rigid()
+        };
         let mut bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
         let mut contacts = Contacts::new(ContactMaterial {
             k_n: 1000.0,
@@ -450,7 +478,10 @@ mod tests {
             advance_bonded(&mut coll, &mut bonds, Some(&mut contacts), None, 0.01, &[]);
         }
         let sep = separation(&coll);
-        assert!(sep > 1.0, "contact failed to expel the overlap after breakage: {sep}");
+        assert!(
+            sep > 1.0,
+            "contact failed to expel the overlap after breakage: {sep}"
+        );
     }
 
     #[test]

@@ -47,9 +47,8 @@ fn make() -> (Sim, Kern) {
         })
         .build();
     let tracers = seed_mass_weighted(&sim, 1000);
-    sim.continuous_tracers = Some(
-        ContinuousTracerSet::from_discrete(&tracers, ItoOrder::Three).unwrap(),
-    );
+    sim.continuous_tracers =
+        Some(ContinuousTracerSet::from_discrete(&tracers, ItoOrder::Three).unwrap());
     sim.tracers = Some(tracers);
     let kernels = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_runtime_source(
         build_user_source(&source, &NEWTONIAN_SPEC).unwrap(),
@@ -85,10 +84,8 @@ fn continuous_records(
 fn source_spawning_continues_identically_after_restart() {
     let (mut uninterrupted, uninterrupted_kernels) = make();
     evolve(&mut uninterrupted, &uninterrupted_kernels, T_MID).unwrap();
-    let checkpoint = std::env::temp_dir().join(format!(
-        "symbi_tracer_restart_{}.h5",
-        std::process::id()
-    ));
+    let checkpoint =
+        std::env::temp_dir().join(format!("symbi_tracer_restart_{}.h5", std::process::id()));
     write_checkpoint(
         &uninterrupted,
         checkpoint.to_str().unwrap(),

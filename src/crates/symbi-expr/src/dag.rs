@@ -45,8 +45,15 @@ impl Node {
         match &self.payload {
             Payload::None | Payload::Value(_) | Payload::ParamIdx(_) => {}
             Payload::Unary(c) => f(*c),
-            Payload::Binary(l, r) => { f(*l); f(*r); }
-            Payload::Ternary(a, b, c) => { f(*a); f(*b); f(*c); }
+            Payload::Binary(l, r) => {
+                f(*l);
+                f(*r);
+            }
+            Payload::Ternary(a, b, c) => {
+                f(*a);
+                f(*b);
+                f(*c);
+            }
         }
     }
 }
@@ -80,68 +87,131 @@ impl Dag {
     // ---- leaf constructors ----
 
     pub fn constant(&mut self, val: f64) -> usize {
-        self.push(Node { op: Op::Constant, payload: Payload::Value(val) })
+        self.push(Node {
+            op: Op::Constant,
+            payload: Payload::Value(val),
+        })
     }
 
     pub fn var_x1(&mut self) -> usize {
-        self.push(Node { op: Op::VariableX1, payload: Payload::None })
+        self.push(Node {
+            op: Op::VariableX1,
+            payload: Payload::None,
+        })
     }
 
     pub fn var_x2(&mut self) -> usize {
-        self.push(Node { op: Op::VariableX2, payload: Payload::None })
+        self.push(Node {
+            op: Op::VariableX2,
+            payload: Payload::None,
+        })
     }
 
     pub fn var_x3(&mut self) -> usize {
-        self.push(Node { op: Op::VariableX3, payload: Payload::None })
+        self.push(Node {
+            op: Op::VariableX3,
+            payload: Payload::None,
+        })
     }
 
     pub fn var_t(&mut self) -> usize {
-        self.push(Node { op: Op::VariableT, payload: Payload::None })
+        self.push(Node {
+            op: Op::VariableT,
+            payload: Payload::None,
+        })
     }
 
     pub fn param(&mut self, idx: usize) -> usize {
-        self.push(Node { op: Op::Parameter, payload: Payload::ParamIdx(idx) })
+        self.push(Node {
+            op: Op::Parameter,
+            payload: Payload::ParamIdx(idx),
+        })
     }
 
     // ---- generic constructors ----
 
     pub fn unary(&mut self, op: Op, child: usize) -> usize {
         debug_assert_eq!(op.arity(), 1, "{:?} is not unary", op);
-        self.push(Node { op, payload: Payload::Unary(child) })
+        self.push(Node {
+            op,
+            payload: Payload::Unary(child),
+        })
     }
 
     pub fn binary(&mut self, op: Op, left: usize, right: usize) -> usize {
         debug_assert_eq!(op.arity(), 2, "{:?} is not binary", op);
-        self.push(Node { op, payload: Payload::Binary(left, right) })
+        self.push(Node {
+            op,
+            payload: Payload::Binary(left, right),
+        })
     }
 
     pub fn if_then_else(&mut self, cond: usize, then_: usize, else_: usize) -> usize {
-        self.push(Node { op: Op::IfThenElse, payload: Payload::Ternary(cond, then_, else_) })
+        self.push(Node {
+            op: Op::IfThenElse,
+            payload: Payload::Ternary(cond, then_, else_),
+        })
     }
 
     // ---- arithmetic convenience ----
 
-    pub fn add(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Add, a, b) }
-    pub fn sub(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Sub, a, b) }
-    pub fn mul(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Mul, a, b) }
-    pub fn div(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Div, a, b) }
-    pub fn pow(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Pow, a, b) }
-    pub fn neg(&mut self, a: usize) -> usize { self.unary(Op::Neg, a) }
-    pub fn abs(&mut self, a: usize) -> usize { self.unary(Op::Abs, a) }
-    pub fn sqrt(&mut self, a: usize) -> usize { self.unary(Op::Sqrt, a) }
-    pub fn sin(&mut self, a: usize) -> usize { self.unary(Op::Sin, a) }
-    pub fn cos(&mut self, a: usize) -> usize { self.unary(Op::Cos, a) }
-    pub fn exp(&mut self, a: usize) -> usize { self.unary(Op::Exp, a) }
-    pub fn log(&mut self, a: usize) -> usize { self.unary(Op::Log, a) }
-    pub fn min(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Min, a, b) }
-    pub fn max(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Max, a, b) }
+    pub fn add(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Add, a, b)
+    }
+    pub fn sub(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Sub, a, b)
+    }
+    pub fn mul(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Mul, a, b)
+    }
+    pub fn div(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Div, a, b)
+    }
+    pub fn pow(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Pow, a, b)
+    }
+    pub fn neg(&mut self, a: usize) -> usize {
+        self.unary(Op::Neg, a)
+    }
+    pub fn abs(&mut self, a: usize) -> usize {
+        self.unary(Op::Abs, a)
+    }
+    pub fn sqrt(&mut self, a: usize) -> usize {
+        self.unary(Op::Sqrt, a)
+    }
+    pub fn sin(&mut self, a: usize) -> usize {
+        self.unary(Op::Sin, a)
+    }
+    pub fn cos(&mut self, a: usize) -> usize {
+        self.unary(Op::Cos, a)
+    }
+    pub fn exp(&mut self, a: usize) -> usize {
+        self.unary(Op::Exp, a)
+    }
+    pub fn log(&mut self, a: usize) -> usize {
+        self.unary(Op::Log, a)
+    }
+    pub fn min(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Min, a, b)
+    }
+    pub fn max(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Max, a, b)
+    }
 
     // ---- comparison convenience ----
 
-    pub fn lt(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Lt, a, b) }
-    pub fn gt(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Gt, a, b) }
-    pub fn le(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Le, a, b) }
-    pub fn ge(&mut self, a: usize, b: usize) -> usize { self.binary(Op::Ge, a, b) }
+    pub fn lt(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Lt, a, b)
+    }
+    pub fn gt(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Gt, a, b)
+    }
+    pub fn le(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Le, a, b)
+    }
+    pub fn ge(&mut self, a: usize, b: usize) -> usize {
+        self.binary(Op::Ge, a, b)
+    }
 
     /// compile this DAG into a ready-to-evaluate Expression.
     pub fn compile(self, outputs: &[usize]) -> crate::eval::Expression {

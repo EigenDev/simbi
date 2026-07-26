@@ -13,15 +13,19 @@
 //   use symbi_geometry::{UniformMap, Spherical, Metric, CoordMap};
 // =============================================================================
 
-pub mod coord_map;
-pub mod metric;
-pub mod grhd_source;
-pub mod motion;
 pub mod block;
 pub mod centroid;
+pub mod coord_map;
+pub mod grhd_source;
+pub mod metric;
+pub mod motion;
 
-pub use coord_map::{CellInterval, CoordMap, UniformMap, LogMap};
-pub use metric::{DiagonalMetric, Metric, Geometry, Spacetime, Cartesian, Spherical, Cylindrical, CylindricalRPhi, Schwarzschild, KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
-pub use motion::MotionState;
-pub use block::{BlockGeometry, AxisMap};
+pub use block::{AxisMap, BlockGeometry};
 pub use centroid::volume_weighted_centroid;
+pub use coord_map::{CellInterval, CoordMap, LogMap, UniformMap};
+pub use metric::{
+    Cartesian, Cylindrical, CylindricalRPhi, DiagonalMetric, Geometry, KerrKS, KerrKSCartesian,
+    KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+    SchwarzschildKSCylindrical, Spacetime, Spherical,
+};
+pub use motion::MotionState;

@@ -19,9 +19,9 @@ use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{KerrKSCylindrical, SchwarzschildKSCylindrical};
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 4.0 / 3.0;
@@ -35,10 +35,8 @@ const Z_HALF: f64 = 3.0;
 const MASS: f64 = 1.0;
 const T_FINAL: f64 = 0.5;
 
-type KerrSim =
-    SimState<Rhd, 3, KerrKSCylindrical<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
-type KsSim =
-    SimState<Rhd, 3, SchwarzschildKSCylindrical<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+type KerrSim = SimState<Rhd, 3, KerrKSCylindrical<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+type KsSim = SimState<Rhd, 3, SchwarzschildKSCylindrical<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
 
 const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
 
@@ -62,9 +60,14 @@ macro_rules! build_run {
             .timestepping(Timestepping::Rk2)
             .allocate()
             .expect("sim")
-            .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 0.1 })
+            .set_initial(|_| Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0; 3]),
+                pre: 0.1,
+            })
             .build();
-        let kern = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &sim.geom.allocated);
+        let kern =
+            RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &sim.geom.allocated);
         let mut sim = sim;
         evolve(&mut sim, &kern, T_FINAL).expect("evolve");
         let mut den = Vec::new();
@@ -79,7 +82,13 @@ macro_rules! build_run {
 
 #[test]
 fn zero_spin_reduces_to_the_kerr_schild_chart() {
-    let (den_k, _) = build_run!(KerrSim, KerrKSCylindrical { mass: MASS, spin: 0.0 });
+    let (den_k, _) = build_run!(
+        KerrSim,
+        KerrKSCylindrical {
+            mass: MASS,
+            spin: 0.0
+        }
+    );
     let (den_s, _) = build_run!(KsSim, SchwarzschildKSCylindrical { mass: MASS });
     // non-vacuous: the infall genuinely developed.
     let dmax = den_k.iter().cloned().fold(0.0_f64, f64::max);
@@ -90,13 +99,28 @@ fn zero_spin_reduces_to_the_kerr_schild_chart() {
         .zip(&den_s)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
-    assert!(err < 1e-11, "a=0 cylindrical kerr vs kerr_schild: max den err {err:e}");
+    assert!(
+        err < 1e-11,
+        "a=0 cylindrical kerr vs kerr_schild: max den err {err:e}"
+    );
 }
 
 #[test]
 fn frame_dragging_is_real_and_antisymmetric_in_the_spin() {
-    let (den_p, sphi_p) = build_run!(KerrSim, KerrKSCylindrical { mass: MASS, spin: 0.9 });
-    let (den_m, sphi_m) = build_run!(KerrSim, KerrKSCylindrical { mass: MASS, spin: -0.9 });
+    let (den_p, sphi_p) = build_run!(
+        KerrSim,
+        KerrKSCylindrical {
+            mass: MASS,
+            spin: 0.9
+        }
+    );
+    let (den_m, sphi_m) = build_run!(
+        KerrSim,
+        KerrKSCylindrical {
+            mass: MASS,
+            spin: -0.9
+        }
+    );
     // a phi-uniform state stays discretely axisymmetric, and the metric's only
     // odd-in-a piece is the azimuthal l: rho evolves IDENTICALLY for +-a.
     let derr = den_p
@@ -107,12 +131,18 @@ fn frame_dragging_is_real_and_antisymmetric_in_the_spin() {
     assert!(derr < 1e-12, "rho not spin-even: {derr:e}");
     // the dragging is real: the azimuthal covariant momentum develops nonzero...
     let smax = sphi_p.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-    assert!(smax > 1e-8, "no frame dragging developed (max |S_phi| {smax:e})");
+    assert!(
+        smax > 1e-8,
+        "no frame dragging developed (max |S_phi| {smax:e})"
+    );
     // ...and flips sign exactly with the spin.
     let aerr = sphi_p
         .iter()
         .zip(&sphi_m)
         .map(|(a, b)| (a + b).abs())
         .fold(0.0_f64, f64::max);
-    assert!(aerr < 1e-12 * smax.max(1.0), "S_phi not spin-odd: {aerr:e} (scale {smax:e})");
+    assert!(
+        aerr < 1e-12 * smax.max(1.0),
+        "S_phi not spin-odd: {aerr:e} (scale {smax:e})"
+    );
 }

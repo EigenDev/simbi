@@ -16,18 +16,18 @@
 // subtracted from the conserved flux post-star).
 // =============================================================================
 
-use symbi_algebra::Tensor;
-use symbi_ir::algebra::{Scalar, Selectable};
+use super::hlle::hlle;
+use crate::dissipation::{ShockwaveLimiter, adaptive_phi, quirk_strong_shock};
 use crate::eos::Eos;
-use crate::state::{Prim, Cons};
-use crate::regime::Regime;
+use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::newtonian::Newtonian;
 use crate::newtonian_mhd::NewtonianMhd;
-use crate::mhd_state::{MhdPrim, MhdCons};
+use crate::regime::Regime;
 use crate::rmhd::Rmhd;
 use crate::spatial_metric::SpatialMetric;
-use crate::dissipation::{adaptive_phi, quirk_strong_shock, ShockwaveLimiter};
-use super::hlle::hlle;
+use crate::state::{Cons, Prim};
+use symbi_algebra::Tensor;
+use symbi_ir::algebra::{Scalar, Selectable};
 
 use super::{DIVZERO_GUARD, NULL_FIELD_THRESHOLD};
 
@@ -52,10 +52,14 @@ fn quirk_gate_active<const D: usize>(shock_smoother: ShockwaveLimiter) -> bool {
 /// / two-shock). returns `(s_l, s_r, s_star)`.
 #[inline]
 fn wave_properties<S: Scalar>(
-    rho_l: S, rho_r: S,
-    pre_l: S, pre_r: S,
-    vn_l: S, vn_r: S,
-    cs_l: S, cs_r: S,
+    rho_l: S,
+    rho_r: S,
+    pre_l: S,
+    pre_r: S,
+    vn_l: S,
+    vn_r: S,
+    cs_l: S,
+    cs_r: S,
     gamma: S,
 ) -> (S, S, S) {
     let half = S::from_f64(0.5);
@@ -81,8 +85,7 @@ fn wave_properties<S: Scalar>(
     // select spelling paid all three estimates at every face and dominated the
     // hllc kernel's cost (~49 ns/zone vs ~14 for hlle). carrier-equivalent:
     // every carrier takes the same arm for the same input, bit-identically.
-    let cond_pvrs = (p_max / p_min).cmp_le(q_user)
-        & p_min.cmp_le(pvrs) & pvrs.cmp_le(p_max);
+    let cond_pvrs = (p_max / p_min).cmp_le(q_user) & p_min.cmp_le(pvrs) & pvrs.cmp_le(p_max);
     let p_star = S::cond(
         cond_pvrs,
         || S::ZERO.max(pvrs),
@@ -157,9 +160,12 @@ fn star_state<S: Scalar, const D: usize>(
     // mom_star = den_star * (vel - vn * nhat + s_star * nhat)
     //          = den_star * vel + den_star * (s_star - vn) * nhat
     let mom_star = prim.vel.scale(den_star) + nhat.scale(den_star * (s_star - vn));
-    let nrg_star = den_star
-        * (u_k.nrg / prim.rho + (s_star - vn) * (s_star + prim.pre / chi_k));
-    Cons { den: den_star, mom: mom_star, nrg: nrg_star }
+    let nrg_star = den_star * (u_k.nrg / prim.rho + (s_star - vn) * (s_star + prim.pre / chi_k));
+    Cons {
+        den: den_star,
+        mom: mom_star,
+        nrg: nrg_star,
+    }
 }
 
 /// HLLC for newtonian (compressible Euler) — toro eq 10.37-10.39. ONE function
@@ -187,7 +193,8 @@ pub fn hllc<S: Scalar, const D: usize>(
     // else. the early-return lives in the `constexpr if (rank > 1)` guard.
     if quirk_gate_active::<D>(shock_smoother) {
         let mask = quirk_strong_shock(prim_l.pre, prim_r.pre);
-        return S::branch(mask,
+        return S::branch(
+            mask,
             || hlle(&regime, eos, prim_l, prim_r, nhat, vface),
             || hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, ShockwaveLimiter::Standard),
         );
@@ -223,8 +230,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
 
     let gamma = eos.gamma();
     let (s_l, s_r, s_star) = wave_properties(
-        prim_l.rho, prim_r.rho, prim_l.pre, prim_r.pre,
-        vn_l, vn_r, cs_l, cs_r, gamma,
+        prim_l.rho, prim_r.rho, prim_l.pre, prim_r.pre, vn_l, vn_r, cs_l, cs_r, gamma,
     );
 
     let chi_l = prim_l.rho * (s_l - vn_l);
@@ -234,24 +240,29 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
         // standard HLLC: branchless three-way dispatch on the signal speeds.
         // the upwind side uses its OWN star state (toro 10.21); supersonic
         // states pass through with the ALE `vface` correction.
-        ShockwaveLimiter::Standard | ShockwaveLimiter::Quirk => {
-            S::branch(s_l.cmp_ge(vface),
-                || f_l - u_l * vface,
-                || S::branch(s_r.cmp_le(vface),
+        ShockwaveLimiter::Standard | ShockwaveLimiter::Quirk => S::branch(
+            s_l.cmp_ge(vface),
+            || f_l - u_l * vface,
+            || {
+                S::branch(
+                    s_r.cmp_le(vface),
                     || f_r - u_r * vface,
-                    || S::branch(s_star.cmp_ge(vface),
-                        || {
-                            let us = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
-                            f_l + (us - u_l) * s_l - us * vface
-                        },
-                        || {
-                            let us = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
-                            f_r + (us - u_r) * s_r - us * vface
-                        },
-                    )
+                    || {
+                        S::branch(
+                            s_star.cmp_ge(vface),
+                            || {
+                                let us = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
+                                f_l + (us - u_l) * s_l - us * vface
+                            },
+                            || {
+                                let us = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
+                                f_r + (us - u_r) * s_r - us * vface
+                            },
+                        )
+                    },
                 )
-            )
-        }
+            },
+        ),
         // fleischmann et al. (2020) eq 11: symmetric central+star flux with an
         // adaptive dissipation factor `phi`. recovers standard HLLC at phi=1
         // (supersonic) and central differencing at phi=0 (zero-mach).
@@ -263,9 +274,8 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
             let s_l_lm = phi * s_l;
             let s_r_lm = phi * s_r;
 
-            let face_star = <Cons<S, D> as Selectable<S>>::select(
-                s_star.cmp_ge(vface), u_star_l, u_star_r,
-            );
+            let face_star =
+                <Cons<S, D> as Selectable<S>>::select(s_star.cmp_ge(vface), u_star_l, u_star_r);
             let half = S::from_f64(0.5);
             (f_l + f_r) * half
                 + ((u_star_l - u_l) * s_l_lm
@@ -316,7 +326,11 @@ fn rhd_contact_props<S: Scalar, const D: usize>(
     // s_norm == 0): unguarded this returns NaN/Inf and poisons the flux. mirrors the proven RMHD
     // guard (the `a_star` select above). Gv evaluates both arms, but the Inf is selected away, never
     // combined into an output — the same carrier-safe pattern the RMHD path uses.
-    let a_star = S::select(quad.abs().cmp_gt(S::from_f64(DIVZERO_GUARD)), cc / quad, S::ZERO);
+    let a_star = S::select(
+        quad.abs().cmp_gt(S::from_f64(DIVZERO_GUARD)),
+        cc / quad,
+        S::ZERO,
+    );
     let p_star = -a_star * fe + fs_norm;
     (a_star, p_star)
 }
@@ -340,7 +354,11 @@ fn rhd_star_state<S: Scalar, const D: usize>(
     let ms = cons.mom.scale(a - vn).scale(fac) + nhat.scale((p_star - prim.pre) * fac);
     let es = fac * (ee * (a - vn) + p_star * a_star - prim.pre * vn);
     // rhd convention: nrg = tau = e - D.
-    Cons { den: ds, mom: ms, nrg: es - ds }
+    Cons {
+        den: ds,
+        mom: ms,
+        nrg: es - ds,
+    }
 }
 
 /// HLLC for special-relativistic hydrodynamics (mignone-bodo 2005). ONE
@@ -362,7 +380,8 @@ pub fn hllc_rhd<S: Scalar, const D: usize>(
     // generic mask routes per cell at S = Gv; at S = f64 it's a bool short-circuit.
     if quirk_gate_active::<D>(shock_smoother) {
         let mask = quirk_strong_shock(prim_l.pre, prim_r.pre);
-        return S::branch(mask,
+        return S::branch(
+            mask,
             || hlle(&regime, eos, prim_l, prim_r, nhat, vface),
             || hllc_rhd_body(eos, prim_l, prim_r, nhat, vface),
         );
@@ -391,24 +410,32 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
     let f_r = regime.to_flux(prim_r, nhat, eos);
     let (a_l, a_r) = regime.extremal_speeds(eos, prim_l, prim_r, nhat);
 
-    S::branch(a_l.cmp_ge(vface),
+    S::branch(
+        a_l.cmp_ge(vface),
         || f_l - u_l * vface,
-        || S::branch(a_r.cmp_le(vface),
-            || f_r - u_r * vface,
-            || {
-                let (a_star, p_star) = rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
-                S::branch(a_star.cmp_ge(vface),
-                    || {
-                        let us = rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
-                        f_l + (us - u_l) * a_l - us * vface
-                    },
-                    || {
-                        let us = rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
-                        f_r + (us - u_r) * a_r - us * vface
-                    },
-                )
-            }
-        )
+        || {
+            S::branch(
+                a_r.cmp_le(vface),
+                || f_r - u_r * vface,
+                || {
+                    let (a_star, p_star) =
+                        rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
+                    S::branch(
+                        a_star.cmp_ge(vface),
+                        || {
+                            let us =
+                                rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
+                            f_l + (us - u_l) * a_l - us * vface
+                        },
+                        || {
+                            let us =
+                                rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
+                            f_r + (us - u_r) * a_r - us * vface
+                        },
+                    )
+                },
+            )
+        },
     )
 }
 
@@ -436,7 +463,8 @@ pub fn hllc_rmhd<S: Scalar, const D: usize>(
     // pressure for the detector lives at `prim_l.hydro.pre`.
     if quirk_gate_active::<D>(shock_smoother) {
         let mask = quirk_strong_shock(prim_l.hydro.pre, prim_r.hydro.pre);
-        return S::branch(mask,
+        return S::branch(
+            mask,
             || hlle(regime, eos, prim_l, prim_r, nhat, vface),
             || hllc_rmhd_body(regime, eos, prim_l, prim_r, nhat, vface),
         );
@@ -464,115 +492,120 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
     let f_r = regime.to_flux(prim_r, nhat, eos);
     let (a_l, a_r) = regime.extremal_speeds(eos, prim_l, prim_r, nhat);
 
-    S::branch(a_l.cmp_ge(vface),
+    S::branch(
+        a_l.cmp_ge(vface),
         || f_l - u_l * vface,
-        || S::branch(a_r.cmp_le(vface),
-            || f_r - u_r * vface,
-            || {
-                let inv = S::ONE / (a_r - a_l);
+        || {
+            S::branch(
+                a_r.cmp_le(vface),
+                || f_r - u_r * vface,
+                || {
+                    let inv = S::ONE / (a_r - a_l);
 
-                // HLL intermediate state + flux.
-                let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv;
-                let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv;
+                    // HLL intermediate state + flux.
+                    let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv;
+                    let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv;
 
-                // normal B from HLL state (continuous across the interface). B is contravariant B^i.
-                let bn = metric.contract_contra(&hll_state.mag, nhat);
-                let bt_hll = metric.project_transverse(&hll_state.mag, nhat);
+                    // normal B from HLL state (continuous across the interface). B is contravariant B^i.
+                    let bn = metric.contract_contra(&hll_state.mag, nhat);
+                    let bt_hll = metric.project_transverse(&hll_state.mag, nhat);
 
-                let uhlld = hll_state.den;
-                let uhllm = hll_state.mom.dot(nhat); // conserved-momentum (covariant S_i . n^i) -> metric-free
-                let uhlle = hll_state.nrg + uhlld;
+                    let uhlld = hll_state.den;
+                    let uhllm = hll_state.mom.dot(nhat); // conserved-momentum (covariant S_i . n^i) -> metric-free
+                    let uhlle = hll_state.nrg + uhlld;
 
-                let fhllm = hll_flux.mom.dot(nhat); // momentum-flux . n -> metric-free (variance settled by C1)
-                let fhlle = hll_flux.nrg + hll_flux.den;
-                let ft_hll = metric.project_transverse(&hll_flux.mag, nhat); // transverse magnetic flux (contravariant)
+                    let fhllm = hll_flux.mom.dot(nhat); // momentum-flux . n -> metric-free (variance settled by C1)
+                    let fhlle = hll_flux.nrg + hll_flux.den;
+                    let ft_hll = metric.project_transverse(&hll_flux.mag, nhat); // transverse magnetic flux (contravariant)
 
-                // contact-wave quadratic: compute null-B AND non-null-B
-                // coefficients in parallel, select via mask.
-                let null_cond = bn.abs().cmp_lt(S::from_f64(NULL_FIELD_THRESHOLD));
-                let fdb = metric.contract_contra(&ft_hll, &bt_hll);
-                let bpsq = metric.norm_sq_contra(&bt_hll);
-                let fbpsq = metric.norm_sq_contra(&ft_hll);
-                let a_coeff = S::select(null_cond, fhlle, fhlle - fdb);
-                let b_coeff = S::select(null_cond,
-                    -(fhllm + uhlle),
-                    -(fhllm + uhlle) + bpsq + fbpsq);
-                let c_coeff = S::select(null_cond, uhllm, uhllm - fdb);
+                    // contact-wave quadratic: compute null-B AND non-null-B
+                    // coefficients in parallel, select via mask.
+                    let null_cond = bn.abs().cmp_lt(S::from_f64(NULL_FIELD_THRESHOLD));
+                    let fdb = metric.contract_contra(&ft_hll, &bt_hll);
+                    let bpsq = metric.norm_sq_contra(&bt_hll);
+                    let fbpsq = metric.norm_sq_contra(&ft_hll);
+                    let a_coeff = S::select(null_cond, fhlle, fhlle - fdb);
+                    let b_coeff =
+                        S::select(null_cond, -(fhllm + uhlle), -(fhllm + uhlle) + bpsq + fbpsq);
+                    let c_coeff = S::select(null_cond, uhllm, uhllm - fdb);
 
-                let disc = (b_coeff * b_coeff - S::from_f64(4.0) * a_coeff * c_coeff).max(S::ZERO);
-                let sgn_b = S::select(b_coeff.cmp_ge(S::ZERO), S::ONE, -S::ONE);
-                let quad = S::from_f64(-0.5) * (b_coeff + sgn_b * disc.sqrt());
-                let a_star = S::select(
-                    quad.abs().cmp_gt(S::from_f64(DIVZERO_GUARD)),
-                    c_coeff / quad,
-                    S::ZERO,
-                );
+                    let disc =
+                        (b_coeff * b_coeff - S::from_f64(4.0) * a_coeff * c_coeff).max(S::ZERO);
+                    let sgn_b = S::select(b_coeff.cmp_ge(S::ZERO), S::ONE, -S::ONE);
+                    let quad = S::from_f64(-0.5) * (b_coeff + sgn_b * disc.sqrt());
+                    let a_star = S::select(
+                        quad.abs().cmp_gt(S::from_f64(DIVZERO_GUARD)),
+                        c_coeff / quad,
+                        S::ZERO,
+                    );
 
-                // safe_bn: avoid 0/0 in the non-null path when bn is tiny;
-                // when null_cond fires the non-null arm is discarded by select.
-                let safe_bn = S::select(null_cond, S::ONE, bn);
+                    // safe_bn: avoid 0/0 in the non-null path when bn is tiny;
+                    // when null_cond fires the non-null arm is discarded by select.
+                    let safe_bn = S::select(null_cond, S::ONE, bn);
 
-                // per-side star state + HLLC flux. carrier-generic via select.
-                let side_flux = |u: &MhdCons<S, D>,
-                                 f: &MhdCons<S, D>,
-                                 prim_side: &MhdPrim<S, D>,
-                                 ws: S|
-                    -> MhdCons<S, D>
-                {
-                    // momentum-class (conserved S_i / flux-of-momentum . n^i) -> metric-free (C1/Tier-2).
-                    let mn = u.mom.dot(nhat);
-                    let umtrans = u.mom - nhat.scale(mn);
-                    let fmtrans = f.mom - nhat.scale(f.mom.dot(nhat));
-                    let etot = u.nrg + u.den;
-                    let cfac = S::ONE / (ws - a_star);
+                    // per-side star state + HLLC flux. carrier-generic via select.
+                    let side_flux = |u: &MhdCons<S, D>,
+                                     f: &MhdCons<S, D>,
+                                     prim_side: &MhdPrim<S, D>,
+                                     ws: S|
+                     -> MhdCons<S, D> {
+                        // momentum-class (conserved S_i / flux-of-momentum . n^i) -> metric-free (C1/Tier-2).
+                        let mn = u.mom.dot(nhat);
+                        let umtrans = u.mom - nhat.scale(mn);
+                        let fmtrans = f.mom - nhat.scale(f.mom.dot(nhat));
+                        let etot = u.nrg + u.den;
+                        let cfac = S::ONE / (ws - a_star);
 
-                    let vn = metric.contract_contra(&prim_side.vel, nhat);
-                    let vs = (ws - vn) / (ws - a_star);
-                    let ds = vs * u.den;
+                        let vn = metric.contract_contra(&prim_side.vel, nhat);
+                        let vs = (ws - vn) / (ws - a_star);
+                        let ds = vs * u.den;
 
-                    // null-B star state.
-                    let p_null = -a_star * fhlle + fhllm;
-                    let es_null = cfac * (ws * etot - mn + p_null * a_star);
-                    let mn_null = (es_null + p_null) * a_star;
-                    let btrans_side = metric.project_transverse(&prim_side.mag, nhat);
-                    let us_null = MhdCons {
-                        hydro: Cons {
-                            den: ds,
-                            mom: nhat.scale(mn_null) + umtrans.scale(vs),
-                            nrg: es_null - ds,
-                        },
-                        mag: nhat.scale(bn) + btrans_side.scale(vs),
-                    };
+                        // null-B star state.
+                        let p_null = -a_star * fhlle + fhllm;
+                        let es_null = cfac * (ws * etot - mn + p_null * a_star);
+                        let mn_null = (es_null + p_null) * a_star;
+                        let btrans_side = metric.project_transverse(&prim_side.mag, nhat);
+                        let us_null = MhdCons {
+                            hydro: Cons {
+                                den: ds,
+                                mom: nhat.scale(mn_null) + umtrans.scale(vs),
+                                nrg: es_null - ds,
+                            },
+                            mag: nhat.scale(bn) + btrans_side.scale(vs),
+                        };
 
-                    // non-null-B star state (safe_bn guards division).
-                    let vtrans = (bt_hll.scale(a_star) - ft_hll).scale(S::ONE / safe_bn);
-                    let invg2 = S::ONE - (a_star * a_star + metric.norm_sq_contra(&vtrans));
-                    let vsdb = a_star * safe_bn + metric.contract_contra(&bt_hll, &vtrans);
-                    let p_nn = -a_star * (fhlle - safe_bn * vsdb) + fhllm
-                        + safe_bn * safe_bn * invg2;
-                    let es_nn = cfac * (ws * etot - mn + p_nn * a_star - vsdb * safe_bn);
-                    let mn_nn = (es_nn + p_nn) * a_star - vsdb * safe_bn;
-                    let mtrans = (umtrans.scale(ws) - fmtrans
-                        - (bt_hll.scale(invg2) + vtrans.scale(vsdb)).scale(safe_bn))
+                        // non-null-B star state (safe_bn guards division).
+                        let vtrans = (bt_hll.scale(a_star) - ft_hll).scale(S::ONE / safe_bn);
+                        let invg2 = S::ONE - (a_star * a_star + metric.norm_sq_contra(&vtrans));
+                        let vsdb = a_star * safe_bn + metric.contract_contra(&bt_hll, &vtrans);
+                        let p_nn =
+                            -a_star * (fhlle - safe_bn * vsdb) + fhllm + safe_bn * safe_bn * invg2;
+                        let es_nn = cfac * (ws * etot - mn + p_nn * a_star - vsdb * safe_bn);
+                        let mn_nn = (es_nn + p_nn) * a_star - vsdb * safe_bn;
+                        let mtrans = (umtrans.scale(ws)
+                            - fmtrans
+                            - (bt_hll.scale(invg2) + vtrans.scale(vsdb)).scale(safe_bn))
                         .scale(cfac);
-                    let us_nn = MhdCons {
-                        hydro: Cons {
-                            den: ds,
-                            mom: nhat.scale(mn_nn) + mtrans,
-                            nrg: es_nn - ds,
-                        },
-                        mag: nhat.scale(safe_bn) + bt_hll,
+                        let us_nn = MhdCons {
+                            hydro: Cons {
+                                den: ds,
+                                mom: nhat.scale(mn_nn) + mtrans,
+                                nrg: es_nn - ds,
+                            },
+                            mag: nhat.scale(safe_bn) + bt_hll,
+                        };
+
+                        let us =
+                            <MhdCons<S, D> as Selectable<S>>::select(null_cond, us_null, us_nn);
+                        *f + (us - *u) * ws - us * vface
                     };
 
-                    let us = <MhdCons<S, D> as Selectable<S>>::select(null_cond, us_null, us_nn);
-                    *f + (us - *u) * ws - us * vface
-                };
-
-                let flux_l = side_flux(&u_l, &f_l, prim_l, a_l);
-                let flux_r = side_flux(&u_r, &f_r, prim_r, a_r);
-                <MhdCons<S, D> as Selectable<S>>::select(a_star.cmp_gt(S::ZERO), flux_l, flux_r)
-            }
-        )
+                    let flux_l = side_flux(&u_l, &f_l, prim_l, a_l);
+                    let flux_r = side_flux(&u_r, &f_r, prim_r, a_r);
+                    <MhdCons<S, D> as Selectable<S>>::select(a_star.cmp_gt(S::ZERO), flux_l, flux_r)
+                },
+            )
+        },
     )
 }
 
@@ -652,9 +685,15 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
 
     // per-side single-star (*) state: normal velocity S_M, transverse v from the
     // transverse-momentum jump with the continuous B*, energy from the energy jump.
-    let star = |u_k: &MhdCons<S, D>, prim_k: &MhdPrim<S, D>, f_k: &MhdCons<S, D>,
-                s_k: S, un_k: S, rho_k: S, pt_k: S, c_k: S|
-        -> (MhdCons<S, D>, MhdCons<S, D>, S) {
+    let star = |u_k: &MhdCons<S, D>,
+                prim_k: &MhdPrim<S, D>,
+                f_k: &MhdCons<S, D>,
+                s_k: S,
+                un_k: S,
+                rho_k: S,
+                pt_k: S,
+                c_k: S|
+     -> (MhdCons<S, D>, MhdCons<S, D>, S) {
         let smk_s = S::select((s_k - s_m).abs().cmp_lt(eps), eps, s_k - s_m);
         let rho_star = rho_k * (s_k - un_k) / smk_s;
         let c_safe = S::select(c_k.abs().cmp_lt(eps), eps, c_k); // rho_K(S_K - u_K)
@@ -665,8 +704,16 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
         let e_k = u_k.nrg;
         let vdb_k = prim_k.vel.dot(&prim_k.mag);
         let vdb_s = v_star.dot(&b_star);
-        let e_star = ((s_k - un_k) * e_k - pt_k * un_k + pt_star * s_m + bn * (vdb_k - vdb_s)) / smk_s;
-        let u_star = MhdCons { hydro: Cons { den: rho_star, mom: v_star.scale(rho_star), nrg: e_star }, mag: b_star };
+        let e_star =
+            ((s_k - un_k) * e_k - pt_k * un_k + pt_star * s_m + bn * (vdb_k - vdb_s)) / smk_s;
+        let u_star = MhdCons {
+            hydro: Cons {
+                den: rho_star,
+                mom: v_star.scale(rho_star),
+                nrg: e_star,
+            },
+            mag: b_star,
+        };
         let f_star = *f_k + (u_star - *u_k) * s_k;
         (u_star, f_star, rho_star)
     };
@@ -674,10 +721,15 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
     let (us_r, fs_r, rs_r) = star(&u_r, prim_r, &f_r, s_r, un_r, rho_r, pt_r, cr);
 
     let reg = |f: MhdCons<S, D>, u: MhdCons<S, D>| -> MhdCons<S, D> { f - u * vface };
-    let pick = MhdCons::select(vface.cmp_lt(s_l), reg(f_l, u_l),
-               MhdCons::select(vface.cmp_lt(s_m), reg(fs_l, us_l),
-               MhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r),
-               reg(f_r, u_r))));
+    let pick = MhdCons::select(
+        vface.cmp_lt(s_l),
+        reg(f_l, u_l),
+        MhdCons::select(
+            vface.cmp_lt(s_m),
+            reg(fs_l, us_l),
+            MhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r), reg(f_r, u_r)),
+        ),
+    );
     let ok = rs_l.cmp_gt(zero) & rs_r.cmp_gt(zero) & pt_star.cmp_gt(zero);
     MhdCons::select(ok, pick, hlle_flux)
 }
@@ -694,7 +746,11 @@ mod tests {
     #[test]
     fn hllc_uniform_state_1d() {
         let eos = IdealGas { gamma: 1.4 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.5]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.5]),
+            pre: 1.0,
+        };
         let nhat = Tensor::unit(0);
         let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
         let regime = Newtonian;
@@ -707,7 +763,11 @@ mod tests {
     #[test]
     fn hllc_uniform_state_2d() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let prim = Prim { rho: 2.0, vel: Tensor::new([0.5, -0.3]), pre: 2.5 };
+        let prim = Prim {
+            rho: 2.0,
+            vel: Tensor::new([0.5, -0.3]),
+            pre: 2.5,
+        };
 
         let nhat_x = Tensor::unit(0);
         let flux_x = hllc(&eos, &prim, &prim, &nhat_x, 0.0, ShockwaveLimiter::Standard);
@@ -730,11 +790,26 @@ mod tests {
     #[test]
     fn hllc_sod_shock_tube() {
         let eos = IdealGas { gamma: 1.4 };
-        let prim_l = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
-        let prim_r = Prim { rho: 0.125, vel: Tensor::new([0.0]), pre: 0.1 };
+        let prim_l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
+        let prim_r = Prim {
+            rho: 0.125,
+            vel: Tensor::new([0.0]),
+            pre: 0.1,
+        };
         let nhat = Tensor::unit(0);
 
-        let flux = hllc(&eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Standard);
+        let flux = hllc(
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Standard,
+        );
         assert!(flux.den > 0.0);
         assert!(flux.nrg > 0.0);
     }
@@ -745,13 +820,43 @@ mod tests {
         // invariance of the nhat-parametrized solver.
         let eos = IdealGas { gamma: 1.4 };
 
-        let prim_l_x = Prim { rho: 1.0, vel: Tensor::new([1.0, 0.0]), pre: 1.0 };
-        let prim_r_x = Prim { rho: 0.5, vel: Tensor::new([0.0, 0.0]), pre: 0.5 };
-        let flux_x = hllc(&eos, &prim_l_x, &prim_r_x, &Tensor::unit(0), 0.0, ShockwaveLimiter::Standard);
+        let prim_l_x = Prim {
+            rho: 1.0,
+            vel: Tensor::new([1.0, 0.0]),
+            pre: 1.0,
+        };
+        let prim_r_x = Prim {
+            rho: 0.5,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 0.5,
+        };
+        let flux_x = hllc(
+            &eos,
+            &prim_l_x,
+            &prim_r_x,
+            &Tensor::unit(0),
+            0.0,
+            ShockwaveLimiter::Standard,
+        );
 
-        let prim_l_y = Prim { rho: 1.0, vel: Tensor::new([0.0, 1.0]), pre: 1.0 };
-        let prim_r_y = Prim { rho: 0.5, vel: Tensor::new([0.0, 0.0]), pre: 0.5 };
-        let flux_y = hllc(&eos, &prim_l_y, &prim_r_y, &Tensor::unit(1), 0.0, ShockwaveLimiter::Standard);
+        let prim_l_y = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 1.0]),
+            pre: 1.0,
+        };
+        let prim_r_y = Prim {
+            rho: 0.5,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 0.5,
+        };
+        let flux_y = hllc(
+            &eos,
+            &prim_l_y,
+            &prim_r_y,
+            &Tensor::unit(1),
+            0.0,
+            ShockwaveLimiter::Standard,
+        );
 
         assert!(approx(flux_x.den, flux_y.den));
         assert!(approx(flux_x.nrg, flux_y.nrg));
@@ -763,9 +868,20 @@ mod tests {
         // a uniform state has zero LM correction — Fleischmann reduces to the
         // exact regime flux just like Standard.
         let eos = IdealGas { gamma: 1.4 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.01]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.01]),
+            pre: 1.0,
+        };
         let nhat = Tensor::unit(0);
-        let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Fleischmann);
+        let flux = hllc(
+            &eos,
+            &prim,
+            &prim,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Fleischmann,
+        );
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
@@ -779,10 +895,25 @@ mod tests {
         // strong-shock 1D problem (sod). protects against regression in the
         // const-generic D > 1 guard.
         let eos = IdealGas { gamma: 1.4 };
-        let prim_l = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
-        let prim_r = Prim { rho: 0.125, vel: Tensor::new([0.0]), pre: 0.1 };
+        let prim_l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
+        let prim_r = Prim {
+            rho: 0.125,
+            vel: Tensor::new([0.0]),
+            pre: 0.1,
+        };
         let nhat = Tensor::unit(0);
-        let f_std = hllc(&eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Standard);
+        let f_std = hllc(
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Standard,
+        );
         let f_quirk = hllc(&eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Quirk);
         assert!(approx(f_std.den, f_quirk.den));
         assert!(approx(f_std.mom[0], f_quirk.mom[0]));
@@ -795,7 +926,11 @@ mod tests {
         // `quirk_strong_shock` detector returns false and the standard HLLC
         // body runs. Quirk must match Standard in this regime.
         let eos = IdealGas { gamma: 1.4 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.3, -0.1]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3, -0.1]),
+            pre: 1.0,
+        };
         let nhat = Tensor::unit(0);
         let f_std = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
         let f_quirk = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Quirk);
@@ -813,13 +948,26 @@ mod tests {
         // dissipative two-wave solver; the contact-resolving three-wave
         // solver is bypassed.
         let eos = IdealGas { gamma: 1.4 };
-        let prim_l = Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 };
-        let prim_r = Prim { rho: 0.125, vel: Tensor::new([0.0, 0.0]), pre: 0.1 };
+        let prim_l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        };
+        let prim_r = Prim {
+            rho: 0.125,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 0.1,
+        };
         let nhat = Tensor::unit(0);
         let regime = Newtonian;
         let f_quirk = hllc(&eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Quirk);
         let f_hlle = hlle(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
-        assert!(approx(f_quirk.den, f_hlle.den), "Quirk strong shock must equal HLLE: {} vs {}", f_quirk.den, f_hlle.den);
+        assert!(
+            approx(f_quirk.den, f_hlle.den),
+            "Quirk strong shock must equal HLLE: {} vs {}",
+            f_quirk.den,
+            f_hlle.den
+        );
         assert!(approx(f_quirk.mom[0], f_hlle.mom[0]));
         assert!(approx(f_quirk.mom[1], f_hlle.mom[1]));
         assert!(approx(f_quirk.nrg, f_hlle.nrg));
@@ -831,18 +979,22 @@ mod tests {
         use crate::dissipation::quirk_strong_shock;
         // exact threshold: 1e-4 relative jump (1.0 vs 1.0001) — just at the line.
         assert!(!quirk_strong_shock::<f64>(1.0, 1.00005)); // 5e-5 < 1e-4, no shock
-        assert!( quirk_strong_shock::<f64>(1.0, 1.0002));  // 2e-4 > 1e-4, shock
+        assert!(quirk_strong_shock::<f64>(1.0, 1.0002)); // 2e-4 > 1e-4, shock
         // sod-class jump (1.0 vs 0.1) is firmly a shock — 9x relative.
-        assert!( quirk_strong_shock::<f64>(1.0, 0.1));
+        assert!(quirk_strong_shock::<f64>(1.0, 0.1));
         // symmetric — pl/pr swap doesn't change the verdict.
-        assert!( quirk_strong_shock::<f64>(0.1, 1.0));
+        assert!(quirk_strong_shock::<f64>(0.1, 1.0));
     }
 
     #[test]
     fn hllc_rhd_uniform_state() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = crate::rhd::Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.3]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3]),
+            pre: 1.0,
+        };
         let nhat = Tensor::unit(0);
         let flux = hllc_rhd(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
         let exact = regime.to_flux(&prim, &nhat, &eos);
@@ -856,17 +1008,45 @@ mod tests {
         let eos = IdealGas { gamma: 2.0 };
         let regime = Rmhd;
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.3, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.3, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
         let nhat = Tensor::unit(0);
-        let flux = hllc_rmhd(&regime, &eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
+        let flux = hllc_rmhd(
+            &regime,
+            &eos,
+            &prim,
+            &prim,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Standard,
+        );
         let exact = regime.to_flux(&prim, &nhat, &eos);
-        assert!(approx(flux.den, exact.den), "den: {} vs {}", flux.den, exact.den);
+        assert!(
+            approx(flux.den, exact.den),
+            "den: {} vs {}",
+            flux.den,
+            exact.den
+        );
         for dd in 0..3 {
-            assert!(approx(flux.mom[dd], exact.mom[dd]), "mom[{}]: {} vs {}", dd, flux.mom[dd], exact.mom[dd]);
+            assert!(
+                approx(flux.mom[dd], exact.mom[dd]),
+                "mom[{}]: {} vs {}",
+                dd,
+                flux.mom[dd],
+                exact.mom[dd]
+            );
         }
-        assert!(approx(flux.nrg, exact.nrg), "nrg: {} vs {}", flux.nrg, exact.nrg);
+        assert!(
+            approx(flux.nrg, exact.nrg),
+            "nrg: {} vs {}",
+            flux.nrg,
+            exact.nrg
+        );
     }
 
     #[test]
@@ -874,31 +1054,78 @@ mod tests {
         let eos = IdealGas { gamma: 2.0 };
         let regime = Rmhd;
         let prim_l = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
         let prim_r = MhdPrim {
-            hydro: Prim { rho: 0.125, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 0.1 },
+            hydro: Prim {
+                rho: 0.125,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 0.1,
+            },
             mag: Tensor::new([0.5, -1.0, 0.0]),
         };
         let nhat = Tensor::unit(0);
-        let flux = hllc_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Standard);
-        assert!(flux.den > 0.0, "density flux should be positive: {}", flux.den);
+        let flux = hllc_rmhd(
+            &regime,
+            &eos,
+            &prim_l,
+            &prim_r,
+            &nhat,
+            0.0,
+            ShockwaveLimiter::Standard,
+        );
+        assert!(
+            flux.den > 0.0,
+            "density flux should be positive: {}",
+            flux.den
+        );
     }
 
     // ---- Newtonian MHD HLLC ----
 
     fn nm_prim(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> MhdPrim<f64, 3> {
-        MhdPrim { hydro: Prim { rho, vel: Tensor::new(v), pre: p }, mag: Tensor::new(b) }
+        MhdPrim {
+            hydro: Prim {
+                rho,
+                vel: Tensor::new(v),
+                pre: p,
+            },
+            mag: Tensor::new(b),
+        }
     }
 
     fn assert_mhd_flux_eq(got: &MhdCons<f64, 3>, want: &MhdCons<f64, 3>, ctx: &str) {
-        assert!(approx(got.den, want.den), "{ctx} den: {} vs {}", got.den, want.den);
+        assert!(
+            approx(got.den, want.den),
+            "{ctx} den: {} vs {}",
+            got.den,
+            want.den
+        );
         for dd in 0..3 {
-            assert!(approx(got.mom[dd], want.mom[dd]), "{ctx} mom[{dd}]: {} vs {}", got.mom[dd], want.mom[dd]);
-            assert!(approx(got.mag[dd], want.mag[dd]), "{ctx} mag[{dd}]: {} vs {}", got.mag[dd], want.mag[dd]);
+            assert!(
+                approx(got.mom[dd], want.mom[dd]),
+                "{ctx} mom[{dd}]: {} vs {}",
+                got.mom[dd],
+                want.mom[dd]
+            );
+            assert!(
+                approx(got.mag[dd], want.mag[dd]),
+                "{ctx} mag[{dd}]: {} vs {}",
+                got.mag[dd],
+                want.mag[dd]
+            );
         }
-        assert!(approx(got.nrg, want.nrg), "{ctx} nrg: {} vs {}", got.nrg, want.nrg);
+        assert!(
+            approx(got.nrg, want.nrg),
+            "{ctx} nrg: {} vs {}",
+            got.nrg,
+            want.nrg
+        );
     }
 
     #[test]
@@ -934,12 +1161,20 @@ mod tests {
         let pl = nm_prim(1.0, [5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
         let pr = nm_prim(0.5, [5.0, -0.1, 0.2], 0.4, [0.3, -0.4, 0.1]);
         let f = hllc_newtonian(&eos, &pl, &pr, &nhat, 0.0, ShockwaveLimiter::Standard);
-        assert_mhd_flux_eq(&f, &NewtonianMhd.to_flux(&pl, &nhat, &eos), "supersonic-right");
+        assert_mhd_flux_eq(
+            &f,
+            &NewtonianMhd.to_flux(&pl, &nhat, &eos),
+            "supersonic-right",
+        );
         // mirror: supersonic-left
         let pl2 = nm_prim(1.0, [-5.0, 0.2, 0.0], 1.0, [0.3, 0.5, 0.0]);
         let pr2 = nm_prim(0.5, [-5.0, -0.1, 0.2], 0.4, [0.3, -0.4, 0.1]);
         let f2 = hllc_newtonian(&eos, &pl2, &pr2, &nhat, 0.0, ShockwaveLimiter::Standard);
-        assert_mhd_flux_eq(&f2, &NewtonianMhd.to_flux(&pr2, &nhat, &eos), "supersonic-left");
+        assert_mhd_flux_eq(
+            &f2,
+            &NewtonianMhd.to_flux(&pr2, &nhat, &eos),
+            "supersonic-left",
+        );
     }
 
     #[test]
@@ -950,13 +1185,17 @@ mod tests {
         let pr = nm_prim(0.125, [0.0, 0.0, 0.0], 0.1, [0.75, -1.0, 0.0]);
         let f = hllc_newtonian(&eos, &pl, &pr, &nhat, 0.0, ShockwaveLimiter::Standard);
         assert!(f.den.is_finite() && f.nrg.is_finite(), "finite");
-        assert!(f.mag[0].abs() < 1e-12, "normal-B flux must vanish: {}", f.mag[0]);
+        assert!(
+            f.mag[0].abs() < 1e-12,
+            "normal-B flux must vanish: {}",
+            f.mag[0]
+        );
     }
 
     // ---- carrier gate: newtonian wave_properties q-factor sqrt ----
 
     use symbi_ir::backends::interp::{Backend, Cpu};
-    use symbi_ir::{begin_trace, end_trace, Gv};
+    use symbi_ir::{Gv, begin_trace, end_trace};
 
     // trace `wave_properties` at S = Gv, scalarize each of the three signal-speed
     // outputs, and CPU-interpret them at the given f64 state. proves the body
@@ -968,9 +1207,8 @@ mod tests {
         ];
         begin_trace();
         let p: Vec<Gv> = names.iter().map(|n| Gv::param(n)).collect();
-        let (s_l, s_r, s_star) = wave_properties::<Gv>(
-            p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8],
-        );
+        let (s_l, s_r, s_star) =
+            wave_properties::<Gv>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]);
         let kernel = end_trace();
         // the KERNEL lowering: `Op::IfElse` (the pressure-estimate lazy branch)
         // lowers only through `scalarize_kernel`; the single-root elemental
@@ -978,7 +1216,10 @@ mod tests {
         // directly, so the lowered kernel adapts into a LoweredFn verbatim.
         let outputs = [s_l.node(), s_r.node(), s_star.node()];
         let k = symbi_ir::passes::scalarize::scalarize_kernel(&kernel.graph, &outputs);
-        assert!(!k.body.is_empty(), "wave_properties rendered an empty kernel");
+        assert!(
+            !k.body.is_empty(),
+            "wave_properties rendered an empty kernel"
+        );
         let lowered = symbi_ir::passes::scalarize::LoweredFn {
             name: "wave_props_probe".to_string(),
             params: k.params,
@@ -993,7 +1234,8 @@ mod tests {
 
     fn wave_properties_f64(state: &[f64; 9]) -> [f64; 3] {
         let (s_l, s_r, s_star) = wave_properties::<f64>(
-            state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7], state[8],
+            state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7],
+            state[8],
         );
         [s_l, s_r, s_star]
     }
@@ -1016,8 +1258,17 @@ mod tests {
         let want = wave_properties_f64(&state);
         let got = wave_properties_gv(&state);
         for kk in 0..3 {
-            assert!(got[kk].is_finite(), "gv signal speed {kk} not finite: {}", got[kk]);
-            assert!(approx(want[kk], got[kk]), "carrier mismatch at {kk}: f64 {} vs gv {}", want[kk], got[kk]);
+            assert!(
+                got[kk].is_finite(),
+                "gv signal speed {kk} not finite: {}",
+                got[kk]
+            );
+            assert!(
+                approx(want[kk], got[kk]),
+                "carrier mismatch at {kk}: f64 {} vs gv {}",
+                want[kk],
+                got[kk]
+            );
         }
     }
 
@@ -1034,7 +1285,12 @@ mod tests {
         let got = wave_properties_gv(&state);
         for kk in 0..3 {
             assert!(got[kk].is_finite(), "gv signal speed {kk} not finite");
-            assert!(approx(want[kk], got[kk]), "carrier mismatch at {kk}: f64 {} vs gv {}", want[kk], got[kk]);
+            assert!(
+                approx(want[kk], got[kk]),
+                "carrier mismatch at {kk}: f64 {} vs gv {}",
+                want[kk],
+                got[kk]
+            );
         }
     }
 }

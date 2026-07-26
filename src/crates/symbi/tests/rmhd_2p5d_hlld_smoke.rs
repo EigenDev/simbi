@@ -28,7 +28,11 @@ fn build_sim() -> Sim {
     sim.seed_face(0, 0.2);
     sim.seed_face(1, 0.2);
     sim.seed_cells(|_| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.1, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.2, 0.2, 0.0]),
     });
     sim
@@ -37,13 +41,24 @@ fn build_sim() -> Sim {
 #[test]
 fn rmhd_2p5d_runs_with_hlld() {
     let mut sim = build_sim();
-    let sub = sim.substrate().with_solver(Solver::Hlld).expect("hlld is valid for rmhd");
+    let sub = sim
+        .substrate()
+        .with_solver(Solver::Hlld)
+        .expect("hlld is valid for rmhd");
     evolve(&mut sim, &sub, 0.02).unwrap_or_else(|e| panic!("2D RMHD HLLD evolve failed: {e}"));
     assert!(sim.iteration >= 1, "no steps taken with HLLD");
     for c in sim.geom.interior.iter() {
         let p = sim.prim_at(c);
-        assert!(p.rho.is_finite() && p.rho > 0.0, "HLLD cell {c:?}: rho={}", p.rho);
-        assert!(p.pre.is_finite() && p.pre > 0.0, "HLLD cell {c:?}: p={}", p.pre);
+        assert!(
+            p.rho.is_finite() && p.rho > 0.0,
+            "HLLD cell {c:?}: rho={}",
+            p.rho
+        );
+        assert!(
+            p.pre.is_finite() && p.pre > 0.0,
+            "HLLD cell {c:?}: p={}",
+            p.pre
+        );
     }
 }
 
@@ -53,7 +68,10 @@ fn rmhd_2p5d_runs_with_hlld() {
 #[test]
 fn rmhd_2p5d_solver_matrix() {
     let sim = build_sim();
-    assert!(sim.substrate().with_solver(Solver::Hllc).is_ok(), "hllc is valid for rmhd");
+    assert!(
+        sim.substrate().with_solver(Solver::Hllc).is_ok(),
+        "hllc is valid for rmhd"
+    );
     // the substrate kernel set is not Debug, so match the Result directly.
     match sim.substrate().with_solver(Solver::HllcLm) {
         Err(ConfigError::SolverRegimeMismatch { .. }) => {}

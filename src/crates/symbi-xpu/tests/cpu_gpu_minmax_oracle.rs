@@ -34,8 +34,12 @@ fn compile_to_ptx(src: &str, name: &str) -> Vec<u8> {
     std::fs::write(&cu, src).unwrap();
     let out = std::process::Command::new("nvcc")
         .args([
-            "-ptx", "-O3", "--gpu-architecture=native",
-            "-o", ptx.to_str().unwrap(), cu.to_str().unwrap(),
+            "-ptx",
+            "-O3",
+            "--gpu-architecture=native",
+            "-o",
+            ptx.to_str().unwrap(),
+            cu.to_str().unwrap(),
         ])
         .output()
         .expect("nvcc not found");
@@ -49,9 +53,7 @@ fn compile_to_ptx(src: &str, name: &str) -> Vec<u8> {
 
 // launch a source kernel `(const double* param_0..p, double* out_0..m, u32 n_cells)`
 // over `n` cells and return the `m` output buffers.
-fn launch_source(
-    cuda: &str, name: &str, params: &[Vec<f64>], n_out: usize,
-) -> Vec<Vec<f64>> {
+fn launch_source(cuda: &str, name: &str, params: &[Vec<f64>], n_out: usize) -> Vec<Vec<f64>> {
     let n = params[0].len();
     let exec = Executor::<CudaSpace>::new(0).unwrap();
     let ptx = compile_to_ptx(cuda, name);
@@ -66,7 +68,9 @@ fn launch_source(
     for (i, data) in params.iter().enumerate() {
         let p = blocks[i].as_mut_ptr::<f64>();
         for (j, &v) in data.iter().enumerate() {
-            unsafe { *p.add(j) = v; }
+            unsafe {
+                *p.add(j) = v;
+            }
         }
     }
 
@@ -78,7 +82,8 @@ fn launch_source(
     }
     args.push(&grid);
     unsafe {
-        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args).unwrap();
+        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args)
+            .unwrap();
     }
     exec.sync().unwrap();
 
@@ -95,8 +100,17 @@ fn launch_source(
 // domain where the ternary and the std method disagree.
 fn probes() -> Vec<f64> {
     vec![
-        f64::NAN, f64::INFINITY, f64::NEG_INFINITY,
-        0.0, -0.0, 1.0, -1.0, 2.5, -2.5, 1e15, -1e-15,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        0.0,
+        -0.0,
+        1.0,
+        -1.0,
+        2.5,
+        -2.5,
+        1e15,
+        -1e-15,
     ]
 }
 
@@ -140,7 +154,12 @@ fn minmax_abs_cpu_gpu_bit_identical_on_ieee_edges() {
     let ncells = a_buf.len();
 
     // device: one kernel, three outputs.
-    let src = emit_source_kernel(&g, &["a".into(), "b".into()], &[n_min, n_max, n_abs], "minmax");
+    let src = emit_source_kernel(
+        &g,
+        &["a".into(), "b".into()],
+        &[n_min, n_max, n_abs],
+        "minmax",
+    );
     let dev = launch_source(&src, "minmax", &[a_buf.clone(), b_buf.clone()], 3);
 
     // interp: same graph, same inputs, per cell.
@@ -158,7 +177,11 @@ fn minmax_abs_cpu_gpu_bit_identical_on_ieee_edges() {
             if want[c].to_bits() != got[c].to_bits() {
                 mism.push(format!(
                     "{}(a={a:?}, b={b:?}): interp={:?} (0x{:016x}) device={:?} (0x{:016x})",
-                    labels[c], want[c], want[c].to_bits(), got[c], got[c].to_bits()
+                    labels[c],
+                    want[c],
+                    want[c].to_bits(),
+                    got[c],
+                    got[c].to_bits()
                 ));
             }
         }

@@ -15,9 +15,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -66,17 +66,30 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
         .expect("root sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim { rho: 1.0 + b, vel: Tensor::new([0.0, 0.0]), pre: 1.0 + b }
+            Prim {
+                rho: 1.0 + b,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: 1.0 + b,
+            }
         })
         .build()
 }
 
 // the CANONICAL monolithic reference: full-grid root + the spanning patch, run via hier.evolve().
 fn build_mono(ts: Timestepping) -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), ts);
+    let root = build_root(
+        [N, N],
+        [0.0, 0.0],
+        Boundaries::uniform(BoundaryType::Outflow),
+        ts,
+    );
     let k = kset(&root);
-    let region = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
-    let mut h = Hier::with_refinement(root, k, &[region], ProlongOrder::Plm, kset).expect("mono hier");
+    let region = RefinementRegion {
+        x_lo: [PX_LO, PY_LO],
+        x_hi: [PX_HI, PY_HI],
+    };
+    let mut h =
+        Hier::with_refinement(root, k, &[region], ProlongOrder::Plm, kset).expect("mono hier");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -93,8 +106,16 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
         let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
         let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
-            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+            let lo = if tc[a] == 0 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
+            let hi = if tc[a] == counts[a] - 1 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
             [lo, hi]
         }));
         let root = build_root(m, origin, bnd, ts);
@@ -104,7 +125,10 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
         let owns_patch = cx[0] < cx[1] && cy[0] < cy[1];
         let mut h = if owns_patch {
             let k = kset(&root);
-            let region = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
+            let region = RefinementRegion {
+                x_lo: [cx[0], cy[0]],
+                x_hi: [cx[1], cy[1]],
+            };
             let h = Hier::with_refinement(root, k, &[region], ProlongOrder::Plm, kset)
                 .expect("tile hier");
             h.seed_fine_from_coarse().expect("seed fine");
@@ -186,7 +210,10 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
@@ -204,10 +231,16 @@ fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
     );
     let spread = mono_c.iter().cloned().fold(0.0_f64, f64::max)
         - mono_c.iter().cloned().fold(f64::INFINITY, f64::min);
-    assert!(spread > 1e-2, "composite is flat ({spread:e}); test is vacuous");
+    assert!(
+        spread > 1e-2,
+        "composite is flat ({spread:e}); test is vacuous"
+    );
 
     let e = max_err(&mono_c, &dec_c);
-    assert!(e < 1e-12, "{counts:?} {ts:?} P3 (patch across cut) composite err {e:e}");
+    assert!(
+        e < 1e-12,
+        "{counts:?} {ts:?} P3 (patch across cut) composite err {e:e}"
+    );
 }
 
 // the PYTHON OUTPUT path: gather each decomposed level into a global hierarchy (root over `counts`,

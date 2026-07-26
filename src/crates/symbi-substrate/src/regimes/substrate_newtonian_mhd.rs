@@ -20,4 +20,5 @@ pub type NewtonianMhdSubstrateKernelSet<Mem, Sc, const D: usize> =
     MhdSubstrateKernelSet<NewtonianMhd, Mem, Sc, D>;
 
 /// back-compat alias for the 3D KernelSet (the original `*3D` name).
-pub type NewtonianMhdSubstrateKernelSet3D<Mem, Sc = f64> = NewtonianMhdSubstrateKernelSet<Mem, Sc, 3>;
+pub type NewtonianMhdSubstrateKernelSet3D<Mem, Sc = f64> =
+    NewtonianMhdSubstrateKernelSet<Mem, Sc, 3>;

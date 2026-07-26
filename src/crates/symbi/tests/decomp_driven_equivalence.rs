@@ -16,7 +16,7 @@
 
 use symbi::prelude::SimSubstrate;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -24,7 +24,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_boundary_dag;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -61,11 +61,17 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 2]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 2]),
+            pre: 1.0,
+        })
         .build();
     let cfg = SourceConfig::from_json(&boundary_json()).expect("parse boundary config");
     let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("lower boundary dag");
-    let (k, id) = sim.substrate().with_driven_boundary(built, cfg.params.clone());
+    let (k, id) = sim
+        .substrate()
+        .with_driven_boundary(built, cfg.params.clone());
     assert_eq!(id, 0, "first registration is id 0 (matches Driven(0))");
     (sim, k)
 }
@@ -85,9 +91,16 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
             let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
             let phys_lo = [BoundaryType::Driven(0), BoundaryType::Outflow];
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { phys_lo[a] } else { BoundaryType::CoarseFine };
-                let hi =
-                    if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    phys_lo[a]
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd)
@@ -136,7 +149,10 @@ fn global_field(
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_driven_matches(counts: [usize; 2]) {
@@ -160,12 +176,21 @@ fn assert_driven_matches(counts: [usize; 2]) {
     // the inflow must have actually entered (else the test is vacuous): the driven face pushes
     // rho ~ 2 gas at v_x = 0.5 into a rho = 1 box, so total mom_x is well above zero.
     let total_momx: f64 = mono_momx.iter().map(|v| v.abs()).sum();
-    assert!(total_momx > 1e-3, "driven inflow produced no momentum ({total_momx:e}); test is vacuous");
+    assert!(
+        total_momx > 1e-3,
+        "driven inflow produced no momentum ({total_momx:e}); test is vacuous"
+    );
 
     let de = max_err(&mono_den, &dec_den);
     let me = max_err(&mono_momx, &dec_momx);
-    assert!(de < 1e-12, "{counts:?} density err {de:e} under driven boundary");
-    assert!(me < 1e-12, "{counts:?} mom_x err {me:e} under driven boundary");
+    assert!(
+        de < 1e-12,
+        "{counts:?} density err {de:e} under driven boundary"
+    );
+    assert!(
+        me < 1e-12,
+        "{counts:?} mom_x err {me:e} under driven boundary"
+    );
 }
 
 #[test]

@@ -32,9 +32,9 @@ pub use symbi_io::{Attr, IoError, Metadata, Result};
 use symbi_io::{DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf};
 
 fn write_tree_atomic(path: &Path, tree: &Tree<'_>) -> Result<()> {
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| IoError::MissingPath(format!("checkpoint path has no file name: {path:?}")))?;
+    let file_name = path.file_name().ok_or_else(|| {
+        IoError::MissingPath(format!("checkpoint path has no file name: {path:?}"))
+    })?;
     let temporary = path.with_file_name(format!(
         ".{}.tmp.{}",
         file_name.to_string_lossy(),
@@ -869,14 +869,10 @@ fn continuous_tracer_snap<const D: usize, Mem: MemorySpace>(
             n,
             order: tracers.order as u64,
             x: (0..n)
-                .flat_map(|ii| {
-                    (0..D).map(move |dd| *tracers.x[dd].as_ptr::<f64>().add(ii))
-                })
+                .flat_map(|ii| (0..D).map(move |dd| *tracers.x[dd].as_ptr::<f64>().add(ii)))
                 .collect(),
             step_x: (0..n)
-                .flat_map(|ii| {
-                    (0..D).map(move |dd| *tracers.step_x[dd].as_ptr::<f64>().add(ii))
-                })
+                .flat_map(|ii| (0..D).map(move |dd| *tracers.step_x[dd].as_ptr::<f64>().add(ii)))
                 .collect(),
             id: std::slice::from_raw_parts(tracers.id.as_ptr::<u64>(), n).to_vec(),
             cohort: std::slice::from_raw_parts(tracers.cohort.as_ptr::<u16>(), n)
@@ -884,9 +880,7 @@ fn continuous_tracer_snap<const D: usize, Mem: MemorySpace>(
                 .map(|value| *value as u64)
                 .collect(),
             owner: std::slice::from_raw_parts(
-                tracers
-                    .owner
-                    .as_ptr::<crate::mass_transport::ContainerId>(),
+                tracers.owner.as_ptr::<crate::mass_transport::ContainerId>(),
                 n,
             )
             .iter()
@@ -896,23 +890,14 @@ fn continuous_tracer_snap<const D: usize, Mem: MemorySpace>(
                 .iter()
                 .map(|value| *value as u64)
                 .collect(),
-            crossed_sink: std::slice::from_raw_parts(
-                tracers.crossed_sink.as_ptr::<u8>(),
-                n,
-            )
-            .iter()
-            .map(|value| *value as u64)
-            .collect(),
-            crossing_time: std::slice::from_raw_parts(
-                tracers.crossing_time.as_ptr::<f64>(),
-                n,
-            )
-            .to_vec(),
-            random_counter: std::slice::from_raw_parts(
-                tracers.random_counter.as_ptr::<u64>(),
-                n,
-            )
-            .to_vec(),
+            crossed_sink: std::slice::from_raw_parts(tracers.crossed_sink.as_ptr::<u8>(), n)
+                .iter()
+                .map(|value| *value as u64)
+                .collect(),
+            crossing_time: std::slice::from_raw_parts(tracers.crossing_time.as_ptr::<f64>(), n)
+                .to_vec(),
+            random_counter: std::slice::from_raw_parts(tracers.random_counter.as_ptr::<u64>(), n)
+                .to_vec(),
             weight: vec![tracers.weight],
             run_seed: tracers.run_seed,
             next_id: tracers.next_id,
@@ -928,16 +913,32 @@ fn continuous_tracer_group<const D: usize>(snap: &ContinuousTracerSnap) -> Tree<
         .with_attr("run_seed", snap.run_seed)
         .with_attr("next_id", snap.next_id)
         .with_attr("injection_remainder", snap.injection_remainder)
-        .with_dataset(Dataset::new("position", vec![snap.n, D], DataRef::F64(&snap.x)))
+        .with_dataset(Dataset::new(
+            "position",
+            vec![snap.n, D],
+            DataRef::F64(&snap.x),
+        ))
         .with_dataset(Dataset::new(
             "step_position",
             vec![snap.n, D],
             DataRef::F64(&snap.step_x),
         ))
         .with_dataset(Dataset::new("id", vec![snap.n], DataRef::U64(&snap.id)))
-        .with_dataset(Dataset::new("cohort", vec![snap.n], DataRef::U64(&snap.cohort)))
-        .with_dataset(Dataset::new("owner", vec![snap.n], DataRef::U64(&snap.owner)))
-        .with_dataset(Dataset::new("escaped", vec![snap.n], DataRef::U64(&snap.escaped)))
+        .with_dataset(Dataset::new(
+            "cohort",
+            vec![snap.n],
+            DataRef::U64(&snap.cohort),
+        ))
+        .with_dataset(Dataset::new(
+            "owner",
+            vec![snap.n],
+            DataRef::U64(&snap.owner),
+        ))
+        .with_dataset(Dataset::new(
+            "escaped",
+            vec![snap.n],
+            DataRef::U64(&snap.escaped),
+        ))
         .with_dataset(Dataset::new(
             "crossed_sink",
             vec![snap.n],
@@ -964,7 +965,10 @@ fn combine_continuous_tracer_snaps(
         assert_eq!(snap.order, combined.order);
         assert_eq!(snap.run_seed, combined.run_seed);
         assert_eq!(snap.next_id, combined.next_id);
-        assert_eq!(snap.injection_remainder.to_bits(), combined.injection_remainder.to_bits());
+        assert_eq!(
+            snap.injection_remainder.to_bits(),
+            combined.injection_remainder.to_bits()
+        );
         assert_eq!(snap.weight, combined.weight);
         combined.n += snap.n;
         combined.x.extend(snap.x);
@@ -1179,10 +1183,7 @@ where
     if let Some(ts) = tr_snap.as_ref() {
         tree.push_group(tracer_group::<D>(ts));
     }
-    let continuous_snap = sim
-        .continuous_tracers
-        .as_ref()
-        .map(continuous_tracer_snap);
+    let continuous_snap = sim.continuous_tracers.as_ref().map(continuous_tracer_snap);
     if let Some(snap) = continuous_snap.as_ref() {
         tree.push_group(continuous_tracer_group::<D>(snap));
     }
@@ -1524,12 +1525,10 @@ where
             for d in 0..D {
                 let face_dom = interior.extend(d, 0, 1);
                 let name = format!("B{}", d + 1);
-                let restored = mag
-                    .find_group(&name)
-                    .map_or_else(
-                        || restore_field(mag, &name, &mhd.bface[d], &face_dom),
-                        |face| restore_field(face, "data", &mhd.bface[d], &face_dom),
-                    );
+                let restored = mag.find_group(&name).map_or_else(
+                    || restore_field(mag, &name, &mhd.bface[d], &face_dom),
+                    |face| restore_field(face, "data", &mhd.bface[d], &face_dom),
+                );
                 if restored.is_err() {
                     all_ok = false;
                 }
@@ -1621,11 +1620,7 @@ where
         sim.tracers = Some(tr);
         let geometry = sim.geom.block_geometry(sim.physics.metric);
         let layout = symbi_sim_tracers::TransportLayout::single(&sim.geom.interior);
-        symbi_sim_tracers::refresh_derived_positions_store(
-            &mut sim.store,
-            &geometry,
-            layout,
-        );
+        symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
     }
     if let Some(group) = tree.find_group("continuous_tracers") {
         let getf = |name: &str| -> Result<Vec<f64>> {
@@ -1634,9 +1629,7 @@ where
                 .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
                 .data
                 .as_f64()
-                .ok_or_else(|| {
-                    IoError::MissingPath(format!("continuous_tracers/{name}: not f64"))
-                })?
+                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}: not f64")))?
                 .to_vec())
         };
         let getu = |name: &str| -> Result<Vec<u64>> {
@@ -1645,9 +1638,7 @@ where
                 .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
                 .data
                 .as_u64()
-                .ok_or_else(|| {
-                    IoError::MissingPath(format!("continuous_tracers/{name}: not u64"))
-                })?
+                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}: not u64")))?
                 .to_vec())
         };
         let x = getf("position")?;

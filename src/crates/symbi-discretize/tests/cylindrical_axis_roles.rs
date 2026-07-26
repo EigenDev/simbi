@@ -16,7 +16,9 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{adiabatic_flux_cyl_rz_gv, geometric_momentum_source_probe_gv, Coords, GeoSource, Spacing};
+use symbi_discretize::{
+    Coords, GeoSource, Spacing, adiabatic_flux_cyl_rz_gv, geometric_momentum_source_probe_gv,
+};
 
 const NR: usize = 4;
 const NZ: usize = 3;
@@ -27,7 +29,10 @@ const DZ: f64 = 0.2;
 
 fn close(got: f64, want: f64, what: &str, i: usize, j: usize) {
     let rel = (got - want).abs() / want.abs().max(1.0);
-    assert!(rel < 1e-12, "{what} cell ({i},{j}): got {got} want {want} (rel {rel:e})");
+    assert!(
+        rel < 1e-12,
+        "{what} cell ({i},{j}): got {got} want {want} (rel {rel:e})"
+    );
 }
 
 #[test]
@@ -41,13 +46,24 @@ fn cylindrical_rz_swirl_source_matches_analytic() {
     let (vr, vphi, vz, p) = (0.1_f64, 0.3_f64, 0.05_f64, 1.0_f64);
 
     let out = KernelRun::new(geometric_momentum_source_probe_gv(
-        Coords::Cylindrical, &[Spacing::Uniform; 2], &[0, 2], 2, 3,
+        Coords::Cylindrical,
+        &[Spacing::Uniform; 2],
+        &[0, 2],
+        2,
+        3,
         GeoSource::Hydro { inertial: true },
     ))
     .grid([NR, NZ])
     // mom_2 (the z momentum) is created by the probe (cons_mom over ncomp=3) but unused by the
     // (r,phi)-plane swirl source — bind it so the harness has every field input satisfied.
-    .fields(&[("pre", p), ("mom_0", vr), ("mom_1", vphi), ("mom_2", vz), ("prim_v0", vr), ("prim_v1", vphi)])
+    .fields(&[
+        ("pre", p),
+        ("mom_0", vr),
+        ("mom_1", vphi),
+        ("mom_2", vz),
+        ("prim_v0", vr),
+        ("prim_v1", vphi),
+    ])
     .scalars(&[("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", Z0), ("dx_1", DZ)])
     .run();
 
@@ -66,7 +82,10 @@ fn cylindrical_rz_swirl_source_matches_analytic() {
         }
     }
     // the swirl angular-momentum source is genuinely nonzero (the new physics).
-    assert!(out.values("s_1")[0].abs() > 1e-6, "swirl S_phi vanished — angular-momentum source idle");
+    assert!(
+        out.values("s_1")[0].abs() > 1e-6,
+        "swirl S_phi vanished — angular-momentum source idle"
+    );
 }
 
 #[test]
@@ -84,7 +103,13 @@ fn cylindrical_rz_swirl_flux_is_advective() {
     let out = KernelRun::new(adiabatic_flux_cyl_rz_gv(0)) // sweep r
         .grid([nr, nz])
         .compute_window([2, 0], [3, nz])
-        .fields(&[("prim_rho", rho), ("prim_v0", vr), ("prim_v1", vphi), ("prim_v2", vz), ("prim_pre", p)])
+        .fields(&[
+            ("prim_rho", rho),
+            ("prim_v0", vr),
+            ("prim_v1", vphi),
+            ("prim_v2", vz),
+            ("prim_pre", p),
+        ])
         // theta=1 == plain minmod; static mesh -> zero mesh motion; uniform geometry (the
         // advective flux of a uniform state is geometry-independent so x_lo_0/dx_0 are arbitrary).
         .scalars(&[
@@ -106,8 +131,20 @@ fn cylindrical_rz_swirl_flux_is_advective() {
         assert!(rel < 1e-12, "{what}: got {got} want {want} (rel {rel:e})");
     };
     close1(out.get(cell, "flux_den"), rho * vr, "F_den");
-    close1(out.get(cell, "flux_mom_0"), rho * vr * vr + p, "F_mom_r (carries pressure)");
-    close1(out.get(cell, "flux_mom_1"), rho * vphi * vr, "F_mom_phi (advection, no pressure)");
-    close1(out.get(cell, "flux_mom_2"), rho * vz * vr, "F_mom_z (advection)");
+    close1(
+        out.get(cell, "flux_mom_0"),
+        rho * vr * vr + p,
+        "F_mom_r (carries pressure)",
+    );
+    close1(
+        out.get(cell, "flux_mom_1"),
+        rho * vphi * vr,
+        "F_mom_phi (advection, no pressure)",
+    );
+    close1(
+        out.get(cell, "flux_mom_2"),
+        rho * vz * vr,
+        "F_mom_z (advection)",
+    );
     close1(out.get(cell, "flux_nrg"), (e + p) * vr, "F_energy");
 }

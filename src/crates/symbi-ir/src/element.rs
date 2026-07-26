@@ -85,7 +85,13 @@ mod tests {
 
     #[test]
     fn float_and_integer_are_disjoint() {
-        for ty in [ElementTy::F64, ElementTy::F32, ElementTy::I32, ElementTy::U32, ElementTy::Bool] {
+        for ty in [
+            ElementTy::F64,
+            ElementTy::F32,
+            ElementTy::I32,
+            ElementTy::U32,
+            ElementTy::Bool,
+        ] {
             assert!(!(ty.is_float() && ty.is_integer()), "{} cannot be both", ty);
         }
     }

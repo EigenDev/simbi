@@ -24,7 +24,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::expr_bridge::build_boundary_dag;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
@@ -61,16 +61,7 @@ fn build_hier(
     region: RefinementRegion<2>,
     json: String,
     ic: impl Fn([f64; 2]) -> Prim<f64, 2> + Copy,
-) -> Hierarchy<
-    Newtonian,
-    2,
-    2,
-    Cartesian,
-    IdealGas<f64>,
-    CpuSpace,
-    HostMemory,
-    Kset,
-> {
+) -> Hierarchy<Newtonian, 2, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
     let dx = 1.0 / N as f64;
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N; 2])
@@ -116,7 +107,10 @@ fn uniform_gas_stays_uniform_with_all_faces_driven() {
         [BoundaryType::Driven(0), BoundaryType::Driven(0)],
         [BoundaryType::Driven(0), BoundaryType::Driven(0)],
     ]);
-    let region = RefinementRegion { x_lo: [0.25; 2], x_hi: [0.75; 2] };
+    let region = RefinementRegion {
+        x_lo: [0.25; 2],
+        x_hi: [0.75; 2],
+    };
     let mut hier = build_hier(boundaries, region, const_dag(rho0, 0.0, pre0), |_| Prim {
         rho: rho0,
         vel: Tensor::new([0.0; 2]),
@@ -146,11 +140,16 @@ fn fine_level_flush_against_a_driven_face_holds_the_prescription() {
         [BoundaryType::Driven(0), BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::Outflow],
     ]);
-    let region = RefinementRegion { x_lo: [0.0, 0.25], x_hi: [0.5, 0.75] };
-    let mut hier = build_hier(boundaries, region, const_dag(rho_in, vx_in, pre_in), |_| Prim {
-        rho: 1.0,
-        vel: Tensor::new([0.0; 2]),
-        pre: 1.0,
+    let region = RefinementRegion {
+        x_lo: [0.0, 0.25],
+        x_hi: [0.5, 0.75],
+    };
+    let mut hier = build_hier(boundaries, region, const_dag(rho_in, vx_in, pre_in), |_| {
+        Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 2]),
+            pre: 1.0,
+        }
     });
     seed_fine(&hier, 1.0, 1.0);
     hier.evolve_steps(STEPS).unwrap();
@@ -185,7 +184,10 @@ fn fine_level_flush_against_a_driven_face_holds_the_prescription() {
     for c in fine.geom.interior.iter() {
         momx += (*fine.fields.cons.mom[0].view().at(c)).abs();
     }
-    assert!(momx > 1e-3, "driven inflow never entered the fine level ({momx:e})");
+    assert!(
+        momx > 1e-3,
+        "driven inflow never entered the fine level ({momx:e})"
+    );
 }
 
 #[test]
@@ -196,7 +198,10 @@ fn covered_restriction_sync_survives_a_driven_inflow() {
         [BoundaryType::Driven(0), BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::Outflow],
     ]);
-    let region = RefinementRegion { x_lo: [0.25; 2], x_hi: [0.75; 2] };
+    let region = RefinementRegion {
+        x_lo: [0.25; 2],
+        x_hi: [0.75; 2],
+    };
     let mut hier = build_hier(boundaries, region, const_dag(2.0, 0.5, 3.0), |_| Prim {
         rho: 1.0,
         vel: Tensor::new([0.0; 2]),
@@ -220,6 +225,9 @@ fn covered_restriction_sync_survives_a_driven_inflow() {
             let want = *scratch.view().at(cc);
             worst = worst.max((live - want).abs() / want.abs().max(1e-300));
         }
-        assert!(worst < 1e-13, "covered '{nm}' out of sync under driven inflow: {worst:e}");
+        assert!(
+            worst < 1e-13,
+            "covered '{nm}' out of sync under driven inflow: {worst:e}"
+        );
     }
 }

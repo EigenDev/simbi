@@ -78,9 +78,7 @@ pub fn select_timestep(
         return Err(symbi_xpu::XpuError {
             operation: "evolve",
             code: -1,
-            detail: format!(
-                "evolve: no CFL candidates at iter {iter} (time {time:.4e})"
-            ),
+            detail: format!("evolve: no CFL candidates at iter {iter} (time {time:.4e})"),
         });
     }
     Ok(dt)
@@ -121,7 +119,12 @@ pub fn reset_profile() {
 }
 /// drain the per-phase profile as (phase, milliseconds) pairs.
 pub fn report_profile() -> Vec<(&'static str, f64)> {
-    PHASE_MS.lock().unwrap().iter().map(|(k, v)| (*k, *v)).collect()
+    PHASE_MS
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (*k, *v))
+        .collect()
 }
 
 /// `c_{k+1} = ac*(c_k + 1)` — euler -> [1]; rk2 -> [1, 1]; rk3 -> [1, 1/2, 1].
@@ -219,8 +222,7 @@ where
             .enumerate()
             .find_map(|(index, body)| match body.kind {
                 symbi_ib::BodyKind::Horizon {
-                    diagnostic_radius,
-                    ..
+                    diagnostic_radius, ..
                 } => Some((index, diagnostic_radius)),
                 _ => None,
             })
@@ -277,12 +279,17 @@ pub fn stage_tag(ii: usize, n: usize) -> u8 {
 /// mass (fixed-potential sink); no kernel dispatch — pure host bookkeeping over the sim.
 pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-)
-where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace,
+) where
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
 {
     let (dt, time) = (sim.dt, sim.time);
 
-    let Some(im) = sim.immersed.as_mut() else { return; };
+    let Some(im) = sim.immersed.as_mut() else {
+        return;
+    };
     // fragments without their pair physics would feel wall forces yet never
     // move — a silently frozen cluster reads as valid output, so refuse it.
     assert!(
@@ -332,7 +339,7 @@ mod tests {
     fn check_dt_or_panic_accepts_positive_finite() {
         // does not panic.
         check_dt_or_panic(1e-3, 0, 0.0);
-        check_dt_or_panic(1.0,  100, 0.5);
+        check_dt_or_panic(1.0, 100, 0.5);
         check_dt_or_panic(f64::MIN_POSITIVE, 0, 0.0);
     }
 

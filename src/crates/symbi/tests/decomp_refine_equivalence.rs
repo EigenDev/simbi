@@ -15,9 +15,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -52,7 +52,10 @@ fn bump(x: f64, y: f64) -> f64 {
 // so its coarse-fine prolongation reads only tile-0-local root cells (no cross-tile coupling) under
 // any of the tested decompositions.
 fn patch() -> RefinementRegion<2> {
-    RefinementRegion { x_lo: [0.125, 0.125], x_hi: [0.375, 0.375] }
+    RefinementRegion {
+        x_lo: [0.125, 0.125],
+        x_hi: [0.375, 0.375],
+    }
 }
 
 fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> Sim {
@@ -67,7 +70,11 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
         .expect("root sim construction failed")
         .set_initial(|[x, y]| {
             let b = bump(x, y);
-            Prim { rho: 1.0 + b, vel: Tensor::new([0.0, 0.0]), pre: 1.0 + b }
+            Prim {
+                rho: 1.0 + b,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: 1.0 + b,
+            }
         })
         .build()
 }
@@ -76,7 +83,12 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
 // `hier.evolve()` (so the test validates BOTH the decomposition AND that the staged driver
 // reproduces the canonical recursive advance).
 fn build_mono(ts: Timestepping) -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), ts);
+    let root = build_root(
+        [N, N],
+        [0.0, 0.0],
+        Boundaries::uniform(BoundaryType::Outflow),
+        ts,
+    );
     let k = kset(&root);
     let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
         .expect("mono hierarchy");
@@ -96,16 +108,23 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
-            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+            let lo = if tc[a] == 0 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
+            let hi = if tc[a] == counts[a] - 1 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
             [lo, hi]
         }));
         let root = build_root(m, origin, bnd, ts);
         // the patch lives in the single tile whose physical extent contains it (the bottom-left
         // quadrant -> tile 0 for every tested topology). check BOTH axes.
-        let owns_patch = (0..2).all(|a| {
-            origin[a] <= 0.125 && origin[a] + m[a] as f64 * DX >= 0.375
-        });
+        let owns_patch =
+            (0..2).all(|a| origin[a] <= 0.125 && origin[a] + m[a] as f64 * DX >= 0.375);
         let mut h = if owns_patch {
             let k = kset(&root);
             let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
@@ -188,7 +207,10 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0_f64, f64::max)
 }
 
 fn assert_refine_matches(counts: [usize; 2], ts: Timestepping) {
@@ -207,10 +229,16 @@ fn assert_refine_matches(counts: [usize; 2], ts: Timestepping) {
     // non-vacuous: the fine patch must hold non-trivial structure (the bump).
     let spread = mono_c.iter().cloned().fold(0.0_f64, f64::max)
         - mono_c.iter().cloned().fold(f64::INFINITY, f64::min);
-    assert!(spread > 1e-2, "composite is flat ({spread:e}); test is vacuous");
+    assert!(
+        spread > 1e-2,
+        "composite is flat ({spread:e}); test is vacuous"
+    );
 
     let e = max_err(&mono_c, &dec_c);
-    assert!(e < 1e-12, "{counts:?} refined decomposed vs monolithic composite err {e:e}");
+    assert!(
+        e < 1e-12,
+        "{counts:?} refined decomposed vs monolithic composite err {e:e}"
+    );
 }
 
 #[test]

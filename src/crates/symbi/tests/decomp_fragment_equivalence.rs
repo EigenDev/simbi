@@ -18,7 +18,7 @@
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -26,7 +26,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, Bond, BondMaterial, FragmentPhysics, SurfaceSpec};
-use symbi_xpu::{with_device, CpuSpace, HostMemory};
+use symbi_xpu::{CpuSpace, HostMemory, with_device};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -42,9 +42,21 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn fragment(x: f64, y: f64) -> Body<f64, 2> {
-    Body::rigid_sphere(0, Tensor::new([x, y]), Tensor::zeros(), FRAG_MASS, FRAG_RADIUS, 1e-3, true)
-        .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-        .with_two_way_coupling(true)
+    Body::rigid_sphere(
+        0,
+        Tensor::new([x, y]),
+        Tensor::zeros(),
+        FRAG_MASS,
+        FRAG_RADIUS,
+        1e-3,
+        true,
+    )
+    .with_surface(SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 50.0,
+    })
+    .with_two_way_coupling(true)
 }
 
 // a bonded pair straddling y = 0: fragment 0 at y = -0.35, fragment 1 at y = +0.35. each fragment
@@ -54,10 +66,18 @@ fn attach_fragments(sim: Sim) -> Sim {
     let coll = BodyCollection::new()
         .add_fragment(fragment(0.0, -0.35))
         .add_fragment(fragment(0.0, 0.35));
-    let mat = BondMaterial { k_n: 50.0, gamma: 0.5, ..BondMaterial::rigid() };
+    let mat = BondMaterial {
+        k_n: 50.0,
+        gamma: 0.5,
+        ..BondMaterial::rigid()
+    };
     let bonds = vec![Bond::form(0, 1, coll.get(0), coll.get(1), mat)];
     let mut sim = sim.with_bodies(coll);
-    sim.attach_fragment_physics(FragmentPhysics { bonds, contacts: None, gravity: None });
+    sim.attach_fragment_physics(FragmentPhysics {
+        bonds,
+        contacts: None,
+        gravity: None,
+    });
     sim
 }
 
@@ -71,7 +91,11 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
         .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([WIND, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([WIND, 0.0]),
+            pre: 1.0,
+        })
         .build();
     let sim = attach_fragments(sim);
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -86,8 +110,16 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd, ts)
@@ -104,7 +136,15 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
         kernels.push(&*k);
     }
     evolve_decomposed(
-        &mut stores, &kernels, counts, &devices, ts, 0.0, T_FINAL, u64::MAX, &LocalCopy,
+        &mut stores,
+        &kernels,
+        counts,
+        &devices,
+        ts,
+        0.0,
+        T_FINAL,
+        u64::MAX,
+        &LocalCopy,
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
 }
@@ -117,7 +157,10 @@ fn fragment_state(tiles: &[(Sim, Kern)]) -> [([f64; 2], [f64; 2]); 2] {
     let im = tiles[0].0.immersed.as_ref().expect("fragments attached");
     std::array::from_fn(|i| {
         let b = im.bodies.get(i);
-        ([b.position[0], b.position[1]], [b.velocity[0], b.velocity[1]])
+        (
+            [b.position[0], b.position[1]],
+            [b.velocity[0], b.velocity[1]],
+        )
     })
 }
 
@@ -141,7 +184,9 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     let mut max_err = 0.0_f64;
     for (i, ((mp, mv), (dp, dv))) in mono_st.iter().zip(&dec_st).enumerate() {
         for a in 0..2 {
-            max_err = max_err.max((mp[a] - dp[a]).abs()).max((mv[a] - dv[a]).abs());
+            max_err = max_err
+                .max((mp[a] - dp[a]).abs())
+                .max((mv[a] - dv[a]).abs());
         }
         let _ = i;
     }

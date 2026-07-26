@@ -17,11 +17,11 @@
 // =============================================================================
 
 // --- physics regimes ---
+pub use symbi_hydro::isothermal_mhd::IsothermalMhd;
 pub use symbi_hydro::newtonian::Newtonian;
 pub use symbi_hydro::newtonian_mhd::NewtonianMhd;
-pub use symbi_hydro::isothermal_mhd::IsothermalMhd;
-pub use symbi_hydro::rmhd::Rmhd;
 pub use symbi_hydro::rhd::Rhd;
+pub use symbi_hydro::rmhd::Rmhd;
 
 // --- equations of state ---
 pub use symbi_hydro::eos::{IdealGas, Isothermal};
@@ -34,10 +34,10 @@ pub use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 // the neutral device space/memory: resolves to whichever gpu backend is
 // compiled in. the concrete `CudaSpace`/`UnifiedMemory` stay exported under `cuda` for any
 // code that names them directly.
-#[cfg(feature = "gpu")]
-pub use symbi_xpu::{DeviceMemory, DeviceSpace};
 #[cfg(feature = "cuda")]
 pub use symbi_xpu::{CudaSpace, UnifiedMemory};
+#[cfg(feature = "gpu")]
+pub use symbi_xpu::{DeviceMemory, DeviceSpace};
 // the FEATURE-SELECTED backend: the device space/memory under any gpu feature, else CPU
 // (CpuSpace / HostMemory) — re-exported so an example drops its per-file `#[cfg(feature="gpu")]`
 // Space/Mem block in favor of `SimDefault*` (below).
@@ -61,8 +61,8 @@ pub use crate::regimes::substrate::IsoSubstrateKernelSet;
 pub use crate::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
 pub use crate::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 pub use crate::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
-pub use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 pub use crate::regimes::substrate_rhd::RhdSubstrateKernelSet;
+pub use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 
 // --- primitive / conserved value types (for IC closures + field read-back) ---
 pub use symbi_algebra::Tensor;

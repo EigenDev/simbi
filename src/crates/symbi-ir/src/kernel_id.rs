@@ -48,13 +48,21 @@ pub enum KernelId {
     /// MULTI-FIELD cell prolongation: one launch over `ncomp` co-located fields
     /// (the prim batch), sharing the per-cell stencil geometry. generated for the
     /// 3D hot path only (ncomp 4 = isothermal, 5 = adiabatic/rhd).
-    RefineProlongMulti { order: ProlongTag, ncomp: u8, ndim: u8 },
+    RefineProlongMulti {
+        order: ProlongTag,
+        ncomp: u8,
+        ndim: u8,
+    },
     /// MULTI-FIELD single-snapshot cell prolongation: the leaf reads ONE
     /// pre-lerped coarse buffer per component (a `FieldLerpMulti` pass hoisted
     /// the time interpolation to once per coarse cell — half the gather
     /// traffic of the time-pair kernel). same generation envelope as
     /// `RefineProlongMulti`.
-    RefineProlongMulti1t { order: ProlongTag, ncomp: u8, ndim: u8 },
+    RefineProlongMulti1t {
+        order: ProlongTag,
+        ncomp: u8,
+        ndim: u8,
+    },
     /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
@@ -89,7 +97,12 @@ pub enum KernelId {
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
     /// the interp evaluations.
-    RefineProlongSweep { order: ProlongTag, axis: u8, ncomp: u8, ndim: u8 },
+    RefineProlongSweep {
+        order: ProlongTag,
+        axis: u8,
+        ncomp: u8,
+        ndim: u8,
+    },
     /// staggered face restriction on the `axis`-normal faces.
     RefineRestrictFace { axis: u8, ndim: u8 },
     /// staggered face prolongation on the `axis`-normal faces.
@@ -120,18 +133,34 @@ fn dim_ix(ndim: u8) -> usize {
 // is ever returned, `kernel_by_name("...!...")` misses and fails loudly.
 const RESTRICT_FACE: [[&str; 3]; 3] = [
     ["refine_restrict_face_0_1d", "!", "!"],
-    ["refine_restrict_face_0_2d", "refine_restrict_face_1_2d", "!"],
-    ["refine_restrict_face_0_3d", "refine_restrict_face_1_3d", "refine_restrict_face_2_3d"],
+    [
+        "refine_restrict_face_0_2d",
+        "refine_restrict_face_1_2d",
+        "!",
+    ],
+    [
+        "refine_restrict_face_0_3d",
+        "refine_restrict_face_1_3d",
+        "refine_restrict_face_2_3d",
+    ],
 ];
 const PROLONG_FACE: [[&str; 3]; 3] = [
     ["refine_prolong_face_0_1d", "!", "!"],
     ["refine_prolong_face_0_2d", "refine_prolong_face_1_2d", "!"],
-    ["refine_prolong_face_0_3d", "refine_prolong_face_1_3d", "refine_prolong_face_2_3d"],
+    [
+        "refine_prolong_face_0_3d",
+        "refine_prolong_face_1_3d",
+        "refine_prolong_face_2_3d",
+    ],
 ];
 const ACC_FACE: [[&str; 3]; 3] = [
     ["refine_acc_face_0_1d", "!", "!"],
     ["refine_acc_face_0_2d", "refine_acc_face_1_2d", "!"],
-    ["refine_acc_face_0_3d", "refine_acc_face_1_3d", "refine_acc_face_2_3d"],
+    [
+        "refine_acc_face_0_3d",
+        "refine_acc_face_1_3d",
+        "refine_acc_face_2_3d",
+    ],
 ];
 // edge EMF accumulation (CT reflux): the build generates one per (axis, ndim)
 // like the face ops; only 3D is ever dispatched (the emf register is 3D), the
@@ -139,7 +168,11 @@ const ACC_FACE: [[&str; 3]; 3] = [
 const ACC_EDGE: [[&str; 3]; 3] = [
     ["refine_acc_edge_0_1d", "!", "!"],
     ["refine_acc_edge_0_2d", "refine_acc_edge_1_2d", "!"],
-    ["refine_acc_edge_0_3d", "refine_acc_edge_1_3d", "refine_acc_edge_2_3d"],
+    [
+        "refine_acc_edge_0_3d",
+        "refine_acc_edge_1_3d",
+        "refine_acc_edge_2_3d",
+    ],
 ];
 
 impl KernelId {
@@ -148,18 +181,22 @@ impl KernelId {
     /// kernel without a name landing here.
     pub fn name(self) -> &'static str {
         match self {
-            KernelId::RefineRestrict { ndim } => {
-                ["refine_restrict_1d", "refine_restrict_2d", "refine_restrict_3d"][dim_ix(ndim)]
-            }
+            KernelId::RefineRestrict { ndim } => [
+                "refine_restrict_1d",
+                "refine_restrict_2d",
+                "refine_restrict_3d",
+            ][dim_ix(ndim)],
             KernelId::FieldCopy { ndim } => {
                 ["field_copy_1d", "field_copy_2d", "field_copy_3d"][dim_ix(ndim)]
             }
             KernelId::FieldFill { ndim } => {
                 ["field_fill_1d", "field_fill_2d", "field_fill_3d"][dim_ix(ndim)]
             }
-            KernelId::FieldAxpyShift { ndim } => {
-                ["field_axpy_shift_1d", "field_axpy_shift_2d", "field_axpy_shift_3d"][dim_ix(ndim)]
-            }
+            KernelId::FieldAxpyShift { ndim } => [
+                "field_axpy_shift_1d",
+                "field_axpy_shift_2d",
+                "field_axpy_shift_3d",
+            ][dim_ix(ndim)],
             KernelId::RefineProlong { order, ndim } => match (order, ndim) {
                 (ProlongTag::Pcm, 1) => "refine_prolong_pcm_1d",
                 (ProlongTag::Pcm, 2) => "refine_prolong_pcm_2d",
@@ -204,57 +241,66 @@ impl KernelId {
                      ncomp 4/5 are generated"
                 ),
             },
-            KernelId::PenalizeDrain { ndim } => {
-                ["penalize_drain_1d", "penalize_drain_2d", "penalize_drain_3d"][dim_ix(ndim)]
-            }
-            KernelId::PenalizeDrainIso { ndim } => {
-                ["penalize_drain_iso_1d", "penalize_drain_iso_2d", "penalize_drain_iso_3d"]
-                    [dim_ix(ndim)]
-            }
-            KernelId::PenalizePorous { ndim } => {
-                ["penalize_porous_1d", "penalize_porous_2d", "penalize_porous_3d"][dim_ix(ndim)]
-            }
-            KernelId::PenalizeTorqueFreeIso { ndim } => {
-                [
-                    "penalize_torque_free_iso_1d",
-                    "penalize_torque_free_iso_2d",
-                    "penalize_torque_free_iso_3d",
-                ][dim_ix(ndim)]
-            }
+            KernelId::PenalizeDrain { ndim } => [
+                "penalize_drain_1d",
+                "penalize_drain_2d",
+                "penalize_drain_3d",
+            ][dim_ix(ndim)],
+            KernelId::PenalizeDrainIso { ndim } => [
+                "penalize_drain_iso_1d",
+                "penalize_drain_iso_2d",
+                "penalize_drain_iso_3d",
+            ][dim_ix(ndim)],
+            KernelId::PenalizePorous { ndim } => [
+                "penalize_porous_1d",
+                "penalize_porous_2d",
+                "penalize_porous_3d",
+            ][dim_ix(ndim)],
+            KernelId::PenalizeTorqueFreeIso { ndim } => [
+                "penalize_torque_free_iso_1d",
+                "penalize_torque_free_iso_2d",
+                "penalize_torque_free_iso_3d",
+            ][dim_ix(ndim)],
             KernelId::ViscousIso { ndim } => {
                 ["viscous_iso_1d", "viscous_iso_2d", "viscous_iso_3d"][dim_ix(ndim)]
             }
-            KernelId::ViscousIsoAlpha { ndim } => {
-                ["viscous_iso_alpha_1d", "viscous_iso_alpha_2d", "viscous_iso_alpha_3d"]
-                    [dim_ix(ndim)]
-            }
-            KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
-                match (order, axis, ncomp, ndim) {
-                    (ProlongTag::Pcm, 0, 4, 3) => "refine_prolong_sw0_pcm_4c_3d",
-                    (ProlongTag::Pcm, 1, 4, 3) => "refine_prolong_sw1_pcm_4c_3d",
-                    (ProlongTag::Pcm, 2, 4, 3) => "refine_prolong_sw2_pcm_4c_3d",
-                    (ProlongTag::Pcm, 0, 5, 3) => "refine_prolong_sw0_pcm_5c_3d",
-                    (ProlongTag::Pcm, 1, 5, 3) => "refine_prolong_sw1_pcm_5c_3d",
-                    (ProlongTag::Pcm, 2, 5, 3) => "refine_prolong_sw2_pcm_5c_3d",
-                    (ProlongTag::Plm, 0, 4, 3) => "refine_prolong_sw0_plm_4c_3d",
-                    (ProlongTag::Plm, 1, 4, 3) => "refine_prolong_sw1_plm_4c_3d",
-                    (ProlongTag::Plm, 2, 4, 3) => "refine_prolong_sw2_plm_4c_3d",
-                    (ProlongTag::Plm, 0, 5, 3) => "refine_prolong_sw0_plm_5c_3d",
-                    (ProlongTag::Plm, 1, 5, 3) => "refine_prolong_sw1_plm_5c_3d",
-                    (ProlongTag::Plm, 2, 5, 3) => "refine_prolong_sw2_plm_5c_3d",
-                    (ProlongTag::Ppm, 0, 4, 3) => "refine_prolong_sw0_ppm_4c_3d",
-                    (ProlongTag::Ppm, 1, 4, 3) => "refine_prolong_sw1_ppm_4c_3d",
-                    (ProlongTag::Ppm, 2, 4, 3) => "refine_prolong_sw2_ppm_4c_3d",
-                    (ProlongTag::Ppm, 0, 5, 3) => "refine_prolong_sw0_ppm_5c_3d",
-                    (ProlongTag::Ppm, 1, 5, 3) => "refine_prolong_sw1_ppm_5c_3d",
-                    (ProlongTag::Ppm, 2, 5, 3) => "refine_prolong_sw2_ppm_5c_3d",
-                    (o, a, n, d) => panic!(
-                        "KernelId::RefineProlongSweep: unsupported (order={o:?}, axis={a}, \
+            KernelId::ViscousIsoAlpha { ndim } => [
+                "viscous_iso_alpha_1d",
+                "viscous_iso_alpha_2d",
+                "viscous_iso_alpha_3d",
+            ][dim_ix(ndim)],
+            KernelId::RefineProlongSweep {
+                order,
+                axis,
+                ncomp,
+                ndim,
+            } => match (order, axis, ncomp, ndim) {
+                (ProlongTag::Pcm, 0, 4, 3) => "refine_prolong_sw0_pcm_4c_3d",
+                (ProlongTag::Pcm, 1, 4, 3) => "refine_prolong_sw1_pcm_4c_3d",
+                (ProlongTag::Pcm, 2, 4, 3) => "refine_prolong_sw2_pcm_4c_3d",
+                (ProlongTag::Pcm, 0, 5, 3) => "refine_prolong_sw0_pcm_5c_3d",
+                (ProlongTag::Pcm, 1, 5, 3) => "refine_prolong_sw1_pcm_5c_3d",
+                (ProlongTag::Pcm, 2, 5, 3) => "refine_prolong_sw2_pcm_5c_3d",
+                (ProlongTag::Plm, 0, 4, 3) => "refine_prolong_sw0_plm_4c_3d",
+                (ProlongTag::Plm, 1, 4, 3) => "refine_prolong_sw1_plm_4c_3d",
+                (ProlongTag::Plm, 2, 4, 3) => "refine_prolong_sw2_plm_4c_3d",
+                (ProlongTag::Plm, 0, 5, 3) => "refine_prolong_sw0_plm_5c_3d",
+                (ProlongTag::Plm, 1, 5, 3) => "refine_prolong_sw1_plm_5c_3d",
+                (ProlongTag::Plm, 2, 5, 3) => "refine_prolong_sw2_plm_5c_3d",
+                (ProlongTag::Ppm, 0, 4, 3) => "refine_prolong_sw0_ppm_4c_3d",
+                (ProlongTag::Ppm, 1, 4, 3) => "refine_prolong_sw1_ppm_4c_3d",
+                (ProlongTag::Ppm, 2, 4, 3) => "refine_prolong_sw2_ppm_4c_3d",
+                (ProlongTag::Ppm, 0, 5, 3) => "refine_prolong_sw0_ppm_5c_3d",
+                (ProlongTag::Ppm, 1, 5, 3) => "refine_prolong_sw1_ppm_5c_3d",
+                (ProlongTag::Ppm, 2, 5, 3) => "refine_prolong_sw2_ppm_5c_3d",
+                (o, a, n, d) => panic!(
+                    "KernelId::RefineProlongSweep: unsupported (order={o:?}, axis={a}, \
                          ncomp={n}, ndim={d}) — only 3D ncomp 4/5 are generated"
-                    ),
-                }
+                ),
+            },
+            KernelId::RefineRestrictFace { axis, ndim } => {
+                RESTRICT_FACE[dim_ix(ndim)][axis as usize]
             }
-            KernelId::RefineRestrictFace { axis, ndim } => RESTRICT_FACE[dim_ix(ndim)][axis as usize],
             KernelId::RefineProlongFace { axis, ndim } => PROLONG_FACE[dim_ix(ndim)][axis as usize],
             KernelId::RefineAccFace { axis, ndim } => ACC_FACE[dim_ix(ndim)][axis as usize],
             KernelId::RefineAccEdge { axis, ndim } => ACC_EDGE[dim_ix(ndim)][axis as usize],
@@ -271,18 +317,66 @@ mod tests {
     // them silently breaks every dispatch — this test is the tripwire.
     #[test]
     fn names_are_the_pinned_registry_keys() {
-        assert_eq!(KernelId::RefineRestrict { ndim: 3 }.name(), "refine_restrict_3d");
-        assert_eq!(KernelId::RefineProlong { order: ProlongTag::Plm, ndim: 3 }.name(), "refine_prolong_plm_3d");
-        assert_eq!(KernelId::RefineProlong { order: ProlongTag::Ppm, ndim: 2 }.name(), "refine_prolong_ppm_2d");
-        assert_eq!(KernelId::RefineProlongMulti { order: ProlongTag::Plm, ncomp: 5, ndim: 3 }.name(), "refine_prolong_plm_5c_3d");
-        assert_eq!(KernelId::RefineProlongMulti { order: ProlongTag::Ppm, ncomp: 4, ndim: 3 }.name(), "refine_prolong_ppm_4c_3d");
-        assert_eq!(KernelId::RefineRestrictFace { axis: 1, ndim: 3 }.name(), "refine_restrict_face_1_3d");
-        assert_eq!(KernelId::RefineProlongFace { axis: 2, ndim: 3 }.name(), "refine_prolong_face_2_3d");
-        assert_eq!(KernelId::RefineAccFace { axis: 0, ndim: 2 }.name(), "refine_acc_face_0_2d");
-        assert_eq!(KernelId::RefineAccEdge { axis: 2, ndim: 3 }.name(), "refine_acc_edge_2_3d");
+        assert_eq!(
+            KernelId::RefineRestrict { ndim: 3 }.name(),
+            "refine_restrict_3d"
+        );
+        assert_eq!(
+            KernelId::RefineProlong {
+                order: ProlongTag::Plm,
+                ndim: 3
+            }
+            .name(),
+            "refine_prolong_plm_3d"
+        );
+        assert_eq!(
+            KernelId::RefineProlong {
+                order: ProlongTag::Ppm,
+                ndim: 2
+            }
+            .name(),
+            "refine_prolong_ppm_2d"
+        );
+        assert_eq!(
+            KernelId::RefineProlongMulti {
+                order: ProlongTag::Plm,
+                ncomp: 5,
+                ndim: 3
+            }
+            .name(),
+            "refine_prolong_plm_5c_3d"
+        );
+        assert_eq!(
+            KernelId::RefineProlongMulti {
+                order: ProlongTag::Ppm,
+                ncomp: 4,
+                ndim: 3
+            }
+            .name(),
+            "refine_prolong_ppm_4c_3d"
+        );
+        assert_eq!(
+            KernelId::RefineRestrictFace { axis: 1, ndim: 3 }.name(),
+            "refine_restrict_face_1_3d"
+        );
+        assert_eq!(
+            KernelId::RefineProlongFace { axis: 2, ndim: 3 }.name(),
+            "refine_prolong_face_2_3d"
+        );
+        assert_eq!(
+            KernelId::RefineAccFace { axis: 0, ndim: 2 }.name(),
+            "refine_acc_face_0_2d"
+        );
+        assert_eq!(
+            KernelId::RefineAccEdge { axis: 2, ndim: 3 }.name(),
+            "refine_acc_edge_2_3d"
+        );
         assert_eq!(KernelId::FieldCopy { ndim: 1 }.name(), "field_copy_1d");
         assert_eq!(KernelId::FieldFill { ndim: 2 }.name(), "field_fill_2d");
-        assert_eq!(KernelId::FieldAxpyShift { ndim: 3 }.name(), "field_axpy_shift_3d");
+        assert_eq!(
+            KernelId::FieldAxpyShift { ndim: 3 }.name(),
+            "field_axpy_shift_3d"
+        );
     }
 
     // every valid (axis < ndim) face/edge combination resolves to a real name,
@@ -301,7 +395,11 @@ mod tests {
             }
         }
         for axis in 0..3u8 {
-            assert!(!KernelId::RefineAccEdge { axis, ndim: 3 }.name().contains('!'));
+            assert!(
+                !KernelId::RefineAccEdge { axis, ndim: 3 }
+                    .name()
+                    .contains('!')
+            );
         }
     }
 }

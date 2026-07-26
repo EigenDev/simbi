@@ -47,7 +47,10 @@ fn cmp<MH: MemorySpace, MD: MemorySpace>(
         let (h, g) = (*host.view().at(c), *dev.view().at(c));
         assert!(g.is_finite(), "{what} at {c:?} went non-finite on GPU: {g}");
         let rel = (g - h).abs() / h.abs().max(1.0);
-        assert!(rel < 1e-9, "{what} at {c:?}: gpu {g} != cpu {h} (rel {rel:e})");
+        assert!(
+            rel < 1e-9,
+            "{what} at {c:?}: gpu {g} != cpu {h} (rel {rel:e})"
+        );
     }
 }
 
@@ -55,8 +58,8 @@ fn cmp<MH: MemorySpace, MD: MemorySpace>(
 // gaussian + a sheared rotation profile and a small v_r — so the phi-flux, the
 // area-weighted r-phi divergence, and the centrifugal/coriolis source are all exercised
 // non-trivially (no exact equilibrium; diffs CPU vs GPU).
-fn build_disk<S: ExecutionSpace, Mem: MemorySpace>(
-) -> SimStateGeneric<Newtonian, 2, 2, Cylindrical, IdealGas<f64>, S, Mem> {
+fn build_disk<S: ExecutionSpace, Mem: MemorySpace>()
+-> SimStateGeneric<Newtonian, 2, 2, Cylindrical, IdealGas<f64>, S, Mem> {
     let (r_lo, r_hi) = (0.5_f64, 1.5_f64);
     let dr = (r_hi - r_lo) / NR as f64;
     let dphi = TWO_PI / NPHI as f64;
@@ -81,7 +84,11 @@ fn build_disk<S: ExecutionSpace, Mem: MemorySpace>(
         let pre = 1.0 + 0.3 * g;
         let vphi = (1.0_f64 / r).sqrt() * (1.0 + 0.05 * g); // sheared near-keplerian
         let vr = 0.03 * g;
-        Prim { rho, vel: Tensor::new([vr, vphi]), pre }
+        Prim {
+            rho,
+            vel: Tensor::new([vr, vphi]),
+            pre,
+        }
     })
     .build()
 }
@@ -90,55 +97,112 @@ fn build_disk<S: ExecutionSpace, Mem: MemorySpace>(
 fn cyl_disk_gpu_matches_cpu() {
     let host = build_disk::<CpuSpace, HostMemory>();
     let dev = build_disk::<CudaSpace, UnifiedMemory>();
-    let hset = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &host.geom.allocated);
-    let dset = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, &dev.geom.allocated);
+    let hset =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &host.geom.allocated);
+    let dset =
+        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, &dev.geom.allocated);
     let alloc = &host.geom.allocated;
     let interior = &host.geom.interior;
-    let (hnrg, dnrg) = (host.fields.cons.nrg_field().unwrap(), dev.fields.cons.nrg_field().unwrap());
-    let (hpre, dpre) = (host.fields.prim.pre_field().unwrap(), dev.fields.prim.pre_field().unwrap());
+    let (hnrg, dnrg) = (
+        host.fields.cons.nrg_field().unwrap(),
+        dev.fields.cons.nrg_field().unwrap(),
+    );
+    let (hpre, dpre) = (
+        host.fields.prim.pre_field().unwrap(),
+        dev.fields.prim.pre_field().unwrap(),
+    );
 
     // snapshot / c2p / ghost (cartesian ncomp=2 instances, reused since DOF == NDIM).
     hset.snapshot(&host);
     dset.snapshot(&dev);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
-    cmp(alloc, &host.workspace.u_n.den, &dev.workspace.u_n.den, "u_n.den");
+    cmp(
+        alloc,
+        &host.workspace.u_n.den,
+        &dev.workspace.u_n.den,
+        "u_n.den",
+    );
     for k in 0..2 {
-        cmp(alloc, &host.workspace.u_n.mom[k], &dev.workspace.u_n.mom[k], "u_n.mom");
+        cmp(
+            alloc,
+            &host.workspace.u_n.mom[k],
+            &dev.workspace.u_n.mom[k],
+            "u_n.mom",
+        );
     }
 
     hset.c2p(&host);
     dset.c2p(&dev);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
-    cmp(interior, &host.fields.prim.rho, &dev.fields.prim.rho, "prim.rho");
+    cmp(
+        interior,
+        &host.fields.prim.rho,
+        &dev.fields.prim.rho,
+        "prim.rho",
+    );
     for k in 0..2 {
-        cmp(interior, &host.fields.prim.vel[k], &dev.fields.prim.vel[k], "prim.vel");
+        cmp(
+            interior,
+            &host.fields.prim.vel[k],
+            &dev.fields.prim.vel[k],
+            "prim.vel",
+        );
     }
     cmp(interior, hpre, dpre, "prim.pre");
 
     hset.ghost_fill(&host);
     dset.ghost_fill(&dev);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
-    cmp(alloc, &host.fields.prim.rho, &dev.fields.prim.rho, "prim.rho (ghosts)");
+    cmp(
+        alloc,
+        &host.fields.prim.rho,
+        &dev.fields.prim.rho,
+        "prim.rho (ghosts)",
+    );
     for k in 0..2 {
-        cmp(alloc, &host.fields.prim.vel[k], &dev.fields.prim.vel[k], "prim.vel (ghosts)");
+        cmp(
+            alloc,
+            &host.fields.prim.vel[k],
+            &dev.fields.prim.vel[k],
+            "prim.vel (ghosts)",
+        );
     }
 
     // cfl (iso_wave_speed_map_cyl_2d, ncomp=2): physical r\cdot dphi widths + device reduce.
     let (hdt, ddt) = (hset.cfl(&host), dset.cfl(&dev));
-    assert!(hdt > 0.0 && hdt.is_finite() && ddt.is_finite(), "bad dt: cpu {hdt} gpu {ddt}");
-    assert!((hdt - ddt).abs() / hdt < 1e-9, "cfl dt: cpu {hdt} != gpu {ddt}");
+    assert!(
+        hdt > 0.0 && hdt.is_finite() && ddt.is_finite(),
+        "bad dt: cpu {hdt} gpu {ddt}"
+    );
+    assert!(
+        (hdt - ddt).abs() / hdt < 1e-9,
+        "cfl dt: cpu {hdt} != gpu {ddt}"
+    );
 
     // flux (adiabatic_face_flux_2d_{dir}, cartesian): per sweep dir, den + 2 mom + nrg.
     for dir in 0..2 {
         hset.flux(&host, dir);
         dset.flux(&dev, dir);
-    symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
+        symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
         let f = interior.face_domain(dir);
-        cmp(&f, &host.fields.flux[dir].den, &dev.fields.flux[dir].den, "flux.den");
+        cmp(
+            &f,
+            &host.fields.flux[dir].den,
+            &dev.fields.flux[dir].den,
+            "flux.den",
+        );
         for k in 0..2 {
-            cmp(&f, &host.fields.flux[dir].mom[k], &dev.fields.flux[dir].mom[k], "flux.mom");
+            cmp(
+                &f,
+                &host.fields.flux[dir].mom[k],
+                &dev.fields.flux[dir].mom[k],
+                "flux.mom",
+            );
         }
-        let (hfn, dfn) = (host.fields.flux[dir].nrg_field().unwrap(), dev.fields.flux[dir].nrg_field().unwrap());
+        let (hfn, dfn) = (
+            host.fields.flux[dir].nrg_field().unwrap(),
+            dev.fields.flux[dir].nrg_field().unwrap(),
+        );
         cmp(&f, hfn, dfn, "flux.nrg");
     }
 
@@ -148,9 +212,19 @@ fn cyl_disk_gpu_matches_cpu() {
     hset.godunov_stage(&host, 0.002, 0.0, 1.0);
     dset.godunov_stage(&dev, 0.002, 0.0, 1.0);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
-    cmp(interior, &host.fields.cons.den, &dev.fields.cons.den, "cons.den (euler)");
+    cmp(
+        interior,
+        &host.fields.cons.den,
+        &dev.fields.cons.den,
+        "cons.den (euler)",
+    );
     for k in 0..2 {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k], "cons.mom (euler)");
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            "cons.mom (euler)",
+        );
     }
     cmp(interior, hnrg, dnrg, "cons.nrg (euler)");
 
@@ -158,7 +232,12 @@ fn cyl_disk_gpu_matches_cpu() {
     dset.godunov_stage(&dev, 0.002, 0.5, 0.5);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
     for k in 0..2 {
-        cmp(interior, &host.fields.cons.mom[k], &dev.fields.cons.mom[k], "cons.mom (rk2)");
+        cmp(
+            interior,
+            &host.fields.cons.mom[k],
+            &dev.fields.cons.mom[k],
+            "cons.mom (rk2)",
+        );
     }
     cmp(interior, hnrg, dnrg, "cons.nrg (rk2)");
 }

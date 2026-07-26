@@ -13,7 +13,7 @@
 
 use symbi::prelude::*;
 use symbi_hydro::expr_bridge::build_user_source;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
@@ -24,7 +24,11 @@ fn build_box() -> Sim {
         .boundaries(BoundaryType::Periodic)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
     sim
 }
 
@@ -49,7 +53,9 @@ fn region_masked_force_acts_only_in_the_left_half() {
     let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("force+region");
 
     let mut sim = build_box();
-    let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());
+    let sub = sim
+        .substrate()
+        .with_runtime_source(built, cfg.params.clone());
     evolve(&mut sim, &sub, 0.05).expect("evolve");
 
     // the SOURCE acts only in the left half. the hydro then leaks a little momentum across the
@@ -63,7 +69,10 @@ fn region_masked_force_acts_only_in_the_left_half() {
         let x = sim.geom.cell_coord(c);
         let mom = *sim.fields.cons.mom[0].view().at(c);
         if x[0] < 0.5 {
-            assert!(mom > 1e-6, "left cell at x={x:?} should be accelerated, mom = {mom}");
+            assert!(
+                mom > 1e-6,
+                "left cell at x={x:?} should be accelerated, mom = {mom}"
+            );
             left_total += mom;
         } else {
             right_total += mom;
@@ -94,17 +103,39 @@ fn relax_sponge_damps_uniform_flow() {
         .finish()
         .unwrap();
     // uniform rightward flow v_x = 1 (the perturbation the sponge absorbs).
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([1.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([1.0, 0.0]),
+        pre: 1.0,
+    });
 
-    let mom0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).sum();
+    let mom0: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.mom[0].view().at(c))
+        .sum();
     let t_final = 0.05;
-    let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());
+    let sub = sim
+        .substrate()
+        .with_runtime_source(built, cfg.params.clone());
     evolve(&mut sim, &sub, t_final).expect("evolve");
-    let mom1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).sum();
+    let mom1: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.mom[0].view().at(c))
+        .sum();
 
     // damped, monotone, no overshoot: 0 < mom1 < mom0, near exp(-kappa*t) = exp(-0.1) ~ 0.905.
-    assert!(mom1 > 0.0, "relaxation must not overshoot past rest: mom1 = {mom1}");
-    assert!(mom1 < mom0, "relaxation must damp the flow: mom0 = {mom0}, mom1 = {mom1}");
+    assert!(
+        mom1 > 0.0,
+        "relaxation must not overshoot past rest: mom1 = {mom1}"
+    );
+    assert!(
+        mom1 < mom0,
+        "relaxation must damp the flow: mom0 = {mom0}, mom1 = {mom1}"
+    );
     let ratio = mom1 / mom0;
     assert!(
         (0.80..0.95).contains(&ratio),
@@ -113,6 +144,9 @@ fn relax_sponge_damps_uniform_flow() {
     // density stays uniform (a uniform decelerating flow develops no gradients).
     for c in sim.geom.interior.iter() {
         let rho = *sim.fields.cons.den.view().at(c);
-        assert!((rho - 1.0).abs() < 1e-6, "density drifted at {c:?}: rho = {rho}");
+        assert!(
+            (rho - 1.0).abs() < 1e-6,
+            "density drifted at {c:?}: rho = {rho}"
+        );
     }
 }

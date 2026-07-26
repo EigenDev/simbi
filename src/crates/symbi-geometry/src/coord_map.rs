@@ -127,7 +127,11 @@ impl<S: Scalar> LogMap<S> {
     /// requires start > 0 and end > start.
     pub fn new(start: S, end: S, n: usize) -> Self {
         let log_slope = (end / start).log10() / S::from_f64(n as f64);
-        Self { start, log_slope, n }
+        Self {
+            start,
+            log_slope,
+            n,
+        }
     }
 }
 

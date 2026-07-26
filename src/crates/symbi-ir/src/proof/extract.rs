@@ -63,7 +63,9 @@ enum RValue {
 fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RValue {
     let node = graph.node(id);
     match &node.op {
-        Op::Const(ConstValue::I32(v)) => RValue::Scalar(RatFun::from_poly(Poly::constant(*v as i64))),
+        Op::Const(ConstValue::I32(v)) => {
+            RValue::Scalar(RatFun::from_poly(Poly::constant(*v as i64)))
+        }
         Op::Const(ConstValue::F64(v)) => {
             // the curvilinear curl uses 0.5 (cell-center average) and integer
             // literals. carry a rational-valued constant exactly: 0.5 = 1/2.
@@ -81,7 +83,10 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
             let key = sym.as_str();
             if fields.contains(&key) {
                 let ndim = infer_ndim(graph);
-                RValue::Lin(lin_single((key.to_string(), vec![0; ndim]), RatFun::from_poly(Poly::constant(1))))
+                RValue::Lin(lin_single(
+                    (key.to_string(), vec![0; ndim]),
+                    RatFun::from_poly(Poly::constant(1)),
+                ))
             } else if scalars.contains(&key) {
                 RValue::Scalar(RatFun::from_poly(Poly::var(key)))
             } else if let Some(ax) = coord_axis(key) {
@@ -93,9 +98,15 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
         }
         Op::LoadAt(sym, comps) => {
             let key = sym.as_str();
-            assert!(fields.contains(&key), "proof(rat): LoadAt of non-field key `{key}`");
+            assert!(
+                fields.contains(&key),
+                "proof(rat): LoadAt of non-field key `{key}`"
+            );
             let off: Vec<i32> = comps.iter().map(|&c| resolve_offset(graph, c)).collect();
-            RValue::Lin(lin_single((key.to_string(), off), RatFun::from_poly(Poly::constant(1))))
+            RValue::Lin(lin_single(
+                (key.to_string(), off),
+                RatFun::from_poly(Poly::constant(1)),
+            ))
         }
         Op::ElementWise(op, ins) => eval_rat_elementwise(graph, *op, ins, fields, scalars),
         // the spacing map's runtime `map_kind` cond (`map_kind > 0.5 ? log-face : uniform-face`) — a
@@ -151,7 +162,9 @@ fn eval_rat_elementwise(
             // here. (a field-linear argument would be a nonlinear |B|, which no curl weight contains.)
             match eval_rat(graph, ins[0], fields, scalars) {
                 RValue::Scalar(r) => RValue::Scalar(r),
-                RValue::Lin(_) => panic!("proof(rat): abs of a field-dependent argument — nonlinear"),
+                RValue::Lin(_) => {
+                    panic!("proof(rat): abs of a field-dependent argument — nonlinear")
+                }
             }
         }
         ElementWiseOp::Cast(_) => {
@@ -175,7 +188,9 @@ fn eval_rat_elementwise(
             // the heart of the curvilinear representation.
             let arg = match eval_rat(graph, ins[0], fields, scalars) {
                 RValue::Scalar(r) => r,
-                RValue::Lin(_) => panic!("proof(rat): sin of a field-dependent argument — nonlinear"),
+                RValue::Lin(_) => {
+                    panic!("proof(rat): sin of a field-dependent argument — nonlinear")
+                }
             };
             RValue::Scalar(RatFun::from_poly(sin_symbol(&arg)))
         }
@@ -185,7 +200,9 @@ fn eval_rat_elementwise(
             // the spherical r-face solid angle Omega = (cos(tl) - cos(th)) dphi uses this.
             let arg = match eval_rat(graph, ins[0], fields, scalars) {
                 RValue::Scalar(r) => r,
-                RValue::Lin(_) => panic!("proof(rat): cos of a field-dependent argument — nonlinear"),
+                RValue::Lin(_) => {
+                    panic!("proof(rat): cos of a field-dependent argument — nonlinear")
+                }
             };
             RValue::Scalar(RatFun::from_poly(cos_symbol(&arg)))
         }
@@ -196,7 +213,9 @@ fn eval_rat_elementwise(
             // (a curl weight is never sqrt of a field).
             let arg = match eval_rat(graph, ins[0], fields, scalars) {
                 RValue::Scalar(r) => r,
-                RValue::Lin(_) => panic!("proof(rat): sqrt of a field-dependent argument — nonlinear"),
+                RValue::Lin(_) => {
+                    panic!("proof(rat): sqrt of a field-dependent argument — nonlinear")
+                }
             };
             // an AFFINE radial argument keys by its radial offset (`sqrt_f@<2m>`, shift-remappable —
             // the spherical Schwarzschild/Kerr-Schild path). a NON-affine one (nested sqrt(R^2+z^2),
@@ -221,16 +240,22 @@ fn eval_rat_elementwise(
             // would be nonlinear in the fields and stays rejected.
             let a = match eval_rat(graph, ins[0], fields, scalars) {
                 RValue::Scalar(r) => r,
-                RValue::Lin(_) => panic!("proof(rat): max of a field-dependent argument — nonlinear"),
+                RValue::Lin(_) => {
+                    panic!("proof(rat): max of a field-dependent argument — nonlinear")
+                }
             };
             let b = match eval_rat(graph, ins[1], fields, scalars) {
                 RValue::Scalar(r) => r,
-                RValue::Lin(_) => panic!("proof(rat): max of a field-dependent argument — nonlinear"),
+                RValue::Lin(_) => {
+                    panic!("proof(rat): max of a field-dependent argument — nonlinear")
+                }
             };
             let atom = Poly::var(&format!("max[{}|{}]", a.canonical(), b.canonical()));
             RValue::Scalar(RatFun::from_poly(atom))
         }
-        other => panic!("proof(rat): unsupported element-wise op in curvilinear curl DAG: {other:?}"),
+        other => {
+            panic!("proof(rat): unsupported element-wise op in curvilinear curl DAG: {other:?}")
+        }
     }
 }
 
@@ -261,17 +286,30 @@ fn cos_symbol(arg: &RatFun) -> Poly {
 /// x_lo_1 and c_1*dx_1 coeffs are both D and the bare-dx_1 coeff is D*m, so
 /// 2m = 2*(D*m)/D. `trig` names the caller for the panic messages.
 fn theta_offset_two_m(arg: &RatFun, trig: &str) -> i64 {
-    let d = const_value(&arg.den)
-        .unwrap_or_else(|| panic!("proof(rat): {trig} of a theta argument with a non-constant denominator"));
-    assert!(d != 0, "proof(rat): {trig} theta argument has a zero denominator");
+    let d = const_value(&arg.den).unwrap_or_else(|| {
+        panic!("proof(rat): {trig} of a theta argument with a non-constant denominator")
+    });
+    assert!(
+        d != 0,
+        "proof(rat): {trig} theta argument has a zero denominator"
+    );
     let xlo1 = arg.num.coefficient_of(&["x_lo_1"]);
     let c1dx1 = arg.num.coefficient_of(&["c_1", "dx_1"]);
     let dx1_offset = arg.num.coefficient_of(&["dx_1"]); // the bare dx_1*(D*m) term
-    assert!(xlo1 == d, "proof(rat): theta arg x_lo_1 coeff {xlo1} != denominator {d}");
-    assert!(c1dx1 == d, "proof(rat): theta arg c_1*dx_1 coeff {c1dx1} != denominator {d}");
+    assert!(
+        xlo1 == d,
+        "proof(rat): theta arg x_lo_1 coeff {xlo1} != denominator {d}"
+    );
+    assert!(
+        c1dx1 == d,
+        "proof(rat): theta arg c_1*dx_1 coeff {c1dx1} != denominator {d}"
+    );
     // 2m = 2 * (D*m) / D, must be integral.
     let twice = 2 * dx1_offset;
-    assert!(twice % d == 0, "proof(rat): theta offset 2m = {twice}/{d} is not a half-integer multiple of dx_1");
+    assert!(
+        twice % d == 0,
+        "proof(rat): theta offset 2m = {twice}/{d} is not a half-integer multiple of dx_1"
+    );
     twice / d
 }
 
@@ -418,7 +456,10 @@ fn eval(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> Value {
             if fields.contains(&key) {
                 // a direct cell read (offset 0) of a field.
                 let ndim = infer_ndim(graph);
-                Value::Lin(LinForm::from_term((key.to_string(), vec![0; ndim]), Poly::constant(1)))
+                Value::Lin(LinForm::from_term(
+                    (key.to_string(), vec![0; ndim]),
+                    Poly::constant(1),
+                ))
             } else if scalars.contains(&key) {
                 Value::Scalar(Poly::var(key))
             } else {
@@ -428,9 +469,15 @@ fn eval(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> Value {
         }
         Op::LoadAt(sym, comps) => {
             let key = sym.as_str();
-            assert!(fields.contains(&key), "proof: LoadAt of non-field key `{key}`");
+            assert!(
+                fields.contains(&key),
+                "proof: LoadAt of non-field key `{key}`"
+            );
             let off: Vec<i32> = comps.iter().map(|&c| resolve_offset(graph, c)).collect();
-            Value::Lin(LinForm::from_term((key.to_string(), off), Poly::constant(1)))
+            Value::Lin(LinForm::from_term(
+                (key.to_string(), off),
+                Poly::constant(1),
+            ))
         }
         Op::ElementWise(op, ins) => eval_elementwise(graph, *op, ins, fields, scalars),
         // the spacing `map_kind` cond is a leaf face-position reparametrization; div(curl) = 0
@@ -548,7 +595,11 @@ mod tests {
         assert!(s1.terms.keys().next().unwrap().contains_key("sin_th@2"));
         // cell-center half offset via /2 rational: (2 x_lo_1 + (2 c_1 + 1) dx_1)/2 -> sin_th@1.
         let mut cnum = Poly::var("x_lo_1").mul(&Poly::constant(2));
-        cnum.add_assign(&Poly::var("c_1").mul(&Poly::var("dx_1")).mul(&Poly::constant(2)));
+        cnum.add_assign(
+            &Poly::var("c_1")
+                .mul(&Poly::var("dx_1"))
+                .mul(&Poly::constant(2)),
+        );
         cnum.add_assign(&Poly::var("dx_1"));
         let sc = sin_symbol(&RatFun::new(cnum, Poly::constant(2)));
         assert!(sc.terms.keys().next().unwrap().contains_key("sin_th@1"));
@@ -560,22 +611,54 @@ mod tests {
         // offset, so the numerator is immaterial. face offset 0 -> sqrt_f@0.
         let mut r0 = Poly::var("x_lo_0");
         r0.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")));
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r0.clone())), Some(0));
+        assert_eq!(
+            radial_offset_two_m(&RatFun::new(Poly::constant(1), r0.clone())),
+            Some(0)
+        );
         // face offset +1 -> sqrt_f@2.
         let mut r1 = r0.clone();
         r1.add_assign(&Poly::var("dx_0"));
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r1)), Some(2));
+        assert_eq!(
+            radial_offset_two_m(&RatFun::new(Poly::constant(1), r1)),
+            Some(2)
+        );
         // cell center (2 x_lo_0 + (2 c_0 + 1) dx_0)/2 -> sqrt_f@1.
         let mut rc = Poly::var("x_lo_0").mul(&Poly::constant(2));
-        rc.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")).mul(&Poly::constant(2)));
+        rc.add_assign(
+            &Poly::var("c_0")
+                .mul(&Poly::var("dx_0"))
+                .mul(&Poly::constant(2)),
+        );
         rc.add_assign(&Poly::var("dx_0"));
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), rc)), Some(1));
+        assert_eq!(
+            radial_offset_two_m(&RatFun::new(Poly::constant(1), rc)),
+            Some(1)
+        );
         // a NON-affine denominator (an opaque atom, no linear x_lo_0) -> None (canonical-key path).
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), Poly::var("sqrt[inner]"))), None);
+        assert_eq!(
+            radial_offset_two_m(&RatFun::new(Poly::constant(1), Poly::var("sqrt[inner]"))),
+            None
+        );
         // the atom remaps under a RADIAL (axis 0) shift — sqrt_f@0 -> sqrt_f@2 (one cell = +2
         // half-units) — and is UNTOUCHED by a theta (axis 1) shift, so it telescopes only radially.
         let atom = RatFun::from_poly(Poly::sqrt_f_sym(0));
-        assert!(atom.shift_coords(&[1, 0]).num.terms.keys().next().unwrap().contains_key("sqrt_f@2"));
-        assert!(atom.shift_coords(&[0, 1]).num.terms.keys().next().unwrap().contains_key("sqrt_f@0"));
+        assert!(
+            atom.shift_coords(&[1, 0])
+                .num
+                .terms
+                .keys()
+                .next()
+                .unwrap()
+                .contains_key("sqrt_f@2")
+        );
+        assert!(
+            atom.shift_coords(&[0, 1])
+                .num
+                .terms
+                .keys()
+                .next()
+                .unwrap()
+                .contains_key("sqrt_f@0")
+        );
     }
 }

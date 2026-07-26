@@ -24,10 +24,10 @@
 // evaluation): it must pass the same three.
 // =============================================================================
 
-use symbi::sim::refinement::transfer::{
-    prolong_prims, prolong_prims_lerped, prolong_prims_swept, ProlongSweepScratch,
-};
 use symbi::sim::refinement::ProlongOrder;
+use symbi::sim::refinement::transfer::{
+    ProlongSweepScratch, prolong_prims, prolong_prims_lerped, prolong_prims_swept,
+};
 use symbi::sim::state::PrimFieldsGeneric;
 use symbi_algebra::{Domain, Space};
 use symbi_xpu::HostMemory;
@@ -46,7 +46,13 @@ fn cube(lo: isize, hi: isize) -> Domain<3> {
 }
 
 fn comps(p: &Prims) -> [&symbi_grid::Field<f64, 3, HostMemory>; NCOMP] {
-    [&p.rho, &p.vel[0], &p.vel[1], &p.vel[2], p.pre_field().unwrap()]
+    [
+        &p.rho,
+        &p.vel[0],
+        &p.vel[1],
+        &p.vel[2],
+        p.pre_field().unwrap(),
+    ]
 }
 
 // fill every allocated cell of every component with f(comp, coord).
@@ -70,16 +76,29 @@ fn fine_prims() -> Prims {
 
 fn fine_region() -> Domain<3> {
     Domain::new([
-        Space { name: "i", lo: -4, hi: 0 },
-        Space { name: "j", lo: -4, hi: 36 },
-        Space { name: "k", lo: -4, hi: 36 },
+        Space {
+            name: "i",
+            lo: -4,
+            hi: 0,
+        },
+        Space {
+            name: "j",
+            lo: -4,
+            hi: 36,
+        },
+        Space {
+            name: "k",
+            lo: -4,
+            hi: 36,
+        },
     ])
 }
 
 // smooth, comp-distinct, non-symmetric data — nothing the limiters can shortcut.
 fn wavy(kk: usize, c: [isize; 3]) -> f64 {
     let (x, y, z) = (c[0] as f64, c[1] as f64, c[2] as f64);
-    1.5 + 0.3 * (0.4 * x + 0.1 * kk as f64).sin() + 0.2 * (0.3 * y - 0.2 * z).cos()
+    1.5 + 0.3 * (0.4 * x + 0.1 * kk as f64).sin()
+        + 0.2 * (0.3 * y - 0.2 * z).cos()
         + 0.05 * kk as f64
 }
 
@@ -88,7 +107,9 @@ fn lerp_then_prolong_is_bit_identical_to_the_time_pair_kernel() {
     for order in [ProlongOrder::Pcm, ProlongOrder::Plm, ProlongOrder::Ppm] {
         let (old, new) = (coarse_prims(), coarse_prims());
         seed(&old, wavy);
-        seed(&new, |kk, c| wavy(kk, c) + 0.1 * ((c[0] + c[1]) as f64 * 0.2).sin());
+        seed(&new, |kk, c| {
+            wavy(kk, c) + 0.1 * ((c[0] + c[1]) as f64 * 0.2).sin()
+        });
         let lerp = coarse_prims();
         let (dst_pair, dst_split) = (fine_prims(), fine_prims());
         let region = fine_region();
@@ -119,14 +140,18 @@ fn axis_split_sweeps_are_bit_identical_to_the_fused_kernel() {
     for order in [ProlongOrder::Pcm, ProlongOrder::Plm, ProlongOrder::Ppm] {
         let (old, new) = (coarse_prims(), coarse_prims());
         seed(&old, wavy);
-        seed(&new, |kk, c| wavy(kk, c) + 0.1 * ((c[0] + c[1]) as f64 * 0.2).sin());
+        seed(&new, |kk, c| {
+            wavy(kk, c) + 0.1 * ((c[0] + c[1]) as f64 * 0.2).sin()
+        });
         let lerp = coarse_prims();
         let (dst_pair, dst_sweep) = (fine_prims(), fine_prims());
         let region = fine_region();
         let scratch = ProlongSweepScratch::for_slab(&region, order, true);
 
         prolong_prims(&old, &new, &dst_pair, &region, order, ALPHA);
-        prolong_prims_swept(&scratch, &lerp, &old, &new, &dst_sweep, &region, order, ALPHA);
+        prolong_prims_swept(
+            &scratch, &lerp, &old, &new, &dst_sweep, &region, order, ALPHA,
+        );
 
         for (kk, (a, b)) in comps(&dst_pair).iter().zip(comps(&dst_sweep)).enumerate() {
             for c in region.iter() {
@@ -167,8 +192,8 @@ fn linear_coarse_data_prolongs_exactly() {
                     let q = f.rem_euclid(2) as f64;
                     p + (q + 0.5) * 0.5 - 0.5
                 };
-                let expect = 1.0 + 0.25 * pos(c[0]) - 0.5 * pos(c[1]) + 0.125 * pos(c[2])
-                    + kk as f64;
+                let expect =
+                    1.0 + 0.25 * pos(c[0]) - 0.5 * pos(c[1]) + 0.125 * pos(c[2]) + kk as f64;
                 let got = *field.view().at(c);
                 assert_eq!(
                     got, expect,

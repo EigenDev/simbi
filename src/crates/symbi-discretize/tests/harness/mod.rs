@@ -26,7 +26,8 @@ use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
 use symbi_ir::{
-    emit_kernel_cpu, emit_kernel_from_lowering, Cpu, CpuField, CpuFieldMut, FieldBind, KernelEmitInputs,
+    Cpu, CpuField, CpuFieldMut, FieldBind, KernelEmitInputs, emit_kernel_cpu,
+    emit_kernel_from_lowering,
 };
 
 type Writes = Vec<(String, FieldBind, NodeId)>;
@@ -49,7 +50,11 @@ pub struct KernelRun {
 impl KernelRun {
     /// take a builder's `(GvKernel, Writes)` return; asserts the traced graph is clean.
     pub fn new((kernel, writes): (GvKernel, Writes)) -> KernelRun {
-        assert!(!kernel.graph.has_errors(), "graph errors: {:?}", kernel.graph.errors());
+        assert!(
+            !kernel.graph.has_errors(),
+            "graph errors: {:?}",
+            kernel.graph.errors()
+        );
         KernelRun {
             kernel,
             writes,
@@ -89,7 +94,8 @@ impl KernelRun {
 
     /// bind named input fields, each to a UNIFORM value over the grid.
     pub fn fields(mut self, vals: &[(&str, f64)]) -> Self {
-        self.uniform.extend(vals.iter().map(|&(k, v)| (k.to_string(), v)));
+        self.uniform
+            .extend(vals.iter().map(|&(k, v)| (k.to_string(), v)));
         self
     }
 
@@ -101,7 +107,8 @@ impl KernelRun {
 
     /// bind named scalar params.
     pub fn scalars(mut self, vals: &[(&str, f64)]) -> Self {
-        self.scalars.extend(vals.iter().map(|&(k, v)| (k.to_string(), v)));
+        self.scalars
+            .extend(vals.iter().map(|&(k, v)| (k.to_string(), v)));
         self
     }
 
@@ -131,8 +138,14 @@ impl KernelRun {
                 }
             })
             .collect();
-        let in_bufs: Vec<CpuField> =
-            in_data.iter().map(|b| CpuField { data: b.as_slice(), lo: &lo, extent: &ext }).collect();
+        let in_bufs: Vec<CpuField> = in_data
+            .iter()
+            .map(|b| CpuField {
+                data: b.as_slice(),
+                lo: &lo,
+                extent: &ext,
+            })
+            .collect();
 
         // scalars, in manifest order.
         let scalars: Vec<f64> = self
@@ -163,8 +176,12 @@ impl KernelRun {
 
         let spec = KernelEmitInputs {
             kernel_name: "harness_kernel",
-            coalesce_layout: false,            ndim: ndim as u8,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim: ndim as u8,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,
             field_writes: &self.writes,
@@ -175,14 +192,28 @@ impl KernelRun {
         {
             let mut outs: Vec<CpuFieldMut> = out_data
                 .iter_mut()
-                .map(|b| CpuFieldMut { data: b.as_mut_slice(), lo: &lo, extent: &ext })
+                .map(|b| CpuFieldMut {
+                    data: b.as_mut_slice(),
+                    lo: &lo,
+                    extent: &ext,
+                })
                 .collect();
             Cpu.run_kernel(
-                &self.kernel.graph, &spec, &in_bufs, &mut outs, &scalars, &grid_sizes, &dom_los,
+                &self.kernel.graph,
+                &spec,
+                &in_bufs,
+                &mut outs,
+                &scalars,
+                &grid_sizes,
+                &dom_los,
             );
         }
 
-        Out { names, data: out_data, extent: ext }
+        Out {
+            names,
+            data: out_data,
+            extent: ext,
+        }
     }
 
     /// emit the kernel as CPU (rust) source without running it — for the BUILD+EMIT tests
@@ -191,20 +222,32 @@ impl KernelRun {
     pub fn emit_cpu(self) -> Emit {
         let ndim = self.grid.len() as u8;
         assert!(ndim > 0, "KernelRun::emit_cpu: call .grid(...) to fix ndim");
-        let desc = emit_kernel_cpu(&self.kernel.graph, &KernelEmitInputs {
-            kernel_name: "harness_kernel",
-            coalesce_layout: false,            ndim,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
-            field_inputs: &self.kernel.field_inputs,
-            scalar_params: &self.kernel.scalar_params,
-            field_writes: &self.writes,
-            coord_components: &self.kernel.coord_components,
-            device_preamble: &[],
-            tile_spec: None,
-        });
+        let desc = emit_kernel_cpu(
+            &self.kernel.graph,
+            &KernelEmitInputs {
+                kernel_name: "harness_kernel",
+                coalesce_layout: false,
+                ndim,
+                target: TargetConfig {
+                    target: Target::Cuda,
+                    precision: Precision::F64,
+                },
+                field_inputs: &self.kernel.field_inputs,
+                scalar_params: &self.kernel.scalar_params,
+                field_writes: &self.writes,
+                coord_components: &self.kernel.coord_components,
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         Emit {
             source: desc.source,
-            field_inputs: self.kernel.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect(),
+            field_inputs: self
+                .kernel
+                .field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect(),
             scalar_params: self.kernel.scalar_params,
             writes: self.writes,
         }
@@ -226,8 +269,12 @@ impl KernelRun {
         // (emit_kernel_from_lowering) reads it — Cuda is the GPU lowerability path.
         let inputs = KernelEmitInputs {
             kernel_name: "lowering_probe",
-            coalesce_layout: false,            ndim,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,
             field_writes: &self.writes,
@@ -237,8 +284,14 @@ impl KernelRun {
         };
         let cpu = emit_kernel_cpu(&self.kernel.graph, &inputs);
         let cuda = emit_kernel_from_lowering(&self.kernel.graph, &inputs);
-        assert!(!cpu.source.is_empty(), "lowerability: CPU (rust) emit produced no source");
-        assert!(!cuda.source.is_empty(), "lowerability: CUDA emit produced no source");
+        assert!(
+            !cpu.source.is_empty(),
+            "lowerability: CPU (rust) emit produced no source"
+        );
+        assert!(
+            !cuda.source.is_empty(),
+            "lowerability: CUDA emit produced no source"
+        );
     }
 
     fn bound_field_keys(&self) -> Vec<&String> {
@@ -280,7 +333,10 @@ impl Out {
         for &(name, w) in want {
             let g = self.get(cell, name);
             let r = (g - w).abs() / w.abs().max(1.0);
-            assert!(r < rel, "carrier oracle: '{name}' at {cell:?}: got {g}, want {w} (rel {r:e})");
+            assert!(
+                r < rel,
+                "carrier oracle: '{name}' at {cell:?}: got {g}, want {w} (rel {r:e})"
+            );
         }
     }
 
@@ -289,7 +345,12 @@ impl Out {
             .names
             .iter()
             .position(|w| w == name)
-            .unwrap_or_else(|| panic!("KernelRun: no output named '{name}' (have: {:?})", self.names));
+            .unwrap_or_else(|| {
+                panic!(
+                    "KernelRun: no output named '{name}' (have: {:?})",
+                    self.names
+                )
+            });
         &self.data[i]
     }
 }

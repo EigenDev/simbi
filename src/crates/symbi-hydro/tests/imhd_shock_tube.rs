@@ -13,9 +13,9 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_hydro::eos::Isothermal;
 use symbi_hydro::energy::Zero;
-use symbi_hydro::isothermal_mhd::{imhd_recover, IsothermalMhd};
+use symbi_hydro::eos::Isothermal;
+use symbi_hydro::isothermal_mhd::{IsothermalMhd, imhd_recover};
 use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::riemann::{hlld_isothermal, hlle};
@@ -33,7 +33,14 @@ type P = IsoMhdPrim<f64, 3>;
 type C = IsoMhdCons<f64, 3>;
 
 fn prim(rho: f64, v: [f64; 3], b: [f64; 3]) -> P {
-    IsoMhdPrim { hydro: PrimG { rho, vel: Tensor::new(v), pre: Zero::default() }, mag: Tensor::new(b) }
+    IsoMhdPrim {
+        hydro: PrimG {
+            rho,
+            vel: Tensor::new(v),
+            pre: Zero::default(),
+        },
+        mag: Tensor::new(b),
+    }
 }
 
 // Mignone Table 1, test 1: L = (rho=1, By=5), R = (rho=0.1, By=2), Bx = 3.
@@ -47,7 +54,13 @@ fn ic(i: usize) -> P {
 }
 
 fn minmod(a: f64, b: f64) -> f64 {
-    if a * b <= 0.0 { 0.0 } else if a.abs() < b.abs() { a } else { b }
+    if a * b <= 0.0 {
+        0.0
+    } else if a.abs() < b.abs() {
+        a
+    } else {
+        b
+    }
 }
 
 // PLM(minmod) reconstruction of one cell: (left-face, right-face) primitives.
@@ -78,7 +91,9 @@ fn run<F: Fn(&P, &P) -> C>(flux: F) -> Vec<P> {
     let nhat = Tensor::<f64, 3>::unit(0);
     let dx = 1.0 / N as f64;
 
-    let mut cons: Vec<C> = (0..TOT).map(|i| regime.to_conserved(&eos, &ic(i))).collect();
+    let mut cons: Vec<C> = (0..TOT)
+        .map(|i| regime.to_conserved(&eos, &ic(i)))
+        .collect();
     let mut t = 0.0;
     while t < T_FINAL {
         for g in 0..NG {
@@ -123,7 +138,8 @@ fn imhd_hlld_is_clean_shock_capturing() {
     let p_hlle = run(|l, r| hlle(&IsothermalMhd, &eos, l, r, &n, 0.0));
     let p_hlld = run(|l, r| hlld_isothermal(&eos, l, r, &n, 0.0));
 
-    let interior = |p: &[P], f: fn(&P) -> f64| -> Vec<f64> { p[NG..NG + N].iter().map(f).collect() };
+    let interior =
+        |p: &[P], f: fn(&P) -> f64| -> Vec<f64> { p[NG..NG + N].iter().map(f).collect() };
     let rho_e = interior(&p_hlle, |p| p.rho);
     let rho_d = interior(&p_hlld, |p| p.rho);
     let by_e = interior(&p_hlle, |p| p.mag[1]);
@@ -131,7 +147,11 @@ fn imhd_hlld_is_clean_shock_capturing() {
 
     // 1) PHYSICAL everywhere (isothermal density = HLL average -> stays positive).
     for (i, pi) in p_hlld[NG..NG + N].iter().enumerate() {
-        assert!(pi.rho.is_finite() && pi.rho > 0.0, "hlld cell {i}: rho={}", pi.rho);
+        assert!(
+            pi.rho.is_finite() && pi.rho > 0.0,
+            "hlld cell {i}: rho={}",
+            pi.rho
+        );
     }
 
     // 2) Bx (normal field) stays EXACTLY constant (F(Bx)=0 in 1D).
@@ -144,8 +164,14 @@ fn imhd_hlld_is_clean_shock_capturing() {
     let (tv_be, tv_bd) = (total_variation(&by_e), total_variation(&by_d));
     eprintln!("[imhd] TV(rho): hlle={tv_re:.4} hlld={tv_rd:.4}");
     eprintln!("[imhd] TV(By):  hlle={tv_be:.4} hlld={tv_bd:.4}");
-    assert!(tv_rd < 1.3 * tv_re, "HLLD rho OSCILLATES: TV {tv_rd:.4} vs hlle {tv_re:.4}");
-    assert!(tv_bd < 1.3 * tv_be, "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}");
+    assert!(
+        tv_rd < 1.3 * tv_re,
+        "HLLD rho OSCILLATES: TV {tv_rd:.4} vs hlle {tv_re:.4}"
+    );
+    assert!(
+        tv_bd < 1.3 * tv_be,
+        "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}"
+    );
 
     // 4) SAME solution as HLLE, only sharper: small L1 distance.
     let l1 = l1_diff(&rho_d, &rho_e);
@@ -153,14 +179,22 @@ fn imhd_hlld_is_clean_shock_capturing() {
     assert!(l1 < 0.05, "HLLD rho diverges from HLLE: L1 {l1}");
 
     // 5) HLLD actually SHARPENS the discontinuity, confirming the HLLD path is active.
-    let max_grad = |f: &[f64]| f.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f64, f64::max);
+    let max_grad = |f: &[f64]| {
+        f.windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f64, f64::max)
+    };
     assert!(
         max_grad(&rho_d) >= max_grad(&rho_e) * 0.95,
         "HLLD not sharper than HLLE (grad {} vs {})",
-        max_grad(&rho_d), max_grad(&rho_e),
+        max_grad(&rho_d),
+        max_grad(&rho_e),
     );
 
     // 6) the wave structure formed: density develops an intermediate state between L and R.
     let rho_mid = rho_d[N / 2];
-    assert!(rho_mid > 0.1 && rho_mid < 1.0, "midpoint density {rho_mid} is a pure step — no waves");
+    assert!(
+        rho_mid > 0.1 && rho_mid < 1.0,
+        "midpoint density {rho_mid} is a pure step — no waves"
+    );
 }

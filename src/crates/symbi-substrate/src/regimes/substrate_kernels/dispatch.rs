@@ -25,8 +25,8 @@ use super::binding::{bind_manifest, kernel_bindings, kernel_field_binds, resolve
 use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
-    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars,
-    scalars_for,
+    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom,
+    resolve_body_scalars, scalars_for,
 };
 use super::types::Solver;
 
@@ -68,7 +68,13 @@ where
     // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
     // identities at a = 1; expanding axes only) pair with the per-axis
     // hubble/translation rates for the in-kernel relative speed `|s - v_g|`.
-    let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = kernel_geom(
+        &geom.x_lo,
+        &geom.dx,
+        &geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let resolve = |bind: &ScalarBind| -> Sc {
         let sref = match bind {
             ScalarBind::Ref(sref) => sref,
@@ -153,21 +159,24 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
     // (read only; the magnetized admissibility residual needs the field but never blends it, since
     // constrained transport owns the staggered value shared with the neighbor).
-    let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some(c) = s.strip_prefix("us_") {
-            crate::regimes::fofc::fofc_comp(u_stage, prim, c)
-        } else if let Some(c) = s.strip_prefix("x_") {
-            crate::regimes::fofc::fofc_comp(cons, prim, c)
-        } else if let Some(c) = s.strip_prefix("bc_") {
-            let k: usize = c.parse().unwrap_or_else(|_| panic!("fofc_project: bad cell-B index '{s}'"));
-            bcell.unwrap_or_else(|| panic!(
+    let slot =
+        |s: &str| -> &Field<Sc, D, Mem> {
+            if let Some(c) = s.strip_prefix("us_") {
+                crate::regimes::fofc::fofc_comp(u_stage, prim, c)
+            } else if let Some(c) = s.strip_prefix("x_") {
+                crate::regimes::fofc::fofc_comp(cons, prim, c)
+            } else if let Some(c) = s.strip_prefix("bc_") {
+                let k: usize = c
+                    .parse()
+                    .unwrap_or_else(|_| panic!("fofc_project: bad cell-B index '{s}'"));
+                bcell.unwrap_or_else(|| panic!(
                 "fofc_project: kernel '{name}' reads '{s}' but no cell-B was supplied — the \
                  magnetized admissibility condition requires it"
             ))[k]
-        } else {
-            panic!("fofc_project: unknown slot '{s}'")
-        }
-    };
+            } else {
+                panic!("fofc_project: unknown slot '{s}'")
+            }
+        };
     // metric mass/spin + grid scalars, resolved as in cfl_wave_speed.
     let (x_lo_phys, dx_phys) =
         kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
@@ -178,12 +187,18 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
         };
         match *sref {
             ScalarRef::SchwarzschildMass => Sc::from_f64(
-                geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass")
-                    .map(|(_, v)| *v).expect("fofc_project: needs schwarzschild_mass"),
+                geom.spacetime_scalars
+                    .iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("fofc_project: needs schwarzschild_mass"),
             ),
             ScalarRef::KerrSpin => Sc::from_f64(
-                geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin")
-                    .map(|(_, v)| *v).expect("fofc_project: needs kerr_spin"),
+                geom.spacetime_scalars
+                    .iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("fofc_project: needs kerr_spin"),
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, other)
@@ -203,7 +218,14 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
             inputs.push(fld);
         }
     }
-    super::exec::dispatch_fields_each::<Sc, Mem, D>(&name, &geom.interior, &inputs, &outputs, &[], &scalars);
+    super::exec::dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &geom.interior,
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
 }
 
 /// the GR horizon accretion diagnostic: run the shell-flux emit `shell_{quantity}_flux_{D}d` over
@@ -230,7 +252,11 @@ where
         match bind {
             ScalarBind::Spec(sp) if &**sp == "diagnostic_radius" => Sc::from_f64(diagnostic_radius),
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin").map(|(_, v)| *v).unwrap_or(0.0),
+                geom.spacetime_scalars
+                    .iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0.0),
             ),
             ScalarBind::Ref(sref) => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, *sref)
@@ -244,7 +270,16 @@ where
     for (i, quantity) in ["mass", "nrg"].iter().enumerate() {
         let name = format!("shell_{quantity}_flux_{D}d");
         let scalars = scalars_for(&name, &resolve);
-        dispatch_named(sim, pre, Some(scratch), 0, &name, &geom.interior, &[], &scalars);
+        dispatch_named(
+            sim,
+            pre,
+            Some(scratch),
+            0,
+            &name,
+            &geom.interior,
+            &[],
+            &scalars,
+        );
         // the emit writes the OUTWARD contribution; Add telescopes to the net outward flux through
         // the shell, and the hole accretes the INWARD flux = its negation.
         rates[i] = -field_reduce(scratch, &geom.interior, ReductionOp::Add);
@@ -265,7 +300,16 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("state_finite_{D}d");
-    dispatch_named(sim, pre, Some(scratch), 0, &name, &sim.geom.allocated, &[], &[]);
+    dispatch_named(
+        sim,
+        pre,
+        Some(scratch),
+        0,
+        &name,
+        &sim.geom.allocated,
+        &[],
+        &[],
+    );
     field_max_reduce(scratch, &sim.geom.allocated) <= 0.5
 }
 
@@ -366,7 +410,9 @@ pub fn dispatch_excise_sweep<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    symbi_sim::driver::prof("excise", || dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Sweep));
+    symbi_sim::driver::prof("excise", || {
+        dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Sweep)
+    });
 }
 
 /// the conserved rebuild of the excised cells, once after the last sweep.
@@ -378,7 +424,9 @@ pub fn dispatch_excise_finalize<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    symbi_sim::driver::prof("excise", || dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Finalize));
+    symbi_sim::driver::prof("excise", || {
+        dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Finalize)
+    });
 }
 
 /// the sweep count a full fill needs on this grid: the spin-widened equatorial
@@ -423,7 +471,10 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    assert!(D == 2 || D == 3, "excision is baked for the 2d and 3d cartesian kerr-schild charts");
+    assert!(
+        D == 2 || D == 3,
+        "excision is baked for the 2d and 3d cartesian kerr-schild charts"
+    );
     assert_eq!(
         geom.coords,
         symbi_geometry::Geometry::Cartesian,
@@ -457,7 +508,11 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let hi_x = (ext - geom.x_lo[a]) / geom.dx[a];
         let lo = (lo_x.floor() as isize - 1).clamp(s.lo, s.hi);
         let hi = (hi_x.ceil() as isize + 2).clamp(s.lo, s.hi);
-        symbi_algebra::Space { name: s.name, lo, hi }
+        symbi_algebra::Space {
+            name: s.name,
+            lo,
+            hi,
+        }
     });
     if spaces.iter().any(|sp| sp.lo >= sp.hi) {
         return;
@@ -510,7 +565,11 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     let p2c_scalars = scalars_for(&p2c_name, &resolve);
 
     // the primitive set is rho + DOF velocities + pre; the conserved set den + DOF momenta + nrg.
-    let pre = sim.fields.prim.pre_field().expect("excision requires prim.pre (GR)");
+    let pre = sim
+        .fields
+        .prim
+        .pre_field()
+        .expect("excision requires prim.pre (GR)");
     let mut prim: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
     for kk in 0..DOF {
         prim.push(&sim.fields.prim.vel[kk]);
@@ -557,7 +616,12 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             for kk in 0..DOF {
                 cons.push(&sim.fields.cons.mom[kk]);
             }
-            cons.push(sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR)"));
+            cons.push(
+                sim.fields
+                    .cons
+                    .nrg_field()
+                    .expect("excision requires cons.nrg (GR)"),
+            );
             dispatch_fields::<Sc, Mem, D>(
                 &p2c_name,
                 &geom.allocated,
@@ -592,13 +656,18 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
             let base = if has_energy {
                 format!("viscous_adiabatic_{D}d")
             } else {
-                symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name().to_string()
+                symbi_ir::KernelId::ViscousIso { ndim: D as u8 }
+                    .name()
+                    .to_string()
             };
             // 2.5D MHD (DOF=3 momentum on a 2-axis grid) selects the DOF-aware `_dof3` kernel, which
             // diffuses ALL three momentum components (the toroidal velocity) + the energy heating;
             // hydro / full 3D MHD (DOF==D) keep the base name.
             if DOF != D {
-                assert!(D == 2 && DOF == 3, "the only DOF>ndim viscous case is 2.5D MHD (D=2, DOF=3)");
+                assert!(
+                    D == 2 && DOF == 3,
+                    "the only DOF>ndim viscous case is 2.5D MHD (D=2, DOF=3)"
+                );
                 format!("{base}_dof{DOF}")
             } else {
                 base
@@ -641,7 +710,16 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
         other => panic!("viscous: unexpected scalar {other:?}"),
     });
     // the kernel reads no prim.pre; pass cons.den as the (unused) pre override.
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, name, &geom.interior, &[], &scalars);
+    dispatch_named(
+        sim,
+        &sim.fields.cons.den,
+        None,
+        0,
+        name,
+        &geom.interior,
+        &[],
+        &scalars,
+    );
 }
 
 /// dispatch the alpha VISCOUS operator (`viscous_iso_alpha_2d`):
@@ -665,7 +743,9 @@ where
     if !Mem::IS_HOST_ACCESSIBLE {
         return 0.0;
     }
-    let Some(im) = sim.immersed.as_ref() else { return 0.0 };
+    let Some(im) = sim.immersed.as_ref() else {
+        return 0.0;
+    };
     if im.bodies.is_empty() {
         return 0.0;
     }
@@ -673,7 +753,9 @@ where
     if b.mass <= 0.0 {
         return 0.0;
     }
-    let Some(pre) = sim.fields.prim.pre_field() else { return 0.0 };
+    let Some(pre) = sim.fields.prim.pre_field() else {
+        return 0.0;
+    };
     let geom = &sim.geom;
     let mut ratio_max = 0.0_f64;
     for c in geom.interior.iter() {
@@ -730,7 +812,10 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     let has_energy = sim.fields.cons.nrg_field().is_some();
     let name: String = match geom.coords {
         symbi_geometry::Geometry::Cartesian if has_energy => {
-            assert!(D == 2, "adiabatic alpha viscosity is baked for cartesian 2D");
+            assert!(
+                D == 2,
+                "adiabatic alpha viscosity is baked for cartesian 2D"
+            );
             if DOF == 3 && D == 2 {
                 "viscous_adiabatic_alpha_2d_dof3".to_string()
             } else {
@@ -738,8 +823,13 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
             }
         }
         symbi_geometry::Geometry::Cartesian => {
-            assert!(D == 2 || D == 3, "cartesian alpha viscosity is baked for 2D/3D");
-            symbi_ir::KernelId::ViscousIsoAlpha { ndim: D as u8 }.name().to_string()
+            assert!(
+                D == 2 || D == 3,
+                "cartesian alpha viscosity is baked for 2D/3D"
+            );
+            symbi_ir::KernelId::ViscousIsoAlpha { ndim: D as u8 }
+                .name()
+                .to_string()
         }
         // every curvilinear chart routes through the ONE general orthogonal alpha
         // kernel; nu(R) uses the radial coordinate, so no body position is needed.
@@ -777,7 +867,16 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
         ScalarBind::Spec(s) if &**s == "alpha" => Sc::from_f64(alpha),
         other => panic!("viscous alpha: unexpected spec scalar {other:?}"),
     });
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, name, &geom.interior, &[], &scalars);
+    dispatch_named(
+        sim,
+        &sim.fields.cons.den,
+        None,
+        0,
+        name,
+        &geom.interior,
+        &[],
+        &scalars,
+    );
 }
 
 /// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
@@ -922,7 +1021,9 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let Some(im) = sim.immersed.as_ref() else { return };
+    let Some(im) = sim.immersed.as_ref() else {
+        return;
+    };
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     let grav_name = format!("body_feedback_grav{sfx}_{D}d");
@@ -941,7 +1042,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         match *sref {
             ScalarRef::Dt => dt,
             ScalarRef::Gamma | ScalarRef::Cs => gamma,
-                        ScalarRef::Body { idx: 0, field } => {
+            ScalarRef::Body { idx: 0, field } => {
                 if matches!(field, symbi_ir::BodyScalar::Sink)
                     && super::params::penalize_owns_accretion::<D, DOF, Mem, Sc>(sim)
                 {
@@ -954,15 +1055,20 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         }
     };
-    let resolve =
-        |name: &str, b: usize| -> Vec<Sc> { scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b))) };
+    let resolve = |name: &str, b: usize| -> Vec<Sc> {
+        scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b)))
+    };
 
     // reduction scratch, shared across bodies and both passes and cached on the
     // workspace across calls (assign-write + reduce over the SAME region needs
     // no zeroing).
     let scratch = feedback_scratch(sim, per_drain);
 
-    let nrg = sim.fields.cons.nrg_field().expect("body_feedback needs cons.nrg");
+    let nrg = sim
+        .fields
+        .cons
+        .nrg_field()
+        .expect("body_feedback needs cons.nrg");
     let mut den_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
     let mut full_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
     for comp in 0..DOF {
@@ -987,7 +1093,13 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             let g_out: Vec<&Field<Sc, D, Mem>> = scratch[..D].iter().collect();
             let g_scalars = resolve(&grav_name, b);
             dispatch_fields::<Sc, Mem, D>(
-                &grav_name, &geom.allocated, &geom.interior, &den_in, &g_out, &[], &g_scalars,
+                &grav_name,
+                &geom.allocated,
+                &geom.interior,
+                &den_in,
+                &g_out,
+                &[],
+                &g_scalars,
             );
             for g in 0..D {
                 force[g] = field_reduce(&scratch[g], &geom.interior, ReductionOp::Add);
@@ -1007,12 +1119,9 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             let names = super::binding::kernel_scalar_names(&drain_name);
             let ball = super::binding::kernel_output_support(&drain_name).and_then(|support| {
                 support.eval_ball(&|pname: &str| {
-                    let (_, bind) = names
-                        .iter()
-                        .find(|(n, _)| n == pname)
-                        .unwrap_or_else(|| {
-                            panic!("support param '{pname}' not in '{drain_name}' scalar manifest")
-                        });
+                    let (_, bind) = names.iter().find(|(n, _)| n == pname).unwrap_or_else(|| {
+                        panic!("support param '{pname}' not in '{drain_name}' scalar manifest")
+                    });
                     bind_value(bind, b)
                 })
             });
@@ -1028,9 +1137,16 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                 let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
                 let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
                 let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
-                symbi_algebra::Space { name: s.name, lo, hi }
+                symbi_algebra::Space {
+                    name: s.name,
+                    lo,
+                    hi,
+                }
             });
-            spaces.iter().all(|sp| sp.lo < sp.hi).then(|| Domain::new(spaces))
+            spaces
+                .iter()
+                .all(|sp| sp.lo < sp.hi)
+                .then(|| Domain::new(spaces))
         });
         let mut drag = symbi_algebra::Tensor::<f64, D>::zeros();
         let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
@@ -1039,7 +1155,13 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             let d_out: Vec<&Field<Sc, D, Mem>> = scratch[..per_drain].iter().collect();
             let d_scalars = resolve(&drain_name, b);
             dispatch_fields::<Sc, Mem, D>(
-                &drain_name, &geom.allocated, &bbox, &full_in, &d_out, &[], &d_scalars,
+                &drain_name,
+                &geom.allocated,
+                &bbox,
+                &full_in,
+                &d_out,
+                &[],
+                &d_scalars,
             );
             for g in 0..D {
                 drag[g] = field_reduce(&scratch[g], &bbox, ReductionOp::Add);
@@ -1124,12 +1246,17 @@ fn shaped_penalize_gv(
     has_energy: bool,
     spin: bool,
     shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
-) -> (symbi_discretize::GvKernel, Vec<(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)>) {
+) -> (
+    symbi_discretize::GvKernel,
+    Vec<(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)>,
+) {
     match (has_energy, spin) {
         (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape),
         (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape),
         (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape),
-        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape),
+        (false, true) => {
+            symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape)
+        }
     }
 }
 
@@ -1210,7 +1337,8 @@ fn shaped_penalize_kernel(
     precision: symbi_ir::emit::Precision,
 ) -> Option<std::sync::Arc<ShapedPenalizeKernel>> {
     use std::sync::{Arc, OnceLock, RwLock};
-    static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
+    static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> =
+        OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
     // the compiled cranelift artifact is precision-specific (f32 vs f64 codegen), so the scalar
     // width joins the shape/dim/regime in the cache key.
@@ -1223,12 +1351,18 @@ fn shaped_penalize_kernel(
         return k.clone();
     }
     let (gvk, writes) = shaped_penalize_gv(coords, ndim, dof, has_energy, spin, shape);
-    let built = symbi_jit::compile_gv_kernel_prec(&gvk, &writes, ndim, precision).ok().map(|kernel| {
-        Arc::new(ShapedPenalizeKernel {
-            kernel,
-            scalar_params: gvk.scalar_params.iter().map(|s| super::params::ScalarBind::from_name(s)).collect(),
-        })
-    });
+    let built = symbi_jit::compile_gv_kernel_prec(&gvk, &writes, ndim, precision)
+        .ok()
+        .map(|kernel| {
+            Arc::new(ShapedPenalizeKernel {
+                kernel,
+                scalar_params: gvk
+                    .scalar_params
+                    .iter()
+                    .map(|s| super::params::ScalarBind::from_name(s))
+                    .collect(),
+            })
+        });
     w.insert(key, built.clone());
     built
 }
@@ -1337,16 +1471,29 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         for s in scratch[..n_delta + n_torque + D].iter() {
             outputs.push(s);
         }
-        let scalars: Vec<Sc> =
-            sk.scalar_params.iter().map(|bind| Sc::from_f64(bind_value(bind, b))).collect();
+        let scalars: Vec<Sc> = sk
+            .scalar_params
+            .iter()
+            .map(|bind| Sc::from_f64(bind_value(bind, b)))
+            .collect();
         dispatch_fields_runtime_ir::<Sc, Mem, D>(
-            &sk.name, &sk.ir, &sim.geom.allocated, &bbox, &[], &outputs, &[], &scalars,
+            &sk.name,
+            &sk.ir,
+            &sim.geom.allocated,
+            &bbox,
+            &[],
+            &outputs,
+            &[],
+            &scalars,
         );
     } else {
         use super::layout::{alloc_layout, exec_layout};
-        let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape, precision).unwrap_or_else(|| {
-            panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
-        });
+        let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape, precision)
+            .unwrap_or_else(|| {
+                panic!(
+                    "arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset"
+                )
+            });
         // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases,
         // in the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque
         // scratch. the JIT buffer ABI is raw f64 on host.
@@ -1374,14 +1521,19 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         for s in scratch[..n_delta + n_torque + D].iter() {
             out_bases.push(cons_ptr_mut(s));
         }
-        let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| bind_value(bind, b)).collect();
+        let scalars: Vec<f64> = sk
+            .scalar_params
+            .iter()
+            .map(|bind| bind_value(bind, b))
+            .collect();
         let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
         let (grid, dlo) = exec_layout(&bbox);
         // SAFETY: shared allocated layout; the cons.* fields are bound as the SAME base in
         // `in_bases` and `out_bases` (in-place, read-before-write per cell); every scratch output
         // is a distinct allocation; distinct cells write distinct flat indices on distinct threads.
         unsafe {
-            sk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases);
+            sk.kernel
+                .run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases);
         }
     }
 
@@ -1439,7 +1591,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let Some(im) = sim.immersed.as_ref() else { return };
+    let Some(im) = sim.immersed.as_ref() else {
+        return;
+    };
     // the DRAIN surface is baked for every chart (the mask distance maps the cell
     // centroid to Cartesian); porous / torque-free stay Cartesian until the
     // physical-frame normal is baked off-chart. no blanket curvilinear early return.
@@ -1449,9 +1603,8 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // ring radius (slot 0 of the cartesian position/velocity) must be zero —
     // an off-axis "point" is a ring, a different object — and a CSG shape in
     // the section is a surface of revolution, a separate mask story.
-    let rz = D == 2
-        && geom.coords == symbi_geometry::Geometry::Cylindrical
-        && geom.axes[..2] == [0, 2];
+    let rz =
+        D == 2 && geom.coords == symbi_geometry::Geometry::Cylindrical && geom.axes[..2] == [0, 2];
     if rz {
         let bodies_chk = &im.bodies;
         for b in 0..bodies_chk.len() {
@@ -1531,7 +1684,16 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // an arbitrary-shape body runs the runtime-JIT'd shaped kernel (built + cached per distinct
         // geometry); a body with no shape is the analytic sphere via the AOT kernel below.
         if let Some(shape) = im.shapes.get(b).and_then(|s| s.as_ref()) {
-            dispatch_penalize_shaped_body(sim, im, b, shape, n_delta, n_torque, scratch, &bind_value);
+            dispatch_penalize_shaped_body(
+                sim,
+                im,
+                b,
+                shape,
+                n_delta,
+                n_torque,
+                scratch,
+                &bind_value,
+            );
             continue;
         }
         // the body's surface stack picks the baked kernel. the regime picks
@@ -1544,7 +1706,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
         let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
-            (symbi_ib::SurfaceSpec::Drain, true) => penalize_name("penalize_drain", coords_g, D, &geom.axes),
+            (symbi_ib::SurfaceSpec::Drain, true) => {
+                penalize_name("penalize_drain", coords_g, D, &geom.axes)
+            }
             (symbi_ib::SurfaceSpec::Drain, false) => {
                 penalize_name("penalize_drain_iso", coords_g, D, &geom.axes)
             }
@@ -1564,7 +1728,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
         // components; hydro / full 3D MHD (DOF == D) keep the base name. the baked matrix covers
         // cartesian all-surfaces + curvilinear drain; anything else fails loud as an unbaked kernel.
-        let name_owned = if DOF != D { format!("{name_owned}_dof{DOF}") } else { name_owned };
+        let name_owned = if DOF != D {
+            format!("{name_owned}_dof{DOF}")
+        } else {
+            name_owned
+        };
         let name: &str = &name_owned;
         // the reduction/dispatch box. on a Cartesian grid the kernel's declared
         // support ball clamps to an index box (identical to the feedback
@@ -1594,9 +1762,16 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                         let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
                         let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
                         let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
-                        symbi_algebra::Space { name: s.name, lo, hi }
+                        symbi_algebra::Space {
+                            name: s.name,
+                            lo,
+                            hi,
+                        }
                     });
-                    spaces.iter().all(|sp| sp.lo < sp.hi).then(|| Domain::new(spaces))
+                    spaces
+                        .iter()
+                        .all(|sp| sp.lo < sp.hi)
+                        .then(|| Domain::new(spaces))
                 })
         };
         let Some(bbox) = bbox else { continue };
@@ -1650,7 +1825,8 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // the appended form-drag (normal-projected) force: D slots after the torque block.
         let mut force_normal = symbi_algebra::Tensor::<f64, D>::zeros();
         for a in 0..D {
-            force_normal[a] = field_reduce(&scratch[n_delta + n_torque + a], &bbox, ReductionOp::Add);
+            force_normal[a] =
+                field_reduce(&scratch[n_delta + n_torque + a], &bbox, ReductionOp::Add);
         }
         im.diagnostics.accumulate(symbi_ib::BodyDelta {
             idx: b,
@@ -1837,7 +2013,11 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // fan — a distinct baked kernel (`_rusanov`), the provably admissibility-preserving low-order
     // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
     // theta = 0 through the normal solver suffix.
-    let solver_sfx = if rusanov { "_rusanov" } else { solver.kernel_suffix() };
+    let solver_sfx = if rusanov {
+        "_rusanov"
+    } else {
+        solver.kernel_suffix()
+    };
     // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the spacetime
     // slug (`rhd_face_flux{_schw|_ks}_{D}d_{dir}`), baked only for a curved spacetime. flat
     // (Minkowski) keeps the unsuffixed flux, so the slug is appended ONLY off-Minkowski.
@@ -1855,10 +2035,17 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // FACE POSITION through `gv_axis_face_at`, which — on a log-radial grid — needs the LOG-AWARE
     // kernel scalars (dx is the log slope), exactly as the shift/godunov dispatches. GR is static
     // mesh, so kernel_geom == physical_geom for the uniform case.
-    let (x_lo_phys, dx_phys) = if matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+    let (x_lo_phys, dx_phys) = if matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski)
+    {
         physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, a)
     } else {
-        kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, a)
+        kernel_geom(
+            &sim.geom.x_lo,
+            &sim.geom.dx,
+            &sim.geom.maps,
+            sim.geom.coords,
+            a,
+        )
     };
     // the flux is a per-direction kernel; it declares the moving-mesh rate for
     // its sweep axis as `mesh_adot_{dir}` (via MeshScalar) — the SAME per-axis
@@ -1903,7 +2090,6 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(sim, pre, None, dir, &name, &face, &[], &scalars);
 }
 
-
 /// the ONE godunov-update dispatch every hydro regime shares (the EOS-generic builder is
 /// already unified; this unifies the field-gathering + the curvilinear binding order + the
 /// scalar tail so no regime re-derives them). `rk2=false` is the forward-Euler step (inputs
@@ -1943,7 +2129,13 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // mesh motion: the divergence + the curvilinear geometric source run over
     // PHYSICAL geometry (expanding axes scaled by a), and mesh_hdil carries
     // the physical volume-growth rate; all exact identities on a static mesh.
-    let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = kernel_geom(
+        &geom.x_lo,
+        &geom.dx,
+        &geom.maps,
+        sim.geom.coords,
+        sim.motion.a,
+    );
     let scalars = scalars_for(&name, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("dispatch_godunov: unexpected spec scalar {bind:?}");

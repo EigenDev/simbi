@@ -16,8 +16,8 @@ use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::energy::IsoModel;
+use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::{Prim, PrimG};
@@ -49,7 +49,10 @@ fn uniform_gas_stays_uniform_across_the_level_seam_adiabatic() {
         })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 3],
+        x_hi: [0.75; 3],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
     })
@@ -112,7 +115,10 @@ fn uniform_gas_stays_uniform_across_the_level_seam_iso() {
         })
         .build();
     let ck = IKset::new(cs, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [0.25; 3],
+        x_hi: [0.75; 3],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         IKset::new(cs, CFL, &s.geom.allocated)
     })

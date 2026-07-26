@@ -18,7 +18,7 @@
 //   let v_lower = g * v_upper;     // index lowering
 // =============================================================================
 
-use symbi_algebra::{Tensor, Matrix, Contravariant, Covariant, Physical, Embedded};
+use symbi_algebra::{Contravariant, Covariant, Embedded, Matrix, Physical, Tensor};
 use symbi_ir::algebra::Scalar;
 
 // ============================================================
@@ -37,7 +37,9 @@ pub enum Geometry {
 
 impl Geometry {
     /// integer representation for GPU kernel dispatch.
-    pub fn as_i32(self) -> i32 { self as i32 }
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
 }
 
 /// spacetime identifier — the background a regime evolves on. ORTHOGONAL to BOTH the spatial
@@ -72,7 +74,9 @@ pub enum Spacetime {
 
 impl Spacetime {
     /// integer representation for GPU kernel dispatch.
-    pub fn as_i32(self) -> i32 { self as i32 }
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
 }
 
 // ============================================================
@@ -99,17 +103,23 @@ impl Spacetime {
 /// and (future) Schwarzschild, Kerr, etc. (`Metric` only, until their quadrature lands).
 pub trait Metric<S: Scalar, const D: usize> {
     /// coordinate system for this metric.
-    fn geometry(&self) -> Geometry { Geometry::Cartesian }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cartesian
+    }
 
     /// the spacetime background (flat vs curved). ORTHOGONAL to `geometry()`: `Minkowski` for every
     /// flat metric, a curved variant (Schwarzschild, ...) for GR. selects the lapse / sqrt(gamma)
     /// densitization path in the kernel; flat -> the densitization is a no-op.
-    fn spacetime(&self) -> Spacetime { Spacetime::Minkowski }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Minkowski
+    }
 
     /// the spacetime's runtime scalar PARAMETERS as `(wire-name, value)` pairs — the kernel-dispatch
     /// scalars a curved metric needs filled (e.g. `("schwarzschild_mass", M)`). flat -> empty. the
     /// substrate resolves these by name at the godunov dispatch, exactly like the EOS feeds `gamma`.
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { Vec::new() }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        Vec::new()
+    }
 
     /// lapse function \alpha. determines time dilation.
     /// flat spacetime: \alpha = 1.
@@ -257,9 +267,7 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// NOTE: this is the CONTINUOUS analytical formula. for discrete schemes,
     /// use `momentum_source_inertial` + discrete pressure source from face
     /// area differences to achieve exact discrete equilibrium.
-    fn momentum_source(
-        &self, x: Tensor<S, D>, rho: S, vel: Tensor<S, D>, p: S,
-    ) -> Tensor<S, D> {
+    fn momentum_source(&self, x: Tensor<S, D>, rho: S, vel: Tensor<S, D>, p: S) -> Tensor<S, D> {
         let _ = (x, rho, vel, p);
         Tensor::zeros()
     }
@@ -280,7 +288,10 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// so the same code serves every regime AND the magnetic tension (call with `mom = b`,
     /// `vel = b` for `-Gamma(b, b)`).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, D>, mom: Tensor<S, D>, vel: Tensor<S, D>,
+        &self,
+        x: Tensor<S, D>,
+        mom: Tensor<S, D>,
+        vel: Tensor<S, D>,
     ) -> Tensor<S, D> {
         let _ = (x, mom, vel);
         Tensor::zeros()
@@ -340,9 +351,15 @@ impl<S: Scalar> Metric<S, 1> for Cartesian {
         Tensor::new([S::ONE])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn volume_factor(&self, x: Tensor<S, 1>) -> S { self.sqrt_det_gamma(x) }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn volume_factor(&self, x: Tensor<S, 1>) -> S {
+        self.sqrt_det_gamma(x)
+    }
 }
 
 impl<S: Scalar> Metric<S, 2> for Cartesian {
@@ -362,9 +379,15 @@ impl<S: Scalar> Metric<S, 2> for Cartesian {
         Tensor::new([S::ONE, S::ONE])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
-    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
-    fn volume_factor(&self, x: Tensor<S, 2>) -> S { self.sqrt_det_gamma(x) }
+    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        x
+    }
+    fn volume_factor(&self, x: Tensor<S, 2>) -> S {
+        self.sqrt_det_gamma(x)
+    }
 }
 
 impl<S: Scalar> Metric<S, 3> for Cartesian {
@@ -384,9 +407,15 @@ impl<S: Scalar> Metric<S, 3> for Cartesian {
         Tensor::new([S::ONE, S::ONE, S::ONE])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> { x }
-    fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> { x }
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        x
+    }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
 }
 
 // ============================================================
@@ -405,7 +434,9 @@ impl<S: Scalar> Metric<S, 3> for Cartesian {
 pub struct Spherical;
 
 impl<S: Scalar> Metric<S, 1> for Spherical {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
     fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
         Matrix::identity()
     }
@@ -422,8 +453,12 @@ impl<S: Scalar> Metric<S, 1> for Spherical {
         Tensor::new([S::ONE])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
 
     fn volume_factor(&self, x: Tensor<S, 1>) -> S {
         let r = x[0];
@@ -431,9 +466,7 @@ impl<S: Scalar> Metric<S, 1> for Spherical {
     }
 
     /// 1D spherical: S_r = 2p/r (pressure from 2 suppressed angular directions).
-    fn momentum_source(
-        &self, x: Tensor<S, 1>, _rho: S, _vel: Tensor<S, 1>, p: S,
-    ) -> Tensor<S, 1> {
+    fn momentum_source(&self, x: Tensor<S, 1>, _rho: S, _vel: Tensor<S, 1>, p: S) -> Tensor<S, 1> {
         let r = x[0];
         let two = S::ONE + S::ONE;
         Tensor::new([two * p / r])
@@ -441,14 +474,19 @@ impl<S: Scalar> Metric<S, 1> for Spherical {
 
     /// 1D spherical inertial: no resolved angular velocity -> zero.
     fn momentum_source_inertial(
-        &self, _x: Tensor<S, 1>, _mom: Tensor<S, 1>, _vel: Tensor<S, 1>,
+        &self,
+        _x: Tensor<S, 1>,
+        _mom: Tensor<S, 1>,
+        _vel: Tensor<S, 1>,
     ) -> Tensor<S, 1> {
         Tensor::zeros()
     }
 }
 
 impl<S: Scalar> Metric<S, 2> for Spherical {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
     fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let r = x[0];
         Matrix::diag(Tensor::new([S::ONE, r * r]))
@@ -484,20 +522,14 @@ impl<S: Scalar> Metric<S, 2> for Spherical {
         let ct = theta.cos();
         let st = theta.sin();
         // physical (orthonormal) components: v_r in hat{r}, v_theta in hat{theta}, rotated to lab.
-        Embedded::new(Tensor::new([
-            v[0] * ct - v[1] * st,
-            v[0] * st + v[1] * ct,
-        ]))
+        Embedded::new(Tensor::new([v[0] * ct - v[1] * st, v[0] * st + v[1] * ct]))
     }
 
     fn vector_from_cartesian(&self, x: Tensor<S, 2>, v: Embedded<S, 2>) -> Physical<S, 2> {
         let theta = x[1];
         let ct = theta.cos();
         let st = theta.sin();
-        Physical::new(Tensor::new([
-            v[0] * ct + v[1] * st,
-            -v[0] * st + v[1] * ct,
-        ]))
+        Physical::new(Tensor::new([v[0] * ct + v[1] * st, -v[0] * st + v[1] * ct]))
     }
 
     fn volume_factor(&self, x: Tensor<S, 2>) -> S {
@@ -509,39 +541,36 @@ impl<S: Scalar> Metric<S, 2> for Spherical {
     /// 2D spherical (r, theta): resolved theta + suppressed phi.
     /// S_r = (rho*V_t^2 + 2p) / r
     /// S_t = (p*cot(theta) - rho*V_r*V_t) / r
-    fn momentum_source(
-        &self, x: Tensor<S, 2>, rho: S, vel: Tensor<S, 2>, p: S,
-    ) -> Tensor<S, 2> {
+    fn momentum_source(&self, x: Tensor<S, 2>, rho: S, vel: Tensor<S, 2>, p: S) -> Tensor<S, 2> {
         let r = x[0];
         let theta = x[1];
         let vr = vel[0];
         let vt = vel[1];
         let two = S::ONE + S::ONE;
         let cot = theta.cos() / theta.sin();
-        Tensor::new([
-            (rho * vt * vt + two * p) / r,
-            (p * cot - rho * vr * vt) / r,
-        ])
+        Tensor::new([(rho * vt * vt + two * p) / r, (p * cot - rho * vr * vt) / r])
     }
 
     /// 2D spherical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
     /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 2>, mom: Tensor<S, 2>, vel: Tensor<S, 2>,
+        &self,
+        x: Tensor<S, 2>,
+        mom: Tensor<S, 2>,
+        vel: Tensor<S, 2>,
     ) -> Tensor<S, 2> {
         let r = x[0];
         let mr = mom[0];
         let mt = mom[1];
         let vt = vel[1];
-        Tensor::new([
-            mt * vt / r,
-            S::ZERO - mr * vt / r,
-        ])
+        Tensor::new([mt * vt / r, S::ZERO - mr * vt / r])
     }
 }
 
 impl<S: Scalar> Metric<S, 3> for Spherical {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
     fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
         let r = x[0];
         let st = x[1].sin();
@@ -552,11 +581,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
         let r = x[0];
         let st = x[1].sin();
         let r2 = r * r;
-        Matrix::diag(Tensor::new([
-            S::ONE,
-            S::ONE / r2,
-            S::ONE / (r2 * st * st),
-        ]))
+        Matrix::diag(Tensor::new([S::ONE, S::ONE / r2, S::ONE / (r2 * st * st)]))
     }
 
     fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
@@ -565,7 +590,9 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
         r * r * st.abs()
     }
     // full-rank spherical chart: the proper measure is sqrt_det_gamma.
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
 
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let r = x[0];
@@ -576,11 +603,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
     fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let (r, theta, phi) = (x[0], x[1], x[2]);
         let st = theta.sin();
-        Tensor::new([
-            r * st * phi.cos(),
-            r * st * phi.sin(),
-            r * theta.cos(),
-        ])
+        Tensor::new([r * st * phi.cos(), r * st * phi.sin(), r * theta.cos()])
     }
 
     fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
@@ -600,7 +623,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
         Embedded::new(Tensor::new([
             v[0] * st * cp + v[1] * ct * cp - v[2] * sp,
             v[0] * st * sp + v[1] * ct * sp + v[2] * cp,
-            v[0] * ct       - v[1] * st,
+            v[0] * ct - v[1] * st,
         ]))
     }
 
@@ -613,7 +636,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
         Physical::new(Tensor::new([
             v[0] * st * cp + v[1] * st * sp + v[2] * ct,
             v[0] * ct * cp + v[1] * ct * sp - v[2] * st,
-            -v[0] * sp      + v[1] * cp,
+            -v[0] * sp + v[1] * cp,
         ]))
     }
 
@@ -621,9 +644,7 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
     /// S_r = (rho*(V_t^2 + V_p^2) + 2p) / r
     /// S_t = ((rho*V_p^2 + p)*cot(theta) - rho*V_r*V_t) / r
     /// S_p = -rho*V_p*(V_r + V_t*cot(theta)) / r
-    fn momentum_source(
-        &self, x: Tensor<S, 3>, rho: S, vel: Tensor<S, 3>, p: S,
-    ) -> Tensor<S, 3> {
+    fn momentum_source(&self, x: Tensor<S, 3>, rho: S, vel: Tensor<S, 3>, p: S) -> Tensor<S, 3> {
         let r = x[0];
         let theta = x[1];
         let vr = vel[0];
@@ -641,7 +662,10 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
     /// 3D spherical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
     /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 3>, mom: Tensor<S, 3>, vel: Tensor<S, 3>,
+        &self,
+        x: Tensor<S, 3>,
+        mom: Tensor<S, 3>,
+        vel: Tensor<S, 3>,
     ) -> Tensor<S, 3> {
         let r = x[0];
         let theta = x[1];
@@ -702,12 +726,22 @@ impl<S: Scalar> Schwarzschild<S> {
 }
 
 impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Schwarzschild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
-    fn lapse(&self, x: Tensor<S, 1>) -> S { self.f(x[0]).sqrt() }
-    fn lapse_sq(&self, x: Tensor<S, 1>) -> S { self.f(x[0]) } // alpha^2 = f = 1 - 2M/r
+    fn lapse(&self, x: Tensor<S, 1>) -> S {
+        self.f(x[0]).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 1>) -> S {
+        self.f(x[0])
+    } // alpha^2 = f = 1 - 2M/r
 
     fn spatial_metric(&self, x: Tensor<S, 1>) -> Matrix<S, 1> {
         Matrix::diag(Tensor::new([S::ONE / self.f(x[0])]))
@@ -715,13 +749,19 @@ impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
     fn spatial_metric_inv(&self, x: Tensor<S, 1>) -> Matrix<S, 1> {
         Matrix::diag(Tensor::new([self.f(x[0])]))
     }
-    fn sqrt_det_gamma(&self, x: Tensor<S, 1>) -> S { S::ONE / self.f(x[0]).sqrt() }
+    fn sqrt_det_gamma(&self, x: Tensor<S, 1>) -> S {
+        S::ONE / self.f(x[0]).sqrt()
+    }
     fn scale_factors(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
         Tensor::new([S::ONE / self.f(x[0]).sqrt()])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
 
     /// the full proper volume element including the 2 suppressed angular directions: r^2 / sqrt(f).
     fn volume_factor(&self, x: Tensor<S, 1>) -> S {
@@ -731,12 +771,22 @@ impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
 }
 
 impl<S: Scalar> Metric<S, 2> for Schwarzschild<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Schwarzschild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
-    fn lapse(&self, x: Tensor<S, 2>) -> S { self.f(x[0]).sqrt() }
-    fn lapse_sq(&self, x: Tensor<S, 2>) -> S { self.f(x[0]) } // alpha^2 = f = 1 - 2M/r
+    fn lapse(&self, x: Tensor<S, 2>) -> S {
+        self.f(x[0]).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
+        self.f(x[0])
+    } // alpha^2 = f = 1 - 2M/r
 
     fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let r = x[0];
@@ -783,12 +833,22 @@ impl<S: Scalar> Metric<S, 2> for Schwarzschild<S> {
 }
 
 impl<S: Scalar> Metric<S, 3> for Schwarzschild<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Schwarzschild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
-    fn lapse(&self, x: Tensor<S, 3>) -> S { self.f(x[0]).sqrt() }
-    fn lapse_sq(&self, x: Tensor<S, 3>) -> S { self.f(x[0]) } // alpha^2 = f = 1 - 2M/r
+    fn lapse(&self, x: Tensor<S, 3>) -> S {
+        self.f(x[0]).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
+        self.f(x[0])
+    } // alpha^2 = f = 1 - 2M/r
 
     fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
         let r = x[0];
@@ -799,14 +859,20 @@ impl<S: Scalar> Metric<S, 3> for Schwarzschild<S> {
         let r = x[0];
         let st = x[1].sin();
         let r2 = r * r;
-        Matrix::diag(Tensor::new([self.f(r), S::ONE / r2, S::ONE / (r2 * st * st)]))
+        Matrix::diag(Tensor::new([
+            self.f(r),
+            S::ONE / r2,
+            S::ONE / (r2 * st * st),
+        ]))
     }
     fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
         let r = x[0];
         r * r * x[1].sin().abs() / self.f(r).sqrt() // sqrt((1/f) r^2 r^2 sin^2)
     }
     // full-rank spherical chart: the proper measure is sqrt_det_gamma.
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let r = x[0];
         let st = x[1].sin();
@@ -892,13 +958,25 @@ impl<S: Scalar> SchwarzschildKS<S> {
 }
 
 impl<S: Scalar> Metric<S, 1> for SchwarzschildKS<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
-    fn lapse(&self, x: Tensor<S, 1>) -> S { S::ONE / self.h(x[0]).sqrt() }
-    fn lapse_sq(&self, x: Tensor<S, 1>) -> S { S::ONE / self.h(x[0]) } // alpha^2 = 1/(1 + 2M/r)
-    fn shift(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { Tensor::new([self.beta_r(x[0])]) }
+    fn lapse(&self, x: Tensor<S, 1>) -> S {
+        S::ONE / self.h(x[0]).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 1>) -> S {
+        S::ONE / self.h(x[0])
+    } // alpha^2 = 1/(1 + 2M/r)
+    fn shift(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        Tensor::new([self.beta_r(x[0])])
+    }
 
     fn spatial_metric(&self, x: Tensor<S, 1>) -> Matrix<S, 1> {
         Matrix::diag(Tensor::new([self.h(x[0])]))
@@ -906,13 +984,19 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKS<S> {
     fn spatial_metric_inv(&self, x: Tensor<S, 1>) -> Matrix<S, 1> {
         Matrix::diag(Tensor::new([S::ONE / self.h(x[0])]))
     }
-    fn sqrt_det_gamma(&self, x: Tensor<S, 1>) -> S { self.h(x[0]).sqrt() }
+    fn sqrt_det_gamma(&self, x: Tensor<S, 1>) -> S {
+        self.h(x[0]).sqrt()
+    }
     fn scale_factors(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
         Tensor::new([self.h(x[0]).sqrt()])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
 
     /// the proper volume element incl. the 2 suppressed angular directions: r^2 sqrt(h).
     fn volume_factor(&self, x: Tensor<S, 1>) -> S {
@@ -922,13 +1006,25 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKS<S> {
 }
 
 impl<S: Scalar> Metric<S, 2> for SchwarzschildKS<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
-    fn lapse(&self, x: Tensor<S, 2>) -> S { S::ONE / self.h(x[0]).sqrt() }
-    fn lapse_sq(&self, x: Tensor<S, 2>) -> S { S::ONE / self.h(x[0]) } // alpha^2 = 1/(1 + 2M/r)
-    fn shift(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { Tensor::new([self.beta_r(x[0]), S::ZERO]) }
+    fn lapse(&self, x: Tensor<S, 2>) -> S {
+        S::ONE / self.h(x[0]).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
+        S::ONE / self.h(x[0])
+    } // alpha^2 = 1/(1 + 2M/r)
+    fn shift(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        Tensor::new([self.beta_r(x[0]), S::ZERO])
+    }
 
     fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let r = x[0];
@@ -975,12 +1071,22 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKS<S> {
 }
 
 impl<S: Scalar> Metric<S, 3> for SchwarzschildKS<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
-    fn lapse(&self, x: Tensor<S, 3>) -> S { S::ONE / self.h(x[0]).sqrt() }
-    fn lapse_sq(&self, x: Tensor<S, 3>) -> S { S::ONE / self.h(x[0]) } // alpha^2 = 1/(1 + 2M/r)
+    fn lapse(&self, x: Tensor<S, 3>) -> S {
+        S::ONE / self.h(x[0]).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
+        S::ONE / self.h(x[0])
+    } // alpha^2 = 1/(1 + 2M/r)
     fn shift(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         Tensor::new([self.beta_r(x[0]), S::ZERO, S::ZERO])
     }
@@ -994,14 +1100,20 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKS<S> {
         let r = x[0];
         let st = x[1].sin();
         let r2 = r * r;
-        Matrix::diag(Tensor::new([S::ONE / self.h(r), S::ONE / r2, S::ONE / (r2 * st * st)]))
+        Matrix::diag(Tensor::new([
+            S::ONE / self.h(r),
+            S::ONE / r2,
+            S::ONE / (r2 * st * st),
+        ]))
     }
     fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
         let r = x[0];
         r * r * x[1].sin().abs() * self.h(r).sqrt() // sqrt(h * r^2 * r^2 sin^2)
     }
     // full-rank spherical chart: the proper measure is sqrt_det_gamma.
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let r = x[0];
         let st = x[1].sin();
@@ -1112,8 +1224,12 @@ impl<S: Scalar> SchwarzschildKSCartesian<S> {
 macro_rules! impl_schwarzschild_ks_cartesian {
     ($d:literal) => {
         impl<S: Scalar> Metric<S, $d> for SchwarzschildKSCartesian<S> {
-            fn geometry(&self) -> Geometry { Geometry::Cartesian }
-            fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
+            fn geometry(&self) -> Geometry {
+                Geometry::Cartesian
+            }
+            fn spacetime(&self) -> Spacetime {
+                Spacetime::KerrSchild
+            }
             fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
                 vec![("schwarzschild_mass", self.mass)]
             }
@@ -1161,10 +1277,16 @@ macro_rules! impl_schwarzschild_ks_cartesian {
                 (S::ONE + two_h * ll2).sqrt()
             }
             // full-rank cartesian chart (D == physical dim): the proper measure is sqrt_det_gamma.
-            fn volume_factor(&self, x: Tensor<S, $d>) -> S { self.sqrt_det_gamma(x) }
+            fn volume_factor(&self, x: Tensor<S, $d>) -> S {
+                self.sqrt_det_gamma(x)
+            }
 
-            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
-            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                x
+            }
+            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                x
+            }
         }
     };
 }
@@ -1223,8 +1345,12 @@ impl<S: Scalar> KerrKSCartesian<S> {
 macro_rules! impl_kerr_ks_cartesian {
     ($d:literal) => {
         impl<S: Scalar> Metric<S, $d> for KerrKSCartesian<S> {
-            fn geometry(&self) -> Geometry { Geometry::Cartesian }
-            fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+            fn geometry(&self) -> Geometry {
+                Geometry::Cartesian
+            }
+            fn spacetime(&self) -> Spacetime {
+                Spacetime::Kerr
+            }
             fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
                 vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
             }
@@ -1265,10 +1391,16 @@ macro_rules! impl_kerr_ks_cartesian {
                 let (two_h, _l, ll2) = self.ks_quantities(x);
                 (S::ONE + two_h * ll2).sqrt()
             }
-            fn volume_factor(&self, x: Tensor<S, $d>) -> S { self.sqrt_det_gamma(x) }
+            fn volume_factor(&self, x: Tensor<S, $d>) -> S {
+                self.sqrt_det_gamma(x)
+            }
 
-            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
-            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                x
+            }
+            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                x
+            }
         }
     };
 }
@@ -1279,8 +1411,12 @@ impl_kerr_ks_cartesian!(3);
 // D = 1 is degenerate (cartesian GR has no radial structure on a line); fail-loud so
 // generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time.
 impl<S: Scalar> Metric<S, 1> for KerrKSCartesian<S> {
-    fn geometry(&self) -> Geometry { Geometry::Cartesian }
-    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cartesian
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Kerr
+    }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
     }
@@ -1296,32 +1432,52 @@ impl<S: Scalar> Metric<S, 1> for KerrKSCartesian<S> {
     fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
         unreachable!("cartesian kerr is 2d/3d only")
     }
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
 }
 
 // D = 1 is degenerate (cartesian GR has no radial structure on a line); provided fail-loud so
 // generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time (the cartesian GR bakes
 // are D = 2, 3). mirrors the KerrKS D = 1 stub.
 impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
-    fn geometry(&self) -> Geometry { Geometry::Cartesian }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cartesian
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass)]
     }
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
     fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
-        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+        unreachable!(
+            "cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)"
+        )
     }
     fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
-        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+        unreachable!(
+            "cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)"
+        )
     }
     fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
-        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+        unreachable!(
+            "cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)"
+        )
     }
     fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
-        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+        unreachable!(
+            "cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)"
+        )
     }
 }
 
@@ -1378,7 +1534,11 @@ impl<S: Scalar> KerrKSCylindrical<S> {
         let rr = r * r;
         let two_h = (S::from_f64(2.0) * self.mass * rr * r) / (rr * rr + az * az);
         let denom = S::ONE / (rr + a * a);
-        let l = [r * rr_cyl * denom, S::ZERO - a * rr_cyl * rr_cyl * denom, z / r];
+        let l = [
+            r * rr_cyl * denom,
+            S::ZERO - a * rr_cyl * rr_cyl * denom,
+            z / r,
+        ];
         // |l|^2 with g0^{-1} = diag(1, 1/R^2, 1); the azimuthal term is a^2 R^2/(r^2+a^2)^2.
         let r_safe = rr_cyl.max(S::from_f64(1.0e-30));
         let ll2 = l[0] * l[0] + (l[1] / r_safe) * (l[1] / r_safe) + l[2] * l[2];
@@ -1392,8 +1552,12 @@ impl<S: Scalar> KerrKSCylindrical<S> {
 macro_rules! impl_kerr_ks_cylindrical_stub {
     ($d:literal) => {
         impl<S: Scalar> Metric<S, $d> for KerrKSCylindrical<S> {
-            fn geometry(&self) -> Geometry { Geometry::Cylindrical }
-            fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+            fn geometry(&self) -> Geometry {
+                Geometry::Cylindrical
+            }
+            fn spacetime(&self) -> Spacetime {
+                Spacetime::Kerr
+            }
             fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
                 vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
             }
@@ -1409,8 +1573,12 @@ macro_rules! impl_kerr_ks_cylindrical_stub {
             fn volume_factor(&self, _x: Tensor<S, $d>) -> S {
                 unreachable!("cylindrical kerr is 3d-only (the dragging needs the azimuth)")
             }
-            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
-            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                x
+            }
+            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                x
+            }
         }
     };
 }
@@ -1418,12 +1586,18 @@ impl_kerr_ks_cylindrical_stub!(1);
 impl_kerr_ks_cylindrical_stub!(2);
 
 impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Kerr
+    }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
     }
-    fn lapse(&self, x: Tensor<S, 3>) -> S { self.lapse_sq(x).sqrt() }
+    fn lapse(&self, x: Tensor<S, 3>) -> S {
+        self.lapse_sq(x).sqrt()
+    }
     // alpha^2 = 1/(1 + 2H |l|^2) — the null l preserves the determinant, so the
     // det-g-flat identity alpha sqrt(gamma) = sqrt(det g0) = R holds at spin.
     fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
@@ -1465,7 +1639,9 @@ impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
         let r_safe = x[0].max(S::from_f64(1.0e-30));
         (r_safe * r_safe * (S::ONE + two_h * ll2)).sqrt()
     }
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
     fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         Tensor::new([x[0] * x[1].cos(), x[0] * x[1].sin(), x[2]])
     }
@@ -1496,9 +1672,15 @@ impl<S: Scalar> SchwarzschildKSCylindrical<S> {
 }
 
 impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindrical<S> {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
 
     fn lapse(&self, x: Tensor<S, 3>) -> S {
         let (_r, two_h) = self.radius_two_h(x[0], x[2]);
@@ -1560,7 +1742,9 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindrical<S> {
         big_r.abs() * (S::ONE + two_h).sqrt()
     }
     // full-rank cylindrical chart (R, phi, z): the proper measure is sqrt_det_gamma.
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
 
     fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let (big_r, phi, z) = (x[0], x[1], x[2]);
@@ -1575,22 +1759,40 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindrical<S> {
 // D = 1 / D = 2 are degenerate (the azimuthal DOF + the poloidal (R, z) block need the full D = 3);
 // provided fail-loud so generic kernel bounds resolve, never reached at bake time. mirrors KerrKS.
 impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
     fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
-        unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
+        unreachable!(
+            "cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)"
+        )
     }
     fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
-        unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
+        unreachable!(
+            "cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)"
+        )
     }
     fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
-        unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
+        unreachable!(
+            "cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)"
+        )
     }
     fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
-        unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
+        unreachable!(
+            "cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)"
+        )
     }
 }
 
@@ -1600,9 +1802,15 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
 // beta^R = 2M/(R + 2M) (beta^phi = 0), sqrt(gamma) = R sqrt(1 + 2M/R) so alpha sqrt(gamma) = R (the
 // cylindrical measure). the SAME physical vacuum as the (R, z) D = 3 view, restricted to z = 0.
 impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
-    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::KerrSchild
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
     fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
         let (big_r, phi) = (x[0], x[1]);
         Tensor::new([big_r * phi.cos(), big_r * phi.sin()])
@@ -1632,7 +1840,10 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     fn spatial_metric_inv(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let big_r = x[0];
         let two_h = S::from_f64(2.0) * self.mass / big_r;
-        Matrix::diag(Tensor::new([S::ONE / (S::ONE + two_h), S::ONE / (big_r * big_r)]))
+        Matrix::diag(Tensor::new([
+            S::ONE / (S::ONE + two_h),
+            S::ONE / (big_r * big_r),
+        ]))
     }
     fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
         let big_r = x[0];
@@ -1643,7 +1854,6 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
         self.sqrt_det_gamma(x)
     }
 }
-
 
 /// spinning Kerr in INGOING KERR-SCHILD coordinates (horizon-penetrating, spherical (r, theta,
 /// phi)). Sigma = r^2 + a^2 cos^2(theta), b = 2 M r / Sigma:
@@ -1686,8 +1896,12 @@ impl<S: Scalar> KerrKS<S> {
 }
 
 impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Kerr
+    }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
     }
@@ -1761,35 +1975,59 @@ impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
 }
 
 impl<S: Scalar> Metric<S, 1> for KerrKS<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Kerr
+    }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
     }
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
     fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+        unreachable!(
+            "kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)"
+        )
     }
     fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+        unreachable!(
+            "kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)"
+        )
     }
     fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+        unreachable!(
+            "kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)"
+        )
     }
     fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+        unreachable!(
+            "kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)"
+        )
     }
 }
 
 impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
-    fn geometry(&self) -> Geometry { Geometry::Spherical }
-    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn geometry(&self) -> Geometry {
+        Geometry::Spherical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::Kerr
+    }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
         vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
     }
-    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
-    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
+    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        x
+    }
     // the SCALAR pieces of the (r, theta) grid view — lapse, shift, and the proper volume
     // element (which includes the suppressed phi direction) — are exact; only the 2x2 spatial
     // matrix restriction is meaningless (the frame-dragging gamma_{r phi} row has no slot).
@@ -1811,10 +2049,14 @@ impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
         self.sqrt_det_gamma(x)
     }
     fn spatial_metric(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+        unreachable!(
+            "kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)"
+        )
     }
     fn spatial_metric_inv(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+        unreachable!(
+            "kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)"
+        )
     }
 }
 
@@ -1834,7 +2076,9 @@ impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
 pub struct Cylindrical;
 
 impl<S: Scalar> Metric<S, 1> for Cylindrical {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
     fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
         Matrix::identity()
     }
@@ -1851,24 +2095,29 @@ impl<S: Scalar> Metric<S, 1> for Cylindrical {
         Tensor::new([S::ONE])
     }
 
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
 
     fn volume_factor(&self, x: Tensor<S, 1>) -> S {
         x[0]
     }
 
     /// 1D cylindrical: S_r = p/r (pressure from 1 suppressed angular direction).
-    fn momentum_source(
-        &self, x: Tensor<S, 1>, _rho: S, _vel: Tensor<S, 1>, p: S,
-    ) -> Tensor<S, 1> {
+    fn momentum_source(&self, x: Tensor<S, 1>, _rho: S, _vel: Tensor<S, 1>, p: S) -> Tensor<S, 1> {
         let r = x[0];
         Tensor::new([p / r])
     }
 
     /// 1D cylindrical inertial: no resolved angular velocity -> zero.
     fn momentum_source_inertial(
-        &self, _x: Tensor<S, 1>, _mom: Tensor<S, 1>, _vel: Tensor<S, 1>,
+        &self,
+        _x: Tensor<S, 1>,
+        _mom: Tensor<S, 1>,
+        _vel: Tensor<S, 1>,
     ) -> Tensor<S, 1> {
         Tensor::zeros()
     }
@@ -1877,7 +2126,9 @@ impl<S: Scalar> Metric<S, 1> for Cylindrical {
 /// axisymmetric cylindrical: coordinates (r, z).
 /// phi direction integrated out — metric is euclidean in (r, z) plane.
 impl<S: Scalar> Metric<S, 2> for Cylindrical {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
     fn spatial_metric(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
         Matrix::identity()
     }
@@ -1908,23 +2159,26 @@ impl<S: Scalar> Metric<S, 2> for Cylindrical {
     }
 
     /// 2D cylindrical (r, z): S_r = p/r from suppressed phi, S_z = 0.
-    fn momentum_source(
-        &self, x: Tensor<S, 2>, _rho: S, _vel: Tensor<S, 2>, p: S,
-    ) -> Tensor<S, 2> {
+    fn momentum_source(&self, x: Tensor<S, 2>, _rho: S, _vel: Tensor<S, 2>, p: S) -> Tensor<S, 2> {
         let r = x[0];
         Tensor::new([p / r, S::ZERO])
     }
 
     /// 2D cylindrical inertial: no resolved angular velocity -> zero.
     fn momentum_source_inertial(
-        &self, _x: Tensor<S, 2>, _mom: Tensor<S, 2>, _vel: Tensor<S, 2>,
+        &self,
+        _x: Tensor<S, 2>,
+        _mom: Tensor<S, 2>,
+        _vel: Tensor<S, 2>,
     ) -> Tensor<S, 2> {
         Tensor::zeros()
     }
 }
 
 impl<S: Scalar> Metric<S, 3> for Cylindrical {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
     fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
         let r = x[0];
         Matrix::diag(Tensor::new([S::ONE, r * r, S::ONE]))
@@ -1939,7 +2193,9 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
         x[0] // r
     }
     // full-rank cylindrical chart (r, phi, z): the proper measure is sqrt_det_gamma = r.
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
 
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         Tensor::new([S::ONE, x[0], S::ONE])
@@ -1983,33 +2239,26 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
     /// S_r = (rho*V_p^2 + p) / r
     /// S_p = -rho*V_r*V_p / r
     /// S_z = 0
-    fn momentum_source(
-        &self, x: Tensor<S, 3>, rho: S, vel: Tensor<S, 3>, p: S,
-    ) -> Tensor<S, 3> {
+    fn momentum_source(&self, x: Tensor<S, 3>, rho: S, vel: Tensor<S, 3>, p: S) -> Tensor<S, 3> {
         let r = x[0];
         let vr = vel[0];
         let vp = vel[1];
-        Tensor::new([
-            (rho * vp * vp + p) / r,
-            -rho * vr * vp / r,
-            S::ZERO,
-        ])
+        Tensor::new([(rho * vp * vp + p) / r, -rho * vr * vp / r, S::ZERO])
     }
 
     /// 3D cylindrical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
     /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 3>, mom: Tensor<S, 3>, vel: Tensor<S, 3>,
+        &self,
+        x: Tensor<S, 3>,
+        mom: Tensor<S, 3>,
+        vel: Tensor<S, 3>,
     ) -> Tensor<S, 3> {
         let r = x[0];
         let mr = mom[0];
         let mp = mom[1];
         let vp = vel[1];
-        Tensor::new([
-            mp * vp / r,
-            S::ZERO - mr * vp / r,
-            S::ZERO,
-        ])
+        Tensor::new([mp * vp / r, S::ZERO - mr * vp / r, S::ZERO])
     }
 }
 
@@ -2022,7 +2271,9 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
 pub struct CylindricalRPhi;
 
 impl<S: Scalar> Metric<S, 2> for CylindricalRPhi {
-    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
 
     fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
         let r = x[0];
@@ -2058,10 +2309,7 @@ impl<S: Scalar> Metric<S, 2> for CylindricalRPhi {
         let phi = x[1];
         let cp = phi.cos();
         let sp = phi.sin();
-        Embedded::new(Tensor::new([
-            v[0] * cp - v[1] * sp,
-            v[0] * sp + v[1] * cp,
-        ]))
+        Embedded::new(Tensor::new([v[0] * cp - v[1] * sp, v[0] * sp + v[1] * cp]))
     }
 
     fn vector_from_cartesian(&self, x: Tensor<S, 2>, v: Embedded<S, 2>) -> Physical<S, 2> {
@@ -2079,31 +2327,26 @@ impl<S: Scalar> Metric<S, 2> for CylindricalRPhi {
     }
 
     /// 2D (r, phi) disk: S_r = (rho*V_p^2 + p)/r, S_p = -rho*V_r*V_p/r.
-    fn momentum_source(
-        &self, x: Tensor<S, 2>, rho: S, vel: Tensor<S, 2>, p: S,
-    ) -> Tensor<S, 2> {
+    fn momentum_source(&self, x: Tensor<S, 2>, rho: S, vel: Tensor<S, 2>, p: S) -> Tensor<S, 2> {
         let r = x[0];
         let vr = vel[0];
         let vp = vel[1];
-        Tensor::new([
-            (rho * vp * vp + p) / r,
-            S::ZERO - rho * vr * vp / r,
-        ])
+        Tensor::new([(rho * vp * vp + p) / r, S::ZERO - rho * vr * vp / r])
     }
 
     /// 2D (r, phi) disk inertial: centrifugal + coriolis, regime-agnostic via the CONSERVED
     /// momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 2>, mom: Tensor<S, 2>, vel: Tensor<S, 2>,
+        &self,
+        x: Tensor<S, 2>,
+        mom: Tensor<S, 2>,
+        vel: Tensor<S, 2>,
     ) -> Tensor<S, 2> {
         let r = x[0];
         let mr = mom[0];
         let mp = mom[1];
         let vp = vel[1];
-        Tensor::new([
-            mp * vp / r,
-            S::ZERO - mr * vp / r,
-        ])
+        Tensor::new([mp * vp / r, S::ZERO - mr * vp / r])
     }
 }
 
@@ -2131,11 +2374,13 @@ impl<S: Scalar> DiagonalMetric<S, 3> for Cylindrical {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::{PI, FRAC_PI_2, FRAC_PI_4};
+    use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
     fn approx(a: f64, b: f64) -> bool {
         let diff = (a - b).abs();
-        if diff < 1e-14 { return true; }
+        if diff < 1e-14 {
+            return true;
+        }
         let scale = a.abs().max(b.abs());
         diff / scale < 1e-10
     }
@@ -2197,9 +2442,14 @@ mod tests {
         for ii in 0..3 {
             for jj in 0..3 {
                 let expected = if ii == jj { 1.0 } else { 0.0 };
-                assert!(approx(product[(ii, jj)], expected),
+                assert!(
+                    approx(product[(ii, jj)], expected),
                     "g * g_inv [{}, {}] = {}, expected {}",
-                    ii, jj, product[(ii, jj)], expected);
+                    ii,
+                    jj,
+                    product[(ii, jj)],
+                    expected
+                );
             }
         }
     }
@@ -2479,8 +2729,13 @@ mod tests {
         let w = Spherical.lower(x, &v);
         let v2 = Spherical.raise(x, &w);
         for ii in 0..3 {
-            assert!(approx(v[ii], v2[ii]),
-                "component {}: {} != {}", ii, v[ii], v2[ii]);
+            assert!(
+                approx(v[ii], v2[ii]),
+                "component {}: {} != {}",
+                ii,
+                v[ii],
+                v2[ii]
+            );
         }
     }
 
@@ -2496,8 +2751,12 @@ mod tests {
         let norm_sq = v.contract(&w);
         let g = Spherical.spatial_metric(x);
         let norm_sq_direct = g.quadratic(v.raw());
-        assert!(approx(norm_sq, norm_sq_direct),
-            "contraction: {} != quadratic: {}", norm_sq, norm_sq_direct);
+        assert!(
+            approx(norm_sq, norm_sq_direct),
+            "contraction: {} != quadratic: {}",
+            norm_sq,
+            norm_sq_direct
+        );
     }
 
     // ---- momentum source: cartesian (always zero) ----
@@ -2546,8 +2805,7 @@ mod tests {
         let s = Spherical.momentum_source(x, rho, Tensor::new([vr, vt]), p);
         // S_r = (rho*vt^2 + 2p) / r
         let expected_r = (rho * vt * vt + 2.0 * p) / r;
-        assert!(approx(s[0], expected_r),
-            "S_r: {} != {}", s[0], expected_r);
+        assert!(approx(s[0], expected_r), "S_r: {} != {}", s[0], expected_r);
     }
 
     #[test]
@@ -2563,8 +2821,7 @@ mod tests {
         // S_t = (p*cot(theta) - rho*vr*vt) / r
         let cot = theta.cos() / theta.sin();
         let expected_t = (p * cot - rho * vr * vt) / r;
-        assert!(approx(s[1], expected_t),
-            "S_t: {} != {}", s[1], expected_t);
+        assert!(approx(s[1], expected_t), "S_t: {} != {}", s[1], expected_t);
     }
 
     #[test]
@@ -2698,10 +2955,13 @@ mod tests {
         // with V_phi = V_z = 0, cylindrical 3D S_r should match 1D
         let r = 4.0;
         let p = 3.0;
-        let s1 = Cylindrical.momentum_source(
-            Tensor::new([r]), 1.0, Tensor::new([1.0]), p);
+        let s1 = Cylindrical.momentum_source(Tensor::new([r]), 1.0, Tensor::new([1.0]), p);
         let s3 = Cylindrical.momentum_source(
-            Tensor::new([r, 0.0, 0.0]), 1.0, Tensor::new([1.0, 0.0, 0.0]), p);
+            Tensor::new([r, 0.0, 0.0]),
+            1.0,
+            Tensor::new([1.0, 0.0, 0.0]),
+            p,
+        );
         assert!(approx(s1[0], s3[0]));
     }
 
@@ -2719,7 +2979,11 @@ mod tests {
 
     #[test]
     fn test_spherical_1d_inertial_zero() {
-        let s = Spherical.momentum_source_inertial(Tensor::new([2.0]), Tensor::new([0.5]), Tensor::new([0.5]));
+        let s = Spherical.momentum_source_inertial(
+            Tensor::new([2.0]),
+            Tensor::new([0.5]),
+            Tensor::new([0.5]),
+        );
         assert!(approx(s[0], 0.0));
     }
 
@@ -2730,7 +2994,11 @@ mod tests {
         let vr = 1.0;
         let vt = 0.5;
         let x = Tensor::new([r, PI / 4.0]);
-        let s = Spherical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vt]), Tensor::new([vr, vt]));
+        let s = Spherical.momentum_source_inertial(
+            x,
+            Tensor::new([rho * vr, rho * vt]),
+            Tensor::new([vr, vt]),
+        );
         // inertial_r = rho*vt^2/r, inertial_t = -rho*vr*vt/r
         assert!(approx(s[0], rho * vt * vt / r));
         assert!(approx(s[1], -rho * vr * vt / r));
@@ -2748,7 +3016,8 @@ mod tests {
         let x = Tensor::new([r, theta]);
         let vel = Tensor::new([vr, vt]);
         let full = Spherical.momentum_source(x, rho, vel, p);
-        let inertial = Spherical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vt]), vel);
+        let inertial =
+            Spherical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vt]), vel);
         // pressure_r = 2p/r, pressure_t = p*cot(theta)/r
         let cot = theta.cos() / theta.sin();
         assert!(approx(full[0], inertial[0] + 2.0 * p / r));
@@ -2762,8 +3031,14 @@ mod tests {
         let rho = 1.0;
         let vel = Tensor::new([0.5, 0.3, 0.2]);
         let x = Tensor::new([r, theta, 0.0]);
-        let s = Spherical.momentum_source_inertial(x, Tensor::new([rho * vel[0], rho * vel[1], rho * vel[2]]), vel);
-        let vr = vel[0]; let vt = vel[1]; let vp = vel[2];
+        let s = Spherical.momentum_source_inertial(
+            x,
+            Tensor::new([rho * vel[0], rho * vel[1], rho * vel[2]]),
+            vel,
+        );
+        let vr = vel[0];
+        let vt = vel[1];
+        let vp = vel[2];
         let cot = theta.cos() / theta.sin();
         assert!(approx(s[0], rho * (vt * vt + vp * vp) / r));
         assert!(approx(s[1], (rho * vp * vp * cot - rho * vr * vt) / r));
@@ -2780,13 +3055,21 @@ mod tests {
         let p = 99.0;
         let x = Tensor::new([r, theta, 0.0]);
         let full = Spherical.momentum_source(x, rho, vel, p);
-        let inertial = Spherical.momentum_source_inertial(x, Tensor::new([rho * vel[0], rho * vel[1], rho * vel[2]]), vel);
+        let inertial = Spherical.momentum_source_inertial(
+            x,
+            Tensor::new([rho * vel[0], rho * vel[1], rho * vel[2]]),
+            vel,
+        );
         assert!(approx(full[2], inertial[2]));
     }
 
     #[test]
     fn test_cylindrical_1d_inertial_zero() {
-        let s = Cylindrical.momentum_source_inertial(Tensor::new([4.0]), Tensor::new([0.5]), Tensor::new([0.5]));
+        let s = Cylindrical.momentum_source_inertial(
+            Tensor::new([4.0]),
+            Tensor::new([0.5]),
+            Tensor::new([0.5]),
+        );
         assert!(approx(s[0], 0.0));
     }
 
@@ -2797,7 +3080,11 @@ mod tests {
         let vr = 0.5;
         let vp = 0.8;
         let x = Tensor::new([r, 0.0, 0.0]);
-        let s = Cylindrical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vp, rho * 1.0]), Tensor::new([vr, vp, 1.0]));
+        let s = Cylindrical.momentum_source_inertial(
+            x,
+            Tensor::new([rho * vr, rho * vp, rho * 1.0]),
+            Tensor::new([vr, vp, 1.0]),
+        );
         assert!(approx(s[0], rho * vp * vp / r));
         assert!(approx(s[1], -rho * vr * vp / r));
         assert!(approx(s[2], 0.0));
@@ -2865,7 +3152,10 @@ mod tests {
         let bh = Schwarzschild { mass: 0.7_f64 };
         let (r, theta) = (6.0, FRAC_PI_4);
         let x = Tensor::new([r, theta, 0.0]);
-        assert!(approx(bh.lapse(x) * bh.volume_factor(x), r * r * theta.sin()));
+        assert!(approx(
+            bh.lapse(x) * bh.volume_factor(x),
+            r * r * theta.sin()
+        ));
     }
 
     #[test]
@@ -2880,8 +3170,14 @@ mod tests {
         }
         assert!(approx(bh.sqrt_det_gamma(x), Spherical.sqrt_det_gamma(x)));
         // the orthogonal axes: spatial geometry is spherical, spacetime is the curved tag.
-        assert_eq!(<Schwarzschild<f64> as Metric<f64, 3>>::geometry(&bh), Geometry::Spherical);
-        assert_eq!(<Schwarzschild<f64> as Metric<f64, 3>>::spacetime(&bh), Spacetime::Schwarzschild);
+        assert_eq!(
+            <Schwarzschild<f64> as Metric<f64, 3>>::geometry(&bh),
+            Geometry::Spherical
+        );
+        assert_eq!(
+            <Schwarzschild<f64> as Metric<f64, 3>>::spacetime(&bh),
+            Spacetime::Schwarzschild
+        );
     }
 
     #[test]
@@ -2927,7 +3223,10 @@ mod tests {
         // inside and outside the horizon, prograde and retrograde.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));
         for &a in &[0.9_f64, -0.6, 0.3] {
-            let g = KerrKS { mass: 1.0_f64, spin: a };
+            let g = KerrKS {
+                mass: 1.0_f64,
+                spin: a,
+            };
             for &(r, th) in &[(1.3_f64, 1.1_f64), (2.0, 0.7), (6.0, 1.9), (30.0, 1.4)] {
                 let x = Tensor::new([r, th, 0.0]);
                 let (st, ct) = (th.sin(), th.cos());
@@ -2944,21 +3243,32 @@ mod tests {
                         for kk in 0..3 {
                             acc += gm[(ii, kk)] * gi[(kk, jj)];
                         }
-                        assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }),
-                            "gamma inverse a={a} r={r}: ({ii},{jj}) = {acc}");
+                        assert!(
+                            close(acc, if ii == jj { 1.0 } else { 0.0 }),
+                            "gamma inverse a={a} r={r}: ({ii},{jj}) = {acc}"
+                        );
                     }
                 }
                 // 4-metric identities from the ADM block.
-                let beta_low: [f64; 3] = std::array::from_fn(|ii| {
-                    (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum()
-                });
+                let beta_low: [f64; 3] =
+                    std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
                 let g_tt = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
-                assert!(close(g_tt, b - 1.0), "g_tt a={a} r={r}: {g_tt} vs {}", b - 1.0);
+                assert!(
+                    close(g_tt, b - 1.0),
+                    "g_tt a={a} r={r}: {g_tt} vs {}",
+                    b - 1.0
+                );
                 assert!(close(beta_low[2], -a * b * st * st), "g_t-phi a={a} r={r}");
-                assert!(close(gm[(0, 2)], -a * st * st * (1.0 + b)), "g_r-phi a={a} r={r}");
+                assert!(
+                    close(gm[(0, 2)], -a * st * st * (1.0 + b)),
+                    "g_r-phi a={a} r={r}"
+                );
                 // determinant.
                 let det = gm[(1, 1)] * (gm[(0, 0)] * gm[(2, 2)] - gm[(0, 2)] * gm[(2, 0)]);
-                assert!(close(det, sig * sig * st * st * (1.0 + b)), "det gamma a={a} r={r}");
+                assert!(
+                    close(det, sig * sig * st * st * (1.0 + b)),
+                    "det gamma a={a} r={r}"
+                );
                 let sq = <KerrKS<f64> as Metric<f64, 3>>::sqrt_det_gamma(&g, x);
                 assert!(close(sq * sq, det), "sqrt_det_gamma a={a} r={r}");
                 // horizon-penetrating: the lapse is finite and positive everywhere sampled.
@@ -2972,7 +3282,10 @@ mod tests {
         // a = 0 must reproduce the schwarzschild kerr-schild ADM block exactly (different
         // expressions, same values) at every position.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-13 * (1.0 + x.abs().max(y.abs()));
-        let kerr = KerrKS { mass: 1.0_f64, spin: 0.0 };
+        let kerr = KerrKS {
+            mass: 1.0_f64,
+            spin: 0.0,
+        };
         let ks = SchwarzschildKS { mass: 1.0_f64 };
         for &(r, th) in &[(1.5_f64, 0.9_f64), (2.0, 1.5707963), (10.0, 2.2)] {
             let x = Tensor::new([r, th, 0.0]);
@@ -2991,7 +3304,10 @@ mod tests {
             for ii in 0..3 {
                 assert!(close(bk[ii], bs[ii]), "shift[{ii}] at r={r}");
                 for jj in 0..3 {
-                    assert!(close(gk[(ii, jj)], gs[(ii, jj)]), "gamma[{ii}{jj}] at r={r}");
+                    assert!(
+                        close(gk[(ii, jj)], gs[(ii, jj)]),
+                        "gamma[{ii}{jj}] at r={r}"
+                    );
                 }
             }
         }
@@ -3015,7 +3331,10 @@ mod tests {
         let bh = SchwarzschildKS { mass: 0.7_f64 };
         let (r, theta) = (6.0, FRAC_PI_4);
         let x = Tensor::new([r, theta, 0.0]);
-        assert!(approx(bh.lapse(x) * bh.volume_factor(x), r * r * theta.sin()));
+        assert!(approx(
+            bh.lapse(x) * bh.volume_factor(x),
+            r * r * theta.sin()
+        ));
     }
 
     #[test]
@@ -3030,8 +3349,14 @@ mod tests {
             assert!(approx(g[(ii, ii)], gs[(ii, ii)]));
         }
         assert!(approx(bh.sqrt_det_gamma(x), Spherical.sqrt_det_gamma(x)));
-        assert_eq!(<SchwarzschildKS<f64> as Metric<f64, 3>>::geometry(&bh), Geometry::Spherical);
-        assert_eq!(<SchwarzschildKS<f64> as Metric<f64, 3>>::spacetime(&bh), Spacetime::KerrSchild);
+        assert_eq!(
+            <SchwarzschildKS<f64> as Metric<f64, 3>>::geometry(&bh),
+            Geometry::Spherical
+        );
+        assert_eq!(
+            <SchwarzschildKS<f64> as Metric<f64, 3>>::spacetime(&bh),
+            Spacetime::KerrSchild
+        );
     }
 
     #[test]
@@ -3050,18 +3375,52 @@ mod tests {
         let fd = |f: &dyn Fn(f64) -> f64, r: f64| (f(r + dr) - f(r - dr)) / (2.0 * dr);
         let seed = |r: f64| Tensor::new([Dual::variable(r)]);
         for &r in &[3.0_f64, 5.0, 9.0] {
-            let m = Schwarzschild { mass: Dual::constant(1.0_f64) };
+            let m = Schwarzschild {
+                mass: Dual::constant(1.0_f64),
+            };
             let mf = Schwarzschild { mass: 1.0_f64 };
-            assert!(close(m.lapse(seed(r)).tangent, fd(&|x| mf.lapse(Tensor::new([x])), r)), "schw d_lapse r={r}");
-            assert!(close(m.spatial_metric(seed(r))[(0, 0)].tangent, fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)), "schw d_grr r={r}");
+            assert!(
+                close(
+                    m.lapse(seed(r)).tangent,
+                    fd(&|x| mf.lapse(Tensor::new([x])), r)
+                ),
+                "schw d_lapse r={r}"
+            );
+            assert!(
+                close(
+                    m.spatial_metric(seed(r))[(0, 0)].tangent,
+                    fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)
+                ),
+                "schw d_grr r={r}"
+            );
             assert!(m.shift(seed(r))[0].tangent == 0.0, "schw d_shift r={r}");
         }
         for &r in &[1.2_f64, 1.8, 2.0, 4.0, 9.0] {
-            let m = SchwarzschildKS { mass: Dual::constant(1.0_f64) };
+            let m = SchwarzschildKS {
+                mass: Dual::constant(1.0_f64),
+            };
             let mf = SchwarzschildKS { mass: 1.0_f64 };
-            assert!(close(m.lapse(seed(r)).tangent, fd(&|x| mf.lapse(Tensor::new([x])), r)), "ks d_lapse r={r}");
-            assert!(close(m.shift(seed(r))[0].tangent, fd(&|x| mf.shift(Tensor::new([x]))[0], r)), "ks d_shift r={r}");
-            assert!(close(m.spatial_metric(seed(r))[(0, 0)].tangent, fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)), "ks d_grr r={r}");
+            assert!(
+                close(
+                    m.lapse(seed(r)).tangent,
+                    fd(&|x| mf.lapse(Tensor::new([x])), r)
+                ),
+                "ks d_lapse r={r}"
+            );
+            assert!(
+                close(
+                    m.shift(seed(r))[0].tangent,
+                    fd(&|x| mf.shift(Tensor::new([x]))[0], r)
+                ),
+                "ks d_shift r={r}"
+            );
+            assert!(
+                close(
+                    m.spatial_metric(seed(r))[(0, 0)].tangent,
+                    fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)
+                ),
+                "ks d_grr r={r}"
+            );
         }
     }
 
@@ -3094,7 +3453,10 @@ mod tests {
             for &big_v in &[0.9_f64, 0.0, -0.9] {
                 let v_contra = big_v / h.sqrt(); // v^r = V / sqrt(gamma_rr)
                 let tilde = v_contra - beta_r / alpha;
-                assert!(tilde < 0.0, "tilde v^r = {tilde} not ingoing at r={r}, V={big_v}");
+                assert!(
+                    tilde < 0.0,
+                    "tilde v^r = {tilde} not ingoing at r={r}, V={big_v}"
+                );
             }
         }
     }
@@ -3106,7 +3468,12 @@ mod tests {
         // (the covariant shift = g_{0i}), g_tt = -alpha^2 + beta_i beta^i = 2H - 1, alpha finite > 0.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));
         let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
-        for &(px, py, pz) in &[(1.0_f64, 0.4, 0.7), (2.0, -1.5, 0.3), (-4.0, 3.0, 5.0), (0.9, 0.2, 0.1)] {
+        for &(px, py, pz) in &[
+            (1.0_f64, 0.4, 0.7),
+            (2.0, -1.5, 0.3),
+            (-4.0, 3.0, 5.0),
+            (0.9, 0.2, 0.1),
+        ] {
             let x = Tensor::new([px, py, pz]);
             let r = (px * px + py * py + pz * pz).sqrt();
             let two_h = 2.0 / r;
@@ -3119,24 +3486,38 @@ mod tests {
             for ii in 0..3 {
                 for jj in 0..3 {
                     let acc: f64 = (0..3).map(|kk| gm[(ii, kk)] * gi[(kk, jj)]).sum();
-                    assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }),
-                        "gamma inverse ({ii},{jj}) = {acc} at r={r}");
+                    assert!(
+                        close(acc, if ii == jj { 1.0 } else { 0.0 }),
+                        "gamma inverse ({ii},{jj}) = {acc} at r={r}"
+                    );
                 }
             }
             // beta_i = gamma_ij beta^j = 2H l_i (the covariant shift = the KS off-diagonal 4-metric).
-            let beta_low: [f64; 3] = std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
+            let beta_low: [f64; 3] =
+                std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
             for ii in 0..3 {
-                assert!(close(beta_low[ii], two_h * l[ii]), "beta_low[{ii}] at r={r}");
+                assert!(
+                    close(beta_low[ii], two_h * l[ii]),
+                    "beta_low[{ii}] at r={r}"
+                );
             }
             // g_tt = -alpha^2 + beta_i beta^i = 2H - 1.
             let g_tt = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
-            assert!(close(g_tt, two_h - 1.0), "g_tt = {g_tt} vs {} at r={r}", two_h - 1.0);
+            assert!(
+                close(g_tt, two_h - 1.0),
+                "g_tt = {g_tt} vs {} at r={r}",
+                two_h - 1.0
+            );
             // sqrt_det^2 = det gamma (det via cofactor).
             let det = gm[(0, 0)] * (gm[(1, 1)] * gm[(2, 2)] - gm[(1, 2)] * gm[(2, 1)])
                 - gm[(0, 1)] * (gm[(1, 0)] * gm[(2, 2)] - gm[(1, 2)] * gm[(2, 0)])
                 + gm[(0, 2)] * (gm[(1, 0)] * gm[(2, 1)] - gm[(1, 1)] * gm[(2, 0)]);
             let sq = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::sqrt_det_gamma(&bh, x);
-            assert!(close(sq * sq, det), "sqrt_det^2 = {} vs det = {det} at r={r}", sq * sq);
+            assert!(
+                close(sq * sq, det),
+                "sqrt_det^2 = {} vs det = {det} at r={r}",
+                sq * sq
+            );
             assert!(close(det, 1.0 + two_h), "det = {det} vs 1+2H at r={r}");
             assert!(alpha > 0.0 && alpha.is_finite());
         }
@@ -3174,7 +3555,13 @@ mod tests {
         // every component finite through the origin, and sqrt(det gamma) equal to the determinant
         // of the matrix it describes.
         let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
-        for &(px, py) in &[(0.0_f64, 0.0), (1e-300, 0.0), (0.1, 0.1), (0.3, 0.2), (0.5, 0.0)] {
+        for &(px, py) in &[
+            (0.0_f64, 0.0),
+            (1e-300, 0.0),
+            (0.1, 0.1),
+            (0.3, 0.2),
+            (0.5, 0.0),
+        ] {
             let x = Tensor::new([px, py]);
             let alpha = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x);
             let sq = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::sqrt_det_gamma(&bh, x);
@@ -3216,23 +3603,47 @@ mod tests {
         // varying with position, so a claim of zero gravity inside the clamp holds for no
         // component of the source.
         use symbi_ir::dual::Dual;
-        let bh = SchwarzschildKSCartesian { mass: Dual { value: 1.0_f64, tangent: 0.0 } };
+        let bh = SchwarzschildKSCartesian {
+            mass: Dual {
+                value: 1.0_f64,
+                tangent: 0.0,
+            },
+        };
         let lapse_dx = |px: f64, py: f64| -> f64 {
             let x = Tensor::new([
-                Dual { value: px, tangent: 1.0 }, // d/dx seed
-                Dual { value: py, tangent: 0.0 },
+                Dual {
+                    value: px,
+                    tangent: 1.0,
+                }, // d/dx seed
+                Dual {
+                    value: py,
+                    tangent: 0.0,
+                },
             ]);
             <SchwarzschildKSCartesian<Dual<f64>> as Metric<Dual<f64>, 2>>::lapse(&bh, x).tangent
         };
-        assert_eq!(lapse_dx(0.0, 0.0), 0.0, "the gradient vanishes at the origin by symmetry");
+        assert_eq!(
+            lapse_dx(0.0, 0.0),
+            0.0,
+            "the gradient vanishes at the origin by symmetry"
+        );
         for &(px, py) in &[(0.2_f64, 0.1), (0.4, 0.0), (0.1, 0.3), (0.49, 0.0)] {
             let d = lapse_dx(px, py);
             let r2 = px * px + py * py;
             let want = -16.0 * px / (1.0 + 16.0 * r2).powf(1.5);
-            assert!((d - want).abs() < 1e-14, "clamp gradient at ({px},{py}): {d} vs {want}");
-            assert!(d.abs() < 3.0, "clamp gradient unbounded at ({px},{py}): {d}");
+            assert!(
+                (d - want).abs() < 1e-14,
+                "clamp gradient at ({px},{py}): {d} vs {want}"
+            );
+            assert!(
+                d.abs() < 3.0,
+                "clamp gradient unbounded at ({px},{py}): {d}"
+            );
         }
-        assert!(lapse_dx(1.0, 0.4).abs() > 1e-3, "true gradient outside the clamp");
+        assert!(
+            lapse_dx(1.0, 0.4).abs() > 1e-3,
+            "true gradient outside the clamp"
+        );
     }
 
     #[test]
@@ -3243,8 +3654,11 @@ mod tests {
         let x3 = Tensor::new([3.0_f64, -2.0, 1.5]);
         assert!(approx(bh.lapse(x3) * bh.volume_factor(x3), 1.0));
         let x2 = Tensor::new([3.0_f64, -2.0]);
-        assert!(approx(<SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x2)
-            * <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::volume_factor(&bh, x2), 1.0));
+        assert!(approx(
+            <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x2)
+                * <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::volume_factor(&bh, x2),
+            1.0
+        ));
     }
 
     #[test]
@@ -3261,8 +3675,14 @@ mod tests {
             }
         }
         assert!(approx(bh.sqrt_det_gamma(x), 1.0));
-        assert_eq!(<SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::geometry(&bh), Geometry::Cartesian);
-        assert_eq!(<SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spacetime(&bh), Spacetime::KerrSchild);
+        assert_eq!(
+            <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::geometry(&bh),
+            Geometry::Cartesian
+        );
+        assert_eq!(
+            <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spacetime(&bh),
+            Spacetime::KerrSchild
+        );
     }
 
     #[test]
@@ -3278,14 +3698,28 @@ mod tests {
             let xc = Tensor::new([px, py, pz]);
             let r = (px * px + py * py + pz * pz).sqrt();
             let xs = Tensor::new([r, FRAC_PI_4, 0.0]); // any (theta, phi): the scalars are angle-free
-            assert!(close(cart.lapse(xc),
-                <SchwarzschildKS<f64> as Metric<f64, 3>>::lapse(&sph, xs)), "lapse at r={r}");
+            assert!(
+                close(
+                    cart.lapse(xc),
+                    <SchwarzschildKS<f64> as Metric<f64, 3>>::lapse(&sph, xs)
+                ),
+                "lapse at r={r}"
+            );
             let gm = cart.spatial_metric(xc);
             let l = [px / r, py / r, pz / r];
-            let radial_stretch: f64 = (0..3).map(|ii| (0..3).map(|jj| l[ii] * gm[(ii, jj)] * l[jj]).sum::<f64>()).sum();
-            let gamma_rr = <SchwarzschildKS<f64> as Metric<f64, 3>>::spatial_metric(&sph, xs)[(0, 0)];
-            assert!(close(radial_stretch, gamma_rr), "radial stretch {radial_stretch} vs gamma_rr {gamma_rr} at r={r}");
-            assert!(close(radial_stretch, 1.0 + 2.0 * 1.3 / r), "radial stretch != 1+2M/r at r={r}");
+            let radial_stretch: f64 = (0..3)
+                .map(|ii| (0..3).map(|jj| l[ii] * gm[(ii, jj)] * l[jj]).sum::<f64>())
+                .sum();
+            let gamma_rr =
+                <SchwarzschildKS<f64> as Metric<f64, 3>>::spatial_metric(&sph, xs)[(0, 0)];
+            assert!(
+                close(radial_stretch, gamma_rr),
+                "radial stretch {radial_stretch} vs gamma_rr {gamma_rr} at r={r}"
+            );
+            assert!(
+                close(radial_stretch, 1.0 + 2.0 * 1.3 / r),
+                "radial stretch != 1+2M/r at r={r}"
+            );
         }
     }
 
@@ -3301,23 +3735,45 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
         for &p in &[[1.0_f64, 0.6, 0.8], [0.7, 0.2, 0.1], [-3.0, 2.0, 4.0]] {
             let mf = SchwarzschildKSCartesian { mass: 1.0_f64 };
-            let md = SchwarzschildKSCartesian { mass: Dual::constant(1.0_f64) };
+            let md = SchwarzschildKSCartesian {
+                mass: Dual::constant(1.0_f64),
+            };
             for kk in 0..3 {
                 // seed axis kk (d/dx_kk = 1), the others constant.
                 let seed: Tensor<Dual<f64>, 3> = Tensor::new(std::array::from_fn(|ii| {
-                    if ii == kk { Dual::variable(p[ii]) } else { Dual::constant(p[ii]) }
+                    if ii == kk {
+                        Dual::variable(p[ii])
+                    } else {
+                        Dual::constant(p[ii])
+                    }
                 }));
                 let fd = |f: &dyn Fn([f64; 3]) -> f64| {
-                    let mut hi = p; hi[kk] += dd;
-                    let mut lo = p; lo[kk] -= dd;
+                    let mut hi = p;
+                    hi[kk] += dd;
+                    let mut lo = p;
+                    lo[kk] -= dd;
                     (f(hi) - f(lo)) / (2.0 * dd)
                 };
-                assert!(close(md.lapse(seed).tangent, fd(&|q| mf.lapse(Tensor::new(q)))), "d_{kk} lapse at {p:?}");
+                assert!(
+                    close(md.lapse(seed).tangent, fd(&|q| mf.lapse(Tensor::new(q)))),
+                    "d_{kk} lapse at {p:?}"
+                );
                 for ii in 0..3 {
-                    assert!(close(md.shift(seed)[ii].tangent, fd(&|q| mf.shift(Tensor::new(q))[ii])), "d_{kk} shift[{ii}] at {p:?}");
+                    assert!(
+                        close(
+                            md.shift(seed)[ii].tangent,
+                            fd(&|q| mf.shift(Tensor::new(q))[ii])
+                        ),
+                        "d_{kk} shift[{ii}] at {p:?}"
+                    );
                     for jj in 0..3 {
-                        assert!(close(md.spatial_metric(seed)[(ii, jj)].tangent,
-                            fd(&|q| mf.spatial_metric(Tensor::new(q))[(ii, jj)])), "d_{kk} gamma[{ii}{jj}] at {p:?}");
+                        assert!(
+                            close(
+                                md.spatial_metric(seed)[(ii, jj)].tangent,
+                                fd(&|q| mf.spatial_metric(Tensor::new(q))[(ii, jj)])
+                            ),
+                            "d_{kk} gamma[{ii}{jj}] at {p:?}"
+                        );
                     }
                 }
             }
@@ -3331,37 +3787,60 @@ mod tests {
         // R^2 (1 + 2H), alpha > 0. off the axis + off the equator, inside and outside the horizon.
         let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));
         let bh = SchwarzschildKSCylindrical { mass: 1.0_f64 };
-        for &(big_r, phi, z) in &[(1.0_f64, 0.7, 0.5), (3.0, 2.1, -4.0), (0.9, 1.3, 0.2), (6.0, 0.0, 8.0)] {
+        for &(big_r, phi, z) in &[
+            (1.0_f64, 0.7, 0.5),
+            (3.0, 2.1, -4.0),
+            (0.9, 1.3, 0.2),
+            (6.0, 0.0, 8.0),
+        ] {
             let x = Tensor::new([big_r, phi, z]);
             let r = (big_r * big_r + z * z).sqrt();
             let two_h = 2.0 / r;
             let l = [big_r / r, 0.0, z / r]; // the KS null covector (coordinate basis)
             let gm = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&bh, x);
-            let gi = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric_inv(&bh, x);
+            let gi =
+                <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric_inv(&bh, x);
             let alpha = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::lapse(&bh, x);
             let beta = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::shift(&bh, x);
             // gamma gamma^{-1} = identity.
             for ii in 0..3 {
                 for jj in 0..3 {
                     let acc: f64 = (0..3).map(|kk| gm[(ii, kk)] * gi[(kk, jj)]).sum();
-                    assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }),
-                        "gamma inverse ({ii},{jj}) = {acc} at R={big_r} z={z}");
+                    assert!(
+                        close(acc, if ii == jj { 1.0 } else { 0.0 }),
+                        "gamma inverse ({ii},{jj}) = {acc} at R={big_r} z={z}"
+                    );
                 }
             }
             // beta_i = gamma_ij beta^j = 2H l_i. NOTE: l_i is the coordinate-basis covector, so the
             // azimuthal beta_phi = 0 (l_phi = 0) even though gamma_phi-phi = R^2.
-            let beta_low: [f64; 3] = std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
+            let beta_low: [f64; 3] =
+                std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
             for ii in 0..3 {
-                assert!(close(beta_low[ii], two_h * l[ii]), "beta_low[{ii}] at R={big_r} z={z}");
+                assert!(
+                    close(beta_low[ii], two_h * l[ii]),
+                    "beta_low[{ii}] at R={big_r} z={z}"
+                );
             }
             let g_tt = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
-            assert!(close(g_tt, two_h - 1.0), "g_tt = {g_tt} vs {} at R={big_r} z={z}", two_h - 1.0);
+            assert!(
+                close(g_tt, two_h - 1.0),
+                "g_tt = {g_tt} vs {} at R={big_r} z={z}",
+                two_h - 1.0
+            );
             // determinant (cofactor along phi, which is decoupled): det = gamma_phi-phi * det(Rz block).
             let det_rz = gm[(0, 0)] * gm[(2, 2)] - gm[(0, 2)] * gm[(2, 0)];
             let det = gm[(1, 1)] * det_rz;
             let sq = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::sqrt_det_gamma(&bh, x);
-            assert!(close(sq * sq, det), "sqrt_det^2 = {} vs det = {det} at R={big_r} z={z}", sq * sq);
-            assert!(close(det, big_r * big_r * (1.0 + two_h)), "det = {det} vs R^2(1+2H) at R={big_r} z={z}");
+            assert!(
+                close(sq * sq, det),
+                "sqrt_det^2 = {} vs det = {det} at R={big_r} z={z}",
+                sq * sq
+            );
+            assert!(
+                close(det, big_r * big_r * (1.0 + two_h)),
+                "det = {det} vs R^2(1+2H) at R={big_r} z={z}"
+            );
             assert!(alpha > 0.0 && alpha.is_finite());
         }
     }
@@ -3374,7 +3853,10 @@ mod tests {
         let bh = SchwarzschildKSCylindrical { mass: 0.8_f64 };
         let x = Tensor::new([3.0_f64, 1.1, 4.0]); // r_sph = 5
         assert!(approx(bh.lapse(x) * bh.volume_factor(x), 3.0)); // alpha sqrt(gamma) = R = 3
-        assert!(approx(bh.lapse(x), 1.0 / (1.0_f64 + 2.0 * 0.8 / 5.0).sqrt())); // alpha uses r_sph = 5 (built from R = 3, z = 4)
+        assert!(approx(
+            bh.lapse(x),
+            1.0 / (1.0_f64 + 2.0 * 0.8 / 5.0).sqrt()
+        )); // alpha uses r_sph = 5 (built from R = 3, z = 4)
     }
 
     #[test]
@@ -3391,8 +3873,14 @@ mod tests {
             }
         }
         assert!(approx(bh.sqrt_det_gamma(x), Cylindrical.sqrt_det_gamma(x)));
-        assert_eq!(<SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::geometry(&bh), Geometry::Cylindrical);
-        assert_eq!(<SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spacetime(&bh), Spacetime::KerrSchild);
+        assert_eq!(
+            <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::geometry(&bh),
+            Geometry::Cylindrical
+        );
+        assert_eq!(
+            <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spacetime(&bh),
+            Spacetime::KerrSchild
+        );
     }
 
     #[test]
@@ -3408,12 +3896,22 @@ mod tests {
             let xc = Tensor::new([big_r, 0.6, z]); // cylindrical (phi arbitrary — invariants are phi-free)
             // a cartesian point at the same spherical radius (put it in the x-z plane: |(R,0,z)| = r).
             let xk = Tensor::new([big_r, 0.0, z]);
-            assert!(close(cyl.lapse(xc),
-                <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::lapse(&cart, xk)), "lapse at r={r}");
+            assert!(
+                close(
+                    cyl.lapse(xc),
+                    <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::lapse(&cart, xk)
+                ),
+                "lapse at r={r}"
+            );
             let gm = cyl.spatial_metric(xc);
             let l = [big_r / r, 0.0, z / r];
-            let stretch: f64 = (0..3).map(|ii| (0..3).map(|jj| l[ii] * gm[(ii, jj)] * l[jj]).sum::<f64>()).sum();
-            assert!(close(stretch, 1.0 + 2.0 * 1.3 / r), "poloidal radial stretch != 1+2M/r at r={r}");
+            let stretch: f64 = (0..3)
+                .map(|ii| (0..3).map(|jj| l[ii] * gm[(ii, jj)] * l[jj]).sum::<f64>())
+                .sum();
+            assert!(
+                close(stretch, 1.0 + 2.0 * 1.3 / r),
+                "poloidal radial stretch != 1+2M/r at r={r}"
+            );
         }
     }
 
@@ -3427,25 +3925,50 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
         for &p in &[[2.0_f64, 0.7, 1.5], [0.8, 1.2, 0.3], [4.0, 2.0, -3.0]] {
             let mf = SchwarzschildKSCylindrical { mass: 1.0_f64 };
-            let md = SchwarzschildKSCylindrical { mass: Dual::constant(1.0_f64) };
+            let md = SchwarzschildKSCylindrical {
+                mass: Dual::constant(1.0_f64),
+            };
             for kk in 0..3 {
                 let seed: Tensor<Dual<f64>, 3> = Tensor::new(std::array::from_fn(|ii| {
-                    if ii == kk { Dual::variable(p[ii]) } else { Dual::constant(p[ii]) }
+                    if ii == kk {
+                        Dual::variable(p[ii])
+                    } else {
+                        Dual::constant(p[ii])
+                    }
                 }));
                 let fd = |f: &dyn Fn([f64; 3]) -> f64| {
-                    let mut hi = p; hi[kk] += dd;
-                    let mut lo = p; lo[kk] -= dd;
+                    let mut hi = p;
+                    hi[kk] += dd;
+                    let mut lo = p;
+                    lo[kk] -= dd;
                     (f(hi) - f(lo)) / (2.0 * dd)
                 };
-                assert!(close(md.lapse(seed).tangent, fd(&|q| mf.lapse(Tensor::new(q)))), "d_{kk} lapse at {p:?}");
+                assert!(
+                    close(md.lapse(seed).tangent, fd(&|q| mf.lapse(Tensor::new(q)))),
+                    "d_{kk} lapse at {p:?}"
+                );
                 if kk == 1 {
-                    assert!(md.lapse(seed).tangent.abs() < 1e-14, "d_phi lapse must vanish at {p:?}");
+                    assert!(
+                        md.lapse(seed).tangent.abs() < 1e-14,
+                        "d_phi lapse must vanish at {p:?}"
+                    );
                 }
                 for ii in 0..3 {
-                    assert!(close(md.shift(seed)[ii].tangent, fd(&|q| mf.shift(Tensor::new(q))[ii])), "d_{kk} shift[{ii}] at {p:?}");
+                    assert!(
+                        close(
+                            md.shift(seed)[ii].tangent,
+                            fd(&|q| mf.shift(Tensor::new(q))[ii])
+                        ),
+                        "d_{kk} shift[{ii}] at {p:?}"
+                    );
                     for jj in 0..3 {
-                        assert!(close(md.spatial_metric(seed)[(ii, jj)].tangent,
-                            fd(&|q| mf.spatial_metric(Tensor::new(q))[(ii, jj)])), "d_{kk} gamma[{ii}{jj}] at {p:?}");
+                        assert!(
+                            close(
+                                md.spatial_metric(seed)[(ii, jj)].tangent,
+                                fd(&|q| mf.spatial_metric(Tensor::new(q))[(ii, jj)])
+                            ),
+                            "d_{kk} gamma[{ii}{jj}] at {p:?}"
+                        );
                     }
                 }
             }
@@ -3463,53 +3986,84 @@ mod tests {
             let x = Tensor::new([big_r, phi]);
             let two_h = 2.0 * 1.3 / big_r;
             let gm = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::spatial_metric(&bh, x);
-            let gi = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::spatial_metric_inv(&bh, x);
+            let gi =
+                <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::spatial_metric_inv(&bh, x);
             assert!(close(gm[(0, 0)], 1.0 + two_h) && close(gm[(1, 1)], big_r * big_r));
-            assert!(gm[(0, 1)] == 0.0 && gm[(1, 0)] == 0.0, "the equatorial disk must be diagonal");
+            assert!(
+                gm[(0, 1)] == 0.0 && gm[(1, 0)] == 0.0,
+                "the equatorial disk must be diagonal"
+            );
             for ii in 0..2 {
                 for jj in 0..2 {
                     let acc: f64 = (0..2).map(|kk| gm[(ii, kk)] * gi[(kk, jj)]).sum();
-                    assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }), "gamma inverse ({ii},{jj})");
+                    assert!(
+                        close(acc, if ii == jj { 1.0 } else { 0.0 }),
+                        "gamma inverse ({ii},{jj})"
+                    );
                 }
             }
             let alpha = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::lapse(&bh, x);
             let vf = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::volume_factor(&bh, x);
-            assert!(close(alpha * vf, big_r), "alpha sqrt(gamma) = R at R={big_r}");
+            assert!(
+                close(alpha * vf, big_r),
+                "alpha sqrt(gamma) = R at R={big_r}"
+            );
             let beta = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::shift(&bh, x);
-            assert!(close(gm[(0, 0)] * beta[0], two_h) && beta[1] == 0.0, "beta_R = 2M/R, beta_phi = 0");
+            assert!(
+                close(gm[(0, 0)] * beta[0], two_h) && beta[1] == 0.0,
+                "beta_R = 2M/R, beta_phi = 0"
+            );
             // agrees with the (R, z) D = 3 poloidal block at z = 0.
-            let gm3 = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&bh, Tensor::new([big_r, phi, 0.0]));
+            let gm3 = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(
+                &bh,
+                Tensor::new([big_r, phi, 0.0]),
+            );
             assert!(close(gm[(0, 0)], gm3[(0, 0)]) && close(gm[(1, 1)], gm3[(1, 1)]));
         }
     }
 
     #[test]
     fn kerr_ks_cylindrical_reduces_to_schwarzschild_at_zero_spin() {
-        let kerr = KerrKSCylindrical { mass: 1.0_f64, spin: 0.0 };
+        let kerr = KerrKSCylindrical {
+            mass: 1.0_f64,
+            spin: 0.0,
+        };
         let schw = SchwarzschildKSCylindrical { mass: 1.0_f64 };
         for &(rr, phi, z) in &[(3.0_f64, 0.7, 1.5), (0.9, -1.2, -0.4), (10.0, 2.0, 0.0)] {
             let p = Tensor::new([rr, phi, z]);
             let a = <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&kerr, p);
             let b = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::lapse(&schw, p);
-            assert!((a - b).abs() < 1e-14, "lapse mismatch at ({rr},{phi},{z}): {a} vs {b}");
+            assert!(
+                (a - b).abs() < 1e-14,
+                "lapse mismatch at ({rr},{phi},{z}): {a} vs {b}"
+            );
             let ga = <KerrKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
             let gb = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&schw, p);
             for ii in 0..3 {
                 for jj in 0..3 {
-                    assert!((ga[(ii, jj)] - gb[(ii, jj)]).abs() < 1e-12, "gamma mismatch");
+                    assert!(
+                        (ga[(ii, jj)] - gb[(ii, jj)]).abs() < 1e-12,
+                        "gamma mismatch"
+                    );
                 }
             }
             let sa = <KerrKSCylindrical<f64> as Metric<f64, 3>>::shift(&kerr, p);
             let sb = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::shift(&schw, p);
             for ii in 0..3 {
-                assert!((sa[ii] - sb[ii]).abs() < 1e-13, "shift mismatch on axis {ii}");
+                assert!(
+                    (sa[ii] - sb[ii]).abs() < 1e-13,
+                    "shift mismatch on axis {ii}"
+                );
             }
         }
     }
 
     #[test]
     fn kerr_ks_cylindrical_inverse_determinant_and_lapse_identity() {
-        let kerr = KerrKSCylindrical { mass: 1.0_f64, spin: 0.9 };
+        let kerr = KerrKSCylindrical {
+            mass: 1.0_f64,
+            spin: 0.9,
+        };
         for &(rr, phi, z) in &[(2.5_f64, 0.3, 0.8), (1.1, -2.0, -1.7), (6.0, 1.0, 0.2)] {
             let p = Tensor::new([rr, phi, z]);
             let g = <KerrKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
@@ -3521,13 +4075,20 @@ mod tests {
                         acc += g[(ii, kk)] * gi[(kk, jj)];
                     }
                     let want = if ii == jj { 1.0 } else { 0.0 };
-                    assert!((acc - want).abs() < 1e-12, "gamma*gamma^-1 != I at ({ii},{jj}): {acc}");
+                    assert!(
+                        (acc - want).abs() < 1e-12,
+                        "gamma*gamma^-1 != I at ({ii},{jj}): {acc}"
+                    );
                 }
             }
             // the null l preserves det g: alpha sqrt(gamma) = sqrt(det g0) = R exactly.
             let alpha = <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&kerr, p);
             let sg = <KerrKSCylindrical<f64> as Metric<f64, 3>>::sqrt_det_gamma(&kerr, p);
-            assert!((alpha * sg - rr).abs() < 1e-12, "alpha sqrt(gamma) != R: {} vs {rr}", alpha * sg);
+            assert!(
+                (alpha * sg - rr).abs() < 1e-12,
+                "alpha sqrt(gamma) != R: {} vs {rr}",
+                alpha * sg
+            );
         }
     }
 
@@ -3565,25 +4126,38 @@ mod tests {
             }
             // the lapse is a scalar: identical across charts at the same physical point.
             let ac = <KerrKSCartesian<f64> as Metric<f64, 3>>::lapse(&cart, pc);
-            let ay = <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&cyl, Tensor::new([rr, phi, z]));
-            assert!((ac - ay).abs() < 1e-13, "lapse differs across charts: {ac} vs {ay}");
+            let ay =
+                <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&cyl, Tensor::new([rr, phi, z]));
+            assert!(
+                (ac - ay).abs() < 1e-13,
+                "lapse differs across charts: {ac} vs {ay}"
+            );
         }
     }
 
     #[test]
     fn kerr_ks_cartesian_reduces_to_schwarzschild_at_zero_spin() {
-        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.0 };
+        let kerr = KerrKSCartesian {
+            mass: 1.0_f64,
+            spin: 0.0,
+        };
         let schw = SchwarzschildKSCartesian { mass: 1.0_f64 };
         for &(x, y, z) in &[(3.0_f64, -2.0, 1.5), (0.7, 0.2, -0.4), (10.0, 0.0, 0.0)] {
             let p = Tensor::new([x, y, z]);
             let a = <KerrKSCartesian<f64> as Metric<f64, 3>>::lapse(&kerr, p);
             let b = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::lapse(&schw, p);
-            assert!((a - b).abs() < 1e-14, "lapse mismatch at ({x},{y},{z}): {a} vs {b}");
+            assert!(
+                (a - b).abs() < 1e-14,
+                "lapse mismatch at ({x},{y},{z}): {a} vs {b}"
+            );
             let ga = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
             let gb = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&schw, p);
             for ii in 0..3 {
                 for jj in 0..3 {
-                    assert!((ga[(ii, jj)] - gb[(ii, jj)]).abs() < 1e-14, "gamma mismatch");
+                    assert!(
+                        (ga[(ii, jj)] - gb[(ii, jj)]).abs() < 1e-14,
+                        "gamma mismatch"
+                    );
                 }
             }
             let sa = <KerrKSCartesian<f64> as Metric<f64, 3>>::shift(&kerr, p);
@@ -3596,8 +4170,16 @@ mod tests {
 
     #[test]
     fn kerr_ks_cartesian_inverse_and_determinant_are_exact() {
-        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.9 };
-        for &(x, y, z) in &[(3.0_f64, -2.0, 1.5), (1.2, 0.9, 0.3), (5.0, 5.0, -4.0), (2.0, 0.0, 0.0)] {
+        let kerr = KerrKSCartesian {
+            mass: 1.0_f64,
+            spin: 0.9,
+        };
+        for &(x, y, z) in &[
+            (3.0_f64, -2.0, 1.5),
+            (1.2, 0.9, 0.3),
+            (5.0, 5.0, -4.0),
+            (2.0, 0.0, 0.0),
+        ] {
             let p = Tensor::new([x, y, z]);
             let g = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
             let gi = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric_inv(&kerr, p);
@@ -3609,7 +4191,10 @@ mod tests {
                         s += g[(ii, kk)] * gi[(kk, jj)];
                     }
                     let want = if ii == jj { 1.0 } else { 0.0 };
-                    assert!((s - want).abs() < 1e-13, "g.g^-1 != I at ({x},{y},{z}) [{ii}{jj}]: {s}");
+                    assert!(
+                        (s - want).abs() < 1e-13,
+                        "g.g^-1 != I at ({x},{y},{z}) [{ii}{jj}]: {s}"
+                    );
                 }
             }
             // det(gamma) equals the closed form (1 + 2H |l|^2) via the numeric 3x3 determinant.
@@ -3617,7 +4202,11 @@ mod tests {
                 - g[(0, 1)] * (g[(1, 0)] * g[(2, 2)] - g[(1, 2)] * g[(2, 0)])
                 + g[(0, 2)] * (g[(1, 0)] * g[(2, 1)] - g[(1, 1)] * g[(2, 0)]);
             let sq = <KerrKSCartesian<f64> as Metric<f64, 3>>::sqrt_det_gamma(&kerr, p);
-            assert!((det - sq * sq).abs() < 1e-12, "det mismatch at ({x},{y},{z}): {det} vs {}", sq * sq);
+            assert!(
+                (det - sq * sq).abs() < 1e-12,
+                "det mismatch at ({x},{y},{z}): {det} vs {}",
+                sq * sq
+            );
         }
     }
 
@@ -3625,12 +4214,18 @@ mod tests {
     fn kerr_ks_cartesian_null_vector_is_unit_off_the_clamp() {
         // |l| = 1 wherever the kerr-schild quartic holds: sqrt_det_gamma^2 - 1 = 2H exactly there,
         // so alpha^2 (1 + 2H) = 1. probe well outside the clamp radius.
-        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.7 };
+        let kerr = KerrKSCartesian {
+            mass: 1.0_f64,
+            spin: 0.7,
+        };
         for &(x, y, z) in &[(4.0_f64, 1.0, 2.0), (2.5, -3.0, 0.5), (0.9, 0.9, 0.9)] {
             let p = Tensor::new([x, y, z]);
             let a2 = <KerrKSCartesian<f64> as Metric<f64, 3>>::lapse_sq(&kerr, p);
             let sq = <KerrKSCartesian<f64> as Metric<f64, 3>>::sqrt_det_gamma(&kerr, p);
-            assert!((a2 * sq * sq - 1.0).abs() < 1e-13, "alpha^2 det != 1 at ({x},{y},{z})");
+            assert!(
+                (a2 * sq * sq - 1.0).abs() < 1e-13,
+                "alpha^2 det != 1 at ({x},{y},{z})"
+            );
         }
     }
 
@@ -3638,7 +4233,10 @@ mod tests {
     fn kerr_ks_cartesian_equatorial_slice_matches_the_3d_plane() {
         // the D = 2 instance is the z = 0 slice: gamma's (x, y) block and the in-plane shift
         // must equal the 3d values at z = 0 (l_z = 0 there exactly).
-        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.6 };
+        let kerr = KerrKSCartesian {
+            mass: 1.0_f64,
+            spin: 0.6,
+        };
         for &(x, y) in &[(3.0_f64, -2.0), (1.5, 0.4), (6.0, 6.0)] {
             let p2 = Tensor::new([x, y]);
             let p3 = Tensor::new([x, y, 0.0]);
@@ -3646,7 +4244,10 @@ mod tests {
             let g3 = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p3);
             for ii in 0..2 {
                 for jj in 0..2 {
-                    assert!((g2[(ii, jj)] - g3[(ii, jj)]).abs() < 1e-14, "slice mismatch");
+                    assert!(
+                        (g2[(ii, jj)] - g3[(ii, jj)]).abs() < 1e-14,
+                        "slice mismatch"
+                    );
                 }
             }
             assert!(

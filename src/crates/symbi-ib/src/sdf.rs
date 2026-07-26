@@ -24,7 +24,6 @@
 use symbi_ir::algebra::Scalar;
 use symbi_ir::dual::Dual;
 
-
 /// the mollified indicator of a signed distance: 1 well inside the body, 0
 /// well outside, a tanh ramp of width `w` across the surface. spelled
 /// identically to `drain::drain_mask` (same subtraction folded into phi, same
@@ -39,23 +38,39 @@ pub fn chi<S: Scalar>(phi: S, w: S) -> S {
 /// nodes in a trace — one structure serves both.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SdfExpr<S, const D: usize> {
-    Sphere { center: [S; D], radius: S },
+    Sphere {
+        center: [S; D],
+        radius: S,
+    },
     /// an axis-aligned box (exact euclidean distance, inside and out).
-    Cuboid { center: [S; D], half_extents: [S; D] },
+    Cuboid {
+        center: [S; D],
+        half_extents: [S; D],
+    },
     /// a capped cylinder aligned with the final coordinate axis.
-    CappedCylinder { center: [S; D], radius: S, half_height: S },
+    CappedCylinder {
+        center: [S; D],
+        radius: S,
+        half_height: S,
+    },
     /// min of distances: inside either body.
     Union(Box<SdfExpr<S, D>>, Box<SdfExpr<S, D>>),
     /// max of distances: inside both bodies.
     Intersect(Box<SdfExpr<S, D>>, Box<SdfExpr<S, D>>),
     /// sign flip: inside becomes outside. unbounded — no bounding ball.
     Complement(Box<SdfExpr<S, D>>),
-    Translated { inner: Box<SdfExpr<S, D>>, offset: [S; D] },
+    Translated {
+        inner: Box<SdfExpr<S, D>>,
+        offset: [S; D],
+    },
     /// a rigid rotation of the inner shape about the body-local origin. `rot` is the body's
     /// orientation matrix R (row-major); a world point maps into the inner's frame as `R^T x`,
     /// so `dist(x) = inner.dist(R^T x)`. rotation is an isometry, so the signed distance is exact
     /// and the bounding-ball radius is unchanged (its center rotates by R).
-    Rotated { inner: Box<SdfExpr<S, D>>, rot: [[S; D]; D] },
+    Rotated {
+        inner: Box<SdfExpr<S, D>>,
+        rot: [[S; D]; D],
+    },
 }
 
 impl<S: Scalar, const D: usize> SdfExpr<S, D> {
@@ -64,7 +79,10 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
     }
 
     pub fn cuboid(center: [S; D], half_extents: [S; D]) -> Self {
-        SdfExpr::Cuboid { center, half_extents }
+        SdfExpr::Cuboid {
+            center,
+            half_extents,
+        }
     }
 
     pub fn capped_cylinder(center: [S; D], radius: S, half_height: S) -> Self {
@@ -88,12 +106,18 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
     }
 
     pub fn translated(self, offset: [S; D]) -> Self {
-        SdfExpr::Translated { inner: Box::new(self), offset }
+        SdfExpr::Translated {
+            inner: Box::new(self),
+            offset,
+        }
     }
 
     /// rotate the shape by the orientation matrix `rot` (row-major) about the body-local origin.
     pub fn rotated(self, rot: [[S; D]; D]) -> Self {
-        SdfExpr::Rotated { inner: Box::new(self), rot }
+        SdfExpr::Rotated {
+            inner: Box::new(self),
+            rot,
+        }
     }
 
     /// the signed distance at `x`: negative inside, positive outside, zero on
@@ -109,7 +133,10 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
                 }
                 sq.sqrt() - *radius
             }
-            SdfExpr::Cuboid { center, half_extents } => {
+            SdfExpr::Cuboid {
+                center,
+                half_extents,
+            } => {
                 // q_a = |x_a - c_a| - h_a: the per-axis excursion beyond the
                 // face. outside = |max(q, 0)|; inside = min(max_a q_a, 0).
                 let mut out_sq = S::ZERO;
@@ -174,7 +201,10 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
                 center: center.map(|c| f(c)),
                 radius: f(*radius),
             },
-            SdfExpr::Cuboid { center, half_extents } => SdfExpr::Cuboid {
+            SdfExpr::Cuboid {
+                center,
+                half_extents,
+            } => SdfExpr::Cuboid {
                 center: center.map(|c| f(c)),
                 half_extents: half_extents.map(|h| f(h)),
             },
@@ -214,7 +244,11 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
         let mut g = [S::ZERO; D];
         for a in 0..D {
             let xd: [Dual<S>; D] = std::array::from_fn(|i| {
-                if i == a { Dual::variable(x[i]) } else { Dual::constant(x[i]) }
+                if i == a {
+                    Dual::variable(x[i])
+                } else {
+                    Dual::constant(x[i])
+                }
             });
             g[a] = lifted.dist(xd).tangent;
         }
@@ -239,7 +273,8 @@ impl SdfExpr<f64, 3> {
     /// coordinates are the body-LOCAL frame; the penalization kernel translates the whole
     /// tree to the runtime body position. an unknown kind or a malformed field fails loud.
     pub fn from_json(s: &str) -> Result<Self, String> {
-        let v: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("shape json: {e}"))?;
+        let v: serde_json::Value =
+            serde_json::from_str(s).map_err(|e| format!("shape json: {e}"))?;
         Self::from_value(&v)
     }
 
@@ -255,7 +290,10 @@ impl SdfExpr<f64, 3> {
             SdfExpr::Sphere { center, radius } => {
                 json!({"kind": "sphere", "center": center, "radius": radius})
             }
-            SdfExpr::Cuboid { center, half_extents } => {
+            SdfExpr::Cuboid {
+                center,
+                half_extents,
+            } => {
                 json!({"kind": "box", "center": center, "half_extents": half_extents})
             }
             SdfExpr::CappedCylinder {
@@ -283,26 +321,39 @@ impl SdfExpr<f64, 3> {
     }
 
     fn from_value(v: &serde_json::Value) -> Result<Self, String> {
-        let kind = v.get("kind").and_then(|k| k.as_str()).ok_or("shape: missing string 'kind'")?;
+        let kind = v
+            .get("kind")
+            .and_then(|k| k.as_str())
+            .ok_or("shape: missing string 'kind'")?;
         let vec3 = |key: &str| -> Result<[f64; 3], String> {
             let arr = v
                 .get(key)
                 .and_then(|a| a.as_array())
                 .ok_or_else(|| format!("shape '{kind}': missing array '{key}'"))?;
             if arr.len() != 3 {
-                return Err(format!("shape '{kind}': '{key}' must have 3 components, got {}", arr.len()));
+                return Err(format!(
+                    "shape '{kind}': '{key}' must have 3 components, got {}",
+                    arr.len()
+                ));
             }
             let mut out = [0.0; 3];
             for (i, e) in arr.iter().enumerate() {
-                out[i] = e.as_f64().ok_or_else(|| format!("shape '{kind}': '{key}[{i}]' not a number"))?;
+                out[i] = e
+                    .as_f64()
+                    .ok_or_else(|| format!("shape '{kind}': '{key}[{i}]' not a number"))?;
             }
             Ok(out)
         };
         let scalar = |key: &str| -> Result<f64, String> {
-            v.get(key).and_then(|s| s.as_f64()).ok_or_else(|| format!("shape '{kind}': missing number '{key}'"))
+            v.get(key)
+                .and_then(|s| s.as_f64())
+                .ok_or_else(|| format!("shape '{kind}': missing number '{key}'"))
         };
         let child = |key: &str| -> Result<Self, String> {
-            Self::from_value(v.get(key).ok_or_else(|| format!("shape '{kind}': missing sub-shape '{key}'"))?)
+            Self::from_value(
+                v.get(key)
+                    .ok_or_else(|| format!("shape '{kind}': missing sub-shape '{key}'"))?,
+            )
         };
         let mat3 = |key: &str| -> Result<[[f64; 3]; 3], String> {
             let rows = v
@@ -310,30 +361,49 @@ impl SdfExpr<f64, 3> {
                 .and_then(|a| a.as_array())
                 .ok_or_else(|| format!("shape '{kind}': missing 3x3 matrix '{key}'"))?;
             if rows.len() != 3 {
-                return Err(format!("shape '{kind}': '{key}' must have 3 rows, got {}", rows.len()));
+                return Err(format!(
+                    "shape '{kind}': '{key}' must have 3 rows, got {}",
+                    rows.len()
+                ));
             }
             let mut out = [[0.0; 3]; 3];
             for (i, row) in rows.iter().enumerate() {
-                let cols = row.as_array().ok_or_else(|| format!("shape '{kind}': '{key}[{i}]' not a row"))?;
+                let cols = row
+                    .as_array()
+                    .ok_or_else(|| format!("shape '{kind}': '{key}[{i}]' not a row"))?;
                 if cols.len() != 3 {
-                    return Err(format!("shape '{kind}': '{key}[{i}]' must have 3 columns, got {}", cols.len()));
+                    return Err(format!(
+                        "shape '{kind}': '{key}[{i}]' must have 3 columns, got {}",
+                        cols.len()
+                    ));
                 }
                 for (j, e) in cols.iter().enumerate() {
-                    out[i][j] = e.as_f64().ok_or_else(|| format!("shape '{kind}': '{key}[{i}][{j}]' not a number"))?;
+                    out[i][j] = e
+                        .as_f64()
+                        .ok_or_else(|| format!("shape '{kind}': '{key}[{i}][{j}]' not a number"))?;
                 }
             }
             Ok(out)
         };
         match kind {
-            "sphere" => Ok(SdfExpr::Sphere { center: vec3("center")?, radius: scalar("radius")? }),
-            "box" => Ok(SdfExpr::Cuboid { center: vec3("center")?, half_extents: vec3("half_extents")? }),
+            "sphere" => Ok(SdfExpr::Sphere {
+                center: vec3("center")?,
+                radius: scalar("radius")?,
+            }),
+            "box" => Ok(SdfExpr::Cuboid {
+                center: vec3("center")?,
+                half_extents: vec3("half_extents")?,
+            }),
             "cylinder" => Ok(SdfExpr::CappedCylinder {
                 center: vec3("center")?,
                 radius: scalar("radius")?,
                 half_height: scalar("half_height")?,
             }),
             "union" => Ok(SdfExpr::Union(Box::new(child("a")?), Box::new(child("b")?))),
-            "intersect" => Ok(SdfExpr::Intersect(Box::new(child("a")?), Box::new(child("b")?))),
+            "intersect" => Ok(SdfExpr::Intersect(
+                Box::new(child("a")?),
+                Box::new(child("b")?),
+            )),
             "complement" => Ok(SdfExpr::Complement(Box::new(child("inner")?))),
             "translated" => Ok(SdfExpr::Translated {
                 inner: Box::new(child("inner")?),
@@ -343,7 +413,9 @@ impl SdfExpr<f64, 3> {
                 inner: Box::new(child("inner")?),
                 rot: mat3("rot")?,
             }),
-            other => Err(format!("shape: unknown kind '{other}' (sphere | box | union | intersect | complement | translated)")),
+            other => Err(format!(
+                "shape: unknown kind '{other}' (sphere | box | union | intersect | complement | translated)"
+            )),
         }
     }
 }
@@ -356,7 +428,10 @@ impl<const D: usize> SdfExpr<f64, D> {
     pub fn bounding_ball(&self) -> Option<([f64; D], f64)> {
         match self {
             SdfExpr::Sphere { center, radius } => Some((*center, *radius)),
-            SdfExpr::Cuboid { center, half_extents } => {
+            SdfExpr::Cuboid {
+                center,
+                half_extents,
+            } => {
                 let r = half_extents.iter().map(|h| h * h).sum::<f64>().sqrt();
                 Some((*center, r))
             }
@@ -364,7 +439,10 @@ impl<const D: usize> SdfExpr<f64, D> {
                 center,
                 radius,
                 half_height,
-            } => Some((*center, (radius * radius + half_height * half_height).sqrt())),
+            } => Some((
+                *center,
+                (radius * radius + half_height * half_height).sqrt(),
+            )),
             SdfExpr::Union(a, b) => match (a.bounding_ball(), b.bounding_ball()) {
                 (Some(ba), Some(bb)) => Some(enclosing_ball(ba, bb)),
                 _ => None,
@@ -437,7 +515,11 @@ mod tests {
         // outside a face: the perpendicular excess.
         assert!(approx(c.dist([2.0, 0.0, 0.0]), 1.0, 1e-15));
         // outside an edge: the 2d hypotenuse of the excesses.
-        assert!(approx(c.dist([2.0, 3.0, 0.0]), (1.0f64 + 1.0).sqrt(), 1e-15));
+        assert!(approx(
+            c.dist([2.0, 3.0, 0.0]),
+            (1.0f64 + 1.0).sqrt(),
+            1e-15
+        ));
         // outside a corner: the 3d hypotenuse.
         assert!(approx(c.dist([2.0, 3.0, 4.0]), 3.0f64.sqrt(), 1e-15));
     }
@@ -451,7 +533,11 @@ mod tests {
         assert!(approx(cylinder.dist([0.8, 0.0, 3.4]), 0.5, 1e-15));
         let (center, radius) = cylinder.bounding_ball().unwrap();
         assert_eq!(center, [0.0, 0.0, 1.0]);
-        assert!(approx(radius, (0.5_f64.powi(2) + 2.0_f64.powi(2)).sqrt(), 1e-15));
+        assert!(approx(
+            radius,
+            (0.5_f64.powi(2) + 2.0_f64.powi(2)).sqrt(),
+            1e-15
+        ));
     }
 
     #[test]
@@ -488,7 +574,12 @@ mod tests {
     fn csg_identities_hold_bit_exactly() {
         let a = Sdf3::sphere([0.0; 3], 1.0);
         let b = Sdf3::cuboid([1.5, 0.0, 0.0], [0.5; 3]);
-        let pts = [[0.0, 0.0, 0.0], [1.2, 0.3, -0.4], [3.0, 3.0, 3.0], [-0.9, 0.0, 0.1]];
+        let pts = [
+            [0.0, 0.0, 0.0],
+            [1.2, 0.3, -0.4],
+            [3.0, 3.0, 3.0],
+            [-0.9, 0.0, 0.1],
+        ];
         for x in pts {
             // union commutes.
             let u1 = a.clone().union(b.clone()).dist(x);
@@ -501,7 +592,11 @@ mod tests {
             let ii = a.clone().intersect(a.clone()).dist(x);
             assert_eq!(ii.to_bits(), a.dist(x).to_bits());
             // translate . untranslate = identity.
-            let tt = a.clone().translated([0.7, -0.2, 0.4]).translated([-0.7, 0.2, -0.4]).dist(x);
+            let tt = a
+                .clone()
+                .translated([0.7, -0.2, 0.4])
+                .translated([-0.7, 0.2, -0.4])
+                .dist(x);
             assert_eq!(tt.to_bits(), a.dist(x).to_bits());
         }
     }
@@ -541,7 +636,9 @@ mod tests {
         let (c, r) = body.bounding_ball().unwrap();
         let mut state = 0x9e3779b97f4a7c15u64;
         let mut rand = || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (state >> 11) as f64 / (1u64 << 53) as f64 * 6.0 - 3.0
         };
         let mut inside = 0usize;
@@ -553,13 +650,21 @@ mod tests {
                 assert!(d <= r + 1e-12, "interior point {x:?} outside the ball");
             }
         }
-        assert!(inside > 100, "sample never landed inside — vacuous containment");
+        assert!(
+            inside > 100,
+            "sample never landed inside — vacuous containment"
+        );
 
         // complement is unbounded; an annulus (intersect with a complement)
         // inherits the bounded side's ball.
-        assert!(Sdf3::sphere([0.0; 3], 1.0).complement().bounding_ball().is_none());
-        let annulus = Sdf3::sphere([0.0; 3], 1.0)
-            .intersect(Sdf3::sphere([0.0; 3], 0.5).complement());
+        assert!(
+            Sdf3::sphere([0.0; 3], 1.0)
+                .complement()
+                .bounding_ball()
+                .is_none()
+        );
+        let annulus =
+            Sdf3::sphere([0.0; 3], 1.0).intersect(Sdf3::sphere([0.0; 3], 0.5).complement());
         let (_, r) = annulus.bounding_ball().unwrap();
         assert_eq!(r, 1.0);
     }
@@ -571,10 +676,14 @@ mod tests {
         // parameters as scalar params, the distance as a graph node. the
         // penalization kernel builder consumes exactly this path.
         use symbi_algebra::algebra::Numeric as _;
-        use symbi_ir::{begin_trace, end_trace, Gv};
+        use symbi_ir::{Gv, begin_trace, end_trace};
         begin_trace();
         let body: SdfExpr<Gv, 3> = SdfExpr::Sphere {
-            center: [Gv::scalar("body_0_pos_0"), Gv::scalar("body_0_pos_1"), Gv::scalar("body_0_pos_2")],
+            center: [
+                Gv::scalar("body_0_pos_0"),
+                Gv::scalar("body_0_pos_1"),
+                Gv::scalar("body_0_pos_2"),
+            ],
             radius: Gv::scalar("body_0_radius"),
         }
         .union(SdfExpr::Cuboid {
@@ -584,7 +693,10 @@ mod tests {
         let x = [Gv::scalar("x0"), Gv::scalar("x1"), Gv::scalar("x2")];
         let d = body.dist(x);
         let kernel = end_trace();
-        assert!(!kernel.graph.has_errors(), "sdf trace produced graph errors");
+        assert!(
+            !kernel.graph.has_errors(),
+            "sdf trace produced graph errors"
+        );
         assert!(
             kernel.scalar_params.iter().any(|p| p == "body_0_radius"),
             "shape params must land in the scalar manifest",
@@ -622,7 +734,10 @@ mod tests {
         let (c, r) = s.bounding_ball().expect("csg is bounded");
         for x in [[0.0, 0.0, 0.0], [2.4, 0.0, 0.0]] {
             let d: f64 = (0..3).map(|a| (x[a] - c[a]).powi(2)).sum::<f64>().sqrt();
-            assert!(d <= r + 1e-12, "interior point {x:?} escapes the bounding ball");
+            assert!(
+                d <= r + 1e-12,
+                "interior point {x:?} escapes the bounding ball"
+            );
         }
     }
 
@@ -651,7 +766,10 @@ mod tests {
         let n = rot.normal([0.0, 0.55, 0.0]);
         let mag = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
         assert!((mag - 1.0).abs() < 1e-9, "normal not unit: {mag}");
-        assert!(n[1] > 0.9, "outward normal of the rotated +y face should be +y: {n:?}");
+        assert!(
+            n[1] > 0.9,
+            "outward normal of the rotated +y face should be +y: {n:?}"
+        );
     }
 
     #[test]
@@ -660,8 +778,11 @@ mod tests {
             "inner":{"kind":"box","center":[0.0,0.0,0.0],"half_extents":[0.5,0.2,0.3]},
             "rot":[[0.0,-1.0,0.0],[1.0,0.0,0.0],[0.0,0.0,1.0]]}"#;
         let s = SdfExpr::<f64, 3>::from_json(wire).expect("parse rotated");
-        let native = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3])
-            .rotated([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
+        let native = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]).rotated([
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]);
         assert_eq!(s, native);
     }
 
@@ -672,7 +793,10 @@ mod tests {
             .union(SdfExpr::sphere([1.0, 0.0, 0.0], 0.6))
             .rotated([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
             .translated([2.0, 0.0, 0.0]);
-        assert_eq!(SdfExpr::<f64, 3>::from_json(&s.to_json()).expect("round trip"), s);
+        assert_eq!(
+            SdfExpr::<f64, 3>::from_json(&s.to_json()).expect("round trip"),
+            s
+        );
     }
 
     #[test]
@@ -680,7 +804,10 @@ mod tests {
         // unknown primitive.
         assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"torus","center":[0,0,0]}"#).is_err());
         // wrong arity on a vector.
-        assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"sphere","center":[0,0],"radius":1.0}"#).is_err());
+        assert!(
+            SdfExpr::<f64, 3>::from_json(r#"{"kind":"sphere","center":[0,0],"radius":1.0}"#)
+                .is_err()
+        );
         // missing scalar field.
         assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"sphere","center":[0,0,0]}"#).is_err());
         // missing sub-shape.

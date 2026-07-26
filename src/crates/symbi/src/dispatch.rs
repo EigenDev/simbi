@@ -18,8 +18,8 @@
 //   domain.for_each_tiled([16, 16], |coord| { ... });
 // =============================================================================
 
-use symbi_algebra::Domain;
 use rayon::prelude::*;
+use symbi_algebra::Domain;
 
 /// tiled parallel for-each over a domain.
 /// the macro #[symbi::kernel(coord)] emits calls to this trait.
@@ -34,9 +34,18 @@ pub trait DomainForEach<const D: usize> {
 // default tile sizes per dimension
 const fn default_tile<const D: usize>() -> [usize; D] {
     let mut tile = [1usize; D];
-    if D >= 1 { tile[0] = 64; }
-    if D >= 2 { tile[0] = 16; tile[1] = 16; }
-    if D >= 3 { tile[0] = 8; tile[1] = 8; tile[2] = 8; }
+    if D >= 1 {
+        tile[0] = 64;
+    }
+    if D >= 2 {
+        tile[0] = 16;
+        tile[1] = 16;
+    }
+    if D >= 3 {
+        tile[0] = 8;
+        tile[1] = 8;
+        tile[2] = 8;
+    }
     tile
 }
 
@@ -50,9 +59,7 @@ impl<const D: usize> DomainForEach<D> for Domain<D> {
         let lo: [isize; D] = std::array::from_fn(|aa| domain.spaces[aa].lo);
 
         // compute number of tiles per axis
-        let num_tiles: [usize; D] = std::array::from_fn(|aa| {
-            (shape[aa] + tile[aa] - 1) / tile[aa]
-        });
+        let num_tiles: [usize; D] = std::array::from_fn(|aa| (shape[aa] + tile[aa] - 1) / tile[aa]);
         let total_tiles: usize = num_tiles.iter().product();
 
         // iterate tiles in parallel, cells within each tile serially
@@ -71,8 +78,7 @@ impl<const D: usize> DomainForEach<D> for Domain<D> {
             let mut tile_hi = [0isize; D];
             for aa in 0..D {
                 tile_lo[aa] = lo[aa] + (tile_idx[aa] * tile[aa]) as isize;
-                tile_hi[aa] = (tile_lo[aa] + tile[aa] as isize)
-                    .min(lo[aa] + shape[aa] as isize);
+                tile_hi[aa] = (tile_lo[aa] + tile[aa] as isize).min(lo[aa] + shape[aa] as isize);
             }
 
             // serial iteration within tile — cache-friendly
@@ -84,11 +90,7 @@ impl<const D: usize> DomainForEach<D> for Domain<D> {
 // serial iteration over a rectangular tile [lo, hi) in D dimensions.
 // uses nested loops for cache locality. the innermost axis (D-1) is
 // the fastest-varying, matching memory layout.
-fn serial_tile_iter<const D: usize>(
-    lo: &[isize; D],
-    hi: &[isize; D],
-    f: &impl Fn([isize; D]),
-) {
+fn serial_tile_iter<const D: usize>(lo: &[isize; D], hi: &[isize; D], f: &impl Fn([isize; D])) {
     let mut coord = *lo;
     serial_tile_recurse::<D>(&mut coord, lo, hi, 0, f);
 }
@@ -188,14 +190,22 @@ pub trait KernelInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{Space, domain};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use symbi_algebra::{Space, domain};
 
     #[test]
     fn for_each_visits_all_2d() {
         let dom = domain([
-            Space { name: "x", lo: 0, hi: 10 },
-            Space { name: "y", lo: 0, hi: 10 },
+            Space {
+                name: "x",
+                lo: 0,
+                hi: 10,
+            },
+            Space {
+                name: "y",
+                lo: 0,
+                hi: 10,
+            },
         ]);
         let count = AtomicUsize::new(0);
         DomainForEach::for_each(&dom, |_coord| {
@@ -207,9 +217,21 @@ mod tests {
     #[test]
     fn for_each_visits_all_3d() {
         let dom = domain([
-            Space { name: "x", lo: 0, hi: 5 },
-            Space { name: "y", lo: 0, hi: 6 },
-            Space { name: "z", lo: 0, hi: 7 },
+            Space {
+                name: "x",
+                lo: 0,
+                hi: 5,
+            },
+            Space {
+                name: "y",
+                lo: 0,
+                hi: 6,
+            },
+            Space {
+                name: "z",
+                lo: 0,
+                hi: 7,
+            },
         ]);
         let count = AtomicUsize::new(0);
         DomainForEach::for_each(&dom, |_coord| {
@@ -221,8 +243,16 @@ mod tests {
     #[test]
     fn for_each_tiled_visits_all() {
         let dom = domain([
-            Space { name: "x", lo: -3, hi: 13 },
-            Space { name: "y", lo: 2, hi: 9 },
+            Space {
+                name: "x",
+                lo: -3,
+                hi: 13,
+            },
+            Space {
+                name: "y",
+                lo: 2,
+                hi: 9,
+            },
         ]);
         let count = AtomicUsize::new(0);
         DomainForEach::for_each_tiled(&dom, [4, 4], |_coord| {
@@ -234,7 +264,11 @@ mod tests {
 
     #[test]
     fn for_each_1d() {
-        let dom = domain([Space { name: "x", lo: 0, hi: 100 }]);
+        let dom = domain([Space {
+            name: "x",
+            lo: 0,
+            hi: 100,
+        }]);
         let count = AtomicUsize::new(0);
         DomainForEach::for_each(&dom, |_coord| {
             count.fetch_add(1, Ordering::Relaxed);
@@ -245,8 +279,16 @@ mod tests {
     #[test]
     fn for_each_respects_offsets() {
         let dom = domain([
-            Space { name: "x", lo: 5, hi: 8 },
-            Space { name: "y", lo: 10, hi: 13 },
+            Space {
+                name: "x",
+                lo: 5,
+                hi: 8,
+            },
+            Space {
+                name: "y",
+                lo: 10,
+                hi: 13,
+            },
         ]);
         let count = AtomicUsize::new(0);
         let in_bounds = AtomicUsize::new(0);

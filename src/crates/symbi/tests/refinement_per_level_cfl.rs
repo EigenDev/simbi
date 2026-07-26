@@ -43,7 +43,11 @@ fn fill(sim: &Sim) {
         let x = sim.geom.centroid(c);
         let in_blob = (0..3).all(|ax| x[ax].abs() < 1.0 / N as f64);
         let pre = if fine && in_blob { 200.0 } else { 1.0 };
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre,
+        };
         let cons = Regime::to_conserved(&sim.physics.regime, &sim.physics.eos, &prim);
         sim.fields.cons.den.view_mut().set(c, cons.den);
         for dd in 0..3 {
@@ -65,10 +69,17 @@ fn root_step_respects_the_fine_level_cfl() {
         .cfl(CFL)
         .allocate()
         .unwrap()
-        .set_initial(|_x: [f64; 3]| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .set_initial(|_x: [f64; 3]| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 1.0,
+        })
         .build();
     let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated);
-    let regions = [RefinementRegion { x_lo: [-0.25; 3], x_hi: [0.25; 3] }];
+    let regions = [RefinementRegion {
+        x_lo: [-0.25; 3],
+        x_hi: [0.25; 3],
+    }];
     let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
     })

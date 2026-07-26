@@ -16,12 +16,16 @@ use symbi_hydro::eos::Isothermal;
 use symbi_hydro::expr_bridge::build_user_source;
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::state::PrimG;
-use symbi_hydro::{SourceConfig, ISO_NEWTONIAN_SPEC};
+use symbi_hydro::{ISO_NEWTONIAN_SPEC, SourceConfig};
 
 type Sim = SimCpu<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
 
 fn mom_x_total(sim: &Sim) -> f64 {
-    sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).sum()
+    sim.geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.mom[0].view().at(c))
+        .sum()
 }
 
 #[test]
@@ -34,7 +38,11 @@ fn runtime_loaded_force_accelerates_iso_gas() {
     let cfg = SourceConfig::from_json(json).expect("parse config");
     // validated against the ISO spec: the nrg overlay is dropped (no energy), mom survives.
     let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("wrap source");
-    assert_eq!(built.len(), 1, "iso force must yield ONLY the mom overlay (no nrg)");
+    assert_eq!(
+        built.len(),
+        1,
+        "iso force must yield ONLY the mom overlay (no nrg)"
+    );
     assert_eq!(built[0].0, "mom");
 
     let mut sim = Sim::build(IsoNewtonian, Isothermal { cs: 1.0 }, Cartesian)
@@ -49,8 +57,13 @@ fn runtime_loaded_force_accelerates_iso_gas() {
         pre: Default::default(),
     });
 
-    let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());
-    assert!(mom_x_total(&sim).abs() < 1e-12, "x-momentum should start at zero");
+    let sub = sim
+        .substrate()
+        .with_runtime_source(built, cfg.params.clone());
+    assert!(
+        mom_x_total(&sim).abs() < 1e-12,
+        "x-momentum should start at zero"
+    );
 
     let t_final = 0.05;
     evolve(&mut sim, &sub, t_final).expect("evolve under runtime source");
@@ -65,6 +78,9 @@ fn runtime_loaded_force_accelerates_iso_gas() {
     );
     for c in sim.geom.interior.iter() {
         let rho = *sim.fields.cons.den.view().at(c);
-        assert!((rho - 1.0).abs() < 1e-6, "density drifted at {c:?}: rho = {rho}");
+        assert!(
+            (rho - 1.0).abs() < 1e-6,
+            "density drifted at {c:?}: rho = {rho}"
+        );
     }
 }

@@ -20,4 +20,5 @@ pub type IsothermalMhdSubstrateKernelSet<Mem, Sc, const D: usize> =
     MhdSubstrateKernelSet<IsothermalMhd, Mem, Sc, D>;
 
 /// back-compat alias for the 3D KernelSet (the original `*3D` name).
-pub type IsothermalMhdSubstrateKernelSet3D<Mem, Sc = f64> = IsothermalMhdSubstrateKernelSet<Mem, Sc, 3>;
+pub type IsothermalMhdSubstrateKernelSet3D<Mem, Sc = f64> =
+    IsothermalMhdSubstrateKernelSet<Mem, Sc, 3>;

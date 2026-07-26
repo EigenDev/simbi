@@ -40,8 +40,8 @@ pub const MJY_PER_CGS_FLUX: f64 = 1.0e26;
 /// indexed `t_bin * n_freqs + f_bin` in [mJy].
 #[derive(Clone, Debug)]
 pub struct ObserverLightcurve {
-    pub times:       Vec<f64>,
-    pub fluxes:      Vec<f64>,
+    pub times: Vec<f64>,
+    pub fluxes: Vec<f64>,
     pub frequencies: Vec<f64>,
 }
 
@@ -54,8 +54,8 @@ pub struct ObserverLightcurve {
 /// an angular half-width).
 #[derive(Clone, Debug)]
 pub struct SkyImage {
-    pub intensity:  Vec<f64>,
-    pub n_pix:      usize,
+    pub intensity: Vec<f64>,
+    pub n_pix: usize,
     pub half_width: f64,
 }
 
@@ -86,19 +86,22 @@ impl SkyImage {
                 cnt[ring] += 1.0;
             }
         }
-        sum.iter().zip(cnt).map(|(s, c)| if c > 0.0 { s / c } else { 0.0 }).collect()
+        sum.iter()
+            .zip(cnt)
+            .map(|(s, c)| if c > 0.0 { s / c } else { 0.0 })
+            .collect()
     }
 }
 
 /// polarization evolution: normalized stokes Q/U/V, degree, and angle vs observer time.
 #[derive(Clone, Debug)]
 pub struct PolarizationCurve {
-    pub times:               Vec<f64>,
+    pub times: Vec<f64>,
     pub polarization_degree: Vec<f64>,
-    pub polarization_angle:  Vec<f64>,
-    pub stokes_q:            Vec<f64>,
-    pub stokes_u:            Vec<f64>,
-    pub stokes_v:            Vec<f64>,
+    pub polarization_angle: Vec<f64>,
+    pub stokes_q: Vec<f64>,
+    pub stokes_u: Vec<f64>,
+    pub stokes_v: Vec<f64>,
 }
 
 #[inline]
@@ -148,13 +151,18 @@ pub fn compute_lightcurve_from_events(
     let obs_hat = normalize(observer_direction);
     let d_l_sq = luminosity_distance * luminosity_distance;
     let one_plus_z = 1.0 + redshift;
-    let time_bins_s: Vec<f64> = time_bins.iter().map(|t| t * SECONDS_PER_DAY.value()).collect();
+    let time_bins_s: Vec<f64> = time_bins
+        .iter()
+        .map(|t| t * SECONDS_PER_DAY.value())
+        .collect();
 
     for evt in events.iter().filter(|e| !e.absorbed) {
         // equal-arrival-time surface, IDENTICAL to compute_skymap: t_obs = (1+z)(t_em - r.n/c).
         let r_dot_n = evt.x * obs_hat[0] + evt.y * obs_hat[1] + evt.z * obs_hat[2];
         let t_arrival = one_plus_z * (evt.t_emission - r_dot_n / C_LIGHT.value());
-        let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else { continue };
+        let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else {
+            continue;
+        };
         let dt = time_bins_s[t_bin + 1] - time_bins_s[t_bin];
 
         // observer-direction doppler from the lab-frame fluid VELOCITY (not the random photon
@@ -176,7 +184,7 @@ pub fn compute_lightcurve_from_events(
     }
 
     ObserverLightcurve {
-        times:       time_bins.to_vec(),
+        times: time_bins.to_vec(),
         fluxes,
         frequencies: frequencies.to_vec(),
     }
@@ -217,7 +225,11 @@ pub fn compute_skymap(
 ) -> SkyImage {
     let n = normalize(observer_direction);
     // an orthonormal basis (e1, e2) spanning the sky plane perpendicular to n.
-    let e1 = if n[2].abs() < 0.99 { normalize([-n[1], n[0], 0.0]) } else { normalize([0.0, -n[2], n[1]]) };
+    let e1 = if n[2].abs() < 0.99 {
+        normalize([-n[1], n[0], 0.0])
+    } else {
+        normalize([0.0, -n[2], n[1]])
+    };
     let e2 = [
         n[1] * e1[2] - n[2] * e1[1],
         n[2] * e1[0] - n[0] * e1[2],
@@ -278,7 +290,11 @@ pub fn compute_skymap(
 
     let mut intensity = vec![0.0; n_pix * n_pix];
     if half_width <= 0.0 || n_pix == 0 {
-        return SkyImage { intensity, n_pix, half_width };
+        return SkyImage {
+            intensity,
+            n_pix,
+            half_width,
+        };
     }
     let px = 2.0 * half_width / n_pix as f64;
     for (q, w) in &pts {
@@ -295,7 +311,11 @@ pub fn compute_skymap(
         *v /= pixel_area;
     }
 
-    SkyImage { intensity, n_pix, half_width }
+    SkyImage {
+        intensity,
+        n_pix,
+        half_width,
+    }
 }
 
 /// polarization evolution for a chosen line of sight: accumulate energy-weighted stokes
@@ -316,7 +336,10 @@ pub fn compute_polarization_from_events(
     let mut stokes_i_total = vec![0.0; n_times];
 
     let obs_hat = normalize(observer_direction);
-    let time_bins_s: Vec<f64> = time_bins.iter().map(|t| t * SECONDS_PER_DAY.value()).collect();
+    let time_bins_s: Vec<f64> = time_bins
+        .iter()
+        .map(|t| t * SECONDS_PER_DAY.value())
+        .collect();
 
     for evt in events.iter().filter(|e| !e.absorbed) {
         // energy band filter on the PHOTON energy h*nu_emit, which sets the spectral band.
@@ -331,7 +354,9 @@ pub fn compute_polarization_from_events(
         // same equal-arrival-time surface as the light curve / skymap: t_obs = (1+z)(t_em - r.n/c).
         let r_dot_n = evt.x * obs_hat[0] + evt.y * obs_hat[1] + evt.z * obs_hat[2];
         let t_arrival = (1.0 + redshift) * (evt.t_emission - r_dot_n / C_LIGHT.value());
-        let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else { continue };
+        let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else {
+            continue;
+        };
 
         stokes_i_total[t_bin] += evt.energy_weight * evt.stokes_i;
         stokes_q[t_bin] += evt.energy_weight * evt.stokes_q;
@@ -370,11 +395,25 @@ mod tests {
     // frequency (doppler=1 here); `weight` is the flux/intensity contribution.
     fn packet_toward_x(nu_emit: f64, weight: f64, radius: f64) -> PhotonEvent {
         PhotonEvent {
-            t_emission: 0.0, x: radius, y: 0.0, z: 0.0,
-            nu_emit, energy_weight: weight, px: 1.0, py: 0.0, pz: 0.0,
-            stokes_i: 1.0, stokes_q: 0.0, stokes_u: 0.0, stokes_v: 0.0,
-            doppler_factor: 1.0, beta_vec: [0.0, 0.0, 0.0], optical_depth: 0.0,
-            cell_id: 0, absorbed: false, n_scatter: 0,
+            t_emission: 0.0,
+            x: radius,
+            y: 0.0,
+            z: 0.0,
+            nu_emit,
+            energy_weight: weight,
+            px: 1.0,
+            py: 0.0,
+            pz: 0.0,
+            stokes_i: 1.0,
+            stokes_q: 0.0,
+            stokes_u: 0.0,
+            stokes_v: 0.0,
+            doppler_factor: 1.0,
+            beta_vec: [0.0, 0.0, 0.0],
+            optical_depth: 0.0,
+            cell_id: 0,
+            absorbed: false,
+            n_scatter: 0,
         }
     }
 
@@ -394,11 +433,19 @@ mod tests {
         let tbins = vec![-10.0, 0.0];
         let obs = [1.0, 0.0, 0.0];
 
-        let lc = compute_lightcurve_from_events(&[visible], obs, &nus, 0.0, 1.0e26, &tbins, 3.0, 0.1);
-        assert!(lc.fluxes.iter().any(|&f| f > 0.0), "visible packet should land flux");
+        let lc =
+            compute_lightcurve_from_events(&[visible], obs, &nus, 0.0, 1.0e26, &tbins, 3.0, 0.1);
+        assert!(
+            lc.fluxes.iter().any(|&f| f > 0.0),
+            "visible packet should land flux"
+        );
 
-        let lc0 = compute_lightcurve_from_events(&[absorbed], obs, &nus, 0.0, 1.0e26, &tbins, 3.0, 0.1);
-        assert!(lc0.fluxes.iter().all(|&f| f == 0.0), "absorbed packet contributes nothing");
+        let lc0 =
+            compute_lightcurve_from_events(&[absorbed], obs, &nus, 0.0, 1.0e26, &tbins, 3.0, 0.1);
+        assert!(
+            lc0.fluxes.iter().all(|&f| f == 0.0),
+            "absorbed packet contributes nothing"
+        );
     }
 
     // the monochromatic band selects only packets whose OBSERVED frequency brackets the target:
@@ -408,18 +455,35 @@ mod tests {
         let evt = packet_toward_x(1.0e15, 1.0, 1.0e16);
         let obs = [1.0, 0.0, 0.0];
         let tbins = vec![-10.0, 0.0];
-        let on = compute_lightcurve_from_events(&[evt], obs, &[1.0e15], 0.0, 1.0e26, &tbins, 3.0, 0.1);
-        let off = compute_lightcurve_from_events(&[evt], obs, &[1.0e12], 0.0, 1.0e26, &tbins, 3.0, 0.1);
+        let on =
+            compute_lightcurve_from_events(&[evt], obs, &[1.0e15], 0.0, 1.0e26, &tbins, 3.0, 0.1);
+        let off =
+            compute_lightcurve_from_events(&[evt], obs, &[1.0e12], 0.0, 1.0e26, &tbins, 3.0, 0.1);
         assert!(on.fluxes[0] > 0.0, "packet lands in its own frequency band");
-        assert!(off.fluxes.iter().all(|&f| f == 0.0), "packet absent from a far band");
+        assert!(
+            off.fluxes.iter().all(|&f| f == 0.0),
+            "packet absent from a far band"
+        );
     }
 
     // unpolarized packets (Q=U=V=0) give zero polarization degree but finite intensity.
     #[test]
     fn polarization_of_unpolarized_is_zero() {
-        let evts: Vec<PhotonEvent> = (0..16).map(|_| packet_toward_x(1.0e15, 1.0, 1.0e16)).collect();
-        let pc = compute_polarization_from_events(&evts, [1.0, 0.0, 0.0], &[-10.0, 0.0], 0.0, 1.0e30, 0.0);
-        assert!(pc.polarization_degree[0].abs() < 1e-12, "unpolarized -> zero degree");
+        let evts: Vec<PhotonEvent> = (0..16)
+            .map(|_| packet_toward_x(1.0e15, 1.0, 1.0e16))
+            .collect();
+        let pc = compute_polarization_from_events(
+            &evts,
+            [1.0, 0.0, 0.0],
+            &[-10.0, 0.0],
+            0.0,
+            1.0e30,
+            0.0,
+        );
+        assert!(
+            pc.polarization_degree[0].abs() < 1e-12,
+            "unpolarized -> zero degree"
+        );
     }
 
     // a partially-polarized population recovers its linear polarization degree and angle.
@@ -427,7 +491,14 @@ mod tests {
     fn polarization_recovers_q() {
         let mut e = packet_toward_x(1.0e15, 1.0, 1.0e16);
         e.stokes_q = 0.4; // 40% along Q
-        let pc = compute_polarization_from_events(&[e], [1.0, 0.0, 0.0], &[-10.0, 0.0], 0.0, 1.0e30, 0.0);
+        let pc = compute_polarization_from_events(
+            &[e],
+            [1.0, 0.0, 0.0],
+            &[-10.0, 0.0],
+            0.0,
+            1.0e30,
+            0.0,
+        );
         assert!((pc.polarization_degree[0] - 0.4).abs() < 1e-9);
         assert!(pc.polarization_angle[0].abs() < 1e-9, "pure +Q -> angle 0");
     }
@@ -444,14 +515,24 @@ mod tests {
                 let rhat = [st * phi.cos(), st * phi.sin(), ct];
                 v.push(PhotonEvent {
                     t_emission: 0.0,
-                    x: radius * rhat[0], y: radius * rhat[1], z: radius * rhat[2],
-                    nu_emit: 1.0e15, energy_weight: 1.0,
-                    px: rhat[0], py: rhat[1], pz: rhat[2],
-                    stokes_i: 1.0, stokes_q: 0.0, stokes_u: 0.0, stokes_v: 0.0,
+                    x: radius * rhat[0],
+                    y: radius * rhat[1],
+                    z: radius * rhat[2],
+                    nu_emit: 1.0e15,
+                    energy_weight: 1.0,
+                    px: rhat[0],
+                    py: rhat[1],
+                    pz: rhat[2],
+                    stokes_i: 1.0,
+                    stokes_q: 0.0,
+                    stokes_u: 0.0,
+                    stokes_v: 0.0,
                     doppler_factor: 1.0,
                     beta_vec: [beta * rhat[0], beta * rhat[1], beta * rhat[2]],
                     optical_depth: 0.0,
-                    cell_id: 0, absorbed: false, n_scatter: 0,
+                    cell_id: 0,
+                    absorbed: false,
+                    n_scatter: 0,
                 });
             }
         }
@@ -483,21 +564,50 @@ mod tests {
                 if x * x + y * y < r * r {
                     // emitters in the sky plane (z=0), at rest (gamma=1 -> delta=1).
                     evts.push(PhotonEvent {
-                        t_emission: 0.0, x, y, z: 0.0,
-                        nu_emit: 1.0e15, energy_weight: 1.0,
-                        px: 0.0, py: 0.0, pz: 1.0,
-                        stokes_i: 1.0, stokes_q: 0.0, stokes_u: 0.0, stokes_v: 0.0,
-                        doppler_factor: 1.0, beta_vec: [0.0, 0.0, 0.0], optical_depth: 0.0,
-                        cell_id: 0, absorbed: false, n_scatter: 0,
+                        t_emission: 0.0,
+                        x,
+                        y,
+                        z: 0.0,
+                        nu_emit: 1.0e15,
+                        energy_weight: 1.0,
+                        px: 0.0,
+                        py: 0.0,
+                        pz: 1.0,
+                        stokes_i: 1.0,
+                        stokes_q: 0.0,
+                        stokes_u: 0.0,
+                        stokes_v: 0.0,
+                        doppler_factor: 1.0,
+                        beta_vec: [0.0, 0.0, 0.0],
+                        optical_depth: 0.0,
+                        cell_id: 0,
+                        absorbed: false,
+                        n_scatter: 0,
                     });
                 }
             }
         }
-        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], 0.0, 1.0e9, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1);
+        let img = compute_skymap(
+            &evts,
+            [0.0, 0.0, 1.0],
+            0.0,
+            1.0e9,
+            0.0,
+            1.0e30,
+            0.0,
+            3.0,
+            16,
+            0.0,
+            0.0,
+            0.1,
+        );
         let nonzero: Vec<f64> = img.intensity.iter().copied().filter(|&v| v > 0.0).collect();
         let mean = nonzero.iter().sum::<f64>() / nonzero.len() as f64;
         let maxv = img.intensity.iter().copied().fold(0.0, f64::max);
-        assert!(maxv < 5.0 * mean, "central singularity: max {maxv} vs mean {mean}");
+        assert!(
+            maxv < 5.0 * mean,
+            "central singularity: max {maxv} vs mean {mean}"
+        );
     }
 
     // the EATS time window slices the shell into a RING: the radial brightness profile peaks
@@ -507,11 +617,30 @@ mod tests {
         // shell radius R, R/c ~ 38.6 day; select theta ~ 60 deg (z = 0.5 R -> arrival -19.3 day).
         let r = 1.0e17;
         let evts = shell_events(r, 10.0, 240, 240);
-        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], -19.3, 4.0, 0.0, 1.0e30, 0.0, 3.0, 64, 0.0, 0.0, 0.1);
+        let img = compute_skymap(
+            &evts,
+            [0.0, 0.0, 1.0],
+            -19.3,
+            4.0,
+            0.0,
+            1.0e30,
+            0.0,
+            3.0,
+            64,
+            0.0,
+            0.0,
+            0.1,
+        );
         let prof = img.radial_profile(10);
         let peak = argmax(&prof);
-        assert!(peak >= 5, "ring should peak off-center (got ring {peak}): {prof:?}");
-        assert!(prof[0] < 0.5 * prof[peak], "center should be dark vs the ring: {prof:?}");
+        assert!(
+            peak >= 5,
+            "ring should peak off-center (got ring {peak}): {prof:?}"
+        );
+        assert!(
+            prof[0] < 0.5 * prof[peak],
+            "center should be dark vs the ring: {prof:?}"
+        );
     }
 
     // the observer-direction doppler weighting boosts a faster (more beamed) emitter: a gamma=10
@@ -527,18 +656,47 @@ mod tests {
             let beta = (1.0 - 1.0 / (gamma * gamma)).sqrt();
             // radial velocity along the position direction (st, 0, ct).
             vec![PhotonEvent {
-                t_emission: 0.0, x: r * st, y: 0.0, z: r * ct,
-                nu_emit: 1.0e15, energy_weight: 1.0,
-                px: st, py: 0.0, pz: ct,
-                stokes_i: 1.0, stokes_q: 0.0, stokes_u: 0.0, stokes_v: 0.0,
-                doppler_factor: 1.0, beta_vec: [beta * st, 0.0, beta * ct], optical_depth: 0.0,
-                cell_id: 0, absorbed: false, n_scatter: 0,
+                t_emission: 0.0,
+                x: r * st,
+                y: 0.0,
+                z: r * ct,
+                nu_emit: 1.0e15,
+                energy_weight: 1.0,
+                px: st,
+                py: 0.0,
+                pz: ct,
+                stokes_i: 1.0,
+                stokes_q: 0.0,
+                stokes_u: 0.0,
+                stokes_v: 0.0,
+                doppler_factor: 1.0,
+                beta_vec: [beta * st, 0.0, beta * ct],
+                optical_depth: 0.0,
+                cell_id: 0,
+                absorbed: false,
+                n_scatter: 0,
             }]
         };
         let total = |g: f64| {
-            let img = compute_skymap(&one(g), [0.0, 0.0, 1.0], arrival_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1);
+            let img = compute_skymap(
+                &one(g),
+                [0.0, 0.0, 1.0],
+                arrival_day,
+                4.0,
+                0.0,
+                1.0e30,
+                0.0,
+                3.0,
+                16,
+                0.0,
+                0.0,
+                0.1,
+            );
             img.intensity.iter().sum::<f64>()
         };
-        assert!(total(10.0) > total(2.0), "delta^3 should favor the faster fluid");
+        assert!(
+            total(10.0) > total(2.0),
+            "delta^3 should favor the faster fluid"
+        );
     }
 }

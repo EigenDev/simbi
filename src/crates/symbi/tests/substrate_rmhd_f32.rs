@@ -17,11 +17,11 @@ use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
+use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
-use symbi_grid::Field;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimState<Rmhd, 3, Cartesian, IdealGas<f32>, CpuSpace, HostMemory, f32>;
@@ -39,7 +39,8 @@ fn make_sim() -> Sim {
     // smooth periodic hydro (|v| small) + uniform staggered B0; the prim -> cons forward map and
     // the cell-centered B are folded in by set_initial, the staggered faces by seed_faces_uniform.
     Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([n, n, n]).spacing([dx, dx, dx])
+        .cells([n, n, n])
+        .spacing([dx, dx, dx])
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
         .cfl(CFL as f64)
         .allocate()
@@ -52,7 +53,11 @@ fn make_sim() -> Sim {
             let vz = 0.05 * (2.0 * pi * x).cos();
             let p = 1.0 + amp * (2.0 * pi * y).sin();
             MhdPrim {
-                hydro: Prim { rho, vel: Tensor::new([vx, vy, vz]), pre: p },
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new([vx, vy, vz]),
+                    pre: p,
+                },
                 mag: Tensor::new(B0),
             }
         })
@@ -71,9 +76,8 @@ fn assert_finite(f: &Field<f32, 3, HostMemory>, interior: &[[isize; 3]], what: &
 #[test]
 fn substrate_rmhd_f32_smoke() {
     let sim = make_sim();
-    let sub = RmhdSubstrateKernelSet3D::<HostMemory, f32>::new(
-        5.0 / 3.0, 0.4, 1.0, &sim.geom.allocated,
-    );
+    let sub =
+        RmhdSubstrateKernelSet3D::<HostMemory, f32>::new(5.0 / 3.0, 0.4, 1.0, &sim.geom.allocated);
     let interior: Vec<[isize; 3]> = sim.geom.interior.iter().collect();
     let pre = sim.fields.prim.pre_field().expect("prim.pre");
     let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
@@ -96,7 +100,10 @@ fn substrate_rmhd_f32_smoke() {
     }
 
     let dt = sub.cfl(&sim);
-    assert!(dt > 0.0 && dt.is_finite(), "cfl dt not finite/positive: {dt}");
+    assert!(
+        dt > 0.0 && dt.is_finite(),
+        "cfl dt not finite/positive: {dt}"
+    );
 
     sub.snapshot(&sim);
     sub.godunov_stage(&sim, dt, 0.0, 1.0);

@@ -15,16 +15,24 @@
 //   assert_eq!(expr.eval(3.0, 0.0, 0.0, 0.0)[0], 3.0);
 // =============================================================================
 
-use crate::op::Op;
 use crate::dag::{Node, Payload};
 use crate::eval::Expression;
+use crate::op::Op;
 
 /// error type for expression loading.
 #[derive(Debug)]
 pub enum LoadError {
     UnknownOp(String),
-    MissingField { node: usize, field: &'static str },
-    InvalidIndex { node: usize, field: &'static str, index: usize, num_nodes: usize },
+    MissingField {
+        node: usize,
+        field: &'static str,
+    },
+    InvalidIndex {
+        node: usize,
+        field: &'static str,
+        index: usize,
+        num_nodes: usize,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -34,8 +42,17 @@ impl std::fmt::Display for LoadError {
             LoadError::MissingField { node, field } => {
                 write!(f, "node {}: missing field '{}'", node, field)
             }
-            LoadError::InvalidIndex { node, field, index, num_nodes } => {
-                write!(f, "node {}: field '{}' index {} >= num_nodes {}", node, field, index, num_nodes)
+            LoadError::InvalidIndex {
+                node,
+                field,
+                index,
+                num_nodes,
+            } => {
+                write!(
+                    f,
+                    "node {}: field '{}' index {} >= num_nodes {}",
+                    node, field, index, num_nodes
+                )
             }
         }
     }
@@ -168,57 +185,102 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
     let mut nodes = Vec::with_capacity(nn);
 
     for (ii, desc) in node_descs.iter().enumerate() {
-        let op = Op::from_name(&desc.op)
-            .ok_or_else(|| LoadError::UnknownOp(desc.op.clone()))?;
+        let op = Op::from_name(&desc.op).ok_or_else(|| LoadError::UnknownOp(desc.op.clone()))?;
 
         let payload = match op.arity() {
             0 if op == Op::Constant => {
-                let val = desc.value
-                    .ok_or(LoadError::MissingField { node: ii, field: "value" })?;
+                let val = desc.value.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "value",
+                })?;
                 Payload::Value(val)
             }
             0 if op == Op::Parameter => {
-                let idx = desc.param_idx
-                    .ok_or(LoadError::MissingField { node: ii, field: "param_idx" })?;
+                let idx = desc.param_idx.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "param_idx",
+                })?;
                 Payload::ParamIdx(idx)
             }
             0 => Payload::None, // variable
             1 => {
-                let child = desc.left
-                    .ok_or(LoadError::MissingField { node: ii, field: "left" })?;
+                let child = desc.left.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "left",
+                })?;
                 if child >= nn {
-                    return Err(LoadError::InvalidIndex { node: ii, field: "left", index: child, num_nodes: nn });
+                    return Err(LoadError::InvalidIndex {
+                        node: ii,
+                        field: "left",
+                        index: child,
+                        num_nodes: nn,
+                    });
                 }
                 Payload::Unary(child)
             }
             2 => {
-                let left = desc.left
-                    .ok_or(LoadError::MissingField { node: ii, field: "left" })?;
-                let right = desc.right
-                    .ok_or(LoadError::MissingField { node: ii, field: "right" })?;
+                let left = desc.left.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "left",
+                })?;
+                let right = desc.right.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "right",
+                })?;
                 if left >= nn {
-                    return Err(LoadError::InvalidIndex { node: ii, field: "left", index: left, num_nodes: nn });
+                    return Err(LoadError::InvalidIndex {
+                        node: ii,
+                        field: "left",
+                        index: left,
+                        num_nodes: nn,
+                    });
                 }
                 if right >= nn {
-                    return Err(LoadError::InvalidIndex { node: ii, field: "right", index: right, num_nodes: nn });
+                    return Err(LoadError::InvalidIndex {
+                        node: ii,
+                        field: "right",
+                        index: right,
+                        num_nodes: nn,
+                    });
                 }
                 Payload::Binary(left, right)
             }
             3 => {
-                let cond = desc.condition
-                    .ok_or(LoadError::MissingField { node: ii, field: "condition" })?;
-                let then_ = desc.true_case
-                    .ok_or(LoadError::MissingField { node: ii, field: "true_case" })?;
-                let else_ = desc.false_case
-                    .ok_or(LoadError::MissingField { node: ii, field: "false_case" })?;
+                let cond = desc.condition.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "condition",
+                })?;
+                let then_ = desc.true_case.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "true_case",
+                })?;
+                let else_ = desc.false_case.ok_or(LoadError::MissingField {
+                    node: ii,
+                    field: "false_case",
+                })?;
                 if cond >= nn {
-                    return Err(LoadError::InvalidIndex { node: ii, field: "condition", index: cond, num_nodes: nn });
+                    return Err(LoadError::InvalidIndex {
+                        node: ii,
+                        field: "condition",
+                        index: cond,
+                        num_nodes: nn,
+                    });
                 }
                 if then_ >= nn {
-                    return Err(LoadError::InvalidIndex { node: ii, field: "true_case", index: then_, num_nodes: nn });
+                    return Err(LoadError::InvalidIndex {
+                        node: ii,
+                        field: "true_case",
+                        index: then_,
+                        num_nodes: nn,
+                    });
                 }
                 if else_ >= nn {
-                    return Err(LoadError::InvalidIndex { node: ii, field: "false_case", index: else_, num_nodes: nn });
+                    return Err(LoadError::InvalidIndex {
+                        node: ii,
+                        field: "false_case",
+                        index: else_,
+                        num_nodes: nn,
+                    });
                 }
                 Payload::Ternary(cond, then_, else_)
             }
@@ -324,12 +386,21 @@ mod tests {
         assert_eq!(cfg.outputs, vec![3]);
 
         let want = 2.5 * 0.7_f64.sin();
-        let got = cfg.to_expression().expect("build expr").eval(0.7, 0.0, 0.0, 0.0)[0];
-        assert!(approx(got, want), "json -> expr -> eval: got {got}, want {want}");
+        let got = cfg
+            .to_expression()
+            .expect("build expr")
+            .eval(0.7, 0.0, 0.0, 0.0)[0];
+        assert!(
+            approx(got, want),
+            "json -> expr -> eval: got {got}, want {want}"
+        );
 
         // serialize -> parse -> same eval (the round-trip the python golden test pins).
         let rt = SourceConfig::from_json(&cfg.to_json().unwrap()).unwrap();
-        assert!(approx(rt.to_expression().unwrap().eval(0.7, 0.0, 0.0, 0.0)[0], want));
+        assert!(approx(
+            rt.to_expression().unwrap().eval(0.7, 0.0, 0.0, 0.0)[0],
+            want
+        ));
     }
 
     #[test]
@@ -348,12 +419,12 @@ mod tests {
     fn load_sod_ic() {
         // if x < 0.5 then 1.0 else 0.125
         let nodes = vec![
-            NodeDesc::variable("VARIABLE_X1"),  // 0
-            NodeDesc::constant(0.5),             // 1
-            NodeDesc::binary("LT", 0, 1),        // 2: x < 0.5
-            NodeDesc::constant(1.0),             // 3
-            NodeDesc::constant(0.125),           // 4
-            NodeDesc::ternary(2, 3, 4),          // 5: if-then-else
+            NodeDesc::variable("VARIABLE_X1"), // 0
+            NodeDesc::constant(0.5),           // 1
+            NodeDesc::binary("LT", 0, 1),      // 2: x < 0.5
+            NodeDesc::constant(1.0),           // 3
+            NodeDesc::constant(0.125),         // 4
+            NodeDesc::ternary(2, 3, 4),        // 5: if-then-else
         ];
         let expr = load_expression(&nodes, &[5], &[]).unwrap();
         assert!(approx(expr.eval(0.1, 0.0, 0.0, 0.0)[0], 1.0));
@@ -364,11 +435,11 @@ mod tests {
     fn load_with_parameters() {
         // p0 * x + p1
         let nodes = vec![
-            NodeDesc::parameter(0),              // 0
-            NodeDesc::variable("VARIABLE_X1"),   // 1
-            NodeDesc::binary("MULTIPLY", 0, 1),  // 2
-            NodeDesc::parameter(1),              // 3
-            NodeDesc::binary("ADD", 2, 3),       // 4
+            NodeDesc::parameter(0),             // 0
+            NodeDesc::variable("VARIABLE_X1"),  // 1
+            NodeDesc::binary("MULTIPLY", 0, 1), // 2
+            NodeDesc::parameter(1),             // 3
+            NodeDesc::binary("ADD", 2, 3),      // 4
         ];
         let expr = load_expression(&nodes, &[4], &[2.0, 5.0]).unwrap();
         assert!(approx(expr.eval(3.0, 0.0, 0.0, 0.0)[0], 11.0));
@@ -378,10 +449,10 @@ mod tests {
     fn load_multi_output() {
         // outputs: (x + y, x * y)
         let nodes = vec![
-            NodeDesc::variable("VARIABLE_X1"),   // 0
-            NodeDesc::variable("VARIABLE_X2"),   // 1
-            NodeDesc::binary("ADD", 0, 1),       // 2
-            NodeDesc::binary("MULTIPLY", 0, 1),  // 3
+            NodeDesc::variable("VARIABLE_X1"),  // 0
+            NodeDesc::variable("VARIABLE_X2"),  // 1
+            NodeDesc::binary("ADD", 0, 1),      // 2
+            NodeDesc::binary("MULTIPLY", 0, 1), // 3
         ];
         let expr = load_expression(&nodes, &[2, 3], &[]).unwrap();
         let out = expr.eval(3.0, 4.0, 0.0, 0.0);
@@ -399,7 +470,10 @@ mod tests {
 
     #[test]
     fn load_missing_field() {
-        let nodes = vec![NodeDesc { op: "CONSTANT".into(), ..NodeDesc::empty() }];
+        let nodes = vec![NodeDesc {
+            op: "CONSTANT".into(),
+            ..NodeDesc::empty()
+        }];
         let err = load_expression(&nodes, &[0], &[]);
         assert!(err.is_err());
         assert!(err.unwrap_err().to_string().contains("missing field"));
@@ -419,10 +493,7 @@ mod tests {
     #[test]
     fn load_unary() {
         // sin(x)
-        let nodes = vec![
-            NodeDesc::variable("VARIABLE_X1"),
-            NodeDesc::unary("SIN", 0),
-        ];
+        let nodes = vec![NodeDesc::variable("VARIABLE_X1"), NodeDesc::unary("SIN", 0)];
         let expr = load_expression(&nodes, &[1], &[]).unwrap();
         let pi_half = std::f64::consts::FRAC_PI_2;
         assert!(approx(expr.eval(pi_half, 0.0, 0.0, 0.0)[0], 1.0));

@@ -26,14 +26,14 @@
 //   let flux = regime.to_flux(&prim, &nhat, &eos);
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::energy::Zero;
-use crate::state::{ConsG, PrimG};
-use crate::mhd_state::{IsoMhdPrim, IsoMhdCons};
-use crate::regime::Regime;
 use crate::c2p_result::C2pResult;
+use crate::energy::Zero;
+use crate::eos::Eos;
+use crate::mhd_state::{IsoMhdCons, IsoMhdPrim};
+use crate::regime::Regime;
+use crate::state::{ConsG, PrimG};
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 /// isothermal ideal magnetohydrodynamics. no energy equation; p = a^2 rho.
 #[derive(Clone, Copy, Debug)]
@@ -51,7 +51,11 @@ pub fn imhd_recover<S: Scalar, const D: usize>(
     // div-by-zero -> inf/NaN, no silent floor (feedback_no_silent_floors).
     let inv_rho = S::ONE / cons.den;
     IsoMhdPrim {
-        hydro: PrimG { rho: cons.den, vel: cons.mom.scale(inv_rho), pre: Zero::default() },
+        hydro: PrimG {
+            rho: cons.den,
+            vel: cons.mom.scale(inv_rho),
+            pre: Zero::default(),
+        },
         mag: cons.mag,
     }
 }
@@ -70,7 +74,7 @@ fn fast_magnetosonic<S: Scalar, const D: usize>(
     let a_sq = eos.sound_speed_sq(prim.rho, S::ZERO);
     let bsq = prim.mag.dot(&prim.mag);
     let bn = prim.mag.dot(nhat);
-    let ca_sq = bsq / prim.rho;        // total alfven speed squared
+    let ca_sq = bsq / prim.rho; // total alfven speed squared
     let can_sq = (bn * bn) / prim.rho; // normal alfven speed squared
     let sum = a_sq + ca_sq;
     let disc = (sum * sum - four * a_sq * can_sq).safe_sqrt();
@@ -86,14 +90,19 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     #[inline]
     fn to_conserved(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
         IsoMhdCons {
-            hydro: ConsG { den: prim.rho, mom: prim.vel.scale(prim.rho), nrg: Zero::default() },
+            hydro: ConsG {
+                den: prim.rho,
+                mom: prim.vel.scale(prim.rho),
+                nrg: Zero::default(),
+            },
             mag: prim.mag,
         }
     }
 
     #[inline]
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
-    where S: OrderedNumeric
+    where
+        S: OrderedNumeric,
     {
         // trivial, no iteration. iso has no failure mode a floor meaningfully
         // recovers (matches IsoNewtonian) -> always Ok; raw IEEE math, no floor.
@@ -107,7 +116,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
         let bn = prim.mag.dot(nhat);
         let bsq = prim.mag.dot(&prim.mag);
         let pre = eos.pressure(prim.rho, S::ZERO); // a^2 rho
-        let p_tot = pre + half * bsq;              // gas + magnetic pressure
+        let p_tot = pre + half * bsq; // gas + magnetic pressure
         let rho_vn = prim.rho * vn;
         IsoMhdCons {
             hydro: ConsG {
@@ -135,8 +144,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::Tensor;
     use crate::eos::Isothermal;
+    use symbi_algebra::Tensor;
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-12 * a.abs().max(b.abs()).max(1.0)
@@ -144,7 +153,11 @@ mod tests {
 
     fn prim3(rho: f64, vel: [f64; 3], mag: [f64; 3]) -> IsoMhdPrim<f64, 3> {
         IsoMhdPrim {
-            hydro: PrimG { rho, vel: Tensor::new(vel), pre: Zero::default() },
+            hydro: PrimG {
+                rho,
+                vel: Tensor::new(vel),
+                pre: Zero::default(),
+            },
             mag: Tensor::new(mag),
         }
     }
@@ -157,8 +170,12 @@ mod tests {
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
         assert!(approx(prim.rho, prim2.rho));
-        for dd in 0..3 { assert!(approx(prim.vel[dd], prim2.vel[dd])); }
-        for dd in 0..3 { assert!(approx(prim.mag[dd], prim2.mag[dd])); }
+        for dd in 0..3 {
+            assert!(approx(prim.vel[dd], prim2.vel[dd]));
+        }
+        for dd in 0..3 {
+            assert!(approx(prim.mag[dd], prim2.mag[dd]));
+        }
     }
 
     #[test]
@@ -172,7 +189,9 @@ mod tests {
         let f = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(f.den, 2.0 * 0.5));
         assert!(approx(f.mom[0], 2.0 * 0.5 * 0.5 + cs * cs * 2.0));
-        for dd in 0..3 { assert!(approx(f.mag[dd], 0.0)); }
+        for dd in 0..3 {
+            assert!(approx(f.mag[dd], 0.0));
+        }
     }
 
     #[test]

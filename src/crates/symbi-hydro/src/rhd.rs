@@ -13,12 +13,12 @@
 // all functions are pure math — elemental, GPU-callable, no allocation.
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use crate::eos::Eos;
-use crate::state::{Prim, Cons};
-use crate::regime::Regime;
 use crate::c2p_result::C2pResult;
+use crate::eos::Eos;
+use crate::regime::Regime;
+use crate::state::{Cons, Prim};
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::Scalar;
 
 mod algebra;
 mod cons;
@@ -26,11 +26,11 @@ mod gr;
 mod wave_speeds;
 
 pub use algebra::{enthalpy, enthalpy_density, lorentz_factor, lorentz_factor_sq, sound_speed_sq};
-pub use gr::RhdGr;
-pub(crate) use wave_speeds::rhd_speeds_from_vn_gr;
 pub use cons::rhd_recover;
 use cons::rhd_to_primitive;
+pub use gr::RhdGr;
 use wave_speeds::rhd_speeds_from_vn;
+pub(crate) use wave_speeds::rhd_speeds_from_vn_gr;
 
 /// special relativistic hydrodynamics.
 #[derive(Clone, Copy, Debug)]
@@ -68,12 +68,19 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     ) -> Self::Cons {
         // delegate to `RhdGr` at the cell's 3+1 block so the seeded state is the densitized
         // sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)] the metric-aware c2p inverts.
-        RhdGr { metric: *gamma, alpha, shift, sqrt_gamma }.to_conserved(eos, prim)
+        RhdGr {
+            metric: *gamma,
+            alpha,
+            shift,
+            sqrt_gamma,
+        }
+        .to_conserved(eos, prim)
     }
 
     #[inline]
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
-    where S: OrderedNumeric
+    where
+        S: OrderedNumeric,
     {
         rhd_to_primitive(eos, cons)
     }
@@ -133,7 +140,11 @@ mod tests {
         // v=0: W=1, D=rho, S=0, tau = rho*h - p - rho = rho*(h-1) - p
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        };
         let cons = regime.to_conserved(&eos, &prim);
         let h = enthalpy(&eos, 1.0, 1.0);
         assert!(approx(cons.den, 1.0));
@@ -146,7 +157,11 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
         let v = 0.5;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([v]),
+            pre: 1.0,
+        };
         let cons = regime.to_conserved(&eos, &prim);
         let h = enthalpy(&eos, 1.0, 1.0);
         let w = lorentz_factor(v * v);
@@ -160,7 +175,11 @@ mod tests {
         // for v << 1, RHD conserved should approximate newtonian conserved
         let eos = IdealGas { gamma: 1.4 };
         let v = 1e-4;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([v]),
+            pre: 1.0,
+        };
         let cons_rhd = Rhd.to_conserved(&eos, &prim);
         let cons_newt = Newtonian.to_conserved(&eos, &prim);
         // den: D = rho*W ~ rho*(1 + 0.5*v^2) ~ rho
@@ -174,7 +193,11 @@ mod tests {
         // v=0: all fluxes zero except mom[dir] = p
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 2.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 2.0,
+        };
         let ff = regime.to_flux(&prim, &Tensor::unit(0), &eos);
         assert!(approx(ff.den, 0.0));
         assert!(approx(ff.mom[0], 2.0)); // pressure only
@@ -186,7 +209,11 @@ mod tests {
         // for uniform state, hlle should return the physical flux
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([0.3]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3]),
+            pre: 1.0,
+        };
         let ff = regime.to_flux(&prim, &Tensor::unit(0), &eos);
         let flux_hlle = crate::riemann::hlle(&regime, &eos, &prim, &prim, &Tensor::unit(0), 0.0);
         assert!(approx(ff.den, flux_hlle.den));
@@ -199,7 +226,11 @@ mod tests {
         // for v << 1, RHD flux should approximate newtonian euler flux
         let eos = IdealGas { gamma: 1.4 };
         let v = 1e-3;
-        let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre: 1.0 };
+        let prim = Prim {
+            rho: 1.0,
+            vel: Tensor::new([v]),
+            pre: 1.0,
+        };
         let flux_rhd = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
         let flux_newt = Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
         // density flux: rho*v for both

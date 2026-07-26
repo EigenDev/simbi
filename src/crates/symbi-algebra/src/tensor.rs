@@ -38,7 +38,9 @@ impl<T: Copy, const N: usize> Tensor<T, N> {
     /// build a tensor from an index closure: `from_fn(|i| ...)`. the const-D bridge from a
     /// runtime slice to a fixed-rank tensor (e.g. the geometry source's `Metric<S, D>` call).
     pub fn from_fn(f: impl FnMut(usize) -> T) -> Self {
-        Self { data: std::array::from_fn(f) }
+        Self {
+            data: std::array::from_fn(f),
+        }
     }
 
     pub fn splat(val: T) -> Self {

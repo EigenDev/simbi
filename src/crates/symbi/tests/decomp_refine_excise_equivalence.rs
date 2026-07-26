@@ -18,17 +18,17 @@
 //     without this the equivalence above would pass just as happily if both sides excised nothing.
 // =============================================================================
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
-use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
 };
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::WithExcision;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 4.0 / 3.0;
@@ -42,7 +42,8 @@ const T_FINAL: f64 = 0.08;
 
 type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
-type Hier = Hierarchy<Rhd, 2, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory, Kern>;
+type Hier =
+    Hierarchy<Rhd, 2, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory, Kern>;
 
 fn kset(sim: &Sim) -> Kern {
     Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC)
@@ -57,28 +58,39 @@ fn kset_unexcised(sim: &Sim) -> Kern {
 // restrict un-excised values back over the fill. the request gate enforces this separation, so the
 // oracle honors it.
 fn patch() -> RefinementRegion<2> {
-    RefinementRegion { x_lo: [0.55 * L, 0.55 * L], x_hi: [0.90 * L, 0.90 * L] }
+    RefinementRegion {
+        x_lo: [0.55 * L, 0.55 * L],
+        x_hi: [0.90 * L, 0.90 * L],
+    }
 }
 
 fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
-    Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells(cells)
-        .spacing([DX; 2])
-        .origin(origin)
-        .boundaries(bnd)
-        .cfl(CFL)
-        .timestepping(Timestepping::Rk2)
-        .allocate()
-        .expect("root sim construction failed")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 2]), pre: 0.1 })
-        .build()
+    Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells(cells)
+    .spacing([DX; 2])
+    .origin(origin)
+    .boundaries(bnd)
+    .cfl(CFL)
+    .timestepping(Timestepping::Rk2)
+    .allocate()
+    .expect("root sim construction failed")
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0; 2]),
+        pre: 0.1,
+    })
+    .build()
 }
 
 fn build_mono(mk: fn(&Sim) -> Kern) -> Hier {
     let root = build_root([N, N], [-L, -L], Boundaries::uniform(BoundaryType::Outflow));
     let k = mk(&root);
-    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, mk)
-        .expect("mono hierarchy");
+    let mut h =
+        Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, mk).expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -92,15 +104,22 @@ fn build_tiles(counts: [usize; 2], mk: fn(&Sim) -> Kern) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let origin: [f64; 2] = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
-            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+            let lo = if tc[a] == 0 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
+            let hi = if tc[a] == counts[a] - 1 {
+                BoundaryType::Outflow
+            } else {
+                BoundaryType::CoarseFine
+            };
             [lo, hi]
         }));
         let root = build_root(m, origin, bnd);
         let p = patch();
-        let owns_patch = (0..2).all(|a| {
-            origin[a] <= p.x_lo[a] && origin[a] + m[a] as f64 * DX >= p.x_hi[a]
-        });
+        let owns_patch =
+            (0..2).all(|a| origin[a] <= p.x_lo[a] && origin[a] + m[a] as f64 * DX >= p.x_hi[a]);
         let mut h = if owns_patch {
             let k = mk(&root);
             let h = Hier::with_refinement(root, k, &[p], ProlongOrder::Plm, mk)
@@ -146,12 +165,18 @@ fn root_density(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
             out[g[1] * N + g[0]] = *root.fields.cons.den.view().at(c);
         }
     }
-    assert!(out.iter().all(|v| v.is_finite()), "root density has unwritten cells");
+    assert!(
+        out.iter().all(|v| v.is_finite()),
+        "root density has unwritten cells"
+    );
     out
 }
 
 fn max_err(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max)
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .fold(0.0, f64::max)
 }
 
 // the cells strictly inside the excised surface, in global root-index order.
@@ -177,7 +202,10 @@ fn assert_matches(counts: [usize; 2]) {
     let got = root_density(&tiles, counts);
 
     let e = max_err(&want, &got);
-    assert!(e < 1e-12, "{counts:?} refined+excised decomposed vs monolithic: err {e:e}");
+    assert!(
+        e < 1e-12,
+        "{counts:?} refined+excised decomposed vs monolithic: err {e:e}"
+    );
 
     // NON-VACUITY: the excise must actually have fired. compare the excised core against the same
     // run with excision OFF -- if the pass never ran, the two are identical and the equivalence
@@ -187,7 +215,10 @@ fn assert_matches(counts: [usize; 2]) {
     let bare = root_density(&plain, [1, 1]);
     let mask = excised_mask();
     let ncore = mask.iter().filter(|b| **b).count();
-    assert!(ncore > 8, "the excised sphere covers only {ncore} root cells; setup is too coarse");
+    assert!(
+        ncore > 8,
+        "the excised sphere covers only {ncore} root cells; setup is too coarse"
+    );
     let core_diff = mask
         .iter()
         .enumerate()

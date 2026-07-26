@@ -35,8 +35,8 @@ const N: usize = 8;
 // build an RMHD sim on (S, Mem) with a smooth periodic hydro state + uniform B,
 // conserved via the production forward map — identical numbers for any memory space
 // (unified is host-addressable, so the host init writes land on-device too).
-fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
-) -> SimState<Rmhd, 3, Cartesian, IdealGas<f64>, S, Mem> {
+fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
+-> SimState<Rmhd, 3, Cartesian, IdealGas<f64>, S, Mem> {
     let dx = 1.0 / N as f64;
     let pi = std::f64::consts::PI;
     let amp = 0.1;
@@ -71,7 +71,10 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
 // GPU vs CPU agree modulo nvcc FMA fusion: ULP-bounded drift.
 fn assert_close(gpu: f64, cpu: f64, what: &str, coord: [isize; 3]) {
     let rel = (gpu - cpu).abs() / cpu.abs().max(1.0);
-    assert!(rel < 1e-9, "{what} at {coord:?}: gpu {gpu} != cpu {cpu} (rel {rel:e})");
+    assert!(
+        rel < 1e-9,
+        "{what} at {coord:?}: gpu {gpu} != cpu {cpu} (rel {rel:e})"
+    );
 }
 
 #[test]
@@ -89,12 +92,17 @@ fn substrate_rmhd_c2p_gpu_matches_cpu() {
     let mut nontrivial = false;
     for coord in host.geom.interior.iter() {
         assert_close(
-            *dev.fields.prim.rho.view().at(coord), *host.fields.prim.rho.view().at(coord), "rho", coord,
+            *dev.fields.prim.rho.view().at(coord),
+            *host.fields.prim.rho.view().at(coord),
+            "rho",
+            coord,
         );
         for k in 0..3 {
             assert_close(
-                *dev.fields.prim.vel[k].view().at(coord), *host.fields.prim.vel[k].view().at(coord),
-                "vel", coord,
+                *dev.fields.prim.vel[k].view().at(coord),
+                *host.fields.prim.vel[k].view().at(coord),
+                "vel",
+                coord,
             );
         }
         assert_close(*dp.view().at(coord), *hp.view().at(coord), "pre", coord);
@@ -102,7 +110,10 @@ fn substrate_rmhd_c2p_gpu_matches_cpu() {
             nontrivial = true;
         }
     }
-    assert!(nontrivial, "c2p output trivially uniform — test would be vacuous");
+    assert!(
+        nontrivial,
+        "c2p output trivially uniform — test would be vacuous"
+    );
 }
 
 // the harder paths on GPU: ghost_fill exercises the INT param lane (map_type/arg)
@@ -143,24 +154,37 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
         }
         let hmhd = host.fields.mhd.as_ref().unwrap();
         let dmhd = dev.fields.mhd.as_ref().unwrap();
-        let (hnrg, dnrg) =
-            (host.fields.flux[dir].nrg_field().unwrap(), dev.fields.flux[dir].nrg_field().unwrap());
+        let (hnrg, dnrg) = (
+            host.fields.flux[dir].nrg_field().unwrap(),
+            dev.fields.flux[dir].nrg_field().unwrap(),
+        );
         for coord in face.iter() {
             assert_close(
-                *dev.fields.flux[dir].den.view().at(coord), *host.fields.flux[dir].den.view().at(coord),
-                "flux.den", coord,
+                *dev.fields.flux[dir].den.view().at(coord),
+                *host.fields.flux[dir].den.view().at(coord),
+                "flux.den",
+                coord,
             );
             for k in 0..3 {
                 assert_close(
                     *dev.fields.flux[dir].mom[k].view().at(coord),
-                    *host.fields.flux[dir].mom[k].view().at(coord), "flux.mom", coord,
+                    *host.fields.flux[dir].mom[k].view().at(coord),
+                    "flux.mom",
+                    coord,
                 );
                 assert_close(
-                    *dmhd.bflux[dir][k].view().at(coord), *hmhd.bflux[dir][k].view().at(coord),
-                    "bflux", coord,
+                    *dmhd.bflux[dir][k].view().at(coord),
+                    *hmhd.bflux[dir][k].view().at(coord),
+                    "bflux",
+                    coord,
                 );
             }
-            assert_close(*dnrg.view().at(coord), *hnrg.view().at(coord), "flux.nrg", coord);
+            assert_close(
+                *dnrg.view().at(coord),
+                *hnrg.view().at(coord),
+                "flux.nrg",
+                coord,
+            );
         }
     }
 }
@@ -186,12 +210,17 @@ fn substrate_rmhd_evolve_gpu_matches_cpu() {
     evolve(&mut host, &hset, t_final).expect("cpu evolve");
     evolve(&mut dev, &dset, t_final).expect("gpu evolve");
     symbi_xpu::cuda::ctx_sync(); // host-read barrier: the final step's c2p/ghost run async after
-                                 // the cfl sync; without this the interior read can race them.
+    // the cfl sync; without this the interior read can race them.
 
-    assert!(host.iteration >= 3, "too few steps ({}) — smoke would be vacuous", host.iteration);
+    assert!(
+        host.iteration >= 3,
+        "too few steps ({}) — smoke would be vacuous",
+        host.iteration
+    );
     assert_eq!(
         host.iteration, dev.iteration,
-        "step count diverged: cpu {} vs gpu {}", host.iteration, dev.iteration,
+        "step count diverged: cpu {} vs gpu {}",
+        host.iteration, dev.iteration,
     );
 
     // compare the conserved state + cell B over the interior: NaN-free + close.
@@ -201,20 +230,43 @@ fn substrate_rmhd_evolve_gpu_matches_cpu() {
     let dnrg = dev.fields.cons.nrg_field().unwrap();
     // looser than a single kernel: ~N steps of RK2 + iterative c2p compound FMA drift.
     let evolve_close = |g: f64, c: f64, what: &str, coord: [isize; 3]| {
-        assert!(g.is_finite(), "{what} at {coord:?} went non-finite on GPU: {g}");
+        assert!(
+            g.is_finite(),
+            "{what} at {coord:?} went non-finite on GPU: {g}"
+        );
         let rel = (g - c).abs() / c.abs().max(1.0);
-        assert!(rel < 1e-6, "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})");
+        assert!(
+            rel < 1e-6,
+            "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})"
+        );
     };
     for coord in host.geom.interior.iter() {
-        evolve_close(*dev.fields.cons.den.view().at(coord), *host.fields.cons.den.view().at(coord), "cons.den", coord);
+        evolve_close(
+            *dev.fields.cons.den.view().at(coord),
+            *host.fields.cons.den.view().at(coord),
+            "cons.den",
+            coord,
+        );
         for k in 0..3 {
             evolve_close(
-                *dev.fields.cons.mom[k].view().at(coord), *host.fields.cons.mom[k].view().at(coord),
-                "cons.mom", coord,
+                *dev.fields.cons.mom[k].view().at(coord),
+                *host.fields.cons.mom[k].view().at(coord),
+                "cons.mom",
+                coord,
             );
-            evolve_close(*dmhd.bcell[k].view().at(coord), *hmhd.bcell[k].view().at(coord), "bcell", coord);
+            evolve_close(
+                *dmhd.bcell[k].view().at(coord),
+                *hmhd.bcell[k].view().at(coord),
+                "bcell",
+                coord,
+            );
         }
-        evolve_close(*dnrg.view().at(coord), *hnrg.view().at(coord), "cons.nrg", coord);
+        evolve_close(
+            *dnrg.view().at(coord),
+            *hnrg.view().at(coord),
+            "cons.nrg",
+            coord,
+        );
     }
 }
 
@@ -229,14 +281,38 @@ fn field_max_reduce_device_matches_host_and_respects_window() {
     use symbi_grid::Field;
 
     let alloc = Domain::new([
-        Space { name: "x", lo: 0, hi: 8 },
-        Space { name: "y", lo: 0, hi: 8 },
-        Space { name: "z", lo: 0, hi: 8 },
+        Space {
+            name: "x",
+            lo: 0,
+            hi: 8,
+        },
+        Space {
+            name: "y",
+            lo: 0,
+            hi: 8,
+        },
+        Space {
+            name: "z",
+            lo: 0,
+            hi: 8,
+        },
     ]);
     let interior = Domain::new([
-        Space { name: "x", lo: 2, hi: 6 },
-        Space { name: "y", lo: 2, hi: 6 },
-        Space { name: "z", lo: 2, hi: 6 },
+        Space {
+            name: "x",
+            lo: 2,
+            hi: 6,
+        },
+        Space {
+            name: "y",
+            lo: 2,
+            hi: 6,
+        },
+        Space {
+            name: "z",
+            lo: 2,
+            hi: 6,
+        },
     ]);
     let f = Field::<f64, 3, UnifiedMemory>::zeros(&alloc).unwrap();
     // smooth distinct values everywhere; a HUGE spike in a GHOST cell (outside the
@@ -252,8 +328,14 @@ fn field_max_reduce_device_matches_host_and_respects_window() {
         host_max = host_max.max(*f.view().at(c));
     }
     let dev_max = field_max_reduce(&f, &interior);
-    assert_eq!(dev_max, host_max, "device reduction != host max over interior");
-    assert!(dev_max < 1.0e6, "windowing failed: the ghost spike leaked into the reduction");
+    assert_eq!(
+        dev_max, host_max,
+        "device reduction != host max over interior"
+    );
+    assert!(
+        dev_max < 1.0e6,
+        "windowing failed: the ghost spike leaked into the reduction"
+    );
 }
 
 // the morphism is op-generic: Add/Min/Max all reduce on-device matching the host.
@@ -267,18 +349,43 @@ fn field_reduce_device_all_ops_match_host() {
     use symbi_ir::emit::ReductionOp;
 
     let alloc = Domain::new([
-        Space { name: "x", lo: 0, hi: 8 },
-        Space { name: "y", lo: 0, hi: 8 },
-        Space { name: "z", lo: 0, hi: 8 },
+        Space {
+            name: "x",
+            lo: 0,
+            hi: 8,
+        },
+        Space {
+            name: "y",
+            lo: 0,
+            hi: 8,
+        },
+        Space {
+            name: "z",
+            lo: 0,
+            hi: 8,
+        },
     ]);
     let interior = Domain::new([
-        Space { name: "x", lo: 2, hi: 6 },
-        Space { name: "y", lo: 2, hi: 6 },
-        Space { name: "z", lo: 2, hi: 6 },
+        Space {
+            name: "x",
+            lo: 2,
+            hi: 6,
+        },
+        Space {
+            name: "y",
+            lo: 2,
+            hi: 6,
+        },
+        Space {
+            name: "z",
+            lo: 2,
+            hi: 6,
+        },
     ]);
     let f = Field::<f64, 3, UnifiedMemory>::zeros(&alloc).unwrap();
     for c in alloc.iter() {
-        f.view_mut().set(c, 0.5 + 0.001 * (c[0] + 5 * c[1] + 11 * c[2]) as f64);
+        f.view_mut()
+            .set(c, 0.5 + 0.001 * (c[0] + 5 * c[1] + 11 * c[2]) as f64);
     }
     let cells: Vec<f64> = interior.iter().map(|c| *f.view().at(c)).collect();
     let hmax = cells.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -287,12 +394,26 @@ fn field_reduce_device_all_ops_match_host() {
     let hprod: f64 = cells.iter().product();
 
     // min/max are bit-exact (no FMA); add/mul differ only by reassociated rounding.
-    assert_eq!(field_reduce(&f, &interior, ReductionOp::Max), hmax, "device max");
-    assert_eq!(field_reduce(&f, &interior, ReductionOp::Min), hmin, "device min");
+    assert_eq!(
+        field_reduce(&f, &interior, ReductionOp::Max),
+        hmax,
+        "device max"
+    );
+    assert_eq!(
+        field_reduce(&f, &interior, ReductionOp::Min),
+        hmin,
+        "device min"
+    );
     let dsum = field_reduce(&f, &interior, ReductionOp::Add);
-    assert!((dsum - hsum).abs() < 1e-9 * hsum.abs().max(1.0), "device add {dsum} != host {hsum}");
+    assert!(
+        (dsum - hsum).abs() < 1e-9 * hsum.abs().max(1.0),
+        "device add {dsum} != host {hsum}"
+    );
     let dprod = field_reduce(&f, &interior, ReductionOp::Mul);
-    assert!((dprod - hprod).abs() < 1e-9 * hprod.abs().max(1e-30), "device mul {dprod} != host {hprod}");
+    assert!(
+        (dprod - hprod).abs() < 1e-9 * hprod.abs().max(1e-30),
+        "device mul {dprod} != host {hprod}"
+    );
 }
 
 // keystone: a single NaN cell must survive the ON-DEVICE block reduction (the
@@ -307,21 +428,52 @@ fn device_reduction_propagates_single_nan_cell() {
     use symbi_ir::emit::ReductionOp;
 
     let alloc = Domain::new([
-        Space { name: "x", lo: 0, hi: 8 },
-        Space { name: "y", lo: 0, hi: 8 },
-        Space { name: "z", lo: 0, hi: 8 },
+        Space {
+            name: "x",
+            lo: 0,
+            hi: 8,
+        },
+        Space {
+            name: "y",
+            lo: 0,
+            hi: 8,
+        },
+        Space {
+            name: "z",
+            lo: 0,
+            hi: 8,
+        },
     ]);
     let interior = Domain::new([
-        Space { name: "x", lo: 2, hi: 6 },
-        Space { name: "y", lo: 2, hi: 6 },
-        Space { name: "z", lo: 2, hi: 6 },
+        Space {
+            name: "x",
+            lo: 2,
+            hi: 6,
+        },
+        Space {
+            name: "y",
+            lo: 2,
+            hi: 6,
+        },
+        Space {
+            name: "z",
+            lo: 2,
+            hi: 6,
+        },
     ]);
     let f = Field::<f64, 3, UnifiedMemory>::zeros(&alloc).unwrap();
     for c in alloc.iter() {
-        f.view_mut().set(c, 0.5 + 0.001 * (c[0] + 5 * c[1] + 11 * c[2]) as f64);
+        f.view_mut()
+            .set(c, 0.5 + 0.001 * (c[0] + 5 * c[1] + 11 * c[2]) as f64);
     }
     f.view_mut().set([3, 3, 3], f64::NAN); // one poisoned interior cell
 
-    assert!(field_reduce(&f, &interior, ReductionOp::Max).is_nan(), "device max dropped NaN");
-    assert!(field_reduce(&f, &interior, ReductionOp::Min).is_nan(), "device min dropped NaN");
+    assert!(
+        field_reduce(&f, &interior, ReductionOp::Max).is_nan(),
+        "device max dropped NaN"
+    );
+    assert!(
+        field_reduce(&f, &interior, ReductionOp::Min).is_nan(),
+        "device min dropped NaN"
+    );
 }

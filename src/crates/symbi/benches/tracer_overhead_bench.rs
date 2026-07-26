@@ -55,8 +55,7 @@ fn build(n: usize) -> Sim {
         .expect("tracer benchmark simulation construction failed")
         .set_initial(|[x, y]| {
             let smooth = 0.02;
-            let inside =
-                0.5 * (1.0 + ((y - 0.25) / smooth).tanh() * ((0.75 - y) / smooth).tanh());
+            let inside = 0.5 * (1.0 + ((y - 0.25) / smooth).tanh() * ((0.75 - y) / smooth).tanh());
             Prim {
                 rho: 1.0 + inside,
                 vel: Tensor::new([-0.5 + inside, 0.01 * (4.0 * PI * x).sin()]),
@@ -70,8 +69,7 @@ fn run(n: usize, particles: usize, order: Option<ItoOrder>) -> (f64, u64) {
     let mut sim = build(n);
     if let Some(order) = order {
         let seed = seed_mass_weighted(&sim, particles);
-        sim.continuous_tracers =
-            Some(ContinuousTracerSet::from_discrete(&seed, order).unwrap());
+        sim.continuous_tracers = Some(ContinuousTracerSet::from_discrete(&seed, order).unwrap());
     }
     let kernels = Kern::new(GAMMA, CFL, &sim.geom.allocated)
         .with_solver(Solver::Hllc)
@@ -81,7 +79,10 @@ fn run(n: usize, particles: usize, order: Option<ItoOrder>) -> (f64, u64) {
     let start = Instant::now();
     evolve(&mut sim, &kernels, WARM_TIME + TIMED_TIME)
         .expect("tracer benchmark timed evolution failed");
-    (start.elapsed().as_secs_f64(), sim.iteration - first_iteration)
+    (
+        start.elapsed().as_secs_f64(),
+        sim.iteration - first_iteration,
+    )
 }
 
 fn main() {
@@ -91,8 +92,14 @@ fn main() {
     let (plain_time, plain_steps) = run(n, particles, None);
     let (ito2_time, ito2_steps) = run(n, particles, Some(ItoOrder::Two));
     let (ito3_time, ito3_steps) = run(n, particles, Some(ItoOrder::Three));
-    assert_eq!(ito2_steps, plain_steps, "ito-2 changed the hydro step count");
-    assert_eq!(ito3_steps, plain_steps, "ito-3 changed the hydro step count");
+    assert_eq!(
+        ito2_steps, plain_steps,
+        "ito-2 changed the hydro step count"
+    );
+    assert_eq!(
+        ito3_steps, plain_steps,
+        "ito-3 changed the hydro step count"
+    );
 
     let zone_cycles = cells as f64 * plain_steps as f64;
     let particle_updates = particles as f64 * plain_steps as f64;

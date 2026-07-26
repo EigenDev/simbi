@@ -33,8 +33,8 @@ const B0: f64 = 1.0;
 const BZ0: f64 = 0.4;
 const V0: f64 = 0.5;
 
-fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
-) -> SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, S, Mem, f64> {
+fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
+-> SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, S, Mem, f64> {
     let dx = 1.0 / N as f64;
     let rho0 = GAMMA * GAMMA;
     let p0 = GAMMA;
@@ -51,8 +51,19 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
     .expect("2.5d sim")
     .set_initial(|[x, y]| {
         let vel = Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]);
-        let mag = Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), BZ0 * (2.0 * PI * x).cos()]);
-        MhdPrim { hydro: Prim { rho: rho0, vel, pre: p0 }, mag }
+        let mag = Tensor::new([
+            -B0 * (2.0 * PI * y).sin(),
+            B0 * (4.0 * PI * x).sin(),
+            BZ0 * (2.0 * PI * x).cos(),
+        ]);
+        MhdPrim {
+            hydro: Prim {
+                rho: rho0,
+                vel,
+                pre: p0,
+            },
+            mag,
+        }
     })
     // face-normal B: bface[0] = -B0*sin(2*pi*y) (uses the face's y), bface[1] = B0*sin(4*pi*x).
     .seed_faces(|axis, x| match axis {
@@ -66,8 +77,18 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
 fn nmhd_2p5d_evolve_gpu_matches_cpu() {
     let mut host = build_sim::<CpuSpace, HostMemory>();
     let mut dev = build_sim::<CudaSpace, UnifiedMemory>();
-    let hset = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.0, &host.geom.allocated);
-    let dset = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, 1.0, &dev.geom.allocated);
+    let hset = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &host.geom.allocated,
+    );
+    let dset = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &dev.geom.allocated,
+    );
 
     let t_final = 0.05_f64;
     evolve(&mut host, &hset, t_final).expect("cpu evolve");
@@ -75,7 +96,11 @@ fn nmhd_2p5d_evolve_gpu_matches_cpu() {
     symbi_xpu::cuda::ctx_sync(); // host-read barrier for the final async c2p/ghost.
 
     assert!(host.iteration >= 3, "too few steps ({})", host.iteration);
-    assert_eq!(host.iteration, dev.iteration, "step count diverged: cpu {} gpu {}", host.iteration, dev.iteration);
+    assert_eq!(
+        host.iteration, dev.iteration,
+        "step count diverged: cpu {} gpu {}",
+        host.iteration, dev.iteration
+    );
 
     let hmhd = host.fields.mhd.as_ref().unwrap();
     let dmhd = dev.fields.mhd.as_ref().unwrap();
@@ -84,15 +109,38 @@ fn nmhd_2p5d_evolve_gpu_matches_cpu() {
     let close = |g: f64, c: f64, what: &str, coord: [isize; 2]| {
         assert!(g.is_finite(), "{what} at {coord:?} non-finite on GPU: {g}");
         let rel = (g - c).abs() / c.abs().max(1.0);
-        assert!(rel < 1e-6, "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})");
+        assert!(
+            rel < 1e-6,
+            "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})"
+        );
     };
     for coord in host.geom.interior.iter() {
-        close(*dev.fields.cons.den.view().at(coord), *host.fields.cons.den.view().at(coord), "cons.den", coord);
-        close(*dnrg.view().at(coord), *hnrg.view().at(coord), "cons.nrg", coord);
+        close(
+            *dev.fields.cons.den.view().at(coord),
+            *host.fields.cons.den.view().at(coord),
+            "cons.den",
+            coord,
+        );
+        close(
+            *dnrg.view().at(coord),
+            *hnrg.view().at(coord),
+            "cons.nrg",
+            coord,
+        );
         for k in 0..3 {
-            close(*dev.fields.cons.mom[k].view().at(coord), *host.fields.cons.mom[k].view().at(coord), "cons.mom", coord);
+            close(
+                *dev.fields.cons.mom[k].view().at(coord),
+                *host.fields.cons.mom[k].view().at(coord),
+                "cons.mom",
+                coord,
+            );
             // bcell carries all 3 components incl. the out-of-plane Bz.
-            close(*dmhd.bcell[k].view().at(coord), *hmhd.bcell[k].view().at(coord), "bcell", coord);
+            close(
+                *dmhd.bcell[k].view().at(coord),
+                *hmhd.bcell[k].view().at(coord),
+                "bcell",
+                coord,
+            );
         }
     }
 }

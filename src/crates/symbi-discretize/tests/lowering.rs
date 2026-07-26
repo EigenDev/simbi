@@ -20,16 +20,16 @@ mod harness;
 use harness::KernelRun;
 
 use symbi_discretize::gv::{
-    adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rmhd_flux_gv, rhd_flux_gv,
+    adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
 };
 use symbi_discretize::{
-    adiabatic_c2p_gv, body_feedback_gv, body_source_gv, geometric_momentum_source_probe_gv,
-    geometry_probe_gv, godunov_mass_gv, godunov_stage_gv,
-    inertial_momentum_probe_gv, iso_c2p_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
-    rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
-    rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
-    rmhd_edge_emf_gv, rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, snapshot_gv,
-    rhd_c2p_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    Coords, GeoSource, Spacetime, Spacing, adiabatic_c2p_gv, body_feedback_gv, body_source_gv,
+    geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv, godunov_stage_gv,
+    inertial_momentum_probe_gv, iso_c2p_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, rhd_c2p_gv,
+    rhd_wave_speed_map_gv, rmhd_average_efield_gv, rmhd_bcell_from_bface_gv,
+    rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv,
+    rmhd_ct_curl_3d_dir_gv, rmhd_edge_emf_gv, rmhd_ghost_fill_gv, rmhd_save_efield_gv,
+    rmhd_wave_speed_map_gv, snapshot_gv,
 };
 
 // MAX_SOURCE_BODIES is owned by the runtime (symbi_ib::collection::MAX_SOURCE_BODIES = 2); mirrored
@@ -43,7 +43,9 @@ const MAX_SOURCE_BODIES: usize = 2;
 fn geo_source(prefix: &str) -> GeoSource {
     match prefix {
         "rmhd" => GeoSource::Rmhd,
-        _ => GeoSource::Hydro { inertial: matches!(prefix, "iso" | "adiabatic" | "rhd") },
+        _ => GeoSource::Hydro {
+            inertial: matches!(prefix, "iso" | "adiabatic" | "rhd"),
+        },
     }
 }
 
@@ -54,10 +56,16 @@ fn geo_source(prefix: &str) -> GeoSource {
 #[test]
 fn c2p_kernels_lower_to_every_backend() {
     KernelRun::new(iso_c2p_gv::<1>()).grid([8]).assert_lowers();
-    KernelRun::new(adiabatic_c2p_gv::<1>()).grid([8]).assert_lowers();
+    KernelRun::new(adiabatic_c2p_gv::<1>())
+        .grid([8])
+        .assert_lowers();
     // cyl r-z adiabatic c2p folds a 3-component velocity on a 2-axis grid (ncomp=3).
-    KernelRun::new(adiabatic_c2p_gv::<3>()).grid([8]).assert_lowers();
-    KernelRun::new(rhd_c2p_gv::<1>(20)).grid([8]).assert_lowers();
+    KernelRun::new(adiabatic_c2p_gv::<3>())
+        .grid([8])
+        .assert_lowers();
+    KernelRun::new(rhd_c2p_gv::<1>(20))
+        .grid([8])
+        .assert_lowers();
     KernelRun::new(rmhd_c2p_gv(100)).grid([8]).assert_lowers();
 }
 
@@ -70,20 +78,40 @@ fn c2p_kernels_lower_to_every_backend() {
 #[test]
 fn flux_kernels_lower() {
     // cartesian, dir 0, ndim 1 (build.rs emits all (ndim,dir); one of each family here).
-    KernelRun::new(iso_flux_gv::<1>(0)).grid([8]).assert_lowers();
-    KernelRun::new(adiabatic_flux_gv::<1>(0)).grid([8]).assert_lowers();
-    KernelRun::new(rhd_flux_gv::<1>(0)).grid([8]).assert_lowers();
+    KernelRun::new(iso_flux_gv::<1>(0))
+        .grid([8])
+        .assert_lowers();
+    KernelRun::new(adiabatic_flux_gv::<1>(0))
+        .grid([8])
+        .assert_lowers();
+    KernelRun::new(rhd_flux_gv::<1>(0))
+        .grid([8])
+        .assert_lowers();
     // a 2D cartesian instance per family to exercise the transverse stencil axis.
-    KernelRun::new(iso_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
-    KernelRun::new(adiabatic_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
-    KernelRun::new(rhd_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
+    KernelRun::new(iso_flux_gv::<2>(1))
+        .grid([8, 8])
+        .assert_lowers();
+    KernelRun::new(adiabatic_flux_gv::<2>(1))
+        .grid([8, 8])
+        .assert_lowers();
+    KernelRun::new(rhd_flux_gv::<2>(1))
+        .grid([8, 8])
+        .assert_lowers();
     // cyl r-z adiabatic flux: 3-component swirl on a 2-axis (r,z) grid, both sweep dirs.
-    KernelRun::new(adiabatic_flux_cyl_rz_gv(0)).grid([8, 8]).assert_lowers();
-    KernelRun::new(adiabatic_flux_cyl_rz_gv(1)).grid([8, 8]).assert_lowers();
+    KernelRun::new(adiabatic_flux_cyl_rz_gv(0))
+        .grid([8, 8])
+        .assert_lowers();
+    KernelRun::new(adiabatic_flux_cyl_rz_gv(1))
+        .grid([8, 8])
+        .assert_lowers();
     // rmhd flux: 8 conserved fluxes (D,S,tau,B). 1D dir-0 + the per-dir 3D instances.
-    KernelRun::new(rmhd_flux_gv(1, 0, 0)).grid([8]).assert_lowers();
+    KernelRun::new(rmhd_flux_gv(1, 0, 0))
+        .grid([8])
+        .assert_lowers();
     for dir in 0..3 {
-        KernelRun::new(rmhd_flux_gv(3, dir, dir as usize)).grid([8, 8, 8]).assert_lowers();
+        KernelRun::new(rmhd_flux_gv(3, dir, dir as usize))
+            .grid([8, 8, 8])
+            .assert_lowers();
     }
 }
 
@@ -95,12 +123,22 @@ fn flux_kernels_lower() {
 #[test]
 fn wave_speed_kernels_lower() {
     // iso: cartesian 1D + log-radial spherical 1D (per-cell physical width).
-    KernelRun::new(iso_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform], &[0], 1))
-        .grid([8])
-        .assert_lowers();
-    KernelRun::new(iso_wave_speed_map_gv(Coords::Spherical, &[Spacing::Log], &[0], 1))
-        .grid([8])
-        .assert_lowers();
+    KernelRun::new(iso_wave_speed_map_gv(
+        Coords::Cartesian,
+        &[Spacing::Uniform],
+        &[0],
+        1,
+    ))
+    .grid([8])
+    .assert_lowers();
+    KernelRun::new(iso_wave_speed_map_gv(
+        Coords::Spherical,
+        &[Spacing::Log],
+        &[0],
+        1,
+    ))
+    .grid([8])
+    .assert_lowers();
     // iso spherical 3D (the curvilinear hydro family) to exercise multi-axis widths.
     KernelRun::new(iso_wave_speed_map_gv(
         Coords::Spherical,
@@ -111,9 +149,15 @@ fn wave_speed_kernels_lower() {
     .grid([8, 8, 8])
     .assert_lowers();
     // rhd: cartesian 1D + spherical 3D.
-    KernelRun::new(rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1))
-        .grid([8])
-        .assert_lowers();
+    KernelRun::new(rhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform],
+        &[0],
+        1,
+    ))
+    .grid([8])
+    .assert_lowers();
     KernelRun::new(rhd_wave_speed_map_gv(
         Coords::Spherical,
         Spacetime::Minkowski,
@@ -124,12 +168,22 @@ fn wave_speed_kernels_lower() {
     .grid([8, 8, 8])
     .assert_lowers();
     // rmhd: the quartic-wave-speed map, cartesian 3D + spherical 3D.
-    KernelRun::new(rmhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3))
-        .grid([8, 8, 8])
-        .assert_lowers();
-    KernelRun::new(rmhd_wave_speed_map_gv(Coords::Spherical, &[Spacing::Uniform; 3], &[0, 1, 2], 3))
-        .grid([8, 8, 8])
-        .assert_lowers();
+    KernelRun::new(rmhd_wave_speed_map_gv(
+        Coords::Cartesian,
+        &[Spacing::Uniform; 3],
+        &[0, 1, 2],
+        3,
+    ))
+    .grid([8, 8, 8])
+    .assert_lowers();
+    KernelRun::new(rmhd_wave_speed_map_gv(
+        Coords::Spherical,
+        &[Spacing::Uniform; 3],
+        &[0, 1, 2],
+        3,
+    ))
+    .grid([8, 8, 8])
+    .assert_lowers();
 }
 
 // -----------------------------------------------------------------------------
@@ -140,59 +194,117 @@ fn wave_speed_kernels_lower() {
 #[test]
 fn godunov_kernels_lower() {
     // single mass law, separate output buffer. cartesian + spherical area-weighted.
-    KernelRun::new(godunov_mass_gv(Coords::Cartesian, &[Spacing::Uniform], &[0], 1))
-        .grid([8])
-        .assert_lowers();
-    KernelRun::new(godunov_mass_gv(Coords::Spherical, &[Spacing::Uniform], &[0], 1))
-        .grid([8])
-        .assert_lowers();
+    KernelRun::new(godunov_mass_gv(
+        Coords::Cartesian,
+        &[Spacing::Uniform],
+        &[0],
+        1,
+    ))
+    .grid([8])
+    .assert_lowers();
+    KernelRun::new(godunov_mass_gv(
+        Coords::Spherical,
+        &[Spacing::Uniform],
+        &[0],
+        1,
+    ))
+    .grid([8])
+    .assert_lowers();
 
     // cartesian godunov-stage/snapshot for each EOS regime, 1D (iso no-energy, adiabatic/rhd
     // energy). the one `godunov_stage_gv` kernel serves every SSP scheme (euler/rk2/rk3) via the
     // runtime (a0, ac) coefficients, so one lowering check per geometry replaces the euler+rk2 pair.
     for (prefix, has_energy) in [("iso", false), ("adiabatic", true), ("rhd", true)] {
         KernelRun::new(godunov_stage_gv(
-            Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1, 1, has_energy, geo_source(prefix),
+            Coords::Cartesian,
+            Spacetime::Minkowski,
+            &[Spacing::Uniform],
+            &[0],
+            1,
+            1,
+            has_energy,
+            geo_source(prefix),
         ))
         .grid([8])
         .assert_lowers();
-        KernelRun::new(snapshot_gv(1, has_energy)).grid([8]).assert_lowers();
+        KernelRun::new(snapshot_gv(1, has_energy))
+            .grid([8])
+            .assert_lowers();
     }
 
     // spherical curvilinear hydro (adiabatic, energy) at 2D — area-weighted + inertial source.
     KernelRun::new(godunov_stage_gv(
-        Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true, geo_source("adiabatic"),
+        Coords::Spherical,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 2],
+        &[0, 1],
+        2,
+        2,
+        true,
+        geo_source("adiabatic"),
     ))
     .grid([8, 8])
     .assert_lowers();
 
     // cylindrical r-z axisymmetric adiabatic (ncomp=3 swirl on a 2-axis (r,z) grid).
     KernelRun::new(godunov_stage_gv(
-        Coords::Cylindrical, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 2], 2, 3, true, geo_source("adiabatic"),
+        Coords::Cylindrical,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 2],
+        &[0, 2],
+        2,
+        3,
+        true,
+        geo_source("adiabatic"),
     ))
     .grid([8, 8])
     .assert_lowers();
-    KernelRun::new(snapshot_gv(3, true)).grid([8, 8]).assert_lowers();
+    KernelRun::new(snapshot_gv(3, true))
+        .grid([8, 8])
+        .assert_lowers();
 
     // cylindrical r-phi disk (ncomp == ndim == 2, natural plane).
     KernelRun::new(godunov_stage_gv(
-        Coords::Cylindrical, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true, geo_source("adiabatic"),
+        Coords::Cylindrical,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 2],
+        &[0, 1],
+        2,
+        2,
+        true,
+        geo_source("adiabatic"),
     ))
     .grid([8, 8])
     .assert_lowers();
 
     // rmhd hydro godunov-stage (D/S/tau), 3D cartesian + spherical.
     KernelRun::new(godunov_stage_gv(
-        Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, geo_source("rmhd"),
+        Coords::Cartesian,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 3],
+        &[0, 1, 2],
+        3,
+        3,
+        true,
+        geo_source("rmhd"),
     ))
     .grid([8, 8, 8])
     .assert_lowers();
     KernelRun::new(godunov_stage_gv(
-        Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, geo_source("rmhd"),
+        Coords::Spherical,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 3],
+        &[0, 1, 2],
+        3,
+        3,
+        true,
+        geo_source("rmhd"),
     ))
     .grid([8, 8, 8])
     .assert_lowers();
-    KernelRun::new(snapshot_gv(3, true)).grid([8, 8, 8]).assert_lowers();
+    KernelRun::new(snapshot_gv(3, true))
+        .grid([8, 8, 8])
+        .assert_lowers();
 }
 
 // -----------------------------------------------------------------------------
@@ -202,10 +314,16 @@ fn godunov_kernels_lower() {
 #[test]
 fn ghost_kernels_lower() {
     // iso cartesian 1D (identity axes) + cyl r-z 2D (3-component, axes [0,2]).
-    KernelRun::new(iso_ghost_fill_gv(1, 1, &[0])).grid([8]).assert_lowers();
-    KernelRun::new(iso_ghost_fill_gv(2, 3, &[0, 2])).grid([8, 8]).assert_lowers();
+    KernelRun::new(iso_ghost_fill_gv(1, 1, &[0]))
+        .grid([8])
+        .assert_lowers();
+    KernelRun::new(iso_ghost_fill_gv(2, 3, &[0, 2]))
+        .grid([8, 8])
+        .assert_lowers();
     // rmhd 3D pullback: prim rho/vel/pre + mhd.bcell with vel/B sign flips.
-    KernelRun::new(rmhd_ghost_fill_gv(3, 3)).grid([8, 8, 8]).assert_lowers();
+    KernelRun::new(rmhd_ghost_fill_gv(3, 3))
+        .grid([8, 8, 8])
+        .assert_lowers();
 }
 
 // -----------------------------------------------------------------------------
@@ -218,7 +336,9 @@ fn ct_kernels_lower() {
     // 2D in-plane curl from the out-of-plane edge EMF (built at ndim=2); the combined 2d curl was
     // split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from the corner E_z).
     for dir in 0..2 {
-        KernelRun::new(rmhd_ct_curl_2d_dir_gv(dir)).grid([8, 8]).assert_lowers();
+        KernelRun::new(rmhd_ct_curl_2d_dir_gv(dir))
+            .grid([8, 8])
+            .assert_lowers();
     }
     // per-dir 3D curl, cartesian + spherical + cylindrical (the orthogonal-curl scale-factor weights).
     for dir in 0..3 {
@@ -230,23 +350,45 @@ fn ct_kernels_lower() {
     }
     // per-dir 3D edge EMF.
     for dir in 0..3 {
-        KernelRun::new(rmhd_edge_emf_gv(3, (dir + 1) % 3, (dir + 2) % 3)).grid([8, 8, 8]).assert_lowers();
+        KernelRun::new(rmhd_edge_emf_gv(3, (dir + 1) % 3, (dir + 2) % 3))
+            .grid([8, 8, 8])
+            .assert_lowers();
     }
     // face->cell B interpolation.
-    KernelRun::new(rmhd_bcell_from_bface_gv(3)).grid([8, 8, 8]).assert_lowers();
+    KernelRun::new(rmhd_bcell_from_bface_gv(3))
+        .grid([8, 8, 8])
+        .assert_lowers();
     // cell-B out-of-plane flux predictor (euler + rk2) on a 2D reduced plane (axes [0,1] -> the
     // predictor writes the single out-of-plane component); cartesian + spherical + cylindrical.
     for coords in [Coords::Cartesian, Coords::Spherical, Coords::Cylindrical] {
-        KernelRun::new(rmhd_bcell_godunov_euler_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 2], 2, 3, &[0, 1]))
-            .grid([8, 8])
-            .assert_lowers();
-        KernelRun::new(rmhd_bcell_godunov_rk2_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 2], 2, 3, &[0, 1]))
-            .grid([8, 8])
-            .assert_lowers();
+        KernelRun::new(rmhd_bcell_godunov_euler_gv(
+            coords,
+            Spacetime::Minkowski,
+            &[Spacing::Uniform; 2],
+            2,
+            3,
+            &[0, 1],
+        ))
+        .grid([8, 8])
+        .assert_lowers();
+        KernelRun::new(rmhd_bcell_godunov_rk2_gv(
+            coords,
+            Spacetime::Minkowski,
+            &[Spacing::Uniform; 2],
+            2,
+            3,
+            &[0, 1],
+        ))
+        .grid([8, 8])
+        .assert_lowers();
     }
     // edge-EMF save (out-of-place copy) + time-average (in-place).
-    KernelRun::new(rmhd_save_efield_gv()).grid([8, 8, 8]).assert_lowers();
-    KernelRun::new(rmhd_average_efield_gv()).grid([8, 8, 8]).assert_lowers();
+    KernelRun::new(rmhd_save_efield_gv())
+        .grid([8, 8, 8])
+        .assert_lowers();
+    KernelRun::new(rmhd_average_efield_gv())
+        .grid([8, 8, 8])
+        .assert_lowers();
 }
 
 // -----------------------------------------------------------------------------
@@ -258,9 +400,15 @@ fn immersed_kernels_lower() {
     // body source: cartesian 1..=3, curvilinear cyl (r-phi 2D, r-phi-z 3D) + spherical (2D, 3D).
     for ndim in 1usize..=3 {
         let axes: Vec<usize> = (0..ndim).collect();
-        KernelRun::new(body_source_gv(MAX_SOURCE_BODIES, Coords::Cartesian, ndim, ndim, &axes))
-            .grid(vec![8usize; ndim])
-            .assert_lowers();
+        KernelRun::new(body_source_gv(
+            MAX_SOURCE_BODIES,
+            Coords::Cartesian,
+            ndim,
+            ndim,
+            &axes,
+        ))
+        .grid(vec![8usize; ndim])
+        .assert_lowers();
     }
     for &(coords, ndim) in &[
         (Coords::Cylindrical, 2usize),
@@ -301,13 +449,21 @@ fn geometry_probe_kernels_lower() {
     KernelRun::new(geometry_probe_gv(Coords::Spherical, &[Spacing::Log], 1))
         .grid([8])
         .assert_lowers();
-    KernelRun::new(geometry_probe_gv(Coords::Spherical, &[Spacing::Log, Spacing::Uniform], 2))
-        .grid([8, 8])
-        .assert_lowers();
+    KernelRun::new(geometry_probe_gv(
+        Coords::Spherical,
+        &[Spacing::Log, Spacing::Uniform],
+        2,
+    ))
+    .grid([8, 8])
+    .assert_lowers();
     // newtonian inertial (centrifugal/coriolis) momentum source, 2D spherical.
-    KernelRun::new(inertial_momentum_probe_gv(Coords::Spherical, &[Spacing::Uniform; 2], 2))
-        .grid([8, 8])
-        .assert_lowers();
+    KernelRun::new(inertial_momentum_probe_gv(
+        Coords::Spherical,
+        &[Spacing::Uniform; 2],
+        2,
+    ))
+    .grid([8, 8])
+    .assert_lowers();
     // full rmhd geometric momentum source (total pressure + gas inertial + magnetic tension), 3D
     // spherical AND cylindrical — the coord-generic Christoffel covers both (cyl: r-phi pair).
     for coords in [Coords::Spherical, Coords::Cylindrical] {

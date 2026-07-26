@@ -30,13 +30,14 @@
 #![cfg(feature = "cuda")]
 
 use symbi_aot::{
-    adiabatic_c2p_1d__raw as adiabatic_c2p_1d, adiabatic_face_flux_1d_0__raw as adiabatic_face_flux_1d,
+    ADIABATIC_C2P_1D_IR, ADIABATIC_FACE_FLUX_1D_0_IR, CpuField, CpuFieldMut, GODUNOV_MASS_1D_IR,
+    ISO_C2P_1D_IR, ISO_FACE_FLUX_1D_0_IR, ISO_GHOST_FILL_1D_IR, ISO_SNAPSHOT_1D_IR,
+    ISO_WAVE_SPEED_MAP_1D_IR, RHD_FACE_FLUX_1D_0_IR, adiabatic_c2p_1d__raw as adiabatic_c2p_1d,
+    adiabatic_face_flux_1d_0__raw as adiabatic_face_flux_1d,
     godunov_mass_1d__raw as godunov_mass_1d, iso_c2p_1d__raw as iso_c2p_1d,
     iso_face_flux_1d_0__raw as iso_face_flux_1d, iso_ghost_fill_1d__raw as iso_ghost_fill_1d,
     iso_snapshot_1d__raw as iso_snapshot_1d, iso_wave_speed_map_1d__raw as iso_wave_speed_map_1d,
-    rhd_face_flux_1d_0__raw as rhd_face_flux_1d, CpuField, CpuFieldMut, ADIABATIC_C2P_1D_IR,
-    ADIABATIC_FACE_FLUX_1D_0_IR, GODUNOV_MASS_1D_IR, ISO_C2P_1D_IR, ISO_FACE_FLUX_1D_0_IR,
-    ISO_GHOST_FILL_1D_IR, ISO_SNAPSHOT_1D_IR, ISO_WAVE_SPEED_MAP_1D_IR, RHD_FACE_FLUX_1D_0_IR,
+    rhd_face_flux_1d_0__raw as rhd_face_flux_1d,
 };
 use symbi_ir::emit::{Precision, Target};
 use symbi_ir::render_from_ir;
@@ -65,18 +66,18 @@ fn cfm(v: &mut [f64]) -> CpuFieldMut<'_, f64> {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct DeviceView {
-    data:    *const std::ffi::c_void,
-    lo:      [i32; 4],
+    data: *const std::ffi::c_void,
+    lo: [i32; 4],
     strides: [i32; 4],
-    extent:  [i32; 4],
+    extent: [i32; 4],
 }
 
 fn view_1d(ptr: *const f64, n: usize) -> DeviceView {
     DeviceView {
-        data:    ptr as *const std::ffi::c_void,
-        lo:      [0; 4],
+        data: ptr as *const std::ffi::c_void,
+        lo: [0; 4],
         strides: [1, 0, 0, 0],
-        extent:  [n as i32, 0, 0, 0],
+        extent: [n as i32, 0, 0, 0],
     }
 }
 
@@ -89,12 +90,20 @@ fn compile_to_ptx(src: &str, name: &str) -> Vec<u8> {
     std::fs::write(&cu, src).unwrap();
     let out = std::process::Command::new("nvcc")
         .args([
-            "-ptx", "-O3", "--gpu-architecture=native",
-            "-o", ptx.to_str().unwrap(), cu.to_str().unwrap(),
+            "-ptx",
+            "-O3",
+            "--gpu-architecture=native",
+            "-o",
+            ptx.to_str().unwrap(),
+            cu.to_str().unwrap(),
         ])
         .output()
         .expect("nvcc not found");
-    assert!(out.status.success(), "nvcc failed for {name}:\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "nvcc failed for {name}:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     std::fs::read(&ptx).unwrap()
 }
 
@@ -103,7 +112,13 @@ fn compile_to_ptx(src: &str, name: &str) -> Vec<u8> {
 // dom_lo_0 (i32), then the scalar params (f64) in declared order. all buffers are
 // `buf_len` long.
 fn launch_1d(
-    cuda: &str, name: &str, ins: &[&[f64]], n_out: usize, scalars: &[f64], grid: u32, dom_lo: i32,
+    cuda: &str,
+    name: &str,
+    ins: &[&[f64]],
+    n_out: usize,
+    scalars: &[f64],
+    grid: u32,
+    dom_lo: i32,
 ) -> Vec<Vec<f64>> {
     let buf_len = ins[0].len();
     let exec = Executor::<CudaSpace>::new(0).unwrap();
@@ -113,16 +128,22 @@ fn launch_1d(
 
     let n_in = ins.len();
     let nbuf = n_in + n_out;
-    let mut blocks: Vec<MemoryBlock<UnifiedMemory>> =
-        (0..nbuf).map(|_| MemoryBlock::<UnifiedMemory>::for_elements::<f64>(buf_len).unwrap()).collect();
+    let mut blocks: Vec<MemoryBlock<UnifiedMemory>> = (0..nbuf)
+        .map(|_| MemoryBlock::<UnifiedMemory>::for_elements::<f64>(buf_len).unwrap())
+        .collect();
     for (i, data) in ins.iter().enumerate() {
         let p = blocks[i].as_mut_ptr::<f64>();
         for (j, &v) in data.iter().enumerate() {
-            unsafe { *p.add(j) = v; }
+            unsafe {
+                *p.add(j) = v;
+            }
         }
     }
 
-    let views: Vec<DeviceView> = blocks.iter().map(|b| view_1d(b.as_ptr::<f64>(), buf_len)).collect();
+    let views: Vec<DeviceView> = blocks
+        .iter()
+        .map(|b| view_1d(b.as_ptr::<f64>(), buf_len))
+        .collect();
     let mut args = KernelArgs::new();
     for v in &views {
         args.push(v);
@@ -133,7 +154,8 @@ fn launch_1d(
         args.push(s);
     }
     unsafe {
-        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args).unwrap();
+        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args)
+            .unwrap();
     }
     exec.sync().unwrap();
 
@@ -150,7 +172,13 @@ fn launch_1d(
 // (all `buf_len` long), launches with the View prefix then the scalar params as `i32`s
 // followed by `f64`s (the order these kernels declare them), and reads ALL buffers back.
 fn launch_raw(
-    cuda: &str, name: &str, bufs: &[Vec<f64>], ints: &[i32], floats: &[f64], grid: u32, dom_lo: i32,
+    cuda: &str,
+    name: &str,
+    bufs: &[Vec<f64>],
+    ints: &[i32],
+    floats: &[f64],
+    grid: u32,
+    dom_lo: i32,
 ) -> Vec<Vec<f64>> {
     let buf_len = bufs[0].len();
     let exec = Executor::<CudaSpace>::new(0).unwrap();
@@ -164,12 +192,17 @@ fn launch_raw(
             let mut b = MemoryBlock::<UnifiedMemory>::for_elements::<f64>(buf_len).unwrap();
             let p = b.as_mut_ptr::<f64>();
             for (j, &v) in data.iter().enumerate() {
-                unsafe { *p.add(j) = v; }
+                unsafe {
+                    *p.add(j) = v;
+                }
             }
             b
         })
         .collect();
-    let views: Vec<DeviceView> = blocks.iter().map(|b| view_1d(b.as_ptr::<f64>(), buf_len)).collect();
+    let views: Vec<DeviceView> = blocks
+        .iter()
+        .map(|b| view_1d(b.as_ptr::<f64>(), buf_len))
+        .collect();
     let mut args = KernelArgs::new();
     for v in &views {
         args.push(v);
@@ -183,7 +216,8 @@ fn launch_raw(
         args.push(x);
     }
     unsafe {
-        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args).unwrap();
+        exec.launch(&kernel, LaunchConfig::for_1d(grid, 64), &mut args)
+            .unwrap();
     }
     exec.sync().unwrap();
     blocks
@@ -200,7 +234,12 @@ fn launch_raw(
 fn assert_close(gpu: &[f64], cpu: &[f64], lo: usize, hi: usize, what: &str) {
     for i in lo..hi {
         let rel = (gpu[i] - cpu[i]).abs() / cpu[i].abs().max(1.0);
-        assert!(rel < 1e-9, "{what} cell {i}: GPU {} != CPU {} (rel {rel:e})", gpu[i], cpu[i]);
+        assert!(
+            rel < 1e-9,
+            "{what} cell {i}: GPU {} != CPU {} (rel {rel:e})",
+            gpu[i],
+            cpu[i]
+        );
     }
 }
 
@@ -221,9 +260,26 @@ fn iso_c2p_gpu_matches_cpu() {
     let cs = 0.7_f64;
     let cs2: Vec<f64> = vec![cs * cs; n];
     let (mut r, mut v, mut p) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
-    iso_c2p_1d(&cf(&den), &cf(&mom), &cf(&cs2), &mut cfm(&mut r), &mut cfm(&mut v), &mut cfm(&mut p), n as i32, 0);
+    iso_c2p_1d(
+        &cf(&den),
+        &cf(&mom),
+        &cf(&cs2),
+        &mut cfm(&mut r),
+        &mut cfm(&mut v),
+        &mut cfm(&mut p),
+        n as i32,
+        0,
+    );
 
-    let g = launch_1d(&cuda_src(ISO_C2P_1D_IR), "iso_c2p_1d", &[&den, &mom, &cs2], 3, &[], n as u32, 0);
+    let g = launch_1d(
+        &cuda_src(ISO_C2P_1D_IR),
+        "iso_c2p_1d",
+        &[&den, &mom, &cs2],
+        3,
+        &[],
+        n as u32,
+        0,
+    );
     assert_close(&g[0], &r, 0, n, "iso rho");
     assert_close(&g[1], &v, 0, n, "iso vel");
     assert_close(&g[2], &p, 0, n, "iso pre");
@@ -237,9 +293,27 @@ fn adiabatic_c2p_gpu_matches_cpu() {
     let nrg: Vec<f64> = vec![2.5, 4.0, 1.2, 3.0, 1.8, 2.2];
     let gamma = 5.0 / 3.0;
     let (mut r, mut v, mut p) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
-    adiabatic_c2p_1d(&cf(&den), &cf(&mom), &cf(&nrg), &mut cfm(&mut r), &mut cfm(&mut v), &mut cfm(&mut p), n as i32, 0, gamma);
+    adiabatic_c2p_1d(
+        &cf(&den),
+        &cf(&mom),
+        &cf(&nrg),
+        &mut cfm(&mut r),
+        &mut cfm(&mut v),
+        &mut cfm(&mut p),
+        n as i32,
+        0,
+        gamma,
+    );
 
-    let g = launch_1d(&cuda_src(ADIABATIC_C2P_1D_IR), "adiabatic_c2p_1d", &[&den, &mom, &nrg], 3, &[gamma], n as u32, 0);
+    let g = launch_1d(
+        &cuda_src(ADIABATIC_C2P_1D_IR),
+        "adiabatic_c2p_1d",
+        &[&den, &mom, &nrg],
+        3,
+        &[gamma],
+        n as u32,
+        0,
+    );
     assert_close(&g[0], &r, 0, n, "adiabatic rho");
     assert_close(&g[1], &v, 0, n, "adiabatic vel");
     assert_close(&g[2], &p, 0, n, "adiabatic pre");
@@ -264,10 +338,30 @@ fn iso_face_flux_gpu_matches_cpu() {
     let scal = [theta, MESH_ADOT, X_LO, dx, MESH_VTRANS];
     // interior only: stencil reads coord-2..coord+1 -> iterate cells 2..6.
     let (mut fd, mut fm) = (vec![0.0; n], vec![0.0; n]);
-    iso_face_flux_1d(&cf(&rho), &cf(&v), &cf(&p), &mut cfm(&mut fd), &mut cfm(&mut fm),
-        4, 2, scal[0], scal[1], scal[2], scal[3], scal[4]);
+    iso_face_flux_1d(
+        &cf(&rho),
+        &cf(&v),
+        &cf(&p),
+        &mut cfm(&mut fd),
+        &mut cfm(&mut fm),
+        4,
+        2,
+        scal[0],
+        scal[1],
+        scal[2],
+        scal[3],
+        scal[4],
+    );
 
-    let g = launch_1d(&cuda_src(ISO_FACE_FLUX_1D_0_IR), "iso_face_flux_1d_0", &[&rho, &v, &p], 2, &scal, 4, 2);
+    let g = launch_1d(
+        &cuda_src(ISO_FACE_FLUX_1D_0_IR),
+        "iso_face_flux_1d_0",
+        &[&rho, &v, &p],
+        2,
+        &scal,
+        4,
+        2,
+    );
     assert_close(&g[0], &fd, 2, 6, "iso flux_den");
     assert_close(&g[1], &fm, 2, 6, "iso flux_mom");
 }
@@ -282,10 +376,32 @@ fn adiabatic_face_flux_gpu_matches_cpu() {
     // scalar tail: gamma, theta, mesh_adot_0, x_lo_0, dx_0, mesh_vtrans_0.
     let scal = [gamma, theta, MESH_ADOT, X_LO, dx, MESH_VTRANS];
     let (mut fd, mut fm, mut fn_) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
-    adiabatic_face_flux_1d(&cf(&rho), &cf(&v), &cf(&p), &mut cfm(&mut fd), &mut cfm(&mut fm), &mut cfm(&mut fn_),
-        4, 2, scal[0], scal[1], scal[2], scal[3], scal[4], scal[5]);
+    adiabatic_face_flux_1d(
+        &cf(&rho),
+        &cf(&v),
+        &cf(&p),
+        &mut cfm(&mut fd),
+        &mut cfm(&mut fm),
+        &mut cfm(&mut fn_),
+        4,
+        2,
+        scal[0],
+        scal[1],
+        scal[2],
+        scal[3],
+        scal[4],
+        scal[5],
+    );
 
-    let g = launch_1d(&cuda_src(ADIABATIC_FACE_FLUX_1D_0_IR), "adiabatic_face_flux_1d_0", &[&rho, &v, &p], 3, &scal, 4, 2);
+    let g = launch_1d(
+        &cuda_src(ADIABATIC_FACE_FLUX_1D_0_IR),
+        "adiabatic_face_flux_1d_0",
+        &[&rho, &v, &p],
+        3,
+        &scal,
+        4,
+        2,
+    );
     assert_close(&g[0], &fd, 2, 6, "adiabatic flux_den");
     assert_close(&g[1], &fm, 2, 6, "adiabatic flux_mom");
     assert_close(&g[2], &fn_, 2, 6, "adiabatic flux_nrg");
@@ -300,10 +416,32 @@ fn rhd_face_flux_gpu_matches_cpu() {
     let dx = 1.0_f64;
     let scal = [gamma, theta, MESH_ADOT, X_LO, dx, MESH_VTRANS];
     let (mut fd, mut fm, mut fn_) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
-    rhd_face_flux_1d(&cf(&rho), &cf(&v), &cf(&p), &mut cfm(&mut fd), &mut cfm(&mut fm), &mut cfm(&mut fn_),
-        4, 2, scal[0], scal[1], scal[2], scal[3], scal[4], scal[5]);
+    rhd_face_flux_1d(
+        &cf(&rho),
+        &cf(&v),
+        &cf(&p),
+        &mut cfm(&mut fd),
+        &mut cfm(&mut fm),
+        &mut cfm(&mut fn_),
+        4,
+        2,
+        scal[0],
+        scal[1],
+        scal[2],
+        scal[3],
+        scal[4],
+        scal[5],
+    );
 
-    let g = launch_1d(&cuda_src(RHD_FACE_FLUX_1D_0_IR), "rhd_face_flux_1d_0", &[&rho, &v, &p], 3, &scal, 4, 2);
+    let g = launch_1d(
+        &cuda_src(RHD_FACE_FLUX_1D_0_IR),
+        "rhd_face_flux_1d_0",
+        &[&rho, &v, &p],
+        3,
+        &scal,
+        4,
+        2,
+    );
     assert_close(&g[0], &fd, 2, 6, "rhd flux_den");
     assert_close(&g[1], &fm, 2, 6, "rhd flux_mom");
     assert_close(&g[2], &fn_, 2, 6, "rhd flux_nrg");
@@ -316,9 +454,24 @@ fn iso_snapshot_gpu_matches_cpu() {
     let den: Vec<f64> = vec![1.0, 2.0, 0.5, 1.5, 0.8, 1.2];
     let mom: Vec<f64> = vec![0.3, -0.4, 0.1, 0.6, -0.2, 0.05];
     let (mut un_d, mut un_m) = (vec![0.0; n], vec![0.0; n]);
-    iso_snapshot_1d(&cf(&den), &cf(&mom), &mut cfm(&mut un_d), &mut cfm(&mut un_m), n as i32, 0);
+    iso_snapshot_1d(
+        &cf(&den),
+        &cf(&mom),
+        &mut cfm(&mut un_d),
+        &mut cfm(&mut un_m),
+        n as i32,
+        0,
+    );
 
-    let g = launch_1d(&cuda_src(ISO_SNAPSHOT_1D_IR), "iso_snapshot_1d", &[&den, &mom], 2, &[], n as u32, 0);
+    let g = launch_1d(
+        &cuda_src(ISO_SNAPSHOT_1D_IR),
+        "iso_snapshot_1d",
+        &[&den, &mom],
+        2,
+        &[],
+        n as u32,
+        0,
+    );
     assert_close(&g[0], &un_d, 0, n, "snapshot u_n.den");
     assert_close(&g[1], &un_m, 0, n, "snapshot u_n.mom");
 }
@@ -336,10 +489,30 @@ fn iso_wave_speed_map_gpu_matches_cpu() {
     // scalar tail: gamma, inv_dx_0, x_lo_0, dx_0, mesh_adot_0, mesh_vtrans_0.
     let scal = [gamma, inv_dx, X_LO, dx, MESH_ADOT, MESH_VTRANS];
     let mut lam = vec![0.0; n];
-    iso_wave_speed_map_1d(&cf(&rho), &cf(&v), &cf(&p), &mut cfm(&mut lam),
-        n as i32, 0, scal[0], scal[1], scal[2], scal[3], scal[4], scal[5]);
+    iso_wave_speed_map_1d(
+        &cf(&rho),
+        &cf(&v),
+        &cf(&p),
+        &mut cfm(&mut lam),
+        n as i32,
+        0,
+        scal[0],
+        scal[1],
+        scal[2],
+        scal[3],
+        scal[4],
+        scal[5],
+    );
 
-    let g = launch_1d(&cuda_src(ISO_WAVE_SPEED_MAP_1D_IR), "iso_wave_speed_map_1d", &[&rho, &v, &p], 1, &scal, n as u32, 0);
+    let g = launch_1d(
+        &cuda_src(ISO_WAVE_SPEED_MAP_1D_IR),
+        "iso_wave_speed_map_1d",
+        &[&rho, &v, &p],
+        1,
+        &scal,
+        n as u32,
+        0,
+    );
     assert_close(&g[0], &lam, 0, n, "wave-speed lambda");
 }
 
@@ -352,9 +525,25 @@ fn godunov_mass_gpu_matches_cpu() {
     let mflux: Vec<f64> = (0..=n).map(|i| 0.3 - 0.02 * i as f64).collect();
     let (dt, dx) = (0.01_f64, 0.5_f64);
     let mut den_new = vec![0.0; n + 1];
-    godunov_mass_1d(&cf(&den), &cf(&mflux), &mut cfm(&mut den_new), n as i32, 0, dt, dx);
+    godunov_mass_1d(
+        &cf(&den),
+        &cf(&mflux),
+        &mut cfm(&mut den_new),
+        n as i32,
+        0,
+        dt,
+        dx,
+    );
 
-    let g = launch_1d(&cuda_src(GODUNOV_MASS_1D_IR), "godunov_mass_1d", &[&den, &mflux], 1, &[dt, dx], n as u32, 0);
+    let g = launch_1d(
+        &cuda_src(GODUNOV_MASS_1D_IR),
+        "godunov_mass_1d",
+        &[&den, &mflux],
+        1,
+        &[dt, dx],
+        n as u32,
+        0,
+    );
     assert_close(&g[0], &den_new, 0, n, "godunov_mass rho_new");
 }
 
@@ -372,12 +561,25 @@ fn iso_ghost_fill_gpu_matches_cpu() {
     let (grid, dom_lo) = (2u32, 0i32);
 
     let (mut r_c, mut v_c, mut p_c) = (rho.clone(), vel.clone(), pre.clone());
-    iso_ghost_fill_1d(&mut cfm(&mut r_c), &mut cfm(&mut v_c), &mut cfm(&mut p_c),
-        grid as i32, dom_lo, map_type, arg, vel_sign);
+    iso_ghost_fill_1d(
+        &mut cfm(&mut r_c),
+        &mut cfm(&mut v_c),
+        &mut cfm(&mut p_c),
+        grid as i32,
+        dom_lo,
+        map_type,
+        arg,
+        vel_sign,
+    );
 
     let g = launch_raw(
-        &cuda_src(ISO_GHOST_FILL_1D_IR), "iso_ghost_fill_1d",
-        &[rho, vel, pre], &[map_type, arg], &[vel_sign], grid, dom_lo,
+        &cuda_src(ISO_GHOST_FILL_1D_IR),
+        "iso_ghost_fill_1d",
+        &[rho, vel, pre],
+        &[map_type, arg],
+        &[vel_sign],
+        grid,
+        dom_lo,
     );
     assert_close(&g[0], &r_c, 0, grid as usize, "ghost_fill rho");
     assert_close(&g[1], &v_c, 0, grid as usize, "ghost_fill vel");

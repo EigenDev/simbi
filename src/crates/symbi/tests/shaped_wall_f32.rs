@@ -28,8 +28,8 @@ const R_BODY: f64 = 0.25;
 const V_INF: f64 = 0.3;
 const GAMMA: f64 = 1.4;
 
-fn build<Sc: Scalar + OrderedNumeric>(
-) -> SimState<Newtonian, 2, Cartesian, IdealGas<Sc>, CpuSpace, HostMemory, Sc> {
+fn build<Sc: Scalar + OrderedNumeric>()
+-> SimState<Newtonian, 2, Cartesian, IdealGas<Sc>, CpuSpace, HostMemory, Sc> {
     let dx = 2.0 * L / N as f64;
     let s = |v: f64| Sc::from_f64(v);
     let mut sim =
@@ -45,12 +45,30 @@ fn build<Sc: Scalar + OrderedNumeric>(
         .cfl(0.3)
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: s(1.0), vel: Tensor::new([s(V_INF), s(0.0)]), pre: s(1.0) })
+        .set_initial(|_| Prim {
+            rho: s(1.0),
+            vel: Tensor::new([s(V_INF), s(0.0)]),
+            pre: s(1.0),
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::new([0.0, 0.0]), Tensor::zeros(), 1.0, R_BODY, 0.1, false)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 0.0 }),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.0, 0.0]),
+                    Tensor::zeros(),
+                    1.0,
+                    R_BODY,
+                    0.1,
+                    false,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 1.0e3,
+                    k_eta_t: 0.0,
+                }),
+            ),
+        );
     // the CSG shape routes the runtime cranelift kernel, built at the sim's precision.
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], R_BODY));
@@ -77,13 +95,19 @@ fn f32_shaped_wall_tracks_f64() {
             gap = gap.max((a - b).abs() / a.abs().max(1.0));
         }
     }
-    assert!(gap < 1e-4, "f32 shaped-wall cons diverges from f64: rel gap {gap:e}");
+    assert!(
+        gap < 1e-4,
+        "f32 shaped-wall cons diverges from f64: rel gap {gap:e}"
+    );
 
     // the wall actually penalized (non-vacuous) and the f32 force receipt tracks the f64 one.
     let f64f = h64.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let f32f = h32.immersed.as_ref().unwrap().diagnostics.consolidate()[0].force_delta;
     let mag = (f64f[0] * f64f[0] + f64f[1] * f64f[1]).sqrt();
-    assert!(mag > 1e-6, "the shaped wall never penalized ({mag:e}); test vacuous");
+    assert!(
+        mag > 1e-6,
+        "the shaped wall never penalized ({mag:e}); test vacuous"
+    );
     for k in 0..2 {
         assert!(f32f[k].is_finite(), "non-finite f32 force[{k}]");
         assert!(

@@ -60,7 +60,11 @@ fn make_sim() -> Sim {
             let bx = -b0 * (2.0 * PI * y).sin();
             let by = b0 * (4.0 * PI * x).sin();
             MhdPrim {
-                hydro: Prim { rho: rho0, vel: Tensor::new([vx, vy, 0.0]), pre: p0 },
+                hydro: Prim {
+                    rho: rho0,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: p0,
+                },
                 mag: Tensor::new([bx, by, 0.0]),
             }
         })
@@ -95,8 +99,14 @@ fn nmhd_orszag_tang_hlld_stays_physical_and_divb_clean() {
     let (idx, idy, idz) = (NX as f64, NY as f64, NZ as f64);
 
     // the HLLD payoff: select the full 5-wave solver.
-    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, CFL, /* theta */ 1.5, &sim.geom.allocated)
-        .with_solver(Solver::Hlld).expect("valid solver/regime pair");
+    let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory>::new(
+        GAMMA,
+        CFL,
+        /* theta */ 1.5,
+        &sim.geom.allocated,
+    )
+    .with_solver(Solver::Hlld)
+    .expect("valid solver/regime pair");
     assert_eq!(sub.solver, Solver::Hlld, "must run with HLLD");
 
     let mut max_rel_divb = 0.0_f64;
@@ -106,16 +116,33 @@ fn nmhd_orszag_tang_hlld_stays_physical_and_divb_clean() {
         for c in s.geom.interior.iter() {
             let rho = *s.fields.prim.rho.view().at(c);
             let p = *pre.view().at(c);
-            assert!(rho.is_finite() && rho > 0.0, "iter {}: rho={rho} at {c:?}", s.iteration);
-            assert!(p.is_finite() && p > 0.0, "iter {}: p={p} at {c:?}", s.iteration);
+            assert!(
+                rho.is_finite() && rho > 0.0,
+                "iter {}: rho={rho} at {c:?}",
+                s.iteration
+            );
+            assert!(
+                p.is_finite() && p > 0.0,
+                "iter {}: p={p} at {c:?}",
+                s.iteration
+            );
         }
         let (md, mb) = max_divb(s, idx, idy, idz);
         let rel = md / mb.max(1.0);
-        assert!(rel < DIVB_TOL, "iter {}: div(B) grew to rel {rel:e} (tol {DIVB_TOL:e})", s.iteration);
+        assert!(
+            rel < DIVB_TOL,
+            "iter {}: div(B) grew to rel {rel:e} (tol {DIVB_TOL:e})",
+            s.iteration
+        );
         max_rel_divb = max_rel_divb.max(rel);
-    }).expect("nmhd OT HLLD evolution failed");
+    })
+    .expect("nmhd OT HLLD evolution failed");
 
-    assert!(sim.iteration >= 20, "OT-HLLD took only {} steps — barely exercised", sim.iteration);
+    assert!(
+        sim.iteration >= 20,
+        "OT-HLLD took only {} steps — barely exercised",
+        sim.iteration
+    );
     eprintln!(
         "[nmhd OT HLLD] {} steps to t={:.3} on {NX}x{NY}, max rel div(B) = {:e}",
         sim.iteration, sim.time, max_rel_divb,

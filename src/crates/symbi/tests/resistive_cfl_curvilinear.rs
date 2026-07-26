@@ -37,21 +37,33 @@ fn resistive_cfl_uses_the_physical_cell_width() {
         .allocate()
         .expect("3d spherical sim")
         .set_initial(|_| MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre: 1.0,
+            },
             mag: Tensor::new([0.0, 0.0, 0.0]),
         })
         .seed_faces(|_, _| 0.0)
         .build();
 
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
-        .with_resistivity(ETA);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        GAMMA,
+        CFL,
+        1.0,
+        &sim.geom.allocated,
+    )
+    .with_resistivity(ETA);
     let dt = sub.cfl(&sim);
 
     // the COORDINATE-width resistive dt bound the old fold would have used.
     let dx_min = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
     let dt_coord = CFL * dx_min * dx_min / (2.0 * 3.0 * ETA);
 
-    assert!(dt.is_finite() && dt > 0.0, "resistive cfl returned a non-physical dt = {dt}");
+    assert!(
+        dt.is_finite() && dt > 0.0,
+        "resistive cfl returned a non-physical dt = {dt}"
+    );
     // the near-pole physical cell is ~5x smaller than dtheta, so the physical bound is >20x tighter.
     assert!(
         dt < 0.1 * dt_coord,

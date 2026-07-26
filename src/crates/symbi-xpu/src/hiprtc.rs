@@ -18,7 +18,7 @@
 #![allow(non_camel_case_types)]
 
 use crate::error::{self, XpuError};
-use std::ffi::{c_char, c_int, c_void, CString};
+use std::ffi::{CString, c_char, c_int, c_void};
 
 type hiprtcResult = c_int;
 type hiprtcProgram = *mut c_void;
@@ -51,9 +51,9 @@ unsafe extern "C" {
 /// returned bytes are a binary code object -- `HipSpace::load_module` loads them as-is.
 pub fn compile_code(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     // optional `--offload-arch=<arch>`; unset -> hiprtc targets the attached device.
-    let arch_opt = std::env::var("SYMBI_HIP_ARCH")
-        .ok()
-        .map(|a| CString::new(format!("--offload-arch={a}")).expect("arch option has no interior NUL"));
+    let arch_opt = std::env::var("SYMBI_HIP_ARCH").ok().map(|a| {
+        CString::new(format!("--offload-arch={a}")).expect("arch option has no interior NUL")
+    });
 
     let src = CString::new(source).map_err(|_| XpuError {
         operation: "hiprtc source",
@@ -69,7 +69,14 @@ pub fn compile_code(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     let mut prog: hiprtcProgram = std::ptr::null_mut();
     check(
         unsafe {
-            hiprtcCreateProgram(&mut prog, src.as_ptr(), name.as_ptr(), 0, std::ptr::null(), std::ptr::null())
+            hiprtcCreateProgram(
+                &mut prog,
+                src.as_ptr(),
+                name.as_ptr(),
+                0,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
         },
         "hiprtcCreateProgram",
     )?;
@@ -79,7 +86,11 @@ pub fn compile_code(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
         hiprtcCompileProgram(
             prog,
             opts.len() as c_int,
-            if opts.is_empty() { std::ptr::null() } else { opts.as_ptr() },
+            if opts.is_empty() {
+                std::ptr::null()
+            } else {
+                opts.as_ptr()
+            },
         )
     };
     if res != HIPRTC_SUCCESS {
@@ -95,9 +106,15 @@ pub fn compile_code(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     }
 
     let mut size: usize = 0;
-    check(unsafe { hiprtcGetCodeSize(prog, &mut size) }, "hiprtcGetCodeSize")?;
+    check(
+        unsafe { hiprtcGetCodeSize(prog, &mut size) },
+        "hiprtcGetCodeSize",
+    )?;
     let mut code = vec![0u8; size];
-    check(unsafe { hiprtcGetCode(prog, code.as_mut_ptr() as *mut c_char) }, "hiprtcGetCode")?;
+    check(
+        unsafe { hiprtcGetCode(prog, code.as_mut_ptr() as *mut c_char) },
+        "hiprtcGetCode",
+    )?;
     unsafe {
         let _ = hiprtcDestroyProgram(&mut prog);
     }

@@ -25,16 +25,16 @@ use symbi::regimes::substrate_kernels::FusedSourceBinding;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
-use symbi_geometry::Cartesian;
 use symbi_algebra::Domain;
+use symbi_algebra::Tensor;
+use symbi_geometry::Cartesian;
 use symbi_grid::Field;
+use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
-use symbi_xpu::{CpuSpace, HostMemory};
-use symbi_algebra::Tensor;
-use symbi_hydro::energy::IsoModel;
 use symbi_hydro::state::PrimG;
+use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
 
@@ -48,8 +48,10 @@ fn assert_cons_bit_identical<const D: usize>(
     for c in interior.iter() {
         let (va, vb) = (*a.view().at(c), *b.view().at(c));
         assert_eq!(
-            va.to_bits(), vb.to_bits(),
-            "{label} differs at {c:?}: fused={va:?} additive={vb:?} (Δ={:?})", va - vb,
+            va.to_bits(),
+            vb.to_bits(),
+            "{label} differs at {c:?}: fused={va:?} additive={vb:?} (Δ={:?})",
+            va - vb,
         );
     }
 }
@@ -71,7 +73,12 @@ fn adiabatic_uniform_accel_additive_equals_fused_rk2() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .finish()
             .expect("sim construction failed");
-        let cnrg = sim.fields.cons.nrg_field().expect("Newtonian cons.nrg").clone();
+        let cnrg = sim
+            .fields
+            .cons
+            .nrg_field()
+            .expect("Newtonian cons.nrg")
+            .clone();
         // a mildly non-uniform profile so flux divergence is nonzero (a uniform
         // state hides any ordering bug behind a zero divergence).
         for c in sim.geom.interior.iter() {
@@ -87,23 +94,44 @@ fn adiabatic_uniform_accel_additive_equals_fused_rk2() {
     let binding = || FusedSourceBinding::new("uniform_accel", &[("g_ext_0", g_ext_0)]);
 
     let mut sim_fused = build();
-    let sub_fused = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim_fused.geom.allocated)
-        .with_fused_source(binding());
+    let sub_fused = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(
+        GAMMA,
+        0.4,
+        &sim_fused.geom.allocated,
+    )
+    .with_fused_source(binding());
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve failed");
 
     let mut sim_add = build();
-    let sub_add = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim_add.geom.allocated)
-        .with_additive_source(binding());
+    let sub_add =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim_add.geom.allocated)
+            .with_additive_source(binding());
     evolve(&mut sim_add, &sub_add, t_final).expect("additive evolve failed");
 
     // same source, two execution strategies -> identical trajectory, bit-for-bit.
     let interior = &sim_fused.geom.interior;
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_add.fields.cons.den, "cons.den");
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[0], &sim_add.fields.cons.mom[0], "cons.mom_0");
-    let (nf, na) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_add.fields.cons.nrg_field().unwrap());
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.den,
+        &sim_add.fields.cons.den,
+        "cons.den",
+    );
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.mom[0],
+        &sim_add.fields.cons.mom[0],
+        "cons.mom_0",
+    );
+    let (nf, na) = (
+        sim_fused.fields.cons.nrg_field().unwrap(),
+        sim_add.fields.cons.nrg_field().unwrap(),
+    );
     assert_cons_bit_identical(interior, nf, na, "cons.nrg");
     // sanity: the run actually did something (gas accelerated).
-    let moved = sim_fused.geom.interior.iter()
+    let moved = sim_fused
+        .geom
+        .interior
+        .iter()
         .any(|c| sim_fused.fields.prim.vel[0].view().at(c).abs() > 1e-6);
     assert!(moved, "gas never accelerated — the test exercised nothing");
 }
@@ -127,7 +155,12 @@ fn adiabatic_point_mass_additive_equals_fused_rk2() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .finish()
             .expect("sim construction failed");
-        let cnrg = sim.fields.cons.nrg_field().expect("Newtonian cons.nrg").clone();
+        let cnrg = sim
+            .fields
+            .cons
+            .nrg_field()
+            .expect("Newtonian cons.nrg")
+            .clone();
         for c in sim.geom.interior.iter() {
             let x = -bound + (c[0] as f64 + 0.5) * dx;
             let y = -bound + (c[1] as f64 + 0.5) * dx;
@@ -141,24 +174,47 @@ fn adiabatic_point_mass_additive_equals_fused_rk2() {
         sim
     };
 
-    let binding = || FusedSourceBinding::new("point_mass_grav", &[("gm", gm), ("xm_0", 0.0), ("xm_1", 0.0), ("eps", 0.0)]);
+    let binding = || {
+        FusedSourceBinding::new(
+            "point_mass_grav",
+            &[("gm", gm), ("xm_0", 0.0), ("xm_1", 0.0), ("eps", 0.0)],
+        )
+    };
 
     let mut sim_fused = build();
-    let sub_fused = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim_fused.geom.allocated)
-        .with_fused_source(binding());
+    let sub_fused = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        0.4,
+        &sim_fused.geom.allocated,
+    )
+    .with_fused_source(binding());
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve failed");
 
     let mut sim_add = build();
-    let sub_add = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim_add.geom.allocated)
-        .with_additive_source(binding());
+    let sub_add =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim_add.geom.allocated)
+            .with_additive_source(binding());
     evolve(&mut sim_add, &sub_add, t_final).expect("additive evolve failed");
 
     let interior = &sim_fused.geom.interior;
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_add.fields.cons.den, "cons.den");
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.den,
+        &sim_add.fields.cons.den,
+        "cons.den",
+    );
     for k in 0..2 {
-        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_add.fields.cons.mom[k], "cons.mom");
+        assert_cons_bit_identical(
+            interior,
+            &sim_fused.fields.cons.mom[k],
+            &sim_add.fields.cons.mom[k],
+            "cons.mom",
+        );
     }
-    let (nf, na) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_add.fields.cons.nrg_field().unwrap());
+    let (nf, na) = (
+        sim_fused.fields.cons.nrg_field().unwrap(),
+        sim_add.fields.cons.nrg_field().unwrap(),
+    );
     assert_cons_bit_identical(interior, nf, na, "cons.nrg");
 }
 
@@ -196,21 +252,38 @@ fn iso_point_mass_additive_equals_fused_rk2() {
         sim
     };
 
-    let binding = || FusedSourceBinding::new("point_mass_grav", &[("gm", gm), ("xm_0", 0.0), ("xm_1", 0.0), ("eps", 0.0)]);
+    let binding = || {
+        FusedSourceBinding::new(
+            "point_mass_grav",
+            &[("gm", gm), ("xm_0", 0.0), ("xm_1", 0.0), ("eps", 0.0)],
+        )
+    };
 
     let mut sim_fused = build();
-    let sub_fused = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.4, &sim_fused.geom.allocated)
-        .with_fused_source(binding());
+    let sub_fused =
+        IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.4, &sim_fused.geom.allocated)
+            .with_fused_source(binding());
     evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve failed");
 
     let mut sim_add = build();
-    let sub_add = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.4, &sim_add.geom.allocated)
-        .with_additive_source(binding());
+    let sub_add =
+        IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(cs, 0.4, &sim_add.geom.allocated)
+            .with_additive_source(binding());
     evolve(&mut sim_add, &sub_add, t_final).expect("additive evolve failed");
 
     let interior = &sim_fused.geom.interior;
-    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_add.fields.cons.den, "cons.den");
+    assert_cons_bit_identical(
+        interior,
+        &sim_fused.fields.cons.den,
+        &sim_add.fields.cons.den,
+        "cons.den",
+    );
     for k in 0..2 {
-        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_add.fields.cons.mom[k], "cons.mom");
+        assert_cons_bit_identical(
+            interior,
+            &sim_fused.fields.cons.mom[k],
+            &sim_add.fields.cons.mom[k],
+            "cons.mom",
+        );
     }
 }

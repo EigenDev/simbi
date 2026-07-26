@@ -16,9 +16,18 @@ use std::time::Instant;
 use symbi_aot::NamedKernel;
 
 fn main() {
-    let gx: i32 = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(128);
-    let gy: i32 = std::env::args().nth(3).and_then(|a| a.parse().ok()).unwrap_or(gx);
-    let gz: i32 = std::env::args().nth(4).and_then(|a| a.parse().ok()).unwrap_or(gy);
+    let gx: i32 = std::env::args()
+        .nth(1)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(128);
+    let gy: i32 = std::env::args()
+        .nth(3)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(gx);
+    let gz: i32 = std::env::args()
+        .nth(4)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(gy);
     let (px, py, pz) = (gx + 4, gy + 4, gz + 4);
     let n = (px * py * pz) as usize;
     let prim: Vec<f64> = (0..n)
@@ -36,29 +45,40 @@ fn main() {
     let dom_lo = [2i32, 2, 2];
     let zones = (gx as f64) * (gy as f64) * (gz as f64);
 
-    for (label, theta) in [("minmod (theta=1.5)", 1.5f64), ("vanleer (theta=-1)", -1.0f64)] {
+    for (label, theta) in [
+        ("minmod (theta=1.5)", 1.5f64),
+        ("vanleer (theta=-1)", -1.0f64),
+    ] {
         let mut run = || {
-            NamedKernel::new(std::env::args().nth(2).map(|s| s.leak() as &str).unwrap_or("adiabatic_face_flux_3d_0_serial"))
-                .input_at("prim.rho", &prim, &lo, &extent)
-                .input_at("prim.vel[0]", &prim, &lo, &extent)
-                .input_at("prim.vel[1]", &prim, &lo, &extent)
-                .input_at("prim.vel[2]", &prim, &lo, &extent)
-                .input_at("prim.pre", &prim, &lo, &extent)
-                .output_at("flux.den", &mut fden, &lo, &extent)
-                .output_at("flux.mom_0", &mut fm0, &lo, &extent)
-                .output_at("flux.mom_1", &mut fm1, &lo, &extent)
-                .output_at("flux.mom_2", &mut fm2, &lo, &extent)
-                .output_at("flux.nrg", &mut fnrg, &lo, &extent)
-                .grid(&grid)
-                .dom_lo(&dom_lo)
-                .scalar("gamma", black_box(1.4))
-                .scalar("theta", black_box(theta))
-                .scalar("x_lo_0", black_box(0.0))
-                .scalar("dx_0", black_box(0.01))
-                .run();
+            NamedKernel::new(
+                std::env::args()
+                    .nth(2)
+                    .map(|s| s.leak() as &str)
+                    .unwrap_or("adiabatic_face_flux_3d_0_serial"),
+            )
+            .input_at("prim.rho", &prim, &lo, &extent)
+            .input_at("prim.vel[0]", &prim, &lo, &extent)
+            .input_at("prim.vel[1]", &prim, &lo, &extent)
+            .input_at("prim.vel[2]", &prim, &lo, &extent)
+            .input_at("prim.pre", &prim, &lo, &extent)
+            .output_at("flux.den", &mut fden, &lo, &extent)
+            .output_at("flux.mom_0", &mut fm0, &lo, &extent)
+            .output_at("flux.mom_1", &mut fm1, &lo, &extent)
+            .output_at("flux.mom_2", &mut fm2, &lo, &extent)
+            .output_at("flux.nrg", &mut fnrg, &lo, &extent)
+            .grid(&grid)
+            .dom_lo(&dom_lo)
+            .scalar("gamma", black_box(1.4))
+            .scalar("theta", black_box(theta))
+            .scalar("x_lo_0", black_box(0.0))
+            .scalar("dx_0", black_box(0.01))
+            .run();
         };
         run();
-        let reps: u32 = std::env::args().nth(5).and_then(|a| a.parse().ok()).unwrap_or(10);
+        let reps: u32 = std::env::args()
+            .nth(5)
+            .and_then(|a| a.parse().ok())
+            .unwrap_or(10);
         let t0 = Instant::now();
         for _ in 0..reps {
             run();

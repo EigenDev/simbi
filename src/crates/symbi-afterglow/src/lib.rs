@@ -42,6 +42,7 @@ pub mod units;
 
 pub use bm::{BmProfile, bm_profile, synthesize_afterglow_events};
 pub use coords::Coords;
+pub use deposit::{VelComponents, compute_skymap_deposit, compute_skymap_deposit_spherical};
 pub use event::PhotonEvent;
 pub use ingest::{Cell, Microphysics, generate_events_from_cells};
 pub use lightcurve::light_curve;
@@ -49,7 +50,6 @@ pub use observe::{
     DOPPLER_BAND, DOPPLER_BOLOMETRIC, ObserverLightcurve, PolarizationCurve, SkyImage,
     compute_lightcurve_from_events, compute_polarization_from_events, compute_skymap,
 };
-pub use deposit::{VelComponents, compute_skymap_deposit, compute_skymap_deposit_spherical};
 pub use transfer::{
     generate_photon_events, generate_photon_events_spherical, monte_carlo_radiative_transfer,
 };

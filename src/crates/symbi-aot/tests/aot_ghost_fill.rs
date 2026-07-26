@@ -38,7 +38,11 @@ fn alloc(f: impl Fn(i32) -> f64) -> Vec<f64> {
     (0..ext)
         .map(|b| {
             let cell = b as i32 + LO;
-            if (0..N as i32).contains(&cell) { f(cell) } else { f64::NAN }
+            if (0..N as i32).contains(&cell) {
+                f(cell)
+            } else {
+                f64::NAN
+            }
         })
         .collect()
 }
@@ -55,7 +59,14 @@ fn pre_profile(cell: i32) -> f64 {
 
 // run the fill on the low-side ghost region (cells -NG .. 0) with one map.
 // pressure is a grade-0 primitive, pulled back like density (no sign flip).
-fn fill_low(rho: &mut [f64], vel: &mut [f64], pre: &mut [f64], map_type: i32, arg: i32, vel_sign: f64) {
+fn fill_low(
+    rho: &mut [f64],
+    vel: &mut [f64],
+    pre: &mut [f64],
+    map_type: i32,
+    arg: i32,
+    vel_sign: f64,
+) {
     // in-place (read at source, write at cell) over the low-ghost window; the
     // allocated buffer starts at lo = LO (= -NG), so the field views need the
     // explicit layout. map_type / arg are INT scalars, vel_sign FLOAT — the
@@ -66,8 +77,10 @@ fn fill_low(rho: &mut [f64], vel: &mut [f64], pre: &mut [f64], map_type: i32, ar
         .output_at("prim.rho", rho, &lo_arr, &ext)
         .output_at("prim.vel[0]", vel, &lo_arr, &ext)
         .output_at("prim.pre", pre, &lo_arr, &ext)
-        .grid(&[NG as u32]).dom_lo(&[LO])
-        .int("map_type_0", map_type).int("arg_0", arg)
+        .grid(&[NG as u32])
+        .dom_lo(&[LO])
+        .int("map_type_0", map_type)
+        .int("arg_0", arg)
         .scalar("vel_sign_0", vel_sign)
         .run();
 }
@@ -82,9 +95,21 @@ fn aot_periodic_reads_one_period_over() {
     fill_low(&mut rho, &mut vel, &mut pre, 1, N as i32, 1.0);
     for c in -NG..0 {
         let src = c + N as i32;
-        assert_eq!(rho[bi(c)], rho_profile(src), "periodic rho ghost {c} <- {src}");
-        assert_eq!(vel[bi(c)], vel_profile(src), "periodic vel ghost {c} <- {src}");
-        assert_eq!(pre[bi(c)], pre_profile(src), "periodic pre ghost {c} <- {src}");
+        assert_eq!(
+            rho[bi(c)],
+            rho_profile(src),
+            "periodic rho ghost {c} <- {src}"
+        );
+        assert_eq!(
+            vel[bi(c)],
+            vel_profile(src),
+            "periodic vel ghost {c} <- {src}"
+        );
+        assert_eq!(
+            pre[bi(c)],
+            pre_profile(src),
+            "periodic pre ghost {c} <- {src}"
+        );
     }
 }
 
@@ -99,9 +124,21 @@ fn aot_reflect_mirrors_and_flips_the_normal_velocity() {
     fill_low(&mut rho, &mut vel, &mut pre, 2, -1, -1.0);
     for c in -NG..0 {
         let src = -1 - c;
-        assert_eq!(rho[bi(c)], rho_profile(src), "reflect rho ghost {c} <- {src}");
-        assert_eq!(vel[bi(c)], -vel_profile(src), "reflect vel ghost {c} flips <- {src}");
-        assert_eq!(pre[bi(c)], pre_profile(src), "reflect pre ghost {c} (no flip) <- {src}");
+        assert_eq!(
+            rho[bi(c)],
+            rho_profile(src),
+            "reflect rho ghost {c} <- {src}"
+        );
+        assert_eq!(
+            vel[bi(c)],
+            -vel_profile(src),
+            "reflect vel ghost {c} flips <- {src}"
+        );
+        assert_eq!(
+            pre[bi(c)],
+            pre_profile(src),
+            "reflect pre ghost {c} (no flip) <- {src}"
+        );
     }
 }
 
@@ -114,9 +151,21 @@ fn aot_outflow_clamps_to_the_edge() {
     // the edge cell; velocity unchanged.
     fill_low(&mut rho, &mut vel, &mut pre, 3, 0, 1.0);
     for c in -NG..0 {
-        assert_eq!(rho[bi(c)], rho_profile(0), "outflow rho ghost {c} <- edge 0");
-        assert_eq!(vel[bi(c)], vel_profile(0), "outflow vel ghost {c} <- edge 0");
-        assert_eq!(pre[bi(c)], pre_profile(0), "outflow pre ghost {c} <- edge 0");
+        assert_eq!(
+            rho[bi(c)],
+            rho_profile(0),
+            "outflow rho ghost {c} <- edge 0"
+        );
+        assert_eq!(
+            vel[bi(c)],
+            vel_profile(0),
+            "outflow vel ghost {c} <- edge 0"
+        );
+        assert_eq!(
+            pre[bi(c)],
+            pre_profile(0),
+            "outflow pre ghost {c} <- edge 0"
+        );
     }
 }
 

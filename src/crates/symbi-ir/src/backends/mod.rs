@@ -14,7 +14,7 @@
 
 pub mod cpu;
 pub mod cuda;
+pub mod interp;
 pub mod kernel;
 pub mod kernel_cpu;
 pub mod render;
-pub mod interp;

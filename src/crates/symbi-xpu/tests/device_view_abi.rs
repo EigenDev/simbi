@@ -26,8 +26,8 @@
 
 #![cfg(feature = "cuda")]
 
-use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
-use symbi_xpu::runtime::{cuda_runtime::current_dispatcher, GpuRuntime};
+use symbi_xpu::cuda::{UnifiedMemory, ctx_sync};
+use symbi_xpu::runtime::{GpuRuntime, cuda_runtime::current_dispatcher};
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
 // host-side mirror of the CUDA `__symbi_View` struct. MUST match the
@@ -37,10 +37,10 @@ use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct DeviceView {
-    data:    *const std::ffi::c_void,
-    lo:      [i32; 4],
+    data: *const std::ffi::c_void,
+    lo: [i32; 4],
     strides: [i32; 4],
-    extent:  [i32; 4],
+    extent: [i32; 4],
 }
 
 // the ABI probe kernel: writes the 12 view-field slots into `data[0..12]`. a
@@ -68,8 +68,8 @@ fn device_view_abi_roundtrip() {
     // unified buffer of 12 doubles. the kernel writes into it through the
     // View's `data` pointer; the host reads it back after sync.
     let n = 12usize;
-    let mut block = MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n)
-        .expect("unified alloc for abi probe");
+    let mut block =
+        MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).expect("unified alloc for abi probe");
     let data_ptr = block.as_mut_ptr::<f64>();
     // initialize to a sentinel so an unmodified slot is detectable.
     unsafe {
@@ -79,10 +79,10 @@ fn device_view_abi_roundtrip() {
     }
 
     let view = DeviceView {
-        data:    data_ptr as *const std::ffi::c_void,
-        lo:      [10, 20, 30, 40],
+        data: data_ptr as *const std::ffi::c_void,
+        lo: [10, 20, 30, 40],
         strides: [50, 60, 70, 80],
-        extent:  [90, 100, 110, 120],
+        extent: [90, 100, 110, 120],
     };
 
     // JIT-compile + launch the one-thread probe — same path substrate_gpu.rs
@@ -101,9 +101,18 @@ fn device_view_abi_roundtrip() {
 
     let got: [f64; 12] = unsafe {
         [
-            *data_ptr.add(0), *data_ptr.add(1), *data_ptr.add(2), *data_ptr.add(3),
-            *data_ptr.add(4), *data_ptr.add(5), *data_ptr.add(6), *data_ptr.add(7),
-            *data_ptr.add(8), *data_ptr.add(9), *data_ptr.add(10), *data_ptr.add(11),
+            *data_ptr.add(0),
+            *data_ptr.add(1),
+            *data_ptr.add(2),
+            *data_ptr.add(3),
+            *data_ptr.add(4),
+            *data_ptr.add(5),
+            *data_ptr.add(6),
+            *data_ptr.add(7),
+            *data_ptr.add(8),
+            *data_ptr.add(9),
+            *data_ptr.add(10),
+            *data_ptr.add(11),
         ]
     };
     let want: [f64; 12] = [

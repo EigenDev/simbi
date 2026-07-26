@@ -290,8 +290,7 @@ impl<S: Scalar> BodySource<S> {
                 let r_norm = r_mag / (S::from_f64(0.5) * self.racc);
                 let weight = (S::ZERO - r_norm * r_norm).exp();
                 let sound_crossing = min_w / cs;
-                let t_ff =
-                    (r_mag * r_mag * r_mag / (S::from_f64(2.0) * self.mass + tiny)).sqrt();
+                let t_ff = (r_mag * r_mag * r_mag / (S::from_f64(2.0) * self.mass + tiny)).sqrt();
                 let nat_rate = S::ONE / (sound_crossing.min(t_ff) + tiny);
                 let sr = self.sink.min(nat_rate).min(inv_dt);
                 rho * sr * weight
@@ -322,7 +321,15 @@ impl<S: Scalar> BodySource<S> {
     /// gravity acts everywhere; the SINK term carries the same exact-support gate as
     /// [`Self::accretion_rate`] so the far field skips `sink_velocity`'s root and
     /// divisions too (they would be multiplied by an exact zero).
-    pub fn momentum_cartesian(&self, rho: S, vel: &[S; 3], x: &[S; 3], cs: S, min_w: S, inv_dt: S) -> [S; 3] {
+    pub fn momentum_cartesian(
+        &self,
+        rho: S,
+        vel: &[S; 3],
+        x: &[S; 3],
+        cs: S,
+        min_w: S,
+        inv_dt: S,
+    ) -> [S; 3] {
         let a = self.accel(x);
         let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
         let r_mag = dot(&dx, &dx).sqrt();
@@ -384,7 +391,9 @@ mod tests {
     #[test]
     fn uniform_accel_f64_matches_analytical() {
         // at S=f64 the source IS the analytical reference — no graph, no eval_source.
-        let src = UniformAccel::<f64, 3> { g_ext: [-0.1, -0.2, -9.81] };
+        let src = UniformAccel::<f64, 3> {
+            g_ext: [-0.1, -0.2, -9.81],
+        };
         let rho = 1.5_f64;
         let vel = [0.3_f64, -0.2, 0.4];
 
@@ -402,7 +411,11 @@ mod tests {
     fn point_mass_gravity_f64_matches_analytical() {
         // at S=f64 the source IS the softened analytical reference:
         // S = -rho*GM (x-xm) / (|x-xm|^2 + eps^2)^{3/2}.
-        let src = PointMassGravity::<f64, 3> { gm: 2.0, xm: [0.1, -0.3, 0.2], eps: 0.05 };
+        let src = PointMassGravity::<f64, 3> {
+            gm: 2.0,
+            xm: [0.1, -0.3, 0.2],
+            eps: 0.05,
+        };
         let rho = 1.5_f64;
         let vel = [0.3_f64, -0.2, 0.4];
         let x = [1.0_f64, 0.5, -0.4];
@@ -426,10 +439,18 @@ mod tests {
     fn softening_keeps_acceleration_finite_at_the_mass() {
         // the bug softening fixes: WITHOUT eps, x == xm gives 1/0 = Inf. WITH eps > 0
         // the field is finite everywhere (= 0 exactly at the mass, where dx = 0).
-        let src = PointMassGravity::<f64, 2> { gm: 1.0, xm: [0.3, -0.7], eps: 0.1 };
+        let src = PointMassGravity::<f64, 2> {
+            gm: 1.0,
+            xm: [0.3, -0.7],
+            eps: 0.1,
+        };
         let a = src.accel(&[0.3, -0.7]);
         for k in 0..2 {
-            assert!(a[k].is_finite() && a[k] == 0.0, "a_{k} at the mass must be finite (0): {}", a[k]);
+            assert!(
+                a[k].is_finite() && a[k] == 0.0,
+                "a_{k} at the mass must be finite (0): {}",
+                a[k]
+            );
         }
     }
 
@@ -439,8 +460,13 @@ mod tests {
         // gv_immersed kernel + immersed_iso test validate): softened gravity +
         // Bondi accretion + sink-velocity momentum loss. Cartesian 3D (z=0 plane).
         let b = BodySource::<f64> {
-            mass: 1.2, xm: [0.1, -0.2, 0.0], vm: [0.0, 0.0, 0.0],
-            soft: 0.1, racc: 0.6, sink: 5.0, delta: 0.3,
+            mass: 1.2,
+            xm: [0.1, -0.2, 0.0],
+            vm: [0.0, 0.0, 0.0],
+            soft: 0.1,
+            racc: 0.6,
+            sink: 5.0,
+            delta: 0.3,
         };
         let (rho, cs) = (1.5_f64, 0.5_f64);
         let vel = [0.4 / 1.5_f64, -0.3 / 1.5, 0.0];
@@ -471,11 +497,22 @@ mod tests {
         let mom = b.momentum_cartesian(rho, &vel, &x, cs, min_w, inv_dt);
         for k in 0..2 {
             let want = rho * g[k] - vstar[k] * den_dot;
-            assert!((mom[k] - want).abs() < 1e-12, "S_mom_{k}: {} vs {want}", mom[k]);
+            assert!(
+                (mom[k] - want).abs() < 1e-12,
+                "S_mom_{k}: {} vs {want}",
+                mom[k]
+            );
         }
-        assert!((b.density(rho, cs, &x, min_w, inv_dt) - (-den_dot)).abs() < 1e-12, "S_den");
+        assert!(
+            (b.density(rho, cs, &x, min_w, inv_dt) - (-den_dot)).abs() < 1e-12,
+            "S_den"
+        );
         // an inactive body (mass=0, sink=0) contributes exactly nothing.
-        let off = BodySource::<f64> { mass: 0.0, sink: 0.0, ..b };
+        let off = BodySource::<f64> {
+            mass: 0.0,
+            sink: 0.0,
+            ..b
+        };
         let m0 = off.momentum_cartesian(rho, &vel, &x, cs, min_w, inv_dt);
         assert!(m0[0] == 0.0 && m0[1] == 0.0 && off.density(rho, cs, &x, min_w, inv_dt) == 0.0);
     }
@@ -488,18 +525,27 @@ mod tests {
         let v_ref = [0.0_f64, 0.0];
 
         let no_op = relax_momentum(rho, &vel, -5.0, &v_ref);
-        assert!(no_op.iter().all(|&s| s.abs() < 1e-15), "negative kappa must clamp to a no-op");
+        assert!(
+            no_op.iter().all(|&s| s.abs() < 1e-15),
+            "negative kappa must clamp to a no-op"
+        );
 
         let drag = relax_momentum(rho, &vel, 2.0, &v_ref);
-        assert!((drag[0] - (-6.0)).abs() < 1e-13, "drag opposes velocity: {}", drag[0]);
+        assert!(
+            (drag[0] - (-6.0)).abs() < 1e-13,
+            "drag opposes velocity: {}",
+            drag[0]
+        );
         let work = relax_energy(rho, &vel, 2.0, &v_ref);
-        assert!(work < 0.0, "relaxation must remove kinetic energy, got {work}");
+        assert!(
+            work < 0.0,
+            "relaxation must remove kinetic energy, got {work}"
+        );
     }
 
     #[test]
     fn rotating_frame_acceleration_has_coriolis_and_centrifugal_signs() {
-        let accel =
-            rotating_frame_acceleration(&[3.0, 4.0, 7.0], &[5.0, 6.0, 8.0], 2.0, 1.0, 1.0);
+        let accel = rotating_frame_acceleration(&[3.0, 4.0, 7.0], &[5.0, 6.0, 8.0], 2.0, 1.0, 1.0);
         assert_eq!(accel, vec![32.0, -8.0, 0.0]);
     }
 

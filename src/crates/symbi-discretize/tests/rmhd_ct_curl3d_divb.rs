@@ -21,7 +21,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_ct_curl_3d_dir_gv, Coords, Spacing};
+use symbi_discretize::{Coords, Spacing, rmhd_ct_curl_3d_dir_gv};
 
 const M: usize = 8; // buffer extent per axis
 const IDX: f64 = 8.0;
@@ -47,9 +47,15 @@ fn div_b(bx: &[f64], by: &[f64], bz: &[f64], i: usize, j: usize, k: usize) -> f6
 fn ct_curl3d_preserves_div_b() {
     // an arbitrary smooth 3D vector potential A and edge EMF E.
     let f = M * M * M;
-    let ax = |i: usize, j: usize, k: usize| (0.3 * i as f64).sin() * (0.2 * j as f64 + 0.1 * k as f64).cos();
-    let ay = |i: usize, j: usize, k: usize| (0.25 * j as f64).cos() * (0.15 * k as f64 - 0.2 * i as f64).sin();
-    let az = |i: usize, j: usize, k: usize| (0.2 * k as f64).sin() * (0.3 * i as f64 + 0.1 * j as f64).cos();
+    let ax = |i: usize, j: usize, k: usize| {
+        (0.3 * i as f64).sin() * (0.2 * j as f64 + 0.1 * k as f64).cos()
+    };
+    let ay = |i: usize, j: usize, k: usize| {
+        (0.25 * j as f64).cos() * (0.15 * k as f64 - 0.2 * i as f64).sin()
+    };
+    let az = |i: usize, j: usize, k: usize| {
+        (0.2 * k as f64).sin() * (0.3 * i as f64 + 0.1 * j as f64).cos()
+    };
     let efn = |s: f64, i: usize, j: usize, k: usize| {
         (0.4 * i as f64 + s).sin() * (0.3 * j as f64).cos() + 0.2 * (0.2 * k as f64 - s).sin()
     };
@@ -70,9 +76,12 @@ fn ct_curl3d_preserves_div_b() {
         for j in 0..M - 1 {
             for k in 0..M - 1 {
                 // Bx = dAz/dy - dAy/dz ; By = dAx/dz - dAz/dx ; Bz = dAy/dx - dAx/dy.
-                bx[idx3(i, j, k)] = IDY * (az(i, j + 1, k) - az(i, j, k)) - IDZ * (ay(i, j, k + 1) - ay(i, j, k));
-                by[idx3(i, j, k)] = IDZ * (ax(i, j, k + 1) - ax(i, j, k)) - IDX * (az(i + 1, j, k) - az(i, j, k));
-                bz[idx3(i, j, k)] = IDX * (ay(i + 1, j, k) - ay(i, j, k)) - IDY * (ax(i, j + 1, k) - ax(i, j, k));
+                bx[idx3(i, j, k)] =
+                    IDY * (az(i, j + 1, k) - az(i, j, k)) - IDZ * (ay(i, j, k + 1) - ay(i, j, k));
+                by[idx3(i, j, k)] =
+                    IDZ * (ax(i, j, k + 1) - ax(i, j, k)) - IDX * (az(i + 1, j, k) - az(i, j, k));
+                bz[idx3(i, j, k)] =
+                    IDX * (ay(i + 1, j, k) - ay(i, j, k)) - IDY * (ax(i, j + 1, k) - ax(i, j, k));
             }
         }
     }
@@ -81,7 +90,10 @@ fn ct_curl3d_preserves_div_b() {
     for i in 0..M - 2 {
         for j in 0..M - 2 {
             for k in 0..M - 2 {
-                assert!(div_b(&bx, &by, &bz, i, j, k).abs() < 1e-11, "init div(B) nonzero at {i},{j},{k}");
+                assert!(
+                    div_b(&bx, &by, &bz, i, j, k).abs() < 1e-11,
+                    "init div(B) nonzero at {i},{j},{k}"
+                );
             }
         }
     }
@@ -91,7 +103,13 @@ fn ct_curl3d_preserves_div_b() {
     // per-dir CT curl: update bface[dir] from E_p1/E_p2 over [0, M-1)^3, into a fresh buffer.
     // out-of-place writes (the single write b_new) so the before/after div comparison reads
     // the originals. b = bface[dir]; e_p1 = efield[p1]; e_p2 = efield[p2].
-    let pick = |a: usize| -> &[f64] { match a { 0 => &ex, 1 => &ey, _ => &ez } };
+    let pick = |a: usize| -> &[f64] {
+        match a {
+            0 => &ex,
+            1 => &ey,
+            _ => &ez,
+        }
+    };
     let mut new_b: [Vec<f64>; 3] = [vec![0.0; f], vec![0.0; f], vec![0.0; f]];
     for dir in 0..3usize {
         let p1 = (dir + 1) % 3;
@@ -101,8 +119,16 @@ fn ct_curl3d_preserves_div_b() {
             built.0.scalar_params,
             vec!["dt".to_string(), "id_p1".to_string(), "id_p2".to_string()]
         );
-        let (bvec, ep1, ep2) =
-            ((match dir { 0 => &bx, 1 => &by, _ => &bz }).clone(), pick(p1).to_vec(), pick(p2).to_vec());
+        let (bvec, ep1, ep2) = (
+            (match dir {
+                0 => &bx,
+                1 => &by,
+                _ => &bz,
+            })
+            .clone(),
+            pick(p1).to_vec(),
+            pick(p2).to_vec(),
+        );
         let out = KernelRun::new(built)
             .grid([M, M, M])
             .compute_window([0, 0, 0], [M - 1, M - 1, M - 1])
@@ -121,8 +147,14 @@ fn ct_curl3d_preserves_div_b() {
             for k in 0..M - 2 {
                 let after = div_b(bxn, byn, bzn, i, j, k);
                 let before = div_b(&bx, &by, &bz, i, j, k);
-                assert!(after.abs() < 1e-11, "post-update div(B) nonzero at {i},{j},{k}: {after}");
-                assert!((after - before).abs() < 1e-12, "div(B) changed at {i},{j},{k}: {before} -> {after}");
+                assert!(
+                    after.abs() < 1e-11,
+                    "post-update div(B) nonzero at {i},{j},{k}: {after}"
+                );
+                assert!(
+                    (after - before).abs() < 1e-12,
+                    "div(B) changed at {i},{j},{k}: {before} -> {after}"
+                );
             }
         }
     }

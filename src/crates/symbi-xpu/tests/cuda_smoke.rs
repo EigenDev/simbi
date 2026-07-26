@@ -10,8 +10,8 @@
 
 #![cfg(feature = "cuda")]
 
-use symbi_xpu::*;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+use symbi_xpu::*;
 
 #[test]
 fn executor_lifecycle() {
@@ -28,7 +28,9 @@ fn memory_block_unified() {
 
     let ptr = block.as_mut_ptr::<f64>();
     for ii in 0..100 {
-        unsafe { *ptr.add(ii) = ii as f64; }
+        unsafe {
+            *ptr.add(ii) = ii as f64;
+        }
     }
     for ii in 0..100 {
         assert_eq!(unsafe { *ptr.add(ii) }, ii as f64);
@@ -56,7 +58,9 @@ extern \"C\" __global__ void double_it(const double* src, double* dst, unsigned 
 
     let sp = src.as_mut_ptr::<f64>();
     for ii in 0..nn {
-        unsafe { *sp.add(ii) = ii as f64; }
+        unsafe {
+            *sp.add(ii) = ii as f64;
+        }
     }
 
     let src_ptr = src.as_ptr::<f64>() as u64;
@@ -68,7 +72,8 @@ extern \"C\" __global__ void double_it(const double* src, double* dst, unsigned 
     args.push(&nu);
 
     unsafe {
-        exec.launch(&kernel, LaunchConfig::for_1d(nu, 256), &mut args).unwrap();
+        exec.launch(&kernel, LaunchConfig::for_1d(nu, 256), &mut args)
+            .unwrap();
     }
     exec.sync().unwrap();
 
@@ -78,7 +83,10 @@ extern \"C\" __global__ void double_it(const double* src, double* dst, unsigned 
         let got = unsafe { *dp.add(ii) };
         assert!(
             (got - expected).abs() < 1e-12,
-            "mismatch at {}: got {}, expected {}", ii, got, expected
+            "mismatch at {}: got {}, expected {}",
+            ii,
+            got,
+            expected
         );
     }
 }
@@ -101,7 +109,9 @@ extern \"C\" __global__ void noop_kernel(unsigned int n) {
     args.push(&nu);
 
     let token = unsafe {
-        exec1.launch(&kernel, LaunchConfig::for_1d(1, 1), &mut args).unwrap()
+        exec1
+            .launch(&kernel, LaunchConfig::for_1d(1, 1), &mut args)
+            .unwrap()
     };
 
     token.wait_on(&exec2).unwrap();
@@ -142,7 +152,9 @@ fn compile_ptx_for_test(src: &[u8]) -> Vec<u8> {
 
     let output = std::process::Command::new("nvcc")
         .args([
-            "-ptx", "-o", ptx_path.to_str().unwrap(),
+            "-ptx",
+            "-o",
+            ptx_path.to_str().unwrap(),
             cu_path.to_str().unwrap(),
             "--gpu-architecture=native",
         ])

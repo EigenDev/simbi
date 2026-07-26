@@ -27,9 +27,9 @@ use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_sim::substrate_seam::WithExcision;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
@@ -46,15 +46,19 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
     init: impl Fn([f64; 2]) -> Prim<f64, 2>,
 ) -> Sim<S, Mem> {
     let dx = 2.0 * L / N as f64;
-    let sim = Sim::<S, Mem>::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells([N, N])
-        .origin([-L, -L])
-        .spacing([dx, dx])
-        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-        .allocate()
-        .expect("sim")
-        .set_initial(|x| init(x))
-        .build();
+    let sim = Sim::<S, Mem>::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells([N, N])
+    .origin([-L, -L])
+    .spacing([dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+    .allocate()
+    .expect("sim")
+    .set_initial(|x| init(x))
+    .build();
     // the builder stores CONSERVED state; the excision pass reads current prims (materialized
     // by c2p in production). populate the prim fields directly to model the post-c2p state.
     for c in sim.geom.interior.iter() {
@@ -65,7 +69,12 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
         sim.fields.prim.rho.view_mut().set(c, p.rho);
         sim.fields.prim.vel[0].view_mut().set(c, p.vel[0]);
         sim.fields.prim.vel[1].view_mut().set(c, p.vel[1]);
-        sim.fields.prim.pre_field().unwrap().view_mut().set(c, p.pre);
+        sim.fields
+            .prim
+            .pre_field()
+            .unwrap()
+            .view_mut()
+            .set(c, p.pre);
     }
     sim
 }
@@ -109,7 +118,11 @@ fn excise_dispatch_matches_cpu_on_device() {
     let mut gap = 0.0_f64;
     for (i, (a, b)) in sh.iter().zip(sd.iter()).enumerate() {
         for k in 0..8 {
-            assert!(b[k].is_finite(), "non-finite device {} at cell {i}", names[k]);
+            assert!(
+                b[k].is_finite(),
+                "non-finite device {} at cell {i}",
+                names[k]
+            );
             let rel = (a[k] - b[k]).abs() / a[k].abs().max(1.0);
             assert!(
                 rel < 1e-9,
@@ -134,7 +147,10 @@ fn excise_dispatch_matches_cpu_on_device() {
             n_changed += 1;
         }
     }
-    assert!(n_changed > 20, "device excise never rewrote the deep sphere (got {n_changed})");
+    assert!(
+        n_changed > 20,
+        "device excise never rewrote the deep sphere (got {n_changed})"
+    );
 }
 
 #[test]
@@ -160,17 +176,30 @@ fn excise_source_cfl_dt_matches_cpu_on_device() {
     let hdt = hk.cfl(&h);
     let ddt = dk.cfl(&d);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
-    assert!(hdt.is_finite() && hdt > 1e-6, "host excised dt bad (not a real timestep): {hdt:e}");
-    assert!(ddt.is_finite() && ddt > 1e-6, "device excised dt collapsed: {ddt:e}");
+    assert!(
+        hdt.is_finite() && hdt > 1e-6,
+        "host excised dt bad (not a real timestep): {hdt:e}"
+    );
+    assert!(
+        ddt.is_finite() && ddt > 1e-6,
+        "device excised dt collapsed: {ddt:e}"
+    );
     let rel = (hdt - ddt).abs() / hdt;
-    assert!(rel < 1e-9, "excised cfl dt host {hdt:e} != device {ddt:e} (rel {rel:e})");
+    assert!(
+        rel < 1e-9,
+        "excised cfl dt host {hdt:e} != device {ddt:e} (rel {rel:e})"
+    );
 }
 
 #[test]
 fn excise_uniform_state_matches_cpu_on_device() {
     // a uniform primitive state: the fill sweeps are the identity on prims; the conserved
     // rebuild recomputes the same arithmetic on both backends. host and device must agree.
-    let init = |_: [f64; 2]| Prim { rho: 1.3, vel: Tensor::new([0.05, -0.04]), pre: 0.02 };
+    let init = |_: [f64; 2]| Prim {
+        rho: 1.3,
+        vel: Tensor::new([0.05, -0.04]),
+        pre: 0.02,
+    };
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
     dispatch_excise(&h, GAMMA, R_EXC);
@@ -180,7 +209,12 @@ fn excise_uniform_state_matches_cpu_on_device() {
     for (i, (a, b)) in sh.iter().zip(sd.iter()).enumerate() {
         for k in 0..8 {
             let rel = (a[k] - b[k]).abs() / a[k].abs().max(1.0);
-            assert!(rel < 1e-9, "uniform excise field {k} at cell {i}: cpu {} != gpu {} (rel {rel:e})", a[k], b[k]);
+            assert!(
+                rel < 1e-9,
+                "uniform excise field {k} at cell {i}: cpu {} != gpu {} (rel {rel:e})",
+                a[k],
+                b[k]
+            );
         }
     }
 }

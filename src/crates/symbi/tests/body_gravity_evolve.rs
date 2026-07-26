@@ -79,8 +79,13 @@ fn fofc_redo_preserves_body_gravity() {
             .expect("sim")
             .set_initial(ic)
             .build();
-        let s = if with_body { s.with_bodies(central_mass()) } else { s };
-        let kset = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &s.geom.allocated);
+        let s = if with_body {
+            s.with_bodies(central_mass())
+        } else {
+            s
+        };
+        let kset =
+            AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &s.geom.allocated);
         let mut hier = Hierarchy::single(s, kset);
         hier.evolve(1e-4).expect("hierarchy step"); // one Euler step (t_final < first dt)
         assert_eq!(hier.levels[0].state.iteration, 1, "expected one step");
@@ -90,7 +95,10 @@ fn fofc_redo_preserves_body_gravity() {
     fofc_reset_stats();
     let b = run(true); // central mass
     let (fired, _) = fofc_stats();
-    assert!(fired > 0, "FOFC did not fire — the gate does not exercise the redo path");
+    assert!(
+        fired > 0,
+        "FOFC did not fire — the gate does not exercise the redo path"
+    );
     let a = run(false); // no body
 
     // the body pulls toward the origin: the impulse D = mom_B - mom_A must point INWARD
@@ -196,7 +204,9 @@ fn fofc_freeze_preserves_body_gravity() {
             c_nrg.view_mut().set(c, e_int);
             prim.rho.view_mut().set(c, 1.0);
             // unphysical first-order pressure in the frozen band forces the select to freeze there.
-            p_pre.view_mut().set(c, if frozen_band(r) { -1.0 } else { 1.0 });
+            p_pre
+                .view_mut()
+                .set(c, if frozen_band(r) { -1.0 } else { 1.0 });
         }
         s
     };
@@ -204,7 +214,14 @@ fn fofc_freeze_preserves_body_gravity() {
     let sb = build();
     fofc_select_with_body(&sb, "adiabatic", dt, GAMMA);
     let sp = build();
-    fofc_select(&sp, "adiabatic", "", &sp.workspace.u_stage, &sp.fields.cons, &sp.fields.prim);
+    fofc_select(
+        &sp,
+        "adiabatic",
+        "",
+        &sp.workspace.u_stage,
+        &sp.fields.cons,
+        &sp.fields.prim,
+    );
 
     let mut frozen = 0usize;
     let mut got_body = 0usize;
@@ -235,7 +252,10 @@ fn fofc_freeze_preserves_body_gravity() {
         }
     }
     assert!(frozen > 8, "too few frozen cells to test ({frozen})");
-    assert!(kept_ok > 8, "physical cells must be kept unchanged by the freeze select ({kept_ok})");
+    assert!(
+        kept_ok > 8,
+        "physical cells must be kept unchanged by the freeze select ({kept_ok})"
+    );
     assert!(
         got_body == frozen,
         "the with-body freeze select dropped the body source: only {got_body}/{frozen} frozen \
@@ -300,7 +320,9 @@ fn fofc_freeze_preserves_body_gravity_iso() {
             cons.mom[0].view_mut().set(c, KEPT_MARKER);
             cons.mom[1].view_mut().set(c, 0.0);
             // negative first-order density in the frozen band -> select freezes; physical elsewhere.
-            prim.rho.view_mut().set(c, if frozen_band(r) { -1.0 } else { 1.0 });
+            prim.rho
+                .view_mut()
+                .set(c, if frozen_band(r) { -1.0 } else { 1.0 });
         }
         s
     };
@@ -308,7 +330,14 @@ fn fofc_freeze_preserves_body_gravity_iso() {
     let sb = build();
     fofc_select_with_body(&sb, "iso", dt, cs);
     let sp = build();
-    fofc_select(&sp, "iso", "", &sp.workspace.u_stage, &sp.fields.cons, &sp.fields.prim);
+    fofc_select(
+        &sp,
+        "iso",
+        "",
+        &sp.workspace.u_stage,
+        &sp.fields.cons,
+        &sp.fields.prim,
+    );
 
     let mut frozen = 0usize;
     let mut got_body = 0usize;
@@ -329,12 +358,18 @@ fn fofc_freeze_preserves_body_gravity_iso() {
             }
             worst_outward = worst_outward.min(inward);
             frozen += 1;
-        } else if kept_band(r) && (bx - KEPT_MARKER).abs() < 1e-12 && (px - KEPT_MARKER).abs() < 1e-12 {
+        } else if kept_band(r)
+            && (bx - KEPT_MARKER).abs() < 1e-12
+            && (px - KEPT_MARKER).abs() < 1e-12
+        {
             kept_ok += 1;
         }
     }
     assert!(frozen > 8, "too few frozen cells to test ({frozen})");
-    assert!(kept_ok > 8, "physical cells must be kept unchanged by the iso freeze select ({kept_ok})");
+    assert!(
+        kept_ok > 8,
+        "physical cells must be kept unchanged by the iso freeze select ({kept_ok})"
+    );
     assert!(
         got_body == frozen,
         "the iso with-body freeze select dropped the body source: only {got_body}/{frozen} frozen \
@@ -427,7 +462,7 @@ fn central_gravity_pulls_fluid_inward_through_evolve() {
 fn body_gravity_gpu_matches_cpu() {
     use symbi_algebra::Domain;
     use symbi_grid::Field;
-    use symbi_xpu::{DeviceSpace, DeviceMemory};
+    use symbi_xpu::{DeviceMemory, DeviceSpace};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -627,7 +662,7 @@ fn black_hole_records_accretion_without_changing_mass() {
 #[cfg(feature = "gpu")]
 #[test]
 fn body_feedback_gpu_matches_cpu() {
-    use symbi_xpu::{DeviceSpace, DeviceMemory};
+    use symbi_xpu::{DeviceMemory, DeviceSpace};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -790,7 +825,7 @@ fn curvilinear_central_gravity_is_radial() {
 #[test]
 fn curvilinear_body_source_gpu_matches_cpu() {
     use symbi_geometry::Cylindrical;
-    use symbi_xpu::{DeviceSpace, DeviceMemory};
+    use symbi_xpu::{DeviceMemory, DeviceSpace};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -942,7 +977,7 @@ fn spherical_central_gravity_is_radial() {
 #[test]
 fn spherical_3d_body_gpu_matches_cpu() {
     use symbi_geometry::Spherical;
-    use symbi_xpu::{DeviceSpace, DeviceMemory};
+    use symbi_xpu::{DeviceMemory, DeviceSpace};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()

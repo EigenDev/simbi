@@ -5,9 +5,11 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{volume_weighted_centroid, Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_algebra::Tensor;
-
+use symbi_geometry::{
+    Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    SchwarzschildKSCartesian, SchwarzschildKSCylindrical, volume_weighted_centroid,
+};
 
 /// one cartesian-uniform finite-volume divergence sum over the gridded axes:
 /// `sum_i (F_i[coord+e_i] - F_i[coord]) / dx_i`. `base` names the per-direction flux field
@@ -30,7 +32,6 @@ fn gv_divergence_cartesian(base: &str, ndim: u8) -> Gv {
     acc.expect("godunov divergence needs ndim >= 1")
 }
 
-
 /// the analytic AREA-WEIGHTED curvilinear divergence: `(1/V) sum_i (F_i[+e_i]*A_hi_i -
 /// F_i*A_lo_i)` — each face flux weighted by its face area BEFORE the telescope, the cell sum
 /// scaled by `1/V`. the gv mirror of `finite_volume::divergence_sum_weighted`; `geo` carries
@@ -51,7 +52,6 @@ fn gv_divergence_weighted(base: &str, ndim: u8, geo: &CellGeometryGv) -> Gv {
     }
     acc.expect("godunov divergence needs ndim >= 1") * geo.inv_volume
 }
-
 
 /// the PLAIN COORDINATE divergence `sum_i (F_i[+e_i] - F_i) / width_i` — no face-area or
 /// cell-volume weighting on ANY chart. this is the divergence of a fully densitized conservation
@@ -75,7 +75,6 @@ pub(crate) fn gv_divergence_coord(base: &str, ndim: u8, spacing: &[Spacing]) -> 
     acc.expect("godunov divergence needs ndim >= 1")
 }
 
-
 /// the per-direction inverse divergence operator for `base`: cartesian-uniform `(F_hi -
 /// F_lo)/dx_i`, else the area-weighted `(1/V)(F_hi*A_hi - F_lo*A_lo)` from `geo`.
 pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) -> Gv {
@@ -84,8 +83,6 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
         Some(g) => gv_divergence_weighted(base, ndim, g),
     }
 }
-
-
 
 /// the GR LAPSE WEIGHT `alpha(x)` for the spatial-RHS densitization (Valencia 3+1). the conserved
 /// update `d_t(sqrt(gamma) U) + d_i(sqrt(-g) F) = sqrt(-g) S` reduces, on a STATIC DIAGONAL
@@ -96,7 +93,11 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
 /// so the RHS is untouched and BIT-IDENTICAL on a flat metric. a GR metric (Schwarzschild)
 /// returns `Some(alpha)` dispatched `Coords -> concrete Metric -> metric.lapse(centroid)` as a
 /// traced Gv expression in the cell coordinate (the coordinate-dispatch pattern).
-pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centroid: &[Gv]) -> Option<Gv> {
+pub(crate) fn gv_lapse_weight(
+    coords: Coords,
+    spacetime: Spacetime,
+    coord_centroid: &[Gv],
+) -> Option<Gv> {
     match (spacetime, coords) {
         // flat (Minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph
         // (no unity multiply) -> bit-identical.
@@ -109,7 +110,12 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
-            Some(SchwarzschildKSCartesian { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
+            Some(
+                SchwarzschildKSCartesian {
+                    mass: Gv::scalar("schwarzschild_mass"),
+                }
+                .lapse(x),
+            )
         }
         // cylindrical kerr-schild: alpha = 1/sqrt(1 + 2M/r), r = sqrt(R^2 + z^2) the SPHERICAL radius
         // at the FULL (R, phi, z) position — the metric reads both slots 0 and 2 (the cylindrical
@@ -118,7 +124,12 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
-            Some(SchwarzschildKSCylindrical { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
+            Some(
+                SchwarzschildKSCylindrical {
+                    mass: Gv::scalar("schwarzschild_mass"),
+                }
+                .lapse(x),
+            )
         }
         // cartesian spinning kerr: alpha = 1/sqrt(1 + 2H |l|^2) at the FULL cartesian position
         // (the metric solves the oblate-spheroidal radius internally); the radial-slot shortcut
@@ -131,7 +142,7 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
             let spin = Gv::scalar("kerr_spin");
             Some(KerrKSCartesian { mass, spin }.lapse(x))
         }
-(Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::Kerr, Coords::Cylindrical) => {
             let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
@@ -164,7 +175,6 @@ pub(crate) fn gv_cell_midpoints(spacing: &[Spacing], ndim: usize) -> Vec<Gv> {
     (0..ndim).map(|d| (lo[d] + hi[d]) * half).collect()
 }
 
-
 /// the full-chart spatial measure `sqrt(det gamma)` at a 3-slot coordinate position, dispatched
 /// `(Spacetime, Coords) -> concrete Metric -> Metric::volume_factor`. always evaluated at the
 /// metric's full spatial dimension, so a reduced grid still carries the suppressed directions: on a
@@ -186,19 +196,26 @@ pub(crate) fn gv_metric_volume_factor_at(
             SchwarzschildKSCylindrical { mass }.volume_factor(x)
         }
         (Spacetime::KerrSchild, _) => SchwarzschildKS { mass }.volume_factor(x),
-        (Spacetime::Kerr, Coords::Cartesian) => {
-            KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") }.volume_factor(x)
+        (Spacetime::Kerr, Coords::Cartesian) => KerrKSCartesian {
+            mass,
+            spin: Gv::scalar("kerr_spin"),
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
-            KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") }.volume_factor(x)
+        .volume_factor(x),
+        (Spacetime::Kerr, Coords::Cylindrical) => KerrKSCylindrical {
+            mass,
+            spin: Gv::scalar("kerr_spin"),
         }
-        (Spacetime::Kerr, _) => KerrKS { mass, spin: Gv::scalar("kerr_spin") }.volume_factor(x),
+        .volume_factor(x),
+        (Spacetime::Kerr, _) => KerrKS {
+            mass,
+            spin: Gv::scalar("kerr_spin"),
+        }
+        .volume_factor(x),
         (Spacetime::Minkowski, _) => {
             unreachable!("the flat measure is the coordinate volume element")
         }
     }
 }
-
 
 /// the analytic lapse alpha(r) as a traced Gv, dispatched `Spacetime -> concrete Metric ->
 /// Metric::lapse` — the SINGLE codegen seam for the GR lapse. every consumer (the densitization cell
@@ -261,13 +278,10 @@ pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv, theta: Option<Gv
     }
 }
 
-
-
 /// `true` iff the flat unweighted `(F_hi-F_lo)/dx` divergence applies (no in-kernel metric).
 pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool {
     coords == Coords::Cartesian && spacing.iter().all(|&s| s == Spacing::Uniform)
 }
-
 
 // =============================================================================
 // in-kernel GEOMETRY — the substrate metric expressed in Gv. `Gv::coord` is the
@@ -282,7 +296,11 @@ pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool 
 /// log-slope for Log). the integer coord promotes to f64 against the scalars at lowering.
 pub(crate) fn gv_axis_face_at(ax: usize, spacing: Spacing, offset: i64) -> Gv {
     let coord = Gv::coord(ax as u8);
-    let i = if offset == 0 { coord } else { coord + Gv::from_f64(offset as f64) };
+    let i = if offset == 0 {
+        coord
+    } else {
+        coord + Gv::from_f64(offset as f64)
+    };
     gv_axis_face_at_index(ax, spacing, i)
 }
 
@@ -297,7 +315,6 @@ pub(crate) fn gv_axis_width(ax: usize, spacing: Spacing) -> Gv {
         || Gv::scalar(&format!("dx_{ax}")),
     )
 }
-
 
 /// the lower face position of the cell at an ARBITRARY integer index expression `i` along
 /// grid axis `ax` — the index-general form of [`gv_axis_face_at`] (which passes the thread
@@ -332,17 +349,16 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     )
 }
 
-
 /// the diagonal scale factor `h_dir(pos)` — the metric Lame coefficient. Cartesian: 1;
 /// Spherical: (1, r, r*sin(theta)); Cylindrical: (1, r, 1). `pos` is coordinate-indexed
 /// (pos[0]=r, pos[1]=theta). the `match` is build-time (Coords is the codegen geometry).
 pub(crate) fn gv_scale_factor(coords: Coords, dir: usize, pos: &[Gv]) -> Gv {
     match (coords, dir) {
         (Coords::Cartesian, _) => Gv::ONE,
-        (Coords::Spherical, 1) => pos[0],                  // r
-        (Coords::Spherical, 2) => pos[0] * pos[1].sin(),   // r*sin(theta)
+        (Coords::Spherical, 1) => pos[0],                // r
+        (Coords::Spherical, 2) => pos[0] * pos[1].sin(), // r*sin(theta)
         (Coords::Spherical, _) => Gv::ONE,
-        (Coords::Cylindrical, 1) => pos[0],                // r (phi direction)
+        (Coords::Cylindrical, 1) => pos[0], // r (phi direction)
         (Coords::Cylindrical, _) => Gv::ONE,
     }
 }
@@ -360,17 +376,25 @@ pub(crate) fn gv_ungridded_slot(coords: Coords, c: usize) -> Gv {
     }
 }
 
-
 /// per-cell PHYSICAL inverse widths `1 / (h_d * width_d)` per gridded axis — the metric-
 /// correct CFL length scale (the wave crosses the physical extent `h_d * \Delta coord_d`, the
 /// coordinate width scaled by the lame factor `h_d`), computed in-kernel from the cell index.
 /// `axes[d]` is the coordinate gridded axis `d` maps to.
 /// (the cartesian-UNIFORM CFL still uses the host's precomputed `inv_dx_d` scalar — this is
 /// the curvilinear / non-uniform path.)
-pub fn cell_inv_phys_widths_gv(coords: Coords, spacing: &[Spacing], axes: &[usize], ndim: usize) -> Vec<Gv> {
+pub fn cell_inv_phys_widths_gv(
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+) -> Vec<Gv> {
     let half = Gv::from_f64(0.5);
-    let lo: Vec<Gv> = (0..ndim).map(|d| gv_axis_face_at(d, spacing[d], 0)).collect();
-    let hi: Vec<Gv> = (0..ndim).map(|d| gv_axis_face_at(d, spacing[d], 1)).collect();
+    let lo: Vec<Gv> = (0..ndim)
+        .map(|d| gv_axis_face_at(d, spacing[d], 0))
+        .collect();
+    let hi: Vec<Gv> = (0..ndim)
+        .map(|d| gv_axis_face_at(d, spacing[d], 1))
+        .collect();
     let width: Vec<Gv> = (0..ndim).map(|d| hi[d] - lo[d]).collect();
     // coordinate-indexed cell center: scale_factor reads pos by coordinate, so place each
     // gridded axis's center at its coordinate slot (symmetry slots stay 0, never read).
@@ -386,7 +410,6 @@ pub fn cell_inv_phys_widths_gv(coords: Coords, spacing: &[Spacing], axes: &[usiz
         .collect()
 }
 
-
 /// per-cell finite-volume geometric factors in Gv:
 /// inverse cell volume, per-axis lo/hi face areas, and
 /// volume-weighted centroids, all from the cell index. the foundation the curvilinear
@@ -399,7 +422,6 @@ pub struct CellGeometryGv {
     pub centroid: Vec<Gv>,
 }
 
-
 /// `a^n` for a small literal power `n >= 1` as repeated multiply — exact (no Pow), so the
 /// analytic radial integrals stay byte-form-identical across rebuilds.
 pub(crate) fn gv_powi(a: Gv, n: u32) -> Gv {
@@ -410,15 +432,17 @@ pub(crate) fn gv_powi(a: Gv, n: u32) -> Gv {
     acc
 }
 
-
 /// per axis: `(lo face, hi face, width)` from the index map.
 fn gv_faces(spacing: &[Spacing], ndim: usize) -> (Vec<Gv>, Vec<Gv>, Vec<Gv>) {
-    let lo: Vec<Gv> = (0..ndim).map(|d| gv_axis_face_at(d, spacing[d], 0)).collect();
-    let hi: Vec<Gv> = (0..ndim).map(|d| gv_axis_face_at(d, spacing[d], 1)).collect();
+    let lo: Vec<Gv> = (0..ndim)
+        .map(|d| gv_axis_face_at(d, spacing[d], 0))
+        .collect();
+    let hi: Vec<Gv> = (0..ndim)
+        .map(|d| gv_axis_face_at(d, spacing[d], 1))
+        .collect();
     let width: Vec<Gv> = (0..ndim).map(|d| hi[d] - lo[d]).collect();
     (lo, hi, width)
 }
-
 
 /// build the per-cell finite-volume geometric factors in Gv (cartesian / spherical /
 /// cylindrical), axis-role driven. `axes[d]`
@@ -437,7 +461,6 @@ pub fn cell_geometry_gv(
         Coords::Cylindrical => cylindrical_geometry_gv(&lo, &hi, &width, axes, ndim),
     }
 }
-
 
 /// the COVARIANT (valencia) finite-volume geometry: face weights are integrals of the
 /// densitized volume element `alpha sqrt(gamma) = r^2 sin(theta)` (the det-g-flat family)
@@ -477,7 +500,6 @@ pub fn cell_geometry_covariant_gv(
     }
 }
 
-
 /// the out-of-plane induction divergence geometry for the FLAT spherical (r,theta) plane:
 /// the toroidal PHYSICAL component obeys `d_t B_phi = -(1/r)[d_r(r F^r) + d_theta F^theta]`
 /// ((curl E)_phi with in-plane lame factors h_r = 1, h_theta = r — NO r^2 and NO sin(theta);
@@ -497,7 +519,6 @@ pub(crate) fn oop_curl_geometry_sph_rtheta_gv(spacing: &[Spacing]) -> CellGeomet
         centroid: vec![r_c, th_c],
     }
 }
-
 
 // cartesian: V = prod(width); A_dir = prod_{j!=dir}(width); centroid = arithmetic mid.
 fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> CellGeometryGv {
@@ -526,9 +547,13 @@ fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> Cel
         area_hi.push(area);
         centroid.push((lo[dir] + hi[dir]) * half); // flat cell centroid = arithmetic mid
     }
-    CellGeometryGv { inv_volume, area_lo, area_hi, centroid }
+    CellGeometryGv {
+        inv_volume,
+        area_lo,
+        area_hi,
+        centroid,
+    }
 }
-
 
 // spherical (r, theta, phi): analytic exact-integral factors, volume-weighted centroids
 // (the radial centroid is volume-weighted). `covariant` selects
@@ -553,12 +578,21 @@ fn spherical_geometry_gv(
         let (tl, th) = (lo[1], hi[1]);
         let (ctl, cth) = (tl.cos(), th.cos());
         let it = ctl - cth; // cos(tl) - cos(th)
-        (it, tl.sin(), th.sin(), volume_weighted_centroid(Geometry::Spherical, 1, tl, th))
+        (
+            it,
+            tl.sin(),
+            th.sin(),
+            volume_weighted_centroid(Geometry::Spherical, 1, tl, th),
+        )
     } else {
         let z = Gv::ZERO;
         (Gv::from_f64(2.0), z, z, Gv::from_f64(pi / 2.0)) // cos(0)-cos(pi)=2; centroid at pi/2
     };
-    let i_phi = if ndim >= 3 { width[2] } else { Gv::from_f64(2.0 * pi) };
+    let i_phi = if ndim >= 3 {
+        width[2]
+    } else {
+        Gv::from_f64(2.0 * pi)
+    };
 
     // the kerr Sigma-measure moments: i_c2s = int cos^2(theta) sin(theta) dtheta over the cell
     // (the a^2 companion of i_theta), c2 at the theta faces, and the radial width. zero-spin
@@ -624,9 +658,13 @@ fn spherical_geometry_gv(
         area_hi[2] = aphi;
         centroid[2] = (lo[2] + hi[2]) * Gv::from_f64(0.5); // arithmetic mid (uniform in phi)
     }
-    CellGeometryGv { inv_volume, area_lo, area_hi, centroid }
+    CellGeometryGv {
+        inv_volume,
+        area_lo,
+        area_hi,
+        centroid,
+    }
 }
-
 
 // cylindrical (coords 0=r, 1=phi, 2=z): h=(1,r,1), sqrt(g)=r. axis-role driven — one builder
 // serves (r,phi)/(r,z)/(r,phi,z); an ungridded coordinate is a symmetry axis (its full-extent
@@ -679,9 +717,13 @@ fn cylindrical_geometry_gv(
         area_hi[a] = az;
         centroid[a] = (lo[a] + hi[a]) * half;
     }
-    CellGeometryGv { inv_volume, area_lo, area_hi, centroid }
+    CellGeometryGv {
+        inv_volume,
+        area_lo,
+        area_hi,
+        centroid,
+    }
 }
-
 
 /// the geometry probe: write `inv_volume` + the dir-0 lo/hi face
 /// areas + the dir-0 volume-weighted centroid, so a host test bit-diffs them against the
@@ -695,10 +737,26 @@ pub fn geometry_probe_gv(
     let axes: Vec<usize> = (0..ndim).collect();
     let g = cell_geometry_gv(coords, spacing, &axes, ndim);
     let writes = vec![
-        ("inv_volume".to_string(), "inv_volume".into(), g.inv_volume.node()),
-        ("area_lo_0".to_string(), "area_lo_0".into(), g.area_lo[0].node()),
-        ("area_hi_0".to_string(), "area_hi_0".into(), g.area_hi[0].node()),
-        ("centroid_0".to_string(), "centroid_0".into(), g.centroid[0].node()),
+        (
+            "inv_volume".to_string(),
+            "inv_volume".into(),
+            g.inv_volume.node(),
+        ),
+        (
+            "area_lo_0".to_string(),
+            "area_lo_0".into(),
+            g.area_lo[0].node(),
+        ),
+        (
+            "area_hi_0".to_string(),
+            "area_hi_0".into(),
+            g.area_hi[0].node(),
+        ),
+        (
+            "centroid_0".to_string(),
+            "centroid_0".into(),
+            g.centroid[0].node(),
+        ),
     ];
     (end_trace(), writes)
 }
@@ -753,7 +811,10 @@ mod local_width_tests {
         let width = eval_width(&values);
         let expected = 0.03 * 1.2_f64.powi(5);
         assert!((width - expected).abs() <= 32.0 * f64::EPSILON * expected);
-        assert_ne!(width, values[1].1, "graded width collapsed to the base width");
+        assert_ne!(
+            width, values[1].1,
+            "graded width collapsed to the base width"
+        );
     }
 
     #[test]

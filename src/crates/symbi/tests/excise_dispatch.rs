@@ -12,9 +12,9 @@ use symbi::regimes::substrate_kernels::dispatch_excise;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::state::Prim;
-use symbi_hydro::Rhd;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const N: usize = 48;
@@ -27,15 +27,19 @@ type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpa
 
 fn build_sim(init: impl Fn([f64; 2]) -> Prim<f64, 2>) -> Sim {
     let dx = 2.0 * L / N as f64;
-    let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
-        .cells([N, N])
-        .origin([-L, -L])
-        .spacing([dx, dx])
-        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
-        .allocate()
-        .expect("sim")
-        .set_initial(|x| init(x))
-        .build();
+    let sim = Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKSCartesian { mass: MASS },
+    )
+    .cells([N, N])
+    .origin([-L, -L])
+    .spacing([dx, dx])
+    .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+    .allocate()
+    .expect("sim")
+    .set_initial(|x| init(x))
+    .build();
     // the builder stores the CONSERVED state; the primitive fields materialize via
     // c2p during evolution (every stage ends with one), so the excision pass always
     // reads current prims in production. populate them directly here to model the
@@ -94,7 +98,10 @@ fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
         let y = sim.geom.x_lo[1] + ((c[1] - lo) as f64 + 0.5) * dx;
         let r = (x * x + y * y).sqrt();
         for k in 0..8 {
-            assert!(after[i][k].is_finite(), "non-finite field {k} at ({x:.3},{y:.3})");
+            assert!(
+                after[i][k].is_finite(),
+                "non-finite field {k} at ({x:.3},{y:.3})"
+            );
         }
         if r > R_EXC + 2.0 * dx {
             n_live += 1;
@@ -109,7 +116,10 @@ fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
             n_excised_changed += 1;
         }
     }
-    assert!(n_live > 1000, "the far field must dominate (got {n_live} live cells)");
+    assert!(
+        n_live > 1000,
+        "the far field must dominate (got {n_live} live cells)"
+    );
     assert!(
         n_excised_changed > 20,
         "the fill never rewrote the deep sphere (got {n_excised_changed} changed cells)"
@@ -126,7 +136,11 @@ fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
     // and must change nothing anywhere.
     const RHO_FLOOR: f64 = 1e-10;
     const P_FLOOR: f64 = 1e-12;
-    let sim = build_sim(|_| Prim { rho: 1.3, vel: Tensor::new([0.05, -0.04]), pre: 0.02 });
+    let sim = build_sim(|_| Prim {
+        rho: 1.3,
+        vel: Tensor::new([0.05, -0.04]),
+        pre: 0.02,
+    });
     let before = snapshot(&sim);
     dispatch_excise(&sim, GAMMA, R_EXC);
     let once = snapshot(&sim);
@@ -169,7 +183,10 @@ fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
             }
         }
     }
-    assert!(n_floor > 20, "the deep sphere must carry the floor (got {n_floor} cells)");
+    assert!(
+        n_floor > 20,
+        "the deep sphere must carry the floor (got {n_floor} cells)"
+    );
 
     dispatch_excise(&sim, GAMMA, R_EXC);
     let twice = snapshot(&sim);

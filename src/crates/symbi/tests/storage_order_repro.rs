@@ -18,7 +18,7 @@
 // run: cargo test -p symbi --test storage_order_repro -- --nocapture
 // =============================================================================
 
-use symbi_algebra::{domain, Domain, Space};
+use symbi_algebra::{Domain, Space, domain};
 
 const NX: usize = 2; // physical x
 const NY: usize = 3; // physical y
@@ -26,9 +26,21 @@ const NZ: usize = 4; // physical z
 
 fn make_domain() -> Domain<3> {
     domain([
-        Space { name: "x", lo: 0, hi: NX as isize },
-        Space { name: "y", lo: 0, hi: NY as isize },
-        Space { name: "z", lo: 0, hi: NZ as isize },
+        Space {
+            name: "x",
+            lo: 0,
+            hi: NX as isize,
+        },
+        Space {
+            name: "y",
+            lo: 0,
+            hi: NY as isize,
+        },
+        Space {
+            name: "z",
+            lo: 0,
+            hi: NZ as isize,
+        },
     ])
 }
 
@@ -45,8 +57,8 @@ fn part1_stride_per_axis() {
     println!("  → axis 2 (physical z) has stride {} cells", s[2]);
 
     // physical-x-fastest convention: axis 0 -> stride 1, axis 2 -> stride Nx*Ny.
-    assert_eq!(s[0], 1,       "axis 0 (x) stride — must be 1 (fastest)");
-    assert_eq!(s[1], NX,      "axis 1 (y) stride — must be Nx");
+    assert_eq!(s[0], 1, "axis 0 (x) stride — must be 1 (fastest)");
+    assert_eq!(s[1], NX, "axis 1 (y) stride — must be Nx");
     assert_eq!(s[2], NX * NY, "axis 2 (z) stride — must be Nx*Ny (slowest)");
 
     println!("  ✓ axis 0 (x) is the FASTEST-varying — standard CFD convention");
@@ -88,9 +100,9 @@ fn part2_flat_index_for_known_coords() {
         flat_x_plus - flat_origin,
     );
 
-    assert_eq!(flat_x_plus - flat_origin, 1,        "x is now the cheapest step");
-    assert_eq!(flat_y_plus - flat_origin, NX,       "y costs Nx slots");
-    assert_eq!(flat_z_plus - flat_origin, NX * NY,  "z costs Nx*Ny slots");
+    assert_eq!(flat_x_plus - flat_origin, 1, "x is now the cheapest step");
+    assert_eq!(flat_y_plus - flat_origin, NX, "y costs Nx slots");
+    assert_eq!(flat_z_plus - flat_origin, NX * NY, "z costs Nx*Ny slots");
 }
 
 #[test]

@@ -19,7 +19,7 @@
 
 use symbi_aot::IR_BLOBS;
 use symbi_ir::prepared_from_ir;
-use symbi_ir::{stencil_reach, AxisReach};
+use symbi_ir::{AxisReach, stencil_reach};
 
 // the ghost halo every sim allocates (the SimBuilder default). the widest
 // stencil in the registry — plm reconstruction's -2..+1 fan on the flux axis —
@@ -102,10 +102,12 @@ fn widened_stencil_in_a_real_blob_breaks_the_law() {
         .per_field
         .iter()
         .flat_map(|(field, axes)| {
-            axes.iter().enumerate().filter_map(move |(axis, r)| match r {
-                AxisReach::Bounded(w) if *w > NG => Some((field, axis, *w)),
-                _ => None,
-            })
+            axes.iter()
+                .enumerate()
+                .filter_map(move |(axis, r)| match r {
+                    AxisReach::Bounded(w) if *w > NG => Some((field, axis, *w)),
+                    _ => None,
+                })
         })
         .collect();
     assert!(

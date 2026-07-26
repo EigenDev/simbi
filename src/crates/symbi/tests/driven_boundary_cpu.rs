@@ -13,7 +13,7 @@
 use symbi::prelude::*;
 use symbi::sim::evolve::KernelSet;
 use symbi_hydro::expr_bridge::build_boundary_dag;
-use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
@@ -32,7 +32,11 @@ fn driven_inflow_prescribes_the_ghost_state() {
         .unwrap();
     // interior at rest, density 1 — DELIBERATELY different from the inflow, so the test proves the
     // ghost state comes from the DAG; had it been copied from the interior it would carry density 1.
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
 
     // prescribe [rho=2, vel_0=1, vel_1=0, pre=3] (constants).
     let json = r#"{
@@ -42,7 +46,9 @@ fn driven_inflow_prescribes_the_ghost_state() {
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse");
     let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("driven boundary");
-    let (sub, id) = sim.substrate().with_driven_boundary(built, cfg.params.clone());
+    let (sub, id) = sim
+        .substrate()
+        .with_driven_boundary(built, cfg.params.clone());
     assert_eq!(id, 0, "first registration is id 0 (matches Driven(0))");
 
     sub.ghost_fill(&sim);
@@ -59,10 +65,19 @@ fn driven_inflow_prescribes_the_ghost_state() {
             let v0 = *sim.fields.prim.vel[0].view().at(c);
             let v1 = *sim.fields.prim.vel[1].view().at(c);
             let p = *sim.fields.prim.pre_field().unwrap().view().at(c);
-            assert!((rho - 2.0).abs() < 1e-12, "x_lo ghost rho at {x:?} = {rho}, want 2");
-            assert!((v0 - 1.0).abs() < 1e-12, "x_lo ghost vel_0 at {x:?} = {v0}, want 1");
+            assert!(
+                (rho - 2.0).abs() < 1e-12,
+                "x_lo ghost rho at {x:?} = {rho}, want 2"
+            );
+            assert!(
+                (v0 - 1.0).abs() < 1e-12,
+                "x_lo ghost vel_0 at {x:?} = {v0}, want 1"
+            );
             assert!(v1.abs() < 1e-12, "x_lo ghost vel_1 at {x:?} = {v1}, want 0");
-            assert!((p - 3.0).abs() < 1e-12, "x_lo ghost pre at {x:?} = {p}, want 3");
+            assert!(
+                (p - 3.0).abs() < 1e-12,
+                "x_lo ghost pre at {x:?} = {p}, want 3"
+            );
             checked += 1;
         }
     }
@@ -87,7 +102,11 @@ fn all_driven_faces_fill_the_corner_ghosts() {
         .boundaries(boundaries)
         .finish()
         .unwrap();
-    sim.seed_cells(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 });
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
 
     let json = r#"{
         "kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
@@ -119,10 +138,16 @@ fn all_driven_faces_fill_the_corner_ghosts() {
         ghosts += 1;
         let rho = *sim.fields.prim.rho.view().at(c);
         let p = *sim.fields.prim.pre_field().unwrap().view().at(c);
-        assert!((rho - 2.0).abs() < 1e-12, "ghost rho at {x:?} = {rho}, want 2 (corner left unwritten?)");
+        assert!(
+            (rho - 2.0).abs() < 1e-12,
+            "ghost rho at {x:?} = {rho}, want 2 (corner left unwritten?)"
+        );
         assert!((p - 3.0).abs() < 1e-12, "ghost pre at {x:?} = {p}, want 3");
     }
-    assert!(ghosts > 0 && corners > 0, "expected face and corner ghost cells to be checked");
+    assert!(
+        ghosts > 0 && corners > 0,
+        "expected face and corner ghost cells to be checked"
+    );
 }
 
 #[test]
@@ -132,13 +157,14 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
     // div-free by construction, so the cell-B prescription needs no CT face sub-problem.
     // x_lo driven, everything else outflow: after ghost_fill the ENTIRE x_lo ghost slab —
     // corners included — holds the prescribed inflow.
+    use symbi_hydro::ISO_MHD_SPEC;
     use symbi_hydro::eos::Isothermal;
     use symbi_hydro::isothermal_mhd::IsothermalMhd;
     use symbi_hydro::mhd_state::MhdPrimG;
     use symbi_hydro::state::PrimG;
-    use symbi_hydro::ISO_MHD_SPEC;
 
-    type SimI = SimStateGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    type SimI =
+        SimStateGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
     let boundaries = Boundaries::<2>::per_axis([
         [BoundaryType::Driven(0), BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::Outflow],
@@ -150,7 +176,11 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
         .finish()
         .unwrap();
     sim.seed_cells(|_| MhdPrimG {
-        hydro: PrimG { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: Default::default() },
+        hydro: PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: Default::default(),
+        },
         mag: Tensor::new([0.0, 0.0, 0.0]),
     });
 
@@ -162,7 +192,9 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
     }"#;
     let cfg = SourceConfig::from_json(json).expect("parse");
     let built = build_boundary_dag(&cfg, &ISO_MHD_SPEC).expect("iso-mhd driven boundary");
-    let (sub, id) = sim.substrate().with_driven_boundary(built, cfg.params.clone());
+    let (sub, id) = sim
+        .substrate()
+        .with_driven_boundary(built, cfg.params.clone());
     assert_eq!(id, 0);
 
     sub.ghost_fill(&sim);
@@ -178,9 +210,18 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
         let rho = *sim.fields.prim.rho.view().at(c);
         let v0 = *sim.fields.prim.vel[0].view().at(c);
         let bz = *mhd.bcell[2].view().at(c);
-        assert!((rho - 2.0).abs() < 1e-12, "x_lo ghost rho at {x:?} = {rho}, want 2");
-        assert!((v0 - 1.0).abs() < 1e-12, "x_lo ghost vel_0 at {x:?} = {v0}, want 1");
-        assert!((bz - 0.5).abs() < 1e-12, "x_lo ghost B_z at {x:?} = {bz}, want 0.5");
+        assert!(
+            (rho - 2.0).abs() < 1e-12,
+            "x_lo ghost rho at {x:?} = {rho}, want 2"
+        );
+        assert!(
+            (v0 - 1.0).abs() < 1e-12,
+            "x_lo ghost vel_0 at {x:?} = {v0}, want 1"
+        );
+        assert!(
+            (bz - 0.5).abs() < 1e-12,
+            "x_lo ghost B_z at {x:?} = {bz}, want 0.5"
+        );
     }
     assert!(checked > 0, "no x_lo ghost cells found to check");
 }

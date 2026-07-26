@@ -20,7 +20,7 @@
 use std::sync::atomic::Ordering;
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
-use symbi::sim::evolve::{evolve, KernelSet};
+use symbi::sim::evolve::{KernelSet, evolve};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{Cartesian, Spherical};
@@ -75,18 +75,31 @@ where
         let bc = B0 / (r * r);
         let pre = 1.0 + 0.3 * (-((r - 1.4) / 0.2).powi(2)).exp();
         let prim = MhdPrim {
-            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre },
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0, 0.0]),
+                pre,
+            },
             mag: Tensor::new([bc, 0.0, 0.0]),
         };
         let cons = sim.physics.regime.to_conserved(&sim.physics.eos, &prim);
-        sim.fields.cons.scatter(c, Cons { den: cons.den, mom: cons.mom, nrg: cons.nrg });
+        sim.fields.cons.scatter(
+            c,
+            Cons {
+                den: cons.den,
+                mom: cons.mom,
+                nrg: cons.nrg,
+            },
+        );
     }
 }
 
 fn make_sph() -> SimSph {
     // unseeded; set_ic seeds the staggered B + bcell (full allocated domain) post-construction.
     SimSph::build(Rmhd, IdealGas { gamma: GAMMA }, Spherical)
-        .cells([N, N, N]).origin([R_LO, T_LO, P_LO]).spacing([DR, DTH, DPH])
+        .cells([N, N, N])
+        .origin([R_LO, T_LO, P_LO])
+        .spacing([DR, DTH, DPH])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
         .finish()
@@ -94,7 +107,9 @@ fn make_sph() -> SimSph {
 }
 fn make_cart() -> SimCart {
     SimCart::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([N, N, N]).origin([R_LO, T_LO, P_LO]).spacing([DR, DTH, DPH])
+        .cells([N, N, N])
+        .origin([R_LO, T_LO, P_LO])
+        .spacing([DR, DTH, DPH])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
         .finish()
@@ -103,11 +118,16 @@ fn make_cart() -> SimCart {
 
 #[test]
 fn full_substrate_spherical_rmhd_smoke() {
-    let sub = RmhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, CFL, 1.0, &make_sph().geom.allocated);
+    let sub =
+        RmhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, CFL, 1.0, &make_sph().geom.allocated);
 
     let mut sph = make_sph();
     set_ic(&mut sph);
-    assert_eq!(sph.geom.coords, symbi_geometry::Geometry::Spherical, "coords must be Spherical");
+    assert_eq!(
+        sph.geom.coords,
+        symbi_geometry::Geometry::Spherical,
+        "coords must be Spherical"
+    );
 
     // geometry is ACTIVE in the wave-speed map: the spherical CFL dt (r-weighted angular
     // widths h_theta=r, h_phi=r sin(theta)) differs from the Cartesian dt on the same state.
@@ -118,7 +138,10 @@ fn full_substrate_spherical_rmhd_smoke() {
     sub.c2p(&cart);
     let dt_sph = sub.cfl(&sph);
     let dt_cart = sub.cfl(&cart);
-    assert!(dt_sph.is_finite() && dt_sph > 0.0, "bad spherical dt {dt_sph}");
+    assert!(
+        dt_sph.is_finite() && dt_sph > 0.0,
+        "bad spherical dt {dt_sph}"
+    );
     assert!(
         (dt_sph - dt_cart).abs() > 1e-9,
         "spherical and cartesian CFL dt identical ({dt_sph} vs {dt_cart}) — wave_speed_map_sph did not engage",
@@ -133,13 +156,18 @@ fn full_substrate_spherical_rmhd_smoke() {
     for c in sph.geom.interior.iter() {
         let rho = *sph.fields.prim.rho.view().at(c);
         let p = *pre.view().at(c);
-        let v2: f64 = (0..3).map(|d| sph.fields.prim.vel[d].view().at(c).powi(2)).sum();
+        let v2: f64 = (0..3)
+            .map(|d| sph.fields.prim.vel[d].view().at(c).powi(2))
+            .sum();
         let v = v2.sqrt();
         assert!(rho.is_finite() && rho > 0.0, "bad density {rho} at {c:?}");
         assert!(p.is_finite() && p > 0.0, "bad pressure {p} at {c:?}");
         assert!(v.is_finite() && v < 1.0, "superluminal |v| = {v} at {c:?}");
         for d in 0..3 {
-            assert!(mhd.bcell[d].view().at(c).is_finite(), "non-finite bcell[{d}] at {c:?}");
+            assert!(
+                mhd.bcell[d].view().at(c).is_finite(),
+                "non-finite bcell[{d}] at {c:?}"
+            );
         }
         max_v = max_v.max(v);
     }

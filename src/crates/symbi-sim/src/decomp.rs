@@ -623,12 +623,7 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     }
 }
 
-fn exchange_ito_coefficients<
-    const D: usize,
-    const DOF: usize,
-    M: MemorySpace,
-    T: HaloTransport,
->(
+fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
     counts: [usize; D],
     devices: &[i32],
@@ -911,8 +906,7 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
             let global_cell: [usize; D] = std::array::from_fn(|dd| {
                 ((position[dd] - global_lo[dd]) / dx[dd]).floor() as usize
             });
-            let tile: [usize; D] =
-                std::array::from_fn(|dd| global_cell[dd] / local_cells[dd]);
+            let tile: [usize; D] = std::array::from_fn(|dd| global_cell[dd] / local_cells[dd]);
             let target = flatten(tile, counts);
             let mut linear = 0usize;
             let mut stride = 1usize;
@@ -1022,8 +1016,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     }
     let local_cells: [usize; D] =
         std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
-    let global_cells: [usize; D] =
-        std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
+    let global_cells: [usize; D] = std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
     let global_lo = stores[0].geom.x_lo;
     let dx = stores[0].geom.dx;
     let first = stores
@@ -1054,10 +1047,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
         &mut spawned,
         injections
             .into_iter()
-            .map(|(destination, mass)| crate::mass_transport::MassTransfer {
-                destination,
-                mass,
-            }),
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
         |owner| {
             let mut linear = owner.0 as usize;
             std::array::from_fn(|dd| {
@@ -1104,11 +1094,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
-fn spawn_decomposed_continuous_injection<
-    const D: usize,
-    const DOF: usize,
-    M: MemorySpace,
->(
+fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     counts: [usize; D],
     ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
@@ -1124,8 +1110,7 @@ fn spawn_decomposed_continuous_injection<
     }
     let local_cells: [usize; D] =
         std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
-    let global_cells: [usize; D] =
-        std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
+    let global_cells: [usize; D] = std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
     let global_lo: [f64; D] = std::array::from_fn(|dd| {
         stores
             .iter()
@@ -1160,10 +1145,7 @@ fn spawn_decomposed_continuous_injection<
         &mut spawned,
         injections
             .into_iter()
-            .map(|(destination, mass)| crate::mass_transport::MassTransfer {
-                destination,
-                mass,
-            }),
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
         |owner| {
             let mut linear = owner.0 as usize;
             let index: [usize; D] = std::array::from_fn(|dd| {
@@ -1419,9 +1401,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             &geometry,
                             stage.ac,
                         )
-                        .unwrap_or_else(|err| {
-                            panic!("ito transport accumulation failed: {err}")
-                        });
+                        .unwrap_or_else(|err| panic!("ito transport accumulation failed: {err}"));
                     }
                 }
                 if has_discrete_tracers || has_continuous_tracers {
@@ -1440,18 +1420,11 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
                             level: 0,
                         };
-                        let mut injections =
-                            crate::tracers::boundary_injection_transfers_store(
-                                &**store,
-                                &geometry,
-                                layout,
-                            );
+                        let mut injections = crate::tracers::boundary_injection_transfers_store(
+                            &**store, &geometry, layout,
+                        );
                         injections.extend(crate::tracers::source_injection_transfers_store(
-                            &**store,
-                            &geometry,
-                            layout,
-                            stage.a0,
-                            stage.ac,
+                            &**store, &geometry, layout, stage.a0, stage.ac,
                         ));
                         crate::tracers::fold_injection_ledger(
                             &mut injection_ledgers[flat],
@@ -1490,9 +1463,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             for store in stores.iter_mut() {
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
                 crate::tracers::materialize_ito_coefficients_store(&mut **store, &geometry)
-                    .unwrap_or_else(|err| {
-                        panic!("ito coefficient materialization failed: {err}")
-                    });
+                    .unwrap_or_else(|err| panic!("ito coefficient materialization failed: {err}"));
                 crate::tracers::fill_ito_coefficient_boundaries_host(
                     store
                         .ito_coefficients
@@ -1545,9 +1516,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             migrate_continuous_tracers(stores, counts)
                 .unwrap_or_else(|err| panic!("continuous tracer migration failed: {err}"));
             spawn_decomposed_continuous_injection(stores, counts, injection_ledgers)
-                .unwrap_or_else(|err| {
-                    panic!("continuous tracer injection failed: {err}")
-                });
+                .unwrap_or_else(|err| panic!("continuous tracer injection failed: {err}"));
         }
         let mut horizon_receipt = None;
         let mut accretion_density = Vec::new();
@@ -1679,9 +1648,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     &accretion_density[flat],
                     crossing_time,
                 )
-                .unwrap_or_else(|detail| {
-                    panic!("continuous tracer accretion transport: {detail}")
-                });
+                .unwrap_or_else(|detail| panic!("continuous tracer accretion transport: {detail}"));
             }
         }
         if has_bodies {
@@ -1707,11 +1674,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                crate::tracers::refresh_derived_positions_store(
-                    &mut **store,
-                    &geometry,
-                    layout,
-                );
+                crate::tracers::refresh_derived_positions_store(&mut **store, &geometry, layout);
             }
         }
         if std::env::var_os("SYMBI_TRACE_DT").is_some() {
@@ -2168,10 +2131,8 @@ mod tests {
         };
         let mut lo = make(0.0);
         let mut hi = make(2.0);
-        lo.ito_coefficients =
-            Some(ItoCoefficientFields::zeros(&lo.geom.allocated).unwrap());
-        hi.ito_coefficients =
-            Some(ItoCoefficientFields::zeros(&hi.geom.allocated).unwrap());
+        lo.ito_coefficients = Some(ItoCoefficientFields::zeros(&lo.geom.allocated).unwrap());
+        hi.ito_coefficients = Some(ItoCoefficientFields::zeros(&hi.geom.allocated).unwrap());
         for coord in lo.geom.interior.iter() {
             lo.ito_coefficients.as_ref().unwrap().drift[0]
                 .view_mut()
@@ -2238,9 +2199,8 @@ mod tests {
             *particles.random_counter.as_mut_ptr::<u64>() = 23;
         }
         lo.continuous_tracers = Some(particles);
-        hi.continuous_tracers = Some(
-            ContinuousTracerSet::allocate(0, crate::mass_transport::ItoOrder::Three).unwrap(),
-        );
+        hi.continuous_tracers =
+            Some(ContinuousTracerSet::allocate(0, crate::mass_transport::ItoOrder::Three).unwrap());
 
         let migrated = migrate_continuous_tracers(&mut [&mut lo, &mut hi], [2]).unwrap();
 
@@ -2303,17 +2263,9 @@ mod tests {
         assert_eq!(spawned, 2);
         assert_eq!(lo.continuous_tracers.as_ref().unwrap().len, 0);
         assert_eq!(hi.continuous_tracers.as_ref().unwrap().len, 2);
-        assert!((lo
-            .continuous_tracers
-            .as_ref()
-            .unwrap()
-            .injection_remainder
-            - 0.05)
-            .abs()
-            < 1.0e-15);
-        assert_eq!(
-            hi.continuous_tracers.as_ref().unwrap().next_id,
-            11
+        assert!(
+            (lo.continuous_tracers.as_ref().unwrap().injection_remainder - 0.05).abs() < 1.0e-15
         );
+        assert_eq!(hi.continuous_tracers.as_ref().unwrap().next_id, 11);
     }
 }

@@ -136,12 +136,21 @@ fn well_balanced_spherical_1d_adiabatic() {
     .boundaries(Boundaries::uniform(BoundaryType::Reflect))
     .allocate()
     .expect("spherical sim construction failed")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0]),
+        pre: 1.0,
+    })
     .build();
     seed_uniform_newton(&mut sph, 1.0, 1.0);
-    assert_eq!(sph.geom.coords, symbi_geometry::Geometry::Spherical, "coords must be Spherical");
+    assert_eq!(
+        sph.geom.coords,
+        symbi_geometry::Geometry::Spherical,
+        "coords must be Spherical"
+    );
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
     evolve(&mut sph, &sub, T_FINAL).expect("spherical well-balanced evolution failed");
 
     // the state must stay finite, positive, and STATIC — the well-balanced cancellation pinned.
@@ -181,7 +190,11 @@ fn well_balanced_spherical_1d_iso() {
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
         .allocate()
         .expect("iso spherical sim")
-        .set_initial(|_| PrimG { rho: 1.0, vel: Tensor::new([0.0]), pre: Default::default() })
+        .set_initial(|_| PrimG {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: Default::default(),
+        })
         .build();
     seed_uniform_iso(&mut sph, 1.0);
 
@@ -190,11 +203,21 @@ fn well_balanced_spherical_1d_iso() {
 
     for c in sph.geom.interior.iter() {
         let rho = *sph.fields.prim.rho.view().at(c);
-        assert!(rho.is_finite() && rho > 0.0, "iso: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "iso: bad density {rho} at {c:?}"
+        );
     }
     let mv = max_radial_vel(&sph);
-    assert!(mv < EPS, "iso spherical NOT well-balanced: max |v_r| = {mv:e} over {} steps", sph.iteration);
-    println!("WELL-BALANCED SPHERICAL ISO: {} steps, max |v_r| {:e}", sph.iteration, mv);
+    assert!(
+        mv < EPS,
+        "iso spherical NOT well-balanced: max |v_r| = {mv:e} over {} steps",
+        sph.iteration
+    );
+    println!(
+        "WELL-BALANCED SPHERICAL ISO: {} steps, max |v_r| {:e}",
+        sph.iteration, mv
+    );
 }
 
 #[test]
@@ -212,7 +235,11 @@ fn well_balanced_spherical_1d_rhd() {
     .boundaries(Boundaries::uniform(BoundaryType::Reflect))
     .allocate()
     .expect("rhd spherical sim")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
+    .set_initial(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0]),
+        pre: 1.0,
+    })
     .build();
     seed_uniform_rhd(&mut sph, 1.0, 1.0);
 
@@ -222,12 +249,22 @@ fn well_balanced_spherical_1d_rhd() {
     for c in sph.geom.interior.iter() {
         let rho = *sph.fields.prim.rho.view().at(c);
         let p = *sph.fields.prim.pre_field().expect("prim.pre").view().at(c);
-        assert!(rho.is_finite() && rho > 0.0, "rhd: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "rhd: bad density {rho} at {c:?}"
+        );
         assert!(p.is_finite() && p > 0.0, "rhd: bad pressure {p} at {c:?}");
     }
     let mv = max_radial_vel(&sph);
-    assert!(mv < EPS, "rhd spherical NOT well-balanced: max |v_r| = {mv:e} over {} steps", sph.iteration);
-    println!("WELL-BALANCED SPHERICAL RHD: {} steps, max |v_r| {:e}", sph.iteration, mv);
+    assert!(
+        mv < EPS,
+        "rhd spherical NOT well-balanced: max |v_r| = {mv:e} over {} steps",
+        sph.iteration
+    );
+    println!(
+        "WELL-BALANCED SPHERICAL RHD: {} steps, max |v_r| {:e}",
+        sph.iteration, mv
+    );
 }
 
 // =============================================================================
@@ -237,29 +274,42 @@ fn well_balanced_spherical_1d_rhd() {
 
 #[test]
 fn well_balanced_cylindrical_1d_adiabatic() {
-    let mut cyl = SimState::<Newtonian, 1, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Newtonian,
-        IdealGas { gamma: GAMMA },
-        Cylindrical,
-    )
-    .cells([N])
-    .origin([R_LO])
-    .spacing([DR])
-    .boundaries(Boundaries::uniform(BoundaryType::Reflect))
-    .allocate()
-    .expect("cylindrical sim construction failed")
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
-    .build();
+    let mut cyl =
+        SimState::<Newtonian, 1, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>::build(
+            Newtonian,
+            IdealGas { gamma: GAMMA },
+            Cylindrical,
+        )
+        .cells([N])
+        .origin([R_LO])
+        .spacing([DR])
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .allocate()
+        .expect("cylindrical sim construction failed")
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
+        .build();
     seed_uniform_newton(&mut cyl, 1.0, 1.0);
-    assert_eq!(cyl.geom.coords, symbi_geometry::Geometry::Cylindrical, "coords must be Cylindrical");
+    assert_eq!(
+        cyl.geom.coords,
+        symbi_geometry::Geometry::Cylindrical,
+        "coords must be Cylindrical"
+    );
 
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &cyl.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &cyl.geom.allocated);
     evolve(&mut cyl, &sub, T_FINAL).expect("cylindrical well-balanced evolution failed");
 
     for c in cyl.geom.interior.iter() {
         let rho = *cyl.fields.prim.rho.view().at(c);
         let p = *cyl.fields.prim.pre_field().expect("prim.pre").view().at(c);
-        assert!(rho.is_finite() && rho > 0.0, "cyl: bad density {rho} at {c:?}");
+        assert!(
+            rho.is_finite() && rho > 0.0,
+            "cyl: bad density {rho} at {c:?}"
+        );
         assert!(p.is_finite() && p > 0.0, "cyl: bad pressure {p} at {c:?}");
     }
     let mv = max_radial_vel(&cyl);

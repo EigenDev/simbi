@@ -268,7 +268,9 @@ impl ScalarBind {
     /// classify a wire name: a known closed-vocabulary scalar becomes `Ref`, any
     /// other name is held verbatim as `Spec`. the inverse of `name()`.
     pub fn from_name(s: &str) -> Self {
-        ScalarRef::parse(s).map(ScalarBind::Ref).unwrap_or_else(|| ScalarBind::Spec(s.into()))
+        ScalarRef::parse(s)
+            .map(ScalarBind::Ref)
+            .unwrap_or_else(|| ScalarBind::Spec(s.into()))
     }
 
     /// the wire name this bind names. `Ref` mints its canonical spelling through
@@ -320,8 +322,14 @@ mod tests {
                 v.push(ScalarRef::Body { idx, field });
             }
             for ax in 0..3u8 {
-                v.push(ScalarRef::Body { idx, field: BodyScalar::Pos(ax) });
-                v.push(ScalarRef::Body { idx, field: BodyScalar::Vel(ax) });
+                v.push(ScalarRef::Body {
+                    idx,
+                    field: BodyScalar::Pos(ax),
+                });
+                v.push(ScalarRef::Body {
+                    idx,
+                    field: BodyScalar::Vel(ax),
+                });
             }
         }
         v
@@ -333,16 +341,29 @@ mod tests {
     #[test]
     fn name_parse_round_trips() {
         for r in all_variants() {
-            assert_eq!(ScalarRef::parse(&r.name()), Some(r), "round-trip failed for {r:?}");
+            assert_eq!(
+                ScalarRef::parse(&r.name()),
+                Some(r),
+                "round-trip failed for {r:?}"
+            );
         }
     }
 
     // the mesh family re-uses MeshScalar — confirm the bridge holds in both directions.
     #[test]
     fn mesh_family_bridges() {
-        assert_eq!(ScalarRef::parse("mesh_hdil"), Some(ScalarRef::Mesh(MeshScalar::Hdil)));
-        assert_eq!(ScalarRef::parse("mesh_adot_1"), Some(ScalarRef::Mesh(MeshScalar::Adot(1))));
-        assert_eq!(ScalarRef::parse("mesh_vtrans_0"), Some(ScalarRef::Mesh(MeshScalar::Vtrans(0))));
+        assert_eq!(
+            ScalarRef::parse("mesh_hdil"),
+            Some(ScalarRef::Mesh(MeshScalar::Hdil))
+        );
+        assert_eq!(
+            ScalarRef::parse("mesh_adot_1"),
+            Some(ScalarRef::Mesh(MeshScalar::Adot(1)))
+        );
+        assert_eq!(
+            ScalarRef::parse("mesh_vtrans_0"),
+            Some(ScalarRef::Mesh(MeshScalar::Vtrans(0)))
+        );
     }
 
     // OPEN spec/user-source knobs are NOT in the closed vocabulary: parse must
@@ -350,8 +371,21 @@ mod tests {
     // documented boundary.
     #[test]
     fn rejects_open_spec_scalars() {
-        for n in ["gm", "g_ext_0", "xm_1", "body_radius", "value", "scale", "alpha", "cs2"] {
-            assert_eq!(ScalarRef::parse(n), None, "'{n}' must stay an open spec scalar");
+        for n in [
+            "gm",
+            "g_ext_0",
+            "xm_1",
+            "body_radius",
+            "value",
+            "scale",
+            "alpha",
+            "cs2",
+        ] {
+            assert_eq!(
+                ScalarRef::parse(n),
+                None,
+                "'{n}' must stay an open spec scalar"
+            );
         }
     }
 
@@ -361,7 +395,11 @@ mod tests {
     #[test]
     fn rejects_per_cell_vars() {
         for n in ["rho", "pre", "vel_0", "x_2", "pos", "p"] {
-            assert_eq!(ScalarRef::parse(n), None, "'{n}' is not a closed kernel scalar");
+            assert_eq!(
+                ScalarRef::parse(n),
+                None,
+                "'{n}' is not a closed kernel scalar"
+            );
         }
     }
 
@@ -372,13 +410,21 @@ mod tests {
     fn scalar_bind_classifies_and_round_trips() {
         for r in all_variants() {
             let bind = ScalarBind::from_name(&r.name());
-            assert_eq!(bind, ScalarBind::Ref(r), "closed name should bind Ref for {r:?}");
+            assert_eq!(
+                bind,
+                ScalarBind::Ref(r),
+                "closed name should bind Ref for {r:?}"
+            );
             assert_eq!(bind.name(), r.name(), "Ref round-trip failed for {r:?}");
         }
         // open spec/user-source knobs are not in the closed vocabulary — they round-trip as Spec.
         for spec in ["gm", "g_ext_0", "xm_1", "value", "scale", "alpha", "cs2"] {
             let bind = ScalarBind::from_name(spec);
-            assert_eq!(bind, ScalarBind::Spec(spec.into()), "'{spec}' should bind Spec");
+            assert_eq!(
+                bind,
+                ScalarBind::Spec(spec.into()),
+                "'{spec}' should bind Spec"
+            );
             assert_eq!(bind.name(), spec, "Spec round-trip failed for '{spec}'");
         }
     }

@@ -29,12 +29,12 @@
 //   });
 // =============================================================================
 
+use crate::backends::cuda::{emit_expr, emit_stmt};
+use crate::backends::render::{COORD_VARS, KernelRenderer, Prepared, emit_kernel_render, render};
 use crate::emit::{self, KernelDescriptor, Precision, ReductionOp, Target, TargetConfig};
+use crate::passes::scalarize::{ScalarExpr, ScalarStmt};
 use crate::{ElementTy, Graph, NodeId};
 use symbi_abi::FieldBind;
-use crate::passes::scalarize::{ScalarExpr, ScalarStmt};
-use crate::backends::cuda::{emit_expr, emit_stmt};
-use crate::backends::render::{emit_kernel_render, render, KernelRenderer, Prepared, COORD_VARS};
 
 /// inputs to `emit_kernel_from_lowering`. the order of `field_inputs`
 /// fixes the buffer indices for inputs; write-only fields are appended
@@ -42,9 +42,9 @@ use crate::backends::render::{emit_kernel_render, render, KernelRenderer, Prepar
 /// `__buf_extents` / `__buf_los` / `__field_ptrs`.
 #[derive(Debug, Clone)]
 pub struct KernelEmitInputs<'a> {
-    pub kernel_name:   &'a str,
-    pub ndim:          u8,
-    pub target:        TargetConfig,
+    pub kernel_name: &'a str,
+    pub ndim: u8,
+    pub target: TargetConfig,
     /// whether all of this kernel's buffers share ONE allocated layout, so the
     /// cell index can be computed once and shared across reads. the PRODUCER sets
     /// this (it knows the kernel's buffer topology); the IR stays domain-agnostic
@@ -55,14 +55,14 @@ pub struct KernelEmitInputs<'a> {
     /// (IR-side synthesized key, born-typed runtime binding). the IR key
     /// matches a Param node in the graph; the FieldBind is what ends up in
     /// `FieldBinding::field` for the dispatch side (no re-parse).
-    pub field_inputs:  &'a [(String, FieldBind)],
+    pub field_inputs: &'a [(String, FieldBind)],
     /// IR-side param names that stay as scalar __global__ args (user
     /// scalars: dt, gamma, etc.), passed by value.
     pub scalar_params: &'a [String],
     /// (write key, runtime path, RHS NodeId). each entry produces one
     /// buffer store; if a write's runtime path matches an input, the
     /// buffer is shared and marked is_output.
-    pub field_writes:  &'a [(String, FieldBind, NodeId)],
+    pub field_writes: &'a [(String, FieldBind, NodeId)],
     /// kernel-coord component axes referenced by the body. each entry
     /// gets a `double _coord_N = (double)<thread-axis>;` line emitted
     /// after the thread-index prelude. body Param references
@@ -136,11 +136,18 @@ impl KernelRenderer for CRenderer {
         format!("    unsigned int {name}")
     }
     fn scalar_param(&self, name: &str, element: ElementTy) -> String {
-        let pty = if matches!(element, ElementTy::I32 | ElementTy::U32) { "int" } else { self.ty() };
+        let pty = if matches!(element, ElementTy::I32 | ElementTy::U32) {
+            "int"
+        } else {
+            self.ty()
+        };
         format!("    {pty} {name}")
     }
     fn open_signature(&self, name: &str) -> String {
-        format!("{} void {name}(\n", emit::global_qualifier(self.target.target))
+        format!(
+            "{} void {name}(\n",
+            emit::global_qualifier(self.target.target)
+        )
     }
     fn params_close(&self) -> &'static str {
         "\n) {\n" // C forbids a trailing comma in the parameter list
@@ -157,10 +164,15 @@ impl KernelRenderer for CRenderer {
                 "    unsigned int _i{aa} = blockIdx.{d} * blockDim.{d} + threadIdx.{d};"
             ));
         }
-        let bounds: Vec<String> = (0..ndim).map(|aa| format!("_i{aa} >= grid_size_{aa}")).collect();
+        let bounds: Vec<String> = (0..ndim)
+            .map(|aa| format!("_i{aa} >= grid_size_{aa}"))
+            .collect();
         v.push(format!("    if ({}) return;", bounds.join(" || ")));
         for aa in 0..ndim {
-            v.push(format!("    int {} = (int)_i{aa} + dom_lo_{aa};", COORD_VARS[aa]));
+            v.push(format!(
+                "    int {} = (int)_i{aa} + dom_lo_{aa};",
+                COORD_VARS[aa]
+            ));
         }
         v
     }
@@ -175,8 +187,12 @@ impl KernelRenderer for CRenderer {
             format!("    {ty} _coord_{axis} = ({ty}){cv};")
         }
     }
-    fn index_lang(&self) -> emit::IndexLang { emit::IndexLang::Cuda }
-    fn skip_scattered_buffer_layout_args(&self) -> bool { true }
+    fn index_lang(&self) -> emit::IndexLang {
+        emit::IndexLang::Cuda
+    }
+    fn skip_scattered_buffer_layout_args(&self) -> bool {
+        true
+    }
     fn flat_index(&self, ndim: u8, buf: u32, comps: &[String]) -> String {
         // shared formula — see `emit::emit_flat_index`.
         let refs: Vec<&str> = comps.iter().map(|s| s.as_str()).collect();
@@ -201,7 +217,13 @@ impl KernelRenderer for CRenderer {
     fn smem_prelude(&self, ndim: usize, halo: &[u8], tiled: &[(String, u32)]) -> Vec<String> {
         smem_prelude_cuda(self.ty(), ndim, halo, tiled)
     }
-    fn tiled_load_expr(&self, key: &str, halo: &[u8], ndim: u8, comps: &[String]) -> Option<String> {
+    fn tiled_load_expr(
+        &self,
+        key: &str,
+        halo: &[u8],
+        ndim: u8,
+        comps: &[String],
+    ) -> Option<String> {
         // local tile offset per axis: threadIdx + halo + (absolute_comp - cell_coord).
         // the (comp - coord_var) folds to the integer stencil delta at compile time.
         let coord_vars = &COORD_VARS[..ndim as usize];
@@ -209,7 +231,10 @@ impl KernelRenderer for CRenderer {
             .map(|a| {
                 format!(
                     "((int)threadIdx.{dim} + {h} + (({comp}) - {cv}))",
-                    dim = CUDA_TDIM[a], h = halo[a], comp = comps[a], cv = coord_vars[a],
+                    dim = CUDA_TDIM[a],
+                    h = halo[a],
+                    comp = comps[a],
+                    cv = coord_vars[a],
                 )
             })
             .collect();
@@ -218,9 +243,19 @@ impl KernelRenderer for CRenderer {
     fn tiled_base_read(&self, key: &str, halo: &[u8], ndim: u8) -> Option<String> {
         // the cell-center slot (delta 0): threadIdx + halo on each axis.
         let locals: Vec<String> = (0..ndim as usize)
-            .map(|a| format!("((int)threadIdx.{dim} + {h})", dim = CUDA_TDIM[a], h = halo[a]))
+            .map(|a| {
+                format!(
+                    "((int)threadIdx.{dim} + {h})",
+                    dim = CUDA_TDIM[a],
+                    h = halo[a]
+                )
+            })
             .collect();
-        Some(format!("    {} {key} = tile_{key}[{}];", self.ty(), smem_flat_index(&locals)))
+        Some(format!(
+            "    {} {key} = tile_{key}[{}];",
+            self.ty(),
+            smem_flat_index(&locals)
+        ))
     }
     fn render_stmt(&self, stmt: &ScalarStmt) -> String {
         let mut s = String::from("    ");
@@ -244,7 +279,13 @@ impl KernelRenderer for CRenderer {
 /// emit a scalarized stencil kernel as an `extern "C" __global__` CUDA kernel —
 /// the shared driver with the C-family (`CRenderer`) spelling.
 pub fn emit_kernel_from_lowering(graph: &Graph, inputs: &KernelEmitInputs) -> KernelDescriptor {
-    emit_kernel_render(graph, inputs, &CRenderer { target: inputs.target.clone() })
+    emit_kernel_render(
+        graph,
+        inputs,
+        &CRenderer {
+            target: inputs.target.clone(),
+        },
+    )
 }
 
 // ----- smem tiling: CUDA spelling -----
@@ -258,7 +299,10 @@ const CUDA_TDIM: [&str; 3] = ["x", "y", "z"];
 fn smem_flat_index(locals: &[String]) -> String {
     let mut terms = vec![locals[0].clone()];
     for a in 1..locals.len() {
-        let stride = (0..a).map(|d| format!("__tw{d}")).collect::<Vec<_>>().join(" * ");
+        let stride = (0..a)
+            .map(|d| format!("__tw{d}"))
+            .collect::<Vec<_>>()
+            .join(" * ");
         terms.push(format!("{} * ({stride})", locals[a]));
     }
     terms.join(" + ")
@@ -272,7 +316,12 @@ fn smem_flat_index(locals: &[String]) -> String {
 /// tiled fields are assumed CELL-CENTERED with shared `lo`/`extent` (true for the
 /// rmhd flux prim + wave-speed inputs); the clamp uses the first field's geometry.
 fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]) -> Vec<String> {
-    assert_eq!(halo.len(), ndim, "smem_prelude: halo rank {} != ndim {ndim}", halo.len());
+    assert_eq!(
+        halo.len(),
+        ndim,
+        "smem_prelude: halo rank {} != ndim {ndim}",
+        halo.len()
+    );
     assert!(!tiled.is_empty(), "smem_prelude: no tiled fields");
     let buf0 = tiled[0].1; // shared cell-centered geometry for the clamp
     let mut v: Vec<String> = Vec::new();
@@ -281,10 +330,14 @@ fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]
     for a in 0..ndim {
         v.push(format!(
             "    const int __tw{a} = (int)blockDim.{dim} + {two_h};",
-            dim = CUDA_TDIM[a], two_h = 2 * halo[a] as i32,
+            dim = CUDA_TDIM[a],
+            two_h = 2 * halo[a] as i32,
         ));
     }
-    let tcells_prod = (0..ndim).map(|a| format!("__tw{a}")).collect::<Vec<_>>().join(" * ");
+    let tcells_prod = (0..ndim)
+        .map(|a| format!("__tw{a}"))
+        .collect::<Vec<_>>()
+        .join(" * ");
     v.push(format!("    const int __tcells = {tcells_prod};"));
     // one slab per tiled field, packed by byte offset into the single allocation.
     for (slot, (key, _)) in tiled.iter().enumerate() {
@@ -293,14 +346,20 @@ fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]
         ));
     }
     // linear thread id + block thread count, for the strided cooperative loop.
-    let nthr = (0..ndim).map(|a| format!("(int)blockDim.{}", CUDA_TDIM[a])).collect::<Vec<_>>().join(" * ");
+    let nthr = (0..ndim)
+        .map(|a| format!("(int)blockDim.{}", CUDA_TDIM[a]))
+        .collect::<Vec<_>>()
+        .join(" * ");
     v.push(format!("    const int __nthr = {nthr};"));
     let tid = (0..ndim)
         .map(|a| {
             if a == 0 {
                 "(int)threadIdx.x".to_string()
             } else {
-                let bd = (0..a).map(|d| format!("(int)blockDim.{}", CUDA_TDIM[d])).collect::<Vec<_>>().join(" * ");
+                let bd = (0..a)
+                    .map(|d| format!("(int)blockDim.{}", CUDA_TDIM[d]))
+                    .collect::<Vec<_>>()
+                    .join(" * ");
                 format!("(int)threadIdx.{} * {bd}", CUDA_TDIM[a])
             }
         })
@@ -336,7 +395,9 @@ fn smem_prelude_cuda(ty: &str, ndim: usize, halo: &[u8], tiled: &[(String, u32)]
             .map(|a| format!("(__c{a} - field{buf}.lo[{a}]) * field{buf}.strides[{a}]"))
             .collect::<Vec<_>>()
             .join(" + ");
-        v.push(format!("        tile_{key}[__t] = field{buf}.data[{flat}];"));
+        v.push(format!(
+            "        tile_{key}[__t] = field{buf}.data[{flat}];"
+        ));
     }
     v.push("    }".to_string());
     v.push("    __syncthreads();".to_string());
@@ -387,25 +448,30 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
 // NVRTC does not include (same class of bug the flux INFINITY fix caught), and the
 // ternary matches the CPU carrier's min/max semantics. the identities are plain
 // finite literals (no INFINITY macro).
-fn reduction_identity_combine(op: ReductionOp, precision: Precision) -> (&'static str, fn(&str, &str) -> String) {
+fn reduction_identity_combine(
+    op: ReductionOp,
+    precision: Precision,
+) -> (&'static str, fn(&str, &str) -> String) {
     let f32 = matches!(precision, Precision::F32);
     match op {
-        ReductionOp::Add => (if f32 { "0.0f" } else { "0.0" }, |a, b| format!("({a} + {b})")),
-        ReductionOp::Mul => (if f32 { "1.0f" } else { "1.0" }, |a, b| format!("({a} * {b})")),
+        ReductionOp::Add => (if f32 { "0.0f" } else { "0.0" }, |a, b| {
+            format!("({a} + {b})")
+        }),
+        ReductionOp::Mul => (if f32 { "1.0f" } else { "1.0" }, |a, b| {
+            format!("({a} * {b})")
+        }),
         // sentinels safely beyond any physical value; finite (NVRTC has no INFINITY).
         // min/max MUST propagate NaN so a poisoned cell surfaces at the host dt
         // guard ([[feedback_no_silent_floors]]); the bare ternary `a < b ? a : b`
         // silently drops a NaN operand (NaN compares false). `x != x` is the
         // NVRTC-safe NaN test (no isnan/<math.h>), matching the host fold in
         // `substrate_gpu::host_identity_combine`.
-        ReductionOp::Min => (
-            if f32 { "1.0e38f" } else { "1.0e308" },
-            |a, b| format!("(({a} != {a}) ? {a} : (({b} != {b}) ? {b} : ({a} < {b} ? {a} : {b})))"),
-        ),
-        ReductionOp::Max => (
-            if f32 { "-1.0e38f" } else { "-1.0e308" },
-            |a, b| format!("(({a} != {a}) ? {a} : (({b} != {b}) ? {b} : ({a} > {b} ? {a} : {b})))"),
-        ),
+        ReductionOp::Min => (if f32 { "1.0e38f" } else { "1.0e308" }, |a, b| {
+            format!("(({a} != {a}) ? {a} : (({b} != {b}) ? {b} : ({a} < {b} ? {a} : {b})))")
+        }),
+        ReductionOp::Max => (if f32 { "-1.0e38f" } else { "-1.0e308" }, |a, b| {
+            format!("(({a} != {a}) ? {a} : (({b} != {b}) ? {b} : ({a} > {b} ? {a} : {b})))")
+        }),
     }
 }
 
@@ -429,7 +495,10 @@ pub fn render_field_reduction(
     precision: Precision,
     op: ReductionOp,
 ) -> KernelDescriptor {
-    assert!((1..=3).contains(&ndim), "render_field_reduction: ndim must be 1..=3 (got {ndim})");
+    assert!(
+        (1..=3).contains(&ndim),
+        "render_field_reduction: ndim must be 1..=3 (got {ndim})"
+    );
     let ty = precision.c_type();
     let (identity, combine) = reduction_identity_combine(op, precision);
     let mut out = String::new();
@@ -454,12 +523,17 @@ pub fn render_field_reduction(
         params.push(format!("    int dom_lo_{aa}"));
     }
     params.push(format!("    {ty}* partials"));
-    out.push_str(&format!("{} void {kernel_name}(\n", emit::global_qualifier(Target::Cuda)));
+    out.push_str(&format!(
+        "{} void {kernel_name}(\n",
+        emit::global_qualifier(Target::Cuda)
+    ));
     out.push_str(&params.join(",\n"));
     out.push_str("\n) {\n");
 
     // ---- shared mem + thread index + per-thread map ----
-    out.push_str(&format!("    __shared__ {ty} sdata[{REDUCTION_BLOCK_SIZE}];\n"));
+    out.push_str(&format!(
+        "    __shared__ {ty} sdata[{REDUCTION_BLOCK_SIZE}];\n"
+    ));
     out.push_str("    unsigned int tid = threadIdx.x;\n");
     out.push_str("    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;\n");
     out.push_str(&format!("    {ty} val = {identity};\n"));
@@ -484,7 +558,12 @@ pub fn render_field_reduction(
     // both formulas now reference `field0.lo[..]` and `field0.strides[..]` —
     // the View struct passed in by the host.
     out.push_str("    ");
-    out.push_str(&emit::emit_cell_index_base(emit::IndexLang::Cuda, ndim as u8, 0, false));
+    out.push_str(&emit::emit_cell_index_base(
+        emit::IndexLang::Cuda,
+        ndim as u8,
+        0,
+        false,
+    ));
     out.push('\n');
     let comps: &[&str] = &["ii", "jj", "kk"][..ndim];
     let flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, 0, comps);
@@ -495,7 +574,10 @@ pub fn render_field_reduction(
     out.push_str("    sdata[tid] = val;\n");
     out.push_str("    __syncthreads();\n");
     out.push_str("    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {\n");
-    out.push_str(&format!("        if (tid < s) {{ sdata[tid] = {}; }}\n", combine("sdata[tid]", "sdata[tid + s]")));
+    out.push_str(&format!(
+        "        if (tid < s) {{ sdata[tid] = {}; }}\n",
+        combine("sdata[tid]", "sdata[tid + s]")
+    ));
     out.push_str("        __syncthreads();\n");
     out.push_str("    }\n");
     out.push_str("    if (tid == 0) partials[blockIdx.x] = sdata[0];\n");
@@ -524,7 +606,10 @@ mod tests {
     use crate::{ElementTy, ElementWiseOp, Graph, Symbol, TensorTy};
 
     fn cuda_cfg() -> TargetConfig {
-        TargetConfig { target: Target::Cuda, precision: Precision::F64 }
+        TargetConfig {
+            target: Target::Cuda,
+            precision: Precision::F64,
+        }
     }
 
     fn scalar_param(g: &mut Graph, name: &str) -> NodeId {
@@ -535,15 +620,21 @@ mod tests {
     fn passthrough_1d_emits_global_and_two_buffers() {
         let mut g = Graph::new();
         let cons_den = scalar_param(&mut g, "cons_den");
-        let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
-            kernel_name:   "pass_1d",
-            coalesce_layout: false,            ndim:          1,
-            target:        cuda_cfg(),
-            field_inputs:  &[("cons_den".into(), "cons.den".into())],
-            scalar_params: &[],
-            field_writes:  &[("prim_den".into(), "prim.den".into(), cons_den)],
-            coord_components: &[], device_preamble: &[], tile_spec: None,
-        });
+        let desc = emit_kernel_from_lowering(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "pass_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cuda_cfg(),
+                field_inputs: &[("cons_den".into(), "cons.den".into())],
+                scalar_params: &[],
+                field_writes: &[("prim_den".into(), "prim.den".into(), cons_den)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert_eq!(desc.kernel_name, "pass_1d");
         assert_eq!(desc.field_bindings.len(), 2);
         assert_eq!(desc.field_bindings[0].field.name(), "cons.den");
@@ -551,8 +642,12 @@ mod tests {
         assert_eq!(desc.field_bindings[1].field.name(), "prim.den");
         assert!(desc.field_bindings[1].is_output);
         // signature shape
-        assert!(desc.source.contains("extern \"C\" __global__ void pass_1d("),
-            "src:\n{}", desc.source);
+        assert!(
+            desc.source
+                .contains("extern \"C\" __global__ void pass_1d("),
+            "src:\n{}",
+            desc.source
+        );
         assert!(desc.source.contains("__symbi_View field0"));
         assert!(desc.source.contains("__symbi_View field1"));
         assert!(desc.source.contains("unsigned int grid_size_0"));
@@ -568,15 +663,21 @@ mod tests {
     fn passthrough_2d_includes_stride_extents() {
         let mut g = Graph::new();
         let cons_den = scalar_param(&mut g, "cons_den");
-        let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
-            kernel_name:   "pass_2d",
-            coalesce_layout: false,            ndim:          2,
-            target:        cuda_cfg(),
-            field_inputs:  &[("cons_den".into(), "cons.den".into())],
-            scalar_params: &[],
-            field_writes:  &[("prim_den".into(), "prim.den".into(), cons_den)],
-            coord_components: &[], device_preamble: &[], tile_spec: None,
-        });
+        let desc = emit_kernel_from_lowering(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "pass_2d",
+                coalesce_layout: false,
+                ndim: 2,
+                target: cuda_cfg(),
+                field_inputs: &[("cons_den".into(), "cons.den".into())],
+                scalar_params: &[],
+                field_writes: &[("prim_den".into(), "prim.den".into(), cons_den)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert!(desc.source.contains("__symbi_View field0"));
         assert!(desc.source.contains("__symbi_View field1"));
         // strides come from `field{N}.strides[..]` — no per-buffer
@@ -594,26 +695,36 @@ mod tests {
         let two = g.add_const(crate::ConstValue::F64(2.0), None);
         let scaled = g.element_wise(ElementWiseOp::Mul, vec![cons_den, two], None);
         let summed = g.element_wise(ElementWiseOp::Add, vec![scaled, cons_nrg], None);
-        let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
-            kernel_name:   "compute_pre_1d",
-            coalesce_layout: false,            ndim:          1,
-            target:        cuda_cfg(),
-            field_inputs:  &[
-                ("cons_den".into(), "cons.den".into()),
-                ("cons_nrg".into(), "cons.nrg".into()),
-            ],
-            scalar_params: &[],
-            field_writes:  &[("prim_pre".into(), "prim.pre".into(), summed)],
-            coord_components: &[], device_preamble: &[], tile_spec: None,
-        });
+        let desc = emit_kernel_from_lowering(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "compute_pre_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cuda_cfg(),
+                field_inputs: &[
+                    ("cons_den".into(), "cons.den".into()),
+                    ("cons_nrg".into(), "cons.nrg".into()),
+                ],
+                scalar_params: &[],
+                field_writes: &[("prim_pre".into(), "prim.pre".into(), summed)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert_eq!(desc.field_bindings.len(), 3);
         // load both inputs.
         assert!(desc.source.contains("double cons_den = field0.data["));
         assert!(desc.source.contains("double cons_nrg = field1.data["));
         // store the summed expression; the exact textual form is
         // ((cons_den * 2.0) + cons_nrg).
-        assert!(desc.source.contains("field2.data[") && desc.source.contains("] = ((cons_den * 2.0) + cons_nrg);"),
-            "src:\n{}", desc.source);
+        assert!(
+            desc.source.contains("field2.data[")
+                && desc.source.contains("] = ((cons_den * 2.0) + cons_nrg);"),
+            "src:\n{}",
+            desc.source
+        );
     }
 
     #[test]
@@ -621,21 +732,27 @@ mod tests {
         let mut g = Graph::new();
         let cons_mom_0 = scalar_param(&mut g, "cons_mom_0");
         let cons_mom_1 = scalar_param(&mut g, "cons_mom_1");
-        let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
-            kernel_name:   "split_1d",
-            coalesce_layout: false,            ndim:          1,
-            target:        cuda_cfg(),
-            field_inputs:  &[
-                ("cons_mom_0".into(), "cons.mom[0]".into()),
-                ("cons_mom_1".into(), "cons.mom[1]".into()),
-            ],
-            scalar_params: &[],
-            field_writes:  &[
-                ("prim_vel_0".into(), "prim.vel[0]".into(), cons_mom_0),
-                ("prim_vel_1".into(), "prim.vel[1]".into(), cons_mom_1),
-            ],
-            coord_components: &[], device_preamble: &[], tile_spec: None,
-        });
+        let desc = emit_kernel_from_lowering(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "split_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cuda_cfg(),
+                field_inputs: &[
+                    ("cons_mom_0".into(), "cons.mom[0]".into()),
+                    ("cons_mom_1".into(), "cons.mom[1]".into()),
+                ],
+                scalar_params: &[],
+                field_writes: &[
+                    ("prim_vel_0".into(), "prim.vel[0]".into(), cons_mom_0),
+                    ("prim_vel_1".into(), "prim.vel[1]".into(), cons_mom_1),
+                ],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert_eq!(desc.field_bindings.len(), 4);
         // writes appear in source order.
         let field2_store = desc.source.find("field2.data[").expect("field2 store");
@@ -653,22 +770,30 @@ mod tests {
         let cons_den = scalar_param(&mut g, "cons_den");
         let one = g.add_const(crate::ConstValue::F64(1.0), None);
         let updated = g.element_wise(ElementWiseOp::Add, vec![cons_den, one], None);
-        let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
-            kernel_name:   "inplace_1d",
-            coalesce_layout: false,            ndim:          1,
-            target:        cuda_cfg(),
-            field_inputs:  &[("cons_den".into(), "cons.den".into())],
-            scalar_params: &[],
-            field_writes:  &[("cons_den".into(), "cons.den".into(), updated)],
-            coord_components: &[], device_preamble: &[], tile_spec: None,
-        });
+        let desc = emit_kernel_from_lowering(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "inplace_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cuda_cfg(),
+                field_inputs: &[("cons_den".into(), "cons.den".into())],
+                scalar_params: &[],
+                field_writes: &[("cons_den".into(), "cons.den".into(), updated)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         // one buffer, marked as output.
         assert_eq!(desc.field_bindings.len(), 1);
         assert_eq!(desc.field_bindings[0].field.name(), "cons.den");
         assert!(desc.field_bindings[0].is_output);
         // load + store both reference buf0.
         assert!(desc.source.contains("double cons_den = field0.data["));
-        assert!(desc.source.contains("field0.data[") && desc.source.contains("] = (cons_den + 1.0);"));
+        assert!(
+            desc.source.contains("field0.data[") && desc.source.contains("] = (cons_den + 1.0);")
+        );
     }
 
     #[test]
@@ -678,15 +803,21 @@ mod tests {
         let a = scalar_param(&mut g, "a");
         let dt = scalar_param(&mut g, "dt");
         let prod = g.element_wise(ElementWiseOp::Mul, vec![a, dt], None);
-        let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
-            kernel_name:   "scale_1d",
-            coalesce_layout: false,            ndim:          1,
-            target:        cuda_cfg(),
-            field_inputs:  &[("a".into(), "a".into())],
-            scalar_params: &["dt".to_string()],
-            field_writes:  &[("out".into(), "out".into(), prod)],
-            coord_components: &[], device_preamble: &[], tile_spec: None,
-        });
+        let desc = emit_kernel_from_lowering(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "scale_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cuda_cfg(),
+                field_inputs: &[("a".into(), "a".into())],
+                scalar_params: &["dt".to_string()],
+                field_writes: &[("out".into(), "out".into(), prod)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert_eq!(desc.param_names, vec!["dt".to_string()]);
         // signature includes `double dt`.
         assert!(desc.source.contains("double dt"));
@@ -699,21 +830,33 @@ mod tests {
         let desc = render_field_reduction("rmhd_field_max_3d", 3, Precision::F64, ReductionOp::Max);
         let s = &desc.source;
         // a __global__ block-reduce over buf0 with a partials output.
-        assert!(s.contains("extern \"C\" __global__ void rmhd_field_max_3d("), "src:\n{s}");
+        assert!(
+            s.contains("extern \"C\" __global__ void rmhd_field_max_3d("),
+            "src:\n{s}"
+        );
         assert!(s.contains("__symbi_View field0"));
         assert!(s.contains("double* partials"));
         assert!(s.contains("__shared__ double sdata[256];"));
         assert!(s.contains("partials[blockIdx.x] = sdata[0];"));
         // max via INLINE TERNARY (NVRTC has no <math.h> for fmax); finite identity,
         // no INFINITY macro.
-        assert!(s.contains("sdata[tid] > sdata[tid + s] ? sdata[tid] : sdata[tid + s]"), "src:\n{s}");
+        assert!(
+            s.contains("sdata[tid] > sdata[tid + s] ? sdata[tid] : sdata[tid + s]"),
+            "src:\n{s}"
+        );
         assert!(s.contains("double val = -1.0e308;"));
         assert!(!s.contains("fmax"), "must not use fmax (NVRTC-unsafe): {s}");
-        assert!(!s.contains("INFINITY"), "must not use INFINITY (NVRTC-unsafe): {s}");
+        assert!(
+            !s.contains("INFINITY"),
+            "must not use INFINITY (NVRTC-unsafe): {s}"
+        );
         // NaN-propagation guard: a poisoned cell must survive the block reduce so it
         // reaches the host dt guard ([[feedback_no_silent_floors]]); the bare ternary
         // drops NaN. `x != x` is the NVRTC-safe NaN test.
-        assert!(s.contains("(sdata[tid] != sdata[tid])"), "max must guard NaN via x!=x: {s}");
+        assert!(
+            s.contains("(sdata[tid] != sdata[tid])"),
+            "max must guard NaN via x!=x: {s}"
+        );
         // value loaded at the cell via the view index; one buffer binding (input).
         assert!(s.contains("val = field0.data["));
         assert_eq!(desc.field_bindings.len(), 1);
@@ -724,14 +867,29 @@ mod tests {
     fn field_reduction_ops_and_precisions() {
         // add/mul/min/max all render their NVRTC-safe combine + identity, at f32 too.
         let add = render_field_reduction("add1", 1, Precision::F64, ReductionOp::Add);
-        assert!(add.source.contains("double val = 0.0;") && add.source.contains("(sdata[tid] + sdata[tid + s])"));
+        assert!(
+            add.source.contains("double val = 0.0;")
+                && add.source.contains("(sdata[tid] + sdata[tid + s])")
+        );
         let mul = render_field_reduction("mul1", 1, Precision::F64, ReductionOp::Mul);
-        assert!(mul.source.contains("double val = 1.0;") && mul.source.contains("(sdata[tid] * sdata[tid + s])"));
+        assert!(
+            mul.source.contains("double val = 1.0;")
+                && mul.source.contains("(sdata[tid] * sdata[tid + s])")
+        );
         let min = render_field_reduction("min1", 1, Precision::F64, ReductionOp::Min);
-        assert!(min.source.contains("double val = 1.0e308;") && min.source.contains("< sdata[tid + s] ?"));
+        assert!(
+            min.source.contains("double val = 1.0e308;")
+                && min.source.contains("< sdata[tid + s] ?")
+        );
         let maxf = render_field_reduction("maxf1", 1, Precision::F32, ReductionOp::Max);
-        assert!(maxf.source.contains("float val = -1.0e38f;"), "src:\n{}", maxf.source);
-        assert!(maxf.source.contains("__symbi_View field0") && maxf.source.contains("float* partials"));
+        assert!(
+            maxf.source.contains("float val = -1.0e38f;"),
+            "src:\n{}",
+            maxf.source
+        );
+        assert!(
+            maxf.source.contains("__symbi_View field0") && maxf.source.contains("float* partials")
+        );
         // 1D: no buf_extent params, single buf_lo.
         assert!(!maxf.source.contains("buf_extent"));
         assert!(maxf.source.contains("__symbi_View field0"));

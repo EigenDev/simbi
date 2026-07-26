@@ -35,7 +35,11 @@ const V0: f64 = 0.3;
 // the OT-with-Bz primitive vectors (vel, B 3-vectors) at a cell CENTER — regime-agnostic.
 fn ot_vectors(x: f64, y: f64) -> (Tensor<f64, 3>, Tensor<f64, 3>) {
     let vel = Tensor::new([-V0 * (2.0 * PI * y).sin(), V0 * (2.0 * PI * x).sin(), 0.0]);
-    let mag = Tensor::new([-B0 * (2.0 * PI * y).sin(), B0 * (4.0 * PI * x).sin(), BZ0 * (2.0 * PI * x).cos()]);
+    let mag = Tensor::new([
+        -B0 * (2.0 * PI * y).sin(),
+        B0 * (4.0 * PI * x).sin(),
+        BZ0 * (2.0 * PI * x).cos(),
+    ]);
     (vel, mag)
 }
 
@@ -69,8 +73,10 @@ where
 }
 
 // finiteness + the out-of-plane Bz evolution check (vs its analytic IC sample).
-fn assert_finite_and_bz_evolved<R, E>(label: &str, sim: &SimStateGeneric<R, 2, 3, Cartesian, E, CpuSpace, HostMemory>)
-where
+fn assert_finite_and_bz_evolved<R, E>(
+    label: &str,
+    sim: &SimStateGeneric<R, 2, 3, Cartesian, E, CpuSpace, HostMemory>,
+) where
     R: Regime<f64, 2>,
     E: symbi_hydro::eos::Eos<f64>,
 {
@@ -79,13 +85,22 @@ where
     let mut max_dbz = 0.0_f64;
     for c in sim.geom.interior.iter() {
         for k in 0..3 {
-            assert!(mhd.bcell[k].view().at(c).is_finite(), "{label}: non-finite bcell[{k}] at {c:?}");
+            assert!(
+                mhd.bcell[k].view().at(c).is_finite(),
+                "{label}: non-finite bcell[{k}] at {c:?}"
+            );
         }
-        assert!(sim.fields.cons.den.view().at(c).is_finite(), "{label}: non-finite den at {c:?}");
+        assert!(
+            sim.fields.cons.den.view().at(c).is_finite(),
+            "{label}: non-finite den at {c:?}"
+        );
         let x = (c[0] as f64 + 0.5) * dx;
         max_dbz = max_dbz.max((*mhd.bcell[2].view().at(c) - BZ0 * (2.0 * PI * x).cos()).abs());
     }
-    assert!(max_dbz > 1e-7, "{label}: out-of-plane Bz did not evolve (max |dBz|={max_dbz:e})");
+    assert!(
+        max_dbz > 1e-7,
+        "{label}: out-of-plane Bz did not evolve (max |dBz|={max_dbz:e})"
+    );
     eprintln!("[2p5d {label}] OK max|dBz|={max_dbz:e}");
 }
 
@@ -94,29 +109,52 @@ fn imhd_2p5d_smoke() {
     const CS: f64 = 1.0;
     // iso primitive (no pressure slot); set_initial seeds cons + bcell, seed_faces the in-plane B.
     let rho0 = 1.0;
-    let mut sim = SimStateGeneric::<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>::build(
-        IsothermalMhd, Isothermal { cs: CS }, Cartesian,
-    )
-        .cells([NX, NY])
-        .spacing([1.0 / NX as f64, 1.0 / NY as f64])
-        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
-        .cfl(0.3)
-        .allocate()
-        .expect("imhd 2.5d construction")
-        .set_initial(|[x, y]| {
-            let (vel, mag) = ot_vectors(x, y);
-            MhdPrimG::<f64, 3, IsoModel> { hydro: PrimG { rho: rho0, vel, pre: Default::default() }, mag }
-        })
-        .seed_faces(ot_bface)
-        .build();
+    let mut sim = SimStateGeneric::<
+        IsothermalMhd,
+        2,
+        3,
+        Cartesian,
+        Isothermal<f64>,
+        CpuSpace,
+        HostMemory,
+    >::build(IsothermalMhd, Isothermal { cs: CS }, Cartesian)
+    .cells([NX, NY])
+    .spacing([1.0 / NX as f64, 1.0 / NY as f64])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .cfl(0.3)
+    .allocate()
+    .expect("imhd 2.5d construction")
+    .set_initial(|[x, y]| {
+        let (vel, mag) = ot_vectors(x, y);
+        MhdPrimG::<f64, 3, IsoModel> {
+            hydro: PrimG {
+                rho: rho0,
+                vel,
+                pre: Default::default(),
+            },
+            mag,
+        }
+    })
+    .seed_faces(ot_bface)
+    .build();
 
-    let kset = IsothermalMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(CS, 0.3, 1.0, &sim.geom.allocated);
+    let kset = IsothermalMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        CS,
+        0.3,
+        1.0,
+        &sim.geom.allocated,
+    );
     let mut steps = 0u64;
     evolve_with_callback(&mut sim, &kset, 0.2, 1, |s| {
         let rel = rel_divb(s);
-        assert!(rel < 1e-10, "imhd: 2.5D div(B) grew to rel={rel:e} at iter {}", s.iteration);
+        assert!(
+            rel < 1e-10,
+            "imhd: 2.5D div(B) grew to rel={rel:e} at iter {}",
+            s.iteration
+        );
         steps = s.iteration;
-    }).expect("imhd 2.5d evolve failed");
+    })
+    .expect("imhd 2.5d evolve failed");
     assert!(steps >= 3, "imhd: only {steps} steps");
     assert_finite_and_bz_evolved("imhd", &sim);
 }
@@ -127,9 +165,12 @@ fn rmhd_2p5d_smoke() {
     // adiabatic primitive; set_initial seeds cons + bcell, seed_faces the in-plane B.
     let rho0 = GAMMA * GAMMA;
     let p0 = GAMMA;
-    let mut sim = SimStateGeneric::<Rmhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Rmhd, IdealGas { gamma: GAMMA }, Cartesian,
-    )
+    let mut sim =
+        SimStateGeneric::<Rmhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
+            Rmhd,
+            IdealGas { gamma: GAMMA },
+            Cartesian,
+        )
         .cells([NX, NY])
         .spacing([1.0 / NX as f64, 1.0 / NY as f64])
         .boundaries(Boundaries::uniform(BoundaryType::Periodic))
@@ -138,18 +179,31 @@ fn rmhd_2p5d_smoke() {
         .expect("rmhd 2.5d construction")
         .set_initial(|[x, y]| {
             let (vel, mag) = ot_vectors(x, y);
-            MhdPrim { hydro: Prim { rho: rho0, vel, pre: p0 }, mag }
+            MhdPrim {
+                hydro: Prim {
+                    rho: rho0,
+                    vel,
+                    pre: p0,
+                },
+                mag,
+            }
         })
         .seed_faces(ot_bface)
         .build();
 
-    let kset = RmhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
+    let kset =
+        RmhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated);
     let mut steps = 0u64;
     evolve_with_callback(&mut sim, &kset, 0.2, 1, |s| {
         let rel = rel_divb(s);
-        assert!(rel < 1e-10, "rmhd: 2.5D div(B) grew to rel={rel:e} at iter {}", s.iteration);
+        assert!(
+            rel < 1e-10,
+            "rmhd: 2.5D div(B) grew to rel={rel:e} at iter {}",
+            s.iteration
+        );
         steps = s.iteration;
-    }).expect("rmhd 2.5d evolve failed");
+    })
+    .expect("rmhd 2.5d evolve failed");
     assert!(steps >= 3, "rmhd: only {steps} steps");
     assert_finite_and_bz_evolved("rmhd", &sim);
 }

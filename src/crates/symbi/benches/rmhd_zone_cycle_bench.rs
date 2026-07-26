@@ -24,15 +24,18 @@ use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdPrim;
-use symbi_hydro::state::Prim;
 use symbi_hydro::rmhd::Rmhd;
+use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimState<Rmhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
 // cubic grid N^3; override with SYMBI_BENCH_N to probe parallelization granularity.
 fn grid_n() -> usize {
-    std::env::var("SYMBI_BENCH_N").ok().and_then(|s| s.parse().ok()).unwrap_or(64)
+    std::env::var("SYMBI_BENCH_N")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64)
 }
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.3;
@@ -59,7 +62,11 @@ fn make_sim(n: usize) -> Sim {
             let bx_c = -B0 * (2.0 * PI * y).sin();
             let by_c = B0 * (4.0 * PI * x).sin();
             MhdPrim {
-                hydro: Prim { rho: rho0, vel: Tensor::new([vx, vy, 0.0]), pre: p0 },
+                hydro: Prim {
+                    rho: rho0,
+                    vel: Tensor::new([vx, vy, 0.0]),
+                    pre: p0,
+                },
                 mag: Tensor::new([bx_c, by_c, 0.0]),
             }
         })
@@ -75,7 +82,8 @@ fn main() {
     let n = grid_n();
     let n_cells = n * n * n;
     let mut sim = make_sim(n);
-    let sub = RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
+    let sub =
+        RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
 
     // warm up: a few steps to settle caches / branch predictors.
     evolve_with_callback(&mut sim, &sub, 0.02, 1, |_| {}).expect("warmup failed");
@@ -89,13 +97,19 @@ fn main() {
         use symbi::sim::evolve::KernelSet;
         let dt = sub.cfl(&sim);
         let call = || match phase.as_str() {
-            "flux"    => { for d in 0..3 { sub.flux(&sim, d); } }
+            "flux" => {
+                for d in 0..3 {
+                    sub.flux(&sim, d);
+                }
+            }
             "godunov" => sub.godunov_stage(&sim, dt, 0.0, 1.0),
-            "c2p"     => sub.c2p(&sim),
-            "ghost"   => sub.ghost_fill(&sim),
-            other     => panic!("SYMBI_PHASE: unknown phase '{other}'"),
+            "c2p" => sub.c2p(&sim),
+            "ghost" => sub.ghost_fill(&sim),
+            other => panic!("SYMBI_PHASE: unknown phase '{other}'"),
         };
-        for _ in 0..5 { call(); } // warmup
+        for _ in 0..5 {
+            call();
+        } // warmup
         let mut best = f64::INFINITY;
         for _ in 0..100 {
             let t = Instant::now();
@@ -104,7 +118,9 @@ fn main() {
         }
         let sweeps = if phase == "flux" { 3.0 } else { 1.0 }; // flux = 3 directional sweeps
         let ns_cell = best * 1e9 / (n_cells as f64 * sweeps);
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(0);
         println!("PHASE={phase}  N={n}^3  {ns_cell:.2} ns/cell-sweep  (threads avail {threads})");
         return;
     }
@@ -123,13 +139,18 @@ fn main() {
     let zone_cycles = (n_cells as f64) * (steps as f64);
     let mzcps = zone_cycles / elapsed / 1e6;
     let ns_per_zc = elapsed * 1e9 / zone_cycles;
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0);
 
     println!("=== RMHD full zone-cycle (3D Orszag-Tang, {n}^3 = {n_cells} cells) ===");
     println!("steps timed     : {steps}");
     println!("wall time       : {:.4} s", elapsed);
     println!("ns / zone-cycle : {:.1}", ns_per_zc);
-    println!("THROUGHPUT      : {:.1} Mzcps   (rayon threads available: {threads})", mzcps);
+    println!(
+        "THROUGHPUT      : {:.1} Mzcps   (rayon threads available: {threads})",
+        mzcps
+    );
     println!("  (AthenaK SR-MHD ref: 20 Mzcps Xeon-6326/32c, 178 A100, 297 GraceHopper)");
 
     let prof = symbi::sim::evolve::report_profile();
@@ -139,9 +160,15 @@ fn main() {
         let mut rows = prof.clone();
         rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         for (name, ms) in rows {
-            println!("  {name:<16} {ms:>8.1} ms  ({:>4.1}%)   {:.0} ns/zone-cycle",
-                100.0 * ms / total, ms * 1e6 / (steps as f64 * n_cells as f64));
+            println!(
+                "  {name:<16} {ms:>8.1} ms  ({:>4.1}%)   {:.0} ns/zone-cycle",
+                100.0 * ms / total,
+                ms * 1e6 / (steps as f64 * n_cells as f64)
+            );
         }
-        println!("  {:<16} {total:>8.1} ms  (sum of instrumented phases)", "TOTAL");
+        println!(
+            "  {:<16} {total:>8.1} ms  (sum of instrumented phases)",
+            "TOTAL"
+        );
     }
 }

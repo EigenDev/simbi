@@ -48,10 +48,18 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
     match coords {
         Geometry::Cartesian => "",
         Geometry::Spherical => {
-            if dof > ndim { "_sph_swirl" } else { "_sph" }
+            if dof > ndim {
+                "_sph_swirl"
+            } else {
+                "_sph"
+            }
         }
         Geometry::Cylindrical => {
-            if dof > ndim { "_cyl_rz" } else { "_cyl" }
+            if dof > ndim {
+                "_cyl_rz"
+            } else {
+                "_cyl"
+            }
         }
     }
 }
@@ -104,7 +112,11 @@ pub fn mhd_geom_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
 /// flux family. ONLY r-z (`[0, 2]`) lifts grid axis 1 onto the z component
 /// (`coord_n = 2 != 1`), so its normal flux differs and needs `_cyl_rz`.
 pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
-    if matches!(coords, Geometry::Cylindrical) && axes == [0, 2] { "_cyl_rz" } else { "" }
+    if matches!(coords, Geometry::Cylindrical) && axes == [0, 2] {
+        "_cyl_rz"
+    } else {
+        ""
+    }
 }
 
 /// the spacetime background tag: flat `Minkowski` is unsuffixed (the
@@ -127,7 +139,12 @@ pub fn spacetime_slug(spacetime: Spacetime) -> &'static str {
 /// tags cartesian `_cart` / cylindrical `_cyl` while spherical stays the
 /// implicit untagged default (the validated spherical GR kernels keep their
 /// names); a flat non-swirl grid is untagged.
-pub fn gr_chart_dof_tag(coords: Geometry, spacetime: Spacetime, dof: usize, ndim: usize) -> &'static str {
+pub fn gr_chart_dof_tag(
+    coords: Geometry,
+    spacetime: Spacetime,
+    dof: usize,
+    ndim: usize,
+) -> &'static str {
     if dof > ndim {
         geom_suffix(coords, dof, ndim)
     } else if spacetime != Spacetime::Minkowski {

@@ -27,18 +27,33 @@ use symbi_aot::NamedKernel;
 // loud + named on manifest drift. every buffer here is 1D (lo = 0).
 #[allow(non_snake_case, clippy::too_many_arguments)]
 fn rhd_c2p_1d(
-    cons_den: &[f64], cons_mom: &[f64], cons_nrg: &[f64],
-    prim_rho: &mut [f64], prim_vel: &mut [f64], prim_pre: &mut [f64],
-    grid_size_0: i32, dom_lo_0: i32,
-    _l0: i32, _l1: i32, _l2: i32, _l3: i32, _l4: i32, _l5: i32,
+    cons_den: &[f64],
+    cons_mom: &[f64],
+    cons_nrg: &[f64],
+    prim_rho: &mut [f64],
+    prim_vel: &mut [f64],
+    prim_pre: &mut [f64],
+    grid_size_0: i32,
+    dom_lo_0: i32,
+    _l0: i32,
+    _l1: i32,
+    _l2: i32,
+    _l3: i32,
+    _l4: i32,
+    _l5: i32,
     gamma: f64,
 ) {
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
     NamedKernel::new("rhd_c2p_1d")
-        .input("cons.den", cons_den).input("cons.mom_0", cons_mom).input("cons.nrg", cons_nrg)
-        .output("prim.rho", prim_rho).output("prim.vel_0", prim_vel).output("prim.pre", prim_pre)
-        .grid(&grid).dom_lo(&dom)
+        .input("cons.den", cons_den)
+        .input("cons.mom_0", cons_mom)
+        .input("cons.nrg", cons_nrg)
+        .output("prim.rho", prim_rho)
+        .output("prim.vel_0", prim_vel)
+        .output("prim.pre", prim_pre)
+        .grid(&grid)
+        .dom_lo(&dom)
         .scalar("gamma", gamma)
         .run();
 }
@@ -105,17 +120,39 @@ fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec
     let mut prim_vel = vec![0.0_f64; n];
     let mut prim_pre = vec![0.0_f64; n];
     rhd_c2p_1d(
-        den, mom, nrg, &mut prim_rho, &mut prim_vel, &mut prim_pre,
-        n as i32, 0, 0, 0, 0, 0, 0, 0, GAMMA,
+        den,
+        mom,
+        nrg,
+        &mut prim_rho,
+        &mut prim_vel,
+        &mut prim_pre,
+        n as i32,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        GAMMA,
     );
     (prim_rho, prim_vel, prim_pre)
 }
 
 #[test]
 fn rhd_c2p_round_trips_prim_to_cons() {
-    let den: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0).collect();
-    let mom: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1).collect();
-    let nrg: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2).collect();
+    let den: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0)
+        .collect();
+    let mom: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1)
+        .collect();
+    let nrg: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2)
+        .collect();
 
     let (rho, vel, pre) = run_kernel(&den, &mom, &nrg);
 
@@ -142,14 +179,23 @@ fn rhd_face_flux_uniform_state_is_consistent() {
     // interior only: the stencil reads coord-2..coord+1, so iterate cells 2..6
     // (dom_lo=2, grid=4) — all reads land inside the size-8 buffers.
     NamedKernel::new("rhd_face_flux_1d_0")
-        .input("prim.rho", &den).input("prim.vel[0]", &v0).input("prim.pre", &pre)
-        .output("flux.den", &mut fden).output("flux.mom_0", &mut fmom).output("flux.nrg", &mut fnrg)
-        .grid(&[4]).dom_lo(&[2])
+        .input("prim.rho", &den)
+        .input("prim.vel[0]", &v0)
+        .input("prim.pre", &pre)
+        .output("flux.den", &mut fden)
+        .output("flux.mom_0", &mut fmom)
+        .output("flux.nrg", &mut fnrg)
+        .grid(&[4])
+        .dom_lo(&[2])
         // gamma/theta + the cartesian geometry scalars the flux kernel gained with the
         // curvilinear/moving-mesh work (no motion -> mesh_adot/mesh_vtrans = 0; cartesian
         // flux is position-independent so x_lo/dx are inert, dx = 1).
-        .scalar("gamma", GAMMA).scalar("theta", 1.0)
-        .scalar("mesh_adot_0", 0.0).scalar("x_lo_0", 0.0).scalar("dx_0", 1.0).scalar("mesh_vtrans_0", 0.0)
+        .scalar("gamma", GAMMA)
+        .scalar("theta", 1.0)
+        .scalar("mesh_adot_0", 0.0)
+        .scalar("x_lo_0", 0.0)
+        .scalar("dx_0", 1.0)
+        .scalar("mesh_vtrans_0", 0.0)
         .run();
 
     // analytic F(U): W=1/sqrt(1-v^2), h=1+gamma/(gamma-1)*p/rho, rhW2=rho*h*W^2;
@@ -160,24 +206,57 @@ fn rhd_face_flux_uniform_state_is_consistent() {
     let (d, s) = (rho * w, rhw2 * v);
     let (fd, fs, ftau) = (d * v, s * v + p, s - d * v);
     for i in 2..6 {
-        assert!((fden[i] - fd).abs() < 1e-9, "cell {i}: F_D {} != {fd}", fden[i]);
-        assert!((fmom[i] - fs).abs() < 1e-9, "cell {i}: F_S {} != {fs}", fmom[i]);
-        assert!((fnrg[i] - ftau).abs() < 1e-9, "cell {i}: F_tau {} != {ftau}", fnrg[i]);
+        assert!(
+            (fden[i] - fd).abs() < 1e-9,
+            "cell {i}: F_D {} != {fd}",
+            fden[i]
+        );
+        assert!(
+            (fmom[i] - fs).abs() < 1e-9,
+            "cell {i}: F_S {} != {fs}",
+            fmom[i]
+        );
+        assert!(
+            (fnrg[i] - ftau).abs() < 1e-9,
+            "cell {i}: F_tau {} != {ftau}",
+            fnrg[i]
+        );
     }
 }
 
 #[test]
 fn rhd_c2p_matches_reference_newton() {
-    let den: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0).collect();
-    let mom: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1).collect();
-    let nrg: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2).collect();
+    let den: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0)
+        .collect();
+    let mom: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1)
+        .collect();
+    let nrg: Vec<f64> = CASES
+        .iter()
+        .map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2)
+        .collect();
 
     let (rho, vel, pre) = run_kernel(&den, &mom, &nrg);
 
     for i in 0..CASES.len() {
         let (rr, vr, pr) = rhd_to_primitive_ref(den[i], mom[i], nrg[i], GAMMA);
-        assert!((rho[i] - rr).abs() < 1e-10, "case {i}: rho {} != ref {rr}", rho[i]);
-        assert!((vel[i] - vr).abs() < 1e-10, "case {i}: vel {} != ref {vr}", vel[i]);
-        assert!((pre[i] - pr).abs() < 1e-10, "case {i}: pre {} != ref {pr}", pre[i]);
+        assert!(
+            (rho[i] - rr).abs() < 1e-10,
+            "case {i}: rho {} != ref {rr}",
+            rho[i]
+        );
+        assert!(
+            (vel[i] - vr).abs() < 1e-10,
+            "case {i}: vel {} != ref {vr}",
+            vel[i]
+        );
+        assert!(
+            (pre[i] - pr).abs() < 1e-10,
+            "case {i}: pre {} != ref {pr}",
+            pre[i]
+        );
     }
 }

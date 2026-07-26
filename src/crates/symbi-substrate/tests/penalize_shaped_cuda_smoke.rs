@@ -15,23 +15,31 @@
 
 use symbi_discretize::coords::Coords;
 use symbi_discretize::{
-    penalize_porous_gv_shaped, penalize_porous_gv_spinning, penalize_porous_iso_gv_shaped,
-    penalize_porous_iso_gv_spinning, GvKernel,
+    GvKernel, penalize_porous_gv_shaped, penalize_porous_gv_spinning,
+    penalize_porous_iso_gv_shaped, penalize_porous_iso_gv_spinning,
 };
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
-use symbi_ir::{emit_kernel_from_lowering, FieldBind, KernelEmitInputs};
+use symbi_ir::{FieldBind, KernelEmitInputs, emit_kernel_from_lowering};
 use symbi_xpu::nvrtc::compile_ptx;
 
 // render the runtime GvKernel to CUDA at f64 (the shaped ABI is raw f64) and
 // NVRTC-compile it, exactly as the device dispatch path will. the name mirrors
 // the AOT penalize convention: coalesce_layout is false (penalize buffers do not
 // share one layout), tile_spec None (the smem path is gated + unimplemented).
-fn nvrtc_ok(name: &str, ndim: u8, k: &GvKernel, writes: &[(String, FieldBind, symbi_ir::graph::NodeId)]) {
+fn nvrtc_ok(
+    name: &str,
+    ndim: u8,
+    k: &GvKernel,
+    writes: &[(String, FieldBind, symbi_ir::graph::NodeId)],
+) {
     let inputs = KernelEmitInputs {
         kernel_name: name,
         ndim,
-        target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+        target: TargetConfig {
+            target: Target::Cuda,
+            precision: Precision::F64,
+        },
         coalesce_layout: false,
         field_inputs: &k.field_inputs,
         scalar_params: &k.scalar_params,

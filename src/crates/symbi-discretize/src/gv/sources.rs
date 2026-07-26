@@ -8,7 +8,6 @@ use super::*;
 use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
 use symbi_hydro::spatial_metric::SpatialMetric;
 
-
 // =============================================================================
 // the conserved-update GODUNOV family in Gv — the finite-volume divergence (the Gv stencil
 // `field_shifted(F_i, +e_i) - field(F_i)`, no `MorphismKind::Diff`) composed with the
@@ -39,7 +38,6 @@ pub enum GeoSource {
     /// energy / `prim.pre`); the closure scalar `cs` is read in-kernel.
     IsothermalMhd,
 }
-
 
 /// the centrifugal/coriolis INERTIAL momentum source per component `S^i = -Gamma^i_jk mom^j
 /// v^k` (the velocity-quadratic geometric terms), in Gv. delegates to the SINGLE-SOURCE
@@ -89,7 +87,6 @@ fn inertial_momentum_sources_gv(
     s.resize(ncomp, Gv::ZERO);
     s
 }
-
 
 /// the FULL geometric momentum source per component `S^i = -Gamma^i_jk T^jk` in Gv, split
 /// into the three pieces every
@@ -142,7 +139,6 @@ fn geometric_momentum_sources_gv(
         .collect()
 }
 
-
 /// trace the regime's geometric momentum source quantities + form the per-component source.
 /// HYDRO/RHD: total pressure = `prim.pre`, gas momentum density * v = the CONSERVED momentum
 /// (cons.mom IS rho v / rho h W^2 v), no magnetic term. RMHD: the gas + magnetic quantities
@@ -184,19 +180,28 @@ pub(crate) fn gv_geometric_source(
             } else {
                 (Vec::new(), Vec::new())
             };
-            geometric_momentum_sources_gv(coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel, None)
+            geometric_momentum_sources_gv(
+                coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel, None,
+            )
         }
         GeoSource::Rmhd => {
             // the RMHD stress = pressure + gas inertial + magnetic tension: read prim + gamma,
             // trace symbi-hydro's `rmhd_source_quantities` (wgam2, bmu, ptot) at S=Gv.
             let rho = Gv::field("prim_rho", FieldRef::PrimRho);
-            let vel: [Gv; 3] =
-                std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+            let vel: [Gv; 3] = std::array::from_fn(|k| {
+                Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
+            });
             let pre = Gv::field("prim_pre", FieldRef::PrimPre);
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
-            let eos = IdealGas { gamma: Gv::scalar("gamma") };
+            let eos = IdealGas {
+                gamma: Gv::scalar("gamma"),
+            };
             let prim = MhdPrim::<Gv, 3> {
-                hydro: Prim { rho, vel: Tensor::new(vel), pre },
+                hydro: Prim {
+                    rho,
+                    vel: Tensor::new(vel),
+                    pre,
+                },
                 mag: Tensor::new(mag),
             };
             // flat-frame metric = identity (constant-folds to euclidean norms; traced kernel bit-identical).
@@ -208,7 +213,15 @@ pub(crate) fn gv_geometric_source(
             let vel_n: Vec<Gv> = vel[..ncomp].to_vec();
             let bmu_n: Vec<Gv> = (0..ncomp).map(|k| bmu[k]).collect();
             geometric_momentum_sources_gv(
-                coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel_n, Some(&bmu_n),
+                coords,
+                axes,
+                ndim,
+                ncomp,
+                geo,
+                ptot,
+                &gas_mom,
+                &vel_n,
+                Some(&bmu_n),
             )
         }
         GeoSource::NewtonianMhd => {
@@ -228,7 +241,15 @@ pub(crate) fn gv_geometric_source(
             let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
             let mag_n: Vec<Gv> = (0..ncomp).map(|k| mag[k]).collect();
             geometric_momentum_sources_gv(
-                coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel, Some(&mag_n),
+                coords,
+                axes,
+                ndim,
+                ncomp,
+                geo,
+                ptot,
+                &gas_mom,
+                &vel,
+                Some(&mag_n),
             )
         }
         GeoSource::IsothermalMhd => {
@@ -246,12 +267,19 @@ pub(crate) fn gv_geometric_source(
             let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
             let mag_n: Vec<Gv> = (0..ncomp).map(|k| mag[k]).collect();
             geometric_momentum_sources_gv(
-                coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel, Some(&mag_n),
+                coords,
+                axes,
+                ndim,
+                ncomp,
+                geo,
+                ptot,
+                &gas_mom,
+                &vel,
+                Some(&mag_n),
             )
         }
     }
 }
-
 
 /// SPIKE probe: trace the carrier-generic `symbi_hydro::UniformAccel` source at S=Gv.
 /// constructs the source with `g_ext_k` runtime scalars (the same names the splice path
@@ -269,12 +297,17 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, Field
     let mom = src.momentum(rho);
     let nrg = src.energy(rho, &vel);
     let mut writes: Vec<(String, FieldBind, NodeId)> = (0..D)
-        .map(|k| (format!("s_mom_{k}"), format!("s_mom_{k}").into(), mom[k].node()))
+        .map(|k| {
+            (
+                format!("s_mom_{k}"),
+                format!("s_mom_{k}").into(),
+                mom[k].node(),
+            )
+        })
         .collect();
     writes.push(("s_nrg".to_string(), "s_nrg".into(), nrg.node()));
     (end_trace(), writes)
 }
-
 
 /// splice an externally-lowered user-expression `BuiltSource` (a parsed script, bridged into the
 /// `symbi-ir` Graph via `symbi_hydro::expr_bridge`, optionally wrapped in a conservation law by
@@ -304,14 +337,14 @@ pub fn splice_user_source_gv(
     (end_trace(), writes)
 }
 
-
 /// SPIKE probe: trace the carrier-generic `symbi_hydro::PointMassGravity` source at S=Gv.
 /// reads rho/vel as cell fields and the position `x_k`, mass position `xm_k`, and `gm` as
 /// runtime scalars (the same names the splice path declares); writes `s_mom_k` + `s_nrg`.
 /// a host test renders + evaluates it and asserts `-rho*GM*(x-xm)/|x-xm|^3` — the SAME form
 /// `point_mass_{momentum,energy}_source` hand-builds, proving the carrier-generic form is a
 /// drop-in (and f64==Gv by construction). the shared `1/|x-xm|^3` is emitted once (hash-cons).
-pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
+{
     begin_trace();
     let rho = Gv::field("rho", FieldRef::cons_den());
     let vel: [Gv; D] =
@@ -324,12 +357,17 @@ pub fn point_mass_gravity_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, 
     let mom = src.momentum(rho, &x);
     let nrg = src.energy(rho, &vel, &x);
     let mut writes: Vec<(String, FieldBind, NodeId)> = (0..D)
-        .map(|k| (format!("s_mom_{k}"), format!("s_mom_{k}").into(), mom[k].node()))
+        .map(|k| {
+            (
+                format!("s_mom_{k}"),
+                format!("s_mom_{k}").into(),
+                mom[k].node(),
+            )
+        })
         .collect();
     writes.push(("s_nrg".to_string(), "s_nrg".into(), nrg.node()));
     (end_trace(), writes)
 }
-
 
 /// the gv inertial-source probe:
 /// read the conserved momentum + primitive velocity, compute the centrifugal/coriolis source
@@ -350,10 +388,11 @@ pub fn inertial_momentum_probe_gv(
         .collect();
     let geo = cell_geometry_gv(coords, spacing, &axes, ndim);
     let s = inertial_momentum_sources_gv(ndim, coords, &mom, &vel, &geo.centroid);
-    let writes = (0..ndim).map(|d| (format!("s_{d}"), format!("s_{d}").into(), s[d].node())).collect();
+    let writes = (0..ndim)
+        .map(|d| (format!("s_{d}"), format!("s_{d}").into(), s[d].node()))
+        .collect();
     (end_trace(), writes)
 }
-
 
 /// the gv FULL geometric-momentum-source probe — the carrier mirror of the ctx
 /// `geometric_momentum_sources` path (+ the rmhd adapter): build the cell geometry, form the
@@ -383,6 +422,8 @@ pub fn geometric_momentum_source_probe_gv(
         GeoSource::Rmhd => Vec::new(),
     };
     let s = gv_geometric_source(coords, axes, ndim, ncomp, &geo, source, &cons_mom, false);
-    let writes = (0..ncomp).map(|k| (format!("s_{k}"), format!("s_{k}").into(), s[k].node())).collect();
+    let writes = (0..ncomp)
+        .map(|k| (format!("s_{k}"), format!("s_{k}").into(), s[k].node()))
+        .collect();
     (end_trace(), writes)
 }

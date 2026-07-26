@@ -16,13 +16,13 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
+use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::{MhdCons, MhdPrim};
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::riemann::{hllc_newtonian, hlld_newtonian, hlle};
 use symbi_hydro::state::Prim;
-use symbi_hydro::ShockwaveLimiter;
 
 const N: usize = 400; // interior cells
 const NG: usize = 2;
@@ -36,7 +36,14 @@ type P = MhdPrim<f64, 3>;
 type C = MhdCons<f64, 3>;
 
 fn prim(rho: f64, v: [f64; 3], p: f64, b: [f64; 3]) -> P {
-    MhdPrim { hydro: Prim { rho, vel: Tensor::new(v), pre: p }, mag: Tensor::new(b) }
+    MhdPrim {
+        hydro: Prim {
+            rho,
+            vel: Tensor::new(v),
+            pre: p,
+        },
+        mag: Tensor::new(b),
+    }
 }
 
 // classic Brio-Wu: L = (1, 0, 1, By=1), R = (0.125, 0, 0.1, By=-1), Bx = 0.75.
@@ -50,7 +57,13 @@ fn ic(i: usize) -> P {
 }
 
 fn minmod(a: f64, b: f64) -> f64 {
-    if a * b <= 0.0 { 0.0 } else if a.abs() < b.abs() { a } else { b }
+    if a * b <= 0.0 {
+        0.0
+    } else if a.abs() < b.abs() {
+        a
+    } else {
+        b
+    }
 }
 
 // PLM(minmod) slope-limited reconstruction of one primitive: returns the cell's
@@ -83,7 +96,9 @@ fn run<F: Fn(&P, &P) -> C>(flux: F) -> Vec<P> {
     let nhat = Tensor::<f64, 3>::unit(0);
     let dx = 1.0 / N as f64;
 
-    let mut cons: Vec<C> = (0..TOT).map(|i| NewtonianMhd.to_conserved(&eos, &ic(i))).collect();
+    let mut cons: Vec<C> = (0..TOT)
+        .map(|i| NewtonianMhd.to_conserved(&eos, &ic(i)))
+        .collect();
     let mut t = 0.0;
     while t < T_FINAL {
         // transmissive ghosts.
@@ -134,7 +149,8 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     let p_hllc = run(|l, r| hllc_newtonian(&eos, l, r, &n, 0.0, ShockwaveLimiter::Standard));
     let p_hlld = run(|l, r| hlld_newtonian(&eos, l, r, &n, 0.0));
 
-    let interior = |p: &[P], f: fn(&P) -> f64| -> Vec<f64> { p[NG..NG + N].iter().map(f).collect() };
+    let interior =
+        |p: &[P], f: fn(&P) -> f64| -> Vec<f64> { p[NG..NG + N].iter().map(f).collect() };
     let rho_e = interior(&p_hlle, |p| p.rho);
     let rho_c = interior(&p_hllc, |p| p.rho);
     let rho_d = interior(&p_hlld, |p| p.rho);
@@ -144,45 +160,89 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     // 1) PHYSICAL everywhere (the algebraic c2p must recover rho,p > 0).
     for (label, ps) in [("hllc", &p_hllc), ("hlld", &p_hlld)] {
         for (i, pi) in ps[NG..NG + N].iter().enumerate() {
-            assert!(pi.rho.is_finite() && pi.rho > 0.0, "{label} cell {i}: rho={}", pi.rho);
-            assert!(pi.pre.is_finite() && pi.pre > 0.0, "{label} cell {i}: p={}", pi.pre);
+            assert!(
+                pi.rho.is_finite() && pi.rho > 0.0,
+                "{label} cell {i}: rho={}",
+                pi.rho
+            );
+            assert!(
+                pi.pre.is_finite() && pi.pre > 0.0,
+                "{label} cell {i}: p={}",
+                pi.pre
+            );
         }
     }
 
     // 2) Bx (normal field) stays EXACTLY constant (induction F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
-        assert!((pi.mag[0] - 0.75).abs() < 1e-12, "Bx drifted: {}", pi.mag[0]);
+        assert!(
+            (pi.mag[0] - 0.75).abs() < 1e-12,
+            "Bx drifted: {}",
+            pi.mag[0]
+        );
     }
 
     // 3) NON-OSCILLATORY: HLLE is the monotone baseline; a buggy solver oscillates
     //    -> TV inflates. a correct SHARPER solver keeps TV ~ the same (a monotone
     //    profile's TV is diffusion-independent). this is the direct "noise" test.
-    let (tv_re, tv_rc, tv_rd) = (total_variation(&rho_e), total_variation(&rho_c), total_variation(&rho_d));
+    let (tv_re, tv_rc, tv_rd) = (
+        total_variation(&rho_e),
+        total_variation(&rho_c),
+        total_variation(&rho_d),
+    );
     let (tv_be, tv_bd) = (total_variation(&by_e), total_variation(&by_d));
     eprintln!("[brio-wu] TV(rho): hlle={tv_re:.4} hllc={tv_rc:.4} hlld={tv_rd:.4}");
     eprintln!("[brio-wu] TV(By):  hlle={tv_be:.4} hlld={tv_bd:.4}");
-    assert!(tv_rd < 1.3 * tv_re, "HLLD rho OSCILLATES: TV {tv_rd:.4} vs hlle {tv_re:.4}");
-    assert!(tv_rc < 1.3 * tv_re, "HLLC rho OSCILLATES: TV {tv_rc:.4} vs hlle {tv_re:.4}");
-    assert!(tv_bd < 1.3 * tv_be, "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}");
+    assert!(
+        tv_rd < 1.3 * tv_re,
+        "HLLD rho OSCILLATES: TV {tv_rd:.4} vs hlle {tv_re:.4}"
+    );
+    assert!(
+        tv_rc < 1.3 * tv_re,
+        "HLLC rho OSCILLATES: TV {tv_rc:.4} vs hlle {tv_re:.4}"
+    );
+    assert!(
+        tv_bd < 1.3 * tv_be,
+        "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}"
+    );
 
     // 4) SAME solution as HLLE, only sharper: small L1 distance.
-    assert!(l1_diff(&rho_d, &rho_e) < 0.05, "HLLD rho diverges from HLLE: L1 {}", l1_diff(&rho_d, &rho_e));
-    assert!(l1_diff(&rho_c, &rho_e) < 0.05, "HLLC rho diverges from HLLE: L1 {}", l1_diff(&rho_c, &rho_e));
+    assert!(
+        l1_diff(&rho_d, &rho_e) < 0.05,
+        "HLLD rho diverges from HLLE: L1 {}",
+        l1_diff(&rho_d, &rho_e)
+    );
+    assert!(
+        l1_diff(&rho_c, &rho_e) < 0.05,
+        "HLLC rho diverges from HLLE: L1 {}",
+        l1_diff(&rho_c, &rho_e)
+    );
 
     // 5) HLLD actually SHARPENS, confirming the HLLD path is active:
     //    the steepest density gradient is larger than HLLE's.
-    let max_grad = |f: &[f64]| f.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f64, f64::max);
+    let max_grad = |f: &[f64]| {
+        f.windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f64, f64::max)
+    };
     assert!(
         max_grad(&rho_d) >= max_grad(&rho_e) * 0.95,
         "HLLD not sharper than HLLE (grad {} vs {}) — is it falling back?",
-        max_grad(&rho_d), max_grad(&rho_e),
+        max_grad(&rho_d),
+        max_grad(&rho_e),
     );
 
     // 6) the Brio-Wu signature: By flips sign across the tube (the compound/rotational
     //    structure), and the density develops intermediate states between L and R.
     let by_min = by_d.iter().cloned().fold(f64::MAX, f64::min);
     let by_max = by_d.iter().cloned().fold(f64::MIN, f64::max);
-    assert!(by_min < -0.5 && by_max > 0.5, "By did not span the L/R sign change: [{by_min},{by_max}]");
+    assert!(
+        by_min < -0.5 && by_max > 0.5,
+        "By did not span the L/R sign change: [{by_min},{by_max}]"
+    );
     let rho_mid = rho_d[N / 2];
-    assert!(rho_mid > 0.125 && rho_mid < 1.0, "midpoint density {rho_mid} is a pure step — no waves formed");
+    assert!(
+        rho_mid > 0.125 && rho_mid < 1.0,
+        "midpoint density {rho_mid} is a pure step — no waves formed"
+    );
 }

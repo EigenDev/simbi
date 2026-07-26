@@ -59,7 +59,10 @@ fn ct_curl_preserves_div_b() {
     // sanity: the init is divergence-free to machine precision.
     for i in 0..M - 2 {
         for j in 0..M - 2 {
-            assert!(div_b(&bx, &by, i, j).abs() < 1e-12, "init div(B) nonzero at {i},{j}");
+            assert!(
+                div_b(&bx, &by, i, j).abs() < 1e-12,
+                "init div(B) nonzero at {i},{j}"
+            );
         }
     }
 
@@ -69,9 +72,15 @@ fn ct_curl_preserves_div_b() {
     // bx for dir=0, by for dir=1) to advance the full in-plane field one step. out-of-place
     // writes b_new so the before/after div comparison reads the originals.
     let bx_built = rmhd_ct_curl_2d_dir_gv(0);
-    assert_eq!(bx_built.0.scalar_params, vec!["dt".to_string(), "idy".to_string()]);
+    assert_eq!(
+        bx_built.0.scalar_params,
+        vec!["dt".to_string(), "idy".to_string()]
+    );
     let by_built = rmhd_ct_curl_2d_dir_gv(1);
-    assert_eq!(by_built.0.scalar_params, vec!["dt".to_string(), "idx".to_string()]);
+    assert_eq!(
+        by_built.0.scalar_params,
+        vec!["dt".to_string(), "idx".to_string()]
+    );
 
     let (bxc, ezc0) = (bx.clone(), ez.clone());
     let bx_out = KernelRun::new(bx_built)
@@ -98,8 +107,14 @@ fn ct_curl_preserves_div_b() {
         for j in 0..M - 2 {
             let after = div_b(bx_new, by_new, i, j);
             let before = div_b(&bx, &by, i, j);
-            assert!(after.abs() < 1e-12, "post-update div(B) nonzero at {i},{j}: {after}");
-            assert!((after - before).abs() < 1e-13, "div(B) changed at {i},{j}: {before} -> {after}");
+            assert!(
+                after.abs() < 1e-12,
+                "post-update div(B) nonzero at {i},{j}: {after}"
+            );
+            assert!(
+                (after - before).abs() < 1e-13,
+                "div(B) changed at {i},{j}: {before} -> {after}"
+            );
         }
     }
 }

@@ -29,8 +29,8 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_bcell_godunov_euler_gv, Coords, Spacing};
 use symbi_discretize::Spacetime;
+use symbi_discretize::{Coords, Spacing, rmhd_bcell_godunov_euler_gv};
 
 const MR: usize = 8; // r cells
 const MZ: usize = 8; // z cells
@@ -57,21 +57,55 @@ fn cyl_rz_out_of_plane_bphi_uses_metric_free_divergence() {
 
     let (bc1c, bf01c) = (bc1.clone(), bf01.clone());
     // the cyl r-z bcell predictor (axes [0,2], DOF=3): out-of-plane = B_phi (comp 1).
-    let out = KernelRun::new(rmhd_bcell_godunov_euler_gv(Coords::Cylindrical, Spacetime::Minkowski, &[Spacing::Uniform; 2], 2, 3, &[0, 2]))
-        .grid([MR, MZ])
-        // run over cells whose +1 neighbor (the flux divergence stencil) stays in bounds.
-        .compute_window([0, 0], [MR - 1, MZ - 1])
-        .field_with("bc_0", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .field_with("bc_1", move |c| bc1c[idx2(c[0], c[1])])
-        .field_with("bc_2", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .field_with("bf_0_0", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .field_with("bf_0_1", move |c| bf01c[idx2(c[0], c[1])])
-        .field_with("bf_0_2", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .field_with("bf_1_0", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .field_with("bf_1_1", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .field_with("bf_1_2", { let z = zero.clone(); move |c| z[idx2(c[0], c[1])] })
-        .scalars(&[("dt", DT), ("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", Z0), ("dx_1", DZ)])
-        .run();
+    let out = KernelRun::new(rmhd_bcell_godunov_euler_gv(
+        Coords::Cylindrical,
+        Spacetime::Minkowski,
+        &[Spacing::Uniform; 2],
+        2,
+        3,
+        &[0, 2],
+    ))
+    .grid([MR, MZ])
+    // run over cells whose +1 neighbor (the flux divergence stencil) stays in bounds.
+    .compute_window([0, 0], [MR - 1, MZ - 1])
+    .field_with("bc_0", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .field_with("bc_1", move |c| bc1c[idx2(c[0], c[1])])
+    .field_with("bc_2", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .field_with("bf_0_0", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .field_with("bf_0_1", move |c| bf01c[idx2(c[0], c[1])])
+    .field_with("bf_0_2", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .field_with("bf_1_0", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .field_with("bf_1_1", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .field_with("bf_1_2", {
+        let z = zero.clone();
+        move |c| z[idx2(c[0], c[1])]
+    })
+    .scalars(&[
+        ("dt", DT),
+        ("x_lo_0", R0),
+        ("dx_0", DR),
+        ("x_lo_1", Z0),
+        ("dx_1", DZ),
+    ])
+    .run();
 
     let bphi_new = out.values("bc_1_new").to_vec();
 
@@ -96,7 +130,6 @@ fn cyl_rz_out_of_plane_bphi_uses_metric_free_divergence() {
     );
 }
 
-
 /// the out-of-plane component set for a chart: the B-vector slots whose coordinate is NOT a grid
 /// axis. the predictor writes ONLY these (the in-plane components are CT / interp(bface)).
 fn oop_comps(axes: &[usize]) -> Vec<usize> {
@@ -116,7 +149,12 @@ fn run_bcell_euler(
     b0: f64,
 ) -> Vec<Option<Vec<f64>>> {
     let mut run = KernelRun::new(rmhd_bcell_godunov_euler_gv(
-        coords, spacetime, &[Spacing::Uniform; 2], 2, 3, axes,
+        coords,
+        spacetime,
+        &[Spacing::Uniform; 2],
+        2,
+        3,
+        axes,
     ))
     .grid([MR, MZ])
     .compute_window([0, 0], [MR - 1, MZ - 1]);
@@ -132,10 +170,12 @@ fn run_bcell_euler(
     let out = run.scalars(scalars).run();
     let oop = oop_comps(axes);
     (0..3)
-        .map(|c| oop.contains(&c).then(|| out.values(&format!("bc_{c}_new")).to_vec()))
+        .map(|c| {
+            oop.contains(&c)
+                .then(|| out.values(&format!("bc_{c}_new")).to_vec())
+        })
         .collect()
 }
-
 
 #[test]
 fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
@@ -144,17 +184,33 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
     let th0 = 0.4; // theta_min (off the pole so the buggy cot(theta) signal is finite)
     let dth = 0.1;
     let scalars: &[(&str, f64)] = &[
-        ("dt", DT), ("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", th0), ("dx_1", dth),
+        ("dt", DT),
+        ("x_lo_0", R0),
+        ("dx_0", DR),
+        ("x_lo_1", th0),
+        ("dx_1", dth),
     ];
 
     // uniform RADIAL flux F^r = C: update = -C/r_c (arithmetic midpoint; the r-weight is
     // linear so the midpoint form is exact). the gas r^2 sin(theta) divergence gives ~2C/r_c.
-    let rad = run_bcell_euler(Coords::Spherical, Spacetime::Minkowski, &[0, 1], scalars,
-        |d, c| if d == 0 && c == 2 { CFLUX } else { 0.0 }, B0);
+    let rad = run_bcell_euler(
+        Coords::Spherical,
+        Spacetime::Minkowski,
+        &[0, 1],
+        scalars,
+        |d, c| if d == 0 && c == 2 { CFLUX } else { 0.0 },
+        B0,
+    );
     // uniform THETA flux F^theta = C: d_theta F^theta = 0, so B_phi is UNCHANGED. the gas
     // sin(theta) face weights give a spurious -C cot(theta)/r drive.
-    let ang = run_bcell_euler(Coords::Spherical, Spacetime::Minkowski, &[0, 1], scalars,
-        |d, c| if d == 1 && c == 2 { CFLUX } else { 0.0 }, B0);
+    let ang = run_bcell_euler(
+        Coords::Spherical,
+        Spacetime::Minkowski,
+        &[0, 1],
+        scalars,
+        |d, c| if d == 1 && c == 2 { CFLUX } else { 0.0 },
+        B0,
+    );
 
     // sph r-theta out-of-plane = B_phi (comp 2); the predictor writes only that slot.
     let rad2 = rad[2].as_ref().expect("sph r-theta oop = B_phi (comp 2)");
@@ -179,7 +235,6 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
     }
 }
 
-
 /// per-cell covariant radial divergence + centroid lapse checks shared by the GR charts, applied to
 /// the OUT-OF-PLANE component the predictor writes (the in-plane slots are `None`). with a uniform
 /// radial flux C, that component's update must be the covariant divergence (NO flat out-of-plane
@@ -197,7 +252,9 @@ fn assert_gr_bcell_updates(
         for j in 0..MZ - 1 {
             let k = i + j * MR;
             for c in 0..3 {
-                let (Some(u0), Some(um)) = (&upd0[c], &upd_m[c]) else { continue };
+                let (Some(u0), Some(um)) = (&upd0[c], &upd_m[c]) else {
+                    continue;
+                };
                 assert!(
                     (u0[k] - want0).abs() < 1e-12 * want0.abs().max(1.0),
                     "{chart} comp {c} M=0 update at ({i},{j}): got {}, want {want0} (the \
@@ -217,7 +274,6 @@ fn assert_gr_bcell_updates(
     }
 }
 
-
 #[test]
 fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
     // schwarzschild (r,theta), contravariant B: the out-of-plane B^phi (comp 2) obeys the densitized
@@ -227,15 +283,28 @@ fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
     let th0 = 0.4;
     let dth = 0.1;
     let base: Vec<(&str, f64)> = vec![
-        ("dt", DT), ("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", th0), ("dx_1", dth),
+        ("dt", DT),
+        ("x_lo_0", R0),
+        ("dx_0", DR),
+        ("x_lo_1", th0),
+        ("dx_1", dth),
     ];
     let uniform_radial = |d: usize, _c: usize| if d == 0 { CFLUX } else { 0.0 };
     let run = |m: f64| {
         let mut s = base.clone();
         s.push(("schwarzschild_mass", m));
-        let b = run_bcell_euler(Coords::Spherical, Spacetime::Schwarzschild, &[0, 1], &s, uniform_radial, B0);
+        let b = run_bcell_euler(
+            Coords::Spherical,
+            Spacetime::Schwarzschild,
+            &[0, 1],
+            &s,
+            uniform_radial,
+            B0,
+        );
         // per-component UPDATE (B0 - bnew), the divergence signal itself.
-        b.into_iter().map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>())).collect::<Vec<Option<Vec<f64>>>>()
+        b.into_iter()
+            .map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>()))
+            .collect::<Vec<Option<Vec<f64>>>>()
     };
     let upd0 = run(0.0);
     let upd_m = run(mass);
@@ -255,7 +324,6 @@ fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
     assert_gr_bcell_updates(&upd0, &upd_m, div, alpha, "schwarzschild sph");
 }
 
-
 #[test]
 fn kerr_schild_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
     // kerr-schild cylindrical (R,z), contravariant B: the out-of-plane B^phi must take the
@@ -265,14 +333,27 @@ fn kerr_schild_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
     // lapse-weighted by alpha = 1/sqrt(1 + 2M/r), r = sqrt(R_cen^2 + z_cen^2).
     let mass = 0.2;
     let base: Vec<(&str, f64)> = vec![
-        ("dt", DT), ("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", Z0), ("dx_1", DZ),
+        ("dt", DT),
+        ("x_lo_0", R0),
+        ("dx_0", DR),
+        ("x_lo_1", Z0),
+        ("dx_1", DZ),
     ];
     let uniform_radial = |d: usize, _c: usize| if d == 0 { CFLUX } else { 0.0 };
     let run = |m: f64| {
         let mut s = base.clone();
         s.push(("schwarzschild_mass", m));
-        let b = run_bcell_euler(Coords::Cylindrical, Spacetime::KerrSchild, &[0, 2], &s, uniform_radial, B0);
-        b.into_iter().map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>())).collect::<Vec<Option<Vec<f64>>>>()
+        let b = run_bcell_euler(
+            Coords::Cylindrical,
+            Spacetime::KerrSchild,
+            &[0, 2],
+            &s,
+            uniform_radial,
+            B0,
+        );
+        b.into_iter()
+            .map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>()))
+            .collect::<Vec<Option<Vec<f64>>>>()
     };
     let upd0 = run(0.0);
     let upd_m = run(mass);

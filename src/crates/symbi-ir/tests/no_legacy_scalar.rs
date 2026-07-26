@@ -23,10 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
-const FORBIDDEN: &[&str] = &[
-    "symbi_algebra::Scalar",
-    "symbi_algebra::Selectable",
-];
+const FORBIDDEN: &[&str] = &["symbi_algebra::Scalar", "symbi_algebra::Selectable"];
 
 const SKIP_DIRS: &[&str] = &["target", ".git", "node_modules", "abandoned"];
 

@@ -25,16 +25,16 @@
 // same one the multi-gpu python entry runs.
 // =============================================================================
 
-use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
 use symbi::regimes::substrate_gpu::device_sync;
+use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
+use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{AxisMap, Cylindrical, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_xpu::{with_device, CpuSpace, HostMemory};
+use symbi_xpu::{CpuSpace, HostMemory, with_device};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -71,15 +71,25 @@ fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMa
         (
             r_start,
             Some([
-                AxisMap::Log { start: r_start, log_slope: slope },
-                AxisMap::Uniform { start: z0, dx: DT_AX },
+                AxisMap::Log {
+                    start: r_start,
+                    log_slope: slope,
+                },
+                AxisMap::Uniform {
+                    start: z0,
+                    dx: DT_AX,
+                },
             ]),
         )
     } else if mode == 2 {
         let ratio = 0.98_f64;
         let width = (R_HI - R_LO) * (ratio - 1.0) / (ratio.powf(NR as f64) - 1.0);
         let offset = (tc0 * m0) as f64;
-        let global = AxisMap::Geometric { start: R_LO, width, ratio };
+        let global = AxisMap::Geometric {
+            start: R_LO,
+            width,
+            ratio,
+        };
         let start = global.face(offset as isize);
         (
             start,
@@ -89,7 +99,10 @@ fn tile_radial(mode: u8, tc0: usize, m0: usize, z0: f64) -> (f64, Option<[AxisMa
                     width: width * ratio.powf(offset),
                     ratio,
                 },
-                AxisMap::Uniform { start: z0, dx: DT_AX },
+                AxisMap::Uniform {
+                    start: z0,
+                    dx: DT_AX,
+                },
             ]),
         )
     } else {
@@ -136,7 +149,11 @@ macro_rules! curvilinear_harness {
                         // x[0] is the physical radius of this cell (origin + i*dr), identical
                         // for the monolithic grid and the tile that owns the cell.
                         let b = pulse(x[0]);
-                        Prim { rho: 1.0 + b, vel: Tensor::new([0.0, 0.0]), pre: 1.0 + b }
+                        Prim {
+                            rho: 1.0 + b,
+                            vel: Tensor::new([0.0, 0.0]),
+                            pre: 1.0 + b,
+                        }
                     })
                     .build();
                 let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -158,12 +175,28 @@ macro_rules! curvilinear_harness {
                         let origin = [r0, z0];
                         let bnd = Boundaries::per_axis([
                             [
-                                if tc[0] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
-                                if tc[0] == counts[0] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
+                                if tc[0] == 0 {
+                                    BoundaryType::Outflow
+                                } else {
+                                    BoundaryType::CoarseFine
+                                },
+                                if tc[0] == counts[0] - 1 {
+                                    BoundaryType::Outflow
+                                } else {
+                                    BoundaryType::CoarseFine
+                                },
                             ],
                             [
-                                if tc[1] == 0 { BoundaryType::Periodic } else { BoundaryType::CoarseFine },
-                                if tc[1] == counts[1] - 1 { BoundaryType::Periodic } else { BoundaryType::CoarseFine },
+                                if tc[1] == 0 {
+                                    BoundaryType::Periodic
+                                } else {
+                                    BoundaryType::CoarseFine
+                                },
+                                if tc[1] == counts[1] - 1 {
+                                    BoundaryType::Periodic
+                                } else {
+                                    BoundaryType::CoarseFine
+                                },
                             ],
                         ]);
                         with_device(tile_device(flat), || make(m, origin, maps, bnd, ts))
@@ -225,7 +258,8 @@ macro_rules! curvilinear_harness {
                 let dec_vals = global_den(&dec, counts);
 
                 assert!(
-                    mono_vals.iter().all(|v| v.is_finite()) && dec_vals.iter().all(|v| v.is_finite()),
+                    mono_vals.iter().all(|v| v.is_finite())
+                        && dec_vals.iter().all(|v| v.is_finite()),
                     "some global cells were never written (gather bug)"
                 );
 
@@ -346,7 +380,12 @@ mod swirl {
         0.3 * (-((r - 1.5) / 0.1).powi(2)).exp()
     }
 
-    fn make(origin: [f64; 2], bnd: Boundaries<2>, cells: [usize; 2], ts: Timestepping) -> (Sim, Kern) {
+    fn make(
+        origin: [f64; 2],
+        bnd: Boundaries<2>,
+        cells: [usize; 2],
+        ts: Timestepping,
+    ) -> (Sim, Kern) {
         let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
             .cells(cells)
             .origin(origin)
@@ -358,7 +397,11 @@ mod swirl {
             .set_initial(|x| {
                 let b = pulse(x[0]);
                 // vel = (v_r, v_phi, v_z); the swirl rides slot 1.
-                Prim { rho: 1.0 + b, vel: Tensor::new([0.0, vphi(x[0]), 0.0]), pre: 1.0 + b }
+                Prim {
+                    rho: 1.0 + b,
+                    vel: Tensor::new([0.0, vphi(x[0]), 0.0]),
+                    pre: 1.0 + b,
+                }
             })
             .build();
         let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
@@ -371,15 +414,34 @@ mod swirl {
         (0..total)
             .map(|flat| {
                 let tc = unflatten(flat, counts);
-                let origin = [R_LO + (tc[0] * m[0]) as f64 * DR, (tc[1] * m[1]) as f64 * DT_AX];
+                let origin = [
+                    R_LO + (tc[0] * m[0]) as f64 * DR,
+                    (tc[1] * m[1]) as f64 * DT_AX,
+                ];
                 let bnd = Boundaries::per_axis([
                     [
-                        if tc[0] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
-                        if tc[0] == counts[0] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
+                        if tc[0] == 0 {
+                            BoundaryType::Outflow
+                        } else {
+                            BoundaryType::CoarseFine
+                        },
+                        if tc[0] == counts[0] - 1 {
+                            BoundaryType::Outflow
+                        } else {
+                            BoundaryType::CoarseFine
+                        },
                     ],
                     [
-                        if tc[1] == 0 { BoundaryType::Periodic } else { BoundaryType::CoarseFine },
-                        if tc[1] == counts[1] - 1 { BoundaryType::Periodic } else { BoundaryType::CoarseFine },
+                        if tc[1] == 0 {
+                            BoundaryType::Periodic
+                        } else {
+                            BoundaryType::CoarseFine
+                        },
+                        if tc[1] == counts[1] - 1 {
+                            BoundaryType::Periodic
+                        } else {
+                            BoundaryType::CoarseFine
+                        },
                     ],
                 ]);
                 with_device(tile_device(flat), || make(origin, bnd, m, ts))
@@ -396,7 +458,15 @@ mod swirl {
             kernels.push(&*k);
         }
         evolve_decomposed(
-            &mut stores, &kernels, counts, &devices, ts, 0.0, T_FINAL, u64::MAX, &LocalCopy,
+            &mut stores,
+            &kernels,
+            counts,
+            &devices,
+            ts,
+            0.0,
+            T_FINAL,
+            u64::MAX,
+            &LocalCopy,
             |_, _, _| std::ops::ControlFlow::Continue(()),
         );
     }
@@ -410,7 +480,8 @@ mod swirl {
             let tc = unflatten(flat_tile, counts);
             let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
             for c in sim.geom.interior.iter() {
-                let g: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+                let g: [usize; 2] =
+                    std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
                 out[flatten(g, [NR, NT])] = *sim.fields.cons.mom[1].view().at(c);
             }
         }

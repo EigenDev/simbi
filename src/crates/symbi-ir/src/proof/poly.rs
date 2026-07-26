@@ -26,7 +26,9 @@ pub struct Poly {
 impl Poly {
     /// the zero polynomial.
     pub fn zero() -> Self {
-        Poly { terms: BTreeMap::new() }
+        Poly {
+            terms: BTreeMap::new(),
+        }
     }
 
     /// an integer constant polynomial.
@@ -259,7 +261,10 @@ pub struct RatFun {
 
 impl RatFun {
     pub(crate) fn from_poly(p: Poly) -> Self {
-        RatFun { num: p, den: Poly::constant(1) }
+        RatFun {
+            num: p,
+            den: Poly::constant(1),
+        }
     }
 
     /// a STABLE canonical string of this rational function (num + den), for keying an opaque metric
@@ -272,8 +277,14 @@ impl RatFun {
     /// curl whose edge-emf coefficient is `dt/w`: `w = dt * coeff.reciprocal()`. panics on a zero
     /// numerator (the reciprocal would divide by zero).
     pub fn reciprocal(&self) -> RatFun {
-        assert!(!self.num.is_zero(), "proof: reciprocal of a zero rational function");
-        RatFun { num: self.den.clone(), den: self.num.clone() }
+        assert!(
+            !self.num.is_zero(),
+            "proof: reciprocal of a zero rational function"
+        );
+        RatFun {
+            num: self.den.clone(),
+            den: self.num.clone(),
+        }
     }
 
     /// public num/den constructor (for tests building the area weights). `den` must
@@ -297,7 +308,10 @@ impl RatFun {
     }
 
     pub(crate) fn neg(&self) -> RatFun {
-        RatFun { num: self.num.neg(), den: self.den.clone() }
+        RatFun {
+            num: self.num.neg(),
+            den: self.den.clone(),
+        }
     }
 
     pub(crate) fn add(&self, other: &RatFun) -> RatFun {
@@ -315,21 +329,33 @@ impl RatFun {
     /// the product of two rational functions (public for tests assembling the area
     /// weight from r and sin factors).
     pub fn mul(&self, other: &RatFun) -> RatFun {
-        RatFun { num: self.num.mul(&other.num), den: self.den.mul(&other.den) }
+        RatFun {
+            num: self.num.mul(&other.num),
+            den: self.den.mul(&other.den),
+        }
     }
 
     pub(crate) fn div(&self, other: &RatFun) -> RatFun {
         // a/b / (c/d) = (a*d) / (b*c). other.num is structurally nonzero (it is a
         // product of r-polys / sin symbols / constants), so b*c stays nonzero.
-        assert!(!other.num.is_zero(), "proof: division by a zero rational function");
-        RatFun { num: self.num.mul(&other.den), den: self.den.mul(&other.num) }
+        assert!(
+            !other.num.is_zero(),
+            "proof: division by a zero rational function"
+        );
+        RatFun {
+            num: self.num.mul(&other.den),
+            den: self.den.mul(&other.num),
+        }
     }
 
     /// apply the covariant coord shift to BOTH num and den: c_N -> c_N + delta_N
     /// and sin_th@<2m>/cos_th@<2m> -> @<2m + 2*delta_theta>. public so a
     /// conservation test can form `area_lo.shift_coords(&e_r)` directly.
     pub fn shift_coords(&self, delta: &[i64]) -> RatFun {
-        RatFun { num: shift_poly_coords(&self.num, delta), den: shift_poly_coords(&self.den, delta) }
+        RatFun {
+            num: shift_poly_coords(&self.num, delta),
+            den: shift_poly_coords(&self.den, delta),
+        }
     }
 
     /// EXACT symbolic equality: `self - other` is the zero rational function (the
@@ -356,7 +382,11 @@ pub(crate) fn shift_poly_coords(p: &Poly, delta: &[i64]) -> Poly {
     // theta (axis 1); the GR lapse sqrt_f@ tracks the radius (axis 0). each symbol at half-unit
     // offset <2m> moves to <2m + 2*delta[ax]> so a shifted contribution's edge symbol aligns with
     // the neighbor it telescopes against.
-    remap_edge_symbols(&mut out, &["sin_th@", "cos_th@"], *delta.get(1).unwrap_or(&0));
+    remap_edge_symbols(
+        &mut out,
+        &["sin_th@", "cos_th@"],
+        *delta.get(1).unwrap_or(&0),
+    );
     remap_edge_symbols(&mut out, &["sqrt_f@"], *delta.first().unwrap_or(&0));
     out
 }

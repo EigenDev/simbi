@@ -27,14 +27,18 @@ macro_rules! carrier_law_suite {
             // a deterministic spread: sign, magnitude, fractions, edge-of-unit — moderate
             // enough that products/associativity don't overflow on f32.
             const RAW: &[f64] = &[
-                0.0, 1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 3.0, -3.0,
-                0.1, -0.1, 0.7, -0.7, 7.0, -7.0, 1e-3, 1e3,
+                0.0, 1.0, -1.0, 2.0, -2.0, 0.5, -0.5, 3.0, -3.0, 0.1, -0.1, 0.7, -0.7, 7.0, -7.0,
+                1e-3, 1e3,
             ];
             // bounded subset for cosh/sinh (cosh overflows ~|x|=710; keep small for f32 too).
             const SMALL: &[f64] = &[0.0, 0.25, -0.25, 0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 3.0, -3.0];
 
-            fn grid() -> Vec<S> { RAW.iter().map(|&x| x as S).collect() }
-            fn small() -> Vec<S> { SMALL.iter().map(|&x| x as S).collect() }
+            fn grid() -> Vec<S> {
+                RAW.iter().map(|&x| x as S).collect()
+            }
+            fn small() -> Vec<S> {
+                SMALL.iter().map(|&x| x as S).collect()
+            }
 
             #[track_caller]
             fn approx(a: S, b: S, law: &str) {
@@ -43,7 +47,9 @@ macro_rules! carrier_law_suite {
                 assert!(rel < TOL, "{law}: {a} vs {b} (rel {rel:e}, tol {TOL:e})");
             }
             #[track_caller]
-            fn exact(cond: bool, law: &str) { assert!(cond, "exact law violated: {law}"); }
+            fn exact(cond: bool, law: &str) {
+                assert!(cond, "exact law violated: {law}");
+            }
 
             // ---- ring + abelian group: the EXACT laws ----
             #[test]
@@ -98,7 +104,10 @@ macro_rules! carrier_law_suite {
                         exact(x.cmp_eq(y) == y.cmp_eq(x), "cmp_eq symmetric");
                         exact(x.cmp_lt(y) == y.cmp_gt(x), "cmp_lt(x,y)==cmp_gt(y,x)");
                         // trichotomy on finite values: exactly one of <, ==, > holds.
-                        let n = [x.cmp_lt(y), x.cmp_eq(y), x.cmp_gt(y)].iter().filter(|b| **b).count();
+                        let n = [x.cmp_lt(y), x.cmp_eq(y), x.cmp_gt(y)]
+                            .iter()
+                            .filter(|b| **b)
+                            .count();
                         exact(n == 1, "trichotomy: exactly one of < == >");
                         // le == (lt or eq); ge == (gt or eq).
                         exact(x.cmp_le(y) == (x.cmp_lt(y) || x.cmp_eq(y)), "le == lt|eq");
@@ -117,8 +126,14 @@ macro_rules! carrier_law_suite {
             fn select_laws() {
                 for &t in &grid() {
                     for &f in &grid() {
-                        exact(<S as Scalar>::select(true, t, f) == t, "select(true,t,f)==t");
-                        exact(<S as Scalar>::select(false, t, f) == f, "select(false,t,f)==f");
+                        exact(
+                            <S as Scalar>::select(true, t, f) == t,
+                            "select(true,t,f)==t",
+                        );
+                        exact(
+                            <S as Scalar>::select(false, t, f) == f,
+                            "select(false,t,f)==f",
+                        );
                         // select distributes over Neg: select(m,-t,-f) == -select(m,t,f).
                         for &m in &[true, false] {
                             let lhs = <S as Scalar>::select(m, -t, -f);
@@ -156,7 +171,11 @@ macro_rules! carrier_law_suite {
                     let (sh, ch) = (x.sinh(), x.cosh());
                     approx(ch * ch - sh * sh, one, "cosh^2 - sinh^2 == 1");
                     approx(x.tanh(), sh / ch, "tanh == sinh/cosh");
-                    approx((x + x).sinh(), (2.0 as S) * sh * ch, "sinh(2x)==2 sinh cosh");
+                    approx(
+                        (x + x).sinh(),
+                        (2.0 as S) * sh * ch,
+                        "sinh(2x)==2 sinh cosh",
+                    );
                     approx(x.sinh().asinh(), x, "asinh(sinh(x))==x");
                     approx(x.cosh().acosh(), x.abs(), "acosh(cosh(x))==abs(x)");
                 }

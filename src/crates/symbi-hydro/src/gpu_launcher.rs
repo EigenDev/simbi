@@ -22,9 +22,9 @@
 //   - unified memory routes input + output through one allocator.
 // =============================================================================
 
-use symbi_xpu::{ctx_sync, DeviceMemory};
-use symbi_xpu::runtime::current_dispatcher;
 use symbi_xpu::runtime::GpuRuntime;
+use symbi_xpu::runtime::current_dispatcher;
+use symbi_xpu::{DeviceMemory, ctx_sync};
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
 use crate::gpu_source_kernel::GpuSourceKernel;
@@ -100,7 +100,9 @@ pub fn launch_source_kernel(
                 .expect("unified alloc for source-kernel input");
             let ptr = block.as_mut_ptr::<f64>();
             for (j, &v) in data.iter().enumerate() {
-                unsafe { *ptr.add(j) = v; }
+                unsafe {
+                    *ptr.add(j) = v;
+                }
             }
             block
         })
@@ -134,8 +136,12 @@ pub fn launch_source_kernel(
         .collect();
 
     let mut args = KernelArgs::new();
-    for p in &input_ptrs { args.push(p); }
-    for p in &output_ptrs { args.push(p); }
+    for p in &input_ptrs {
+        args.push(p);
+    }
+    for p in &output_ptrs {
+        args.push(p);
+    }
     let n_cells_u32 = n_cells as u32;
     args.push(&n_cells_u32);
 
@@ -144,9 +150,7 @@ pub fn launch_source_kernel(
         current_dispatcher()
             .runtime()
             .launch(&jit_kernel, config, args.as_mut_slice())
-            .unwrap_or_else(|e| panic!(
-                "GPU launch '{entry_name}' failed: {e:?}"
-            ));
+            .unwrap_or_else(|e| panic!("GPU launch '{entry_name}' failed: {e:?}"));
     }
     ctx_sync();
 
@@ -155,7 +159,9 @@ pub fn launch_source_kernel(
         .iter()
         .map(|block| {
             let ptr = block.as_ptr::<f64>();
-            (0..n_cells).map(|i| unsafe { *ptr.add(i) }).collect::<Vec<f64>>()
+            (0..n_cells)
+                .map(|i| unsafe { *ptr.add(i) })
+                .collect::<Vec<f64>>()
         })
         .collect()
 }

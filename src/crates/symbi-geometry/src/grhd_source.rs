@@ -32,16 +32,20 @@ use crate::metric::Metric;
 /// `d_r` of the lapse, the radial shift, and the radial spatial-metric coefficient.
 #[derive(Clone, Copy, Debug)]
 pub struct AdmRadialDerivs<S> {
-    pub d_lapse: S,     // d_r alpha
-    pub d_shift_r: S,   // d_r beta^r
-    pub d_gamma_rr: S,  // d_r gamma_{rr}
+    pub d_lapse: S,    // d_r alpha
+    pub d_shift_r: S,  // d_r beta^r
+    pub d_gamma_rr: S, // d_r gamma_{rr}
 }
 
 impl<S: Scalar> AdmRadialDerivs<S> {
     /// the flat / static-diagonal-with-no-radial-stretch value: every derivative zero (Minkowski,
     /// and the flat curvilinear metrics whose radial coefficient is constant).
     pub fn zero() -> Self {
-        Self { d_lapse: S::ZERO, d_shift_r: S::ZERO, d_gamma_rr: S::ZERO }
+        Self {
+            d_lapse: S::ZERO,
+            d_shift_r: S::ZERO,
+            d_gamma_rr: S::ZERO,
+        }
     }
 }
 
@@ -53,13 +57,13 @@ impl<S: Scalar> AdmRadialDerivs<S> {
 pub fn grhd_radial_geodesic_source<S: Scalar>(
     r: S,
     alpha: S,
-    beta_r: S,      // beta^r (contravariant radial shift)
-    gamma_rr: S,    // gamma_{rr}
-    d_alpha: S,     // d_r alpha
-    d_beta_r: S,    // d_r beta^r
-    d_gamma_rr: S,  // d_r gamma_{rr}
-    e: S,           // E = rho eta W^2 = D + tau + p
-    big_v: S,       // orthonormal radial velocity V
+    beta_r: S,     // beta^r (contravariant radial shift)
+    gamma_rr: S,   // gamma_{rr}
+    d_alpha: S,    // d_r alpha
+    d_beta_r: S,   // d_r beta^r
+    d_gamma_rr: S, // d_r gamma_{rr}
+    e: S,          // E = rho eta W^2 = D + tau + p
+    big_v: S,      // orthonormal radial velocity V
     p: S,
 ) -> (S, S) {
     let two = S::from_f64(2.0);
@@ -108,7 +112,7 @@ pub fn grhd_radial_geodesic_source<S: Scalar>(
         + two * t_tr * gt_tr
         + t_rr * gt_rr
         + t_ang * gt_ang   // theta theta
-        + t_ang * gt_ang;  // phi phi
+        + t_ang * gt_ang; // phi phi
     let dln_alpha = d_alpha / alpha;
     let s_tau = alpha * (t_tr * dln_alpha - t_gamma);
 
@@ -159,7 +163,6 @@ where
     }
     contract_stress(&adm, &t4)
 }
-
 
 /// the rest-mass-subtracted covariant (killing) energy from the valencia energy `tau`:
 ///   E_hat = sqrt(gamma) ( alpha tau + (alpha - 1) D - beta^i S_i )   (docs/covariant_energy.md)
@@ -250,7 +253,10 @@ mod ehat_tests {
         // sqrt(gamma) multiply/divide slips), so the recovered tau feeds the newton unchanged.
         let ehat = tau_to_ehat(tau, den, mom, alpha, shift, sg);
         let rec = ehat_to_tau(ehat, den, mom, alpha, shift, sg);
-        assert!((rec - tau).abs() < 1e-14 * tau.abs().max(1.0), "round-trip {rec} vs {tau}");
+        assert!(
+            (rec - tau).abs() < 1e-14 * tau.abs().max(1.0),
+            "round-trip {rec} vs {tau}"
+        );
         // flat background: alpha = 1, beta = 0, sqrt(gamma) = 1 -> E_hat == tau exactly.
         assert_eq!(tau_to_ehat(tau, den, mom, 1.0, Tensor::zeros(), 1.0), tau);
     }
@@ -267,10 +273,30 @@ mod ehat_tests {
         const JM: f64 = 527.9439529572;
         const H_INF: f64 = 1.0400000000;
         let pts: [(f64, f64, f64, f64); 4] = [
-            (3.0, 8.779950259276684e1, 6.681181269277645e-1, 3.902318750504499e0),
-            (6.0, 3.457351834737535e1, 4.241717506740386e-1, 1.126310423270443e0),
-            (10.0, 1.799067745636194e1, 2.934541816103347e-1, 4.714077194002101e-1),
-            (30.0, 5.162852963799085e0, 1.136202011344974e-1, 8.923180448359856e-2),
+            (
+                3.0,
+                8.779950259276684e1,
+                6.681181269277645e-1,
+                3.902318750504499e0,
+            ),
+            (
+                6.0,
+                3.457351834737535e1,
+                4.241717506740386e-1,
+                1.126310423270443e0,
+            ),
+            (
+                10.0,
+                1.799067745636194e1,
+                2.934541816103347e-1,
+                4.714077194002101e-1,
+            ),
+            (
+                30.0,
+                5.162852963799085e0,
+                1.136202011344974e-1,
+                8.923180448359856e-2,
+            ),
         ];
         let mut f_ehat = Vec::new();
         let mut f_e = Vec::new();
@@ -310,7 +336,10 @@ mod ehat_tests {
             let shift = Tensor::<f64, 1>::new([beta]);
             let ehat = tau_to_ehat(tau, den, mom, alpha, shift, sqrtg);
             let rec = ehat_to_tau(ehat, den, mom, alpha, shift, sqrtg);
-            assert!((rec - tau).abs() < 1e-12 * tau.abs().max(1.0), "round-trip at r={r}");
+            assert!(
+                (rec - tau).abs() < 1e-12 * tau.abs().max(1.0),
+                "round-trip at r={r}"
+            );
             // AthenaK/HARM coordinate form (positive convention): -sqrt(-g)(T^t_t + rho u^t) and its
             // flux, computed straight from the primitives via the SchwarzschildKS metric, must agree
             // with the ADM E_hat / F_Ehat above — the two are the same conserved current. evaluated
@@ -318,7 +347,9 @@ mod ehat_tests {
             // v^phi = 0) so that gam.det() = r^2 sqrt(h) picks up the r^2 the reduced 1d chart drops,
             // matching the manual sqrtg = r^2 sqrt(h).
             let (e_coord, f_coord) = coord_energy_cons_flux(
-                &SchwarzschildKS { mass: Dual::constant(M) },
+                &SchwarzschildKS {
+                    mass: Dual::constant(M),
+                },
                 Tensor::<f64, 3>::new([r, std::f64::consts::FRAC_PI_2, 0.0]),
                 rho,
                 rho * h,
@@ -340,20 +371,28 @@ mod ehat_tests {
         let spread = (f_ehat.iter().cloned().fold(f64::MIN, f64::max)
             - f_ehat.iter().cloned().fold(f64::MAX, f64::min))
             / mean.abs();
-        assert!(spread < 1e-10, "F_Ehat not conserved: rel spread {spread:.2e}");
+        assert!(
+            spread < 1e-10,
+            "F_Ehat not conserved: rel spread {spread:.2e}"
+        );
         // sanity: the per-steradian constant equals the analytic killing-minus-baryon flux
         // jm*(h_inf-1) (negative for infall).
         let analytic = -JM * (H_INF - 1.0);
-        assert!((mean - analytic).abs() < 1e-6 * analytic.abs(), "F_Ehat {mean} vs {analytic}");
+        assert!(
+            (mean - analytic).abs() < 1e-6 * analytic.abs(),
+            "F_Ehat {mean} vs {analytic}"
+        );
         // and the eulerian flux is NOT conserved (varies O(1)).
         let e_mean: f64 = f_e.iter().sum::<f64>() / f_e.len() as f64;
         let e_spread = (f_e.iter().cloned().fold(f64::MIN, f64::max)
             - f_e.iter().cloned().fold(f64::MAX, f64::min))
             / e_mean.abs();
-        assert!(e_spread > 1e-2, "eulerian flux unexpectedly flat: {e_spread:.2e}");
+        assert!(
+            e_spread > 1e-2,
+            "eulerian flux unexpectedly flat: {e_spread:.2e}"
+        );
     }
 }
-
 
 /// the full GRMHD covariant valencia source — [`grhd_covariant_source`] with the ideal-MHD
 /// stress `T^{mu nu} = (rho h + b^2) u^mu u^nu + (p + b^2/2) g^{mu nu} - b^mu b^nu` in the SAME
@@ -407,13 +446,11 @@ where
     let mut t4 = [[S::ZERO; 4]; 4];
     for mm in 0..=D {
         for nn in 0..=D {
-            t4[mm][nn] = inertia * uhat[mm] * uhat[nn] + p_tot * adm.gi4[mm][nn]
-                - b4[mm] * b4[nn];
+            t4[mm][nn] = inertia * uhat[mm] * uhat[nn] + p_tot * adm.gi4[mm][nn] - b4[mm] * b4[nn];
         }
     }
     contract_stress(&adm, &t4)
 }
-
 
 /// the harvested ADM blocks + derivatives a covariant-source contraction consumes: the 4-metric
 /// coordinate derivatives `dg4[kk] = d_kk g_{mu nu}` (one Dual pass per axis on a STATIC
@@ -435,7 +472,10 @@ fn adm_contraction_blocks<S: Scalar, M, const D: usize>(
 where
     M: Metric<Dual<S>, D>,
 {
-    debug_assert!(D <= 3, "the padded 4-metric blocks hold at most 3 spatial axes");
+    debug_assert!(
+        D <= 3,
+        "the padded 4-metric blocks hold at most 3 spatial axes"
+    );
 
     // one dual pass per axis: seed x_kk, harvest the ADM block and its d_kk. the values are
     // identical across passes; take them from the first.
@@ -449,7 +489,11 @@ where
     let mut d_gam: Vec<Matrix<S, D>> = Vec::with_capacity(D);
     for kk in 0..D {
         let xd = Tensor::<Dual<S>, D>::from_fn(|ii| {
-            if ii == kk { Dual::variable(x[ii]) } else { Dual::constant(x[ii]) }
+            if ii == kk {
+                Dual::variable(x[ii])
+            } else {
+                Dual::constant(x[ii])
+            }
         });
         let a = g.lapse(xd);
         let b = g.shift(xd);
@@ -518,9 +562,16 @@ where
         }
     }
 
-    AdmContractionBlocks { alpha, beta, gam, sqrt_gamma, d_alpha, dg4, gi4 }
+    AdmContractionBlocks {
+        alpha,
+        beta,
+        gam,
+        sqrt_gamma,
+        d_alpha,
+        dg4,
+        gi4,
+    }
 }
-
 
 /// contract a stress tensor against the harvested metric derivatives:
 ///   S_j   = (1/2) T^{mu nu} d_j g_{mu nu}                       (all blocks, per coordinate j)
@@ -547,7 +598,11 @@ fn contract_stress<S: Scalar, const D: usize>(
     // Gamma^t_{mu nu} = (1/2) g^{t sigma} (d_mu g_{sigma nu} + d_nu g_{sigma mu} - d_sigma g_{mu nu});
     // static background: the t-derivative vanishes, so d_mu indexes the spatial passes only.
     let dg = |mu: usize, aa: usize, bb: usize| -> S {
-        if mu == 0 { S::ZERO } else { dg4[mu - 1][aa][bb] }
+        if mu == 0 {
+            S::ZERO
+        } else {
+            dg4[mu - 1][aa][bb]
+        }
     };
     let mut t_gamma = S::ZERO;
     for mm in 0..=D {
@@ -583,18 +638,44 @@ mod tests {
         // symmetric). a resolution-independent x <-> y asymmetry in a cartesian GR run would show
         // up here if the D-generic contraction dropped an axis.
         use crate::metric::SchwarzschildKSCartesian;
-        let m = SchwarzschildKSCartesian { mass: Dual::constant(1.0_f64) };
+        let m = SchwarzschildKSCartesian {
+            mass: Dual::constant(1.0_f64),
+        };
         let (px, py, e, p) = (3.0_f64, 5.0, 1.5, 0.1);
         let (s1, tau1) = grhd_covariant_source(
-            &m, Tensor::new([px, py, 0.0]), e, Tensor::new([0.1, 0.2, 0.0]), p,
+            &m,
+            Tensor::new([px, py, 0.0]),
+            e,
+            Tensor::new([0.1, 0.2, 0.0]),
+            p,
         );
         let (s2, tau2) = grhd_covariant_source(
-            &m, Tensor::new([py, px, 0.0]), e, Tensor::new([0.2, 0.1, 0.0]), p,
+            &m,
+            Tensor::new([py, px, 0.0]),
+            e,
+            Tensor::new([0.2, 0.1, 0.0]),
+            p,
         );
-        assert!((s1[0] - s2[1]).abs() < 1e-12, "S_x(x,y) = {} != S_y(y,x) = {}", s1[0], s2[1]);
-        assert!((s1[1] - s2[0]).abs() < 1e-12, "S_y(x,y) = {} != S_x(y,x) = {}", s1[1], s2[0]);
-        assert!(s1[2].abs() < 1e-12 && s2[2].abs() < 1e-12, "z-momentum source nonzero on the slice");
-        assert!((tau1 - tau2).abs() < 1e-12, "S_tau asymmetric: {tau1} vs {tau2}");
+        assert!(
+            (s1[0] - s2[1]).abs() < 1e-12,
+            "S_x(x,y) = {} != S_y(y,x) = {}",
+            s1[0],
+            s2[1]
+        );
+        assert!(
+            (s1[1] - s2[0]).abs() < 1e-12,
+            "S_y(x,y) = {} != S_x(y,x) = {}",
+            s1[1],
+            s2[0]
+        );
+        assert!(
+            s1[2].abs() < 1e-12 && s2[2].abs() < 1e-12,
+            "z-momentum source nonzero on the slice"
+        );
+        assert!(
+            (tau1 - tau2).abs() < 1e-12,
+            "S_tau asymmetric: {tau1} vs {tau2}"
+        );
     }
 
     // the schwarzschild-coordinate ADM block + its radial derivatives (f = 1 - 2M/r).
@@ -630,14 +711,27 @@ mod tests {
         let (e, big_v, p) = (2.3, -0.4, 0.05);
         for &r in &[8.0, 3.0, 2.5] {
             let (a, br, grr, d) = schwarzschild_adm(r, m);
-            let (s_mom, s_tau) =
-                grhd_radial_geodesic_source(r, a, br, grr, d.d_lapse, d.d_shift_r, d.d_gamma_rr, e, big_v, p);
+            let (s_mom, s_tau) = grhd_radial_geodesic_source(
+                r,
+                a,
+                br,
+                grr,
+                d.d_lapse,
+                d.d_shift_r,
+                d.d_gamma_rr,
+                e,
+                big_v,
+                p,
+            );
             let f = 1.0 - 2.0 * m / r;
             // schwarzschild closed forms: gravity part only for momentum.
             let s_mom_cf = -m * e * (1.0 + big_v * big_v) / (r * r * f);
             let s_tau_cf = -a * e * big_v * m / (r * r * f);
             assert!(approx(s_mom, s_mom_cf), "S_Sr r={r}: {s_mom} != {s_mom_cf}");
-            assert!(approx(s_tau, s_tau_cf), "S_tau r={r}: {s_tau} != {s_tau_cf}");
+            assert!(
+                approx(s_tau, s_tau_cf),
+                "S_tau r={r}: {s_tau} != {s_tau_cf}"
+            );
         }
     }
 
@@ -658,24 +752,57 @@ mod tests {
                 if !ks && r <= 2.0 * m {
                     continue;
                 }
-                let (a, br, grr, d) = if ks { kerr_schild_adm(r, m) } else { schwarzschild_adm(r, m) };
+                let (a, br, grr, d) = if ks {
+                    kerr_schild_adm(r, m)
+                } else {
+                    schwarzschild_adm(r, m)
+                };
                 let (mom_cf, tau_cf) = grhd_radial_geodesic_source(
-                    r, a, br, grr, d.d_lapse, d.d_shift_r, d.d_gamma_rr, e, big_v, p,
+                    r,
+                    a,
+                    br,
+                    grr,
+                    d.d_lapse,
+                    d.d_shift_r,
+                    d.d_gamma_rr,
+                    e,
+                    big_v,
+                    p,
                 );
                 let vr = big_v / grr.sqrt(); // contravariant v^r from the orthonormal V
                 let x = Tensor::new([r, theta, 0.0]);
                 let v = Tensor::new([vr, 0.0, 0.0]);
                 let (s, s_tau) = if ks {
-                    let g = SchwarzschildKS { mass: Dual::constant(m) };
+                    let g = SchwarzschildKS {
+                        mass: Dual::constant(m),
+                    };
                     grhd_covariant_source(&g, x, e, v, p)
                 } else {
-                    let g = Schwarzschild { mass: Dual::constant(m) };
+                    let g = Schwarzschild {
+                        mass: Dual::constant(m),
+                    };
                     grhd_covariant_source(&g, x, e, v, p)
                 };
-                assert!(approx(s[0], mom_cf + 2.0 * p / r), "S_r r={r} ks={ks}: {} != {}", s[0], mom_cf + 2.0 * p / r);
-                assert!(approx(s[1], p * theta.cos() / theta.sin()), "S_theta r={r} ks={ks}: {}", s[1]);
-                assert!(s[2].abs() < 1e-14, "S_phi must vanish (axisymmetry): {}", s[2]);
-                assert!(approx(s_tau, tau_cf), "S_tau r={r} ks={ks}: {s_tau} != {tau_cf}");
+                assert!(
+                    approx(s[0], mom_cf + 2.0 * p / r),
+                    "S_r r={r} ks={ks}: {} != {}",
+                    s[0],
+                    mom_cf + 2.0 * p / r
+                );
+                assert!(
+                    approx(s[1], p * theta.cos() / theta.sin()),
+                    "S_theta r={r} ks={ks}: {}",
+                    s[1]
+                );
+                assert!(
+                    s[2].abs() < 1e-14,
+                    "S_phi must vanish (axisymmetry): {}",
+                    s[2]
+                );
+                assert!(
+                    approx(s_tau, tau_cf),
+                    "S_tau r={r} ks={ks}: {s_tau} != {tau_cf}"
+                );
             }
         }
     }
@@ -693,15 +820,30 @@ mod tests {
         let (vr, vphi) = (-0.1_f64, 0.02_f64);
         let (st, ct) = (theta.sin(), theta.cos());
 
-        let g = Schwarzschild { mass: Dual::constant(m) };
+        let g = Schwarzschild {
+            mass: Dual::constant(m),
+        };
         let (s, s_tau) = grhd_covariant_source(
-            &g, Tensor::new([r, theta, 0.0]), e, Tensor::new([vr, 0.0, vphi]), p,
+            &g,
+            Tensor::new([r, theta, 0.0]),
+            e,
+            Tensor::new([vr, 0.0, vphi]),
+            p,
         );
 
         let (a, br, grr, d) = schwarzschild_adm(r, m);
         let big_v = vr * grr.sqrt();
         let (mom_cf, tau_cf) = grhd_radial_geodesic_source(
-            r, a, br, grr, d.d_lapse, d.d_shift_r, d.d_gamma_rr, e, big_v, p,
+            r,
+            a,
+            br,
+            grr,
+            d.d_lapse,
+            d.d_shift_r,
+            d.d_gamma_rr,
+            e,
+            big_v,
+            p,
         );
         let s_r_cf = mom_cf + 2.0 * p / r + e * vphi * vphi * r * st * st;
         let s_th_cf = (e * vphi * vphi + p / (r * r * st * st)) * r * r * st * ct;
@@ -721,16 +863,25 @@ mod tests {
         let (vr, vth, vphi) = (-0.1_f64, 0.03_f64, 0.02_f64);
         let (st, ct) = (theta.sin(), theta.cos());
 
-        let g = Schwarzschild { mass: Dual::constant(0.0) };
+        let g = Schwarzschild {
+            mass: Dual::constant(0.0),
+        };
         let (s, s_tau) = grhd_covariant_source(
-            &g, Tensor::new([r, theta, 0.0]), e, Tensor::new([vr, vth, vphi]), p,
+            &g,
+            Tensor::new([r, theta, 0.0]),
+            e,
+            Tensor::new([vr, vth, vphi]),
+            p,
         );
 
         let s_r_cf = e * (vth * vth * r + vphi * vphi * r * st * st) + 2.0 * p / r;
         let s_th_cf = (e * vphi * vphi + p / (r * r * st * st)) * r * r * st * ct;
         assert!(approx(s[0], s_r_cf), "flat S_r: {} != {s_r_cf}", s[0]);
         assert!(approx(s[1], s_th_cf), "flat S_theta: {} != {s_th_cf}", s[1]);
-        assert!(s[2].abs() < 1e-14 && s_tau.abs() < 1e-14, "flat gravity must vanish");
+        assert!(
+            s[2].abs() < 1e-14 && s_tau.abs() < 1e-14,
+            "flat gravity must vanish"
+        );
     }
 
     // finite-difference mirror of the covariant contraction: the SAME T^{mu nu} algebra, but
@@ -842,8 +993,14 @@ mod tests {
         // finite-difference mirror through the non-diagonal theta-dependent metric.
         let fd_close = |x: f64, y: f64, s: f64| (x - y).abs() < 1e-7 * (1.0 + s.abs());
         for &a in &[0.9_f64, -0.5] {
-            let g = KerrKS { mass: 1.0_f64, spin: a };
-            let gd = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(a) };
+            let g = KerrKS {
+                mass: 1.0_f64,
+                spin: a,
+            };
+            let gd = KerrKS {
+                mass: Dual::constant(1.0_f64),
+                spin: Dual::constant(a),
+            };
             let (e, p) = (2.3_f64, 0.05_f64);
             for &(r, th) in &[(1.4_f64, 1.2_f64), (2.5, 0.8), (8.0, 1.9)] {
                 let x = Tensor::new([r, th, 0.0]);
@@ -851,10 +1008,17 @@ mod tests {
                 let (s_ad, tau_ad) = grhd_covariant_source(&gd, x, e, v, p);
                 let (s_fd, tau_fd) = covariant_source_fd(&g, x, e, v, p);
                 for kk in 0..3 {
-                    assert!(fd_close(s_ad[kk], s_fd[kk], e),
-                        "S_mom[{kk}] a={a} r={r}: {} vs {}", s_ad[kk], s_fd[kk]);
+                    assert!(
+                        fd_close(s_ad[kk], s_fd[kk], e),
+                        "S_mom[{kk}] a={a} r={r}: {} vs {}",
+                        s_ad[kk],
+                        s_fd[kk]
+                    );
                 }
-                assert!(fd_close(tau_ad, tau_fd, e), "S_tau a={a} r={r}: {tau_ad} vs {tau_fd}");
+                assert!(
+                    fd_close(tau_ad, tau_fd, e),
+                    "S_tau a={a} r={r}: {tau_ad} vs {tau_fd}"
+                );
             }
         }
     }
@@ -865,8 +1029,13 @@ mod tests {
         // a = 0 kerr must reproduce the schwarzschild-KS source values for arbitrary
         // rotating states (different expression paths, same physics).
         let close = |x: f64, y: f64| (x - y).abs() < 1e-11 * (1.0 + x.abs().max(y.abs()));
-        let kerr = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(0.0) };
-        let ks = SchwarzschildKS { mass: Dual::constant(1.0_f64) };
+        let kerr = KerrKS {
+            mass: Dual::constant(1.0_f64),
+            spin: Dual::constant(0.0),
+        };
+        let ks = SchwarzschildKS {
+            mass: Dual::constant(1.0_f64),
+        };
         let (e, p) = (2.3_f64, 0.05_f64);
         for &(r, th) in &[(1.5_f64, 1.0_f64), (3.0, 1.9), (12.0, 1.3)] {
             let x = Tensor::new([r, th, 0.0]);
@@ -874,7 +1043,12 @@ mod tests {
             let (sk, tk) = grhd_covariant_source(&kerr, x, e, v, p);
             let (ss, ts) = grhd_covariant_source(&ks, x, e, v, p);
             for kk in 0..3 {
-                assert!(close(sk[kk], ss[kk]), "S_mom[{kk}] r={r}: {} vs {}", sk[kk], ss[kk]);
+                assert!(
+                    close(sk[kk], ss[kk]),
+                    "S_mom[{kk}] r={r}: {} vs {}",
+                    sk[kk],
+                    ss[kk]
+                );
             }
             assert!(close(tk, ts), "S_tau r={r}: {tk} vs {ts}");
         }
@@ -886,14 +1060,28 @@ mod tests {
         let (e, big_v, p) = (2.3, -0.4, 0.05);
         for &r in &[8.0, 3.0, 2.0, 1.5, 1.2] {
             let (a, br, grr, d) = kerr_schild_adm(r, m);
-            let (s_mom, s_tau) =
-                grhd_radial_geodesic_source(r, a, br, grr, d.d_lapse, d.d_shift_r, d.d_gamma_rr, e, big_v, p);
+            let (s_mom, s_tau) = grhd_radial_geodesic_source(
+                r,
+                a,
+                br,
+                grr,
+                d.d_lapse,
+                d.d_shift_r,
+                d.d_gamma_rr,
+                e,
+                big_v,
+                p,
+            );
             let b = 2.0 * m / r;
             let h = 1.0 + b;
             let s_mom_cf = -m * e * (1.0 + big_v).powi(2) / (r * r * h);
-            let s_tau_cf = -m / (r * r * h.powf(1.5)) * (e * big_v * (1.0 + (2.0 + b) * big_v) - p * (2.0 + 3.0 * b));
+            let s_tau_cf = -m / (r * r * h.powf(1.5))
+                * (e * big_v * (1.0 + (2.0 + b) * big_v) - p * (2.0 + 3.0 * b));
             assert!(approx(s_mom, s_mom_cf), "S_Sr r={r}: {s_mom} != {s_mom_cf}");
-            assert!(approx(s_tau, s_tau_cf), "S_tau r={r}: {s_tau} != {s_tau_cf}");
+            assert!(
+                approx(s_tau, s_tau_cf),
+                "S_tau r={r}: {s_tau} != {s_tau_cf}"
+            );
         }
     }
 
@@ -920,7 +1108,9 @@ mod tests {
             uhat[ii + 1] = v[ii] - beta[ii] / alpha;
         }
         let dot_g = |a: &Tensor<f64, 3>, b: &Tensor<f64, 3>| -> f64 {
-            (0..3).map(|ii| (0..3).map(|jj| gm[(ii, jj)] * a[ii] * b[jj]).sum::<f64>()).sum()
+            (0..3)
+                .map(|ii| (0..3).map(|jj| gm[(ii, jj)] * a[ii] * b[jj]).sum::<f64>())
+                .sum()
         };
         let v_sq = dot_g(&v, &v);
         let w_sq = 1.0 / (1.0 - v_sq);
@@ -1031,12 +1221,22 @@ mod tests {
         let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
         let b0 = Tensor::new([0.0_f64, 0.0, 0.0]);
         let ks_f = SchwarzschildKS { mass: 1.0_f64 };
-        let kerr_f = KerrKS { mass: 1.0_f64, spin: 0.7_f64 };
-        let ks = SchwarzschildKS { mass: Dual::constant(1.0_f64) };
-        let kerr = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(0.7_f64) };
+        let kerr_f = KerrKS {
+            mass: 1.0_f64,
+            spin: 0.7_f64,
+        };
+        let ks = SchwarzschildKS {
+            mass: Dual::constant(1.0_f64),
+        };
+        let kerr = KerrKS {
+            mass: Dual::constant(1.0_f64),
+            spin: Dual::constant(0.7_f64),
+        };
         // the hydro call takes e = rho_h W^2 (the same inertia the mhd call builds internally).
         let w_sq = |gm: symbi_algebra::Matrix<f64, 3>| -> f64 {
-            let v_sq: f64 = (0..3).map(|ii| (0..3).map(|jj| gm[(ii, jj)] * v[ii] * v[jj]).sum::<f64>()).sum();
+            let v_sq: f64 = (0..3)
+                .map(|ii| (0..3).map(|jj| gm[(ii, jj)] * v[ii] * v[jj]).sum::<f64>())
+                .sum();
             1.0 / (1.0 - v_sq)
         };
         for &(r, th) in &[(2.5_f64, 0.8_f64), (8.0, 1.9)] {
@@ -1045,14 +1245,24 @@ mod tests {
             let (sh, th_h) = grhd_covariant_source(&ks, x, e_ks, v, p);
             let (sm, th_m) = grmhd_covariant_source(&ks, x, rho_h, v, p, b0);
             for kk in 0..3 {
-                assert!(close(sh[kk], sm[kk], e_ks), "ks S[{kk}] r={r}: {} vs {}", sh[kk], sm[kk]);
+                assert!(
+                    close(sh[kk], sm[kk], e_ks),
+                    "ks S[{kk}] r={r}: {} vs {}",
+                    sh[kk],
+                    sm[kk]
+                );
             }
             assert!(close(th_h, th_m, e_ks), "ks S_tau r={r}");
             let e_kerr = rho_h * w_sq(crate::metric::Metric::<f64, 3>::spatial_metric(&kerr_f, x));
             let (sh, th_h) = grhd_covariant_source(&kerr, x, e_kerr, v, p);
             let (sm, th_m) = grmhd_covariant_source(&kerr, x, rho_h, v, p, b0);
             for kk in 0..3 {
-                assert!(close(sh[kk], sm[kk], e_kerr), "kerr S[{kk}] r={r}: {} vs {}", sh[kk], sm[kk]);
+                assert!(
+                    close(sh[kk], sm[kk], e_kerr),
+                    "kerr S[{kk}] r={r}: {} vs {}",
+                    sh[kk],
+                    sm[kk]
+                );
             }
             assert!(close(th_h, th_m, e_kerr), "kerr S_tau r={r}");
         }
@@ -1066,8 +1276,14 @@ mod tests {
         // b^mu assembly must agree with the finite-difference mirror.
         let fd_close = |x: f64, y: f64, s: f64| (x - y).abs() < 1e-7 * (1.0 + s.abs());
         for &a in &[0.9_f64, -0.5] {
-            let g = KerrKS { mass: 1.0_f64, spin: a };
-            let gd = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(a) };
+            let g = KerrKS {
+                mass: 1.0_f64,
+                spin: a,
+            };
+            let gd = KerrKS {
+                mass: Dual::constant(1.0_f64),
+                spin: Dual::constant(a),
+            };
             let (rho_h, p) = (2.3_f64, 0.05_f64);
             let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
             let b = Tensor::new([0.4_f64, -0.15, 0.08]);
@@ -1076,10 +1292,17 @@ mod tests {
                 let (s_ad, tau_ad) = grmhd_covariant_source(&gd, x, rho_h, v, p, b);
                 let (s_fd, tau_fd) = covariant_source_fd_mhd(&g, x, rho_h, v, p, b);
                 for kk in 0..3 {
-                    assert!(fd_close(s_ad[kk], s_fd[kk], rho_h),
-                        "S_mom[{kk}] a={a} r={r}: {} vs {}", s_ad[kk], s_fd[kk]);
+                    assert!(
+                        fd_close(s_ad[kk], s_fd[kk], rho_h),
+                        "S_mom[{kk}] a={a} r={r}: {} vs {}",
+                        s_ad[kk],
+                        s_fd[kk]
+                    );
                 }
-                assert!(fd_close(tau_ad, tau_fd, rho_h), "S_tau a={a} r={r}: {tau_ad} vs {tau_fd}");
+                assert!(
+                    fd_close(tau_ad, tau_fd, rho_h),
+                    "S_tau a={a} r={r}: {tau_ad} vs {tau_fd}"
+                );
             }
         }
     }
@@ -1089,7 +1312,10 @@ mod tests {
         use crate::metric::KerrKS;
         // the metric never reads phi, so the suppressed-slot momentum source is zero by
         // construction — magnetization does not break angular-momentum conservation.
-        let gd = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(0.9_f64) };
+        let gd = KerrKS {
+            mass: Dual::constant(1.0_f64),
+            spin: Dual::constant(0.9_f64),
+        };
         let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
         let b = Tensor::new([0.4_f64, -0.15, 0.08]);
         for &(r, th) in &[(2.5_f64, 0.8_f64), (8.0, 1.9)] {

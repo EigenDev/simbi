@@ -77,7 +77,10 @@ fn walk_stmt_exprs<'a>(stmt: &'a ScalarStmt, out: &mut Vec<&'a ScalarExpr>) {
             }
             out.push(result);
         }
-        ScalarStmt::For { body, .. } | ScalarStmt::If { then_body: body, .. } => {
+        ScalarStmt::For { body, .. }
+        | ScalarStmt::If {
+            then_body: body, ..
+        } => {
             for s in body {
                 walk_stmt_exprs(s, out);
             }
@@ -180,7 +183,10 @@ fn specialize_stmt(stmt: &mut ScalarStmt, cond_let: &str, value: bool) {
             }
             specialize_expr(result, cond_let, value);
         }
-        ScalarStmt::For { body, .. } | ScalarStmt::If { then_body: body, .. } => {
+        ScalarStmt::For { body, .. }
+        | ScalarStmt::If {
+            then_body: body, ..
+        } => {
             for s in body {
                 specialize_stmt(s, cond_let, value);
             }

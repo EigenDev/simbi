@@ -154,7 +154,9 @@ pub mod law_params {
     /// scalar primitive pressure.
     pub const PRE: &str = "pre";
     /// per-axis primitive velocity component `vel_<k>`.
-    pub fn vel(k: usize) -> String { format!("vel_{k}") }
+    pub fn vel(k: usize) -> String {
+        format!("vel_{k}")
+    }
 }
 
 /// kind of conservation law — the physical quantity being evolved. one
@@ -220,38 +222,83 @@ pub(crate) fn build_dot(g: &mut Graph, a: &[NodeId], b: &[NodeId]) -> NodeId {
 
 /// the three classical newtonian conservation laws.
 pub const NEWTONIAN_LAWS: &[LawSpec] = &[
-    LawSpec { field: "den", kind: LawKind::Mass },
-    LawSpec { field: "mom", kind: LawKind::Momentum },
-    LawSpec { field: "nrg", kind: LawKind::Energy },
+    LawSpec {
+        field: "den",
+        kind: LawKind::Mass,
+    },
+    LawSpec {
+        field: "mom",
+        kind: LawKind::Momentum,
+    },
+    LawSpec {
+        field: "nrg",
+        kind: LawKind::Energy,
+    },
 ];
 
 /// the isothermal-newtonian conservation laws — mass + momentum, no energy.
 pub const ISO_NEWTONIAN_LAWS: &[LawSpec] = &[
-    LawSpec { field: "den", kind: LawKind::Mass },
-    LawSpec { field: "mom", kind: LawKind::Momentum },
+    LawSpec {
+        field: "den",
+        kind: LawKind::Mass,
+    },
+    LawSpec {
+        field: "mom",
+        kind: LawKind::Momentum,
+    },
 ];
 
 /// the three RHD conservation laws — same shape as newtonian but with
 /// relativistic semantics (`D = rho*W`, `M = rho*h*W^2*v`, `tau = H - p - D`).
 pub const RHD_LAWS: &[LawSpec] = &[
-    LawSpec { field: "den", kind: LawKind::Mass },
-    LawSpec { field: "mom", kind: LawKind::Momentum },
-    LawSpec { field: "nrg", kind: LawKind::Energy },
+    LawSpec {
+        field: "den",
+        kind: LawKind::Mass,
+    },
+    LawSpec {
+        field: "mom",
+        kind: LawKind::Momentum,
+    },
+    LawSpec {
+        field: "nrg",
+        kind: LawKind::Energy,
+    },
 ];
 
 /// the four RMHD conservation laws — mass + momentum + energy + induction.
 pub const RMHD_LAWS: &[LawSpec] = &[
-    LawSpec { field: "den", kind: LawKind::Mass },
-    LawSpec { field: "mom", kind: LawKind::Momentum },
-    LawSpec { field: "nrg", kind: LawKind::Energy },
-    LawSpec { field: "mag", kind: LawKind::Induction },
+    LawSpec {
+        field: "den",
+        kind: LawKind::Mass,
+    },
+    LawSpec {
+        field: "mom",
+        kind: LawKind::Momentum,
+    },
+    LawSpec {
+        field: "nrg",
+        kind: LawKind::Energy,
+    },
+    LawSpec {
+        field: "mag",
+        kind: LawKind::Induction,
+    },
 ];
 
 /// isothermal MHD laws — mass + momentum + induction (no energy).
 pub const ISO_MHD_LAWS: &[LawSpec] = &[
-    LawSpec { field: "den", kind: LawKind::Mass },
-    LawSpec { field: "mom", kind: LawKind::Momentum },
-    LawSpec { field: "mag", kind: LawKind::Induction },
+    LawSpec {
+        field: "den",
+        kind: LawKind::Mass,
+    },
+    LawSpec {
+        field: "mom",
+        kind: LawKind::Momentum,
+    },
+    LawSpec {
+        field: "mag",
+        kind: LawKind::Induction,
+    },
 ];
 
 impl FieldKind {
@@ -291,78 +338,168 @@ impl RegimeSpec {
 /// the newtonian conserved field set, in kernel-binding order.
 /// {den (scalar), mom (D-vector), nrg (scalar)}.
 const NEWTONIAN_FIELDS: &[FieldSpec] = &[
-    FieldSpec { name: "den", kind: FieldKind::Scalar },
-    FieldSpec { name: "mom", kind: FieldKind::DimVector },
-    FieldSpec { name: "nrg", kind: FieldKind::Scalar },
+    FieldSpec {
+        name: "den",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "mom",
+        kind: FieldKind::DimVector,
+    },
+    FieldSpec {
+        name: "nrg",
+        kind: FieldKind::Scalar,
+    },
 ];
 
 /// the **primitive** field sets driving the I/O writer. (rho, vel, pre,
 /// bcell) — the canonical short names live in `symbi-io::field_layout`.
 const NEWTONIAN_PRIMS: &[FieldSpec] = &[
-    FieldSpec { name: "rho", kind: FieldKind::Scalar },
-    FieldSpec { name: "vel", kind: FieldKind::DimVector },
-    FieldSpec { name: "pre", kind: FieldKind::Scalar },
+    FieldSpec {
+        name: "rho",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "vel",
+        kind: FieldKind::DimVector,
+    },
+    FieldSpec {
+        name: "pre",
+        kind: FieldKind::Scalar,
+    },
 ];
 const ISO_NEWTONIAN_PRIMS: &[FieldSpec] = &[
-    FieldSpec { name: "rho", kind: FieldKind::Scalar },
-    FieldSpec { name: "vel", kind: FieldKind::DimVector },
+    FieldSpec {
+        name: "rho",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "vel",
+        kind: FieldKind::DimVector,
+    },
     // iso has no energy law; `pre` is substrate-owned (Option<...>),
     // written conditionally by the I/O writer when present.
 ];
 const RHD_PRIMS: &[FieldSpec] = &[
-    FieldSpec { name: "rho", kind: FieldKind::Scalar },
-    FieldSpec { name: "vel", kind: FieldKind::DimVector },
-    FieldSpec { name: "pre", kind: FieldKind::Scalar },
+    FieldSpec {
+        name: "rho",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "vel",
+        kind: FieldKind::DimVector,
+    },
+    FieldSpec {
+        name: "pre",
+        kind: FieldKind::Scalar,
+    },
 ];
 const RMHD_PRIMS: &[FieldSpec] = &[
-    FieldSpec { name: "rho",   kind: FieldKind::Scalar },
+    FieldSpec {
+        name: "rho",
+        kind: FieldKind::Scalar,
+    },
     // MHD velocity is a 3-vector (DOF=3), always — like B — even on a 1D/2D grid.
-    FieldSpec { name: "vel",   kind: FieldKind::FixedVector { components: 3 } },
-    FieldSpec { name: "pre",   kind: FieldKind::Scalar },
-    FieldSpec { name: "bcell", kind: FieldKind::FixedVector { components: 3 } },
+    FieldSpec {
+        name: "vel",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
+    FieldSpec {
+        name: "pre",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "bcell",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
 ];
 
 /// isothermal: newtonian minus the energy field. matches `IsoCons<S, D>`'s
 /// `Zero<S>` energy slot (the ZST elision).
 const ISO_NEWTONIAN_FIELDS: &[FieldSpec] = &[
-    FieldSpec { name: "den", kind: FieldKind::Scalar },
-    FieldSpec { name: "mom", kind: FieldKind::DimVector },
+    FieldSpec {
+        name: "den",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "mom",
+        kind: FieldKind::DimVector,
+    },
 ];
 
 /// RHD: same field SHAPE as newtonian (den = rho*W, mom = rho*h*W^2*v,
 /// nrg = tau). the names and structural kinds match — only the *semantics*
 /// of each conserved component differs.
 const RHD_FIELDS: &[FieldSpec] = &[
-    FieldSpec { name: "den", kind: FieldKind::Scalar },
-    FieldSpec { name: "mom", kind: FieldKind::DimVector },
-    FieldSpec { name: "nrg", kind: FieldKind::Scalar },
+    FieldSpec {
+        name: "den",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "mom",
+        kind: FieldKind::DimVector,
+    },
+    FieldSpec {
+        name: "nrg",
+        kind: FieldKind::Scalar,
+    },
 ];
 
 /// RMHD: RHD plus the magnetic field. the magnetic field is always
 /// 3-component, even when the simulation is 2D (the dropped axis sees zero
 /// flux but the field still has 3 spatial components).
 const RMHD_FIELDS: &[FieldSpec] = &[
-    FieldSpec { name: "den", kind: FieldKind::Scalar },
+    FieldSpec {
+        name: "den",
+        kind: FieldKind::Scalar,
+    },
     // MHD momentum is a 3-vector (DOF=3), always — like B — even on a 1D/2D grid.
-    FieldSpec { name: "mom", kind: FieldKind::FixedVector { components: 3 } },
-    FieldSpec { name: "nrg", kind: FieldKind::Scalar },
-    FieldSpec { name: "mag", kind: FieldKind::FixedVector { components: 3 } },
+    FieldSpec {
+        name: "mom",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
+    FieldSpec {
+        name: "nrg",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "mag",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
 ];
 
 /// isothermal MHD: RMHD fields minus the energy slot (den, mom, mag). matches
 /// `IsoMhdCons<S, D>`'s `Zero<S>` energy slot (ZST elision).
 const ISO_MHD_FIELDS: &[FieldSpec] = &[
-    FieldSpec { name: "den", kind: FieldKind::Scalar },
-    FieldSpec { name: "mom", kind: FieldKind::FixedVector { components: 3 } },
-    FieldSpec { name: "mag", kind: FieldKind::FixedVector { components: 3 } },
+    FieldSpec {
+        name: "den",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "mom",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
+    FieldSpec {
+        name: "mag",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
 ];
 
 /// isothermal MHD primitives: rho, vel, bcell — NO `pre` (substrate-owned,
 /// written conditionally by the I/O writer, mirroring ISO_NEWTONIAN_PRIMS).
 const ISO_MHD_PRIMS: &[FieldSpec] = &[
-    FieldSpec { name: "rho",   kind: FieldKind::Scalar },
-    FieldSpec { name: "vel",   kind: FieldKind::FixedVector { components: 3 } },
-    FieldSpec { name: "bcell", kind: FieldKind::FixedVector { components: 3 } },
+    FieldSpec {
+        name: "rho",
+        kind: FieldKind::Scalar,
+    },
+    FieldSpec {
+        name: "vel",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
+    FieldSpec {
+        name: "bcell",
+        kind: FieldKind::FixedVector { components: 3 },
+    },
 ];
 
 /// newtonian compressible Euler — the prototype every other spec is
@@ -524,9 +661,16 @@ mod tests {
             assert_eq!(rf.name, sf.name, "hydro field names match in order");
         }
         assert_eq!(r.fields[1].name, "mom");
-        assert_eq!(r.fields[1].kind, FieldKind::FixedVector { components: 3 }, "MHD mom is a 3-vector");
+        assert_eq!(
+            r.fields[1].kind,
+            FieldKind::FixedVector { components: 3 },
+            "MHD mom is a 3-vector"
+        );
         assert_eq!(r.fields[s_count].name, "mag");
-        assert_eq!(r.fields[s_count].kind, FieldKind::FixedVector { components: 3 });
+        assert_eq!(
+            r.fields[s_count].kind,
+            FieldKind::FixedVector { components: 3 }
+        );
     }
 
     /// the newtonian-MHD vs RMHD collapse: every spec field MUST match EXCEPT
@@ -572,7 +716,7 @@ mod tests {
         assert_eq!(i.fields, &n.fields[..i_count]);
 
         // the divergences.
-        assert_ne!(n.eos, i.eos);                     // Adiabatic vs Isothermal
+        assert_ne!(n.eos, i.eos); // Adiabatic vs Isothermal
         assert_ne!(n.has_energy, i.has_energy);
     }
 
@@ -617,10 +761,17 @@ mod tests {
         // D, because the MHD momentum AND magnetic field are fixed 3-vectors (DOF=3), unlike
         // RHD's D-vector momentum. (the spatial dimension is independent of the vector DOF count.)
         for d in [1usize, 2, 3] {
-            assert_eq!(RMHD_SPEC.total_components_at(d), 8, "rmhd is always 8 components (D={d})");
+            assert_eq!(
+                RMHD_SPEC.total_components_at(d),
+                8,
+                "rmhd is always 8 components (D={d})"
+            );
         }
         // at D=3 the RHD momentum is itself 3, so RMHD = RHD + the 3 mag components.
-        assert_eq!(RMHD_SPEC.total_components_at(3), RHD_SPEC.total_components_at(3) + 3);
+        assert_eq!(
+            RMHD_SPEC.total_components_at(3),
+            RHD_SPEC.total_components_at(3) + 3
+        );
     }
 
     #[test]
@@ -644,11 +795,13 @@ mod tests {
         // proves the wiring: a regime's trait-method bool MUST equal its
         // SPEC's flag. closes the "consts collapse" claim end-to-end —
         // future regimes that forget to wire SPEC fail this test.
-        use crate::{Regime, Newtonian, Rhd, Rmhd, IsoNewtonian};
+        use crate::{IsoNewtonian, Newtonian, Regime, Rhd, Rmhd};
         use symbi_ir::algebra::Scalar;
 
         fn check<R, S, const D: usize>(r: R, spec: &RegimeSpec)
-        where R: Regime<S, D>, S: Scalar,
+        where
+            R: Regime<S, D>,
+            S: Scalar,
         {
             assert_eq!(r.is_relativistic(), spec.is_relativistic);
             assert_eq!(r.is_mhd(), spec.is_mhd);
@@ -682,7 +835,6 @@ mod tests {
         assert_eq!(spec.laws[2].field, "nrg");
         assert_eq!(spec.laws[2].kind, LawKind::Energy);
     }
-
 
     #[test]
     fn rhd_iso_laws_unchanged_by_b4iv() {

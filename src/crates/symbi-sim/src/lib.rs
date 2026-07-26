@@ -19,16 +19,16 @@
 //  use symbi_sim::substrate_seam::{KernelSet, RegimeSubstrate, Solver};
 // =============================================================================
 
-pub mod stage;
+pub mod checkpoint;
+pub mod config;
+pub mod decomp;
+pub mod driver;
+pub mod hydro_ops;
 pub mod mass_transport;
-pub mod tracers;
-#[cfg(feature = "gpu")]
-mod tracer_device;
+pub mod run_args;
+pub mod stage;
 pub mod state;
 pub mod substrate_seam;
-pub mod driver;
-pub mod config;
-pub mod hydro_ops;
-pub mod run_args;
-pub mod checkpoint;
-pub mod decomp;
+#[cfg(feature = "gpu")]
+mod tracer_device;
+pub mod tracers;

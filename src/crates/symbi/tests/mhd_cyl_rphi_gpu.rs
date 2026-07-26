@@ -55,8 +55,8 @@ fn rotor_state(r: f64, phi: f64) -> (f64, f64, f64) {
     }
 }
 
-fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
-) -> SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, S, Mem, f64> {
+fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
+-> SimStateGeneric<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, S, Mem, f64> {
     let dr = (R_HI - R_LO) / NR as f64;
     let dphi = (PHI_HI - PHI_LO) / NPHI as f64;
     SimStateGeneric::<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, S, Mem, f64>::build(
@@ -76,7 +76,14 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
     .set_initial(|[r, phi]| {
         let (rho, vr, vphi) = rotor_state(r, phi);
         // velocity COORDINATE-indexed (0=r, 1=phi, 2=z); B = (B_r, B_phi, B_z) = (0, B0, 0).
-        MhdPrim { hydro: Prim { rho, vel: Tensor::new([vr, vphi, 0.0]), pre: 1.0 }, mag: Tensor::new([0.0, B0, 0.0]) }
+        MhdPrim {
+            hydro: Prim {
+                rho,
+                vel: Tensor::new([vr, vphi, 0.0]),
+                pre: 1.0,
+            },
+            mag: Tensor::new([0.0, B0, 0.0]),
+        }
     })
     // uniform toroidal B_phi on the phi-faces (bface[1]); B_r (bface[0]) stays zero.
     .seed_faces_uniform([0.0, B0])
@@ -87,10 +94,22 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
 fn nmhd_cyl_rphi_evolve_gpu_matches_cpu() {
     let mut host = build_sim::<CpuSpace, HostMemory>();
     let mut dev = build_sim::<CudaSpace, UnifiedMemory>();
-    let hset = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, 1.5, &host.geom.allocated)
-        .with_solver(Solver::Hlld).expect("valid solver/regime pair");
-    let dset = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, CFL, 1.5, &dev.geom.allocated)
-        .with_solver(Solver::Hlld).expect("valid solver/regime pair");
+    let hset = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.5,
+        &host.geom.allocated,
+    )
+    .with_solver(Solver::Hlld)
+    .expect("valid solver/regime pair");
+    let dset = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(
+        GAMMA,
+        CFL,
+        1.5,
+        &dev.geom.allocated,
+    )
+    .with_solver(Solver::Hlld)
+    .expect("valid solver/regime pair");
 
     let t_final = 0.04_f64;
     evolve(&mut host, &hset, t_final).expect("cpu evolve");
@@ -98,7 +117,11 @@ fn nmhd_cyl_rphi_evolve_gpu_matches_cpu() {
     symbi_xpu::cuda::ctx_sync();
 
     assert!(host.iteration >= 3, "too few steps ({})", host.iteration);
-    assert_eq!(host.iteration, dev.iteration, "step count diverged: cpu {} gpu {}", host.iteration, dev.iteration);
+    assert_eq!(
+        host.iteration, dev.iteration,
+        "step count diverged: cpu {} gpu {}",
+        host.iteration, dev.iteration
+    );
 
     let hmhd = host.fields.mhd.as_ref().unwrap();
     let dmhd = dev.fields.mhd.as_ref().unwrap();
@@ -107,21 +130,49 @@ fn nmhd_cyl_rphi_evolve_gpu_matches_cpu() {
     let close = |g: f64, c: f64, what: &str, coord: [isize; 2]| {
         assert!(g.is_finite(), "{what} at {coord:?} non-finite on GPU: {g}");
         let rel = (g - c).abs() / c.abs().max(1.0);
-        assert!(rel < 1e-9, "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})");
+        assert!(
+            rel < 1e-9,
+            "{what} at {coord:?}: gpu {g} != cpu {c} (rel {rel:e})"
+        );
     };
     for coord in host.geom.interior.iter() {
-        close(*dev.fields.cons.den.view().at(coord), *host.fields.cons.den.view().at(coord), "cons.den", coord);
-        close(*dnrg.view().at(coord), *hnrg.view().at(coord), "cons.nrg", coord);
+        close(
+            *dev.fields.cons.den.view().at(coord),
+            *host.fields.cons.den.view().at(coord),
+            "cons.den",
+            coord,
+        );
+        close(
+            *dnrg.view().at(coord),
+            *hnrg.view().at(coord),
+            "cons.nrg",
+            coord,
+        );
         for k in 0..3 {
-            close(*dev.fields.cons.mom[k].view().at(coord), *host.fields.cons.mom[k].view().at(coord), "cons.mom", coord);
-            close(*dmhd.bcell[k].view().at(coord), *hmhd.bcell[k].view().at(coord), "bcell", coord);
+            close(
+                *dev.fields.cons.mom[k].view().at(coord),
+                *host.fields.cons.mom[k].view().at(coord),
+                "cons.mom",
+                coord,
+            );
+            close(
+                *dmhd.bcell[k].view().at(coord),
+                *hmhd.bcell[k].view().at(coord),
+                "bcell",
+                coord,
+            );
         }
     }
     // the STAGGERED face B — the r-phi metric curl writes these on device (B_r on r-faces,
     // B_phi on phi-faces). diff over each face domain to gate the device curl directly.
     for d in 0..2 {
         for fc in hmhd.bface[d].domain().clone().iter() {
-            close(*dmhd.bface[d].view().at(fc), *hmhd.bface[d].view().at(fc), "bface", fc);
+            close(
+                *dmhd.bface[d].view().at(fc),
+                *hmhd.bface[d].view().at(fc),
+                "bface",
+                fc,
+            );
         }
     }
 }

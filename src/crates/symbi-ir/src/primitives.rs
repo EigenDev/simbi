@@ -50,7 +50,7 @@ use crate::algebra::{Scalar, Selectable};
 // see crates/symbi-algebra/src/variance.rs for the implementation.
 // =============================================================================
 
-pub use symbi_algebra::{contract, Contravariant, Covariant, Indexed, Lower, Upper};
+pub use symbi_algebra::{Contravariant, Covariant, Indexed, Lower, Upper, contract};
 
 // =============================================================================
 // section 2 — Scope: per-rank vs cross-rank value discipline (A5).
@@ -91,7 +91,10 @@ impl<Sc: Scope, T> Scoped<Sc, T> {
     /// wrap a value at the given scope. caller asserts the value genuinely
     /// lives in this scope; this is a compile-time TYPE assertion and performs no runtime check.
     pub const fn new(value: T) -> Self {
-        Self { value, _scope: PhantomData }
+        Self {
+            value,
+            _scope: PhantomData,
+        }
     }
     /// borrow the inner value.
     pub fn get(&self) -> &T {
@@ -103,14 +106,20 @@ impl<Sc: Scope, T> Scoped<Sc, T> {
     }
     /// scope-preserving map: U inherits the scope of self.
     pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Scoped<Sc, U> {
-        Scoped { value: f(self.value), _scope: PhantomData }
+        Scoped {
+            value: f(self.value),
+            _scope: PhantomData,
+        }
     }
 }
 
 impl<T: Copy> Scoped<Global, T> {
     /// every rank already agrees on this value → narrowing to Local is free.
     pub fn localize(self) -> Scoped<Local, T> {
-        Scoped { value: self.value, _scope: PhantomData }
+        Scoped {
+            value: self.value,
+            _scope: PhantomData,
+        }
     }
 }
 
@@ -299,9 +308,18 @@ mod tests {
         assert_eq!(xx[0], 2.0);
         assert_eq!(xx[1], 3.0);
         assert_eq!(xx[2], 5.0);
-        assert_eq!(<FlatCartesian as Geometry<f64, 3>>::sqrt_det_g(&geom, &xx), 1.0);
-        assert_eq!(<FlatCartesian as Geometry<f64, 3>>::cell_volume(&geom, &xx), 1.0);
-        assert_eq!(<FlatCartesian as Geometry<f64, 3>>::face_area(&geom, &xx, 1), 1.0);
+        assert_eq!(
+            <FlatCartesian as Geometry<f64, 3>>::sqrt_det_g(&geom, &xx),
+            1.0
+        );
+        assert_eq!(
+            <FlatCartesian as Geometry<f64, 3>>::cell_volume(&geom, &xx),
+            1.0
+        );
+        assert_eq!(
+            <FlatCartesian as Geometry<f64, 3>>::face_area(&geom, &xx, 1),
+            1.0
+        );
     }
 
     #[test]

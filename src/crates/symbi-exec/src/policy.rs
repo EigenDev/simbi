@@ -10,8 +10,8 @@
 // =============================================================================
 
 use symbi_algebra::{BlockGrid, Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
 use symbi_grid::Field;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use symbi_aot::{Buf, BufHandle, KernelInvocation};
@@ -35,21 +35,28 @@ use crate::layout::{alloc_layout, exec_layout, expect_kernel};
 /// the others and from `inputs` — the multiple `&mut` slices then alias nothing.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
-    name:      &str,
+    name: &str,
     allocated: &Domain<D>,
-    exec:      &Domain<D>,
-    inputs:    &[&Field<Sc, D, Mem>],
-    outputs:   &[&Field<Sc, D, Mem>],
-    ints:      &[i32],
-    scalars:   &[Sc],
+    exec: &Domain<D>,
+    inputs: &[&Field<Sc, D, Mem>],
+    outputs: &[&Field<Sc, D, Mem>],
+    ints: &[i32],
+    scalars: &[Sc],
 ) {
     let (grid, dlo) = exec_layout(exec);
     // cell-centered: one SHARED allocated layout, replicated per field for the disjoint constructor.
     let shared = alloc_layout(allocated);
-    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> =
-        std::iter::repeat(shared).take(inputs.len() + outputs.len()).collect();
+    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = std::iter::repeat(shared)
+        .take(inputs.len() + outputs.len())
+        .collect();
     let buffers = disjoint_host_buffers(name, inputs, outputs, &layouts);
-    let inv = KernelInvocation { buffers, grid: &grid, dom_lo: &dlo, ints, scalars };
+    let inv = KernelInvocation {
+        buffers,
+        grid: &grid,
+        dom_lo: &dlo,
+        ints,
+        scalars,
+    };
     let (cpu, ir) = expect_kernel::<Sc>(name);
     dispatch::<Sc, Mem, _>(inv, ir, name, cpu);
 }
@@ -82,21 +89,28 @@ fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
 /// reads inputs immutably + writes only its own outputs.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
-    name:      &str,
-    ir:        &str,
+    name: &str,
+    ir: &str,
     allocated: &Domain<D>,
-    exec:      &Domain<D>,
-    inputs:    &[&Field<Sc, D, Mem>],
-    outputs:   &[&Field<Sc, D, Mem>],
-    ints:      &[i32],
-    scalars:   &[Sc],
+    exec: &Domain<D>,
+    inputs: &[&Field<Sc, D, Mem>],
+    outputs: &[&Field<Sc, D, Mem>],
+    ints: &[i32],
+    scalars: &[Sc],
 ) {
     let (grid, dlo) = exec_layout(exec);
     let shared = alloc_layout(allocated);
-    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> =
-        std::iter::repeat(shared).take(inputs.len() + outputs.len()).collect();
+    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = std::iter::repeat(shared)
+        .take(inputs.len() + outputs.len())
+        .collect();
     let buffers = disjoint_host_buffers(name, inputs, outputs, &layouts);
-    let inv = KernelInvocation { buffers, grid: &grid, dom_lo: &dlo, ints, scalars };
+    let inv = KernelInvocation {
+        buffers,
+        grid: &grid,
+        dom_lo: &dlo,
+        ints,
+        scalars,
+    };
     dispatch::<Sc, Mem, _>(inv, ir, name, no_host_fallback::<Sc>);
 }
 
@@ -128,12 +142,16 @@ where
     // for `dispatch_fields_each` (staggered / mixed-domain binds). ONE constructor, ONE distinctness
     // check (release-active) — the "DisjointBufferSet" SSOT.
     debug_assert_eq!(
-        layouts.len(), inputs.len() + outputs.len(),
+        layouts.len(),
+        inputs.len() + outputs.len(),
         "disjoint_host_buffers('{name}'): one layout per field required",
     );
     let mut seen_ptrs = std::collections::HashSet::with_capacity(inputs.len() + outputs.len());
     assert!(
-        inputs.iter().chain(outputs.iter()).all(|f| seen_ptrs.insert(f.as_ptr() as usize)),
+        inputs
+            .iter()
+            .chain(outputs.iter())
+            .all(|f| seen_ptrs.insert(f.as_ptr() as usize)),
         "disjoint_host_buffers('{name}'): two bindings resolve to the same allocation — input/output aliasing would be UB. either the kernel's IR manifest has a duplicate path, or the caller bound the same field twice."
     );
     let mut buffers: Vec<Buf<'a, Sc>> = Vec::with_capacity(inputs.len() + outputs.len());
@@ -146,7 +164,9 @@ where
     }
     for (f, (lo, ext, vol)) in outputs.iter().zip(layouts.iter().skip(inputs.len())) {
         buffers.push(Buf {
-            handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(f.as_mut_ptr(), *vol) }),
+            handle: BufHandle::HostMut(unsafe {
+                std::slice::from_raw_parts_mut(f.as_mut_ptr(), *vol)
+            }),
             lo,
             extent: ext,
         });
@@ -170,12 +190,12 @@ where
 /// the executor is a host scheduler; the gpu owns its own parallelism.
 #[must_use]
 pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
-    name:    &str,
-    exec:    &Domain<D>,
-    block:   [usize; D],
-    inputs:  &[&Field<Sc, D, Mem>],
+    name: &str,
+    exec: &Domain<D>,
+    block: [usize; D],
+    inputs: &[&Field<Sc, D, Mem>],
     outputs: &[&Field<Sc, D, Mem>],
-    ints:    &[i32],
+    ints: &[i32],
     scalars: &[Sc],
 ) -> bool {
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -237,8 +257,12 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
         // accessed through methods so the closure captures the whole (Send+Sync)
         // wrapper; Rust 2021 disjoint capture would otherwise grab the inner
         // `*const T`/`*mut T` Vecs, which are not Sync.
-        fn ins(&self) -> &[*const T] { &self.0 }
-        fn outs(&self) -> &[*mut T] { &self.1 }
+        fn ins(&self) -> &[*const T] {
+            &self.0
+        }
+        fn outs(&self) -> &[*mut T] {
+            &self.1
+        }
     }
     let ptrs = CoverPtrs(
         inputs.iter().map(|f| f.as_ptr()).collect::<Vec<_>>(),
@@ -275,7 +299,13 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, cons
                 extent: ext,
             });
         }
-        let inv = KernelInvocation { buffers, grid: &grid, dom_lo: &dlo, ints, scalars };
+        let inv = KernelInvocation {
+            buffers,
+            grid: &grid,
+            dom_lo: &dlo,
+            ints,
+            scalars,
+        };
         inv.run_cpu(serial);
     });
     true
@@ -298,7 +328,11 @@ fn dispatch_profiling() -> bool {
 /// (calls, total ns in registry lookup, total ns in kernel execution).
 pub fn report_dispatch_profile() -> (u64, u64, u64) {
     use std::sync::atomic::Ordering::Relaxed;
-    (DISP_COUNT.load(Relaxed), DISP_LOOKUP_NS.load(Relaxed), DISP_EXEC_NS.load(Relaxed))
+    (
+        DISP_COUNT.load(Relaxed),
+        DISP_LOOKUP_NS.load(Relaxed),
+        DISP_EXEC_NS.load(Relaxed),
+    )
 }
 /// clear the dispatch-profile accumulators (call after warmup).
 pub fn reset_dispatch_profile() {
@@ -317,11 +351,11 @@ pub fn reset_dispatch_profile() {
 /// wanted — shared `&[T]` reads alias soundly); outputs must stay distinct
 /// from everything.
 pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
-    name:    &str,
-    exec:    &Domain<D>,
-    inputs:  &[&Field<Sc, D, Mem>],
+    name: &str,
+    exec: &Domain<D>,
+    inputs: &[&Field<Sc, D, Mem>],
     outputs: &[&Field<Sc, D, Mem>],
-    ints:    &[i32],
+    ints: &[i32],
     scalars: &[Sc],
 ) {
     let (grid, dlo) = exec_layout(exec);
@@ -350,7 +384,13 @@ pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const
         .map(|f| alloc_layout(f.domain()))
         .collect();
     let buffers = disjoint_host_buffers(name, inputs, outputs, &layouts);
-    let inv = KernelInvocation { buffers, grid: &grid, dom_lo: &dlo, ints, scalars };
+    let inv = KernelInvocation {
+        buffers,
+        grid: &grid,
+        dom_lo: &dlo,
+        ints,
+        scalars,
+    };
     if dispatch_profiling() {
         use std::sync::atomic::Ordering::Relaxed;
         let t0 = std::time::Instant::now();
@@ -412,13 +452,19 @@ pub fn policy_for<const D: usize>(exec: &Domain<D>, is_device: bool) -> ExecPoli
                     .filter_map(|t| t.trim().parse::<usize>().ok())
                     .filter(|&v| v > 0)
                     .collect();
-                if vals.is_empty() { Mode::Auto } else { Mode::Fixed(vals) }
+                if vals.is_empty() {
+                    Mode::Auto
+                } else {
+                    Mode::Fixed(vals)
+                }
             }
         },
     });
     match mode {
         Mode::Off => ExecPolicy::Whole,
-        Mode::Fixed(vals) => ExecPolicy::Cover(std::array::from_fn(|a| vals[a.min(vals.len() - 1)])),
+        Mode::Fixed(vals) => {
+            ExecPolicy::Cover(std::array::from_fn(|a| vals[a.min(vals.len() - 1)]))
+        }
         Mode::Auto => match auto_block_size(exec.shape(), rayon::current_num_threads()) {
             Some(block) => ExecPolicy::Cover(block),
             None => ExecPolicy::Whole,
@@ -435,7 +481,7 @@ pub fn policy_for<const D: usize>(exec: &Domain<D>, is_device: bool) -> ExecPoli
 /// "device? small? twin-missing?" logic — they only supply how to run the cover.
 pub fn run_policy<const D: usize>(
     policy: ExecPolicy<D>,
-    cover:  impl FnOnce([usize; D]) -> bool,
+    cover: impl FnOnce([usize; D]) -> bool,
 ) -> bool {
     match policy {
         ExecPolicy::Whole => false,
@@ -479,9 +525,8 @@ fn auto_block_size<const D: usize>(shape: [usize; D], threads: usize) -> Option<
     let contig = symbi_algebra::CONTIGUOUS_AXIS;
     if D >= 2 && contig < D {
         block[contig] = shape[contig].max(1);
-        let tile_count = |block: &[usize; D]| -> usize {
-            (0..D).map(|a| shape[a].div_ceil(block[a])).product()
-        };
+        let tile_count =
+            |block: &[usize; D]| -> usize { (0..D).map(|a| shape[a].div_ceil(block[a])).product() };
         while block[contig] > CACHE_EDGE && tile_count(&block) < 4 * threads.max(1) {
             block[contig] = (block[contig] / 2).max(CACHE_EDGE);
         }

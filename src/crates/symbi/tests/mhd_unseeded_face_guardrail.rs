@@ -25,7 +25,11 @@ fn evolve_without_seeding_faces_fails_with_guidance() {
     // seed the CELL-centered state (incl. cell B) but FORGET `seed_face` — the classic first-MHD
     // mistake. the guardrail must catch it at evolve entry.
     sim.seed_cells(|_| MhdPrim {
-        hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+        hydro: Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        },
         mag: Tensor::new([0.1, 0.0, 0.0]),
     });
     let sub = sim.substrate();

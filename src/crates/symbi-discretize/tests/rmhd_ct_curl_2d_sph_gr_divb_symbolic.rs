@@ -22,12 +22,18 @@
 // AND the r^2 sin — so the edge-EMF reads telescope to the ZERO rational function.
 // =============================================================================
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Coords, Spacetime, Spacing};
+use symbi_discretize::{Coords, Spacetime, Spacing, rmhd_ct_curl_2d_sph_gr_gv};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
-const SCALARS: &[&str] =
-    &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "schwarzschild_mass"];
+const SCALARS: &[&str] = &[
+    "dt",
+    "x_lo_0",
+    "dx_0",
+    "x_lo_1",
+    "dx_1",
+    "schwarzschild_mass",
+];
 
 fn curl_only(mut lf: LinFormR) -> LinFormR {
     lf.terms.retain(|(key, _), _| key != "b");
@@ -46,7 +52,11 @@ fn r_at(off: i64) -> Poly {
 // r_c, the cell-center radius x_lo_0 + (c_0 + 1/2) dx_0, as a RatFun (denominator 2).
 fn r_center() -> RatFun {
     let mut num = Poly::var("x_lo_0").times(&Poly::constant(2));
-    num = num.plus(&Poly::var("c_0").times(&Poly::var("dx_0")).times(&Poly::constant(2)));
+    num = num.plus(
+        &Poly::var("c_0")
+            .times(&Poly::var("dx_0"))
+            .times(&Poly::constant(2)),
+    );
     num = num.plus(&Poly::var("dx_0"));
     RatFun::new(num, Poly::constant(2))
 }
@@ -82,8 +92,16 @@ fn curl(dir: usize, spacetime: Spacetime) -> LinFormR {
         &[0, 1],
     );
     assert_eq!(writes.len(), 1, "curl builder must write exactly b_new");
-    let lf = curl_only(LinFormR::extract_rat(&kernel.graph, writes[0].2, FIELDS, SCALARS));
-    assert!(!lf.is_zero(), "dir {dir}: curl is empty — extractor saw no emf reads");
+    let lf = curl_only(LinFormR::extract_rat(
+        &kernel.graph,
+        writes[0].2,
+        FIELDS,
+        SCALARS,
+    ));
+    assert!(
+        !lf.is_zero(),
+        "dir {dir}: curl is empty — extractor saw no emf reads"
+    );
     lf
 }
 

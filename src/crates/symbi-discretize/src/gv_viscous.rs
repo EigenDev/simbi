@@ -18,15 +18,15 @@
 // no support ball — the viscous operator acts over the whole interior.
 // =============================================================================
 
-use symbi_algebra::algebra::Numeric;
-use symbi_ir::algebra::Scalar as _;
 use symbi_algebra::Tensor;
+use symbi_algebra::algebra::Numeric;
 use symbi_geometry::{CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::viscous::{
     viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_orthogonal_2d,
 };
+use symbi_ir::algebra::Scalar as _;
 use symbi_ir::gv::Writes;
-use symbi_ir::{begin_trace, end_trace, FieldRef, Gv, GvKernel};
+use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -111,9 +111,21 @@ pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
     let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
     let nrg_c = Gv::field("nrg", FieldRef::cons_nrg());
     let writes = vec![
-        ("mom_out_0".to_string(), FieldRef::cons_mom(0).into(), (mom0_c + dmom[0]).node()),
-        ("mom_out_1".to_string(), FieldRef::cons_mom(1).into(), (mom1_c + dmom[1]).node()),
-        ("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg_c + dnrg).node()),
+        (
+            "mom_out_0".to_string(),
+            FieldRef::cons_mom(0).into(),
+            (mom0_c + dmom[0]).node(),
+        ),
+        (
+            "mom_out_1".to_string(),
+            FieldRef::cons_mom(1).into(),
+            (mom1_c + dmom[1]).node(),
+        ),
+        (
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg_c + dnrg).node(),
+        ),
     ];
     (end_trace(), writes)
 }
@@ -175,22 +187,39 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
     let mut writes: Writes = Vec::new();
     if dof3 {
         let (vst, rst) = prim_stencil_2p5d();
-        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
+        let (dmom, dnrg) =
+            symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
         for c in 0..3 {
             let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-            writes.push((format!("mom_out_{c}"), FieldRef::cons_mom(c as u8).into(), (mom_c + dmom[c]).node()));
+            writes.push((
+                format!("mom_out_{c}"),
+                FieldRef::cons_mom(c as u8).into(),
+                (mom_c + dmom[c]).node(),
+            ));
         }
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+        writes.push((
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg + dnrg).node(),
+        ));
     } else {
         let (vst, rst) = prim_stencil();
         let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
         for c in 0..2 {
             let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-            writes.push((format!("mom_out_{c}"), FieldRef::cons_mom(c as u8).into(), (mom_c + dmom[c]).node()));
+            writes.push((
+                format!("mom_out_{c}"),
+                FieldRef::cons_mom(c as u8).into(),
+                (mom_c + dmom[c]).node(),
+            ));
         }
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+        writes.push((
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg + dnrg).node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -285,11 +314,16 @@ fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKe
     }
 
     // physical components in, physical force out — same frame as the storage.
-    let (dmom, dnrg) =
-        symbi_hydro::viscous::viscous_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2d(
+        &vst, &rst, &nust, &h1, &h2, dx1, dx2, dt,
+    );
     let mut writes = accumulate_mom(dmom);
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    writes.push((
+        "nrg_out".to_string(),
+        FieldRef::cons_nrg().into(),
+        (nrg + dnrg).node(),
+    ));
     (end_trace(), writes)
 }
 
@@ -405,9 +439,21 @@ fn accumulate_mom_3d(dmom: Tensor<Gv, 3>) -> Writes {
     let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
     let mom2_c = Gv::field("mom2", FieldRef::cons_mom(2));
     vec![
-        ("mom_out_0".to_string(), FieldRef::cons_mom(0).into(), (mom0_c + dmom[0]).node()),
-        ("mom_out_1".to_string(), FieldRef::cons_mom(1).into(), (mom1_c + dmom[1]).node()),
-        ("mom_out_2".to_string(), FieldRef::cons_mom(2).into(), (mom2_c + dmom[2]).node()),
+        (
+            "mom_out_0".to_string(),
+            FieldRef::cons_mom(0).into(),
+            (mom0_c + dmom[0]).node(),
+        ),
+        (
+            "mom_out_1".to_string(),
+            FieldRef::cons_mom(1).into(),
+            (mom1_c + dmom[1]).node(),
+        ),
+        (
+            "mom_out_2".to_string(),
+            FieldRef::cons_mom(2).into(),
+            (mom2_c + dmom[2]).node(),
+        ),
     ]
 }
 
@@ -447,10 +493,26 @@ pub fn viscous_adiabatic_gv_3d() -> (GvKernel, Writes) {
     let mom2 = Gv::field("mom2", FieldRef::cons_mom(2));
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
     let writes = vec![
-        ("mom_out_0".to_string(), FieldRef::cons_mom(0).into(), (mom0 + dmom[0]).node()),
-        ("mom_out_1".to_string(), FieldRef::cons_mom(1).into(), (mom1 + dmom[1]).node()),
-        ("mom_out_2".to_string(), FieldRef::cons_mom(2).into(), (mom2 + dmom[2]).node()),
-        ("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()),
+        (
+            "mom_out_0".to_string(),
+            FieldRef::cons_mom(0).into(),
+            (mom0 + dmom[0]).node(),
+        ),
+        (
+            "mom_out_1".to_string(),
+            FieldRef::cons_mom(1).into(),
+            (mom1 + dmom[1]).node(),
+        ),
+        (
+            "mom_out_2".to_string(),
+            FieldRef::cons_mom(2).into(),
+            (mom2 + dmom[2]).node(),
+        ),
+        (
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg + dnrg).node(),
+        ),
     ];
     (end_trace(), writes)
 }
@@ -497,11 +559,19 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
     let mut writes: Writes = Vec::new();
     for c in 0..3 {
         let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
-        writes.push((format!("mom_out_{c}"), FieldRef::cons_mom(c as u8).into(), (mom_c + dmom[c]).node()));
+        writes.push((
+            format!("mom_out_{c}"),
+            FieldRef::cons_mom(c as u8).into(),
+            (mom_c + dmom[c]).node(),
+        ));
     }
     if has_energy {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+        writes.push((
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg + dnrg).node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -642,7 +712,11 @@ fn ortho_25_orbital_radius(plane: OrthoPlane25, x0: Gv, x1: Gv) -> Gv {
 /// `alpha` swaps the constant nu for the shakura-sunyaev law nu = alpha cs^2 /
 /// Omega_K(R_cyl) (local cs^2 = gamma p / rho when adiabatic, the global `cs`
 /// scalar otherwise), Omega_K about body 0's mass on the symmetry axis.
-pub fn viscous_ortho_2p5d_gv(plane: OrthoPlane25, adiabatic: bool, alpha: bool) -> (GvKernel, Writes) {
+pub fn viscous_ortho_2p5d_gv(
+    plane: OrthoPlane25,
+    adiabatic: bool,
+    alpha: bool,
+) -> (GvKernel, Writes) {
     const NDIM: u8 = 2;
     let (coords, axes): (Coords, [usize; 2]) = match plane {
         OrthoPlane25::CylRPhi => (Coords::Cylindrical, [0, 1]),
@@ -663,9 +737,20 @@ pub fn viscous_ortho_2p5d_gv(plane: OrthoPlane25, adiabatic: bool, alpha: bool) 
     let dx2 = Gv::scalar("dx_1");
     let (vst_raw, rst) = prim_stencil_2p5d();
     let vst: [[Tensor<Gv, 3>; 3]; 3] = std::array::from_fn(|j| {
-        std::array::from_fn(|i| Tensor::new([vst_raw[j][i][perm[0]], vst_raw[j][i][perm[1]], vst_raw[j][i][perm[2]]]))
+        std::array::from_fn(|i| {
+            Tensor::new([
+                vst_raw[j][i][perm[0]],
+                vst_raw[j][i][perm[1]],
+                vst_raw[j][i][perm[2]],
+            ])
+        })
     });
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; NDIM as usize], &axes, NDIM as usize);
+    let geo = cell_geometry_gv(
+        coords,
+        &vec![Spacing::Uniform; NDIM as usize],
+        &axes,
+        NDIM as usize,
+    );
     let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
     let floor = Gv::from_f64(1e-30);
 
@@ -711,11 +796,19 @@ pub fn viscous_ortho_2p5d_gv(plane: OrthoPlane25, adiabatic: bool, alpha: bool) 
         // carrier component c lands on its STORAGE slot perm[c].
         let slot = perm[c] as u8;
         let mom_c = Gv::field(&format!("mom{}", perm[c]), FieldRef::cons_mom(slot));
-        writes.push((format!("mom_out_{}", perm[c]), FieldRef::cons_mom(slot).into(), (mom_c + dmom[c]).node()));
+        writes.push((
+            format!("mom_out_{}", perm[c]),
+            FieldRef::cons_mom(slot).into(),
+            (mom_c + dmom[c]).node(),
+        ));
     }
     if adiabatic {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+        writes.push((
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg + dnrg).node(),
+        ));
     }
     (end_trace(), writes)
 }
@@ -777,16 +870,29 @@ pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvK
     }
 
     let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_3d(
-        &vst, &rst, &nust, [&h1, &h2, &h3], dx, dt,
+        &vst,
+        &rst,
+        &nust,
+        [&h1, &h2, &h3],
+        dx,
+        dt,
     );
     let mut writes: Writes = Vec::new();
     for cc in 0..3 {
         let mom_c = Gv::field(&format!("mom{cc}"), FieldRef::cons_mom(cc as u8));
-        writes.push((format!("mom_out_{cc}"), FieldRef::cons_mom(cc as u8).into(), (mom_c + dmom[cc]).node()));
+        writes.push((
+            format!("mom_out_{cc}"),
+            FieldRef::cons_mom(cc as u8).into(),
+            (mom_c + dmom[cc]).node(),
+        ));
     }
     if adiabatic {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+        writes.push((
+            "nrg_out".to_string(),
+            FieldRef::cons_nrg().into(),
+            (nrg + dnrg).node(),
+        ));
     }
     (end_trace(), writes)
 }

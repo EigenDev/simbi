@@ -17,9 +17,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
-use symbi_sim::tracers::{
-    body_accretion_reservoir, is_accretion_reservoir, seed_mass_weighted,
-};
+use symbi_sim::tracers::{body_accretion_reservoir, is_accretion_reservoir, seed_mass_weighted};
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;

@@ -19,7 +19,7 @@
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 use symbi::sim::decomp::{
-    evolve_decomposed, exchange_grid, flatten, gather_faces, gather_interiors, unflatten, LocalCopy,
+    LocalCopy, evolve_decomposed, exchange_grid, flatten, gather_faces, gather_interiors, unflatten,
 };
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
@@ -87,8 +87,16 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
             let bnd = Boundaries(std::array::from_fn(|a| {
-                let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+                let lo = if tc[a] == 0 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
+                let hi = if tc[a] == counts[a] - 1 {
+                    BoundaryType::Outflow
+                } else {
+                    BoundaryType::CoarseFine
+                };
                 [lo, hi]
             }));
             make(m, origin, bnd, ts)
@@ -156,7 +164,10 @@ fn div_b_max(sim: &Sim) -> f64 {
 }
 
 fn tiles_div_b_max(tiles: &[(Sim, Kern)]) -> f64 {
-    tiles.iter().map(|(s, _)| div_b_max(s)).fold(0.0_f64, f64::max)
+    tiles
+        .iter()
+        .map(|(s, _)| div_b_max(s))
+        .fold(0.0_f64, f64::max)
 }
 
 // scatter cell-centered B component `comp` (0..3) into one global N^2 grid. the REAL MHD check:
@@ -217,7 +228,10 @@ fn argmax_diff(a: &[f64], b: &[f64]) -> (usize, f64) {
         .zip(b)
         .map(|(x, y)| (x - y).abs())
         .enumerate()
-        .fold((0usize, 0.0_f64), |(bi, be), (i, e)| if e > be { (i, e) } else { (bi, be) })
+        .fold(
+            (0usize, 0.0_f64),
+            |(bi, be), (i, e)| if e > be { (i, e) } else { (bi, be) },
+        )
 }
 
 fn assert_matches(counts: [usize; 2], ts: Timestepping) {
@@ -247,14 +261,20 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         if be >= 1e-11 {
             eprintln!(
                 "[B{comp}] {counts:?} {ts:?}: max bcell[{comp}] err {be:e} at ({},{}) [center=({},{})] mono={} dec={}",
-                bi % N, bi / N, N / 2, N / 2, mb[bi], db[bi]
+                bi % N,
+                bi / N,
+                N / 2,
+                N / 2,
+                mb[bi],
+                db[bi]
             );
         }
     }
     if de >= 1e-11 {
         eprintln!(
             "[rho] {counts:?} {ts:?}: max density err {de:e} at ({},{}); div(B) mono={mono_divb:e} dec={dec_divb:e}",
-            di % N, di / N
+            di % N,
+            di / N
         );
     }
     assert!(dec_divb < 1e-10, "div(B) {dec_divb:e} (mono {mono_divb:e})");
@@ -262,7 +282,10 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         let mb = global_bcell(&mono, [1; 2], comp);
         let db = global_bcell(&dec, counts, comp);
         let (_, be) = argmax_diff(&mb, &db);
-        assert!(be < 1e-11, "{counts:?} {ts:?} bcell[{comp}] err {be:e} (div-free but WRONG)");
+        assert!(
+            be < 1e-11,
+            "{counts:?} {ts:?} bcell[{comp}] err {be:e} (div-free but WRONG)"
+        );
     }
     assert!(de < 1e-11, "{counts:?} {ts:?} density err {de:e}");
 }
@@ -289,26 +312,31 @@ fn mhd_debug_rk2_stages() {
         }
         exch(tiles, counts);
     };
-    let stage = |tiles: &[(Sim, Kern)], counts: [usize; 2], si: usize, a0: f64, ac: f64, dt: f64| {
-        for (s, k) in tiles {
-            k.wave_speeds(&**s);
-            for d in 0..2 {
-                k.flux(&**s, d);
+    let stage =
+        |tiles: &[(Sim, Kern)], counts: [usize; 2], si: usize, a0: f64, ac: f64, dt: f64| {
+            for (s, k) in tiles {
+                k.wave_speeds(&**s);
+                for d in 0..2 {
+                    k.flux(&**s, d);
+                }
+                k.efield(&**s);
+                k.godunov_stage(&**s, dt, a0, ac);
+                k.post_godunov(&**s, dt, (si + 1) as u8);
+                k.c2p(&**s);
+                k.ghost_fill(&**s);
             }
-            k.efield(&**s);
-            k.godunov_stage(&**s, dt, a0, ac);
-            k.post_godunov(&**s, dt, (si + 1) as u8);
-            k.c2p(&**s);
-            k.ghost_fill(&**s);
-        }
-        exch(tiles, counts);
-    };
+            exch(tiles, counts);
+        };
     let cmp = |when: &str| {
         for comp in 0..3 {
             let mb = global_bcell(&mono, [1, 1], comp);
             let db = global_bcell(&dec, [2, 2], comp);
             let (bi, be) = argmax_diff(&mb, &db);
-            eprintln!("[{when}] bcell[{comp}] err {be:e} at ({},{})", bi % N, bi / N);
+            eprintln!(
+                "[{when}] bcell[{comp}] err {be:e} at ({},{})",
+                bi % N,
+                bi / N
+            );
         }
     };
 
@@ -316,8 +344,14 @@ fn mhd_debug_rk2_stages() {
     prime(&dec, [2, 2]);
     cmp("prime ");
     // cfl AFTER prime (prim is now valid). per-run dt, exactly as evolve_decomposed does.
-    let dt_mono = mono.iter().map(|(s, k)| k.cfl(&**s)).fold(f64::INFINITY, f64::min);
-    let dt_dec = dec.iter().map(|(s, k)| k.cfl(&**s)).fold(f64::INFINITY, f64::min);
+    let dt_mono = mono
+        .iter()
+        .map(|(s, k)| k.cfl(&**s))
+        .fold(f64::INFINITY, f64::min);
+    let dt_dec = dec
+        .iter()
+        .map(|(s, k)| k.cfl(&**s))
+        .fold(f64::INFINITY, f64::min);
     eprintln!(
         "[cfl] dt_mono={dt_mono:.17e} dt_dec={dt_dec:.17e} diff={:.3e}",
         (dt_mono - dt_dec).abs()
@@ -338,7 +372,11 @@ fn mhd_debug_rk2_stages() {
         let de = global_efn(&dec, [2, 2], slot);
         let (bi, be) = argmax_diff(&me, &de);
         // flatten = gx*N + gy, so gx = bi/N, gy = bi%N.
-        eprintln!("[efn{slot}] after stage1: err {be:e} at (gx={},gy={})", bi / N, bi % N);
+        eprintln!(
+            "[efn{slot}] after stage1: err {be:e} at (gx={},gy={})",
+            bi / N,
+            bi % N
+        );
     }
     // dump ACTUAL field values around the REAL corner (x-cut x=16, bottom outflow y=0). INDEX
     // LOCALLY: global (gx, gy) -> owning tile (gx/16, gy/16) at interior-lo + the in-tile offset.
@@ -388,7 +426,11 @@ fn mhd_debug_rk2_stages() {
         let me = global_ef(&mono, [1, 1], slot);
         let de = global_ef(&dec, [2, 2], slot);
         let (bi, be) = argmax_diff(&me, &de);
-        eprintln!("[ef{slot}] stage2 recomputed (pre-curl): err {be:e} at ({},{})", bi % N, bi / N);
+        eprintln!(
+            "[ef{slot}] stage2 recomputed (pre-curl): err {be:e} at ({},{})",
+            bi % N,
+            bi / N
+        );
     }
     for (s, k) in &mono {
         k.godunov_stage(&**s, dt_mono, stages[1].0, stages[1].1);
@@ -477,7 +519,8 @@ fn mhd_gather_reassembles_global() {
     // cell fields: density + the three cell-centered B components over the interior.
     let mut max_cell = 0.0_f64;
     for c in global.geom.interior.iter() {
-        let dd = (global.fields.cons.den.view().at(c) - mono_sim.fields.cons.den.view().at(c)).abs();
+        let dd =
+            (global.fields.cons.den.view().at(c) - mono_sim.fields.cons.den.view().at(c)).abs();
         max_cell = max_cell.max(dd);
         for k in 0..3 {
             let db = (g_mhd.bcell.b[k].view().at(c) - m_mhd.bcell.b[k].view().at(c)).abs();
@@ -494,6 +537,12 @@ fn mhd_gather_reassembles_global() {
         }
     }
 
-    assert!(max_cell < 1e-11, "gathered cell fields diverge: {max_cell:e}");
-    assert!(max_face < 1e-11, "gathered staggered faces diverge: {max_face:e}");
+    assert!(
+        max_cell < 1e-11,
+        "gathered cell fields diverge: {max_cell:e}"
+    );
+    assert!(
+        max_face < 1e-11,
+        "gathered staggered faces diverge: {max_face:e}"
+    );
 }
