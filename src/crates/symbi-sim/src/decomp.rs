@@ -299,12 +299,19 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     g.x.clear();
     g.id.clear();
     g.flags.clear();
+    g.owner.clear();
+    g.step_owner.clear();
+    g.step_flags.clear();
     for t in tiles {
         if let Some(tr) = t.tracers.as_ref() {
             g.x.extend_from_slice(&tr.x);
             g.id.extend_from_slice(&tr.id);
             g.flags.extend_from_slice(&tr.flags);
+            g.owner.extend_from_slice(&tr.owner);
+            g.step_owner.extend_from_slice(&tr.step_owner);
+            g.step_flags.extend_from_slice(&tr.step_flags);
             g.weight = tr.weight;
+            g.run_seed = tr.run_seed;
         }
     }
     // stable id order: build the permutation, apply to each SoA column.
@@ -313,6 +320,9 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     g.x = perm.iter().map(|&i| g.x[i]).collect();
     g.id = perm.iter().map(|&i| g.id[i]).collect();
     g.flags = perm.iter().map(|&i| g.flags[i]).collect();
+    g.owner = perm.iter().map(|&i| g.owner[i]).collect();
+    g.step_owner = perm.iter().map(|&i| g.step_owner[i]).collect();
+    g.step_flags = perm.iter().map(|&i| g.step_flags[i]).collect();
 }
 
 pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
@@ -699,6 +709,107 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
+fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    counts: [usize; D],
+) {
+    let local_cells: [usize; D] =
+        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+    let global_cells: [usize; D] = std::array::from_fn(|dd| local_cells[dd] * counts[dd]);
+    let destination = |owner: crate::mass_transport::ContainerId| {
+        let mut linear = owner.0 as usize;
+        let global: [usize; D] = std::array::from_fn(|dd| {
+            let index = linear % global_cells[dd];
+            linear /= global_cells[dd];
+            index
+        });
+        let tile = std::array::from_fn(|dd| global[dd] / local_cells[dd]);
+        flatten(tile, counts)
+    };
+
+    let mut moved = Vec::new();
+    for (source, store) in stores.iter_mut().enumerate() {
+        let Some(tracers) = store.tracers.as_mut() else {
+            continue;
+        };
+        let mut ii = 0;
+        while ii < tracers.len() {
+            let target = if tracers.flags[ii].escaped {
+                source
+            } else {
+                destination(tracers.owner[ii])
+            };
+            if target == source {
+                ii += 1;
+                continue;
+            }
+            moved.push((
+                target,
+                tracers.x.swap_remove(ii),
+                tracers.id.swap_remove(ii),
+                tracers.flags.swap_remove(ii),
+                tracers.owner.swap_remove(ii),
+                tracers.step_owner.swap_remove(ii),
+                tracers.step_flags.swap_remove(ii),
+            ));
+        }
+    }
+    for (target, x, id, flags, owner, step_owner, step_flags) in moved {
+        let tracers = stores[target]
+            .tracers
+            .as_mut()
+            .expect("every decomposed tile carries a tracer set");
+        tracers.x.push(x);
+        tracers.id.push(id);
+        tracers.flags.push(flags);
+        tracers.owner.push(owner);
+        tracers.step_owner.push(step_owner);
+        tracers.step_flags.push(step_flags);
+    }
+}
+
+fn blend_mass_transport_ancestry<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    candidate_weight: f64,
+    stage: usize,
+) {
+    if candidate_weight == 1.0 {
+        return;
+    }
+    let ids: Vec<u64> = stores
+        .iter()
+        .filter_map(|store| store.tracers.as_ref())
+        .flat_map(|tracers| tracers.id.iter().copied())
+        .collect();
+    let first = stores
+        .iter()
+        .find_map(|store| store.tracers.as_ref())
+        .expect("decomposed tracer population is present");
+    let key = crate::mass_transport::SamplingKey {
+        run_seed: first.run_seed,
+        epoch: stores[0]
+            .iteration
+            .wrapping_mul(4)
+            .wrapping_add(stage as u64),
+    };
+    let selections: std::collections::BTreeMap<u64, bool> =
+        crate::mass_transport::sample_convex_blend(&ids, candidate_weight, key)
+            .expect("valid ssp ancestry weight")
+            .into_iter()
+            .collect();
+    for store in stores.iter_mut() {
+        let Some(tracers) = store.tracers.as_mut() else {
+            continue;
+        };
+        for ii in 0..tracers.len() {
+            if !selections[&tracers.id[ii]] {
+                tracers.owner[ii] = tracers.step_owner[ii];
+                tracers.flags[ii] = tracers.step_flags[ii];
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
@@ -866,22 +977,33 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 }
                 drop(sh);
                 if has_tracers {
-                    for store in stores.iter_mut() {
+                    let local_cells: [usize; D] =
+                        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+                    for (flat, store) in stores.iter_mut().enumerate() {
                         if store.geom.coords != symbi_geometry::Geometry::Cartesian {
                             panic!(
                                 "decomposed mass-transport tracers require explicit curvilinear geometry"
                             );
                         }
                         let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                        let tile = unflatten(flat, counts);
+                        let layout = crate::tracers::TransportLayout {
+                            global_cells: std::array::from_fn(|dd| local_cells[dd] * counts[dd]),
+                            tile_offset: std::array::from_fn(|dd| tile[dd] * local_cells[dd]),
+                        };
                         crate::tracers::advance_stage_mass_transport_store(
                             &mut **store,
                             &geometry,
-                            stage.a0,
-                            stage.ac,
+                            layout,
+                            0.0,
+                            1.0,
                             stage.index,
                         )
                         .unwrap_or_else(|err| panic!("tracer mass transport failed: {err}"));
                     }
+                    migrate_mass_transport_tracers(stores, counts);
+                    blend_mass_transport_ancestry(stores, stage.ac, stage.index);
+                    migrate_mass_transport_tracers(stores, counts);
                 }
             }
         }

@@ -20,8 +20,8 @@
 
 use std::path::Path;
 
-use crate::tracers as symbi_sim_tracers;
 use crate::state::*;
+use crate::tracers as symbi_sim_tracers;
 use symbi_geometry::Metric;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
@@ -303,7 +303,10 @@ where
     // a NON-square AMR fine patch renders transposed / offset (a square grid hides it -- both orders
     // agree). matches the `(0..D).rev()` walk used for `mesh_cells` above.
     let owned_start: Vec<i64> = vec![0; D];
-    let owned_fin: Vec<i64> = (0..D).rev().map(|ax| interior.spaces[ax].size() as i64).collect();
+    let owned_fin: Vec<i64> = (0..D)
+        .rev()
+        .map(|ax| interior.spaces[ax].size() as i64)
+        .collect();
 
     Snapshot {
         resolution,
@@ -492,10 +495,18 @@ where
         let scale = match sim.physics.metric.geometry() {
             symbi_geometry::Geometry::Cartesian => sim.motion.a,
             symbi_geometry::Geometry::Spherical => {
-                if ax == 0 { sim.motion.a } else { 1.0 }
+                if ax == 0 {
+                    sim.motion.a
+                } else {
+                    1.0
+                }
             }
             symbi_geometry::Geometry::Cylindrical => {
-                if ax == 0 || ax == D - 1 { sim.motion.a } else { 1.0 }
+                if ax == 0 || ax == D - 1 {
+                    sim.motion.a
+                } else {
+                    1.0
+                }
             }
         };
         let (start, end) = match &sim.geom.maps {
@@ -504,12 +515,8 @@ where
                 maps[ax].face(hi_index) * scale,
             ),
             None => {
-                let start =
-                    snap.x_lo_phys[ax] + lo_index as f64 * snap.dx_phys[ax];
-                (
-                    start,
-                    start + snap.dx_phys[ax] * snap.resolution[ax] as f64,
-                )
+                let start = snap.x_lo_phys[ax] + lo_index as f64 * snap.dx_phys[ax];
+                (start, start + snap.dx_phys[ax] * snap.resolution[ax] as f64)
             }
         };
         // the per-axis spacing the reader reconstructs cell centers from: "linear" -> uniform faces
@@ -618,7 +625,6 @@ where
         .with_group(cons)
 }
 
-
 // =============================================================================
 // body state round-trip: the per-body kinematic + accretion ledger a restart
 // must restore. bodies re-attach from the CONFIG on restart, so without this
@@ -629,25 +635,23 @@ where
 
 /// the materialized per-body state buffers a write borrows (Snapshot-style).
 struct BodyStateSnap {
-    pos: Vec<f64>,         // [nb, D]
-    vel: Vec<f64>,         // [nb, D]
-    mass: Vec<f64>,        // [nb]
-    accreted: Vec<f64>,    // [nb] cumulative rest mass (0 for non-sinks)
-    rate: Vec<f64>,        // [nb] instantaneous Mdot (0 for non-sinks)
+    pos: Vec<f64>,             // [nb, D]
+    vel: Vec<f64>,             // [nb, D]
+    mass: Vec<f64>,            // [nb]
+    accreted: Vec<f64>,        // [nb] cumulative rest mass (0 for non-sinks)
+    rate: Vec<f64>,            // [nb] instantaneous Mdot (0 for non-sinks)
     accreted_energy: Vec<f64>, // [nb] cumulative covariant (killing) energy (GR horizon only)
     energy_rate: Vec<f64>,     // [nb] instantaneous Edot (GR horizon only)
-    ang_mom: Vec<f64>,     // [nb, 3] world-frame angular momentum L = I omega
-    ke_trans: Vec<f64>,    // [nb] translational kinetic energy 0.5 m |v|^2
-    ke_rot: Vec<f64>,      // [nb] rotational kinetic energy 0.5 omega.I.omega
-    orientation: Vec<f64>, // [nb, 3, 3] row-major rotation matrix (evolved spin state)
-    omega: Vec<f64>,       // [nb, 3] angular-velocity vector
-    shape_json: Vec<String>, // per-body CSG wire (empty = the analytic sphere), for viz
+    ang_mom: Vec<f64>,         // [nb, 3] world-frame angular momentum L = I omega
+    ke_trans: Vec<f64>,        // [nb] translational kinetic energy 0.5 m |v|^2
+    ke_rot: Vec<f64>,          // [nb] rotational kinetic energy 0.5 omega.I.omega
+    orientation: Vec<f64>,     // [nb, 3, 3] row-major rotation matrix (evolved spin state)
+    omega: Vec<f64>,           // [nb, 3] angular-velocity vector
+    shape_json: Vec<String>,   // per-body CSG wire (empty = the analytic sphere), for viz
     nb: usize,
 }
 
-fn body_state_snap<const D: usize>(
-    im: &ImmersedBodies<D>,
-) -> BodyStateSnap {
+fn body_state_snap<const D: usize>(im: &ImmersedBodies<D>) -> BodyStateSnap {
     let nb = im.bodies.len();
     let mut snap = BodyStateSnap {
         pos: Vec::with_capacity(nb * D),
@@ -698,22 +702,28 @@ fn body_state_snap<const D: usize>(
         snap.ke_rot.push(body.rotational_ke());
         snap.mass.push(body.mass);
         let (acc, rate) = match body.kind {
-            symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
-                (total_accreted_mass, accretion_rate)
-            }
+            symbi_ib::BodyKind::BlackHole {
+                total_accreted_mass,
+                accretion_rate,
+                ..
+            } => (total_accreted_mass, accretion_rate),
             // the GR horizon books the shell-flux rest-mass ledger into the same datasets (Mdot).
-            symbi_ib::BodyKind::Horizon { total_accreted_mass, mdot, .. } => {
-                (total_accreted_mass, mdot)
-            }
+            symbi_ib::BodyKind::Horizon {
+                total_accreted_mass,
+                mdot,
+                ..
+            } => (total_accreted_mass, mdot),
             _ => (0.0, 0.0),
         };
         snap.accreted.push(acc);
         snap.rate.push(rate);
         // the GR horizon also books the covariant (killing) energy ledger (Edot, cumulative E).
         let (acc_e, rate_e) = match body.kind {
-            symbi_ib::BodyKind::Horizon { total_accreted_energy, edot, .. } => {
-                (total_accreted_energy, edot)
-            }
+            symbi_ib::BodyKind::Horizon {
+                total_accreted_energy,
+                edot,
+                ..
+            } => (total_accreted_energy, edot),
             _ => (0.0, 0.0),
         };
         snap.accreted_energy.push(acc_e);
@@ -727,7 +737,9 @@ fn body_state_snap<const D: usize>(
 struct TracerSnap {
     n: usize,
     x: Vec<f64>,
-    id: Vec<f64>,
+    id: Vec<u64>,
+    owner: Vec<u64>,
+    run_seed: u64,
     escaped: Vec<f64>,
     crossed: Vec<f64>,
     crossing_time: Vec<f64>,
@@ -743,9 +755,15 @@ fn tracer_snap<const D: usize>(tr: &symbi_sim_tracers::TracerSet<D>) -> TracerSn
     TracerSnap {
         n,
         x,
-        id: tr.id.iter().map(|&i| i as f64).collect(),
+        id: tr.id.clone(),
+        owner: tr.owner.iter().map(|owner| owner.0).collect(),
+        run_seed: tr.run_seed,
         escaped: tr.flags.iter().map(|f| f.escaped as u8 as f64).collect(),
-        crossed: tr.flags.iter().map(|f| f.crossed_sink as u8 as f64).collect(),
+        crossed: tr
+            .flags
+            .iter()
+            .map(|f| f.crossed_sink as u8 as f64)
+            .collect(),
         crossing_time: tr.flags.iter().map(|f| f.crossing_time).collect(),
         weight: vec![tr.weight],
     }
@@ -754,10 +772,28 @@ fn tracer_snap<const D: usize>(tr: &symbi_sim_tracers::TracerSet<D>) -> TracerSn
 fn tracer_group<const D: usize>(snap: &TracerSnap) -> Tree<'_> {
     Tree::new("tracers")
         .with_attr("n_tracers", snap.n as u64)
-        .with_dataset(Dataset::new("position", vec![snap.n, D], DataRef::F64(&snap.x)))
-        .with_dataset(Dataset::new("id", vec![snap.n], DataRef::F64(&snap.id)))
-        .with_dataset(Dataset::new("escaped", vec![snap.n], DataRef::F64(&snap.escaped)))
-        .with_dataset(Dataset::new("crossed_sink", vec![snap.n], DataRef::F64(&snap.crossed)))
+        .with_attr("run_seed", snap.run_seed)
+        .with_dataset(Dataset::new(
+            "position",
+            vec![snap.n, D],
+            DataRef::F64(&snap.x),
+        ))
+        .with_dataset(Dataset::new("id", vec![snap.n], DataRef::U64(&snap.id)))
+        .with_dataset(Dataset::new(
+            "owner",
+            vec![snap.n],
+            DataRef::U64(&snap.owner),
+        ))
+        .with_dataset(Dataset::new(
+            "escaped",
+            vec![snap.n],
+            DataRef::F64(&snap.escaped),
+        ))
+        .with_dataset(Dataset::new(
+            "crossed_sink",
+            vec![snap.n],
+            DataRef::F64(&snap.crossed),
+        ))
         .with_dataset(Dataset::new(
             "crossing_time",
             vec![snap.n],
@@ -770,30 +806,62 @@ fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
     let nb = snap.nb;
     let mut t = Tree::new("bodies")
         .with_attr("n_bodies", nb as u64)
-        .with_dataset(Dataset::new("position", vec![nb, D], DataRef::F64(&snap.pos)))
-        .with_dataset(Dataset::new("velocity", vec![nb, D], DataRef::F64(&snap.vel)))
+        .with_dataset(Dataset::new(
+            "position",
+            vec![nb, D],
+            DataRef::F64(&snap.pos),
+        ))
+        .with_dataset(Dataset::new(
+            "velocity",
+            vec![nb, D],
+            DataRef::F64(&snap.vel),
+        ))
         .with_dataset(Dataset::new("mass", vec![nb], DataRef::F64(&snap.mass)))
         .with_dataset(Dataset::new(
             "total_accreted_mass",
             vec![nb],
             DataRef::F64(&snap.accreted),
         ))
-        .with_dataset(Dataset::new("accretion_rate", vec![nb], DataRef::F64(&snap.rate)))
+        .with_dataset(Dataset::new(
+            "accretion_rate",
+            vec![nb],
+            DataRef::F64(&snap.rate),
+        ))
         .with_dataset(Dataset::new(
             "total_accreted_energy",
             vec![nb],
             DataRef::F64(&snap.accreted_energy),
         ))
-        .with_dataset(Dataset::new("accretion_energy_rate", vec![nb], DataRef::F64(&snap.energy_rate)))
+        .with_dataset(Dataset::new(
+            "accretion_energy_rate",
+            vec![nb],
+            DataRef::F64(&snap.energy_rate),
+        ))
         .with_dataset(Dataset::new(
             "orientation",
             vec![nb, 3, 3],
             DataRef::F64(&snap.orientation),
         ))
-        .with_dataset(Dataset::new("omega", vec![nb, 3], DataRef::F64(&snap.omega)))
-        .with_dataset(Dataset::new("angular_momentum", vec![nb, 3], DataRef::F64(&snap.ang_mom)))
-        .with_dataset(Dataset::new("ke_translational", vec![nb], DataRef::F64(&snap.ke_trans)))
-        .with_dataset(Dataset::new("ke_rotational", vec![nb], DataRef::F64(&snap.ke_rot)));
+        .with_dataset(Dataset::new(
+            "omega",
+            vec![nb, 3],
+            DataRef::F64(&snap.omega),
+        ))
+        .with_dataset(Dataset::new(
+            "angular_momentum",
+            vec![nb, 3],
+            DataRef::F64(&snap.ang_mom),
+        ))
+        .with_dataset(Dataset::new(
+            "ke_translational",
+            vec![nb],
+            DataRef::F64(&snap.ke_trans),
+        ))
+        .with_dataset(Dataset::new(
+            "ke_rotational",
+            vec![nb],
+            DataRef::F64(&snap.ke_rot),
+        ));
     // the per-body CSG shape wire as a string attr (empty = analytic sphere); viz reconstructs the
     // body silhouette from it + the position/orientation.
     for (b, wire) in snap.shape_json.iter().enumerate() {
@@ -859,7 +927,11 @@ where
         root.push_group(
             Tree::new("body_diagnostics")
                 .with_attr("n_bodies", nb as u64)
-                .with_dataset(Dataset::new("time", vec![n], DataRef::F64(im.history.time())))
+                .with_dataset(Dataset::new(
+                    "time",
+                    vec![n],
+                    DataRef::F64(im.history.time()),
+                ))
                 .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
                 .with_dataset(Dataset::new(
                     "mass_delta",
@@ -972,31 +1044,67 @@ where
     }
     // per-body kinematic + accretion state (restart round-trip), from
     // whichever level carries the immersed sidecar.
-    let body_snap = levels.iter().filter_map(|l| l.immersed.as_ref()).next().map(body_state_snap);
+    let body_snap = levels
+        .iter()
+        .filter_map(|l| l.immersed.as_ref())
+        .next()
+        .map(body_state_snap);
     if let Some(bs) = body_snap.as_ref() {
         root.push_group(body_state_group::<D>(bs));
     }
     // the tracer population lives on whichever level carries it (uni-grid:
     // level 0) — same group layout as the single-grid writer.
-    let tr_snap = levels.iter().filter_map(|l| l.tracers.as_ref()).next().map(tracer_snap);
+    let tr_snap = levels
+        .iter()
+        .filter_map(|l| l.tracers.as_ref())
+        .next()
+        .map(tracer_snap);
     if let Some(ts) = tr_snap.as_ref() {
         root.push_group(tracer_group::<D>(ts));
     }
     // the per-step body-gas exchange series: whichever level carries the
     // immersed sidecar (the driver consolidates on one) supplies it — the
     // same group layout the single-grid writer emits.
-    if let Some(im) = levels.iter().filter_map(|l| l.immersed.as_ref()).find(|im| !im.history.is_empty()) {
+    if let Some(im) = levels
+        .iter()
+        .filter_map(|l| l.immersed.as_ref())
+        .find(|im| !im.history.is_empty())
+    {
         let (n, nb) = (im.history.len(), im.history.n_bodies());
         root.push_group(
             Tree::new("body_diagnostics")
                 .with_attr("n_bodies", nb as u64)
-                .with_dataset(Dataset::new("time", vec![n], DataRef::F64(im.history.time())))
+                .with_dataset(Dataset::new(
+                    "time",
+                    vec![n],
+                    DataRef::F64(im.history.time()),
+                ))
                 .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
-                .with_dataset(Dataset::new("mass_delta", vec![n, nb], DataRef::F64(im.history.mass_delta())))
-                .with_dataset(Dataset::new("energy_delta", vec![n, nb], DataRef::F64(im.history.energy_delta())))
-                .with_dataset(Dataset::new("force", vec![n, nb, D], DataRef::F64(im.history.force())))
-                .with_dataset(Dataset::new("force_normal", vec![n, nb, D], DataRef::F64(im.history.force_normal())))
-                .with_dataset(Dataset::new("torque", vec![n, nb, 3], DataRef::F64(im.history.torque()))),
+                .with_dataset(Dataset::new(
+                    "mass_delta",
+                    vec![n, nb],
+                    DataRef::F64(im.history.mass_delta()),
+                ))
+                .with_dataset(Dataset::new(
+                    "energy_delta",
+                    vec![n, nb],
+                    DataRef::F64(im.history.energy_delta()),
+                ))
+                .with_dataset(Dataset::new(
+                    "force",
+                    vec![n, nb, D],
+                    DataRef::F64(im.history.force()),
+                ))
+                .with_dataset(Dataset::new(
+                    "force_normal",
+                    vec![n, nb, D],
+                    DataRef::F64(im.history.force_normal()),
+                ))
+                .with_dataset(Dataset::new(
+                    "torque",
+                    vec![n, nb, 3],
+                    DataRef::F64(im.history.torque()),
+                )),
         );
     }
     Hdf5Backend.write(Path::new(path), &root)
@@ -1241,24 +1349,50 @@ where
                 .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not f64")))?
                 .to_vec())
         };
-        let (xs, ids) = (getf("position")?, getf("id")?);
-        let (esc, crx, ct) = (getf("escaped")?, getf("crossed_sink")?, getf("crossing_time")?);
+        let getu = |name: &str| -> Result<Vec<u64>> {
+            Ok(tg
+                .find_dataset(name)
+                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}")))?
+                .data
+                .as_u64()
+                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not u64")))?
+                .to_vec())
+        };
+        let xs = getf("position")?;
+        let ids = getu("id")?;
+        let owners = getu("owner")?;
+        let (esc, crx, ct) = (
+            getf("escaped")?,
+            getf("crossed_sink")?,
+            getf("crossing_time")?,
+        );
         let weight = getf("weight")?.first().copied().unwrap_or(0.0);
         let n = ids.len();
-        let mut tr = symbi_sim_tracers::TracerSet::<D> { weight, ..Default::default() };
+        let run_seed = tg
+            .find_attr("run_seed")
+            .ok_or_else(|| IoError::MissingPath("tracers/run_seed".to_string()))?
+            .as_u64("tracers/run_seed")?;
+        let mut tr = symbi_sim_tracers::TracerSet::<D> {
+            weight,
+            run_seed,
+            ..Default::default()
+        };
         for i in 0..n {
             let mut p = [0.0; D];
             for a in 0..D {
                 p[a] = xs[i * D + a];
             }
             tr.x.push(p);
-            tr.id.push(ids[i] as u64);
+            tr.id.push(ids[i]);
+            tr.owner.push(crate::mass_transport::ContainerId(owners[i]));
             tr.flags.push(symbi_sim_tracers::TracerFlags {
                 escaped: esc[i] != 0.0,
                 crossed_sink: crx[i] != 0.0,
                 crossing_time: ct[i],
             });
         }
+        tr.step_owner = tr.owner.clone();
+        tr.step_flags = tr.flags.clone();
         sim.tracers = Some(tr);
     }
 
@@ -1273,8 +1407,11 @@ where
                 .to_vec())
         };
         let (pos, vel) = (get("position")?, get("velocity")?);
-        let (mass, accreted, rate) =
-            (get("mass")?, get("total_accreted_mass")?, get("accretion_rate")?);
+        let (mass, accreted, rate) = (
+            get("mass")?,
+            get("total_accreted_mass")?,
+            get("accretion_rate")?,
+        );
         let nb = im.bodies.len().min(mass.len());
         for b in 0..nb {
             let body = im.bodies.get_mut(b);
@@ -1284,7 +1421,9 @@ where
             }
             body.mass = mass[b];
             if let symbi_ib::BodyKind::BlackHole {
-                total_accreted_mass, accretion_rate, ..
+                total_accreted_mass,
+                accretion_rate,
+                ..
             } = &mut body.kind
             {
                 *total_accreted_mass = accreted[b];
@@ -1295,7 +1434,11 @@ where
         // spinning / tumbling body resumes its exact pose. checkpoints written before these datasets
         // existed keep the config values (identity orientation, prescribed omega).
         let get_opt = |name: &str| -> Option<Vec<f64>> {
-            bodies_g.find_dataset(name)?.data.as_f64().map(|d| d.to_vec())
+            bodies_g
+                .find_dataset(name)?
+                .data
+                .as_f64()
+                .map(|d| d.to_vec())
         };
         if let (Some(orient), Some(omega)) = (get_opt("orientation"), get_opt("omega")) {
             for b in 0..nb {
@@ -1475,11 +1618,11 @@ mod tests {
             .unwrap()
             .find_group("dim_2")
             .unwrap();
-        assert_eq!(dim.find_attr("type").unwrap().as_str("type").unwrap(), "geometric");
-        assert!(
-            (dim.find_attr("ratio").unwrap().as_f64("ratio").unwrap() - ratio).abs()
-                < 1.0e-14
+        assert_eq!(
+            dim.find_attr("type").unwrap().as_str("type").unwrap(),
+            "geometric"
         );
+        assert!((dim.find_attr("ratio").unwrap().as_f64("ratio").unwrap() - ratio).abs() < 1.0e-14);
         assert!((dim.find_attr("start").unwrap().as_f64("start").unwrap()).abs() < 1.0e-14);
         assert!((dim.find_attr("end").unwrap().as_f64("end").unwrap() - 1.0).abs() < 1.0e-12);
     }
@@ -1558,6 +1701,58 @@ mod tests {
                 "cons.nrg transposed/garbled at {c:?}"
             );
         }
+    }
+
+    #[test]
+    fn checkpoint_roundtrip_preserves_mass_transport_tracers() {
+        let build = || {
+            Sim::new(
+                Newtonian,
+                IdealGas { gamma: 5.0 / 3.0 },
+                Cartesian,
+                [2, 1, 1],
+                [0.0; 3],
+                [0.5, 1.0, 1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
+            )
+            .unwrap()
+        };
+        let mut sim = build();
+        sim.tracers = Some(symbi_sim_tracers::TracerSet {
+            x: vec![[0.25, 0.5, 0.5], [0.75, 0.5, 0.5]],
+            id: vec![u64::MAX - 1, u64::MAX],
+            flags: vec![Default::default(); 2],
+            weight: 3.5,
+            owner: vec![
+                crate::mass_transport::ContainerId(0),
+                crate::mass_transport::ContainerId(1),
+            ],
+            step_owner: vec![
+                crate::mass_transport::ContainerId(0),
+                crate::mass_transport::ContainerId(1),
+            ],
+            step_flags: vec![Default::default(); 2],
+            run_seed: u64::MAX - 7,
+        });
+
+        let dir = std::env::temp_dir().join("symbi_checkpoint_mass_transport_tracers");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tracers.h5");
+        write_checkpoint(&sim, path.to_str().unwrap(), &Metadata::new()).unwrap();
+
+        let mut restored = build();
+        load_checkpoint(&mut restored, path.to_str().unwrap()).unwrap();
+        let expected = sim.tracers.as_ref().unwrap();
+        let actual = restored.tracers.as_ref().unwrap();
+        assert_eq!(actual.id, expected.id);
+        assert_eq!(actual.owner, expected.owner);
+        assert_eq!(actual.step_owner, expected.owner);
+        assert_eq!(actual.run_seed, expected.run_seed);
+        assert_eq!(actual.weight.to_bits(), expected.weight.to_bits());
     }
 
     #[test]
@@ -1649,17 +1844,33 @@ mod tests {
         type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
         let build = || {
             let mut s = Sim2::new_at(
-                Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
-                [0isize, 0], [4usize, 4], [0.0, 0.0], [0.25, 0.25], 2,
-                Boundaries::uniform(BoundaryType::Outflow), 0.4, Timestepping::Rk2, 0,
+                Newtonian,
+                IdealGas { gamma: 5.0 / 3.0 },
+                Cartesian,
+                [0isize, 0],
+                [4usize, 4],
+                [0.0, 0.0],
+                [0.25, 0.25],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
             )
             .unwrap();
-            s.attach_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(
-                0,
-                symbi_algebra::Tensor::new([0.5, 0.5]),
-                symbi_algebra::Tensor::zeros(),
-                1.0, 0.1, 0.05, 0.5, 0.0, 0.1,
-            )));
+            s.attach_bodies(
+                symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(
+                    0,
+                    symbi_algebra::Tensor::new([0.5, 0.5]),
+                    symbi_algebra::Tensor::zeros(),
+                    1.0,
+                    0.1,
+                    0.05,
+                    0.5,
+                    0.0,
+                    0.1,
+                )),
+            );
             s
         };
         let mut sim = build();
@@ -1672,7 +1883,9 @@ mod tests {
             body.orientation = [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
             body.omega = symbi_algebra::Tensor::new([0.1, -0.2, 0.3]);
             if let symbi_ib::BodyKind::BlackHole {
-                total_accreted_mass, accretion_rate, ..
+                total_accreted_mass,
+                accretion_rate,
+                ..
             } = &mut body.kind
             {
                 *total_accreted_mass = 0.042;
@@ -1693,10 +1906,17 @@ mod tests {
         assert_eq!(b.velocity[0], -0.1);
         assert_eq!(b.mass, 1.25);
         // the evolved rotation survives the restart (else a tumbling body resets to identity/config).
-        assert_eq!(b.orientation, [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
+        assert_eq!(
+            b.orientation,
+            [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        );
         assert_eq!([b.omega[0], b.omega[1], b.omega[2]], [0.1, -0.2, 0.3]);
         match b.kind {
-            symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
+            symbi_ib::BodyKind::BlackHole {
+                total_accreted_mass,
+                accretion_rate,
+                ..
+            } => {
                 assert_eq!(total_accreted_mass, 0.042);
                 assert_eq!(accretion_rate, 3.5e-3);
             }
@@ -1727,17 +1947,19 @@ mod tests {
             0,
         )
         .unwrap();
-        sim.attach_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(
-            0,
-            symbi_algebra::Tensor::new([0.5, 0.5]),
-            symbi_algebra::Tensor::zeros(),
-            1.0,
-            0.1,
-            0.05,
-            0.5,
-            0.0,
-            0.1,
-        )));
+        sim.attach_bodies(
+            symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(
+                0,
+                symbi_algebra::Tensor::new([0.5, 0.5]),
+                symbi_algebra::Tensor::zeros(),
+                1.0,
+                0.1,
+                0.05,
+                0.5,
+                0.0,
+                0.1,
+            )),
+        );
 
         // two steps' worth of exchanges, distinct so ordering bugs are loud.
         let im = sim.immersed.as_mut().unwrap();
@@ -1758,9 +1980,27 @@ mod tests {
         let diag = tree
             .find_group("body_diagnostics")
             .expect("body_diagnostics group missing from the checkpoint");
-        let time = diag.find_dataset("time").unwrap().data.as_f64().unwrap().to_vec();
-        let mass = diag.find_dataset("mass_delta").unwrap().data.as_f64().unwrap().to_vec();
-        let force = diag.find_dataset("force").unwrap().data.as_f64().unwrap().to_vec();
+        let time = diag
+            .find_dataset("time")
+            .unwrap()
+            .data
+            .as_f64()
+            .unwrap()
+            .to_vec();
+        let mass = diag
+            .find_dataset("mass_delta")
+            .unwrap()
+            .data
+            .as_f64()
+            .unwrap()
+            .to_vec();
+        let force = diag
+            .find_dataset("force")
+            .unwrap()
+            .data
+            .as_f64()
+            .unwrap()
+            .to_vec();
         assert_eq!(time, vec![0.1, 0.2]);
         assert_eq!(mass, vec![0.25, 0.5]);
         assert_eq!(force, vec![1.0, -2.0, 1.0, -2.0]);
@@ -1772,11 +2012,10 @@ mod tests {
         // dataset, so cs must travel in metadata for readers to reconstruct
         // pressure-dependent fields. energy regimes must NOT carry the attr:
         // their sound speed varies per cell and a constant would be a lie.
-        use symbi_hydro::eos::Isothermal;
         use symbi_hydro::IsoNewtonian;
+        use symbi_hydro::eos::Isothermal;
 
-        type IsoSim =
-            SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+        type IsoSim = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
         let iso = IsoSim::new_at(
             IsoNewtonian,
             Isothermal { cs: 0.75 },
