@@ -42,6 +42,10 @@ pub struct TracerSet<const D: usize> {
     pub step_owner: Vec<crate::mass_transport::ContainerId>,
     pub step_flags: Vec<TracerFlags>,
     pub run_seed: u64,
+    /// first unused stable identity for tracers spawned by material injection.
+    pub next_id: u64,
+    /// injected mass below one tracer quantum, carried exactly between steps.
+    pub injection_remainder: f64,
 }
 
 /// stratified apportionment of `n` tracers over cells proportional to their
@@ -112,6 +116,7 @@ impl<const D: usize> TracerSet<D> {
                 next_id += 1;
             }
         }
+        set.next_id = next_id;
         set
     }
 
@@ -128,6 +133,250 @@ impl<const D: usize> TracerSet<D> {
     pub fn crossed_mass(&self) -> f64 {
         self.flags.iter().filter(|f| f.crossed_sink).count() as f64 * self.weight
     }
+}
+
+/// spawn fixed-weight tracers for newly injected material. total represented
+/// mass plus the carried remainder equals injected mass plus the old remainder.
+pub fn spawn_injected_tracers<const D: usize>(
+    tracers: &mut TracerSet<D>,
+    injections: impl IntoIterator<Item = crate::mass_transport::MassTransfer>,
+    positions: impl Fn(crate::mass_transport::ContainerId) -> [f64; D],
+    key: crate::mass_transport::SamplingKey,
+) -> Result<usize, String> {
+    use crate::mass_transport::{
+        ContainerId, MassTransfer, TransportKernel, sample_systematic,
+    };
+    use std::collections::BTreeMap;
+
+    if !tracers.weight.is_finite() || tracers.weight <= 0.0 {
+        return Err(format!(
+            "injected tracer spawning requires positive finite weight, got {:?}",
+            tracers.weight
+        ));
+    }
+    let mut combined = BTreeMap::<ContainerId, f64>::new();
+    for injection in injections {
+        if !injection.mass.is_finite() || injection.mass < 0.0 {
+            return Err(format!("invalid injected mass {:?}", injection.mass));
+        }
+        *combined.entry(injection.destination).or_insert(0.0) += injection.mass;
+    }
+    let injected_mass: f64 = combined.values().sum();
+    let available = tracers.injection_remainder + injected_mass;
+    let count = (available / tracers.weight).floor() as usize;
+    tracers.injection_remainder = available - count as f64 * tracers.weight;
+    if count == 0 {
+        return Ok(0);
+    }
+
+    const INJECTION_SOURCE: ContainerId = ContainerId((1 << 62) | 1);
+    let kernel = TransportKernel::new(
+        INJECTION_SOURCE,
+        injected_mass,
+        combined.into_iter().map(|(destination, mass)| MassTransfer {
+            destination,
+            mass,
+        }),
+    )?;
+    let ids: Vec<u64> = (0..count)
+        .map(|_| {
+            let id = tracers.next_id;
+            tracers.next_id = tracers.next_id.checked_add(1).expect("tracer id overflow");
+            id
+        })
+        .collect();
+    for (id, owner) in sample_systematic(&kernel, &ids, key) {
+        tracers.x.push(positions(owner));
+        tracers.id.push(id);
+        tracers.flags.push(TracerFlags::default());
+        tracers.owner.push(owner);
+        tracers.step_owner.push(owner);
+        tracers.step_flags.push(TracerFlags::default());
+    }
+    Ok(count)
+}
+
+/// accumulate one stage's injected masses through the same shu-osher
+/// recurrence as the conserved state.
+pub fn fold_injection_ledger(
+    ledger: &mut std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>,
+    stage: impl IntoIterator<Item = crate::mass_transport::MassTransfer>,
+    ac: f64,
+) {
+    for mass in ledger.values_mut() {
+        *mass *= ac;
+    }
+    for transfer in stage {
+        *ledger.entry(transfer.destination).or_insert(0.0) += ac * transfer.mass;
+    }
+}
+
+/// accepted external mass entering through physical domain faces during one
+/// forward-euler candidate.
+pub fn boundary_injection_transfers<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+) -> Vec<crate::mass_transport::MassTransfer>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let geometry = sim.geom.block_geometry(sim.physics.metric);
+    let layout = TransportLayout::single(&interior);
+    boundary_injection_transfers_store(&sim.store, &geometry, layout)
+}
+
+pub fn boundary_injection_transfers_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+) -> Vec<crate::mass_transport::MassTransfer>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let mut transfers = Vec::new();
+    for dd in 0..D {
+        for high in [false, true] {
+            if matches!(
+                sim.boundaries.0[dd][high as usize],
+                crate::state::BoundaryType::Periodic
+                    | crate::state::BoundaryType::Reflect
+                    | crate::state::BoundaryType::CoarseFine
+            ) {
+                continue;
+            }
+            let face_index = if high {
+                interior.spaces[dd].hi
+            } else {
+                interior.spaces[dd].lo
+            };
+            let slab = interior.slab(dd, (face_index - high as isize, face_index + !high as isize));
+            for cell in slab.iter() {
+                let mut face = cell;
+                if high {
+                    face[dd] += 1;
+                }
+                let flux = *sim.fields.flux[dd].den.view().at(face);
+                let inward_flux = if high { -flux } else { flux };
+                if inward_flux > 0.0 {
+                    transfers.push(crate::mass_transport::MassTransfer {
+                        destination: cell_container(cell, &interior, layout),
+                        mass: inward_flux * geometry.face_area(face, dd) * sim.dt,
+                    });
+                }
+            }
+        }
+    }
+    transfers
+}
+
+/// positive density supplied by non-flux stage operators, recovered as the
+/// conservative residual of the accepted stage update.
+pub fn source_injection_transfers<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    a0: f64,
+    ac: f64,
+) -> Vec<crate::mass_transport::MassTransfer>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let geometry = sim.geom.block_geometry(sim.physics.metric);
+    let layout = TransportLayout::single(&interior);
+    source_injection_transfers_store(&sim.store, &geometry, layout, a0, ac)
+}
+
+pub fn source_injection_transfers_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    a0: f64,
+    ac: f64,
+) -> Vec<crate::mass_transport::MassTransfer>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let stage_input = sim.stage_input();
+    let mut transfers = Vec::new();
+    for coord in interior.iter() {
+        let volume = geometry.volume(coord);
+        let mut divergence = 0.0;
+        for dd in 0..D {
+            let mut high = coord;
+            high[dd] += 1;
+            divergence += *sim.fields.flux[dd].den.view().at(high)
+                * geometry.face_area(high, dd)
+                - *sim.fields.flux[dd].den.view().at(coord)
+                    * geometry.face_area(coord, dd);
+        }
+        let expected_mass = a0 * *sim.workspace.u_n.den.view().at(coord) * volume
+            + ac
+                * (*stage_input.den.view().at(coord) * volume - sim.dt * divergence);
+        let actual_mass = *sim.fields.cons.den.view().at(coord) * volume;
+        let residual = actual_mass - expected_mass;
+        let tolerance = 128.0
+            * f64::EPSILON
+            * actual_mass.abs().max(expected_mass.abs()).max(1.0);
+        if residual > tolerance && ac > 0.0 {
+            transfers.push(crate::mass_transport::MassTransfer {
+                destination: cell_container(coord, &interior, layout),
+                mass: residual / ac,
+            });
+        }
+    }
+    transfers
+}
+
+pub fn spawn_boundary_injection<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    ledger: std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>,
+) -> Result<usize, String>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let interior = sim.geom.interior.clone();
+    let geometry = sim.geom.block_geometry(sim.physics.metric);
+    let layout = TransportLayout::single(&interior);
+    let Some(mut tracers) = sim.tracers.take() else {
+        return Ok(0);
+    };
+    let key = crate::mass_transport::SamplingKey {
+        run_seed: tracers.run_seed,
+        epoch: sim.iteration | (1 << 62),
+    };
+    let count = spawn_injected_tracers(
+        &mut tracers,
+        ledger
+            .into_iter()
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer {
+                destination,
+                mass,
+            }),
+        |owner| {
+            let coord = container_cell(owner, &interior, layout)
+                .expect("boundary injection destination belongs to this grid");
+            let center = geometry.centroid(coord);
+            std::array::from_fn(|dd| center[dd])
+        },
+        key,
+    )?;
+    sim.tracers = Some(tracers);
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -170,6 +419,84 @@ mod tests {
         );
         // and the band allocation is spread, not concentrated at its head.
         assert!(counts[..800].iter().filter(|&&c| c > 0).count() > 150);
+    }
+
+    #[test]
+    fn injected_mass_spawns_fixed_weight_tracers_and_carries_the_remainder() {
+        use crate::mass_transport::{ContainerId, MassTransfer, SamplingKey};
+
+        let mut tracers = TracerSet::<1> {
+            weight: 0.25,
+            next_id: 10,
+            ..Default::default()
+        };
+        let spawned = spawn_injected_tracers(
+            &mut tracers,
+            [
+                MassTransfer {
+                    destination: ContainerId(2),
+                    mass: 0.4,
+                },
+                MassTransfer {
+                    destination: ContainerId(3),
+                    mass: 0.2,
+                },
+            ],
+            |owner| [owner.0 as f64],
+            SamplingKey {
+                run_seed: 7,
+                epoch: 11,
+            },
+        )
+        .unwrap();
+        assert_eq!(spawned, 2);
+        assert_eq!(tracers.id, [10, 11]);
+        assert_eq!(tracers.next_id, 12);
+        assert!((tracers.injection_remainder - 0.1).abs() < 1.0e-15);
+        assert_eq!(tracers.owner.len(), 2);
+
+        let spawned = spawn_injected_tracers(
+            &mut tracers,
+            [MassTransfer {
+                destination: ContainerId(3),
+                mass: 0.15,
+            }],
+            |owner| [owner.0 as f64],
+            SamplingKey {
+                run_seed: 7,
+                epoch: 12,
+            },
+        )
+        .unwrap();
+        assert_eq!(spawned, 1);
+        assert!(tracers.injection_remainder.abs() < 1.0e-15);
+        assert_eq!(tracers.id, [10, 11, 12]);
+    }
+
+    #[test]
+    fn rk2_injection_ledger_weights_predictor_and_corrector_equally() {
+        use crate::mass_transport::{ContainerId, MassTransfer};
+        use std::collections::BTreeMap;
+
+        let destination = ContainerId(4);
+        let mut ledger = BTreeMap::new();
+        fold_injection_ledger(
+            &mut ledger,
+            [MassTransfer {
+                destination,
+                mass: 2.0,
+            }],
+            1.0,
+        );
+        fold_injection_ledger(
+            &mut ledger,
+            [MassTransfer {
+                destination,
+                mass: 6.0,
+            }],
+            0.5,
+        );
+        assert_eq!(ledger[&destination], 4.0);
     }
 
     #[test]
@@ -216,6 +543,97 @@ mod tests {
         let in_right = tracers.owner.iter().filter(|owner| owner.0 == 1).count();
         assert_eq!((in_left, in_right), (75, 125));
         assert_eq!(tracers.flags.iter().filter(|flag| flag.escaped).count(), 0);
+    }
+
+    #[test]
+    fn accepted_boundary_inflow_spawns_tracers_in_the_receiving_cell() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        sim.dt = 0.25;
+        let low_face = [sim.geom.interior.spaces[0].lo];
+        sim.fields.flux[0].den.view_mut().set(low_face, 1.0);
+        sim.tracers = Some(TracerSet {
+            weight: 0.1,
+            next_id: 4,
+            ..Default::default()
+        });
+
+        let mut ledger = std::collections::BTreeMap::new();
+        fold_injection_ledger(
+            &mut ledger,
+            boundary_injection_transfers(&sim),
+            1.0,
+        );
+        let spawned = spawn_boundary_injection(&mut sim, ledger).unwrap();
+        let tracers = sim.tracers.as_ref().unwrap();
+        assert_eq!(spawned, 2);
+        assert_eq!(tracers.owner, [crate::mass_transport::ContainerId(0); 2]);
+        assert!((tracers.injection_remainder - 0.05).abs() < 1.0e-15);
+    }
+
+    #[test]
+    fn accepted_density_source_residual_spawns_tracers() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [1],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        let cell = [sim.geom.interior.spaces[0].lo];
+        sim.workspace.u_stage.den.view_mut().set(cell, 1.0);
+        sim.fields.cons.den.view_mut().set(cell, 1.2);
+        sim.dt = 0.5;
+        sim.tracers = Some(TracerSet {
+            weight: 0.05,
+            next_id: 8,
+            ..Default::default()
+        });
+
+        let mut ledger = std::collections::BTreeMap::new();
+        fold_injection_ledger(
+            &mut ledger,
+            source_injection_transfers(&sim, 0.0, 1.0),
+            1.0,
+        );
+        let spawned = spawn_boundary_injection(&mut sim, ledger).unwrap();
+        assert_eq!(spawned, 3);
+        let tracers = sim.tracers.as_ref().unwrap();
+        assert!((tracers.injection_remainder - 0.05).abs() < 1.0e-14);
+        assert_eq!(tracers.owner, [crate::mass_transport::ContainerId(0); 3]);
     }
 }
 
@@ -674,6 +1092,7 @@ pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
         per_tile[dest].step_owner.push(set.step_owner[i]);
         per_tile[dest].step_flags.push(set.step_flags[i]);
         per_tile[dest].run_seed = set.run_seed;
+        per_tile[dest].next_id = set.next_id;
     }
     per_tile
 }

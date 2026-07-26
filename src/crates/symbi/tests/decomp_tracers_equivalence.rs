@@ -141,6 +141,7 @@ fn partition_into(tiles: &mut [(Sim, Kern)], global: &TracerSet<2>, counts: [usi
         per_tile[dest].step_owner.push(global.step_owner[i]);
         per_tile[dest].step_flags.push(global.step_flags[i]);
         per_tile[dest].run_seed = global.run_seed;
+        per_tile[dest].next_id = global.next_id;
     }
     for (t, set) in tiles.iter_mut().zip(per_tile) {
         t.0.tracers = Some(set);
@@ -177,11 +178,21 @@ fn gather_owners(tiles: &[(Sim, Kern)]) -> Vec<symbi_sim::mass_transport::Contai
     for (sim, _) in tiles {
         if let Some(tr) = sim.tracers.as_ref() {
             for i in 0..tr.len() {
-                out[tr.id[i] as usize] = tr.owner[i];
+                if (tr.id[i] as usize) < N_TRACERS {
+                    out[tr.id[i] as usize] = tr.owner[i];
+                }
             }
         }
     }
     out
+}
+
+fn gather_all_owners(tiles: &[(Sim, Kern)]) -> Vec<symbi_sim::mass_transport::ContainerId> {
+    tiles
+        .iter()
+        .filter_map(|(sim, _)| sim.tracers.as_ref())
+        .flat_map(|tracers| tracers.owner.iter().copied())
+        .collect()
 }
 
 fn assert_matches(counts: [usize; 2], ts: Timestepping) {
@@ -200,11 +211,13 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     partition_into(&mut mono, &global, [1, 1]);
     run(&mut mono, [1, 1], ts);
     let mono_owner = gather_owners(&mono);
+    let mono_all = gather_all_owners(&mono);
 
     let mut dec = grid_tiles(counts, ts);
     partition_into(&mut dec, &global, counts);
     run(&mut dec, counts, ts);
     let dec_owner = gather_owners(&dec);
+    let dec_all = gather_all_owners(&dec);
 
     assert!(
         mono_owner.iter().all(|owner| owner.0 != u64::MAX)
@@ -244,8 +257,8 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         }
         counts
     };
-    let mono_histogram = histogram(&mono_owner);
-    let dec_histogram = histogram(&dec_owner);
+    let mono_histogram = histogram(&mono_all);
+    let dec_histogram = histogram(&dec_all);
     let l1: usize = mono_histogram
         .keys()
         .chain(dec_histogram.keys())
@@ -263,7 +276,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     // below ten percent, comparable to the finite-population sampling scale
     // 1/sqrt(n) and well below a resolved transport signal.
     assert!(
-        l1 <= N_TRACERS / 5,
+        l1 <= mono_all.len().max(dec_all.len()) / 5,
         "decomposition {counts:?} ({ts:?}) changed the ownership histogram by l1={l1}"
     );
 }
