@@ -8,6 +8,7 @@
 
 use symbi::prelude::*;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
+use symbi::regimes::substrate_kernels::GradientBc;
 use symbi::sim::decomp::LocalCopy;
 use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
@@ -62,6 +63,12 @@ fn driven_kernels(sim: &Sim) -> Kern {
             build_boundary_dag(&boundary, &NEWTONIAN_SPEC).unwrap(),
             boundary.params,
         )
+        .0
+}
+
+fn gradient_kernels(sim: &Sim) -> Kern {
+    kernels(sim)
+        .with_gradient_boundary(GradientBc::Neumann(vec![0.0, 20.0, 0.0]))
         .0
 }
 
@@ -145,6 +152,25 @@ fn driven_global() -> Hier {
         &[region()],
         ProlongOrder::Plm,
         driven_kernels,
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy
+}
+
+fn gradient_global() -> Hier {
+    let boundaries = Boundaries([[
+        BoundaryType::Neumann(0),
+        BoundaryType::Outflow,
+    ]]);
+    let coarse = resting_root(N, 0.0, boundaries);
+    let coarse_kernels = gradient_kernels(&coarse);
+    let hierarchy = Hier::with_refinement(
+        coarse,
+        coarse_kernels,
+        &[region()],
+        ProlongOrder::Plm,
+        gradient_kernels,
     )
     .unwrap();
     hierarchy.seed_fine_from_coarse().unwrap();
@@ -248,6 +274,43 @@ fn driven_tiles() -> Vec<Hier> {
                 &[region()],
                 ProlongOrder::Plm,
                 driven_kernels,
+            )
+            .unwrap();
+            hierarchy.seed_fine_from_coarse().unwrap();
+            hierarchy
+        } else {
+            Hier::single(coarse, coarse_kernels)
+        };
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.prime();
+        result.push(hierarchy);
+    }
+    result
+}
+
+fn gradient_tiles() -> Vec<Hier> {
+    let mut result = Vec::new();
+    for tile in 0..2 {
+        let boundaries = if tile == 0 {
+            Boundaries([[
+                BoundaryType::Neumann(0),
+                BoundaryType::CoarseFine,
+            ]])
+        } else {
+            Boundaries([[
+                BoundaryType::CoarseFine,
+                BoundaryType::Outflow,
+            ]])
+        };
+        let coarse = resting_root(N / 2, tile as f64 * 0.5, boundaries);
+        let coarse_kernels = gradient_kernels(&coarse);
+        let mut hierarchy = if tile == 0 {
+            let hierarchy = Hier::with_refinement(
+                coarse,
+                coarse_kernels,
+                &[region()],
+                ProlongOrder::Plm,
+                gradient_kernels,
             )
             .unwrap();
             hierarchy.seed_fine_from_coarse().unwrap();
@@ -474,6 +537,52 @@ fn decomposed_refined_driven_inflow_uses_one_global_spawn_stream() {
     assert!(
         (represented_added - fluid_added).abs() < 1.0e-10,
         "represented inflow mass {represented_added:e} != composite fluid addition \
+         {fluid_added:e}"
+    );
+}
+
+#[test]
+fn decomposed_refined_gradient_inflow_uses_one_global_spawn_stream() {
+    let global_seed = gradient_global();
+    let mut decomposed = gradient_tiles();
+    seed_decomposed_hierarchy_tracers(&global_seed, &mut decomposed, N_TRACERS);
+    let mass_before = composite_mass(&decomposed);
+
+    evolve_hierarchy_decomposed(
+        &mut decomposed,
+        [2],
+        &[0, 0],
+        &LocalCopy,
+        Timestepping::Rk2,
+        0.0,
+        0.04,
+        u64::MAX,
+        |_, _, _| std::ops::ControlFlow::Continue(()),
+    );
+
+    let all_ids: Vec<_> = decomposed
+        .iter()
+        .flat_map(|tile| &tile.levels)
+        .flat_map(|level| level.state.tracers.as_ref().unwrap().id.iter().copied())
+        .collect();
+    let unique: std::collections::BTreeSet<_> = all_ids.iter().copied().collect();
+    let tracers = decomposed[0].levels[0].state.tracers.as_ref().unwrap();
+    let represented_added = (all_ids.len() - N_TRACERS) as f64 * tracers.weight
+        + tracers.injection_remainder;
+    let fluid_added = composite_mass(&decomposed) - mass_before;
+
+    assert_eq!(
+        unique.len(),
+        all_ids.len(),
+        "gradient-inflow tracer IDs are not global"
+    );
+    assert!(
+        all_ids.len() > N_TRACERS,
+        "the decomposed gradient boundary spawned no tracers"
+    );
+    assert!(
+        (represented_added - fluid_added).abs() < 1.0e-10,
+        "represented gradient inflow mass {represented_added:e} != composite fluid addition \
          {fluid_added:e}"
     );
 }

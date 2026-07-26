@@ -8,6 +8,7 @@
 
 use symbi::prelude::*;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
+use symbi::regimes::substrate_kernels::GradientBc;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_hydro::state::Prim;
 use symbi_hydro::expr_bridge::{build_boundary_dag, build_user_source};
@@ -333,5 +334,80 @@ fn refined_driven_inflow_spawns_only_the_composite_entering_mass() {
             + root_tracers.injection_remainder;
 
     assert!(represented_added > 0.0, "driven boundary injected no tracers");
+    assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
+}
+
+#[test]
+fn refined_neumann_inflow_spawns_only_the_accepted_entering_mass() {
+    let make_kernels = |state: &Sim| {
+        Kern::new(GAMMA, CFL, &state.geom.allocated)
+            .with_gradient_boundary(GradientBc::Neumann(vec![0.0, 20.0, 0.0]))
+            .0
+    };
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([32])
+        .bounds([0.0], [1.0])
+        .boundaries(Boundaries([[
+            BoundaryType::Neumann(0),
+            BoundaryType::Outflow,
+        ]]))
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
+        .build();
+    let kernels = make_kernels(&coarse);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [0.0],
+            x_hi: [0.5],
+        }],
+        ProlongOrder::Ppm,
+        make_kernels,
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy.attach_mass_tracers(1000);
+
+    hierarchy.evolve_steps(2).unwrap();
+
+    let mut composite_mass = 0.0;
+    for level in &hierarchy.levels {
+        let geometry = level
+            .state
+            .geom
+            .block_geometry(level.state.physics.metric);
+        for coord in level.state.geom.interior.iter() {
+            if level
+                .coverage
+                .as_ref()
+                .is_some_and(|coverage| coverage.contains(coord))
+            {
+                continue;
+            }
+            composite_mass +=
+                *level.state.fields.cons.den.view().at(coord) * geometry.volume(coord);
+        }
+    }
+    let tracer_count: usize = hierarchy
+        .levels
+        .iter()
+        .map(|level| level.state.tracers.as_ref().unwrap().len())
+        .sum();
+    let root_tracers = hierarchy.levels[0].state.tracers.as_ref().unwrap();
+    let represented_added = (tracer_count - 1000) as f64 * root_tracers.weight
+        + root_tracers.injection_remainder;
+
+    assert!(
+        tracer_count > 1000,
+        "the refined Neumann boundary produced no tracer inflow"
+    );
     assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
 }
