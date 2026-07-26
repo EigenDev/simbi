@@ -478,6 +478,12 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
             bcs = tuple(
                 decode_str(bc_group.attrs[f"bc_{i}"]) for i in range(num_bcs)
             )
+        elif "boundary_conditions" in attrs:
+            bcs = tuple(
+                boundary.strip()
+                for boundary in decode_str(attrs["boundary_conditions"]).split(",")
+                if boundary.strip()
+            )
 
         return Ok(
             Metadata(

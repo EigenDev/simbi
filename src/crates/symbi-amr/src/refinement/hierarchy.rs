@@ -1084,6 +1084,31 @@ where
         &mut self,
         t_final: f64,
         interval: u64,
+        callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
+    ) -> symbi_xpu::Result<()> {
+        self.evolve_with_callback_impl(t_final, interval, true, callback)
+    }
+
+    /// continue a checkpoint-restored hierarchy whose primitive and staggered
+    /// magnetic interiors represent the accepted step tail. physical ghost
+    /// bands are reconstructed without re-running c2p or bcell recovery.
+    pub fn resume_with_callback(
+        &mut self,
+        t_final: f64,
+        interval: u64,
+        callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
+    ) -> symbi_xpu::Result<()> {
+        for level in &self.levels {
+            level.kernels.ghost_fill(&level.state);
+        }
+        self.evolve_with_callback_impl(t_final, interval, false, callback)
+    }
+
+    fn evolve_with_callback_impl(
+        &mut self,
+        t_final: f64,
+        interval: u64,
+        prepare_initial_state: bool,
         mut callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
     ) -> symbi_xpu::Result<()> {
         // homologous mesh motion is single-grid only: the hierarchy's flux
@@ -1098,7 +1123,9 @@ where
                     .all(|l| { l.state.motion.a_dot == 0.0 && l.state.motion.a == 1.0 }),
             "refinement: mesh motion is uni-grid only (the registers carry no scale factor)"
         );
-        self.init_levels();
+        if prepare_initial_state {
+            self.init_levels();
+        }
         let mut last_cb = self.levels[0].state.iteration;
         while self.levels[0].state.time < t_final {
             self.step_root(t_final);
