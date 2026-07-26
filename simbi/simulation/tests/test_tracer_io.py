@@ -16,6 +16,7 @@ import pytest
 from pydantic import computed_field
 
 from simbi.simulation import runner
+from simbi.types import TracerScheme
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 
 N_TRACERS = 400
@@ -26,6 +27,10 @@ class TracedKH(KelvinHelmholtz):
     @property
     def n_tracers(self) -> int:
         return N_TRACERS
+
+
+def test_tracer_scheme_defaults_to_discrete_mass_transport():
+    assert TracedKH().tracer_scheme is TracerScheme.DISCRETE
 
 
 @pytest.mark.simulation

@@ -115,6 +115,119 @@ pub struct SamplingKey {
     pub epoch: u64,
 }
 
+/// first three per-time displacement moments of one axis of an accepted jump law.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JumpMomentRates {
+    pub drift: f64,
+    pub variance: f64,
+    pub third: f64,
+}
+
+impl JumpMomentRates {
+    pub fn from_probabilities(
+        p_plus: f64,
+        p_minus: f64,
+        cell_width: f64,
+        dt: f64,
+    ) -> Result<Self, String> {
+        if !p_plus.is_finite()
+            || !p_minus.is_finite()
+            || p_plus < 0.0
+            || p_minus < 0.0
+            || p_plus + p_minus > 1.0 + 32.0 * f64::EPSILON
+        {
+            return Err(
+                "jump probabilities must be finite, non-negative, and sum to at most one"
+                    .to_string(),
+            );
+        }
+        if !cell_width.is_finite() || cell_width <= 0.0 {
+            return Err("jump cell width must be positive and finite".to_string());
+        }
+        if !dt.is_finite() || dt <= 0.0 {
+            return Err("jump timestep must be positive and finite".to_string());
+        }
+        let difference = p_plus - p_minus;
+        let sum = p_plus + p_minus;
+        let variance_factor = (sum - difference * difference).max(0.0);
+        Ok(Self {
+            drift: difference * cell_width / dt,
+            variance: variance_factor * cell_width * cell_width / dt,
+            third: difference
+                * (1.0 - 3.0 * sum + 2.0 * difference * difference)
+                * cell_width.powi(3)
+                / dt,
+        })
+    }
+
+    pub fn skewness(self, dt: f64) -> f64 {
+        let variance = self.variance * dt;
+        if variance == 0.0 {
+            0.0
+        } else {
+            self.third * dt / variance.powf(1.5)
+        }
+    }
+}
+
+/// zero-mean, unit-variance piecewise-skew-uniform distribution.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PiecewiseSkewUniform {
+    left_extent: f64,
+    right_extent: f64,
+    left_density: f64,
+    right_density: f64,
+}
+
+impl PiecewiseSkewUniform {
+    pub fn new(skewness: f64) -> Result<Self, String> {
+        if !skewness.is_finite() {
+            return Err("piecewise-skew-uniform skewness must be finite".to_string());
+        }
+        let root = (27.0 + 4.0 * skewness * skewness).sqrt();
+        let left_extent = (root - 2.0 * skewness) / 3.0;
+        let right_extent = (root + 2.0 * skewness) / 3.0;
+        let extent_sum = left_extent + right_extent;
+        Ok(Self {
+            left_extent,
+            right_extent,
+            left_density: right_extent / (left_extent * extent_sum),
+            right_density: left_extent / (right_extent * extent_sum),
+        })
+    }
+
+    pub fn sample(self, unit: f64) -> Result<f64, String> {
+        if !unit.is_finite() || !(0.0..1.0).contains(&unit) {
+            return Err("piecewise-skew-uniform sample must lie in [0, 1)".to_string());
+        }
+        let left_mass = self.left_density * self.left_extent;
+        Ok(if unit < left_mass {
+            -self.left_extent + unit / self.left_density
+        } else {
+            (unit - left_mass) / self.right_density
+        })
+    }
+}
+
+pub fn ito2_displacement(rates: JumpMomentRates, dt: f64, unit: f64) -> Result<f64, String> {
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err("ito tracer timestep must be positive and finite".to_string());
+    }
+    if !unit.is_finite() || !(0.0..1.0).contains(&unit) {
+        return Err("ito tracer sample must lie in [0, 1)".to_string());
+    }
+    let standardized = 12.0_f64.sqrt() * (unit - 0.5);
+    Ok(rates.drift * dt + (rates.variance * dt).sqrt() * standardized)
+}
+
+pub fn ito3_displacement(rates: JumpMomentRates, dt: f64, unit: f64) -> Result<f64, String> {
+    if !dt.is_finite() || dt <= 0.0 {
+        return Err("ito tracer timestep must be positive and finite".to_string());
+    }
+    let standardized = PiecewiseSkewUniform::new(rates.skewness(dt))?.sample(unit)?;
+    Ok(rates.drift * dt + (rates.variance * dt).sqrt() * standardized)
+}
+
 /// assign every original tracer to exactly one kernel destination using a
 /// randomly shifted systematic lattice and a keyed id permutation.
 pub fn sample_systematic(
@@ -196,7 +309,8 @@ fn unit_f64(value: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ContainerId, MassTransfer, SamplingKey, TransportKernel, sample_convex_blend,
+        ContainerId, JumpMomentRates, MassTransfer, PiecewiseSkewUniform, SamplingKey,
+        TransportKernel, ito2_displacement, ito3_displacement, sample_convex_blend,
         sample_systematic,
     };
     use std::collections::BTreeMap;
@@ -217,6 +331,50 @@ mod tests {
             ],
         )
         .unwrap()
+    }
+
+    fn psu_moments(distribution: PiecewiseSkewUniform) -> (f64, f64, f64, f64) {
+        let left = distribution.left_extent;
+        let right = distribution.right_extent;
+        let dl = distribution.left_density;
+        let dr = distribution.right_density;
+        let norm = dl * left + dr * right;
+        let mean = (-dl * left.powi(2) + dr * right.powi(2)) / 2.0;
+        let second = (dl * left.powi(3) + dr * right.powi(3)) / 3.0;
+        let third = (-dl * left.powi(4) + dr * right.powi(4)) / 4.0;
+        (norm, mean, second, third)
+    }
+
+    #[test]
+    fn jump_moment_rates_match_the_discrete_transition() {
+        let rates = JumpMomentRates::from_probabilities(0.3, 0.1, 2.0, 0.5).unwrap();
+        assert!((rates.drift * 0.5 - 0.4).abs() < 1e-15);
+        assert!((rates.variance * 0.5 - 1.44).abs() < 1e-15);
+        assert!((rates.third * 0.5 + 0.192).abs() < 1e-15);
+    }
+
+    #[test]
+    fn piecewise_skew_uniform_has_requested_first_three_moments() {
+        for skewness in [-4.0, -0.5, 0.0, 0.5, 4.0] {
+            let distribution = PiecewiseSkewUniform::new(skewness).unwrap();
+            let (norm, mean, variance, third) = psu_moments(distribution);
+            assert!((norm - 1.0).abs() < 2e-14);
+            assert!(mean.abs() < 2e-14);
+            assert!((variance - 1.0).abs() < 2e-14);
+            assert!((third - skewness).abs() < 2e-13);
+        }
+    }
+
+    #[test]
+    fn ito_displacements_match_the_requested_support_and_center() {
+        let rates = JumpMomentRates::from_probabilities(0.3, 0.1, 2.0, 0.5).unwrap();
+        let drift = rates.drift * 0.5;
+        let ito2_center = ito2_displacement(rates, 0.5, 0.5).unwrap();
+        let ito3 = PiecewiseSkewUniform::new(rates.skewness(0.5)).unwrap();
+        let ito3_split = ito3.left_density * ito3.left_extent;
+        let ito3_center = ito3_displacement(rates, 0.5, ito3_split).unwrap();
+        assert!((ito2_center - drift).abs() < 1e-15);
+        assert!((ito3_center - drift).abs() < 1e-15);
     }
 
     #[test]

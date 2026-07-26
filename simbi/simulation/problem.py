@@ -49,6 +49,7 @@ from simbi.types.input import (
     Solver,
     SubCycleMode,
     TimeStepping,
+    TracerScheme,
 )
 from simbi.types.typing import (
     ExpressionDict,
@@ -796,6 +797,12 @@ class SimbiProblem(BaseModel):
         reservoir ownership. checkpoints also carry derived positions for
         visualization. 0 = none."""
         return 0
+
+    @computed_field
+    @property
+    def tracer_scheme(self) -> TracerScheme:
+        """passive tracer realization: discrete, ito2, or ito3."""
+        return TracerScheme.DISCRETE
 
     def tracer_cohort(self) -> Optional[GasStateGenerator]:
         """initial-material provenance: one non-negative integer cohort per

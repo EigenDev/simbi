@@ -128,6 +128,12 @@ class TimeStepping(str, ExtendedEnum):
     RK3 = "rk3"
 
 
+class TracerScheme(str, ExtendedEnum):
+    DISCRETE = "discrete"
+    ITO2 = "ito2"
+    ITO3 = "ito3"
+
+
 class Reconstruction(str, ExtendedEnum):
     PCM = "pcm"
     PLM = "plm"

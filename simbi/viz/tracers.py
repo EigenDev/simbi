@@ -116,14 +116,14 @@ def tracer_projection(
             plane=(0, 2 if ndim == 3 else 1),
             collapsed_axis=1 if ndim == 3 else None,
             projection="cartesian",
-            labels=("R", "z"),
+            labels=("$R$", "$z$"),
         )
     if coord_system == "cartesian":
         return TracerProjection(
             plane=(0, 1),
             collapsed_axis=2 if ndim == 3 else None,
             projection="cartesian",
-            labels=("x", "y"),
+            labels=("$x$", "$y$"),
         )
     raise ValueError(f"unsupported tracer coordinate system '{coord_system}'")
 
