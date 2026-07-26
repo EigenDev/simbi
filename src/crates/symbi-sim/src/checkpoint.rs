@@ -738,6 +738,7 @@ struct TracerSnap {
     n: usize,
     x: Vec<f64>,
     id: Vec<u64>,
+    cohort: Vec<u64>,
     owner: Vec<u64>,
     run_seed: u64,
     next_id: u64,
@@ -758,6 +759,7 @@ fn tracer_snap<const D: usize>(tr: &symbi_sim_tracers::TracerSet<D>) -> TracerSn
         n,
         x,
         id: tr.id.clone(),
+        cohort: tr.cohort.iter().map(|&cohort| cohort as u64).collect(),
         owner: tr.owner.iter().map(|owner| owner.0).collect(),
         run_seed: tr.run_seed,
         next_id: tr.next_id,
@@ -785,6 +787,11 @@ fn tracer_group<const D: usize>(snap: &TracerSnap) -> Tree<'_> {
             DataRef::F64(&snap.x),
         ))
         .with_dataset(Dataset::new("id", vec![snap.n], DataRef::U64(&snap.id)))
+        .with_dataset(Dataset::new(
+            "cohort",
+            vec![snap.n],
+            DataRef::U64(&snap.cohort),
+        ))
         .with_dataset(Dataset::new(
             "owner",
             vec![snap.n],
@@ -1382,6 +1389,7 @@ where
         };
         let xs = getf("position")?;
         let ids = getu("id")?;
+        let cohorts = getu("cohort")?;
         let owners = getu("owner")?;
         let (esc, crx, ct) = (
             getf("escaped")?,
@@ -1416,6 +1424,10 @@ where
             }
             tr.x.push(p);
             tr.id.push(ids[i]);
+            tr.cohort.push(
+                u16::try_from(cohorts[i])
+                    .map_err(|_| IoError::Backend("tracer cohort exceeds u16".to_string()))?,
+            );
             tr.owner.push(crate::mass_transport::ContainerId(owners[i]));
             tr.flags.push(symbi_sim_tracers::TracerFlags {
                 escaped: esc[i] != 0.0,
@@ -1764,6 +1776,7 @@ mod tests {
         sim.tracers = Some(symbi_sim_tracers::TracerSet {
             x: vec![[91.0, 92.0, 93.0], [94.0, 95.0, 96.0]],
             id: vec![u64::MAX - 1, u64::MAX],
+            cohort: vec![7, 9],
             flags: vec![Default::default(); 2],
             weight: 3.5,
             owner: vec![
@@ -1790,6 +1803,7 @@ mod tests {
         let expected = sim.tracers.as_ref().unwrap();
         let actual = restored.tracers.as_ref().unwrap();
         assert_eq!(actual.id, expected.id);
+        assert_eq!(actual.cohort, expected.cohort);
         assert_eq!(actual.owner, expected.owner);
         assert_eq!(actual.step_owner, expected.owner);
         assert_eq!(actual.x, vec![[0.25, 0.5, 0.5], [0.75, 0.5, 0.5]]);

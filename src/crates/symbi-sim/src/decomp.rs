@@ -298,6 +298,7 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     };
     g.x.clear();
     g.id.clear();
+    g.cohort.clear();
     g.flags.clear();
     g.owner.clear();
     g.step_owner.clear();
@@ -308,6 +309,7 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
         if let Some(tr) = t.tracers.as_ref() {
             g.x.extend_from_slice(&tr.x);
             g.id.extend_from_slice(&tr.id);
+            g.cohort.extend_from_slice(&tr.cohort);
             g.flags.extend_from_slice(&tr.flags);
             g.owner.extend_from_slice(&tr.owner);
             g.step_owner.extend_from_slice(&tr.step_owner);
@@ -323,6 +325,7 @@ pub fn gather_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     perm.sort_by_key(|&i| g.id[i]);
     g.x = perm.iter().map(|&i| g.x[i]).collect();
     g.id = perm.iter().map(|&i| g.id[i]).collect();
+    g.cohort = perm.iter().map(|&i| g.cohort[i]).collect();
     g.flags = perm.iter().map(|&i| g.flags[i]).collect();
     g.owner = perm.iter().map(|&i| g.owner[i]).collect();
     g.step_owner = perm.iter().map(|&i| g.step_owner[i]).collect();
@@ -751,6 +754,7 @@ fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpa
                 target,
                 tracers.x.swap_remove(ii),
                 tracers.id.swap_remove(ii),
+                tracers.cohort.swap_remove(ii),
                 tracers.flags.swap_remove(ii),
                 tracers.owner.swap_remove(ii),
                 tracers.step_owner.swap_remove(ii),
@@ -758,13 +762,14 @@ fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpa
             ));
         }
     }
-    for (target, x, id, flags, owner, step_owner, step_flags) in moved {
+    for (target, x, id, cohort, flags, owner, step_owner, step_flags) in moved {
         let tracers = stores[target]
             .tracers
             .as_mut()
             .expect("every decomposed tile carries a tracer set");
         tracers.x.push(x);
         tracers.id.push(id);
+        tracers.cohort.push(cohort);
         tracers.flags.push(flags);
         tracers.owner.push(owner);
         tracers.step_owner.push(step_owner);
@@ -904,6 +909,7 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
         let tracers = stores[target].tracers.as_mut().unwrap();
         tracers.x.push(spawned.x[ii]);
         tracers.id.push(spawned.id[ii]);
+        tracers.cohort.push(spawned.cohort[ii]);
         tracers.flags.push(spawned.flags[ii]);
         tracers.owner.push(spawned.owner[ii]);
         tracers.step_owner.push(spawned.step_owner[ii]);

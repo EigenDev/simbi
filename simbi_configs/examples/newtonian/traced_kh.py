@@ -9,9 +9,9 @@
 # discrete lagrangian complement to the eulerian dye in dyed_kh.py.
 #
 # tracers land in the checkpoint `tracers` group with exact ids, cell or
-# reservoir owners, derived positions, mass weight, provenance flags, and
-# deterministic spawning state. the periodic domain has no exterior reservoir,
-# so every checkpoint retains the full seeded population.
+# reservoir owners, derived positions, mass weight, immutable initial-material
+# cohort, provenance flags, and deterministic spawning state. cohort 1 begins
+# in the dense layer and cohort 0 in the ambient gas.
 #
 # usage:
 #  simbi run traced_kh                       # 2000 tracers by default
@@ -116,6 +116,17 @@ class TracedKelvinHelmholtz(SimbiProblem):
 
     def _in_layer(self, y: float) -> bool:
         return abs(y) < 0.25
+
+    def tracer_cohort(self) -> GasStateGenerator:
+        """label the dense layer independently of its later position."""
+
+        nx, ny = self.resolution
+        (_, _), (ymin, ymax) = self.bounds[0], self.bounds[1]
+        dy = (ymax - ymin) / ny
+        for jj in range(ny):
+            y = ymin + (jj + 0.5) * dy
+            for _ii in range(nx):
+                yield 1 if self._in_layer(y) else 0
 
     def initial_primitive_state(self) -> InitialStateType:
         """shear layer with seeded noise; pressure-uniform."""

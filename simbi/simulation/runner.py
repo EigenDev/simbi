@@ -500,6 +500,9 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
     chi_field = problem.passive_scalar()
     if chi_field is not None:
         _check_first_scalar(type(problem).__name__, "passive scalar", chi_field)
+    cohort_field = problem.tracer_cohort()
+    if cohort_field is not None:
+        _check_first_scalar(type(problem).__name__, "tracer cohort", cohort_field)
 
     backend = _load_backend(compute_mode)
     if backend is None:
@@ -633,6 +636,7 @@ def run(
         a=scale_factor,
         adot=scale_factor_derivative,
         chi_field=problem.passive_scalar(),
+        cohort_field=problem.tracer_cohort(),
     )
 
 

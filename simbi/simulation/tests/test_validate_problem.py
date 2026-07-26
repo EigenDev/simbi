@@ -21,7 +21,10 @@ from simbi_configs.examples.newtonian.sod import SodProblem
 
 
 def test_validate_problem_calls_rust_preflight(monkeypatch, capsys) -> None:
-    problem = SimpleNamespace(passive_scalar=lambda: None)
+    problem = SimpleNamespace(
+        passive_scalar=lambda: None,
+        tracer_cohort=lambda: None,
+    )
     calls: list[dict[str, object]] = []
     backend = SimpleNamespace(
         validate_simulation=lambda **kwargs: calls.append(kwargs)

@@ -263,6 +263,7 @@ where
                 .expect("composite seed owner names an absent refinement level");
             target.x.push(seeded.x[ii]);
             target.id.push(seeded.id[ii]);
+            target.cohort.push(seeded.cohort[ii]);
             target.flags.push(seeded.flags[ii]);
             target.owner.push(seeded.owner[ii]);
             target.step_owner.push(seeded.step_owner[ii]);
@@ -485,6 +486,7 @@ where
                 migrating.push((
                     destination_level,
                     tracers.id.swap_remove(ii),
+                    tracers.cohort.swap_remove(ii),
                     tracers.flags.swap_remove(ii),
                     tracers.owner.swap_remove(ii),
                     tracers.step_owner.swap_remove(ii),
@@ -492,7 +494,7 @@ where
                 ));
             }
         }
-        for (destination_level, id, flags, owner, step_owner, step_flags) in migrating {
+        for (destination_level, id, cohort, flags, owner, step_owner, step_flags) in migrating {
             let (_, coord) = self
                 .tracer_cell(owner)
                 .ok_or_else(|| format!("interface destination {} is not active", owner.0))?;
@@ -505,6 +507,7 @@ where
                 .expect("every refined level carries a tracer set");
             tracers.x.push(x);
             tracers.id.push(id);
+            tracers.cohort.push(cohort);
             tracers.flags.push(flags);
             tracers.owner.push(owner);
             tracers.step_owner.push(step_owner);
@@ -2177,6 +2180,7 @@ pub fn seed_decomposed_hierarchy_tracers<
         let tracers = tiles[destination].levels[level].state.tracers.as_mut().unwrap();
         tracers.x.push(x);
         tracers.id.push(seeded.id[ii]);
+        tracers.cohort.push(seeded.cohort[ii]);
         tracers.flags.push(seeded.flags[ii]);
         tracers.owner.push(owner);
         tracers.step_owner.push(seeded.step_owner[ii]);
@@ -2225,6 +2229,7 @@ pub fn gather_decomposed_hierarchy_tracers<
                 (
                     tracers.id[ii],
                     tracers.x[ii],
+                    tracers.cohort[ii],
                     tracers.flags[ii],
                     tracers.owner[ii],
                     tracers.step_owner[ii],
@@ -2242,9 +2247,10 @@ pub fn gather_decomposed_hierarchy_tracers<
             injection_remainder,
             ..Default::default()
         };
-        for (id, x, flags, owner, step_owner, step_flags) in records {
+        for (id, x, cohort, flags, owner, step_owner, step_flags) in records {
             gathered.id.push(id);
             gathered.x.push(x);
+            gathered.cohort.push(cohort);
             gathered.flags.push(flags);
             gathered.owner.push(owner);
             gathered.step_owner.push(step_owner);
@@ -2341,6 +2347,7 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
             migrating.push((
                 destination,
                 tracers.id.swap_remove(ii),
+                tracers.cohort.swap_remove(ii),
                 tracers.flags.swap_remove(ii),
                 tracers.owner.swap_remove(ii),
                 tracers.step_owner.swap_remove(ii),
@@ -2348,7 +2355,7 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
             ));
         }
     }
-    for (destination, id, flags, owner, step_owner, step_flags) in migrating {
+    for (destination, id, cohort, flags, owner, step_owner, step_flags) in migrating {
         let (_, coord) = tiles[destination]
             .tracer_cell(owner)
             .expect("tracer destination tile owns the addressed cell");
@@ -2360,6 +2367,7 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
             .expect("every decomposed hierarchy level carries tracers");
         tracers.x.push(x);
         tracers.id.push(id);
+        tracers.cohort.push(cohort);
         tracers.flags.push(flags);
         tracers.owner.push(owner);
         tracers.step_owner.push(step_owner);

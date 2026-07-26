@@ -316,7 +316,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--tracer-render",
-        choices=["concentration", "scatter"],
+        choices=["concentration", "cohort-ratio", "scatter"],
         default="concentration",
         help="tracer-only rendering mode",
     )
@@ -328,9 +328,15 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--tracer-color-by",
-        choices=["flag", "id", "none"],
+        choices=["flag", "cohort", "reservoir", "id", "none"],
         default="flag",
         help="scatter-mode tracer coloring",
+    )
+    parser.add_argument(
+        "--tracer-cohort",
+        type=int,
+        default=None,
+        help="render only this initial-material cohort in concentration mode",
     )
     parser.add_argument(
         "--draw-horizon",

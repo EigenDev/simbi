@@ -30,6 +30,7 @@ class TracerCloud:
 
     position: np.ndarray  # (n, D)
     id: np.ndarray  # (n,) uint64
+    cohort: np.ndarray  # (n,) uint16 immutable initial-material label
     owner: np.ndarray  # (n,) uint64 cell or reservoir address
     escaped: np.ndarray  # (n,) bool -- left the domain, frozen at exit
     crossed_sink: np.ndarray  # (n,) bool -- crossed an accretion radius, frozen
@@ -81,11 +82,14 @@ def tracer_concentration(
     y_edges: np.ndarray,
     plane: tuple[str, str] = ("x", "y"),
     smoothing: Optional[float] = None,
+    cohort: Optional[int] = None,
 ) -> np.ndarray:
     """estimate projected tracer mass per area on the supplied display mesh."""
     axes = tuple(_AXIS[name] for name in plane)
     reservoir_bits = np.uint64((1 << 63) | (1 << 62))
     live = (cloud.owner & reservoir_bits) == 0
+    if cohort is not None:
+        live &= cloud.cohort == cohort
     positions = cloud.position[live]
     weights = np.full(len(positions), cloud.weight, dtype=float)
     mass, _, _ = np.histogram2d(
@@ -104,6 +108,25 @@ def tracer_concentration(
     return smoothed_mass / area
 
 
+def cohort_to_gas_ratio(
+    cohort_concentration: np.ndarray,
+    gas_column_density: np.ndarray,
+    cell_area: np.ndarray,
+) -> np.ndarray:
+    """ratio of mean-normalized cohort and gas column densities."""
+    if cohort_concentration.shape != gas_column_density.shape:
+        raise ValueError("cohort and gas concentration shapes differ")
+    if cell_area.shape != cohort_concentration.shape:
+        raise ValueError("cell-area and concentration shapes differ")
+    area_total = np.sum(cell_area)
+    cohort_mean = np.sum(cohort_concentration * cell_area) / area_total
+    gas_mean = np.sum(gas_column_density * cell_area) / area_total
+    tiny = np.finfo(float).tiny
+    return (cohort_concentration / max(cohort_mean, tiny)) / (
+        gas_column_density / max(gas_mean, tiny)
+    )
+
+
 def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
     """read the tracer population from a checkpoint's `tracers` group, or None when the
     run carried no tracers."""
@@ -114,6 +137,7 @@ def load_tracers(checkpoint_path: str) -> Optional[TracerCloud]:
         return TracerCloud(
             position=np.asarray(g["position"], dtype=float),
             id=np.asarray(g["id"], dtype=np.uint64),
+            cohort=np.asarray(g["cohort"], dtype=np.uint16),
             owner=np.asarray(g["owner"], dtype=np.uint64),
             escaped=np.asarray(g["escaped"], dtype=float) > 0.5,
             crossed_sink=np.asarray(g["crossed_sink"], dtype=float) > 0.5,
@@ -143,6 +167,7 @@ def overlay_tracers(
     every particle projects onto the plane. `color_by`:
       - "flag": crossed-sink crimson, escaped grey, live blue (provenance at a glance)
       - "reservoir": accreted particles colored by body index
+      - "cohort": immutable initial-material cohort
       - "id":   a stable per-particle color (follow a particle across frames)
       - "none": a single color (pass `c=` / `color=` through kwargs)
     returns the scatter artist, or None when there is nothing to draw -- in which case it
@@ -200,5 +225,8 @@ def overlay_tracers(
             else ("0.5" if escaped else "white")
             for index, escaped in zip(body, cloud.escaped[keep])
         ]
+    elif color_by == "cohort":
+        opts["c"] = cloud.cohort[keep]
+        opts.setdefault("cmap", "tab20")
     opts.update(kwargs)
     return ax.scatter(x, y, **opts)

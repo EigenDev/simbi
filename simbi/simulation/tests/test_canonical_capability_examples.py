@@ -9,6 +9,8 @@
 from itertools import islice
 from pathlib import Path
 
+import h5py
+import numpy as np
 import pytest
 
 import simbi.libs.cpu_ext as backend
@@ -82,6 +84,10 @@ def test_traced_kh_initial_state_is_repeatable():
 
     assert first == second
     assert problem.n_tracers == problem.tracers
+    cohorts = np.fromiter(problem.tracer_cohort(), dtype=np.uint16)
+    assert cohorts.size == np.prod(problem.resolution)
+    np.testing.assert_array_equal(np.unique(cohorts), [0, 1])
+    assert np.count_nonzero(cohorts == 0) == np.count_nonzero(cohorts == 1)
 
 
 @pytest.mark.parametrize("factory", EXAMPLE_FACTORIES)
@@ -94,3 +100,10 @@ def test_canonical_example_advances_one_production_step(factory, tmp_path: Path)
     problem = factory(data_directory=tmp_path / factory.__name__)
 
     run(problem, compute_mode="cpu", max_steps=1)
+    if factory is TracedKelvinHelmholtz:
+        checkpoints = list(problem.data_directory.glob("*final*.h5"))
+        assert checkpoints
+        with h5py.File(checkpoints[0]) as checkpoint:
+            cohorts = np.asarray(checkpoint["tracers/cohort"], dtype=np.uint16)
+        assert cohorts.size == problem.n_tracers
+        np.testing.assert_array_equal(np.unique(cohorts), [0, 1])

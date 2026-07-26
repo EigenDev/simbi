@@ -137,6 +137,8 @@ struct Config {
     // empty = the run carries no dye. set AFTER parse (run_simulation drains
     // the generator), never read from the sim_info dict.
     chi_ic: Vec<f64>,
+    // immutable initial-material cohort per interior cell.
+    cohort_ic: Vec<u16>,
     // the prescribed binary orbit (`body_system.binary_config`), if any; attaches the Keplerian
     // orbit to the body collection so the two components orbit each other. None for non-binary runs.
     binary: Option<BinaryCfg>,
@@ -874,6 +876,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .map(|v| v.max(0) as usize)
             .unwrap_or(0),
         chi_ic: Vec::new(),
+        cohort_ic: Vec::new(),
         binary: parse_binary(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
         n_gpus: dict
@@ -1278,6 +1281,44 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
         let hi = bcs.get(2 * ax + 1).copied().unwrap_or(lo);
         [lo, hi]
     }))
+}
+
+fn seed_configured_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
+    sim: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    cfg: &Config,
+) -> symbi_sim::tracers::TracerSet<D> {
+    if cfg.cohort_ic.is_empty() {
+        symbi_sim::tracers::seed_mass_weighted(sim, cfg.n_tracers)
+    } else {
+        symbi_sim::tracers::seed_mass_weighted_with_cohorts(
+            sim,
+            cfg.n_tracers,
+            &cfg.cohort_ic,
+        )
+        .unwrap_or_else(|detail| panic!("tracer cohort seeding: {detail}"))
+    }
+}
+
+fn partition_configured_tracers<
+    const D: usize,
+    const DOF: usize,
+    Mem: symbi::symbi_xpu::MemorySpace,
+>(
+    sim: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    cfg: &Config,
+    counts: [usize; D],
+) -> Vec<symbi_sim::tracers::TracerSet<D>> {
+    if cfg.cohort_ic.is_empty() {
+        symbi_sim::tracers::seed_and_partition(sim, cfg.n_tracers, counts)
+    } else {
+        symbi_sim::tracers::seed_and_partition_with_cohorts(
+            sim,
+            cfg.n_tracers,
+            counts,
+            &cfg.cohort_ic,
+        )
+        .unwrap_or_else(|detail| panic!("tracer cohort partition: {detail}"))
+    }
 }
 
 /// the time-scheduled checkpoint loop. ONE path for every run: a single grid is a
@@ -3312,7 +3353,7 @@ macro_rules! build_and_run_hydro {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(&sim, cfg.n_tracers));
+            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
             sim
         };
         let theta = build_theta(cfg);
@@ -4185,7 +4226,7 @@ macro_rules! build_and_run_hydro_decomposed {
         // from the identical particles a single-grid run would. the output view carries an empty
         // set the checkpoint gather refills from the tiles each write.
         if cfg.n_tracers > 0 {
-            let per_tile = symbi_sim::tracers::seed_and_partition(&global, cfg.n_tracers, counts);
+            let per_tile = partition_configured_tracers(&global, cfg, counts);
             for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
                 tile.tracers = Some(set);
             }
@@ -4574,10 +4615,7 @@ macro_rules! build_and_run_mhd {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(
-                &sim,
-                cfg.n_tracers,
-            ));
+            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
             sim
         };
         let theta = build_theta(cfg);
@@ -4723,10 +4761,7 @@ macro_rules! build_and_run_imhd {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(
-                &sim,
-                cfg.n_tracers,
-            ));
+            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
             sim
         };
         let theta = build_theta(cfg);
@@ -4983,8 +5018,7 @@ macro_rules! build_and_run_mhd_decomposed {
             .build();
 
         if cfg.n_tracers > 0 {
-            let per_tile =
-                symbi_sim::tracers::seed_and_partition(&global, cfg.n_tracers, counts);
+            let per_tile = partition_configured_tracers(&global, cfg, counts);
             for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
                 tile.tracers = Some(set);
             }
@@ -5162,8 +5196,7 @@ macro_rules! build_and_run_imhd_decomposed {
             .build();
 
         if cfg.n_tracers > 0 {
-            let per_tile =
-                symbi_sim::tracers::seed_and_partition(&global, cfg.n_tracers, counts);
+            let per_tile = partition_configured_tracers(&global, cfg, counts);
             for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
                 tile.tracers = Some(set);
             }
@@ -5616,7 +5649,7 @@ macro_rules! build_and_run_iso {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(&sim, cfg.n_tracers));
+            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
             sim
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
@@ -5984,6 +6017,13 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 "n_tracers does not support mesh motion yet".to_string(),
             );
         }
+        if !cfg.cohort_ic.is_empty() && cfg.refinement_enabled {
+            return Err(
+                "tracer_cohort seeding on a refined hierarchy requires a composite-level \
+                 cohort field and is not wired yet"
+                    .to_string(),
+            );
+        }
         // multi-device hydro uses global container identities and migrates
         // complete tracer records across decomposition cuts.
         if cfg.n_gpus > 1
@@ -5997,6 +6037,9 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.regime
             ));
         }
+    }
+    if !cfg.cohort_ic.is_empty() && cfg.n_tracers == 0 {
+        return Err("tracer_cohort requires n_tracers > 0".to_string());
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
@@ -6542,7 +6585,15 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, a, adot, chi_field=None))]
+#[pyo3(signature = (
+    prim_gen,
+    staggered_bfields,
+    sim_info,
+    a,
+    adot,
+    chi_field=None,
+    cohort_field=None
+))]
 fn run_simulation(
     py: Python<'_>,
     prim_gen: &Bound<'_, PyAny>,
@@ -6551,6 +6602,7 @@ fn run_simulation(
     a: &Bound<'_, PyAny>,
     adot: &Bound<'_, PyAny>,
     chi_field: Option<&Bound<'_, PyAny>>,
+    cohort_field: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
@@ -6565,6 +6617,26 @@ fn run_simulation(
             cfg.chi_ic = vals;
         }
     }
+    if let Some(cohort_field) = cohort_field {
+        if !cohort_field.is_none() {
+            let mut vals = Vec::new();
+            for value in cohort_field.try_iter()? {
+                let cohort = value?.extract::<i64>()?;
+                vals.push(u16::try_from(cohort).map_err(|_| {
+                    PyValueError::new_err(format!(
+                        "tracer cohort {cohort} is outside the supported range 0..=65534"
+                    ))
+                })?);
+            }
+            if vals.iter().any(|&cohort| cohort == u16::MAX) {
+                return Err(PyValueError::new_err(
+                    "tracer cohort 65535 is reserved for injected material",
+                ));
+            }
+            cfg.cohort_ic = vals;
+        }
+    }
+    validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
     // a non-linear (log) radial axis IS supported under decomposition: each tile carries the global
     // per-cell slope and an origin advanced multiplicatively to its first global cell
     // (`start * 10^(g * slope)`), so a tile's local index i lands exactly where the undecomposed grid
