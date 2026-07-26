@@ -4650,6 +4650,16 @@ macro_rules! build_and_run_imhd {
         } else {
             sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
         };
+        let sim = if cfg.n_tracers == 0 {
+            sim
+        } else {
+            let mut sim = sim;
+            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(
+                &sim,
+                cfg.n_tracers,
+            ));
+            sim
+        };
         let theta = build_theta(cfg);
         let sub = sim
             .substrate()
@@ -5049,7 +5059,7 @@ macro_rules! build_and_run_imhd_decomposed {
             tiles.push(built);
         }
 
-        let global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
+        let mut global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
@@ -5081,6 +5091,15 @@ macro_rules! build_and_run_imhd_decomposed {
             })
             .seed_faces_indexed(&bufs[0..$d])
             .build();
+
+        if cfg.n_tracers > 0 {
+            let per_tile =
+                symbi_sim::tracers::seed_and_partition(&global, cfg.n_tracers, counts);
+            for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                tile.tracers = Some(set);
+            }
+            global.tracers = Some(symbi_sim::tracers::TracerSet::default());
+        }
 
         run_decomposed_loop(cfg, tiles, global, counts)
     }};
@@ -5863,10 +5882,10 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     if cfg.n_tracers > 0 {
         if !matches!(
             cfg.regime.as_str(),
-            "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd"
+            "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd"
         ) {
             return Err(format!(
-                "n_tracers = {} is wired for hydro and adiabatic mhd; got '{}'",
+                "n_tracers = {} is wired for hydro and mhd; got '{}'",
                 cfg.n_tracers, cfg.regime
             ));
         }
@@ -5887,11 +5906,11 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         if cfg.n_gpus > 1
             && !matches!(
                 cfg.regime.as_str(),
-                "newtonian" | "rhd" | "nmhd" | "rmhd"
+                "newtonian" | "rhd" | "nmhd" | "rmhd" | "imhd"
             )
         {
             return Err(format!(
-                "n_tracers with gpus > 1 is wired for adiabatic hydro/mhd; regime '{}' not yet",
+                "n_tracers with gpus > 1 is wired for hydro/mhd; regime '{}' not yet",
                 cfg.regime
             ));
         }
