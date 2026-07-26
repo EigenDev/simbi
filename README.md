@@ -47,7 +47,7 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
-CUDA and HIP are peer production backends generated from the same kernel
+> CUDA and HIP are peer production backends generated from the same kernel
 definitions. Multi-*node* decomposition is the next step on the roadmap;
 single-node multi-GPU already runs today.
 I don't have a science problem that needs it at this time, so it prob won't be added for 
