@@ -29,8 +29,42 @@ class TracedKH(KelvinHelmholtz):
         return N_TRACERS
 
 
+class ItoTracedKH(TracedKH):
+    realization: TracerScheme = TracerScheme.ITO2
+
+    @computed_field
+    @property
+    def tracer_scheme(self) -> TracerScheme:
+        return self.realization
+
+
 def test_tracer_scheme_defaults_to_discrete_mass_transport():
     assert TracedKH().tracer_scheme is TracerScheme.DISCRETE
+
+
+@pytest.mark.simulation
+@pytest.mark.parametrize(
+    ("scheme", "order"),
+    [(TracerScheme.ITO2, 2), (TracerScheme.ITO3, 3)],
+)
+def test_ito_scheme_runs_through_python_and_checkpoints_continuous_state(
+    scheme, order, tmp_path
+):
+    problem = ItoTracedKH(realization=scheme)
+    problem.data_directory = tmp_path / scheme.value
+    problem.checkpoint_interval = 1.0e30
+
+    runner.run(problem, compute_mode="cpu", max_steps=2)
+
+    final = list(problem.data_directory.glob("*final*.h5"))
+    assert final
+    with h5py.File(final[0]) as checkpoint:
+        assert "tracers" not in checkpoint
+        group = checkpoint["continuous_tracers"]
+        assert int(group.attrs["order"]) == order
+        assert int(group.attrs["n_tracers"]) == N_TRACERS
+        assert np.isfinite(group["position"][:]).all()
+        assert np.any(group["random_counter"][:] > 0)
 
 
 @pytest.mark.simulation

@@ -58,6 +58,31 @@ def test_load_tracers_preserves_exact_ownership_and_spawn_state(tmp_path):
     assert cloud.injection_remainder == 0.125
 
 
+def test_load_tracers_reads_continuous_ito_population(tmp_path):
+    path = tmp_path / "ito.h5"
+    with h5py.File(path, "w") as checkpoint:
+        group = checkpoint.create_group("continuous_tracers")
+        group.attrs["order"] = np.uint64(3)
+        group.attrs["run_seed"] = np.uint64(17)
+        group.attrs["next_id"] = np.uint64(2)
+        group.attrs["injection_remainder"] = 0.25
+        group.create_dataset("position", data=np.array([[0.2, 0.3], [0.7, 0.8]]))
+        group.create_dataset("id", data=np.arange(2, dtype=np.uint64))
+        group.create_dataset("cohort", data=np.array([0, 1], dtype=np.uint16))
+        group.create_dataset("owner", data=np.array([4, 9], dtype=np.uint64))
+        group.create_dataset("escaped", data=np.zeros(2))
+        group.create_dataset("crossed_sink", data=np.zeros(2))
+        group.create_dataset("crossing_time", data=np.zeros(2))
+        group.create_dataset("weight", data=np.array([0.5]))
+
+    cloud = load_tracers(str(path))
+
+    assert cloud is not None
+    assert cloud.scheme == "ito"
+    assert cloud.order == 3
+    np.testing.assert_array_equal(cloud.position, [[0.2, 0.3], [0.7, 0.8]])
+
+
 def test_body_accretion_reservoir_identity_is_available_to_visualization(tmp_path):
     path = tmp_path / "body-reservoirs.h5"
     prefix = (1 << 62) | (1 << 61)

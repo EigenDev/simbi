@@ -1,21 +1,21 @@
 # =============================================================================
 # traced_kh.py
 #
-# kelvin-helmholtz instability seeded with fixed-mass transport tracers. the
+# kelvin-helmholtz instability seeded with continuous ito-3 tracers. the
 # population is seeded in proportion to initial cell mass, so the denser
-# central layer starts with more tracers. accepted finite-volume mass transfers
-# move their authoritative cell owners through the same shear fluxes as the
-# gas. the checkpoint position is the derived owner-cell centroid, giving a
-# discrete lagrangian complement to the eulerian dye in dyed_kh.py.
+# central layer starts with more tracers. flux-derived displacement moments
+# advance their continuous positions through the same shear transport as the
+# gas, giving a lagrangian complement to the eulerian dye in dyed_kh.py.
 #
-# tracers land in the checkpoint `tracers` group with exact ids, cell or
-# reservoir owners, derived positions, mass weight, immutable initial-material
-# cohort, provenance flags, and deterministic spawning state. cohort 1 begins
-# in the dense layer and cohort 0 in the ambient gas.
+# tracers land in the checkpoint `continuous_tracers` group with exact ids,
+# continuous positions, cell or reservoir owners, mass weight, immutable
+# initial-material cohort, provenance flags, and deterministic random state.
+# cohort 1 begins in the dense layer and cohort 0 in the ambient gas.
 #
 # usage:
 #  simbi run traced_kh                       # 2000 tracers by default
 #  simbi run traced_kh --tracers 8000        # denser particle sampling
+#  simbi run traced_kh --tracer-method ito2  # cheaper second-order realization
 #  simbi run traced_kh --resolution 512,512  # sharper billows
 #  simbi plot data/traced_kh/*.h5 --field rho --draw-tracers   # scatter the particles
 #  simbi plot data/traced_kh/*.h5 --tracers-only               # concentration map
@@ -33,6 +33,7 @@ from simbi.types import (
     CoordSystem,
     Regime,
     Solver,
+    TracerScheme,
 )
 from simbi.types.typing import GasStateGenerator, InitialStateType
 
@@ -62,6 +63,14 @@ class TracedKelvinHelmholtz(SimbiProblem):
             2000,
             cli=True,
             description="lagrangian tracer count (mass-weighted seeding; 0 = none)",
+        ),
+    ]
+    tracer_method: Annotated[
+        TracerScheme,
+        ProblemParam(
+            TracerScheme.ITO3,
+            cli=True,
+            description="continuous tracer realization (ito2 or ito3)",
         ),
     ]
 
@@ -113,6 +122,12 @@ class TracedKelvinHelmholtz(SimbiProblem):
     def n_tracers(self) -> int:
         """expose the cli tracer count through the backend field."""
         return self.tracers
+
+    @computed_field
+    @property
+    def tracer_scheme(self) -> TracerScheme:
+        """select the configured continuous tracer realization."""
+        return self.tracer_method
 
     def _in_layer(self, y: float) -> bool:
         return abs(y) < 0.25

@@ -15,6 +15,7 @@ import pytest
 
 import simbi.libs.cpu_ext as backend
 from simbi.simulation.runner import run, to_execution_dict
+from simbi.types import TracerScheme
 from simbi_configs.examples.newtonian.decomposed_tabulated_geometric import (
     DecomposedTabulatedGeometric,
 )
@@ -86,6 +87,7 @@ def test_traced_kh_initial_state_is_repeatable():
 
     assert first == second
     assert problem.n_tracers == problem.tracers
+    assert problem.tracer_scheme is TracerScheme.ITO3
     cohorts = np.fromiter(problem.tracer_cohort(), dtype=np.uint16)
     assert cohorts.size == np.prod(problem.resolution)
     np.testing.assert_array_equal(np.unique(cohorts), [0, 1])
@@ -106,6 +108,8 @@ def test_canonical_example_advances_one_production_step(factory, tmp_path: Path)
         checkpoints = list(problem.data_directory.glob("*final*.h5"))
         assert checkpoints
         with h5py.File(checkpoints[0]) as checkpoint:
-            cohorts = np.asarray(checkpoint["tracers/cohort"], dtype=np.uint16)
+            group = checkpoint["continuous_tracers"]
+            assert int(group.attrs["order"]) == 3
+            cohorts = np.asarray(group["cohort"], dtype=np.uint16)
         assert cohorts.size == problem.n_tracers
         np.testing.assert_array_equal(np.unique(cohorts), [0, 1])

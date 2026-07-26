@@ -1385,6 +1385,54 @@ fn seed_configured_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_x
     }
 }
 
+fn configured_ito_order(
+    cfg: &Config,
+) -> Result<Option<symbi_sim::mass_transport::ItoOrder>, String> {
+    match cfg.tracer_scheme.as_str() {
+        "discrete" => Ok(None),
+        "ito2" => Ok(Some(symbi_sim::mass_transport::ItoOrder::Two)),
+        "ito3" => Ok(Some(symbi_sim::mass_transport::ItoOrder::Three)),
+        scheme => Err(format!(
+            "tracer_scheme must be one of discrete, ito2, or ito3; got '{scheme}'"
+        )),
+    }
+}
+
+fn attach_configured_tracers<
+    const D: usize,
+    const DOF: usize,
+    Mem: symbi::symbi_xpu::MemorySpace,
+>(
+    sim: &mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    cfg: &Config,
+) -> Result<(), String> {
+    let seed = seed_configured_tracers(sim, cfg);
+    if let Some(order) = configured_ito_order(cfg)? {
+        sim.continuous_tracers = Some(
+            symbi_sim::tracers::ContinuousTracerSet::from_discrete(&seed, order)
+                .map_err(|detail| format!("continuous tracer seeding: {detail}"))?,
+        );
+    } else {
+        sim.tracers = Some(seed);
+    }
+    Ok(())
+}
+
+fn convert_seeded_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
+    sim: &mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    order: symbi_sim::mass_transport::ItoOrder,
+) -> Result<(), String> {
+    let seed = sim
+        .tracers
+        .take()
+        .ok_or_else(|| "continuous tracer conversion requires a discrete seed".to_string())?;
+    sim.continuous_tracers = Some(
+        symbi_sim::tracers::ContinuousTracerSet::from_discrete(&seed, order)
+            .map_err(|detail| format!("continuous tracer conversion: {detail}"))?,
+    );
+    Ok(())
+}
+
 fn partition_configured_tracers<
     const D: usize,
     const DOF: usize,
@@ -1523,6 +1571,7 @@ where
             .into());
         }
         hier.levels[0].state.tracers = None;
+        hier.levels[0].state.continuous_tracers = None;
         load_checkpoint(&mut hier.levels[0].state, path)?;
     }
     // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
@@ -3417,6 +3466,11 @@ macro_rules! into_hierarchy {
             h.seed_fine_from_coarse().map_err(|e| format!("fine-level seed: {e:?}"))?;
             if $cfg.n_tracers > 0 {
                 h.attach_mass_tracers($cfg.n_tracers);
+                if let Some(order) = configured_ito_order($cfg)? {
+                    for level in &mut h.levels {
+                        convert_seeded_tracers(&mut level.state, order)?;
+                    }
+                }
             }
             h
         } else {
@@ -3583,7 +3637,7 @@ macro_rules! build_and_run_hydro {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
+            attach_configured_tracers(&mut sim, cfg)?;
             sim
         };
         let theta = build_theta(cfg);
@@ -4224,6 +4278,16 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 cfg.n_tracers,
             );
             global.attach_mass_tracers(cfg.n_tracers);
+            if let Some(order) = configured_ito_order(cfg)? {
+                for tile in &mut tiles {
+                    for level in &mut tile.levels {
+                        convert_seeded_tracers(&mut level.state, order)?;
+                    }
+                }
+                for level in &mut global.levels {
+                    convert_seeded_tracers(&mut level.state, order)?;
+                }
+            }
         }
 
         run_refined_decomposed_loop(cfg, tiles, global, counts)
@@ -4456,10 +4520,23 @@ macro_rules! build_and_run_hydro_decomposed {
         // set the checkpoint gather refills from the tiles each write.
         if cfg.n_tracers > 0 {
             let per_tile = partition_configured_tracers(&global, cfg, counts);
-            for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
-                tile.tracers = Some(set);
+            if let Some(order) = configured_ito_order(cfg)? {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.continuous_tracers = Some(
+                        symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                            .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                    );
+                }
+                global.continuous_tracers = Some(
+                    symbi_sim::tracers::ContinuousTracerSet::allocate(0, order)
+                        .map_err(|detail| format!("continuous tracer output: {detail}"))?,
+                );
+            } else {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.tracers = Some(set);
+                }
+                global.tracers = Some(symbi_sim::tracers::TracerSet::default());
             }
-            global.tracers = Some(symbi_sim::tracers::TracerSet::default());
         }
 
         // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
@@ -4848,7 +4925,7 @@ macro_rules! build_and_run_mhd {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
+            attach_configured_tracers(&mut sim, cfg)?;
             sim
         };
         let theta = build_theta(cfg);
@@ -4997,7 +5074,7 @@ macro_rules! build_and_run_imhd {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
+            attach_configured_tracers(&mut sim, cfg)?;
             sim
         };
         let theta = build_theta(cfg);
@@ -5255,10 +5332,23 @@ macro_rules! build_and_run_mhd_decomposed {
 
         if cfg.n_tracers > 0 {
             let per_tile = partition_configured_tracers(&global, cfg, counts);
-            for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
-                tile.tracers = Some(set);
+            if let Some(order) = configured_ito_order(cfg)? {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.continuous_tracers = Some(
+                        symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                            .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                    );
+                }
+                global.continuous_tracers = Some(
+                    symbi_sim::tracers::ContinuousTracerSet::allocate(0, order)
+                        .map_err(|detail| format!("continuous tracer output: {detail}"))?,
+                );
+            } else {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.tracers = Some(set);
+                }
+                global.tracers = Some(symbi_sim::tracers::TracerSet::default());
             }
-            global.tracers = Some(symbi_sim::tracers::TracerSet::default());
         }
 
         run_decomposed_loop(cfg, tiles, global, counts)
@@ -5433,10 +5523,23 @@ macro_rules! build_and_run_imhd_decomposed {
 
         if cfg.n_tracers > 0 {
             let per_tile = partition_configured_tracers(&global, cfg, counts);
-            for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
-                tile.tracers = Some(set);
+            if let Some(order) = configured_ito_order(cfg)? {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.continuous_tracers = Some(
+                        symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                            .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                    );
+                }
+                global.continuous_tracers = Some(
+                    symbi_sim::tracers::ContinuousTracerSet::allocate(0, order)
+                        .map_err(|detail| format!("continuous tracer output: {detail}"))?,
+                );
+            } else {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.tracers = Some(set);
+                }
+                global.tracers = Some(symbi_sim::tracers::TracerSet::default());
             }
-            global.tracers = Some(symbi_sim::tracers::TracerSet::default());
         }
 
         run_decomposed_loop(cfg, tiles, global, counts)
@@ -5885,7 +5988,7 @@ macro_rules! build_and_run_iso {
             sim
         } else {
             let mut sim = sim;
-            sim.tracers = Some(seed_configured_tracers(&sim, cfg));
+            attach_configured_tracers(&mut sim, cfg)?;
             sim
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
@@ -6234,12 +6337,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         if !matches!(cfg.tracer_scheme.as_str(), "discrete" | "ito2" | "ito3") {
             return Err(format!(
                 "tracer_scheme must be one of discrete, ito2, or ito3; got '{}'",
-                cfg.tracer_scheme
-            ));
-        }
-        if cfg.tracer_scheme != "discrete" {
-            return Err(format!(
-                "tracer_scheme '{}' is not wired into the particle driver yet",
                 cfg.tracer_scheme
             ));
         }
