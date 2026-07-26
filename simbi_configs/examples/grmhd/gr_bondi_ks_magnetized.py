@@ -48,7 +48,7 @@ class GrBondiKsMagnetized(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.KERR_SCHILD, description="background spacetime"),
+        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="background spacetime"),
     ]
     schwarzschild_mass: Annotated[
         float,

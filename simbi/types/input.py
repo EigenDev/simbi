@@ -44,11 +44,11 @@ class Spacetime(str, ExtendedEnum):
     SCHWARZSCHILD = "schwarzschild"
     # ingoing kerr-schild: the same physical schwarzschild vacuum in a HORIZON-PENETRATING chart
     # (regular across r = 2M) — the shift-advection-flux + KS densitization/wavespeed kernels.
-    KERR_SCHILD = "kerr_schild"
+    SCHWARZSCHILD_KS = "schwarzschild_ks"
     # spinning kerr in ingoing kerr-schild coordinates: horizon-penetrating, non-diagonal
     # spatial metric (frame dragging), theta-dependent lapse. requires the azimuthal momentum
     # DOF (5-tuple gas rows) and the kerr_spin parameter.
-    KERR = "kerr"
+    KERR_KS = "kerr_ks"
 
 
 class Regime(str, ExtendedEnum):
@@ -324,7 +324,8 @@ class Metadata:
     # and on isothermal checkpoints written before the attr existed.
     sound_speed: float | None = None
 
-    # the background spacetime chart (minkowski/schwarzschild/kerr_schild/kerr),
+    # the background spacetime chart
+    # (minkowski/schwarzschild/schwarzschild_ks/kerr_ks),
     # orthogonal to coord_system; "minkowski" on flat runs and on pre-attr checkpoints.
     spacetime: str = "minkowski"
     # the schwarzschild geometric mass M (G=c=1); 0 on a flat background.

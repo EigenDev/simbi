@@ -20,7 +20,7 @@
 #
 # supported diagonal spherically-symmetric charts (both have sqrt(-g) = r^2 sin(theta)):
 #   schwarzschild  f = 1 - 2M/r,   gamma_rr = 1/f,  beta^r = 0,        alpha = sqrt(f)
-#   kerr_schild    h = 1 + 2M/r,   gamma_rr = h,    beta^r = 2M/(r+2M), alpha = 1/sqrt(h)
+#   schwarzschild_ks  h = 1 + 2M/r, gamma_rr = h, beta^r = 2M/(r+2M), alpha = 1/sqrt(h)
 # kerr (non-diagonal spatial metric, frame dragging) is unsupported here.
 # =============================================================================
 
@@ -32,7 +32,7 @@ import numpy as np
 
 Array = np.ndarray
 
-_SUPPORTED_CHARTS = ("schwarzschild", "kerr_schild")
+_SUPPORTED_CHARTS = ("schwarzschild", "schwarzschild_ks")
 
 
 def _radial_metric(r: Array, mass: float, spacetime: str) -> tuple[Array, Array]:
@@ -42,7 +42,7 @@ def _radial_metric(r: Array, mass: float, spacetime: str) -> tuple[Array, Array]
     if spacetime == "schwarzschild":
         f = 1.0 - 2.0 * mass / r
         return 1.0 / f, np.zeros_like(np.asarray(r, dtype=float))
-    if spacetime == "kerr_schild":
+    if spacetime == "schwarzschild_ks":
         h = 1.0 + 2.0 * mass / r
         beta_r = 2.0 * mass / (r + 2.0 * mass)
         return h, beta_r * np.sqrt(h)  # beta^r/alpha = beta^r sqrt(h)
@@ -86,7 +86,7 @@ def accretion_rate(
     r: Array,
     theta: Array | None,
     mass: float,
-    spacetime: str = "kerr_schild",
+    spacetime: str = "schwarzschild_ks",
     *,
     dtheta: Array | float | None = None,
     dphi: float = 2.0 * np.pi,
@@ -309,7 +309,7 @@ def ring_accretion_from_checkpoint(
     and half the domain edge) + the r_ex-invariance summary. fails loud off the
     cartesian kerr-schild chart or on a massless background."""
     meta = data.metadata
-    if meta.spacetime != "kerr_schild" or meta.coord_system != "cartesian":
+    if meta.spacetime != "schwarzschild_ks" or meta.coord_system != "cartesian":
         raise ValueError(
             "ring_accretion_from_checkpoint: needs the cartesian kerr-schild slice; "
             f"got (coords={meta.coord_system}, spacetime={meta.spacetime})"

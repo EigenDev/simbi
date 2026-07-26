@@ -467,7 +467,7 @@ pub fn shell_flux_map_gv(
     begin_trace();
     let geo = cell_geometry_gv(coords, spacing, axes, ndim);
     let r_d = Gv::scalar("diagnostic_radius");
-    let spin = if matches!(spacetime, Spacetime::Kerr) {
+    let spin = if matches!(spacetime, Spacetime::KerrKS) {
         Gv::scalar("kerr_spin")
     } else {
         Gv::ZERO
@@ -515,7 +515,7 @@ mod shell_flux_tests {
         // per-axis grid scalars, and reads the densitized mass flux; schwarzschild carries no spin.
         let (k, writes) = shell_flux_map_gv(
             Coords::Cartesian,
-            Spacetime::KerrSchild,
+            Spacetime::SchwarzschildKS,
             &[Spacing::Uniform; 3],
             &[0, 1, 2],
             3,
@@ -542,7 +542,7 @@ mod shell_flux_tests {
         // the spinning-kerr chart adds the spin scalar.
         let (kk, _) = shell_flux_map_gv(
             Coords::Cartesian,
-            Spacetime::Kerr,
+            Spacetime::KerrKS,
             &[Spacing::Uniform; 3],
             &[0, 1, 2],
             3,

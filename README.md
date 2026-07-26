@@ -499,21 +499,22 @@ relativistic regime, and the geometry supplies the metric the fluid evolves on:
 
 - `MINKOWSKI` — flat, i.e. plain special relativity
 - `SCHWARZSCHILD` — a static central mass
-- `KERR_SCHILD` — horizon-penetrating coordinates; gas crosses r = 2M without drama
-- `KERR` — a spinning black hole
+- `SCHWARZSCHILD_KS` — nonspinning Schwarzschild in horizon-penetrating
+  Kerr-Schild coordinates; gas crosses r = 2M without drama
+- `KERR_KS` — spinning Kerr in horizon-penetrating Kerr-Schild coordinates
 
 So "GR hydro around a Kerr black hole" is the same `RHD` regime you already know,
 handed a different metric.
 
 ### Horizon excision
 
-Point a horizon-penetrating chart (`KERR_SCHILD` or `KERR`) at a black hole and you can actually
+Point a horizon-penetrating chart (`SCHWARZSCHILD_KS` or `KERR_KS`) at a black hole and you can actually
 *swallow* it. Set `excision_radius` to a radius inside the horizon (above the metric-guard radius
 M/2, so around 0.7 r_+) and the cells inside are excised every step: their primitives are
 overwritten by a causal, outward one-way "onion" sweep and their conserved state is rebuilt from
 the local metric, so nothing unphysical leaks back out across the horizon and the accretion-rate
 certificate stays well-posed — no coordinate singularity to babysit. It works for hydro and MHD
-(the staggered magnetic faces stay constrained-transport-owned), for spinning (`KERR`) horizons,
+(the staggered magnetic faces stay constrained-transport-owned), for spinning (`KERR_KS`) horizons,
 on the GPU, and across the multi-GPU decomposed path.
 
 ### Coordinate systems

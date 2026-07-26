@@ -402,7 +402,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     ) -> (f64, f64) {
         // the shell-flux kernels are baked for the cartesian kerr-schild chart (the only chart that
         // excises). reuse the (already-consumed) cfl scratch for the per-quantity Add-reduction.
-        if sim.geom.spacetime != Spacetime::KerrSchild
+        if sim.geom.spacetime != Spacetime::SchwarzschildKS
             || sim.geom.coords != symbi_geometry::Geometry::Cartesian
         {
             return (0.0, 0.0);
@@ -428,7 +428,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the dragging-consistent w-copy is a spherical-azimuth construct (gamma_{r phi} on the
         // swirl DOF); the cartesian kerr chart has DOF == D and copies the raw prims like any
         // other background.
-        let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr)
+        let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrKS)
             && sim.geom.coords == symbi_geometry::Geometry::Spherical;
         let name = if is_kerr {
             format!("rhd_ghost_fill{geom_sfx}_kerr_{D}d")

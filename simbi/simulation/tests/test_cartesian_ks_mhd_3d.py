@@ -59,7 +59,7 @@ def _sqrtg(x: float, y: float, z: float) -> float:
 
 class _CartesianKsMhd3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_SCHILD)]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.SCHWARZSCHILD_KS)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     # excision of the singular core at 0.7 r_+ (r_+ = 2M) is OPT-IN per test: the
     # full-evolution symmetry gate excises it (the sub-horizon interior is causally

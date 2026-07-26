@@ -127,8 +127,8 @@ pub fn spacetime_slug(spacetime: Spacetime) -> &'static str {
     match spacetime {
         Spacetime::Minkowski => "",
         Spacetime::Schwarzschild => "_schw",
-        Spacetime::KerrSchild => "_ks",
-        Spacetime::Kerr => "_kerr",
+        Spacetime::SchwarzschildKS => "_ks",
+        Spacetime::KerrKS => "_kerr",
     }
 }
 

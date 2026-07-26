@@ -40,7 +40,7 @@ class GrBondiKS(SimbiProblem):
     spacetime: Annotated[
         Spacetime,
         ProblemParam(
-            Spacetime.KERR_SCHILD, description="background spacetime (ingoing kerr-schild)"
+            Spacetime.SCHWARZSCHILD_KS, description="background spacetime (ingoing kerr-schild)"
         ),
     ]
     schwarzschild_mass: Annotated[

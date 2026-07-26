@@ -44,8 +44,8 @@ fn mid(ax: usize, idx: usize) -> f64 {
 
 fn sqrtg(st: Spacetime, r: f64, th: f64) -> f64 {
     match st {
-        Spacetime::KerrSchild => r * r * th.sin() * (1.0 + 2.0 * MASS / r).sqrt(),
-        Spacetime::Kerr => {
+        Spacetime::SchwarzschildKS => r * r * th.sin() * (1.0 + 2.0 * MASS / r).sqrt(),
+        Spacetime::KerrKS => {
             let sigma = r * r + SPIN * SPIN * th.cos() * th.cos();
             sigma * th.sin() * (1.0 + 2.0 * MASS * r / sigma).sqrt()
         }
@@ -154,13 +154,13 @@ fn preserves_div(st: Spacetime) {
 }
 
 #[test]
-fn kerr_schild_ct_curl_preserves_div_b() {
-    preserves_div(Spacetime::KerrSchild);
+fn schwarzschild_ks_ct_curl_preserves_div_b() {
+    preserves_div(Spacetime::SchwarzschildKS);
 }
 
 #[test]
 fn kerr_ct_curl_preserves_div_b() {
-    preserves_div(Spacetime::Kerr);
+    preserves_div(Spacetime::KerrKS);
 }
 
 // ---- the ACTUAL contact EMF kernel + curl, in isolation ----
@@ -242,10 +242,10 @@ fn emf_then_curl_preserves_div(st: Spacetime) {
 }
 
 #[test]
-fn kerr_schild_emf_then_curl_preserves_div() {
-    emf_then_curl_preserves_div(Spacetime::KerrSchild);
+fn schwarzschild_ks_emf_then_curl_preserves_div() {
+    emf_then_curl_preserves_div(Spacetime::SchwarzschildKS);
 }
 #[test]
 fn kerr_emf_then_curl_preserves_div() {
-    emf_then_curl_preserves_div(Spacetime::Kerr);
+    emf_then_curl_preserves_div(Spacetime::KerrKS);
 }

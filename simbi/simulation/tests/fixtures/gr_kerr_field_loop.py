@@ -46,7 +46,7 @@ class GrKerrFieldLoop(SimbiProblem):
         float, ProblemParam(4.0 / 3.0, description="adiabatic index")
     ]
     spacetime: Annotated[
-        Spacetime, ProblemParam(Spacetime.KERR, description="background spacetime")
+        Spacetime, ProblemParam(Spacetime.KERR_KS, description="background spacetime")
     ]
     schwarzschild_mass: Annotated[
         float, ProblemParam(1.0, cli=True, description="black-hole mass M")

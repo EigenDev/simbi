@@ -322,7 +322,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
                 <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&g, x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let g = SchwarzschildKSCartesian { mass };
             (
                 g.lapse(x),
@@ -330,7 +330,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
                 <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&g, x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let g = SchwarzschildKSCylindrical { mass };
             (
                 g.lapse(x),
@@ -338,7 +338,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
                 <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&g, x),
             )
         }
-        (Spacetime::KerrSchild, _) => {
+        (Spacetime::SchwarzschildKS, _) => {
             let g = SchwarzschildKS { mass };
             (
                 g.lapse(x),
@@ -348,7 +348,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             let g = KerrKSCartesian {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -359,7 +359,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
                 <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&g, x),
             )
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             let g = KerrKSCylindrical {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -370,7 +370,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
                 <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&g, x),
             )
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             let g = KerrKS {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -593,7 +593,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
                 <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (
                 m.spatial_metric(x),
@@ -602,7 +602,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
                 <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
             )
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
             (
                 m.spatial_metric(x),
@@ -611,7 +611,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
                 <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
             )
         }
-        (Spacetime::KerrSchild, _) => {
+        (Spacetime::SchwarzschildKS, _) => {
             let m = SchwarzschildKS { mass };
             (
                 m.spatial_metric(x),
@@ -622,7 +622,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             let m = KerrKSCartesian {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -634,7 +634,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
                 <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
             )
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             let m = KerrKSCylindrical {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -646,7 +646,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
                 <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
             )
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             let m = KerrKS {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
@@ -750,7 +750,7 @@ pub fn rmhd_source_cfl_gr_gv(
                 let (_, st) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pre, b);
                 (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
             }
-            (Spacetime::KerrSchild, Coords::Cartesian) => {
+            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
                 let mg = SchwarzschildKSCartesian { mass: mass_gv };
                 let (sm, _) = grmhd_covariant_source(
                     &SchwarzschildKSCartesian { mass },
@@ -764,7 +764,7 @@ pub fn rmhd_source_cfl_gr_gv(
                     grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
                 (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
             }
-            (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
                 let mg = SchwarzschildKSCylindrical { mass: mass_gv };
                 let (sm, _) = grmhd_covariant_source(
                     &SchwarzschildKSCylindrical { mass },
@@ -784,7 +784,7 @@ pub fn rmhd_source_cfl_gr_gv(
                 );
                 (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
             }
-            (Spacetime::KerrSchild, _) => {
+            (Spacetime::SchwarzschildKS, _) => {
                 let mg = SchwarzschildKS { mass: mass_gv };
                 let (sm, _) =
                     grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
@@ -794,7 +794,7 @@ pub fn rmhd_source_cfl_gr_gv(
             }
             // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
             // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-            (Spacetime::Kerr, Coords::Cartesian) => {
+            (Spacetime::KerrKS, Coords::Cartesian) => {
                 let spin_gv = Gv::scalar("kerr_spin");
                 let mg = KerrKSCartesian {
                     mass: mass_gv,
@@ -813,7 +813,7 @@ pub fn rmhd_source_cfl_gr_gv(
                     grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
                 (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
             }
-            (Spacetime::Kerr, Coords::Cylindrical) => {
+            (Spacetime::KerrKS, Coords::Cylindrical) => {
                 let spin_gv = Gv::scalar("kerr_spin");
                 let mg = KerrKSCylindrical {
                     mass: mass_gv,
@@ -832,7 +832,7 @@ pub fn rmhd_source_cfl_gr_gv(
                     grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pre, b);
                 (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
             }
-            (Spacetime::Kerr, _) => {
+            (Spacetime::KerrKS, _) => {
                 let spin_gv = Gv::scalar("kerr_spin");
                 let mg = KerrKS {
                     mass: mass_gv,
@@ -890,9 +890,9 @@ pub fn rmhd_source_cfl_gr_gv(
     // driving enormous geodesic sources over donor-copied gas. gating cell CENTERS on r_+ matches how
     // interior guard activations are counted. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
-        && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
+        && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
     {
-        let spin = if spacetime == Spacetime::Kerr {
+        let spin = if spacetime == Spacetime::KerrKS {
             Gv::scalar("kerr_spin")
         } else {
             Gv::ZERO
@@ -979,7 +979,7 @@ pub fn rhd_source_cfl_gr_gv(
             let (_, st) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pre);
             (gi, sm, st, al, bt)
         }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
             let al = SchwarzschildKSCartesian { mass: mass_gv }.lapse(x);
             let bt = SchwarzschildKSCartesian { mass: mass_gv }.shift(x);
@@ -988,7 +988,7 @@ pub fn rhd_source_cfl_gr_gv(
             let (_, st) = grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pre);
             (gi, sm, st, al, bt)
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
             let al = SchwarzschildKSCylindrical { mass: mass_gv }.lapse(x);
             let bt = SchwarzschildKSCylindrical { mass: mass_gv }.shift(x);
@@ -997,7 +997,7 @@ pub fn rhd_source_cfl_gr_gv(
             let (_, st) = grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pre);
             (gi, sm, st, al, bt)
         }
-        (Spacetime::KerrSchild, _) => {
+        (Spacetime::SchwarzschildKS, _) => {
             let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
             let al = SchwarzschildKS { mass: mass_gv }.lapse(x);
             let bt = SchwarzschildKS { mass: mass_gv }.shift(x);
@@ -1007,7 +1007,7 @@ pub fn rhd_source_cfl_gr_gv(
         }
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             let spin_gv = Gv::scalar("kerr_spin");
             let gi = KerrKSCartesian {
                 mass: mass_gv,
@@ -1029,7 +1029,7 @@ pub fn rhd_source_cfl_gr_gv(
             let (_, st) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pre);
             (gi, sm, st, al, bt)
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             let spin_gv = Gv::scalar("kerr_spin");
             let gi = KerrKSCylindrical {
                 mass: mass_gv,
@@ -1052,7 +1052,7 @@ pub fn rhd_source_cfl_gr_gv(
             let (_, st) = grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pre);
             (gi, sm, st, al, bt)
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             let spin_gv = Gv::scalar("kerr_spin");
             let gi = KerrKS {
                 mass: mass_gv,
@@ -1168,9 +1168,9 @@ pub fn rhd_source_cfl_gr_gv(
     // driving enormous geodesic sources over donor-copied gas. gating cell CENTERS on r_+ matches how
     // interior guard activations are counted. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
-        && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
+        && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
     {
-        let spin = if spacetime == Spacetime::Kerr {
+        let spin = if spacetime == Spacetime::KerrKS {
             Gv::scalar("kerr_spin")
         } else {
             Gv::ZERO
@@ -1297,7 +1297,7 @@ pub fn fofc_project_gr_mhd_gv(
                     m.shift(x),
                 )
             }
-            (Spacetime::KerrSchild, Coords::Cartesian) => {
+            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
                 let m = SchwarzschildKSCartesian { mass };
                 (
                     m.spatial_metric_inv(x),
@@ -1306,7 +1306,7 @@ pub fn fofc_project_gr_mhd_gv(
                     m.shift(x),
                 )
             }
-            (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
                 let m = SchwarzschildKSCylindrical { mass };
                 (
                     m.spatial_metric_inv(x),
@@ -1315,7 +1315,7 @@ pub fn fofc_project_gr_mhd_gv(
                     m.shift(x),
                 )
             }
-            (Spacetime::KerrSchild, _) => {
+            (Spacetime::SchwarzschildKS, _) => {
                 let m = SchwarzschildKS { mass };
                 (
                     m.spatial_metric_inv(x),
@@ -1324,7 +1324,7 @@ pub fn fofc_project_gr_mhd_gv(
                     m.shift(x),
                 )
             }
-            (Spacetime::Kerr, Coords::Cartesian) => {
+            (Spacetime::KerrKS, Coords::Cartesian) => {
                 let m = KerrKSCartesian {
                     mass,
                     spin: Gv::scalar("kerr_spin"),
@@ -1336,7 +1336,7 @@ pub fn fofc_project_gr_mhd_gv(
                     m.shift(x),
                 )
             }
-            (Spacetime::Kerr, Coords::Cylindrical) => {
+            (Spacetime::KerrKS, Coords::Cylindrical) => {
                 let m = KerrKSCylindrical {
                     mass,
                     spin: Gv::scalar("kerr_spin"),
@@ -1348,7 +1348,7 @@ pub fn fofc_project_gr_mhd_gv(
                     m.shift(x),
                 )
             }
-            (Spacetime::Kerr, _) => {
+            (Spacetime::KerrKS, _) => {
                 let m = KerrKS {
                     mass,
                     spin: Gv::scalar("kerr_spin"),
@@ -1437,33 +1437,33 @@ pub fn fofc_project_gr_gv(
             let m = Schwarzschild { mass };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             let m = SchwarzschildKSCylindrical { mass };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::KerrSchild, _) => {
+        (Spacetime::SchwarzschildKS, _) => {
             let m = SchwarzschildKS { mass };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             let m = KerrKSCartesian {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
             };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             let m = KerrKSCylindrical {
                 mass,
                 spin: Gv::scalar("kerr_spin"),
             };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             let m = KerrKS {
                 mass,
                 spin: Gv::scalar("kerr_spin"),

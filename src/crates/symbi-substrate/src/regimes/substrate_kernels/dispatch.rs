@@ -483,7 +483,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     assert!(
         matches!(
             geom.spacetime,
-            symbi_geometry::Spacetime::KerrSchild | symbi_geometry::Spacetime::Kerr
+            symbi_geometry::Spacetime::SchwarzschildKS | symbi_geometry::Spacetime::KerrKS
         ),
         "excision requires a horizon-penetrating kerr-schild chart"
     );

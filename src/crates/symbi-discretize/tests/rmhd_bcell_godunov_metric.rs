@@ -325,7 +325,7 @@ fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
 }
 
 #[test]
-fn kerr_schild_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
+fn schwarzschild_ks_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
     // kerr-schild cylindrical (R,z), contravariant B: the out-of-plane B^phi must take the
     // SAME covariant R-measure divergence as the in-plane components (the flat metric-free
     // shortcut would give a ZERO update for a uniform radial flux — dropping the G^R/R
@@ -345,7 +345,7 @@ fn kerr_schild_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
         s.push(("schwarzschild_mass", m));
         let b = run_bcell_euler(
             Coords::Cylindrical,
-            Spacetime::KerrSchild,
+            Spacetime::SchwarzschildKS,
             &[0, 2],
             &s,
             uniform_radial,

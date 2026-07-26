@@ -708,7 +708,7 @@ pub fn godunov_stage_gv_with_fused_built(
                 Spacetime::Minkowski => cell_geometry_gv(coords, spacing, axes, ndim as usize),
                 // spinning kerr: the densitized measure is Sigma sin(theta) — the spin rides the
                 // `kerr_spin` kernel scalar into the face/volume moments.
-                Spacetime::Kerr => cell_geometry_covariant_gv(
+                Spacetime::KerrKS => cell_geometry_covariant_gv(
                     coords,
                     spacing,
                     axes,
@@ -902,15 +902,17 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::Schwarzschild => {
                         grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pp, b)
                     }
-                    Spacetime::KerrSchild if coords == Coords::Cartesian => grmhd_covariant_source(
-                        &SchwarzschildKSCartesian { mass },
-                        x,
-                        rho_h,
-                        v,
-                        pp,
-                        b,
-                    ),
-                    Spacetime::KerrSchild if coords == Coords::Cylindrical => {
+                    Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
+                        grmhd_covariant_source(
+                            &SchwarzschildKSCartesian { mass },
+                            x,
+                            rho_h,
+                            v,
+                            pp,
+                            b,
+                        )
+                    }
+                    Spacetime::SchwarzschildKS if coords == Coords::Cylindrical => {
                         grmhd_covariant_source(
                             &SchwarzschildKSCylindrical { mass },
                             x,
@@ -920,16 +922,16 @@ pub fn godunov_stage_gv_with_fused_built(
                             b,
                         )
                     }
-                    Spacetime::KerrSchild => {
+                    Spacetime::SchwarzschildKS => {
                         grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
                     }
-                    Spacetime::Kerr if coords == Coords::Cartesian => {
+                    Spacetime::KerrKS if coords == Coords::Cartesian => {
                         // cartesian spinning kerr: the rank-1 kerr-schild metric at the FULL
                         // cartesian position; derivatives ride the same autodiff Dual pass.
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pp, b)
                     }
-                    Spacetime::Kerr if coords == Coords::Cylindrical => {
+                    Spacetime::KerrKS if coords == Coords::Cylindrical => {
                         // cylindrical spinning kerr: the rank-1 update on the diag(1, R^2, 1)
                         // base at the FULL (R, phi, z) position; same autodiff Dual pass.
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
@@ -942,7 +944,7 @@ pub fn godunov_stage_gv_with_fused_built(
                             b,
                         )
                     }
-                    Spacetime::Kerr => {
+                    Spacetime::KerrKS => {
                         // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
                         // with the EM stress; the non-diagonal kerr metric enters only through the
                         // autodiff Dual pass, no per-block closed form.
@@ -959,24 +961,24 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::Schwarzschild => {
                         grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp)
                     }
-                    Spacetime::KerrSchild if coords == Coords::Cartesian => {
+                    Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
                         grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pp)
                     }
-                    Spacetime::KerrSchild if coords == Coords::Cylindrical => {
+                    Spacetime::SchwarzschildKS if coords == Coords::Cylindrical => {
                         grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pp)
                     }
-                    Spacetime::KerrSchild => {
+                    Spacetime::SchwarzschildKS => {
                         grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp)
                     }
-                    Spacetime::Kerr if coords == Coords::Cartesian => {
+                    Spacetime::KerrKS if coords == Coords::Cartesian => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pp)
                     }
-                    Spacetime::Kerr if coords == Coords::Cylindrical => {
+                    Spacetime::KerrKS if coords == Coords::Cylindrical => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pp)
                     }
-                    Spacetime::Kerr => {
+                    Spacetime::KerrKS => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)
                     }
@@ -1731,7 +1733,7 @@ fn bcell_godunov_geom(
         // divergence), exactly like the gas godunov's geometry selection.
         let g = match spacetime {
             Spacetime::Minkowski => cell_geometry_gv(coords, spacing, axes, ndim),
-            Spacetime::Kerr => cell_geometry_covariant_gv(
+            Spacetime::KerrKS => cell_geometry_covariant_gv(
                 coords,
                 spacing,
                 axes,

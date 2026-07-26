@@ -184,7 +184,7 @@ impl<S: Scalar> LinearSpace for S {
 // the index-to-physics bridge: methods take cell index (or a position derived
 // from one) and return metric quantities. FlatCartesian is a ZST with the
 // identity metric — the optimizer eliminates every method call through
-// monomorphization. Cylindrical/Spherical/KerrSchild add non-trivial metric.
+// monomorphization. cylindrical/spherical/schwarzschild-ks add a non-trivial metric.
 //
 // NOT connected to the Regime trait in symbi-hydro — physics handles
 // curvilinear cases ad-hoc. lifting Geometry into Regime (so flux/wave_speed

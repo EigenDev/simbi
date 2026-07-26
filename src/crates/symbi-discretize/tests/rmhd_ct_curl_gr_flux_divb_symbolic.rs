@@ -79,7 +79,7 @@ fn div(spacetime: Spacetime, coords: Coords, axes: &[usize]) -> LinFormR {
 #[test]
 fn divb_cartesian_kerr_schild_symbolic() {
     // r = sqrt(x^2 + y^2): a NESTED sqrt in sqrt(gamma) = sqrt(1 + 2M/r).
-    let d = div(Spacetime::KerrSchild, Coords::Cartesian, &[0, 1]);
+    let d = div(Spacetime::SchwarzschildKS, Coords::Cartesian, &[0, 1]);
     assert!(
         d.is_zero(),
         "cartesian KS div(curl B) != 0:\n{:#?}",
@@ -91,7 +91,7 @@ fn divb_cartesian_kerr_schild_symbolic() {
 fn divb_cylindrical_rphi_kerr_schild_symbolic() {
     // the (R, phi) equatorial disk: r = R on the equator, so this chart is diagonal + affine, but the
     // extract-the-weight method binds it uniformly with the rest.
-    let d = div(Spacetime::KerrSchild, Coords::Cylindrical, &[0, 1]);
+    let d = div(Spacetime::SchwarzschildKS, Coords::Cylindrical, &[0, 1]);
     assert!(
         d.is_zero(),
         "cylindrical r-phi KS div(curl B) != 0:\n{:#?}",
@@ -103,7 +103,7 @@ fn divb_cylindrical_rphi_kerr_schild_symbolic() {
 fn divb_cylindrical_rz_kerr_schild_symbolic() {
     // the (R, z) poloidal chart: r = sqrt(R^2 + z^2), NON-diagonal spatial metric (gamma_Rz), nested
     // sqrt in the measure. axes = [R=0, z=2].
-    let d = div(Spacetime::KerrSchild, Coords::Cylindrical, &[0, 2]);
+    let d = div(Spacetime::SchwarzschildKS, Coords::Cylindrical, &[0, 2]);
     assert!(
         d.is_zero(),
         "cylindrical r-z KS div(curl B) != 0:\n{:#?}",
@@ -115,7 +115,7 @@ fn divb_cylindrical_rz_kerr_schild_symbolic() {
 fn divb_spherical_kerr_symbolic() {
     // spinning Kerr (r, theta): sqrt(gamma) = Sigma sin(theta) sqrt(1 + b), Sigma = r^2 + a^2 cos^2,
     // b = 2Mr/Sigma — non-affine radius AND a transcendental (cos) argument.
-    let d = div(Spacetime::Kerr, Coords::Spherical, &[0, 1]);
+    let d = div(Spacetime::KerrKS, Coords::Spherical, &[0, 1]);
     assert!(
         d.is_zero(),
         "spherical Kerr div(curl B) != 0:\n{:#?}",
@@ -130,7 +130,7 @@ fn divb_gr_flux_symbolic_detects_missing_weight() {
     let raw = |dir: usize| -> LinFormR {
         let (kernel, writes) = rmhd_ct_curl_2d_sph_gr_gv(
             dir,
-            Spacetime::KerrSchild,
+            Spacetime::SchwarzschildKS,
             Coords::Cartesian,
             &[Spacing::Uniform; 2],
             &[0, 1],

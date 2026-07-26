@@ -46,7 +46,7 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
     spacetime: Annotated[
         Spacetime,
         ProblemParam(
-            Spacetime.KERR_SCHILD,
+            Spacetime.SCHWARZSCHILD_KS,
             description="horizon-penetrating cartesian kerr-schild background; "
             "setup() promotes it to KERR when kerr_spin != 0",
         ),
@@ -177,7 +177,7 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         # the spinning chart is a different metric family (non-diagonal gamma with
         # the frame-dragging swirl of l); the spacetime tag follows the spin knob.
         if self.kerr_spin != 0.0:
-            self.spacetime = Spacetime.KERR
+            self.spacetime = Spacetime.KERR_KS
         # auto excision surface: 0.7 r_+ keeps the live band between the surface
         # and the horizon narrow (the gas there is near-vacuum supersonic infall,
         # the stiffest cells in the domain; a wide band collapses dt).

@@ -54,7 +54,7 @@ def _grid_radii():
 
 class _KerrExcised3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR)]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     kerr_spin: Annotated[float, ProblemParam(SPIN)]
     excision_radius: Annotated[float, ProblemParam(0.0, cli=True)]
@@ -154,7 +154,7 @@ def test_spinning_excision_acts_and_leakage_is_bounded() -> None:
 
 class _KsMhdExcised3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_SCHILD)]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.SCHWARZSCHILD_KS)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     excision_radius: Annotated[float, ProblemParam(0.0, cli=True)]
     regime: Annotated[Regime, ProblemParam(Regime.RMHD)]

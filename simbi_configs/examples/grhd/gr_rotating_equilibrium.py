@@ -135,7 +135,7 @@ class GrRotatingEquilibrium(SimbiProblem):
             # spinning: the kerr spacetime. the domain stays OUTSIDE the horizon —
             # a stationary constant-l azimuthal flow needs a timelike LNRF
             # (Delta > 0), so this state has no through-horizon continuation.
-            self.spacetime = Spacetime.KERR
+            self.spacetime = Spacetime.KERR_KS
         self.bounds = [
             (3.0, 100.0),
             (theta_c - self.theta_halfwidth, theta_c + self.theta_halfwidth),

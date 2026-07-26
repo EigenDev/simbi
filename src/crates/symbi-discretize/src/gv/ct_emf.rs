@@ -30,22 +30,22 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
     }
     match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => adm!(Schwarzschild { mass }, Schwarzschild<Gv>),
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             adm!(
                 SchwarzschildKSCartesian { mass },
                 SchwarzschildKSCartesian<Gv>
             )
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             adm!(
                 SchwarzschildKSCylindrical { mass },
                 SchwarzschildKSCylindrical<Gv>
             )
         }
-        (Spacetime::KerrSchild, _) => adm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
+        (Spacetime::SchwarzschildKS, _) => adm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => {
+        (Spacetime::KerrKS, Coords::Cartesian) => {
             adm!(
                 KerrKSCartesian {
                     mass,
@@ -54,7 +54,7 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
                 KerrKSCartesian<Gv>
             )
         }
-        (Spacetime::Kerr, Coords::Cylindrical) => {
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
             adm!(
                 KerrKSCylindrical {
                     mass,
@@ -63,7 +63,7 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
                 KerrKSCylindrical<Gv>
             )
         }
-        (Spacetime::Kerr, _) => {
+        (Spacetime::KerrKS, _) => {
             adm!(
                 KerrKS {
                     mass,
@@ -102,36 +102,36 @@ fn gr_spatial_metric_at(
     }
     match (spacetime, coords) {
         (Spacetime::Schwarzschild, _) => sm!(Schwarzschild { mass }, Schwarzschild<Gv>),
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             sm!(
                 SchwarzschildKSCartesian { mass },
                 SchwarzschildKSCartesian<Gv>
             )
         }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
             sm!(
                 SchwarzschildKSCylindrical { mass },
                 SchwarzschildKSCylindrical<Gv>
             )
         }
-        (Spacetime::KerrSchild, _) => sm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
+        (Spacetime::SchwarzschildKS, _) => sm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::Kerr, Coords::Cartesian) => sm!(
+        (Spacetime::KerrKS, Coords::Cartesian) => sm!(
             KerrKSCartesian {
                 mass,
                 spin: Gv::scalar("kerr_spin")
             },
             KerrKSCartesian<Gv>
         ),
-        (Spacetime::Kerr, Coords::Cylindrical) => sm!(
+        (Spacetime::KerrKS, Coords::Cylindrical) => sm!(
             KerrKSCylindrical {
                 mass,
                 spin: Gv::scalar("kerr_spin")
             },
             KerrKSCylindrical<Gv>
         ),
-        (Spacetime::Kerr, _) => sm!(
+        (Spacetime::KerrKS, _) => sm!(
             KerrKS {
                 mass,
                 spin: Gv::scalar("kerr_spin")

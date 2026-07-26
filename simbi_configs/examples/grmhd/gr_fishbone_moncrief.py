@@ -440,7 +440,7 @@ class GrFishboneMoncrief(SimbiProblem):
             # spinning: the kerr spacetime on the horizon-penetrating chart, inner
             # boundary below r_plus = M + sqrt(M^2 - a^2) (supersonic through-horizon
             # inflow decouples the inner ghosts).
-            self.spacetime = Spacetime.KERR
+            self.spacetime = Spacetime.KERR_KS
             mm = self.schwarzschild_mass
             r_plus = mm + math.sqrt(max(mm * mm - self.kerr_spin**2, 0.0))
             r_lo = 0.85 * r_plus

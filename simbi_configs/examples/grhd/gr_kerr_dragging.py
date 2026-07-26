@@ -41,7 +41,7 @@ class GrKerrDragging(SimbiProblem):
     """uniform gas on the zero-angular-momentum kerr dragging manifold — the w-reconstruction probe."""
 
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0, description="adiabatic index")]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR, description="background spacetime")]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS, description="background spacetime")]
     schwarzschild_mass: Annotated[float, ProblemParam(1.0, cli=True, description="black-hole mass M")]
     kerr_spin: Annotated[float, ProblemParam(0.9, cli=True, description="dimensionless spin a")]
     inflow: Annotated[float, ProblemParam(0.15, cli=True, description="radial inflow speed |v^r|")]

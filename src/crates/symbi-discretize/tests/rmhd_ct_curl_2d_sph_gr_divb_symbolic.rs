@@ -154,7 +154,7 @@ fn divb_2d_sph_schwarzschild_symbolic_telescoping() {
 #[test]
 fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
     // Kerr-Schild: sqrt(gamma) = r^2 sin * sqrt(h) -> the lapse is in the NUMERATOR.
-    let d = div(Spacetime::KerrSchild, true);
+    let d = div(Spacetime::SchwarzschildKS, true);
     assert!(
         d.is_zero(),
         "2d sph Kerr-Schild div(curl B) != 0 symbolically — residual:\n{:#?}",

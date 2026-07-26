@@ -41,7 +41,7 @@ PRE0 = 0.1
 
 class _CartesianKsBH3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_SCHILD)]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.SCHWARZSCHILD_KS)]
     schwarzschild_mass: Annotated[float, ProblemParam(1.0)]
     excision_radius: Annotated[float, ProblemParam(0.0, cli=True)]
     resolution: Annotated[tuple[int, int, int], ProblemParam((RES, RES, RES))]

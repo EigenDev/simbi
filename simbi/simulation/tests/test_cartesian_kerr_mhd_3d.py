@@ -61,7 +61,7 @@ def _w(x: float, y: float, z: float, a: float) -> float:
 
 class _CartesianKerrMhd3D(SimbiProblem):
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0)]
-    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR)]
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS)]
     schwarzschild_mass: Annotated[float, ProblemParam(MASS)]
     kerr_spin: Annotated[float, ProblemParam(SPIN)]
     regime: Annotated[Regime, ProblemParam(Regime.RMHD)]
@@ -114,7 +114,7 @@ class _CartesianKerrMhd3D(SimbiProblem):
         return (gas_state, b_field("b1"), b_field("b2"), b_field("b3"))
 
 
-def _run(spin: float, spacetime: Spacetime = Spacetime.KERR) -> dict[str, np.ndarray]:
+def _run(spin: float, spacetime: Spacetime = Spacetime.KERR_KS) -> dict[str, np.ndarray]:
     d = tempfile.mkdtemp() + "/"
     p = _CartesianKerrMhd3D(data_directory=Path(d))
     p.kerr_spin = spin
@@ -186,7 +186,7 @@ def test_cartesian_kerr_mhd_3d_divb_and_quarter_turn() -> None:
 @needs_backend
 def test_cartesian_kerr_mhd_a0_matches_kerr_schild_exterior() -> None:
     a = _run(0.0)
-    b = _run(0.0, spacetime=Spacetime.KERR_SCHILD)
+    b = _run(0.0, spacetime=Spacetime.SCHWARZSCHILD_KS)
     assert a["rho"].max() > 1.05 * RHO0, "no accretion; the comparison is vacuous"
     dd = 2.0 * L / RES
     xs = (np.arange(RES) + 0.5) * dd - L
