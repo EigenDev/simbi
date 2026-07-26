@@ -64,14 +64,19 @@ def _kerr_wdiv(p, B1, B2):
     [
         (Solver.HLLE, CtMethod.CONTACT),
         (Solver.HLLE, CtMethod.UCT),
-        (Solver.HLLD, CtMethod.UCT),  # the sharp tetrad HLLD flux + UCT-HLLD wave-sum EMF on kerr
+        (
+            Solver.HLLD,
+            CtMethod.UCT,
+        ),  # the sharp tetrad HLLD flux + UCT-HLLD wave-sum EMF on kerr
     ],
 )
 def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
     from simbi.simulation.tests.fixtures.gr_kerr_field_loop import GrKerrFieldLoop
 
     d = tempfile.mkdtemp() + "/"
-    p = GrKerrFieldLoop.from_cli(["--nr", "128", "--npolar", "64", "--kerr-spin", "0.9"])
+    p = GrKerrFieldLoop.from_cli(
+        ["--nr", "128", "--npolar", "64", "--kerr-spin", "0.9"]
+    )
     p.ct_method = ct
     p.solver = solver
     p.end_time = 4.0
@@ -92,11 +97,15 @@ def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
     assert not np.isnan(rho).any(), f"NaN at {ct}"
     assert float(np.abs(B1).max()) < 1.0, "field blew up"
     ratio = _kerr_wdiv(p, B1, B2)
-    assert ratio < 1e-10, f"kerr w-weighted div(B) not machine-zero at {ct}: {ratio:.3e}"
+    assert ratio < 1e-10, (
+        f"kerr w-weighted div(B) not machine-zero at {ct}: {ratio:.3e}"
+    )
 
 
 def _roteq_hold_l1(nr, npolar):
-    from simbi.simulation.tests.fixtures.gr_rotating_equilibrium_mhd import GrRotatingEquilibriumMhd
+    from simbi.simulation.tests.fixtures.gr_rotating_equilibrium_mhd import (
+        GrRotatingEquilibriumMhd,
+    )
 
     d = tempfile.mkdtemp() + "/"
     p = GrRotatingEquilibriumMhd.from_cli(
@@ -153,7 +162,9 @@ def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
     # the MRI initial condition: the fat FM torus threaded with a weak
     # beta-normalized poloidal seed field on the spinning-kerr RMHD path (tetrad HLLD + UCT-HLLD).
     # the seed must be div-free to machine zero, the torus core resolved, and the state stable.
-    from simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd import GrFishboneMoncriefMhd
+    from simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd import (
+        GrFishboneMoncriefMhd,
+    )
 
     d = tempfile.mkdtemp() + "/"
     p = GrFishboneMoncriefMhd.from_cli(
@@ -203,4 +214,6 @@ def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
             )
             md = max(md, abs(div))
             sc = max(sc, abs(sg(rf[i + 1], tc[j]) * dth * B1[j, i + 1]))
-    assert md / max(sc, 1e-30) < 1e-10, f"fm-torus seed div(B) not machine-zero: {md / sc:.3e}"
+    assert md / max(sc, 1e-30) < 1e-10, (
+        f"fm-torus seed div(B) not machine-zero: {md / sc:.3e}"
+    )

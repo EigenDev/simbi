@@ -32,6 +32,30 @@ from simbi_configs.examples.grhd.gr_fishbone_moncrief_cartesian import (
 class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
     """the magnetized FM torus on the pole-free 3d cartesian kerr-schild grid."""
 
+    kerr_spin: Annotated[
+        float,
+        ProblemParam(
+            0.9,
+            cli=True,
+            description="dimensionless kerr spin",
+        ),
+    ]
+    kappa: Annotated[
+        float,
+        ProblemParam(
+            1.3,
+            cli=True,
+            description="FM angular-momentum parameter for a resolved thick torus",
+        ),
+    ]
+    half_width: Annotated[
+        float,
+        ProblemParam(
+            35.0,
+            cli=True,
+            description="cube half-width in M enclosing the thick torus",
+        ),
+    ]
     regime: Annotated[
         Regime, ProblemParam(Regime.RMHD, description="physics regime (GRMHD)")
     ]
@@ -45,7 +69,9 @@ class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
     ]
     rho_cut: Annotated[
         float,
-        ProblemParam(0.2, cli=True, description="A_phi = max(rho/rho_max - rho_cut, 0)"),
+        ProblemParam(
+            0.2, cli=True, description="A_phi = max(rho/rho_max - rho_cut, 0)"
+        ),
     ]
     excision_radius: Annotated[
         float,
@@ -97,6 +123,7 @@ class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
         # bounding shell so the expensive lnh evaluation only runs over the torus
         # volume.
         r_lo, r_hi = self.r_in, 2.0 * torus.r_max
+
         def aphi(x: float, y: float, z: float) -> float:
             r = self.ks_radius(x, y, z)
             if r < r_lo or r > r_hi:
@@ -172,7 +199,11 @@ class GrFishboneMoncriefMhdCartesian(GrFishboneMoncriefCartesian):
             az = a * z
             two_h = 2.0 * mm * rr * r / (rr * rr + az * az)
             den = 1.0 / (rr + a * a)
-            ldotb = (r * x + a * y) * den * bcx + (r * y - a * x) * den * bcy + (z / r) * bcz
+            ldotb = (
+                (r * x + a * y) * den * bcx
+                + (r * y - a * x) * den * bcy
+                + (z / r) * bcz
+            )
             bsq = bcx * bcx + bcy * bcy + bcz * bcz + two_h * ldotb * ldotb
             if bsq <= 0.0:
                 continue

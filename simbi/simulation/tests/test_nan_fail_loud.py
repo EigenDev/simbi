@@ -45,7 +45,9 @@ def _poisoned_prescription() -> dict:
 
 @needs_backend
 def test_poisoned_state_halts_under_a_state_independent_cfl_map() -> None:
-    from simbi_configs.examples.grhd.gr_rotating_equilibrium import GrRotatingEquilibrium
+    from simbi.simulation.tests.fixtures.gr_rotating_equilibrium import (
+        GrRotatingEquilibrium,
+    )
 
     class Poisoned(GrRotatingEquilibrium):
         """the kerr rotating equilibrium with a NaN-producing inner ghost band."""
@@ -86,7 +88,9 @@ def test_persistent_freeze_halts_on_unrecoverable_source() -> None:
         @property
         def source_expressions(self):
             g = expr.ExprGraph()
-            sink = expr.constant(-1.0e6, g)  # subtract energy every step -> eps < 0, finite
+            sink = expr.constant(
+                -1.0e6, g
+            )  # subtract energy every step -> eps < 0, finite
             return [
                 g.compile([sink]).serialize_source(
                     expr.SourceKind.RAW, dim=1, target="nrg"

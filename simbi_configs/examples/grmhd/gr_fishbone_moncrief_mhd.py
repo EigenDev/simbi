@@ -15,7 +15,7 @@
 # drives transports angular momentum outward and accretes the torus onto the hole.
 #
 # usage:
-#   simbi run gr_fishbone_moncrief_mhd.py --kerr-spin 0.9 --target-beta 100
+#   simbi run gr_fishbone_moncrief_mhd.py --target-beta 100
 # =============================================================================
 
 import math
@@ -25,32 +25,51 @@ from typing import Annotated
 from simbi import ProblemParam
 from simbi.types import CtMethod, Regime, Solver
 from simbi.types.typing import (
-    GasStateGenerator,
     InitialStateType,
     StaggeredBFieldGenerator,
 )
 
-from simbi_configs.examples.grmhd.gr_fishbone_moncrief import GrFishboneMoncrief
+from simbi_configs.examples.grhd.gr_fishbone_moncrief import GrFishboneMoncrief
 
 
 class GrFishboneMoncriefMhd(GrFishboneMoncrief):
     """the magnetized FM torus — the weak-field MRI initial condition on a kerr background."""
 
+    kerr_spin: Annotated[
+        float,
+        ProblemParam(
+            0.9,
+            cli=True,
+            description="dimensionless kerr spin",
+        ),
+    ]
     # a FAT torus (r_max ~ 12 M, the classic Gammie 2003 / HARM MRI torus) — well-resolved on the
     # log grid, unlike the thin kappa ~ 1.01 gate torus.
     kappa: Annotated[
-        float, ProblemParam(1.3, cli=True, description="FM angular-momentum parameter (fat torus)")
+        float,
+        ProblemParam(
+            1.3, cli=True, description="FM angular-momentum parameter (fat torus)"
+        ),
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.RMHD, description="physics regime (RMHD)")]
-    solver: Annotated[Solver, ProblemParam(Solver.HLLD, cli=True, description="Riemann solver")]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.RMHD, description="physics regime (RMHD)")
+    ]
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLD, cli=True, description="Riemann solver")
+    ]
     ct_method: Annotated[
-        CtMethod, ProblemParam(CtMethod.UCT, cli=True, description="CT edge-EMF (UCT-HLLD)")
+        CtMethod,
+        ProblemParam(CtMethod.UCT, cli=True, description="CT edge-EMF (UCT-HLLD)"),
     ]
     target_beta: Annotated[
-        float, ProblemParam(100.0, cli=True, description="minimum plasma beta p_gas/(b^2/2)")
+        float,
+        ProblemParam(100.0, cli=True, description="minimum plasma beta p_gas/(b^2/2)"),
     ]
     rho_cut: Annotated[
-        float, ProblemParam(0.2, cli=True, description="A_phi = max(rho/rho_max - rho_cut, 0)")
+        float,
+        ProblemParam(
+            0.2, cli=True, description="A_phi = max(rho/rho_max - rho_cut, 0)"
+        ),
     ]
 
     def _sqrtg(self, r: float, th: float) -> float:
@@ -93,9 +112,14 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
                 return 0.0
             return max(state[0] / self.rho_torus_max - self.rho_cut, 0.0)
 
-        aphi = [[aphi_corner(rf[i], tf[j]) for j in range(npolar + 1)] for i in range(nr + 1)]
+        aphi = [
+            [aphi_corner(rf[i], tf[j]) for j in range(npolar + 1)]
+            for i in range(nr + 1)
+        ]
         # cell-centered torus primitive, sampled once for the beta scan (rho + pressure).
-        cell = [[torus.primitive(r_c[i], th_c[j]) for j in range(npolar)] for i in range(nr)]
+        cell = [
+            [torus.primitive(r_c[i], th_c[j]) for j in range(npolar)] for i in range(nr)
+        ]
 
         # unit-amplitude poloidal field from the metric-weighted curl of A_phi (arithmetic face
         # centers, matching the CT curl weights so the w-weighted div(B) is machine zero).
@@ -111,7 +135,9 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
         # grid-peak density). the cut excludes the low-pressure torus surface, where beta is small
         # for any field and would otherwise pin the amplitude to a truncation-noise edge cell (the
         # standard FM-MRI recipe). the threshold adapts to the resolved peak.
-        rho_peak = max((cell[ii][jj] or (0.0,))[0] for jj in range(npolar) for ii in range(nr))
+        rho_peak = max(
+            (cell[ii][jj] or (0.0,))[0] for jj in range(npolar) for ii in range(nr)
+        )
         beta_min = math.inf
         for jj in range(npolar):
             for ii in range(nr):
@@ -126,7 +152,9 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
                     continue
                 beta_min = min(beta_min, state[3] / (0.5 * bsq))
         a0 = math.sqrt(beta_min / self.target_beta) if math.isfinite(beta_min) else 0.0
-        print(f"fm-mhd: r_max={torus.r_max:.3f} A0={a0:.4e} (min plasma beta -> {self.target_beta})")
+        print(
+            f"fm-mhd: r_max={torus.r_max:.3f} A0={a0:.4e} (min plasma beta -> {self.target_beta})"
+        )
 
         def b_field(bn: str) -> StaggeredBFieldGenerator:
             if bn == "b1":

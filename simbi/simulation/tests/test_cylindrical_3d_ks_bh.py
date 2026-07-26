@@ -23,11 +23,17 @@ needs_backend = pytest.mark.skipif(
     _BACKEND is None, reason="rust cpu_ext backend not built"
 )
 
-_RES = (20, 12, 16)  # (nR, nphi, nz) — distinct so the phi axis (nphi=12) is identifiable
+_RES = (
+    20,
+    12,
+    16,
+)  # (nR, nphi, nz) — distinct so the phi axis (nphi=12) is identifiable
 
 
 def _run(data_dir: str):
-    from simbi_configs.examples.grhd.gr_cylindrical_3d_ks_bh import GrCylindrical3DKsBH
+    from simbi.simulation.tests.fixtures.gr_cylindrical_3d_ks_bh import (
+        GrCylindrical3DKsBH,
+    )
 
     p = GrCylindrical3DKsBH.from_cli([])
     p.resolution = _RES
@@ -56,14 +62,19 @@ def test_cylindrical_3d_ks_bh_runs_stably_and_is_axisymmetric() -> None:
         rho, pre = _run(d + "/")
 
     # stability: horizon-penetrating, positive, finite (no floors).
-    assert np.isfinite(rho).all() and np.isfinite(pre).all(), "NaN/inf in the evolved state"
+    assert np.isfinite(rho).all() and np.isfinite(pre).all(), (
+        "NaN/inf in the evolved state"
+    )
     assert pre.min() > 0.0, f"pressure went non-positive: {pre.min():.3e}"
     assert rho.min() > 0.0, f"density went non-positive: {rho.min():.3e}"
 
     # per-axis variation of rho: the deviation from the axis-mean, normalized. the phi axis is
     # uniform (roundoff); R and z carry the developing infall.
     def axis_var(a: np.ndarray, ax: int) -> float:
-        return float(np.abs(a - a.mean(axis=ax, keepdims=True)).max() / (np.abs(a).max() + 1e-300))
+        return float(
+            np.abs(a - a.mean(axis=ax, keepdims=True)).max()
+            / (np.abs(a).max() + 1e-300)
+        )
 
     variations = [axis_var(rho, ax) for ax in range(3)]
     order = np.argsort(variations)
@@ -74,4 +85,6 @@ def test_cylindrical_3d_ks_bh_runs_stably_and_is_axisymmetric() -> None:
         f"the phi-uniform axis (size {rho.shape[phi_ax]}) is not the nphi={_RES[1]} axis: {rho.shape}"
     )
     # the other two axes (R, z) carry real structure — the flow actually developed.
-    assert variations[int(order[1])] > 1e-6, f"only one axis varies (flow static?): {variations}"
+    assert variations[int(order[1])] > 1e-6, (
+        f"only one axis varies (flow static?): {variations}"
+    )

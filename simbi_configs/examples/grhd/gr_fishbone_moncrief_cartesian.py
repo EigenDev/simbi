@@ -34,7 +34,7 @@ from simbi import ProblemParam, SimbiProblem
 from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver, Spacetime
 from simbi.types.typing import GasStateGenerator, InitialStateType
 
-from simbi_configs.examples.grmhd.gr_fishbone_moncrief import FishboneMoncrief
+from simbi_configs.helpers.fishbone_moncrief import FishboneMoncrief
 
 
 class GrFishboneMoncriefCartesian(SimbiProblem):
@@ -134,7 +134,8 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         ProblemParam(None, description="domain bounds (computed from half_width)"),
     ]
     coord_system: Annotated[
-        CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="coordinate system")
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
     ]
     regime: Annotated[Regime, ProblemParam(Regime.RHD, description="GR hydro")]
     solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="solver")]

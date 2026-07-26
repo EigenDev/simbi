@@ -15,7 +15,7 @@
 # the disk chart, catching any azimuthal coordinate-role bug. horizon-penetrating, no floors.
 #
 # usage:
-#   simbi run gr_disk_ks_bh.py --resolution 48 --end-time 2.0
+#   imported by test_disk_ks_bh.py
 # =============================================================================
 
 import math
@@ -34,7 +34,9 @@ class GrDiskKsBH(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="cylindrical kerr-schild background"),
+        ProblemParam(
+            Spacetime.SCHWARZSCHILD_KS, description="cylindrical kerr-schild background"
+        ),
     ]
     schwarzschild_mass: Annotated[
         float, ProblemParam(1.0, cli=True, description="black-hole mass M (G=c=1)")
@@ -50,15 +52,20 @@ class GrDiskKsBH(SimbiProblem):
     bounds: Annotated[
         list[tuple[float, float]],
         ProblemParam(
-            [(4.0, 12.0), (0.0, 2.0 * math.pi)], description="(R, phi) domain — R off-axis, phi full"
+            [(4.0, 12.0), (0.0, 2.0 * math.pi)],
+            description="(R, phi) domain — R off-axis, phi full",
         ),
     ]
     resolution: Annotated[
-        tuple[int, int], ProblemParam((48, 24), cli=True, description="grid resolution (nR, nphi)")
+        tuple[int, int],
+        ProblemParam((48, 24), cli=True, description="grid resolution (nR, nphi)"),
     ]
     coord_system: Annotated[
         CoordSystem,
-        ProblemParam(CoordSystem.PLANAR_CYLINDRICAL, description="the (R, phi) equatorial disk plane"),
+        ProblemParam(
+            CoordSystem.PLANAR_CYLINDRICAL,
+            description="the (R, phi) equatorial disk plane",
+        ),
     ]
     regime: Annotated[Regime, ProblemParam(Regime.RHD, description="physics regime")]
     boundary_conditions: Annotated[
@@ -76,7 +83,9 @@ class GrDiskKsBH(SimbiProblem):
 
     end_time: Annotated[
         float,
-        ProblemParam(2.0, cli=True, checkpoint_safe=True, description="simulation end time"),
+        ProblemParam(
+            2.0, cli=True, checkpoint_safe=True, description="simulation end time"
+        ),
     ]
 
     def initial_primitive_state(self) -> InitialStateType:
