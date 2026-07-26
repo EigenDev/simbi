@@ -13,6 +13,7 @@ use symbi::sim::decomp::{evolve_decomposed, LocalCopy};
 use symbi_grid::Field;
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::rmhd::Rmhd;
+use symbi_sim::tracers::seed_mass_weighted;
 
 const GAMMA: f64 = 5.0 / 3.0;
 const T_FINAL: f64 = 0.02;
@@ -159,6 +160,33 @@ fn assert_mhd_driver_identity(timestepping: Timestepping) {
     );
 }
 
+fn assert_mhd_tracer_driver_identity(timestepping: Timestepping) {
+    let (mut single, single_kernels) = make(timestepping);
+    let (mut decomposed, decomposed_kernels) = make(timestepping);
+    single.tracers = Some(seed_mass_weighted(&single, 512));
+    decomposed.tracers = Some(seed_mass_weighted(&decomposed, 512));
+
+    evolve(&mut single, &single_kernels, T_FINAL).expect("single-grid mhd tracers");
+    evolve_decomposed(
+        &mut [&mut *decomposed],
+        &[&decomposed_kernels],
+        [1, 1],
+        &[0],
+        timestepping,
+        0.0,
+        T_FINAL,
+        u64::MAX,
+        &LocalCopy,
+        |_, _, _| std::ops::ControlFlow::Continue(()),
+    );
+
+    let single_tracers = single.tracers.as_ref().unwrap();
+    let decomposed_tracers = decomposed.tracers.as_ref().unwrap();
+    assert_eq!(single_tracers.id, decomposed_tracers.id);
+    assert_eq!(single_tracers.owner, decomposed_tracers.owner);
+    assert_eq!(single_tracers.flags, decomposed_tracers.flags);
+}
+
 #[test]
 fn euler_mhd_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_mhd_driver_identity(Timestepping::Euler);
@@ -167,4 +195,9 @@ fn euler_mhd_single_grid_equals_one_tile_decomposed_bitwise() {
 #[test]
 fn rk2_mhd_single_grid_equals_one_tile_decomposed_bitwise() {
     assert_mhd_driver_identity(Timestepping::Rk2);
+}
+
+#[test]
+fn rk2_mhd_tracers_single_grid_equal_one_tile_decomposed() {
+    assert_mhd_tracer_driver_identity(Timestepping::Rk2);
 }

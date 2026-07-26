@@ -532,6 +532,11 @@ mod tests {
         let internal_face = [sim.geom.interior.spaces[0].lo + 1];
         sim.fields.flux[0].den.view_mut().set(internal_face, 0.5);
         sim.dt = 0.5;
+        // the accepted state includes the finite-volume divergence of the imposed flux.
+        for (ii, coord) in sim.geom.interior.iter().enumerate() {
+            let density = if ii == 0 { 0.75 } else { 1.25 };
+            sim.fields.cons.den.view_mut().set(coord, density);
+        }
         let cells = [([0.0], [1.0]), ([1.0], [1.0])];
         sim.tracers = Some(TracerSet::seed_stratified(&cells, &[100, 100], 0.01));
         snapshot_transport_state(&mut sim);
@@ -634,6 +639,54 @@ mod tests {
         let tracers = sim.tracers.as_ref().unwrap();
         assert!((tracers.injection_remainder - 0.05).abs() < 1.0e-14);
         assert_eq!(tracers.owner, [crate::mass_transport::ContainerId(0); 3]);
+    }
+
+    #[test]
+    fn accepted_negative_density_source_moves_tracers_to_removal_reservoir() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [1],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        let cell = [sim.geom.interior.spaces[0].lo];
+        sim.workspace.u_stage.den.view_mut().set(cell, 1.0);
+        sim.fields.cons.den.view_mut().set(cell, 0.8);
+        sim.dt = 0.5;
+        sim.tracers = Some(TracerSet::seed_stratified(
+            &[([0.0], [1.0])],
+            &[100],
+            0.01,
+        ));
+        snapshot_transport_state(&mut sim);
+
+        advance_stage_mass_transport(&mut sim, 0.0, 1.0, 0).unwrap();
+        let tracers = sim.tracers.as_ref().unwrap();
+        let removed = tracers
+            .owner
+            .iter()
+            .filter(|&&owner| owner == MATERIAL_REMOVAL_RESERVOIR)
+            .count();
+        assert_eq!(removed, 20);
+        assert_eq!(
+            tracers.owner.iter().filter(|owner| owner.0 == 0).count(),
+            80
+        );
     }
 }
 
@@ -814,6 +867,30 @@ where
                 });
             }
         }
+        if ac > 0.0 {
+            let mut divergence = 0.0;
+            for dd in 0..D {
+                let mut high = coord;
+                high[dd] += 1;
+                divergence += *sim.fields.flux[dd].den.view().at(high)
+                    * geometry.face_area(high, dd)
+                    - *sim.fields.flux[dd].den.view().at(coord)
+                        * geometry.face_area(coord, dd);
+            }
+            let expected_mass = a0 * *sim.workspace.u_n.den.view().at(coord) * geometry.volume(coord)
+                + ac * (source_mass - sim.dt * divergence);
+            let actual_mass = *sim.fields.cons.den.view().at(coord) * geometry.volume(coord);
+            let residual = actual_mass - expected_mass;
+            let tolerance = 128.0
+                * f64::EPSILON
+                * actual_mass.abs().max(expected_mass.abs()).max(1.0);
+            if residual < -tolerance {
+                transfers.push(MassTransfer {
+                    destination: MATERIAL_REMOVAL_RESERVOIR,
+                    mass: -residual / ac,
+                });
+            }
+        }
         let kernel = TransportKernel::new(source, source_mass, transfers)?;
         candidate.extend(sample_systematic(&kernel, ids, key));
     }
@@ -853,9 +930,12 @@ where
 
 const EXTERIOR_BIT: u64 = 1 << 63;
 const ACCRETION_RESERVOIR_ID: u64 = 1 << 62;
+const MATERIAL_REMOVAL_RESERVOIR_ID: u64 = (1 << 62) | 2;
 
 pub const ACCRETION_RESERVOIR: crate::mass_transport::ContainerId =
     crate::mass_transport::ContainerId(ACCRETION_RESERVOIR_ID);
+pub const MATERIAL_REMOVAL_RESERVOIR: crate::mass_transport::ContainerId =
+    crate::mass_transport::ContainerId(MATERIAL_REMOVAL_RESERVOIR_ID);
 
 fn is_exterior(container: crate::mass_transport::ContainerId) -> bool {
     container.0 & EXTERIOR_BIT != 0

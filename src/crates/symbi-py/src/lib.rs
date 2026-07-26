@@ -4498,6 +4498,16 @@ macro_rules! build_and_run_mhd {
         } else {
             sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
         };
+        let sim = if cfg.n_tracers == 0 {
+            sim
+        } else {
+            let mut sim = sim;
+            sim.tracers = Some(symbi_sim::tracers::seed_mass_weighted(
+                &sim,
+                cfg.n_tracers,
+            ));
+            sim
+        };
         let theta = build_theta(cfg);
         let sub = sim
             .substrate()
@@ -4857,7 +4867,7 @@ macro_rules! build_and_run_mhd_decomposed {
         // the full-size OUTPUT view: gather scatters tile interiors (cells + cell B) and faces into
         // it each checkpoint; seed the faces so `bface_initialized` is set (the gather overwrites
         // the interior). lives on device 0 (touched only at output).
-        let global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+        let mut global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
@@ -4889,6 +4899,15 @@ macro_rules! build_and_run_mhd_decomposed {
             })
             .seed_faces_indexed(&bufs[0..$d])
             .build();
+
+        if cfg.n_tracers > 0 {
+            let per_tile =
+                symbi_sim::tracers::seed_and_partition(&global, cfg.n_tracers, counts);
+            for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                tile.tracers = Some(set);
+            }
+            global.tracers = Some(symbi_sim::tracers::TracerSet::default());
+        }
 
         run_decomposed_loop(cfg, tiles, global, counts)
     }};
@@ -5839,9 +5858,12 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // curvilinear decomposition and mesh motion still require explicit
     // material-volume geometry in the decomposed driver.
     if cfg.n_tracers > 0 {
-        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+        if !matches!(
+            cfg.regime.as_str(),
+            "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd"
+        ) {
             return Err(format!(
-                "n_tracers = {} is wired for newtonian/rhd/isothermal hydro; got '{}'",
+                "n_tracers = {} is wired for hydro and adiabatic mhd; got '{}'",
                 cfg.n_tracers, cfg.regime
             ));
         }
@@ -5859,9 +5881,14 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         }
         // multi-device hydro uses global container identities and migrates
         // complete tracer records across decomposition cuts.
-        if cfg.n_gpus > 1 && !matches!(cfg.regime.as_str(), "newtonian" | "rhd") {
+        if cfg.n_gpus > 1
+            && !matches!(
+                cfg.regime.as_str(),
+                "newtonian" | "rhd" | "nmhd" | "rmhd"
+            )
+        {
             return Err(format!(
-                "n_tracers with gpus > 1 is wired for newtonian/rhd hydro; regime '{}' not yet",
+                "n_tracers with gpus > 1 is wired for adiabatic hydro/mhd; regime '{}' not yet",
                 cfg.regime
             ));
         }
