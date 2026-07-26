@@ -135,7 +135,7 @@ fn continuous_tracer_record_moves_to_finest_active_level_without_state_loss() {
         .set_initial(|_| MhdPrim {
             hydro: Prim {
                 rho: 1.0,
-                vel: Tensor::new([0.0; 3]),
+                vel: Tensor::new([0.4, 0.0, 0.0]),
                 pre: 1.0,
             },
             mag: Tensor::new(B0),
@@ -154,6 +154,7 @@ fn continuous_tracer_record_moves_to_finest_active_level_without_state_loss() {
         |state| Kern::new(GAMMA, CFL, 1.0, &state.geom.allocated),
     )
     .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
     let mut coarse_tracers =
         ContinuousTracerSet::<3, HostMemory>::allocate(1, ItoOrder::Three).unwrap();
     coarse_tracers.weight = 0.125;
@@ -232,4 +233,70 @@ fn continuous_tracer_record_moves_to_finest_active_level_without_state_loss() {
     assert_eq!(coarse.run_seed, 91);
     assert_eq!(coarse.next_id, 43);
     assert_eq!(coarse.injection_remainder, 0.03125);
+    coarse.push_host(record).unwrap();
+    hierarchy.levels[1]
+        .state
+        .continuous_tracers
+        .as_mut()
+        .unwrap()
+        .push_host(ContinuousTracerRecord {
+            x: [0.5, 0.4, 0.6],
+            step_x: [0.5, 0.4, 0.6],
+            id: 44,
+            cohort: 8,
+            owner: ContainerId(0),
+            escaped: 0,
+            crossed_sink: 0,
+            crossing_time: 0.0,
+            random_counter: 29,
+        })
+        .unwrap();
+
+    hierarchy.evolve_steps(1).unwrap();
+
+    let fine_state = &hierarchy.levels[1].state;
+    let coefficient_ghost = [
+        fine_state.geom.interior.spaces[0].hi,
+        fine_state.geom.interior.spaces[1].lo,
+        fine_state.geom.interior.spaces[2].lo,
+    ];
+    assert!(
+        *fine_state
+            .ito_coefficients
+            .as_ref()
+            .unwrap()
+            .drift[0]
+            .view()
+            .at(coefficient_ghost)
+            > 0.1,
+        "fine coarse/fine coefficient ghost did not inherit parent transport"
+    );
+    let edge_rates = fine_state
+        .ito_coefficients
+        .as_ref()
+        .unwrap()
+        .interpolate(&fine_state.geom, [0.751, 0.4, 0.6])
+        .unwrap();
+    assert!(
+        edge_rates[0].drift > 0.1,
+        "a trajectory crossing the patch edge sampled an unresolved halo"
+    );
+    let coarse = hierarchy.levels[0]
+        .state
+        .continuous_tracers
+        .as_ref()
+        .unwrap();
+    let fine = hierarchy.levels[1]
+        .state
+        .continuous_tracers
+        .as_ref()
+        .unwrap();
+    assert_eq!(coarse.len, 1);
+    assert_eq!(fine.len, 1);
+    unsafe {
+        assert_eq!(*coarse.id.as_ptr::<u64>(), 42);
+        assert_eq!(*coarse.random_counter.as_ptr::<u64>(), 20);
+        assert_eq!(*fine.id.as_ptr::<u64>(), 44);
+        assert_eq!(*fine.random_counter.as_ptr::<u64>(), 31);
+    }
 }

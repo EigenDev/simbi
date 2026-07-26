@@ -523,14 +523,24 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             .ito_coefficients
             .as_ref()
             .expect("ito coefficients were materialized");
-        symbi_sim::tracers::advance_continuous_tracers_host(
+        let (scale_start, scale_end, offset_start, offset_end) =
+            symbi_sim::tracers::continuous_tracer_mesh_step(&sim.store, sim.dt);
+        symbi_sim::tracers::advance_continuous_tracers_affine_mesh_host(
             &mut tracers,
             coefficients,
             &sim.geom,
+            scale_start,
+            scale_end,
+            offset_start,
+            offset_end,
             sim.dt,
         )
         .unwrap_or_else(|detail| panic!("ito tracer advancement: {detail}"));
-        let bounds = symbi_sim::tracers::partition_physical_bounds(&sim.geom);
+        let bounds = symbi_sim::tracers::map_continuous_tracer_bounds(
+            symbi_sim::tracers::partition_physical_bounds(&sim.geom),
+            scale_end,
+            offset_end,
+        );
         symbi_sim::tracers::apply_continuous_boundaries_host(
             &mut tracers,
             bounds,

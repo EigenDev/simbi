@@ -1516,16 +1516,27 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     .ito_coefficients
                     .as_ref()
                     .expect("ito coefficients were materialized");
-                crate::tracers::advance_continuous_tracers_host(
+                let (scale_start, scale_end, offset_start, offset_end) =
+                    crate::tracers::continuous_tracer_mesh_step(&**store, dt);
+                crate::tracers::advance_continuous_tracers_affine_mesh_host(
                     &mut tracers,
                     coefficients,
                     &store.geom,
+                    scale_start,
+                    scale_end,
+                    offset_start,
+                    offset_end,
                     dt,
                 )
                 .unwrap_or_else(|err| panic!("ito tracer advancement failed: {err}"));
+                let physical_bounds = crate::tracers::map_continuous_tracer_bounds(
+                    tracer_bounds,
+                    scale_end,
+                    offset_end,
+                );
                 crate::tracers::apply_continuous_boundaries_host(
                     &mut tracers,
-                    tracer_bounds,
+                    physical_bounds,
                     tracer_boundaries,
                 )
                 .unwrap_or_else(|err| panic!("ito tracer boundaries failed: {err}"));
