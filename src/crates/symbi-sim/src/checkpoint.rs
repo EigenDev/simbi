@@ -815,6 +815,148 @@ fn tracer_group<const D: usize>(snap: &TracerSnap) -> Tree<'_> {
         .with_dataset(Dataset::new("weight", vec![1], DataRef::F64(&snap.weight)))
 }
 
+struct ContinuousTracerSnap {
+    n: usize,
+    order: u64,
+    x: Vec<f64>,
+    step_x: Vec<f64>,
+    id: Vec<u64>,
+    cohort: Vec<u64>,
+    owner: Vec<u64>,
+    escaped: Vec<u64>,
+    crossed_sink: Vec<u64>,
+    crossing_time: Vec<f64>,
+    random_counter: Vec<u64>,
+    weight: Vec<f64>,
+    run_seed: u64,
+    next_id: u64,
+    injection_remainder: f64,
+}
+
+fn continuous_tracer_snap<const D: usize, Mem: MemorySpace>(
+    tracers: &symbi_sim_tracers::ContinuousTracerSet<D, Mem>,
+) -> ContinuousTracerSnap {
+    assert!(
+        Mem::IS_HOST_ACCESSIBLE,
+        "continuous tracer checkpointing requires host-accessible storage"
+    );
+    let n = tracers.len;
+    unsafe {
+        ContinuousTracerSnap {
+            n,
+            order: tracers.order as u64,
+            x: (0..n)
+                .flat_map(|ii| {
+                    (0..D).map(move |dd| *tracers.x[dd].as_ptr::<f64>().add(ii))
+                })
+                .collect(),
+            step_x: (0..n)
+                .flat_map(|ii| {
+                    (0..D).map(move |dd| *tracers.step_x[dd].as_ptr::<f64>().add(ii))
+                })
+                .collect(),
+            id: std::slice::from_raw_parts(tracers.id.as_ptr::<u64>(), n).to_vec(),
+            cohort: std::slice::from_raw_parts(tracers.cohort.as_ptr::<u16>(), n)
+                .iter()
+                .map(|value| *value as u64)
+                .collect(),
+            owner: std::slice::from_raw_parts(
+                tracers
+                    .owner
+                    .as_ptr::<crate::mass_transport::ContainerId>(),
+                n,
+            )
+            .iter()
+            .map(|owner| owner.0)
+            .collect(),
+            escaped: std::slice::from_raw_parts(tracers.escaped.as_ptr::<u8>(), n)
+                .iter()
+                .map(|value| *value as u64)
+                .collect(),
+            crossed_sink: std::slice::from_raw_parts(
+                tracers.crossed_sink.as_ptr::<u8>(),
+                n,
+            )
+            .iter()
+            .map(|value| *value as u64)
+            .collect(),
+            crossing_time: std::slice::from_raw_parts(
+                tracers.crossing_time.as_ptr::<f64>(),
+                n,
+            )
+            .to_vec(),
+            random_counter: std::slice::from_raw_parts(
+                tracers.random_counter.as_ptr::<u64>(),
+                n,
+            )
+            .to_vec(),
+            weight: vec![tracers.weight],
+            run_seed: tracers.run_seed,
+            next_id: tracers.next_id,
+            injection_remainder: tracers.injection_remainder,
+        }
+    }
+}
+
+fn continuous_tracer_group<const D: usize>(snap: &ContinuousTracerSnap) -> Tree<'_> {
+    Tree::new("continuous_tracers")
+        .with_attr("n_tracers", snap.n as u64)
+        .with_attr("order", snap.order)
+        .with_attr("run_seed", snap.run_seed)
+        .with_attr("next_id", snap.next_id)
+        .with_attr("injection_remainder", snap.injection_remainder)
+        .with_dataset(Dataset::new("position", vec![snap.n, D], DataRef::F64(&snap.x)))
+        .with_dataset(Dataset::new(
+            "step_position",
+            vec![snap.n, D],
+            DataRef::F64(&snap.step_x),
+        ))
+        .with_dataset(Dataset::new("id", vec![snap.n], DataRef::U64(&snap.id)))
+        .with_dataset(Dataset::new("cohort", vec![snap.n], DataRef::U64(&snap.cohort)))
+        .with_dataset(Dataset::new("owner", vec![snap.n], DataRef::U64(&snap.owner)))
+        .with_dataset(Dataset::new("escaped", vec![snap.n], DataRef::U64(&snap.escaped)))
+        .with_dataset(Dataset::new(
+            "crossed_sink",
+            vec![snap.n],
+            DataRef::U64(&snap.crossed_sink),
+        ))
+        .with_dataset(Dataset::new(
+            "crossing_time",
+            vec![snap.n],
+            DataRef::F64(&snap.crossing_time),
+        ))
+        .with_dataset(Dataset::new(
+            "random_counter",
+            vec![snap.n],
+            DataRef::U64(&snap.random_counter),
+        ))
+        .with_dataset(Dataset::new("weight", vec![1], DataRef::F64(&snap.weight)))
+}
+
+fn combine_continuous_tracer_snaps(
+    mut snaps: impl Iterator<Item = ContinuousTracerSnap>,
+) -> Option<ContinuousTracerSnap> {
+    let mut combined = snaps.next()?;
+    for snap in snaps {
+        assert_eq!(snap.order, combined.order);
+        assert_eq!(snap.run_seed, combined.run_seed);
+        assert_eq!(snap.next_id, combined.next_id);
+        assert_eq!(snap.injection_remainder.to_bits(), combined.injection_remainder.to_bits());
+        assert_eq!(snap.weight, combined.weight);
+        combined.n += snap.n;
+        combined.x.extend(snap.x);
+        combined.step_x.extend(snap.step_x);
+        combined.id.extend(snap.id);
+        combined.cohort.extend(snap.cohort);
+        combined.owner.extend(snap.owner);
+        combined.escaped.extend(snap.escaped);
+        combined.crossed_sink.extend(snap.crossed_sink);
+        combined.crossing_time.extend(snap.crossing_time);
+        combined.random_counter.extend(snap.random_counter);
+    }
+    Some(combined)
+}
+
 fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
     let nb = snap.nb;
     let mut t = Tree::new("bodies")
@@ -1014,6 +1156,13 @@ where
     if let Some(ts) = tr_snap.as_ref() {
         tree.push_group(tracer_group::<D>(ts));
     }
+    let continuous_snap = sim
+        .continuous_tracers
+        .as_ref()
+        .map(continuous_tracer_snap);
+    if let Some(snap) = continuous_snap.as_ref() {
+        tree.push_group(continuous_tracer_group::<D>(snap));
+    }
     Hdf5Backend.write(Path::new(path), &tree)
 }
 
@@ -1074,6 +1223,15 @@ where
         .map(tracer_snap);
     if let Some(ts) = tr_snap.as_ref() {
         root.push_group(tracer_group::<D>(ts));
+    }
+    let continuous_snap = combine_continuous_tracer_snaps(levels.iter().filter_map(|level| {
+        level
+            .continuous_tracers
+            .as_ref()
+            .map(continuous_tracer_snap)
+    }));
+    if let Some(snap) = continuous_snap.as_ref() {
+        root.push_group(continuous_tracer_group::<D>(snap));
     }
     // the per-step body-gas exchange series: whichever level carries the
     // immersed sidecar (the driver consolidates on one) supplies it — the
@@ -1446,6 +1604,112 @@ where
             layout,
         );
     }
+    if let Some(group) = tree.find_group("continuous_tracers") {
+        let getf = |name: &str| -> Result<Vec<f64>> {
+            Ok(group
+                .find_dataset(name)
+                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
+                .data
+                .as_f64()
+                .ok_or_else(|| {
+                    IoError::MissingPath(format!("continuous_tracers/{name}: not f64"))
+                })?
+                .to_vec())
+        };
+        let getu = |name: &str| -> Result<Vec<u64>> {
+            Ok(group
+                .find_dataset(name)
+                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
+                .data
+                .as_u64()
+                .ok_or_else(|| {
+                    IoError::MissingPath(format!("continuous_tracers/{name}: not u64"))
+                })?
+                .to_vec())
+        };
+        let x = getf("position")?;
+        let step_x = getf("step_position")?;
+        let id = getu("id")?;
+        let cohort = getu("cohort")?;
+        let owner = getu("owner")?;
+        let escaped = getu("escaped")?;
+        let crossed_sink = getu("crossed_sink")?;
+        let crossing_time = getf("crossing_time")?;
+        let random_counter = getu("random_counter")?;
+        let weight = getf("weight")?.first().copied().unwrap_or(0.0);
+        let n = id.len();
+        if [
+            x.len() / D,
+            step_x.len() / D,
+            cohort.len(),
+            owner.len(),
+            escaped.len(),
+            crossed_sink.len(),
+            crossing_time.len(),
+            random_counter.len(),
+        ]
+        .into_iter()
+        .any(|length| length != n)
+        {
+            return Err(IoError::Backend(
+                "continuous tracer checkpoint arrays have inconsistent lengths".to_string(),
+            ));
+        }
+        let order = match group
+            .find_attr("order")
+            .ok_or_else(|| IoError::MissingPath("continuous_tracers/order".to_string()))?
+            .as_u64("continuous_tracers/order")?
+        {
+            2 => crate::mass_transport::ItoOrder::Two,
+            3 => crate::mass_transport::ItoOrder::Three,
+            value => {
+                return Err(IoError::Backend(format!(
+                    "unsupported continuous tracer order {value}"
+                )));
+            }
+        };
+        let mut tracers = symbi_sim_tracers::ContinuousTracerSet::<D, Mem>::allocate(n, order)
+            .map_err(IoError::Backend)?;
+        tracers.weight = weight;
+        tracers.run_seed = group
+            .find_attr("run_seed")
+            .ok_or_else(|| IoError::MissingPath("continuous_tracers/run_seed".to_string()))?
+            .as_u64("continuous_tracers/run_seed")?;
+        tracers.next_id = group
+            .find_attr("next_id")
+            .ok_or_else(|| IoError::MissingPath("continuous_tracers/next_id".to_string()))?
+            .as_u64("continuous_tracers/next_id")?;
+        tracers.injection_remainder = group
+            .find_attr("injection_remainder")
+            .ok_or_else(|| {
+                IoError::MissingPath("continuous_tracers/injection_remainder".to_string())
+            })?
+            .as_f64("continuous_tracers/injection_remainder")?;
+        for ii in 0..n {
+            tracers
+                .push_host(symbi_sim_tracers::ContinuousTracerRecord {
+                    x: std::array::from_fn(|dd| x[ii * D + dd]),
+                    step_x: std::array::from_fn(|dd| step_x[ii * D + dd]),
+                    id: id[ii],
+                    cohort: u16::try_from(cohort[ii]).map_err(|_| {
+                        IoError::Backend("continuous tracer cohort exceeds u16".to_string())
+                    })?,
+                    owner: crate::mass_transport::ContainerId(owner[ii]),
+                    escaped: u8::try_from(escaped[ii]).map_err(|_| {
+                        IoError::Backend("continuous tracer escaped flag exceeds u8".to_string())
+                    })?,
+                    crossed_sink: u8::try_from(crossed_sink[ii]).map_err(|_| {
+                        IoError::Backend(
+                            "continuous tracer crossed-sink flag exceeds u8".to_string(),
+                        )
+                    })?,
+                    crossing_time: crossing_time[ii],
+                    random_counter: random_counter[ii],
+                })
+                .map_err(IoError::Backend)?;
+        }
+        sim.continuous_tracers = Some(tracers);
+    }
 
     if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), sim.immersed.as_mut()) {
         let get = |name: &str| -> Result<Vec<f64>> {
@@ -1815,6 +2079,90 @@ mod tests {
             expected.injection_remainder.to_bits()
         );
         assert_eq!(actual.weight.to_bits(), expected.weight.to_bits());
+    }
+
+    #[test]
+    fn checkpoint_roundtrip_preserves_continuous_tracer_state() {
+        let build = || {
+            Sim::new(
+                Newtonian,
+                IdealGas { gamma: 5.0 / 3.0 },
+                Cartesian,
+                [2, 1, 1],
+                [0.0; 3],
+                [0.5, 1.0, 1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
+            )
+            .unwrap()
+        };
+        let mut sim = build();
+        let mut tracers = symbi_sim_tracers::ContinuousTracerSet::<3, HostMemory>::allocate(
+            2,
+            crate::mass_transport::ItoOrder::Three,
+        )
+        .unwrap();
+        tracers.weight = 3.5;
+        tracers.run_seed = u64::MAX - 7;
+        tracers.next_id = u64::MAX - 2;
+        tracers.injection_remainder = 0.25;
+        for record in [
+            symbi_sim_tracers::ContinuousTracerRecord {
+                x: [1.0, 2.0, 3.0],
+                step_x: [0.5, 1.5, 2.5],
+                id: u64::MAX - 1,
+                cohort: 7,
+                owner: crate::mass_transport::ContainerId(4),
+                escaped: 0,
+                crossed_sink: 1,
+                crossing_time: 2.25,
+                random_counter: 19,
+            },
+            symbi_sim_tracers::ContinuousTracerRecord {
+                x: [4.0, 5.0, 6.0],
+                step_x: [3.5, 4.5, 5.5],
+                id: u64::MAX,
+                cohort: 9,
+                owner: crate::mass_transport::ContainerId(5),
+                escaped: 1,
+                crossed_sink: 0,
+                crossing_time: 3.25,
+                random_counter: 23,
+            },
+        ] {
+            tracers.push_host(record).unwrap();
+        }
+        sim.continuous_tracers = Some(tracers);
+
+        let dir = std::env::temp_dir().join("symbi_checkpoint_continuous_tracers");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tracers.h5");
+        write_checkpoint(&sim, path.to_str().unwrap(), &Metadata::new()).unwrap();
+
+        let mut restored = build();
+        load_checkpoint(&mut restored, path.to_str().unwrap()).unwrap();
+        let expected = continuous_tracer_snap(sim.continuous_tracers.as_ref().unwrap());
+        let actual = continuous_tracer_snap(restored.continuous_tracers.as_ref().unwrap());
+        assert_eq!(actual.order, expected.order);
+        assert_eq!(actual.x, expected.x);
+        assert_eq!(actual.step_x, expected.step_x);
+        assert_eq!(actual.id, expected.id);
+        assert_eq!(actual.cohort, expected.cohort);
+        assert_eq!(actual.owner, expected.owner);
+        assert_eq!(actual.escaped, expected.escaped);
+        assert_eq!(actual.crossed_sink, expected.crossed_sink);
+        assert_eq!(actual.crossing_time, expected.crossing_time);
+        assert_eq!(actual.random_counter, expected.random_counter);
+        assert_eq!(actual.weight, expected.weight);
+        assert_eq!(actual.run_seed, expected.run_seed);
+        assert_eq!(actual.next_id, expected.next_id);
+        assert_eq!(
+            actual.injection_remainder.to_bits(),
+            expected.injection_remainder.to_bits()
+        );
     }
 
     #[test]
