@@ -148,6 +148,15 @@ where
 /// survives FOFC recovery, without false-halting the rare correct parachute. generous margin.
 const FOFC_FREEZE_HALT_STREAK: u32 = 16;
 
+fn advance_freeze_streak(freeze_streak: &AtomicU32, exterior_froze: u64) -> u32 {
+    if exterior_froze > 0 {
+        freeze_streak.fetch_add(1, Ordering::Relaxed) + 1
+    } else {
+        freeze_streak.store(0, Ordering::Relaxed);
+        0
+    }
+}
+
 /// resolve a FOFC copy/select slot name to its field: `den`/`mom_k`/`nrg` (conserved),
 /// `rho`/`vel_k`/`pre` (primitive). regime-generic over the degrees of freedom `DOF`.
 pub(crate) fn fofc_comp<'a, const D: usize, const DOF: usize, Mem, Sc>(
@@ -479,6 +488,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // tally. no extra pass: this replaces the former max-reduce.
     let fallback_cells = field_reduce(flag, &sim.geom.interior, ReductionOp::Add);
     if fallback_cells < 0.5 {
+        advance_freeze_streak(freeze_streak, 0);
         return;
     }
     FOFC_FALLBACK_CELLS.fetch_add(fallback_cells as u64, Ordering::Relaxed);
@@ -562,8 +572,8 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         0
     };
     let exterior_froze = (froze as u64).saturating_sub(interior_froze);
-    if exterior_froze > 0 {
-        let streak = freeze_streak.fetch_add(1, Ordering::Relaxed) + 1;
+    let streak = advance_freeze_streak(freeze_streak, exterior_froze);
+    if streak > 0 {
         assert!(
             streak < FOFC_FREEZE_HALT_STREAK,
             "FOFC last-resort freeze fired on {streak} consecutive substages in the EXTERIOR (r > r_+, \
@@ -571,8 +581,6 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
              redo — a genuine breakdown, not the rare isolated parachute. check the source / initial \
              data / boundary for a poison. (freezes inside the horizon are expected and do not halt.)"
         );
-    } else {
-        freeze_streak.store(0, Ordering::Relaxed);
     }
     match body_freeze {
         Some((dt_eff, gamma)) => fofc_select_with_body(sim, prefix, dt_eff, gamma),
@@ -583,10 +591,21 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
 
 #[cfg(test)]
 mod horizon_split_tests {
-    use super::horizon_flagged_count;
+    use super::{FOFC_FREEZE_HALT_STREAK, advance_freeze_streak, horizon_flagged_count};
+    use std::sync::atomic::{AtomicU32, Ordering};
     use symbi_algebra::{Domain, Space};
     use symbi_grid::Field;
     use symbi_xpu::HostMemory;
+
+    #[test]
+    fn clean_substage_breaks_the_persistent_freeze_streak() {
+        let streak = AtomicU32::new(0);
+        for _ in 0..FOFC_FREEZE_HALT_STREAK {
+            assert_eq!(advance_freeze_streak(&streak, 1), 1);
+            assert_eq!(advance_freeze_streak(&streak, 0), 0);
+        }
+        assert_eq!(streak.load(Ordering::Relaxed), 0);
+    }
 
     #[test]
     fn masked_count_splits_by_cell_center_radius() {
