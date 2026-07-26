@@ -5912,12 +5912,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                         .to_string(),
                 );
             }
-            if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
-                return Err(format!(
-                    "n_tracers with refinement is wired for hydro; regime '{}' not yet",
-                    cfg.regime
-                ));
-            }
             if !cfg.gradient_bcs.is_empty() {
                 return Err(
                     "n_tracers with refinement does not yet support gradient boundaries until \
