@@ -23,11 +23,15 @@
 pub mod emf_register;
 pub mod flux_register;
 pub mod hierarchy;
+pub mod tracer_interface;
 pub mod transfer;
 
 pub use emf_register::EmfRegister;
 pub use flux_register::FluxRegister;
 pub use hierarchy::{
     evolve_hierarchy_decomposed, fine_subgrid, FineSubgrid, Hierarchy, LevelData, RefinementRegion,
+};
+pub use tracer_interface::{
+    InterfaceFace, InterfaceTransfer, interface_faces, interface_mass_transfers,
 };
 pub use transfer::ProlongOrder;

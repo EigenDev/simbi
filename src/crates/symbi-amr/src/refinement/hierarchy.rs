@@ -174,6 +174,97 @@ where
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
+    /// seed tracers from the hierarchy's active composite mass: covered coarse
+    /// cells are omitted and their finest available children supply the mass.
+    pub fn seed_mass_tracers(&self, n: usize) -> symbi_sim::tracers::TracerSet<NDIM> {
+        assert!(
+            self.levels[0].state.geom.coords == symbi_geometry::Geometry::Cartesian,
+            "refined mass tracers require cartesian geometry"
+        );
+        assert!(
+            self.levels[0]
+                .state
+                .geom
+                .interior
+                .spaces
+                .iter()
+                .all(|space| space.lo == 0),
+            "refined mass tracers require a root grid beginning at global index zero"
+        );
+
+        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
+            self.levels[0].state.geom.interior.spaces[aa].size()
+        });
+        let mut owners = Vec::new();
+        let mut cells = Vec::new();
+        let mut masses = Vec::new();
+        for (ll, level) in self.levels.iter().enumerate() {
+            let scale = 1usize
+                .checked_shl(ll as u32)
+                .expect("refinement level exceeds machine index width");
+            let global_cells: [usize; NDIM] =
+                std::array::from_fn(|aa| root_cells[aa] * scale);
+            let geometry = level
+                .state
+                .geom
+                .block_geometry(level.state.physics.metric);
+            for coord in level.state.geom.interior.iter() {
+                if level
+                    .coverage
+                    .as_ref()
+                    .is_some_and(|coverage| coverage.contains(coord))
+                {
+                    continue;
+                }
+                let mut linear = 0usize;
+                let mut stride = 1usize;
+                for aa in 0..NDIM {
+                    linear += coord[aa] as usize * stride;
+                    stride *= global_cells[aa];
+                }
+                let center = geometry.centroid(coord);
+                let widths = level.state.geom.dx;
+                let lo = std::array::from_fn(|aa| center[aa] - 0.5 * widths[aa]);
+                owners.push(symbi_sim::tracers::cell_container_id(linear, ll as u8));
+                cells.push((lo, widths));
+                masses.push(
+                    *level.state.fields.cons.den.view().at(coord) * geometry.volume(coord),
+                );
+            }
+        }
+        symbi_sim::tracers::seed_weighted_cells(&owners, &cells, &masses, n)
+    }
+
+    /// seed the active composite hierarchy once and partition the resulting
+    /// globally identified population onto the levels that own its cells.
+    pub fn attach_mass_tracers(&mut self, n: usize) {
+        let seeded = self.seed_mass_tracers(n);
+        let mut per_level: Vec<symbi_sim::tracers::TracerSet<NDIM>> = (0..self.levels.len())
+            .map(|_| symbi_sim::tracers::TracerSet {
+                weight: seeded.weight,
+                run_seed: seeded.run_seed,
+                next_id: seeded.next_id,
+                ..Default::default()
+            })
+            .collect();
+        for ii in 0..seeded.len() {
+            let (level, _) = symbi_sim::tracers::cell_container_address(seeded.owner[ii])
+                .expect("composite seed produced a non-cell owner");
+            let target = per_level
+                .get_mut(level as usize)
+                .expect("composite seed owner names an absent refinement level");
+            target.x.push(seeded.x[ii]);
+            target.id.push(seeded.id[ii]);
+            target.flags.push(seeded.flags[ii]);
+            target.owner.push(seeded.owner[ii]);
+            target.step_owner.push(seeded.step_owner[ii]);
+            target.step_flags.push(seeded.step_flags[ii]);
+        }
+        for (level, tracers) in self.levels.iter_mut().zip(per_level) {
+            level.state.tracers = Some(tracers);
+        }
+    }
+
     /// decimate the hierarchy to a screen-sized density heatmap, compositing the
     /// nested refinement levels: each root cell descends to the FINEST level whose
     /// `coverage` box contains it (SMR = single nested box per level, ratio 2), so

@@ -90,7 +90,21 @@ impl<const D: usize> TracerSet<D> {
     /// (k + 1/2)/m along axis 0, centered on the other axes). `cells` gives
     /// each cell's low corner and widths.
     pub fn seed_stratified(cells: &[([f64; D], [f64; D])], counts: &[usize], weight: f64) -> Self {
+        let owners: Vec<_> = (0..cells.len())
+            .map(|ii| crate::mass_transport::ContainerId(ii as u64))
+            .collect();
+        Self::seed_stratified_owned(cells, &owners, counts, weight)
+    }
+
+    /// seed stratified tracers into explicitly addressed material cells.
+    pub fn seed_stratified_owned(
+        cells: &[([f64; D], [f64; D])],
+        owners: &[crate::mass_transport::ContainerId],
+        counts: &[usize],
+        weight: f64,
+    ) -> Self {
         assert_eq!(cells.len(), counts.len(), "cells/counts length mismatch");
+        assert_eq!(cells.len(), owners.len(), "cells/owners length mismatch");
         let mut set = Self {
             weight,
             ..Default::default()
@@ -111,8 +125,7 @@ impl<const D: usize> TracerSet<D> {
                 set.x.push(p);
                 set.id.push(next_id);
                 set.flags.push(TracerFlags::default());
-                set.owner
-                    .push(crate::mass_transport::ContainerId(ci as u64));
+                set.owner.push(owners[ci]);
                 next_id += 1;
             }
         }
@@ -688,6 +701,20 @@ mod tests {
             80
         );
     }
+
+    #[test]
+    fn cell_container_namespace_preserves_root_ids_and_separates_levels() {
+        let root = cell_container_id(42, 0);
+        let fine = cell_container_id(42, 1);
+
+        assert_eq!(root.0, 42);
+        assert_ne!(root, fine);
+        assert_eq!(cell_container_address(root), Some((0, 42)));
+        assert_eq!(cell_container_address(fine), Some((1, 42)));
+        assert_eq!(cell_container_address(ACCRETION_RESERVOIR), None);
+        assert_eq!(cell_container_address(MATERIAL_REMOVAL_RESERVOIR), None);
+        assert_eq!(cell_container_address(exterior_container(0, false)), None);
+    }
 }
 
 // =============================================================================
@@ -713,8 +740,9 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
         masses.push(*sim.fields.cons.den.view().at(c));
         let mut lo = [0.0; D];
         let mut dxs = [0.0; D];
+        let center = sim.geom.centroid(c);
         for a in 0..D {
-            lo[a] = sim.geom.x_lo[a] + (c[a] - interior.spaces[a].lo) as f64 * sim.geom.dx[a];
+            lo[a] = center[a] - 0.5 * sim.geom.dx[a];
             dxs[a] = sim.geom.dx[a];
         }
         cells.push((lo, dxs));
@@ -727,6 +755,28 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
         masses.iter().sum::<f64>() * vol / n as f64
     };
     let mut tracers = TracerSet::seed_stratified(&cells, &counts, weight);
+    tracers.step_owner = tracers.owner.clone();
+    tracers.step_flags = tracers.flags.clone();
+    tracers
+}
+
+/// seed a fixed-size tracer population over explicitly addressed cells whose
+/// masses may come from different refinement levels.
+pub fn seed_weighted_cells<const D: usize>(
+    owners: &[crate::mass_transport::ContainerId],
+    cells: &[([f64; D], [f64; D])],
+    masses: &[f64],
+    n: usize,
+) -> TracerSet<D> {
+    assert_eq!(owners.len(), cells.len(), "owners/cells length mismatch");
+    assert_eq!(masses.len(), cells.len(), "masses/cells length mismatch");
+    let counts = systematic_counts(masses, n);
+    let weight = if n == 0 {
+        0.0
+    } else {
+        masses.iter().sum::<f64>() / n as f64
+    };
+    let mut tracers = TracerSet::seed_stratified_owned(cells, owners, &counts, weight);
     tracers.step_owner = tracers.owner.clone();
     tracers.step_flags = tracers.flags.clone();
     tracers
@@ -769,6 +819,7 @@ where
 pub struct TransportLayout<const D: usize> {
     pub global_cells: [usize; D],
     pub tile_offset: [usize; D],
+    pub level: u8,
 }
 
 impl<const D: usize> TransportLayout<D> {
@@ -776,6 +827,7 @@ impl<const D: usize> TransportLayout<D> {
         Self {
             global_cells: std::array::from_fn(|dd| domain.spaces[dd].size()),
             tile_offset: [0; D],
+            level: 0,
         }
     }
 }
@@ -931,6 +983,9 @@ where
 const EXTERIOR_BIT: u64 = 1 << 63;
 const ACCRETION_RESERVOIR_ID: u64 = 1 << 62;
 const MATERIAL_REMOVAL_RESERVOIR_ID: u64 = (1 << 62) | 2;
+const CELL_LEVEL_SHIFT: u32 = 56;
+const CELL_LEVEL_MASK: u64 = 0x3f << CELL_LEVEL_SHIFT;
+const CELL_LINEAR_MASK: u64 = (1 << CELL_LEVEL_SHIFT) - 1;
 
 pub const ACCRETION_RESERVOIR: crate::mass_transport::ContainerId =
     crate::mass_transport::ContainerId(ACCRETION_RESERVOIR_ID);
@@ -1042,6 +1097,26 @@ fn exterior_container(axis: usize, high: bool) -> crate::mass_transport::Contain
     crate::mass_transport::ContainerId(EXTERIOR_BIT | ((axis as u64) << 1) | high as u64)
 }
 
+pub fn cell_container_id(linear: usize, level: u8) -> crate::mass_transport::ContainerId {
+    assert!(level < 64, "tracer refinement level {level} exceeds 63");
+    assert!(
+        linear as u64 <= CELL_LINEAR_MASK,
+        "tracer cell index {linear} exceeds the 56-bit cell-address space"
+    );
+    crate::mass_transport::ContainerId(((level as u64) << CELL_LEVEL_SHIFT) | linear as u64)
+}
+
+pub fn cell_container_address(
+    container: crate::mass_transport::ContainerId,
+) -> Option<(u8, usize)> {
+    if container.0 & (EXTERIOR_BIT | ACCRETION_RESERVOIR_ID) != 0 {
+        return None;
+    }
+    let level = ((container.0 & CELL_LEVEL_MASK) >> CELL_LEVEL_SHIFT) as u8;
+    let linear = (container.0 & CELL_LINEAR_MASK) as usize;
+    Some((level, linear))
+}
+
 fn cell_container<const D: usize>(
     coord: [isize; D],
     domain: &symbi_algebra::Domain<D>,
@@ -1054,7 +1129,7 @@ fn cell_container<const D: usize>(
         linear += (layout.tile_offset[dd] + local) * stride;
         stride *= layout.global_cells[dd];
     }
-    crate::mass_transport::ContainerId(linear as u64)
+    cell_container_id(linear, layout.level)
 }
 
 fn container_cell<const D: usize>(
@@ -1062,7 +1137,10 @@ fn container_cell<const D: usize>(
     domain: &symbi_algebra::Domain<D>,
     layout: TransportLayout<D>,
 ) -> Option<[isize; D]> {
-    let mut linear = container.0 as usize;
+    let (level, mut linear) = cell_container_address(container)?;
+    if level != layout.level {
+        return None;
+    }
     let global: [usize; D] = std::array::from_fn(|dd| {
         let index = linear % layout.global_cells[dd];
         linear /= layout.global_cells[dd];
@@ -1093,7 +1171,7 @@ fn face_destination<const D: usize>(
             linear += global[dd] as usize * stride;
             stride *= layout.global_cells[dd];
         }
-        return crate::mass_transport::ContainerId(linear as u64);
+        return cell_container_id(linear, layout.level);
     }
     match boundaries.0[axis][high as usize] {
         crate::state::BoundaryType::Periodic => {
@@ -1108,7 +1186,7 @@ fn face_destination<const D: usize>(
                 linear += global[dd] as usize * stride;
                 stride *= layout.global_cells[dd];
             }
-            crate::mass_transport::ContainerId(linear as u64)
+            cell_container_id(linear, layout.level)
         }
         crate::state::BoundaryType::Reflect => cell_container(coord, domain, layout),
         _ => exterior_container(axis, high),
