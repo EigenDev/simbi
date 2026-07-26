@@ -11,7 +11,10 @@ use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
-use symbi_sim::tracers::cell_container_address;
+use symbi_sim::mass_transport::{ContainerId, ItoOrder};
+use symbi_sim::tracers::{
+    ContinuousTracerRecord, ContinuousTracerSet, cell_container_address,
+};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.35;
@@ -117,4 +120,116 @@ fn translating_nmhd_flow_crosses_refinement_interfaces_without_tracer_loss() {
         crossed_level > 0,
         "no MHD tracer crossed a refinement interface"
     );
+}
+
+#[test]
+fn continuous_tracer_record_moves_to_finest_active_level_without_state_loss() {
+    let coarse = Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([16, 4, 2])
+        .bounds([0.0; 3], [1.0; 3])
+        .boundaries(BoundaryType::Periodic)
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| MhdPrim {
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0; 3]),
+                pre: 1.0,
+            },
+            mag: Tensor::new(B0),
+        })
+        .seed_faces_uniform(B0)
+        .build();
+    let kernels = Kern::new(GAMMA, CFL, 1.0, &coarse.geom.allocated);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [0.25, 0.0, 0.0],
+            x_hi: [0.75, 1.0, 1.0],
+        }],
+        ProlongOrder::Ppm,
+        |state| Kern::new(GAMMA, CFL, 1.0, &state.geom.allocated),
+    )
+    .unwrap();
+    let mut coarse_tracers =
+        ContinuousTracerSet::<3, HostMemory>::allocate(1, ItoOrder::Three).unwrap();
+    coarse_tracers.weight = 0.125;
+    coarse_tracers.run_seed = 91;
+    coarse_tracers.next_id = 43;
+    coarse_tracers.injection_remainder = 0.03125;
+    coarse_tracers
+        .push_host(ContinuousTracerRecord {
+            x: [0.5, 0.4, 0.6],
+            step_x: [0.49, 0.39, 0.59],
+            id: 42,
+            cohort: 7,
+            owner: ContainerId(0),
+            escaped: 0,
+            crossed_sink: 0,
+            crossing_time: 1.25,
+            random_counter: 19,
+        })
+        .unwrap();
+    hierarchy.levels[0].state.continuous_tracers = Some(coarse_tracers);
+    hierarchy.levels[1].state.continuous_tracers =
+        Some(ContinuousTracerSet::allocate(0, ItoOrder::Three).unwrap());
+
+    assert_eq!(hierarchy.migrate_continuous_tracers_to_finest().unwrap(), 1);
+    assert_eq!(
+        hierarchy.levels[0]
+            .state
+            .continuous_tracers
+            .as_ref()
+            .unwrap()
+            .len,
+        0
+    );
+    let fine = hierarchy.levels[1]
+        .state
+        .continuous_tracers
+        .as_mut()
+        .unwrap();
+    assert_eq!(fine.len, 1);
+    assert_eq!(fine.order, ItoOrder::Three);
+    assert_eq!(fine.weight, 0.125);
+    assert_eq!(fine.run_seed, 91);
+    assert_eq!(fine.next_id, 43);
+    assert_eq!(fine.injection_remainder, 0.03125);
+    let record = fine.swap_remove_host(0).unwrap();
+    assert_eq!(record.id, 42);
+    assert_eq!(record.cohort, 7);
+    assert_eq!(record.x, [0.5, 0.4, 0.6]);
+    assert_eq!(record.step_x, [0.49, 0.39, 0.59]);
+    assert_eq!(record.crossing_time, 1.25);
+    assert_eq!(record.random_counter, 19);
+    assert_eq!(cell_container_address(record.owner).unwrap().0, 1);
+    fine.push_host(ContinuousTracerRecord {
+        x: [0.9, 0.4, 0.6],
+        ..record
+    })
+    .unwrap();
+
+    assert_eq!(hierarchy.migrate_continuous_tracers_to_finest().unwrap(), 1);
+    let coarse = hierarchy.levels[0]
+        .state
+        .continuous_tracers
+        .as_mut()
+        .unwrap();
+    assert_eq!(coarse.len, 1);
+    let record = coarse.swap_remove_host(0).unwrap();
+    assert_eq!(record.id, 42);
+    assert_eq!(record.cohort, 7);
+    assert_eq!(record.x, [0.9, 0.4, 0.6]);
+    assert_eq!(record.step_x, [0.49, 0.39, 0.59]);
+    assert_eq!(record.crossing_time, 1.25);
+    assert_eq!(record.random_counter, 19);
+    assert_eq!(cell_container_address(record.owner).unwrap().0, 0);
+    assert_eq!(coarse.order, ItoOrder::Three);
+    assert_eq!(coarse.weight, 0.125);
+    assert_eq!(coarse.run_seed, 91);
+    assert_eq!(coarse.next_id, 43);
+    assert_eq!(coarse.injection_remainder, 0.03125);
 }

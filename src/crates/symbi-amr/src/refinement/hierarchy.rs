@@ -274,6 +274,140 @@ where
         }
     }
 
+    /// relocate continuous particles onto the finest active level containing
+    /// their authoritative physical position.
+    pub fn migrate_continuous_tracers_to_finest(&mut self) -> Result<usize, String> {
+        let descriptors: Vec<_> = self
+            .levels
+            .iter()
+            .enumerate()
+            .map(|(level, data)| {
+                (
+                    level,
+                    symbi_sim::tracers::partition_physical_bounds(&data.state.geom),
+                    data.state.geom.maps,
+                    data.state.geom.x_lo,
+                    data.state.geom.dx,
+                    data.state.geom.interior.clone(),
+                    self.tracer_layout(level),
+                )
+            })
+            .collect();
+        let metadata = self
+            .levels
+            .iter()
+            .filter_map(|level| level.state.continuous_tracers.as_ref())
+            .max_by_key(|tracers| usize::from(tracers.len > 0))
+            .map(|tracers| {
+                (
+                    tracers.order,
+                    tracers.weight,
+                    tracers.run_seed,
+                    tracers.next_id,
+                    tracers.injection_remainder,
+                )
+            })
+            .ok_or_else(|| "continuous tracer population is missing".to_string())?;
+        let locate = |position: [f64; NDIM]| {
+            descriptors.iter().rev().find_map(
+                |(level, bounds, maps, x_lo, dx, interior, layout)| {
+                    if (0..NDIM)
+                        .any(|dd| position[dd] < bounds[dd].0 || position[dd] >= bounds[dd].1)
+                    {
+                        return None;
+                    }
+                    let coord: [isize; NDIM] = std::array::from_fn(|dd| match maps {
+                        Some(maps) => maps[dd].index_at(position[dd]),
+                        None => ((position[dd] - x_lo[dd]) / dx[dd]).floor() as isize,
+                    });
+                    if !interior.contains(coord) {
+                        return None;
+                    }
+                    let mut linear = 0usize;
+                    let mut stride = 1usize;
+                    for dd in 0..NDIM {
+                        let local = (coord[dd] - interior.spaces[dd].lo) as usize;
+                        linear += (layout.tile_offset[dd] + local) * stride;
+                        stride *= layout.global_cells[dd];
+                    }
+                    Some((
+                        *level,
+                        symbi_sim::tracers::cell_container_id(linear, layout.level),
+                    ))
+                },
+            )
+        };
+        for level in &mut self.levels {
+            if let Some(tracers) = level.state.continuous_tracers.as_mut() {
+                tracers.order = metadata.0;
+                tracers.weight = metadata.1;
+                tracers.run_seed = metadata.2;
+                tracers.next_id = metadata.3;
+                tracers.injection_remainder = metadata.4;
+            }
+        }
+        let mut moved = Vec::new();
+        for (source_level, level) in self.levels.iter_mut().enumerate() {
+            let Some(tracers) = level.state.continuous_tracers.as_mut() else {
+                continue;
+            };
+            let mut ii = 0;
+            while ii < tracers.len {
+                let inactive = unsafe {
+                    *tracers.escaped.as_ptr::<u8>().add(ii) != 0
+                        || *tracers.crossed_sink.as_ptr::<u8>().add(ii) != 0
+                };
+                if inactive {
+                    ii += 1;
+                    continue;
+                }
+                let position: [f64; NDIM] = unsafe {
+                    std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii))
+                };
+                let Some((target_level, owner)) = locate(position) else {
+                    ii += 1;
+                    continue;
+                };
+                if target_level == source_level {
+                    unsafe {
+                        *tracers
+                            .owner
+                            .as_mut_ptr::<symbi_sim::mass_transport::ContainerId>()
+                            .add(ii) = owner;
+                    }
+                    ii += 1;
+                } else {
+                    let mut record = tracers.swap_remove_host(ii)?;
+                    record.owner = owner;
+                    moved.push((target_level, record));
+                }
+            }
+        }
+        let count = moved.len();
+        for (target_level, record) in moved {
+            if self.levels[target_level]
+                .state
+                .continuous_tracers
+                .is_none()
+            {
+                let mut tracers =
+                    symbi_sim::tracers::ContinuousTracerSet::allocate(0, metadata.0)?;
+                tracers.weight = metadata.1;
+                tracers.run_seed = metadata.2;
+                tracers.next_id = metadata.3;
+                tracers.injection_remainder = metadata.4;
+                self.levels[target_level].state.continuous_tracers = Some(tracers);
+            }
+            self.levels[target_level]
+                .state
+                .continuous_tracers
+                .as_mut()
+                .expect("continuous tracer destination was initialized")
+                .push_host(record)?;
+        }
+        Ok(count)
+    }
+
     fn tracer_cell(
         &self,
         owner: symbi_sim::mass_transport::ContainerId,
