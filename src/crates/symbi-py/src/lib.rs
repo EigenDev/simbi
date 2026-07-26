@@ -5918,16 +5918,13 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     cfg.regime
                 ));
             }
-            if !cfg.source_jsons.is_empty()
-                || !cfg.driven_exprs.is_empty()
-                || !cfg.gradient_bcs.is_empty()
+            if !cfg.gradient_bcs.is_empty()
                 || !cfg.bodies.is_empty()
                 || cfg.bonded_assembly.is_some()
             {
                 return Err(
-                    "n_tracers with refinement requires source-free hydro without immersed \
-                     bodies or driven/gradient boundaries until level-specific material \
-                     receipts are wired"
+                    "n_tracers with refinement does not yet support immersed bodies or gradient \
+                     boundaries until their level-specific material receipts are wired"
                         .to_string(),
                 );
             }

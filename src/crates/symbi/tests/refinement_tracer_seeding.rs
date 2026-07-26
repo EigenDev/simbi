@@ -10,6 +10,8 @@ use symbi::prelude::*;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi_hydro::state::Prim;
+use symbi_hydro::expr_bridge::{build_boundary_dag, build_user_source};
+use symbi_hydro::{SourceConfig, NEWTONIAN_SPEC};
 use symbi_sim::tracers::cell_container_address;
 
 const GAMMA: f64 = 1.4;
@@ -161,4 +163,175 @@ fn translating_flow_crosses_refinement_interfaces_without_losing_tracers() {
     assert_eq!(ids, (0..4096).collect::<Vec<_>>());
     assert!(moved > 0, "no tracer crossed a cell face");
     assert!(crossed_level > 0, "no tracer crossed a refinement interface");
+}
+
+#[test]
+fn refined_density_source_spawns_only_the_composite_added_mass() {
+    let source = SourceConfig::from_json(
+        r#"{
+            "kind": "raw", "dim": 1, "outputs": [0], "params": [],
+            "target": "den",
+            "nodes": [ {"op": "CONSTANT", "value": 0.2} ]
+        }"#,
+    )
+    .unwrap();
+    let make_kernels = |state: &Sim| {
+        Kern::new(GAMMA, CFL, &state.geom.allocated).with_runtime_source(
+            build_user_source(&source, &NEWTONIAN_SPEC).unwrap(),
+            source.params.clone(),
+        )
+    };
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([32])
+        .bounds([0.0], [1.0])
+        .boundaries(BoundaryType::Periodic)
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
+        .build();
+    let kernels = make_kernels(&coarse);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [0.25],
+            x_hi: [0.75],
+        }],
+        ProlongOrder::Ppm,
+        make_kernels,
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy.attach_mass_tracers(1000);
+
+    hierarchy.evolve_steps(2).unwrap();
+
+    let mut composite_mass = 0.0;
+    for level in &hierarchy.levels {
+        let geometry = level
+            .state
+            .geom
+            .block_geometry(level.state.physics.metric);
+        for coord in level.state.geom.interior.iter() {
+            if level
+                .coverage
+                .as_ref()
+                .is_some_and(|coverage| coverage.contains(coord))
+            {
+                continue;
+            }
+            composite_mass +=
+                *level.state.fields.cons.den.view().at(coord) * geometry.volume(coord);
+        }
+    }
+    let tracer_count: usize = hierarchy
+        .levels
+        .iter()
+        .map(|level| level.state.tracers.as_ref().unwrap().len())
+        .sum();
+    let root_tracers = hierarchy.levels[0].state.tracers.as_ref().unwrap();
+    let represented_added =
+        (tracer_count - 1000) as f64 * root_tracers.weight
+            + root_tracers.injection_remainder;
+
+    assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
+    let mut ids: Vec<_> = hierarchy
+        .levels
+        .iter()
+        .flat_map(|level| level.state.tracers.as_ref().unwrap().id.iter().copied())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), tracer_count, "source spawning duplicated tracer ids");
+}
+
+#[test]
+fn refined_driven_inflow_spawns_only_the_composite_entering_mass() {
+    let boundary = SourceConfig::from_json(
+        r#"{
+            "kind": "dirichlet", "dim": 1, "outputs": [0, 1, 2], "params": [],
+            "nodes": [
+                {"op": "CONSTANT", "value": 2.0},
+                {"op": "CONSTANT", "value": 0.5},
+                {"op": "CONSTANT", "value": 1.0}
+            ]
+        }"#,
+    )
+    .unwrap();
+    let make_kernels = |state: &Sim| {
+        let built = build_boundary_dag(&boundary, &NEWTONIAN_SPEC).unwrap();
+        Kern::new(GAMMA, CFL, &state.geom.allocated)
+            .with_driven_boundary(built, boundary.params.clone())
+            .0
+    };
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([32])
+        .bounds([0.0], [1.0])
+        .boundaries(Boundaries::per_axis([[
+            BoundaryType::Driven(0),
+            BoundaryType::Outflow,
+        ]]))
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
+        .build();
+    let kernels = make_kernels(&coarse);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [0.0],
+            x_hi: [0.5],
+        }],
+        ProlongOrder::Ppm,
+        make_kernels,
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy.attach_mass_tracers(1000);
+
+    hierarchy.evolve_steps(2).unwrap();
+
+    let mut composite_mass = 0.0;
+    for level in &hierarchy.levels {
+        let geometry = level
+            .state
+            .geom
+            .block_geometry(level.state.physics.metric);
+        for coord in level.state.geom.interior.iter() {
+            if level
+                .coverage
+                .as_ref()
+                .is_some_and(|coverage| coverage.contains(coord))
+            {
+                continue;
+            }
+            composite_mass +=
+                *level.state.fields.cons.den.view().at(coord) * geometry.volume(coord);
+        }
+    }
+    let tracer_count: usize = hierarchy
+        .levels
+        .iter()
+        .map(|level| level.state.tracers.as_ref().unwrap().len())
+        .sum();
+    let root_tracers = hierarchy.levels[0].state.tracers.as_ref().unwrap();
+    let represented_added =
+        (tracer_count - 1000) as f64 * root_tracers.weight
+            + root_tracers.injection_remainder;
+
+    assert!(represented_added > 0.0, "driven boundary injected no tracers");
+    assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
 }
