@@ -3117,9 +3117,12 @@ macro_rules! into_hierarchy {
         if $cfg.refinement_enabled {
             let regions = refinement_regions_nd::<$d>(&$cfg.refinement_regions)?;
             let prolong = prolong_order_for(&$cfg.reconstruction_name);
-            let h = Hierarchy::with_refinement(sim, $kernels, &regions, prolong, $make)
+            let mut h = Hierarchy::with_refinement(sim, $kernels, &regions, prolong, $make)
                 .map_err(|e| format!("refinement build: {e:?}"))?;
             h.seed_fine_from_coarse().map_err(|e| format!("fine-level seed: {e:?}"))?;
+            if $cfg.n_tracers > 0 {
+                h.attach_mass_tracers($cfg.n_tracers);
+            }
             h
         } else {
             Hierarchy::single(sim, $kernels)
@@ -5896,10 +5899,38 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.n_tracers, cfg.coord_system, cfg.spacetime
             ));
         }
-        if cfg.refinement_enabled || cfg.mesh_motion {
+        if cfg.mesh_motion {
             return Err(
-                "n_tracers does not support refinement or mesh motion yet".to_string(),
+                "n_tracers does not support mesh motion yet".to_string(),
             );
+        }
+        if cfg.refinement_enabled {
+            if cfg.n_gpus > 1 {
+                return Err(
+                    "n_tracers with refinement is single-device until decomposed hierarchy \
+                     ownership migration is wired"
+                        .to_string(),
+                );
+            }
+            if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+                return Err(format!(
+                    "n_tracers with refinement is wired for hydro; regime '{}' not yet",
+                    cfg.regime
+                ));
+            }
+            if !cfg.source_jsons.is_empty()
+                || !cfg.driven_exprs.is_empty()
+                || !cfg.gradient_bcs.is_empty()
+                || !cfg.bodies.is_empty()
+                || cfg.bonded_assembly.is_some()
+            {
+                return Err(
+                    "n_tracers with refinement requires source-free hydro without immersed \
+                     bodies or driven/gradient boundaries until level-specific material \
+                     receipts are wired"
+                        .to_string(),
+                );
+            }
         }
         // multi-device hydro uses global container identities and migrates
         // complete tracer records across decomposition cuts.
