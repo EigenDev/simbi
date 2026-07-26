@@ -73,11 +73,42 @@ pub struct ContinuousTracerSet<const D: usize, Mem: symbi_xpu::MemorySpace> {
     pub injection_remainder: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ContinuousTracerRecord<const D: usize> {
+    pub x: [f64; D],
+    pub step_x: [f64; D],
+    pub id: u64,
+    pub cohort: u16,
+    pub owner: crate::mass_transport::ContainerId,
+    pub escaped: u8,
+    pub crossed_sink: u8,
+    pub crossing_time: f64,
+    pub random_counter: u64,
+}
+
 /// cell-centered flux-derived coefficients interpolated by continuous tracers.
 pub struct ItoCoefficientFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
     pub drift: [symbi_grid::Field<f64, D, Mem>; D],
     pub variance: [symbi_grid::Field<f64, D, Mem>; D],
     pub third: [symbi_grid::Field<f64, D, Mem>; D],
+}
+
+/// accepted full-step mass transfers from which continuous-tracer moments derive.
+pub struct ItoTransportReceipt<const D: usize, Mem: symbi_xpu::MemorySpace> {
+    pub source_mass: symbi_grid::Field<f64, D, Mem>,
+    pub face_mass: [symbi_grid::Field<f64, D, Mem>; D],
+    pub step_scale: f64,
+}
+
+impl<const D: usize, Mem: symbi_xpu::MemorySpace> ItoTransportReceipt<D, Mem> {
+    pub fn zeros(domain: &symbi_algebra::Domain<D>) -> Result<Self, String> {
+        Ok(Self {
+            source_mass: symbi_grid::Field::zeros(domain).map_err(|err| err.to_string())?,
+            face_mass: crate::state::array_field_zeros(domain)
+                .map_err(|err| err.to_string())?,
+            step_scale: 1.0,
+        })
+    }
 }
 
 impl<const D: usize, Mem: symbi_xpu::MemorySpace> ItoCoefficientFields<D, Mem> {
@@ -213,6 +244,9 @@ pub fn advance_continuous_tracers_host<const D: usize, Mem: symbi_xpu::MemorySpa
             }
             let position =
                 std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii));
+            for dd in 0..D {
+                *tracers.step_x[dd].as_mut_ptr::<f64>().add(ii) = position[dd];
+            }
             let rates = coefficients.interpolate(geometry, position)?;
             for dd in 0..D {
                 let unit = crate::mass_transport::ito_unit_sample(
@@ -235,6 +269,218 @@ pub fn advance_continuous_tracers_host<const D: usize, Mem: symbi_xpu::MemorySpa
         }
     }
     Ok(())
+}
+
+/// apply physical face laws to each accepted continuous trajectory segment.
+pub fn apply_continuous_boundaries_host<const D: usize, Mem: symbi_xpu::MemorySpace>(
+    tracers: &mut ContinuousTracerSet<D, Mem>,
+    bounds: [(f64, f64); D],
+    boundaries: crate::state::Boundaries<D>,
+) -> Result<(), String> {
+    if !Mem::IS_HOST_ACCESSIBLE {
+        return Err("host tracer boundaries require host-accessible memory".to_string());
+    }
+    for dd in 0..D {
+        let (lo, hi) = bounds[dd];
+        if !lo.is_finite() || !hi.is_finite() || hi <= lo {
+            return Err(format!("invalid tracer bounds [{lo}, {hi}] on axis {dd}"));
+        }
+    }
+    unsafe {
+        for ii in 0..tracers.len {
+            if *tracers.escaped.as_ptr::<u8>().add(ii) != 0
+                || *tracers.crossed_sink.as_ptr::<u8>().add(ii) != 0
+            {
+                continue;
+            }
+            let mut point: [f64; D] =
+                std::array::from_fn(|dd| *tracers.step_x[dd].as_ptr::<f64>().add(ii));
+            let endpoint: [f64; D] =
+                std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii));
+            let mut remaining: [f64; D] =
+                std::array::from_fn(|dd| endpoint[dd] - point[dd]);
+            let mut escaped = false;
+            for _event in 0..(8 * D + 8) {
+                let mut hit: Option<(f64, usize, bool)> = None;
+                for dd in 0..D {
+                    let candidate = if remaining[dd] < 0.0 {
+                        Some(((bounds[dd].0 - point[dd]) / remaining[dd], false))
+                    } else if remaining[dd] > 0.0 {
+                        Some(((bounds[dd].1 - point[dd]) / remaining[dd], true))
+                    } else {
+                        None
+                    };
+                    if let Some((fraction, high)) = candidate {
+                        if fraction >= 0.0
+                            && fraction <= 1.0
+                            && hit.is_none_or(|(best, _, _)| fraction < best)
+                        {
+                            hit = Some((fraction, dd, high));
+                        }
+                    }
+                }
+                let Some((fraction, axis, high)) = hit else {
+                    for dd in 0..D {
+                        point[dd] += remaining[dd];
+                    }
+                    remaining = [0.0; D];
+                    break;
+                };
+                for dd in 0..D {
+                    point[dd] += fraction * remaining[dd];
+                    remaining[dd] *= 1.0 - fraction;
+                }
+                let boundary = if high {
+                    boundaries.hi(axis)
+                } else {
+                    boundaries.lo(axis)
+                };
+                match boundary {
+                    crate::state::BoundaryType::Periodic => {
+                        point[axis] = if high {
+                            bounds[axis].0
+                        } else {
+                            bounds[axis].1
+                        };
+                    }
+                    crate::state::BoundaryType::Reflect => {
+                        remaining[axis] = -remaining[axis];
+                    }
+                    crate::state::BoundaryType::CoarseFine => {
+                        return Err(
+                            "continuous tracer reached an unresolved coarse-fine boundary"
+                                .to_string(),
+                        );
+                    }
+                    crate::state::BoundaryType::Outflow
+                    | crate::state::BoundaryType::Driven(_)
+                    | crate::state::BoundaryType::Neumann(_)
+                    | crate::state::BoundaryType::Robin(_) => {
+                        remaining = [0.0; D];
+                        escaped = true;
+                        break;
+                    }
+                }
+            }
+            if remaining.iter().any(|value| *value != 0.0) {
+                return Err(format!(
+                    "continuous tracer {} crossed too many boundaries in one step",
+                    *tracers.id.as_ptr::<u64>().add(ii)
+                ));
+            }
+            for dd in 0..D {
+                *tracers.x[dd].as_mut_ptr::<f64>().add(ii) = point[dd];
+            }
+            if escaped {
+                *tracers.escaped.as_mut_ptr::<u8>().add(ii) = 1;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn partition_physical_bounds<const D: usize>(
+    geometry: &crate::state::PartitionGeometry<D>,
+) -> [(f64, f64); D] {
+    std::array::from_fn(|dd| {
+        let lo_index = geometry.interior.spaces[dd].lo;
+        let hi_index = geometry.interior.spaces[dd].hi;
+        match geometry.maps {
+            Some(maps) => (maps[dd].face(lo_index), maps[dd].face(hi_index)),
+            None => (
+                geometry.x_lo[dd] + lo_index as f64 * geometry.dx[dd],
+                geometry.x_lo[dd] + hi_index as f64 * geometry.dx[dd],
+            ),
+        }
+    })
+}
+
+/// fill physical coefficient ghosts with the parity of the trajectory law.
+pub fn fill_ito_coefficient_boundaries_host<const D: usize, Mem: symbi_xpu::MemorySpace>(
+    coefficients: &ItoCoefficientFields<D, Mem>,
+    geometry: &crate::state::PartitionGeometry<D>,
+    boundaries: crate::state::Boundaries<D>,
+) -> Result<(), String> {
+    if !Mem::IS_HOST_ACCESSIBLE {
+        return Err("host ito boundary fill requires host-accessible memory".to_string());
+    }
+    for coord in geometry.allocated.iter() {
+        if geometry.interior.contains(coord) {
+            continue;
+        }
+        let mut donor = coord;
+        let mut normal_sign = [1.0; D];
+        let mut unresolved = false;
+        for axis in 0..D {
+            let space = &geometry.interior.spaces[axis];
+            while donor[axis] < space.lo || donor[axis] >= space.hi {
+                let high = donor[axis] >= space.hi;
+                let boundary = if high {
+                    boundaries.hi(axis)
+                } else {
+                    boundaries.lo(axis)
+                };
+                match boundary {
+                    crate::state::BoundaryType::Periodic => {
+                        let size = space.size() as isize;
+                        donor[axis] = space.lo + (donor[axis] - space.lo).rem_euclid(size);
+                    }
+                    crate::state::BoundaryType::Reflect => {
+                        donor[axis] = if high {
+                            2 * space.hi - 1 - donor[axis]
+                        } else {
+                            2 * space.lo - 1 - donor[axis]
+                        };
+                        normal_sign[axis] = -normal_sign[axis];
+                    }
+                    crate::state::BoundaryType::CoarseFine => {
+                        unresolved = true;
+                        break;
+                    }
+                    crate::state::BoundaryType::Outflow
+                    | crate::state::BoundaryType::Driven(_)
+                    | crate::state::BoundaryType::Neumann(_)
+                    | crate::state::BoundaryType::Robin(_) => {
+                        donor[axis] = if high { space.hi - 1 } else { space.lo };
+                    }
+                }
+            }
+            if unresolved {
+                break;
+            }
+        }
+        if unresolved {
+            continue;
+        }
+        for dd in 0..D {
+            let sign = normal_sign[dd];
+            coefficients.drift[dd]
+                .view_mut()
+                .set(coord, sign * *coefficients.drift[dd].view().at(donor));
+            coefficients.variance[dd]
+                .view_mut()
+                .set(coord, *coefficients.variance[dd].view().at(donor));
+            coefficients.third[dd]
+                .view_mut()
+                .set(coord, sign * *coefficients.third[dd].view().at(donor));
+        }
+    }
+    Ok(())
+}
+
+fn candidate_choices_by_storage_order(
+    ids: &[u64],
+    selections: Vec<(u64, bool)>,
+) -> Result<Vec<bool>, String> {
+    let by_id: std::collections::BTreeMap<_, _> = selections.into_iter().collect();
+    ids.iter()
+        .map(|id| {
+            by_id
+                .get(id)
+                .copied()
+                .ok_or_else(|| format!("missing ssp ancestry selection for tracer {id}"))
+        })
+        .collect()
 }
 
 fn particle_blocks<const D: usize, Mem: symbi_xpu::MemorySpace, T>(
@@ -330,6 +576,134 @@ impl<const D: usize, Mem: symbi_xpu::MemorySpace> ContinuousTracerSet<D, Mem> {
             }
         }
         Ok(set)
+    }
+
+    fn reserve_host(&mut self, required: usize) -> Result<(), String> {
+        if required <= self.capacity {
+            return Ok(());
+        }
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return Err("host tracer growth requires host-accessible memory".to_string());
+        }
+        let capacity = required.max(self.capacity.saturating_mul(2)).max(1);
+        fn grow<Mem: symbi_xpu::MemorySpace, T>(
+            block: &mut symbi_xpu::MemoryBlock<Mem>,
+            len: usize,
+            capacity: usize,
+        ) -> Result<(), String> {
+            let mut replacement = symbi_xpu::MemoryBlock::<Mem>::for_elements::<T>(capacity)
+                .map_err(|err| err.to_string())?;
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    block.as_ptr::<T>(),
+                    replacement.as_mut_ptr::<T>(),
+                    len,
+                );
+            }
+            *block = replacement;
+            Ok(())
+        }
+        for dd in 0..D {
+            grow::<Mem, f64>(&mut self.x[dd], self.len, capacity)?;
+            grow::<Mem, f64>(&mut self.step_x[dd], self.len, capacity)?;
+        }
+        grow::<Mem, u64>(&mut self.id, self.len, capacity)?;
+        grow::<Mem, u16>(&mut self.cohort, self.len, capacity)?;
+        grow::<Mem, crate::mass_transport::ContainerId>(&mut self.owner, self.len, capacity)?;
+        grow::<Mem, u8>(&mut self.escaped, self.len, capacity)?;
+        grow::<Mem, u8>(&mut self.crossed_sink, self.len, capacity)?;
+        grow::<Mem, f64>(&mut self.crossing_time, self.len, capacity)?;
+        grow::<Mem, u64>(&mut self.random_counter, self.len, capacity)?;
+        self.capacity = capacity;
+        Ok(())
+    }
+
+    pub(crate) fn swap_remove_host(
+        &mut self,
+        index: usize,
+    ) -> Result<ContinuousTracerRecord<D>, String> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return Err("host tracer removal requires host-accessible memory".to_string());
+        }
+        if index >= self.len {
+            return Err(format!(
+                "continuous tracer index {index} exceeds length {}",
+                self.len
+            ));
+        }
+        let last = self.len - 1;
+        unsafe {
+            let record = ContinuousTracerRecord {
+                x: std::array::from_fn(|dd| *self.x[dd].as_ptr::<f64>().add(index)),
+                step_x: std::array::from_fn(|dd| {
+                    *self.step_x[dd].as_ptr::<f64>().add(index)
+                }),
+                id: *self.id.as_ptr::<u64>().add(index),
+                cohort: *self.cohort.as_ptr::<u16>().add(index),
+                owner: *self
+                    .owner
+                    .as_ptr::<crate::mass_transport::ContainerId>()
+                    .add(index),
+                escaped: *self.escaped.as_ptr::<u8>().add(index),
+                crossed_sink: *self.crossed_sink.as_ptr::<u8>().add(index),
+                crossing_time: *self.crossing_time.as_ptr::<f64>().add(index),
+                random_counter: *self.random_counter.as_ptr::<u64>().add(index),
+            };
+            if index != last {
+                for dd in 0..D {
+                    *self.x[dd].as_mut_ptr::<f64>().add(index) =
+                        *self.x[dd].as_ptr::<f64>().add(last);
+                    *self.step_x[dd].as_mut_ptr::<f64>().add(index) =
+                        *self.step_x[dd].as_ptr::<f64>().add(last);
+                }
+                *self.id.as_mut_ptr::<u64>().add(index) = *self.id.as_ptr::<u64>().add(last);
+                *self.cohort.as_mut_ptr::<u16>().add(index) =
+                    *self.cohort.as_ptr::<u16>().add(last);
+                *self
+                    .owner
+                    .as_mut_ptr::<crate::mass_transport::ContainerId>()
+                    .add(index) = *self
+                    .owner
+                    .as_ptr::<crate::mass_transport::ContainerId>()
+                    .add(last);
+                *self.escaped.as_mut_ptr::<u8>().add(index) =
+                    *self.escaped.as_ptr::<u8>().add(last);
+                *self.crossed_sink.as_mut_ptr::<u8>().add(index) =
+                    *self.crossed_sink.as_ptr::<u8>().add(last);
+                *self.crossing_time.as_mut_ptr::<f64>().add(index) =
+                    *self.crossing_time.as_ptr::<f64>().add(last);
+                *self.random_counter.as_mut_ptr::<u64>().add(index) =
+                    *self.random_counter.as_ptr::<u64>().add(last);
+            }
+            self.len = last;
+            Ok(record)
+        }
+    }
+
+    pub(crate) fn push_host(
+        &mut self,
+        record: ContinuousTracerRecord<D>,
+    ) -> Result<(), String> {
+        self.reserve_host(self.len + 1)?;
+        let index = self.len;
+        unsafe {
+            for dd in 0..D {
+                *self.x[dd].as_mut_ptr::<f64>().add(index) = record.x[dd];
+                *self.step_x[dd].as_mut_ptr::<f64>().add(index) = record.step_x[dd];
+            }
+            *self.id.as_mut_ptr::<u64>().add(index) = record.id;
+            *self.cohort.as_mut_ptr::<u16>().add(index) = record.cohort;
+            *self
+                .owner
+                .as_mut_ptr::<crate::mass_transport::ContainerId>()
+                .add(index) = record.owner;
+            *self.escaped.as_mut_ptr::<u8>().add(index) = record.escaped;
+            *self.crossed_sink.as_mut_ptr::<u8>().add(index) = record.crossed_sink;
+            *self.crossing_time.as_mut_ptr::<f64>().add(index) = record.crossing_time;
+            *self.random_counter.as_mut_ptr::<u64>().add(index) = record.random_counter;
+        }
+        self.len += 1;
+        Ok(())
     }
 }
 
@@ -736,6 +1110,48 @@ mod tests {
     }
 
     #[test]
+    fn continuous_relocation_grows_storage_and_preserves_complete_records() {
+        use symbi_xpu::HostMemory;
+
+        let seed = TracerSet::<2>::seed_stratified(&[([0.0, 1.0], [2.0, 4.0])], &[2], 0.25);
+        let mut source = ContinuousTracerSet::<2, HostMemory>::from_discrete(
+            &seed,
+            crate::mass_transport::ItoOrder::Three,
+        )
+        .unwrap();
+        let mut target =
+            ContinuousTracerSet::<2, HostMemory>::allocate(0, crate::mass_transport::ItoOrder::Three)
+                .unwrap();
+        unsafe {
+            *source.random_counter.as_mut_ptr::<u64>().add(0) = 17;
+            *source.crossed_sink.as_mut_ptr::<u8>().add(0) = 1;
+            *source.crossing_time.as_mut_ptr::<f64>().add(0) = 3.5;
+        }
+
+        let moved = source.swap_remove_host(0).unwrap();
+        target.push_host(moved).unwrap();
+
+        assert_eq!(source.len, 1);
+        assert_eq!(target.len, 1);
+        assert!(target.capacity >= 1);
+        let roundtrip = target.swap_remove_host(0).unwrap();
+        assert_eq!(roundtrip, moved);
+        assert_eq!(roundtrip.random_counter, 17);
+        assert_eq!(roundtrip.crossed_sink, 1);
+        assert_eq!(roundtrip.crossing_time, 3.5);
+    }
+
+    #[test]
+    fn ssp_choices_follow_particle_ids_after_storage_reordering() {
+        let choices = candidate_choices_by_storage_order(
+            &[30, 10, 20],
+            vec![(10, false), (20, true), (30, false)],
+        )
+        .unwrap();
+        assert_eq!(choices, [false, false, true]);
+    }
+
+    #[test]
     fn apportionment_is_exact_and_proportional() {
         let masses = vec![1.0, 2.0, 3.0, 4.0];
         let counts = systematic_counts(&masses, 1000);
@@ -854,6 +1270,50 @@ mod tests {
     }
 
     #[test]
+    fn rk2_ito_receipt_folds_stage_face_masses_before_moment_matching() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [1],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
+            )
+            .unwrap();
+        let cell = [sim.geom.interior.spaces[0].lo];
+        let high = [cell[0] + 1];
+        sim.fields.cons.den.view_mut().set(cell, 1.0);
+        sim.dt = 0.5;
+        let geometry = sim.geom.block_geometry(Cartesian);
+        begin_ito_transport_store(&mut sim, &geometry).unwrap();
+
+        sim.fields.flux[0].den.view_mut().set(high, 0.2);
+        accumulate_ito_transport_stage_store(&mut sim, &geometry, 1.0).unwrap();
+        sim.fields.flux[0].den.view_mut().set(high, 0.6);
+        accumulate_ito_transport_stage_store(&mut sim, &geometry, 0.5).unwrap();
+        materialize_ito_coefficients_store(&mut sim, &geometry).unwrap();
+
+        let receipt = sim.ito_transport.as_ref().unwrap();
+        assert!((*receipt.face_mass[0].view().at(high) - 0.2).abs() < 1.0e-15);
+        let rates = sim.ito_coefficients.as_ref().unwrap();
+        assert!((*rates.drift[0].view().at(cell) - 0.4).abs() < 1.0e-15);
+        assert!((*rates.variance[0].view().at(cell) - 0.32).abs() < 1.0e-15);
+        assert!((*rates.third[0].view().at(cell) - 0.192).abs() < 1.0e-15);
+    }
+
+    #[test]
     fn accepted_mass_flux_moves_the_low_variance_quota() {
         use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
         use symbi_geometry::Cartesian;
@@ -880,6 +1340,8 @@ mod tests {
             sim.fields.cons.den.view_mut().set(coord, 1.0);
             sim.workspace.u_stage.den.view_mut().set(coord, 1.0);
         }
+        let geometry = sim.geom.block_geometry(Cartesian);
+        begin_ito_transport_store(&mut sim, &geometry).unwrap();
         for coord in sim.geom.allocated.iter() {
             sim.fields.flux[0].den.view_mut().set(coord, 0.0);
         }
@@ -894,7 +1356,7 @@ mod tests {
         let cells = [([0.0], [1.0]), ([1.0], [1.0])];
         sim.tracers = Some(TracerSet::seed_stratified(&cells, &[100, 100], 0.01));
         snapshot_transport_state(&mut sim);
-        let geometry = sim.geom.block_geometry(Cartesian);
+        accumulate_ito_transport_stage_store(&mut sim, &geometry, 1.0).unwrap();
         materialize_ito_coefficients_store(&mut sim, &geometry).unwrap();
         let coefficients = sim.ito_coefficients.as_ref().unwrap();
         let left = [sim.geom.interior.spaces[0].lo];
@@ -1032,6 +1494,101 @@ mod tests {
             assert_eq!(position, [0.75, 0.75]);
             assert_eq!(counters, [1, 0]);
         }
+    }
+
+    #[test]
+    fn continuous_boundaries_wrap_reflect_and_freeze_at_outflow_faces() {
+        use crate::state::{Boundaries, BoundaryType};
+        use symbi_xpu::HostMemory;
+
+        let trajectory = |start: f64, end: f64, boundary| {
+            let seed = TracerSet::<1>::seed_stratified(&[([start], [0.1])], &[1], 1.0);
+            let mut tracers = ContinuousTracerSet::<1, HostMemory>::from_discrete(
+                &seed,
+                crate::mass_transport::ItoOrder::Two,
+            )
+            .unwrap();
+            unsafe {
+                *tracers.step_x[0].as_mut_ptr::<f64>() = start;
+                *tracers.x[0].as_mut_ptr::<f64>() = end;
+            }
+            apply_continuous_boundaries_host(
+                &mut tracers,
+                [(0.0, 1.0)],
+                Boundaries::uniform(boundary),
+            )
+            .unwrap();
+            let record = tracers.swap_remove_host(0).unwrap();
+            (record.x[0], record.escaped)
+        };
+
+        let periodic = trajectory(0.9, 1.2, BoundaryType::Periodic);
+        assert!((periodic.0 - 0.2).abs() < 1.0e-15);
+        assert_eq!(periodic.1, 0);
+
+        let reflected = trajectory(0.1, -0.2, BoundaryType::Reflect);
+        assert!((reflected.0 - 0.2).abs() < 1.0e-15);
+        assert_eq!(reflected.1, 0);
+
+        let outflow = trajectory(0.8, 1.4, BoundaryType::Outflow);
+        assert_eq!(outflow.0, 1.0);
+        assert_eq!(outflow.1, 1);
+    }
+
+    #[test]
+    fn ito_coefficient_ghosts_respect_periodic_and_reflecting_parity() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        let coefficients =
+            ItoCoefficientFields::<1, HostMemory>::zeros(&sim.geom.allocated).unwrap();
+        let lo = [sim.geom.interior.spaces[0].lo];
+        let hi = [sim.geom.interior.spaces[0].hi - 1];
+        coefficients.drift[0].view_mut().set(lo, 2.0);
+        coefficients.variance[0].view_mut().set(lo, 3.0);
+        coefficients.third[0].view_mut().set(lo, 4.0);
+        coefficients.drift[0].view_mut().set(hi, 5.0);
+        coefficients.variance[0].view_mut().set(hi, 6.0);
+        coefficients.third[0].view_mut().set(hi, 7.0);
+        let low_ghost = [lo[0] - 1];
+
+        fill_ito_coefficient_boundaries_host(
+            &coefficients,
+            &sim.geom,
+            Boundaries::uniform(BoundaryType::Reflect),
+        )
+        .unwrap();
+        assert_eq!(*coefficients.drift[0].view().at(low_ghost), -2.0);
+        assert_eq!(*coefficients.variance[0].view().at(low_ghost), 3.0);
+        assert_eq!(*coefficients.third[0].view().at(low_ghost), -4.0);
+
+        fill_ito_coefficient_boundaries_host(
+            &coefficients,
+            &sim.geom,
+            Boundaries::uniform(BoundaryType::Periodic),
+        )
+        .unwrap();
+        assert_eq!(*coefficients.drift[0].view().at(low_ghost), 5.0);
+        assert_eq!(*coefficients.variance[0].view().at(low_ghost), 6.0);
+        assert_eq!(*coefficients.third[0].view().at(low_ghost), 7.0);
     }
 
     #[test]
@@ -1301,6 +1858,8 @@ mod tests {
         immersed.reset_accretion_receipts(1);
         immersed.record_accretion_receipt(0, [0.25]);
         immersed.record_accretion_receipt(1, [0.25]);
+        sim.time = 1.25;
+        sim.dt = 0.25;
 
         advance_accretion_transport(&mut sim, &[1.0]).unwrap();
 
@@ -1328,6 +1887,63 @@ mod tests {
             50
         );
         assert_eq!(tracers.crossed_mass(), 0.5);
+        assert!(tracers
+            .flags
+            .iter()
+            .filter(|flag| flag.crossed_sink)
+            .all(|flag| flag.crossing_time == 1.25));
+    }
+
+    #[test]
+    fn continuous_accretion_uses_accepted_removal_and_records_the_accepted_time() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [1],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        let cell = [sim.geom.interior.spaces[0].lo];
+        sim.fields.cons.den.view_mut().set(cell, 0.0);
+        let seed = TracerSet::<1>::seed_stratified(&[([0.0], [1.0])], &[1], 1.0);
+        sim.continuous_tracers = Some(
+            ContinuousTracerSet::<1, HostMemory>::from_discrete(
+                &seed,
+                crate::mass_transport::ItoOrder::Two,
+            )
+            .unwrap(),
+        );
+        let geometry = sim.geom.block_geometry(Cartesian);
+        let layout = TransportLayout::single(&sim.geom.interior);
+
+        advance_continuous_accretion_transport_store(
+            &mut sim,
+            &geometry,
+            layout,
+            &[1.0],
+            2.5,
+        )
+        .unwrap();
+
+        let tracers = sim.continuous_tracers.as_mut().unwrap();
+        let record = tracers.swap_remove_host(0).unwrap();
+        assert_eq!(record.owner, ACCRETION_RESERVOIR);
+        assert_eq!(record.crossed_sink, 1);
+        assert_eq!(record.crossing_time, 2.5);
     }
 }
 
@@ -1480,7 +2096,78 @@ where
     advance_stage_mass_transport_store_masked(sim, geometry, layout, None, a0, ac, stage)
 }
 
-/// materialize continuous-tracer moment rates from the final accepted stage flux.
+/// start a continuous-tracer receipt from the step-entry cell masses.
+pub fn begin_ito_transport_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let scale = if sim.motion.homologous {
+        sim.motion.a
+    } else {
+        1.0
+    };
+    let mut receipt = ItoTransportReceipt::zeros(&sim.geom.allocated)?;
+    receipt.step_scale = scale;
+    for coord in sim.geom.interior.iter() {
+        let mass = *sim.fields.cons.den.view().at(coord)
+            * geometry.labframe_volume(coord, scale);
+        receipt.source_mass.view_mut().set(coord, mass);
+    }
+    sim.ito_transport = Some(receipt);
+    Ok(())
+}
+
+/// fold one hydro stage's signed face masses into the accepted-step receipt.
+pub fn accumulate_ito_transport_stage_store<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    ac: f64,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    let receipt = sim
+        .ito_transport
+        .as_ref()
+        .ok_or_else(|| "ito transport receipt was not initialized".to_string())?;
+    let scale = if sim.motion.homologous {
+        sim.motion.a
+    } else {
+        1.0
+    };
+    for dd in 0..D {
+        for coord in sim.geom.interior.iter() {
+            let stage_mass = *sim.fields.flux[dd].den.view().at(coord)
+                * geometry.labframe_face_area(coord, dd, scale)
+                * sim.dt;
+            let history = *receipt.face_mass[dd].view().at(coord);
+            receipt.face_mass[dd].view_mut().set(
+                coord,
+                crate::mass_transport::fold_accepted_face_mass(history, stage_mass, ac)?,
+            );
+            if coord[dd] == sim.geom.interior.spaces[dd].hi - 1 {
+                let mut high = coord;
+                high[dd] += 1;
+                let stage_mass = *sim.fields.flux[dd].den.view().at(high)
+                    * geometry.labframe_face_area(high, dd, scale)
+                    * sim.dt;
+                let history = *receipt.face_mass[dd].view().at(high);
+                receipt.face_mass[dd].view_mut().set(
+                    high,
+                    crate::mass_transport::fold_accepted_face_mass(history, stage_mass, ac)?,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// materialize continuous-tracer moment rates from the accepted-step receipt.
 pub fn materialize_ito_coefficients_store<const D: usize, const DOF: usize, M, Mem>(
     sim: &mut FieldStore<D, DOF, Mem, f64>,
     geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
@@ -1491,27 +2178,20 @@ where
 {
     let interior = sim.geom.interior.clone();
     let coefficients = ItoCoefficientFields::zeros(&sim.geom.allocated)?;
-    let stage_input = sim.stage_input();
-    let scale = if sim.motion.homologous {
-        sim.motion.a
-    } else {
-        1.0
-    };
+    let receipt = sim
+        .ito_transport
+        .as_ref()
+        .ok_or_else(|| "ito transport receipt was not initialized".to_string())?;
     for coord in interior.iter() {
-        let source_mass =
-            *stage_input.den.view().at(coord) * geometry.labframe_volume(coord, scale);
+        let source_mass = *receipt.source_mass.view().at(coord);
         for dd in 0..D {
             let mut high = coord;
             high[dd] += 1;
-            let low_flux = *sim.fields.flux[dd].den.view().at(coord);
-            let high_flux = *sim.fields.flux[dd].den.view().at(high);
-            let mass_to_minus = (-low_flux).max(0.0)
-                * geometry.labframe_face_area(coord, dd, scale)
-                * sim.dt;
-            let mass_to_plus = high_flux.max(0.0)
-                * geometry.labframe_face_area(high, dd, scale)
-                * sim.dt;
-            let width = geometry.cell_width(coord, dd) * scale;
+            let low_mass = *receipt.face_mass[dd].view().at(coord);
+            let high_mass = *receipt.face_mass[dd].view().at(high);
+            let mass_to_minus = (-low_mass).max(0.0);
+            let mass_to_plus = high_mass.max(0.0);
+            let width = geometry.cell_width(coord, dd) * receipt.step_scale;
             let rates = crate::mass_transport::accepted_face_moment_rates(
                 source_mass,
                 mass_to_minus,
@@ -1673,7 +2353,8 @@ where
 
     if a0 != 0.0 || ac != 1.0 {
         let selections = sample_convex_blend(&tracers.id, ac, key)?;
-        for (ii, (_, choose_candidate)) in selections.into_iter().enumerate() {
+        let choices = candidate_choices_by_storage_order(&tracers.id, selections)?;
+        for (ii, choose_candidate) in choices.into_iter().enumerate() {
             if !choose_candidate {
                 tracers.owner[ii] = tracers.step_owner[ii];
                 tracers.flags[ii] = tracers.step_flags[ii];
@@ -1753,7 +2434,14 @@ where
     let interior = sim.geom.interior.clone();
     let geometry = sim.geom.block_geometry(sim.physics.metric);
     let layout = TransportLayout::single(&interior);
-    advance_accretion_transport_store(&mut sim.store, &geometry, layout, density_before)
+    let crossing_time = sim.time;
+    advance_accretion_transport_store(
+        &mut sim.store,
+        &geometry,
+        layout,
+        density_before,
+        crossing_time,
+    )
 }
 
 pub fn advance_accretion_transport_store<const D: usize, const DOF: usize, M, Mem>(
@@ -1761,6 +2449,7 @@ pub fn advance_accretion_transport_store<const D: usize, const DOF: usize, M, Me
     geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
     layout: TransportLayout<D>,
     density_before: &[f64],
+    crossing_time: f64,
 ) -> Result<(), String>
 where
     M: symbi_geometry::Metric<f64, D> + Copy,
@@ -1831,10 +2520,124 @@ where
         {
             tracers.owner[ii] = owner;
             tracers.flags[ii].crossed_sink = true;
-            tracers.flags[ii].crossing_time = sim.time + sim.dt;
+            tracers.flags[ii].crossing_time = crossing_time;
         }
     }
     sim.tracers = Some(tracers);
+    Ok(())
+}
+
+/// apply accepted post-step sink removal as a killing probability.
+pub fn advance_continuous_accretion_transport_store<
+    const D: usize,
+    const DOF: usize,
+    M,
+    Mem,
+>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    density_before: &[f64],
+    crossing_time: f64,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    if !Mem::IS_HOST_ACCESSIBLE {
+        return Err("continuous accretion transport requires host-accessible memory".to_string());
+    }
+    let interior = sim.geom.interior.clone();
+    if density_before.len() != interior.volume() {
+        return Err("accretion density snapshot has the wrong cell count".to_string());
+    }
+    let body_receipts = sim
+        .immersed
+        .as_ref()
+        .map(|immersed| immersed.accretion_receipts())
+        .unwrap_or_default();
+    let Some(mut tracers) = sim.continuous_tracers.take() else {
+        return Ok(());
+    };
+    unsafe {
+        for ii in 0..tracers.len {
+            if *tracers.escaped.as_ptr::<u8>().add(ii) != 0
+                || *tracers.crossed_sink.as_ptr::<u8>().add(ii) != 0
+            {
+                continue;
+            }
+            let position: [f64; D] =
+                std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii));
+            let coord: [isize; D] = std::array::from_fn(|dd| match sim.geom.maps {
+                Some(maps) => maps[dd].index_at(position[dd]),
+                None => ((position[dd] - sim.geom.x_lo[dd]) / sim.geom.dx[dd]).floor() as isize,
+            });
+            if !interior.contains(coord) {
+                continue;
+            }
+            let mut linear = 0usize;
+            let mut stride = 1usize;
+            for dd in 0..D {
+                linear += (coord[dd] - interior.spaces[dd].lo) as usize * stride;
+                stride *= interior.spaces[dd].size();
+            }
+            let source_mass = density_before[linear] * geometry.volume(coord);
+            if !source_mass.is_finite() || source_mass <= 0.0 {
+                return Err("continuous accretion source mass must be positive and finite".into());
+            }
+            let mut transfers: Vec<(crate::mass_transport::ContainerId, f64)> = body_receipts
+                .iter()
+                .enumerate()
+                .filter_map(|(body, receipt)| {
+                    let mass = receipt.get(linear).copied().unwrap_or(0.0).max(0.0);
+                    (mass > 0.0).then_some((body_accretion_reservoir(body), mass))
+                })
+                .collect();
+            if transfers.is_empty() {
+                let after = *sim.fields.cons.den.view().at(coord);
+                let removed_mass = (density_before[linear] - after).max(0.0)
+                    * geometry.volume(coord);
+                if removed_mass > 0.0 {
+                    transfers.push((ACCRETION_RESERVOIR, removed_mass));
+                }
+            }
+            let removed_mass: f64 = transfers.iter().map(|(_, mass)| mass).sum();
+            let tolerance =
+                32.0 * f64::EPSILON * source_mass.max(removed_mass).max(1.0);
+            if removed_mass > source_mass + tolerance {
+                return Err(format!(
+                    "accepted sink mass {removed_mass:?} exceeds source mass {source_mass:?}"
+                ));
+            }
+            let id = *tracers.id.as_ptr::<u64>().add(ii);
+            let counter = *tracers.random_counter.as_ptr::<u64>().add(ii);
+            let sample =
+                crate::mass_transport::ito_unit_sample(tracers.run_seed, id, counter, D);
+            let point = sample * source_mass;
+            if point < removed_mass {
+                let mut cumulative = 0.0;
+                let destination = transfers
+                    .iter()
+                    .find_map(|(destination, mass)| {
+                        cumulative += *mass;
+                        (point < cumulative).then_some(*destination)
+                    })
+                    .expect("positive removed mass has a destination");
+                *tracers
+                    .owner
+                    .as_mut_ptr::<crate::mass_transport::ContainerId>()
+                    .add(ii) = destination;
+                *tracers.crossed_sink.as_mut_ptr::<u8>().add(ii) = 1;
+                *tracers.crossing_time.as_mut_ptr::<f64>().add(ii) = crossing_time;
+            } else {
+                *tracers
+                    .owner
+                    .as_mut_ptr::<crate::mass_transport::ContainerId>()
+                    .add(ii) = cell_container(coord, &interior, layout);
+            }
+        }
+    }
+    sim.continuous_tracers = Some(tracers);
     Ok(())
 }
 

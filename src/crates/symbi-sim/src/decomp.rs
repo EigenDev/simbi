@@ -623,6 +623,75 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     }
 }
 
+fn exchange_ito_coefficients<
+    const D: usize,
+    const DOF: usize,
+    M: MemorySpace,
+    T: HaloTransport,
+>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+    devices: &[i32],
+    transport: &T,
+) {
+    let total: usize = counts.iter().product();
+    let mut processed = [false; D];
+    for axis in 0..D {
+        for flat in 0..total {
+            let tc = unflatten(flat, counts);
+            if tc[axis] + 1 >= counts[axis] {
+                continue;
+            }
+            let mut tc_hi = tc;
+            tc_hi[axis] += 1;
+            let lo_flat = flatten(tc, counts);
+            let hi_flat = flatten(tc_hi, counts);
+            let lo = tiles[lo_flat];
+            let hi = tiles[hi_flat];
+            let lo_fields = lo
+                .ito_coefficients
+                .as_ref()
+                .expect("continuous-tracer tile carries ito coefficients");
+            let hi_fields = hi
+                .ito_coefficients
+                .as_ref()
+                .expect("continuous-tracer tile carries ito coefficients");
+            let ng = lo.geom.ng as isize;
+            let i_hi_lo = lo.geom.interior.spaces[axis].hi;
+            let i_lo_hi = hi.geom.interior.spaces[axis].lo;
+            let lo_ghost = ghost_strip(&lo.geom, axis, Side::Hi, &processed, &counts);
+            let hi_src = lo_ghost.slab(axis, (i_lo_hi, i_lo_hi + ng));
+            let hi_ghost = ghost_strip(&hi.geom, axis, Side::Lo, &processed, &counts);
+            let lo_src = hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo));
+            for dd in 0..D {
+                for (fl, fr) in [
+                    (&lo_fields.drift[dd], &hi_fields.drift[dd]),
+                    (&lo_fields.variance[dd], &hi_fields.variance[dd]),
+                    (&lo_fields.third[dd], &hi_fields.third[dd]),
+                ] {
+                    transport.copy_region(
+                        fr,
+                        &hi_src,
+                        fl,
+                        &lo_ghost,
+                        devices[hi_flat],
+                        devices[lo_flat],
+                    );
+                    transport.copy_region(
+                        fl,
+                        &lo_src,
+                        fr,
+                        &hi_ghost,
+                        devices[lo_flat],
+                        devices[hi_flat],
+                    );
+                }
+            }
+        }
+        processed[axis] = true;
+    }
+}
+
 // drain every UNIQUE tile device's context so async writes are visible to a consumer running
 // in another context (the cross-device read barrier). no-op on a host backend. mirrors the
 // equivalence test's `sync_devices`.
@@ -775,6 +844,124 @@ fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpa
         tracers.step_owner.push(step_owner);
         tracers.step_flags.push(step_flags);
     }
+}
+
+fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    counts: [usize; D],
+) -> Result<usize, String> {
+    if !M::IS_HOST_ACCESSIBLE {
+        return Err("continuous tracer migration requires host-accessible memory".to_string());
+    }
+    if stores.iter().any(|store| {
+        store.geom.coords != symbi_geometry::Geometry::Cartesian || store.geom.maps.is_some()
+    }) {
+        return Err(
+            "continuous tracer migration requires a uniform Cartesian decomposition".to_string(),
+        );
+    }
+    let local_cells: [usize; D] =
+        std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
+    let dx = stores[0].geom.dx;
+    let global_lo: [f64; D] = std::array::from_fn(|dd| {
+        stores
+            .iter()
+            .map(|store| crate::tracers::partition_physical_bounds(&store.geom)[dd].0)
+            .fold(f64::INFINITY, f64::min)
+    });
+    let global_hi: [f64; D] = std::array::from_fn(|dd| {
+        stores
+            .iter()
+            .map(|store| crate::tracers::partition_physical_bounds(&store.geom)[dd].1)
+            .fold(f64::NEG_INFINITY, f64::max)
+    });
+    let metadata = stores
+        .iter()
+        .filter_map(|store| store.continuous_tracers.as_ref())
+        .max_by_key(|set| usize::from(set.len > 0))
+        .map(|set| {
+            (
+                set.order,
+                set.weight,
+                set.run_seed,
+                set.next_id,
+                set.injection_remainder,
+            )
+        })
+        .ok_or_else(|| "continuous tracer population is missing".to_string())?;
+    let mut moved = Vec::new();
+    for (source, store) in stores.iter_mut().enumerate() {
+        let Some(tracers) = store.continuous_tracers.as_mut() else {
+            continue;
+        };
+        let mut ii = 0;
+        while ii < tracers.len {
+            let escaped = unsafe { *tracers.escaped.as_ptr::<u8>().add(ii) != 0 };
+            let crossed_sink = unsafe { *tracers.crossed_sink.as_ptr::<u8>().add(ii) != 0 };
+            if escaped || crossed_sink {
+                ii += 1;
+                continue;
+            }
+            let position: [f64; D] =
+                unsafe { std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii)) };
+            if (0..D).any(|dd| position[dd] < global_lo[dd] || position[dd] >= global_hi[dd]) {
+                ii += 1;
+                continue;
+            }
+            let global_cell: [usize; D] = std::array::from_fn(|dd| {
+                ((position[dd] - global_lo[dd]) / dx[dd]).floor() as usize
+            });
+            let tile: [usize; D] =
+                std::array::from_fn(|dd| global_cell[dd] / local_cells[dd]);
+            let target = flatten(tile, counts);
+            let mut linear = 0usize;
+            let mut stride = 1usize;
+            for dd in 0..D {
+                linear += global_cell[dd] * stride;
+                stride *= local_cells[dd] * counts[dd];
+            }
+            let owner = crate::mass_transport::ContainerId(linear as u64);
+            if target == source {
+                unsafe {
+                    *tracers
+                        .owner
+                        .as_mut_ptr::<crate::mass_transport::ContainerId>()
+                        .add(ii) = owner;
+                }
+                ii += 1;
+            } else {
+                let mut record = tracers.swap_remove_host(ii)?;
+                record.owner = owner;
+                moved.push((target, record));
+            }
+        }
+    }
+    let count = moved.len();
+    for (target, record) in moved {
+        if stores[target].continuous_tracers.is_none() {
+            let mut set = crate::tracers::ContinuousTracerSet::allocate(0, metadata.0)?;
+            set.weight = metadata.1;
+            set.run_seed = metadata.2;
+            set.next_id = metadata.3;
+            set.injection_remainder = metadata.4;
+            stores[target].continuous_tracers = Some(set);
+        }
+        let target_set = stores[target]
+            .continuous_tracers
+            .as_mut()
+            .expect("continuous tracer target was initialized");
+        if target_set.order != metadata.0 {
+            return Err("continuous tracer order differs across decomposed tiles".to_string());
+        }
+        if target_set.len == 0 {
+            target_set.weight = metadata.1;
+            target_set.run_seed = metadata.2;
+            target_set.next_id = metadata.3;
+            target_set.injection_remainder = metadata.4;
+        }
+        target_set.push_host(record)?;
+    }
+    Ok(count)
 }
 
 fn blend_mass_transport_ancestry<const D: usize, const DOF: usize, M: MemorySpace>(
@@ -944,7 +1131,40 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     // bodies are replicated identically on every tile; the per-step backward feedback + prescribed
     // advance run once per step when any tile carries them.
     let has_bodies = stores.iter().any(|s| s.immersed.is_some());
-    let has_tracers = stores.iter().any(|s| s.has_tracers());
+    let has_discrete_tracers = stores.iter().any(|s| s.tracers.is_some());
+    let has_continuous_tracers = stores.iter().any(|s| s.continuous_tracers.is_some());
+    let tracer_bounds: [(f64, f64); D] = std::array::from_fn(|dd| {
+        stores
+            .iter()
+            .map(|store| crate::tracers::partition_physical_bounds(&store.geom)[dd])
+            .fold(
+                (f64::INFINITY, f64::NEG_INFINITY),
+                |(global_lo, global_hi), (lo, hi)| (global_lo.min(lo), global_hi.max(hi)),
+            )
+    });
+    let tracer_boundaries = crate::state::Boundaries::per_axis(std::array::from_fn(|dd| {
+        let lo = stores
+            .iter()
+            .min_by(|left, right| {
+                crate::tracers::partition_physical_bounds(&left.geom)[dd]
+                    .0
+                    .total_cmp(&crate::tracers::partition_physical_bounds(&right.geom)[dd].0)
+            })
+            .expect("decomposition has at least one tile")
+            .boundaries
+            .lo(dd);
+        let hi = stores
+            .iter()
+            .max_by(|left, right| {
+                crate::tracers::partition_physical_bounds(&left.geom)[dd]
+                    .1
+                    .total_cmp(&crate::tracers::partition_physical_bounds(&right.geom)[dd].1)
+            })
+            .expect("decomposition has at least one tile")
+            .boundaries
+            .hi(dd);
+        [lo, hi]
+    }));
 
     // a fresh SHARED reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
     // rebuilt per phase so the per-step body bookkeeping can take `&mut` between phases -- the
@@ -1017,8 +1237,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
         for s in stores.iter_mut() {
             s.dt = dt;
-            if has_tracers {
+            if has_discrete_tracers {
                 crate::tracers::snapshot_transport_state(&mut **s);
+            }
+            if has_continuous_tracers {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                    .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
             }
         }
         {
@@ -1084,7 +1309,20 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
                 }
                 drop(sh);
-                if has_tracers {
+                if has_continuous_tracers {
+                    for store in stores.iter_mut() {
+                        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                        crate::tracers::accumulate_ito_transport_stage_store(
+                            &mut **store,
+                            &geometry,
+                            stage.ac,
+                        )
+                        .unwrap_or_else(|err| {
+                            panic!("ito transport accumulation failed: {err}")
+                        });
+                    }
+                }
+                if has_discrete_tracers {
                     let local_cells: [usize; D] =
                         std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
                     for (flat, store) in stores.iter_mut().enumerate() {
@@ -1134,13 +1372,61 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 }
             }
         }
-        if has_tracers {
+        if has_discrete_tracers {
             spawn_decomposed_injection(stores, counts, injection_ledgers);
         }
         // the stage refresh mutated a; the step-tail advance below starts from the
         // step-entry value, mirroring the single-grid step's restore.
         for (i, s) in stores.iter_mut().enumerate() {
             s.motion.a = a_n[i];
+        }
+        if has_continuous_tracers {
+            for store in stores.iter_mut() {
+                let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::materialize_ito_coefficients_store(&mut **store, &geometry)
+                    .unwrap_or_else(|err| {
+                        panic!("ito coefficient materialization failed: {err}")
+                    });
+                crate::tracers::fill_ito_coefficient_boundaries_host(
+                    store
+                        .ito_coefficients
+                        .as_ref()
+                        .expect("ito coefficients were materialized"),
+                    &store.geom,
+                    store.boundaries,
+                )
+                .unwrap_or_else(|err| panic!("ito coefficient boundary fill failed: {err}"));
+            }
+            {
+                let sh = shared!();
+                exchange_ito_coefficients(&sh, counts, devices, transport);
+            }
+            drain_devices::<M>(devices);
+            for store in stores.iter_mut() {
+                let Some(mut tracers) = store.continuous_tracers.take() else {
+                    continue;
+                };
+                let coefficients = store
+                    .ito_coefficients
+                    .as_ref()
+                    .expect("ito coefficients were materialized");
+                crate::tracers::advance_continuous_tracers_host(
+                    &mut tracers,
+                    coefficients,
+                    &store.geom,
+                    dt,
+                )
+                .unwrap_or_else(|err| panic!("ito tracer advancement failed: {err}"));
+                crate::tracers::apply_continuous_boundaries_host(
+                    &mut tracers,
+                    tracer_bounds,
+                    tracer_boundaries,
+                )
+                .unwrap_or_else(|err| panic!("ito tracer boundaries failed: {err}"));
+                store.continuous_tracers = Some(tracers);
+            }
+            migrate_continuous_tracers(stores, counts)
+                .unwrap_or_else(|err| panic!("continuous tracer migration failed: {err}"));
         }
         let mut horizon_receipt = None;
         let mut accretion_density = Vec::new();
@@ -1212,7 +1498,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         im.set_c_a2_override(global_c_a2);
                     }
                 }
-                if has_tracers {
+                if has_discrete_tracers {
                     drain_devices::<M>(devices);
                     accretion_density = sh
                         .iter()
@@ -1256,13 +1542,25 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     level: 0,
                 };
                 let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                let crossing_time = store.time + dt;
                 crate::tracers::advance_accretion_transport_store(
                     &mut **store,
                     &geometry,
                     layout,
                     &accretion_density[flat],
+                    crossing_time,
                 )
                 .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
+                crate::tracers::advance_continuous_accretion_transport_store(
+                    &mut **store,
+                    &geometry,
+                    layout,
+                    &accretion_density[flat],
+                    crossing_time,
+                )
+                .unwrap_or_else(|detail| {
+                    panic!("continuous tracer accretion transport: {detail}")
+                });
             }
         }
         if has_bodies {
@@ -1277,7 +1575,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);
         }
-        if has_tracers {
+        if has_discrete_tracers {
             let local_cells: [usize; D] =
                 std::array::from_fn(|dd| stores[0].geom.interior.spaces[dd].size());
             for (flat, store) in stores.iter_mut().enumerate() {
@@ -1679,7 +1977,9 @@ impl HaloTransport for PeerCopy {
 
 #[cfg(test)]
 mod tests {
-    use super::decompose_grid;
+    use super::{
+        LocalCopy, decompose_grid, exchange_ito_coefficients, migrate_continuous_tracers,
+    };
 
     #[test]
     fn decompose_one_part_is_monolithic() {
@@ -1717,5 +2017,119 @@ mod tests {
         assert!(decompose_grid([100usize, 100], 3).is_err());
         // 16 tiles cannot fit on an 8-cell axis.
         assert!(decompose_grid([8usize], 16).is_err());
+    }
+
+    #[test]
+    fn ito_coefficient_halos_cross_tile_cuts() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use crate::tracers::ItoCoefficientFields;
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let make = |x_lo| {
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [x_lo],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap()
+        };
+        let mut lo = make(0.0);
+        let mut hi = make(2.0);
+        lo.ito_coefficients =
+            Some(ItoCoefficientFields::zeros(&lo.geom.allocated).unwrap());
+        hi.ito_coefficients =
+            Some(ItoCoefficientFields::zeros(&hi.geom.allocated).unwrap());
+        for coord in lo.geom.interior.iter() {
+            lo.ito_coefficients.as_ref().unwrap().drift[0]
+                .view_mut()
+                .set(coord, 1.0);
+        }
+        for coord in hi.geom.interior.iter() {
+            hi.ito_coefficients.as_ref().unwrap().drift[0]
+                .view_mut()
+                .set(coord, 2.0);
+        }
+
+        exchange_ito_coefficients(&[&lo, &hi], [2], &[0, 0], &LocalCopy);
+
+        let lo_hi_ghost = [lo.geom.interior.spaces[0].hi];
+        let hi_lo_ghost = [hi.geom.interior.spaces[0].lo - 1];
+        assert_eq!(
+            *lo.ito_coefficients.as_ref().unwrap().drift[0]
+                .view()
+                .at(lo_hi_ghost),
+            2.0
+        );
+        assert_eq!(
+            *hi.ito_coefficients.as_ref().unwrap().drift[0]
+                .view()
+                .at(hi_lo_ghost),
+            1.0
+        );
+    }
+
+    #[test]
+    fn continuous_migration_preserves_identity_and_counter_across_a_cut() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use crate::tracers::{ContinuousTracerSet, TracerSet};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let make = |x_lo| {
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [x_lo],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap()
+        };
+        let mut lo = make(0.0);
+        let mut hi = make(2.0);
+        let seed = TracerSet::<1>::seed_stratified(&[([2.0], [1.0])], &[1], 0.5);
+        let mut particles = ContinuousTracerSet::<1, HostMemory>::from_discrete(
+            &seed,
+            crate::mass_transport::ItoOrder::Three,
+        )
+        .unwrap();
+        unsafe {
+            *particles.random_counter.as_mut_ptr::<u64>() = 23;
+        }
+        lo.continuous_tracers = Some(particles);
+        hi.continuous_tracers = Some(
+            ContinuousTracerSet::allocate(0, crate::mass_transport::ItoOrder::Three).unwrap(),
+        );
+
+        let migrated = migrate_continuous_tracers(&mut [&mut lo, &mut hi], [2]).unwrap();
+
+        assert_eq!(migrated, 1);
+        assert_eq!(lo.continuous_tracers.as_ref().unwrap().len, 0);
+        let target = hi.continuous_tracers.as_mut().unwrap();
+        assert_eq!(target.len, 1);
+        let record = target.swap_remove_host(0).unwrap();
+        assert_eq!(record.id, seed.id[0]);
+        assert_eq!(record.x, [2.5]);
+        assert_eq!(record.random_counter, 23);
+        assert_eq!(record.owner, crate::mass_transport::ContainerId(2));
     }
 }
