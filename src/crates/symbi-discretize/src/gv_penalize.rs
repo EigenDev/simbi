@@ -42,7 +42,7 @@ fn signal_speed(cs: Gv) -> Gv {
 }
 
 use crate::coords::{Coords, Spacing};
-use crate::gv::cell_geometry_gv;
+use crate::gv::{cell_geometry_gv, gv_axis_width};
 use crate::gv::gv_field_at;
 use symbi_ir::{begin_trace, end_trace};
 
@@ -444,9 +444,9 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
     // map every other body kernel of this chart evaluates.
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = gv_axis_width(0, Spacing::Uniform);
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
     }
 
     // the mask geometry as a traced SDF: phi = |x - body_pos| - r_mask, and
@@ -599,9 +599,9 @@ fn penalize_porous_inner(
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = gv_axis_width(0, Spacing::Uniform);
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
@@ -761,9 +761,9 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize, axes
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = gv_axis_width(0, Spacing::Uniform);
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
@@ -897,9 +897,9 @@ fn penalize_porous_iso_inner(
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = gv_axis_width(0, Spacing::Uniform);
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
@@ -1021,9 +1021,9 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize, axes: &[
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = gv_axis_width(0, Spacing::Uniform);
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {
@@ -1110,9 +1110,9 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize, axes: &[us
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = Gv::scalar("dx_0");
+    let mut min_w = gv_axis_width(0, Spacing::Uniform);
     for ax in 1..ndim {
-        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
     }
 
     let center: [Gv; 3] = std::array::from_fn(|a| {

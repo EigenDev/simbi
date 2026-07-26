@@ -286,6 +286,18 @@ pub(crate) fn gv_axis_face_at(ax: usize, spacing: Spacing, offset: i64) -> Gv {
     gv_axis_face_at_index(ax, spacing, i)
 }
 
+/// physical coordinate width of the current cell on one logical grid axis.
+/// the runtime map selector makes this local on uniform, logarithmic, and
+/// geometrically graded meshes.
+pub(crate) fn gv_axis_width(ax: usize, spacing: Spacing) -> Gv {
+    let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
+    Gv::cond(
+        map_kind.cmp_gt(Gv::from_f64(0.5)),
+        || gv_axis_face_at(ax, spacing, 1) - gv_axis_face_at(ax, spacing, 0),
+        || Gv::scalar(&format!("dx_{ax}")),
+    )
+}
+
 
 /// the lower face position of the cell at an ARBITRARY integer index expression `i` along
 /// grid axis `ax` — the index-general form of [`gv_axis_face_at`] (which passes the thread
@@ -689,4 +701,72 @@ pub fn geometry_probe_gv(
         ("centroid_0".to_string(), "centroid_0".into(), g.centroid[0].node()),
     ];
     (end_trace(), writes)
+}
+
+#[cfg(test)]
+mod local_width_tests {
+    use super::*;
+    use symbi_ir::backends::interp::{Backend, Cpu};
+    use symbi_ir::gv::{begin_trace, end_trace, with_trace};
+    use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
+
+    fn eval_width(values: &[(&str, f64)]) -> f64 {
+        begin_trace();
+        let output = gv_axis_width(0, Spacing::Uniform).node();
+        let lowered = with_trace(|trace| {
+            let scalarized = scalarize_kernel(trace.graph(), &[output]);
+            let ty = trace.graph().ty(output).clone();
+            LoweredFn {
+                name: "cell_width".to_string(),
+                params: scalarized.params,
+                body: scalarized.body,
+                results: vec![scalarized.outputs[0].clone()],
+                result_element: ty.element,
+                result_shape: ty.shape,
+            }
+        });
+        let inputs = lowered
+            .params
+            .iter()
+            .map(|param| {
+                values
+                    .iter()
+                    .find(|(name, _)| *name == param.name.as_str())
+                    .map(|(_, value)| *value)
+                    .unwrap_or_else(|| panic!("missing width parameter {}", param.name))
+            })
+            .collect::<Vec<_>>();
+        let value = Cpu.eval_elemental(&lowered, &inputs)[0];
+        end_trace();
+        value
+    }
+
+    #[test]
+    fn geometric_width_is_local_to_the_cell() {
+        let values = [
+            ("x_lo_0", 0.2),
+            ("dx_0", 0.03),
+            ("map_kind_0", 2.0),
+            ("map_param_0", 1.2),
+            ("_coord_0", 5.0),
+        ];
+        let width = eval_width(&values);
+        let expected = 0.03 * 1.2_f64.powi(5);
+        assert!((width - expected).abs() <= 32.0 * f64::EPSILON * expected);
+        assert_ne!(width, values[1].1, "graded width collapsed to the base width");
+    }
+
+    #[test]
+    fn logarithmic_width_is_local_to_the_cell() {
+        let values = [
+            ("x_lo_0", 0.5),
+            ("dx_0", 0.04),
+            ("map_kind_0", 1.0),
+            ("map_param_0", 0.0),
+            ("_coord_0", 7.0),
+        ];
+        let width = eval_width(&values);
+        let expected = 0.5 * (10.0_f64.powf(8.0 * 0.04) - 10.0_f64.powf(7.0 * 0.04));
+        assert!((width - expected).abs() <= 64.0 * f64::EPSILON * expected);
+    }
 }
