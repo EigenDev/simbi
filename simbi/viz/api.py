@@ -34,6 +34,7 @@ from .pipeline.coord_binning import create_coordinate_profile_data
 from .pipeline.time_series import create_time_series_data
 from .pipeline.transforms import _compose_pcolormesh, _compose_polygons
 from .types import CoordSystem, FieldData
+from .utility import get_tracer_field_str
 
 
 def _get_props(
@@ -120,7 +121,7 @@ def plot_tracers(
         mean = np.sum(concentration * display_area) / np.sum(display_area)
         normalized = concentration / max(mean, np.finfo(float).tiny)
         cmap = "magma"
-        label = "tracer concentration / mean"
+        label = get_tracer_field_str("tracer_concentration")
         if tracer_render == "cohort-ratio":
             rho = np.squeeze(sim_data.get_field("rho", crop_to_owned=True))
             gas_concentration = projected_gas_concentration(
@@ -136,9 +137,15 @@ def plot_tracers(
             )
             normalized = np.log10(np.maximum(ratio, np.finfo(float).tiny))
             cmap = "coolwarm"
-            label = f"log10 cohort {tracer_cohort} / gas concentration"
+            label = get_tracer_field_str(
+                "tracer_cohort_ratio",
+                tracer_cohort,
+            )
         elif tracer_cohort is not None:
-            label = f"cohort {tracer_cohort} concentration / mean"
+            label = get_tracer_field_str(
+                "tracer_cohort_concentration",
+                tracer_cohort,
+            )
         mesh = ax.pcolormesh(
             x_edges,
             y_edges,

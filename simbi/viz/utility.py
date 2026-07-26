@@ -52,6 +52,7 @@ class FieldType(Enum):
 FIELD_MAP: dict[str, str] = {
     "rho": r"\rho",
     "D": "D",
+    "W": r"$\Gamma$",
     "gamma_beta": r"$\Gamma \beta$",
     "u": r"$\Gamma \beta$",
     "gamma_beta_1": r"$\Gamma \beta_1$",
@@ -80,6 +81,7 @@ FIELD_MAP: dict[str, str] = {
     "ptot": r"$p_{\rm tot}$",
     "sigma": r"$\sigma$",
     "Sigma": r"\Sigma",
+    "enthalpy": r"$h$",
     "enthalpy_density": r"$w$",
     "b1": r"$B_1$",
     "b2": r"$B_2$",
@@ -90,6 +92,7 @@ FIELD_MAP: dict[str, str] = {
     "bmu1": r"$b^1$",
     "bmu2": r"$b^2$",
     "bmu3": r"$b^3$",
+    "emag": r"$E_{\rm mag}$",
     "accretion_rate": r"$\dot{M} / \dot{M}_0$",
     "accreted_mass": r"$M_{\rm acc}$",
     "mdot": r"$\dot{M} / \dot{M_0}$",
@@ -99,8 +102,12 @@ FIELD_MAP: dict[str, str] = {
     "vphi": r"$v_\phi / v_0$",
     "vtheta": r"$v_\theta / v_0$",
     "j_spec": r"$j / j_{0}$",
+    "mass_flux": r"$4 \pi r^2 \rho v_r$",
     "div_v": r"$\nabla \cdot \mathbf{v}$",
     "vorticity": r"$(\nabla \times \mathbf{v})_z$",
+    "vorticity_magnitude": r"$|\nabla \times \mathbf{v}|$",
+    "q_criterion": r"$Q$",
+    "okubo_weiss": r"$s_n^2 + s_s^2 - \omega^2$",
     "term_advection": r"$\rho \mathbf{v} \cdot \nabla \mathbf{v}$",
     "term_gravity": r"$-\rho \nabla \Phi$",
     "term_pressure": r"$-\nabla p$",
@@ -114,6 +121,17 @@ FIELD_MAP: dict[str, str] = {
     "decay rate": r"\dot{a}",
     "power": r"$\dot{E}$",
     "drag force": r"$F_{\rm drag}$",
+    "tracer_concentration": (
+        r"$\Sigma_{\rm tr} / \langle \Sigma_{\rm tr} \rangle$"
+    ),
+    "tracer_cohort_concentration": (
+        r"$\Sigma_{{\rm tr},c} / \langle \Sigma_{{\rm tr},c} \rangle$"
+    ),
+    "tracer_cohort_ratio": (
+        r"$\log_{10}\left[(\Sigma_{{\rm tr},c}/"
+        r"\langle\Sigma_{{\rm tr},c}\rangle)/"
+        r"(\Sigma_{\rm gas}/\langle\Sigma_{\rm gas}\rangle)\right]$"
+    ),
 }
 
 UNITS: dict[str, str] = {
@@ -189,6 +207,14 @@ def get_field_str(
     if "$" in field:
         return field  # already formatted
     return mapper.get_field_str(field, units, normalized)
+
+
+def get_tracer_field_str(field: str, cohort: Optional[int] = None) -> str:
+    """get a tracer label and identify the selected initial-material cohort."""
+    label = get_field_str(field)
+    if cohort is None:
+        return label
+    return label.replace(",c}", rf",c={cohort}}}")
 
 
 def calc_enthalpy(fields: dict[str, NDArray[np.floating[Any]]]) -> Any:
