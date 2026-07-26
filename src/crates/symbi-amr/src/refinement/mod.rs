@@ -33,5 +33,6 @@ pub use hierarchy::{
 };
 pub use tracer_interface::{
     InterfaceFace, InterfaceTransfer, interface_faces, interface_mass_transfers,
+    interface_transport_kernels,
 };
 pub use transfer::ProlongOrder;

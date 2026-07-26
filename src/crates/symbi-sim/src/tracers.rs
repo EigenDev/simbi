@@ -564,6 +564,73 @@ mod tests {
     }
 
     #[test]
+    fn covered_coarse_neighbor_is_deferred_to_the_interface_operator() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_algebra::{Domain, Space};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        let mut sim =
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+        for coord in sim.geom.interior.iter() {
+            sim.workspace.u_stage.den.view_mut().set(coord, 1.0);
+        }
+        let left = [sim.geom.interior.spaces[0].lo];
+        let right = [left[0] + 1];
+        sim.fields.cons.den.view_mut().set(left, 0.75);
+        sim.fields.cons.den.view_mut().set(right, 1.25);
+        for coord in sim.geom.allocated.iter() {
+            sim.fields.flux[0].den.view_mut().set(coord, 0.0);
+        }
+        sim.fields.flux[0].den.view_mut().set(right, 0.5);
+        sim.dt = 0.5;
+        sim.tracers = Some(TracerSet::seed_stratified(
+            &[([0.0], [1.0]), ([1.0], [1.0])],
+            &[100, 0],
+            0.01,
+        ));
+        snapshot_transport_state(&mut sim);
+        let inactive = Domain::new([Space {
+            name: "i",
+            lo: right[0],
+            hi: right[0] + 1,
+        }]);
+        let geometry = sim.geom.block_geometry(Cartesian);
+        let layout = TransportLayout::single(&sim.geom.interior);
+
+        advance_stage_mass_transport_store_masked(
+            &mut sim.store,
+            &geometry,
+            layout,
+            Some(&inactive),
+            0.0,
+            1.0,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(
+            sim.tracers.as_ref().unwrap().owner,
+            [crate::mass_transport::ContainerId(0); 100]
+        );
+    }
+
+    #[test]
     fn accepted_boundary_inflow_spawns_tracers_in_the_receiving_cell() {
         use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
         use symbi_geometry::Cartesian;
@@ -846,6 +913,31 @@ where
     M: symbi_geometry::Metric<f64, D> + Copy,
     Mem: MemorySpace,
 {
+    advance_stage_mass_transport_store_masked(
+        sim, geometry, layout, None, a0, ac, stage,
+    )
+}
+
+/// advance one transport stage while excluding cells replaced by a finer
+/// representation of the same material volume.
+pub fn advance_stage_mass_transport_store_masked<
+    const D: usize,
+    const DOF: usize,
+    M,
+    Mem,
+>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    inactive: Option<&symbi_algebra::Domain<D>>,
+    a0: f64,
+    ac: f64,
+    stage: usize,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
     use crate::mass_transport::{
         ContainerId, MassTransfer, SamplingKey, TransportKernel, sample_convex_blend,
         sample_systematic,
@@ -881,6 +973,9 @@ where
 
     let mut candidate = BTreeMap::<u64, ContainerId>::new();
     for coord in interior.iter() {
+        if inactive.is_some_and(|domain| domain.contains(coord)) {
+            continue;
+        }
         let source = cell_container(coord, &interior, layout);
         let Some(ids) = by_source.get(&source) else {
             continue;
@@ -892,7 +987,11 @@ where
             high[dd] += 1;
             let low_flux = *sim.fields.flux[dd].den.view().at(coord);
             let high_flux = *sim.fields.flux[dd].den.view().at(high);
-            if low_flux < 0.0 {
+            let mut low_cell = coord;
+            low_cell[dd] -= 1;
+            let low_inactive = inactive.is_some_and(|domain| domain.contains(low_cell));
+            let high_inactive = inactive.is_some_and(|domain| domain.contains(high));
+            if low_flux < 0.0 && !low_inactive {
                 transfers.push(MassTransfer {
                     destination: face_destination(
                         coord,
@@ -905,7 +1004,7 @@ where
                     mass: -low_flux * geometry.face_area(coord, dd) * sim.dt,
                 });
             }
-            if high_flux > 0.0 {
+            if high_flux > 0.0 && !high_inactive {
                 transfers.push(MassTransfer {
                     destination: face_destination(
                         coord,
@@ -1189,6 +1288,7 @@ fn face_destination<const D: usize>(
             cell_container_id(linear, layout.level)
         }
         crate::state::BoundaryType::Reflect => cell_container(coord, domain, layout),
+        crate::state::BoundaryType::CoarseFine => cell_container(coord, domain, layout),
         _ => exterior_container(axis, high),
     }
 }

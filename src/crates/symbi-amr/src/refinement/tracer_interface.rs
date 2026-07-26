@@ -12,10 +12,11 @@
 
 use symbi_algebra::Domain;
 use symbi_geometry::{BlockGeometry, Metric};
-use symbi_sim::mass_transport::ContainerId;
+use symbi_sim::mass_transport::{ContainerId, MassTransfer, TransportKernel};
 use symbi_sim::state::ConsFieldsGeneric;
 use symbi_sim::tracers::cell_container_id;
 use symbi_xpu::MemorySpace;
+use std::collections::BTreeMap;
 
 const RATIO: isize = 2;
 
@@ -174,6 +175,37 @@ where
     result
 }
 
+/// build one simultaneous interface event from post-event cell masses and
+/// directed receipts. conservation gives `pre = post + outbound - inbound`.
+pub fn interface_transport_kernels(
+    transfers: &[InterfaceTransfer],
+    post_mass: &BTreeMap<ContainerId, f64>,
+) -> Result<Vec<TransportKernel>, String> {
+    let mut outgoing = BTreeMap::<ContainerId, Vec<MassTransfer>>::new();
+    let mut incoming = BTreeMap::<ContainerId, f64>::new();
+    for transfer in transfers {
+        outgoing
+            .entry(transfer.source)
+            .or_default()
+            .push(MassTransfer {
+                destination: transfer.destination,
+                mass: transfer.mass,
+            });
+        *incoming.entry(transfer.destination).or_insert(0.0) += transfer.mass;
+    }
+    outgoing
+        .into_iter()
+        .map(|(source, transfers)| {
+            let outbound: f64 = transfers.iter().map(|transfer| transfer.mass).sum();
+            let post = post_mass.get(&source).copied().ok_or_else(|| {
+                format!("missing post-event mass for interface source {}", source.0)
+            })?;
+            let pre = post + outbound - incoming.get(&source).copied().unwrap_or(0.0);
+            TransportKernel::new(source, pre, transfers)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,5 +282,39 @@ mod tests {
         assert_eq!(transfers[1].source, faces[1].fine_cell);
         assert_eq!(transfers[1].destination, faces[1].coarse_cell);
         assert_eq!(transfers[1].mass, 0.75);
+    }
+
+    #[test]
+    fn interface_event_recovers_pre_event_mass_from_conservation() {
+        let coarse = cell_container_id(3, 0);
+        let fine = cell_container_id(6, 1);
+        let transfers = [
+            InterfaceTransfer {
+                source: coarse,
+                destination: fine,
+                mass: 2.0,
+            },
+            InterfaceTransfer {
+                source: fine,
+                destination: coarse,
+                mass: 1.0,
+            },
+        ];
+        let post_mass = BTreeMap::from([(coarse, 9.0), (fine, 6.0)]);
+
+        let kernels = interface_transport_kernels(&transfers, &post_mass).unwrap();
+
+        let coarse_kernel = kernels
+            .iter()
+            .find(|kernel| kernel.source() == coarse)
+            .unwrap();
+        let fine_kernel = kernels
+            .iter()
+            .find(|kernel| kernel.source() == fine)
+            .unwrap();
+        assert_eq!(coarse_kernel.source_mass(), 10.0);
+        assert_eq!(fine_kernel.source_mass(), 5.0);
+        assert_eq!(coarse_kernel.destinations(), &[(coarse, 0.8), (fine, 0.2)]);
+        assert_eq!(fine_kernel.destinations(), &[(coarse, 0.2), (fine, 0.8)]);
     }
 }

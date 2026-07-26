@@ -42,6 +42,10 @@ use symbi_grid::Field;
 
 use super::emf_register::EmfRegister;
 use super::flux_register::FluxRegister;
+use super::tracer_interface::{
+    InterfaceFace, InterfaceTransfer, interface_faces, interface_mass_transfers,
+    interface_transport_kernels,
+};
 use super::transfer::{
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_swept,
@@ -158,6 +162,8 @@ where
     /// emf_registers[ll] corrects the coarse bface at the same interface (mhd
     /// pairs only; None for pure hydro).
     pub emf_registers: Vec<Option<EmfRegister<NDIM, Mem>>>,
+    tracer_interfaces: Vec<Vec<InterfaceFace<NDIM>>>,
+    tracer_interface_ledgers: Vec<std::cell::RefCell<Vec<InterfaceTransfer>>>,
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive / a sudden blowup from a
     /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
@@ -263,6 +269,147 @@ where
         for (level, tracers) in self.levels.iter_mut().zip(per_level) {
             level.state.tracers = Some(tracers);
         }
+    }
+
+    fn tracer_cell(
+        &self,
+        owner: symbi_sim::mass_transport::ContainerId,
+    ) -> Option<(usize, [isize; NDIM])> {
+        let (level, mut linear) = symbi_sim::tracers::cell_container_address(owner)?;
+        let level = level as usize;
+        let scale = 1usize.checked_shl(level as u32)?;
+        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
+            self.levels[0].state.geom.interior.spaces[aa].size()
+        });
+        let global_cells: [usize; NDIM] =
+            std::array::from_fn(|aa| root_cells[aa] * scale);
+        let coord = std::array::from_fn(|aa| {
+            let index = linear % global_cells[aa];
+            linear /= global_cells[aa];
+            index as isize
+        });
+        self.levels
+            .get(level)?
+            .state
+            .geom
+            .interior
+            .contains(coord)
+            .then_some((level, coord))
+    }
+
+    fn tracer_cell_mass(
+        &self,
+        owner: symbi_sim::mass_transport::ContainerId,
+    ) -> Option<f64> {
+        let (level, coord) = self.tracer_cell(owner)?;
+        let state = &self.levels[level].state;
+        let geometry = state.geom.block_geometry(state.physics.metric);
+        Some(*state.fields.cons.den.view().at(coord) * geometry.volume(coord))
+    }
+
+    fn apply_interface_event(
+        &mut self,
+        transfers: &[InterfaceTransfer],
+        epoch: u64,
+    ) -> Result<(), String> {
+        use std::collections::BTreeMap;
+        use symbi_sim::mass_transport::{SamplingKey, sample_systematic};
+
+        if transfers.is_empty() {
+            return Ok(());
+        }
+        let mut post_mass = BTreeMap::new();
+        for transfer in transfers {
+            for owner in [transfer.source, transfer.destination] {
+                if let std::collections::btree_map::Entry::Vacant(entry) =
+                    post_mass.entry(owner)
+                {
+                    let mass = self.tracer_cell_mass(owner).ok_or_else(|| {
+                        format!("interface receipt names inactive cell {}", owner.0)
+                    })?;
+                    entry.insert(mass);
+                }
+            }
+        }
+        let kernels = interface_transport_kernels(transfers, &post_mass)?;
+        let run_seed = self
+            .levels
+            .iter()
+            .find_map(|level| level.state.tracers.as_ref().map(|tracers| tracers.run_seed))
+            .unwrap_or(0);
+        let key = SamplingKey { run_seed, epoch };
+        let mut assignments = BTreeMap::new();
+        for kernel in kernels {
+            let ids: Vec<u64> = self
+                .levels
+                .iter()
+                .filter_map(|level| level.state.tracers.as_ref())
+                .flat_map(|tracers| {
+                    tracers
+                        .id
+                        .iter()
+                        .zip(&tracers.owner)
+                        .filter_map(|(&id, &owner)| (owner == kernel.source()).then_some(id))
+                })
+                .collect();
+            assignments.extend(sample_systematic(&kernel, &ids, key));
+        }
+        for level in &mut self.levels {
+            if let Some(tracers) = level.state.tracers.as_mut() {
+                for (ii, id) in tracers.id.iter().enumerate() {
+                    if let Some(&destination) = assignments.get(id) {
+                        tracers.owner[ii] = destination;
+                        tracers.step_owner[ii] = destination;
+                    }
+                }
+            }
+        }
+
+        let mut migrating = Vec::new();
+        for (level_index, level) in self.levels.iter_mut().enumerate() {
+            let Some(tracers) = level.state.tracers.as_mut() else {
+                continue;
+            };
+            let mut ii = 0usize;
+            while ii < tracers.len() {
+                let destination_level =
+                    symbi_sim::tracers::cell_container_address(tracers.owner[ii])
+                        .map(|address| address.0 as usize)
+                        .unwrap_or(level_index);
+                if destination_level == level_index {
+                    ii += 1;
+                    continue;
+                }
+                tracers.x.swap_remove(ii);
+                migrating.push((
+                    destination_level,
+                    tracers.id.swap_remove(ii),
+                    tracers.flags.swap_remove(ii),
+                    tracers.owner.swap_remove(ii),
+                    tracers.step_owner.swap_remove(ii),
+                    tracers.step_flags.swap_remove(ii),
+                ));
+            }
+        }
+        for (destination_level, id, flags, owner, step_owner, step_flags) in migrating {
+            let (_, coord) = self
+                .tracer_cell(owner)
+                .ok_or_else(|| format!("interface destination {} is not active", owner.0))?;
+            let state = &self.levels[destination_level].state;
+            let x = state.geom.centroid(coord);
+            let tracers = self.levels[destination_level]
+                .state
+                .tracers
+                .as_mut()
+                .expect("every refined level carries a tracer set");
+            tracers.x.push(x);
+            tracers.id.push(id);
+            tracers.flags.push(flags);
+            tracers.owner.push(owner);
+            tracers.step_owner.push(step_owner);
+            tracers.step_flags.push(step_flags);
+        }
+        Ok(())
     }
 
     /// decimate the hierarchy to a screen-sized density heatmap, compositing the
@@ -468,6 +615,8 @@ where
             prolong_order: ProlongOrder::Plm,
             flux_registers: Vec::new(),
             emf_registers: Vec::new(),
+            tracer_interfaces: Vec::new(),
+            tracer_interface_ledgers: Vec::new(),
             crash: None,
         }
     }
@@ -584,6 +733,10 @@ where
 
         let mut flux_registers = Vec::with_capacity(levels.len().saturating_sub(1));
         let mut emf_registers = Vec::with_capacity(levels.len().saturating_sub(1));
+        let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
+            levels[0].state.geom.interior.spaces[aa].size()
+        });
+        let mut tracer_interfaces = Vec::with_capacity(levels.len().saturating_sub(1));
         for ll in 0..levels.len().saturating_sub(1) {
             flux_registers.push(FluxRegister::new(
                 levels[ll].coverage.as_ref().unwrap(),
@@ -598,7 +751,15 @@ where
             } else {
                 None
             });
+            tracer_interfaces.push(interface_faces(
+                levels[ll].coverage.as_ref().unwrap(),
+                root_cells,
+                ll as u8,
+            ));
         }
+        let tracer_interface_ledgers = (0..tracer_interfaces.len())
+            .map(|_| std::cell::RefCell::new(Vec::new()))
+            .collect();
 
         Ok(Hierarchy {
             levels,
@@ -606,6 +767,8 @@ where
             prolong_order,
             flux_registers,
             emf_registers,
+            tracer_interfaces,
+            tracer_interface_ledgers,
             crash: None,
         })
     }
@@ -1108,12 +1271,13 @@ where
             prof("snapshot", || l.kernels.snapshot(&l.state));
         }
         if self.levels[level].state.has_tracers() {
-            assert!(
-                self.levels.len() == 1,
-                "mass-transport tracers on a refined hierarchy are not wired",
-            );
             symbi_sim::tracers::snapshot_transport_state(&mut self.levels[level].state);
             self.injection_ledger.clear();
+            if has_finer {
+                self.tracer_interface_ledgers[level]
+                    .borrow_mut()
+                    .clear();
+            }
         }
     }
 
@@ -1134,6 +1298,9 @@ where
         let weights = flux_weights(stages);
         let stage_time = stage_time_fractions(stages);
         let (a0, ac) = stages[ii];
+        let receipt_start = has_coarser
+            .then(|| self.tracer_interface_ledgers[level - 1].borrow().len())
+            .unwrap_or(0);
 
         let this = &*self;
         let l = &this.levels[level];
@@ -1192,6 +1359,20 @@ where
                                 );
                             }
                         }
+                        if l.state.has_tracers() {
+                            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                            let geometry =
+                                l.state.geom.block_geometry(l.state.physics.metric);
+                            let transfers = interface_mass_transfers(
+                                &this.tracer_interfaces[level - 1],
+                                &l.state.fields.flux,
+                                &geometry,
+                                weights[ii] * dt,
+                            );
+                            this.tracer_interface_ledgers[level - 1]
+                                .borrow_mut()
+                                .extend(transfers);
+                        }
                     }
                 });
             }
@@ -1220,10 +1401,32 @@ where
         );
         if self.levels[level].state.has_tracers() {
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-            let mut injections =
-                symbi_sim::tracers::boundary_injection_transfers(&self.levels[level].state);
-            injections.extend(symbi_sim::tracers::source_injection_transfers(
+            let root_cells: [usize; NDIM] = std::array::from_fn(|aa| {
+                self.levels[0].state.geom.interior.spaces[aa].size()
+            });
+            let scale = 1usize << level;
+            let global_cells = std::array::from_fn(|aa| root_cells[aa] * scale);
+            let interior = &self.levels[level].state.geom.interior;
+            let layout = symbi_sim::tracers::TransportLayout {
+                global_cells,
+                tile_offset: std::array::from_fn(|aa| {
+                    interior.spaces[aa].lo as usize
+                }),
+                level: level as u8,
+            };
+            let geometry = self.levels[level]
+                .state
+                .geom
+                .block_geometry(self.levels[level].state.physics.metric);
+            let mut injections = symbi_sim::tracers::boundary_injection_transfers_store(
                 &self.levels[level].state,
+                &geometry,
+                layout,
+            );
+            injections.extend(symbi_sim::tracers::source_injection_transfers_store(
+                &self.levels[level].state,
+                &geometry,
+                layout,
                 a0,
                 ac,
             ));
@@ -1233,14 +1436,32 @@ where
                 ac,
             );
             prof("tracers", || {
-                symbi_sim::tracers::advance_stage_mass_transport(
+                let coverage = self.levels[level].coverage.clone();
+                symbi_sim::tracers::advance_stage_mass_transport_store_masked(
                     &mut self.levels[level].state,
+                    &geometry,
+                    layout,
+                    coverage.as_ref(),
                     a0,
                     ac,
                     ii,
                 )
                 .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
             });
+        }
+        if has_coarser && self.levels[level].state.has_tracers() {
+            let transfers = {
+                let ledger = self.tracer_interface_ledgers[level - 1].borrow();
+                ledger[receipt_start..].to_vec()
+            };
+            let epoch = self.levels[level]
+                .state
+                .iteration
+                .wrapping_mul(64)
+                .wrapping_add((level as u64) << 4)
+                .wrapping_add(ii as u64);
+            self.apply_interface_event(&transfers, epoch)
+                .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
         }
     }
 

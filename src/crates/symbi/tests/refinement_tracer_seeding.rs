@@ -96,3 +96,69 @@ fn composite_seed_uses_uncovered_coarse_and_covered_fine_mass_once() {
     ids.sort_unstable();
     assert_eq!(ids, (0..150).collect::<Vec<_>>());
 }
+
+#[test]
+fn translating_flow_crosses_refinement_interfaces_without_losing_tracers() {
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([32])
+        .bounds([0.0], [1.0])
+        .boundaries(BoundaryType::Periodic)
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.4]),
+            pre: 1.0,
+        })
+        .build();
+    let kernels = Kern::new(GAMMA, CFL, &coarse.geom.allocated);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [0.25],
+            x_hi: [0.75],
+        }],
+        ProlongOrder::Ppm,
+        |state| Kern::new(GAMMA, CFL, &state.geom.allocated),
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy.attach_mass_tracers(4096);
+    let initial: std::collections::BTreeMap<_, _> = hierarchy
+        .levels
+        .iter()
+        .filter_map(|level| level.state.tracers.as_ref())
+        .flat_map(|tracers| tracers.id.iter().copied().zip(tracers.owner.iter().copied()))
+        .collect();
+
+    hierarchy.evolve_steps(2).unwrap();
+
+    let mut ids = Vec::new();
+    let mut moved = 0usize;
+    let mut crossed_level = 0usize;
+    for (level_index, level) in hierarchy.levels.iter().enumerate() {
+        let tracers = level.state.tracers.as_ref().unwrap();
+        assert_eq!(tracers.id.len(), tracers.owner.len());
+        for ((&id, &owner), flags) in tracers.id.iter().zip(&tracers.owner).zip(&tracers.flags) {
+            ids.push(id);
+            moved += usize::from(initial[&id] != owner);
+            crossed_level += usize::from(
+                cell_container_address(initial[&id]).unwrap().0
+                    != cell_container_address(owner).unwrap().0,
+            );
+            assert!(!flags.escaped);
+            assert_eq!(
+                cell_container_address(owner).unwrap().0 as usize,
+                level_index,
+                "tracer {id} is stored on the wrong hierarchy level"
+            );
+        }
+    }
+    ids.sort_unstable();
+    assert_eq!(ids, (0..4096).collect::<Vec<_>>());
+    assert!(moved > 0, "no tracer crossed a cell face");
+    assert!(crossed_level > 0, "no tracer crossed a refinement interface");
+}
