@@ -51,9 +51,18 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
             0.12, // accretion radius = the mask radius
         )));
 
-    let before: Vec<f64> = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c)).collect();
-    let nrg_before: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c)).collect();
+    let before: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .collect();
+    let nrg_before: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c))
+        .collect();
 
     let dt = 1e-3;
     dispatch_penalize(&sim, dt, GAMMA, 1.0);
@@ -61,7 +70,10 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
     let im = sim.immersed.as_ref().unwrap();
     let deltas = im.diagnostics.consolidate();
     assert!(deltas[0].mass_delta > 0.0, "the drain never removed mass");
-    assert!(deltas[0].energy_delta > 0.0, "the drain never removed energy");
+    assert!(
+        deltas[0].energy_delta > 0.0,
+        "the drain never removed energy"
+    );
 
     // gas loss == body gain, machine-exact: sum the cell-integrated conserved
     // change over the interior against the accumulated delta.
@@ -94,7 +106,8 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
         deltas[0].mass_delta,
     );
     assert!(
-        (lost_nrg - deltas[0].energy_delta).abs() <= 1e-12 * deltas[0].energy_delta.abs().max(1e-30),
+        (lost_nrg - deltas[0].energy_delta).abs()
+            <= 1e-12 * deltas[0].energy_delta.abs().max(1e-30),
         "gas energy loss {lost_nrg} != body gain {}",
         deltas[0].energy_delta,
     );
@@ -135,7 +148,12 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
             // variables in a way the mass sum sees, breaking the exact ledger
             // identity. the fofc-counter assert below guards that no correction
             // fired.
-            1.0, 0.08, 0.10, 0.5, 0.0, 0.12,
+            1.0,
+            0.08,
+            0.10,
+            0.5,
+            0.0,
+            0.12,
         )));
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
@@ -144,12 +162,29 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
         let w = ((-L) + dx) - (-L);
         1.0 / (1.0 / (w * w))
     };
-    let mass0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c) * dv).sum();
+    let mass0: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c) * dv)
+        .sum();
     symbi::regimes::fofc::fofc_reset_stats();
     evolve(&mut sim, &sub, 0.05).expect("evolve");
-    let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c) * dv).sum();
+    let mass1: f64 = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| *sim.fields.cons.den.view().at(c) * dv)
+        .sum();
 
-    let ledger: f64 = sim.immersed.as_ref().unwrap().history.mass_delta().iter().sum();
+    let ledger: f64 = sim
+        .immersed
+        .as_ref()
+        .unwrap()
+        .history
+        .mass_delta()
+        .iter()
+        .sum();
     let lost = mass0 - mass1;
     let (fb, fz) = symbi::regimes::fofc::fofc_stats();
     assert!(
@@ -169,8 +204,8 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
 
 #[test]
 fn iso_dispatch_drains_directly() {
-    use symbi_hydro::eos::Isothermal;
     use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::eos::Isothermal;
     use symbi_hydro::isothermal::IsoNewtonian;
     use symbi_hydro::state::PrimG;
     type ISim = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
@@ -192,11 +227,20 @@ fn iso_dispatch_drains_directly() {
             0,
             Tensor::new([0.1, -0.05]),
             Tensor::zeros(),
-            1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+            1.0,
+            0.08,
+            0.04,
+            0.5,
+            0.0,
+            0.12,
         )));
     dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert!(deltas[0].mass_delta > 0.0, "iso dispatch removed no mass: {:e}", deltas[0].mass_delta);
+    assert!(
+        deltas[0].mass_delta > 0.0,
+        "iso dispatch removed no mass: {:e}",
+        deltas[0].mass_delta
+    );
 }
 
 // the ANGULAR-MOMENTUM receipt: the reduced torque_delta is
@@ -227,14 +271,24 @@ fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
             0,
             Tensor::new(center),
             Tensor::zeros(),
-            1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+            1.0,
+            0.08,
+            0.04,
+            0.5,
+            0.0,
+            0.12,
         )));
 
     let mom_before: Vec<[f64; 2]> = sim
         .geom
         .interior
         .iter()
-        .map(|c| [*sim.fields.cons.mom[0].view().at(c), *sim.fields.cons.mom[1].view().at(c)])
+        .map(|c| {
+            [
+                *sim.fields.cons.mom[0].view().at(c),
+                *sim.fields.cons.mom[1].view().at(c),
+            ]
+        })
         .collect();
 
     let dt = 1e-3;
@@ -294,22 +348,36 @@ fn porous_surface_endpoints_hold_through_the_dispatch() {
                 pre: 1.0,
             })
             .build()
-            .with_bodies(BodyCollection::new().add(
-                Body::black_hole(
-                    0,
-                    Tensor::new([0.1, -0.05]),
-                    Tensor::zeros(),
-                    1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
-                )
-                .with_surface(surface),
-            ))
+            .with_bodies(
+                BodyCollection::new().add(
+                    Body::black_hole(
+                        0,
+                        Tensor::new([0.1, -0.05]),
+                        Tensor::zeros(),
+                        1.0,
+                        0.08,
+                        0.04,
+                        0.5,
+                        0.0,
+                        0.12,
+                    )
+                    .with_surface(surface),
+                ),
+            )
     };
 
     // sealed free-slip wall: zero mass receipts, exactly; momentum exchanged.
-    let sealed = build(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 0.0 });
+    let sealed = build(SurfaceSpec::Porous {
+        porosity: 0.0,
+        k_eta_n: 50.0,
+        k_eta_t: 0.0,
+    });
     dispatch_penalize(&sealed, 1e-3, GAMMA, 1.0);
     let d = sealed.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a sealed surface must book zero mass, exactly");
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a sealed surface must book zero mass, exactly"
+    );
     let f = d[0].force_delta;
     assert!(
         (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
@@ -317,10 +385,90 @@ fn porous_surface_endpoints_hold_through_the_dispatch() {
     );
 
     // half-open: the drain fires.
-    let porous = build(SurfaceSpec::Porous { porosity: 0.5, k_eta_n: 50.0, k_eta_t: 0.0 });
+    let porous = build(SurfaceSpec::Porous {
+        porosity: 0.5,
+        k_eta_n: 50.0,
+        k_eta_t: 0.0,
+    });
     dispatch_penalize(&porous, 1e-3, GAMMA, 1.0);
     let d = porous.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(d[0].mass_delta > 0.0, "the half-open surface never drained");
+}
+
+#[test]
+fn porous_absorption_converges_under_grid_refinement() {
+    use std::f64::consts::PI;
+    use symbi_ib::SurfaceSpec;
+
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    const RADIUS: f64 = 0.3;
+    const EXPOSURE_TIME: f64 = 0.5;
+
+    let run = |cells: usize| {
+        let dx = 2.0 * L / cells as f64;
+        let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([cells, cells])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .allocate()
+            .expect("sim")
+            .set_initial(|_| Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.2, -0.1]),
+                pre: 1.0,
+            })
+            .build()
+            .with_bodies(
+                BodyCollection::new().add(
+                    Body::black_hole(
+                        0,
+                        Tensor::zeros(),
+                        Tensor::zeros(),
+                        1.0,
+                        0.08,
+                        0.04,
+                        0.5,
+                        0.0,
+                        RADIUS,
+                    )
+                    .with_surface(SurfaceSpec::Porous {
+                        porosity: 0.5,
+                        k_eta_n: 1.0,
+                        k_eta_t: 1.0,
+                    }),
+                ),
+            );
+
+        dispatch_penalize(&sim, EXPOSURE_TIME, GAMMA, 1.0);
+        let receipt = sim.immersed.as_ref().unwrap().diagnostics.consolidate()[0];
+        let force = receipt.force_delta;
+        assert!(
+            receipt.mass_delta > 0.0,
+            "the drain channel never fired at {cells} cells"
+        );
+        assert!(
+            (force[0] * force[0] + force[1] * force[1]).sqrt() > 1e-8,
+            "the wall channel never fired at {cells} cells"
+        );
+        receipt.mass_delta
+    };
+
+    let exact = PI * RADIUS * RADIUS;
+    let coarse_error = (run(32) - exact).abs();
+    let medium_error = (run(64) - exact).abs();
+    let fine_error = (run(128) - exact).abs();
+
+    assert!(
+        medium_error < coarse_error && fine_error < medium_error,
+        "absorbed disk mass did not converge: errors {coarse_error:e}, {medium_error:e}, \
+         {fine_error:e}"
+    );
+    assert!(
+        fine_error < 0.75 * coarse_error,
+        "two refinements failed to contract the absorbed-mass error by 25%: \
+         errors {coarse_error:e}, {medium_error:e}, {fine_error:e}"
+    );
 }
 
 // a RIGID (non-accreting) body reaches the penalize dispatch through the mask_radius
@@ -345,16 +493,42 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
             pre: 1.0,
         })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            // rigid sphere: no accretion capability, so accretion_radius() is None; it
-            // masks to its physical radius. no-slip wall on both channels.
-            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.12, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
-        ));
-    assert_eq!(rigid.immersed.as_ref().unwrap().bodies.get(0).accretion_radius(), None);
+        .with_bodies(
+            BodyCollection::new().add(
+                // rigid sphere: no accretion capability, so accretion_radius() is None; it
+                // masks to its physical radius. no-slip wall on both channels.
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.1, -0.05]),
+                    Tensor::zeros(),
+                    1.0,
+                    0.12,
+                    1.0,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 50.0,
+                    k_eta_t: 50.0,
+                }),
+            ),
+        );
+    assert_eq!(
+        rigid
+            .immersed
+            .as_ref()
+            .unwrap()
+            .bodies
+            .get(0)
+            .accretion_radius(),
+        None
+    );
     dispatch_penalize(&rigid, 1e-3, GAMMA, 1.0);
     let d = rigid.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a rigid wall removes no mass, exactly");
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a rigid wall removes no mass, exactly"
+    );
     let f = d[0].force_delta;
     assert!(
         (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
@@ -369,8 +543,8 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
 // end to end.
 #[test]
 fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
@@ -386,18 +560,37 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
             pre: 1.0,
         })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.2, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.1, -0.05]),
+                    Tensor::zeros(),
+                    1.0,
+                    0.2,
+                    1.0,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 50.0,
+                    k_eta_t: 50.0,
+                }),
+            ),
+        );
     // attach the arbitrary shape: a box in the body-local frame (a 0.3 x 0.3 square in the z=0
     // plane).
-    sim.immersed.as_mut().unwrap().shapes[0] =
-        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.15, 0.15, 1.0]));
+    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::cuboid(
+        [0.0, 0.0, 0.0],
+        [0.15, 0.15, 1.0],
+    ));
 
     dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a sealed shaped wall removes no mass, exactly");
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a sealed shaped wall removes no mass, exactly"
+    );
     let f = d[0].force_delta;
     assert!(
         (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
@@ -410,12 +603,12 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
 // penalizes (force) and removes no mass.
 #[test]
 fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
-    use symbi_hydro::eos::Isothermal;
     use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::eos::Isothermal;
     use symbi_hydro::isothermal::IsoNewtonian;
     use symbi_hydro::state::PrimG;
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     type ISim = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     let mut sim = ISim::build(IsoNewtonian, Isothermal { cs: 1.0 }, Cartesian)
@@ -431,16 +624,35 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
             pre: Default::default(),
         })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.2, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
-        ));
-    sim.immersed.as_mut().unwrap().shapes[0] =
-        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.15, 0.15, 1.0]));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([0.1, -0.05]),
+                    Tensor::zeros(),
+                    1.0,
+                    0.2,
+                    1.0,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 50.0,
+                    k_eta_t: 50.0,
+                }),
+            ),
+        );
+    sim.immersed.as_mut().unwrap().shapes[0] = Some(SdfExpr::<f64, 3>::cuboid(
+        [0.0, 0.0, 0.0],
+        [0.15, 0.15, 1.0],
+    ));
 
     dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a sealed iso shaped wall removes no mass, exactly");
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a sealed iso shaped wall removes no mass, exactly"
+    );
     let f = d[0].force_delta;
     assert!(
         (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
@@ -454,8 +666,8 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
 // this also pins the sign of the coupling.
 #[test]
 fn two_way_spin_is_dragged_to_a_stop() {
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     const OMEGA0: f64 = 3.0;
@@ -467,14 +679,24 @@ fn two_way_spin_is_dragged_to_a_stop() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, INERTIA, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-                .with_spin(OMEGA0)
-                .with_two_way_coupling(true),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, INERTIA, true)
+                    .with_surface(SurfaceSpec::Porous {
+                        porosity: 0.0,
+                        k_eta_n: 50.0,
+                        k_eta_t: 50.0,
+                    })
+                    .with_spin(OMEGA0)
+                    .with_two_way_coupling(true),
+            ),
+        );
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.1, 1.0]));
 
@@ -484,7 +706,10 @@ fn two_way_spin_is_dragged_to_a_stop() {
     symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
     // spin was about z, so the drag reduces the z component of the angular-velocity vector.
     let omega = sim.immersed.as_ref().unwrap().bodies.get(0).omega[2];
-    assert!(omega < OMEGA0, "the free spinner should decelerate from drag: {OMEGA0} -> {omega}");
+    assert!(
+        omega < OMEGA0,
+        "the free spinner should decelerate from drag: {OMEGA0} -> {omega}"
+    );
     assert!(omega > 0.0, "one step should not reverse the spin: {omega}");
 }
 
@@ -493,8 +718,8 @@ fn two_way_spin_is_dragged_to_a_stop() {
 // in the flow direction over one evolve step.
 #[test]
 fn two_way_body_is_pushed_downstream_by_the_flow() {
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
@@ -504,13 +729,23 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.3, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.3, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-                .with_two_way_coupling(true),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
+                    .with_surface(SurfaceSpec::Porous {
+                        porosity: 0.0,
+                        k_eta_n: 50.0,
+                        k_eta_t: 50.0,
+                    })
+                    .with_two_way_coupling(true),
+            ),
+        );
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.2, 0.2, 1.0]));
 
@@ -519,10 +754,21 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
     let b = sim.immersed.as_ref().unwrap().bodies.get(0);
-    assert!(b.velocity[0] > 0.0, "the +x flow should accelerate the body downstream: {}", b.velocity[0]);
-    assert!(b.position[0] > 0.0, "the body should drift downstream: {}", b.position[0]);
+    assert!(
+        b.velocity[0] > 0.0,
+        "the +x flow should accelerate the body downstream: {}",
+        b.velocity[0]
+    );
+    assert!(
+        b.position[0] > 0.0,
+        "the body should drift downstream: {}",
+        b.position[0]
+    );
     // the transverse push is negligible for a symmetric obstacle in an axis-aligned flow.
-    assert!(b.velocity[1].abs() < b.velocity[0], "the drift is predominantly downstream");
+    assert!(
+        b.velocity[1].abs() < b.velocity[0],
+        "the drift is predominantly downstream"
+    );
 }
 
 // ARBITRARY-AXIS 3D spin: a box spinning about the X axis in still 3D fluid
@@ -530,8 +776,8 @@ fn two_way_body_is_pushed_downstream_by_the_flow() {
 // velocity is omega x r about the config axis.
 #[test]
 fn spinning_box_about_x_axis_imparts_torque_3d() {
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     type Sim3 = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let n = 24;
     let dx = 2.0 * L / n as f64;
@@ -542,22 +788,38 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("3d sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.4, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-                .with_spin_about(5.0, Tensor::new([1.0, 0.0, 0.0])),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.4, 1.0, true)
+                    .with_surface(SurfaceSpec::Porous {
+                        porosity: 0.0,
+                        k_eta_n: 50.0,
+                        k_eta_t: 50.0,
+                    })
+                    .with_spin_about(5.0, Tensor::new([1.0, 0.0, 0.0])),
+            ),
+        );
     // a box elongated in y, so spinning about x sweeps its arms through z and grabs the gas.
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.1, 0.3, 0.1]));
 
     dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a sealed spinning wall removes no mass");
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a sealed spinning wall removes no mass"
+    );
     let tau = d[0].torque_delta;
-    assert!(tau[0].abs() > 1e-6, "spin about x should book a torque about x: {tau:?}");
+    assert!(
+        tau[0].abs() > 1e-6,
+        "spin about x should book a torque about x: {tau:?}"
+    );
     // the reaction is about the spin axis (x) — the default axis is not hardwired.
     assert!(
         tau[0].abs() > 10.0 * tau[2].abs(),
@@ -572,8 +834,8 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
 fn shaped_box_rigid_wall_cylindrical_penalizes() {
     use std::f64::consts::PI;
     use symbi_geometry::Cylindrical;
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     use symbi_sim::state::CylPlane;
     type CylSim = SimState<Newtonian, 2, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
     let (nr, nphi) = (40usize, 32usize);
@@ -588,19 +850,40 @@ fn shaped_box_rigid_wall_cylindrical_penalizes() {
         ]))
         .allocate()
         .expect("cyl sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.2, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.2, 0.0]),
+            pre: 1.0,
+        })
         .build()
-        .with_bodies(BodyCollection::new().add(
-            // the body sits at a Cartesian point inside the annulus (physical radius ~2.06).
-            Body::rigid_sphere(0, Tensor::new([2.0, 0.5]), Tensor::zeros(), 1.0, 0.5, 1.0, true)
-                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
-        ));
+        .with_bodies(
+            BodyCollection::new().add(
+                // the body sits at a Cartesian point inside the annulus (physical radius ~2.06).
+                Body::rigid_sphere(
+                    0,
+                    Tensor::new([2.0, 0.5]),
+                    Tensor::zeros(),
+                    1.0,
+                    0.5,
+                    1.0,
+                    true,
+                )
+                .with_surface(SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: 50.0,
+                    k_eta_t: 50.0,
+                }),
+            ),
+        );
     sim.immersed.as_mut().unwrap().shapes[0] =
         Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.4, 1.0]));
 
     dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a sealed shaped wall on a cyl grid removes no mass");
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a sealed shaped wall on a cyl grid removes no mass"
+    );
     let f = d[0].force_delta;
     assert!(
         (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
@@ -613,8 +896,8 @@ fn shaped_box_rigid_wall_cylindrical_penalizes() {
 // reaction torque about z. an identical NON-spinning wall in still fluid imparts ~nothing.
 #[test]
 fn spinning_box_wall_imparts_torque_to_still_fluid() {
-    use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_ib::sdf::SdfExpr;
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     let build = |omega: f64| -> Sim {
@@ -625,13 +908,23 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
             .boundaries(Boundaries::uniform(BoundaryType::Outflow))
             .allocate()
             .expect("sim")
-            .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+            .set_initial(|_| Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: 1.0,
+            })
             .build()
-            .with_bodies(BodyCollection::new().add(
-                Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
-                    .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-                    .with_spin(omega),
-            ));
+            .with_bodies(
+                BodyCollection::new().add(
+                    Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
+                        .with_surface(SurfaceSpec::Porous {
+                            porosity: 0.0,
+                            k_eta_n: 50.0,
+                            k_eta_t: 50.0,
+                        })
+                        .with_spin(omega),
+                ),
+            );
         // an elongated box, so the spin grabs the fluid.
         sim.immersed.as_mut().unwrap().shapes[0] =
             Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.1, 1.0]));
@@ -640,10 +933,21 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
 
     let spinning = build(5.0);
     dispatch_penalize(&spinning, 1e-3, GAMMA, 1.0);
-    let d = spinning.immersed.as_ref().unwrap().diagnostics.consolidate();
-    assert_eq!(d[0].mass_delta, 0.0, "a sealed spinning wall removes no mass");
+    let d = spinning
+        .immersed
+        .as_ref()
+        .unwrap()
+        .diagnostics
+        .consolidate();
+    assert_eq!(
+        d[0].mass_delta, 0.0,
+        "a sealed spinning wall removes no mass"
+    );
     let tau = d[0].torque_delta[2];
-    assert!(tau.abs() > 1e-6, "the spinning wall imparted no torque to the still fluid: {tau}");
+    assert!(
+        tau.abs() > 1e-6,
+        "the spinning wall imparted no torque to the still fluid: {tau}"
+    );
 
     // baseline: the SAME wall with no spin leaves still fluid still — negligible torque.
     let still = build(0.0);
@@ -685,7 +989,11 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rz sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.3, 0.1]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.3, 0.1]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,
@@ -713,7 +1021,11 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
         (r * r + (z - z0) * (z - z0)).sqrt()
     };
     let mass = |s: &RzSim| -> f64 {
-        s.geom.interior.iter().map(|c| *s.fields.cons.den.view().at(c) * dv(c)).sum()
+        s.geom
+            .interior
+            .iter()
+            .map(|c| *s.fields.cons.den.view().at(c) * dv(c))
+            .sum()
     };
     let before_mass = mass(&sim);
     let far_before: Vec<f64> = sim
@@ -742,9 +1054,15 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
         .filter(|c| dist(*c) > racc + 25.0 * dr.min(dz))
         .map(|c| *sim.fields.cons.den.view().at(c))
         .collect();
-    assert!(!far_before.is_empty(), "the far-field probe covers no cells");
+    assert!(
+        !far_before.is_empty(),
+        "the far-field probe covers no cells"
+    );
     for (b, a) in far_before.iter().zip(&far_after) {
-        assert!(b.to_bits() == a.to_bits(), "far field touched: {b:e} -> {a:e}");
+        assert!(
+            b.to_bits() == a.to_bits(),
+            "far field touched: {b:e} -> {a:e}"
+        );
     }
     // the swirling gas gives up prograde angular momentum: positive z torque,
     // zero radial world force (ring cancellation is exact in-kernel).
@@ -753,9 +1071,15 @@ fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
         "prograde swirl must book a positive axis torque: {:?}",
         d[0].torque_delta
     );
-    assert_eq!(d[0].force_delta[0], 0.0, "ring-radial receipt must cancel exactly");
+    assert_eq!(
+        d[0].force_delta[0], 0.0,
+        "ring-radial receipt must cancel exactly"
+    );
     // uniform +z momentum drains: the receipt on the body points along +z.
-    assert!(d[0].force_delta[1] > 0.0, "the +z momentum drain must book a +z receipt");
+    assert!(
+        d[0].force_delta[1] > 0.0,
+        "the +z momentum drain must book a +z receipt"
+    );
 }
 
 // off-axis and shaped bodies remain outside the axisymmetric contract.
@@ -771,7 +1095,11 @@ fn rz_off_axis_body_fails_loud() {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("rz sim")
-        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 })
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0, 0.0, 0.0]),
+            pre: 1.0,
+        })
         .build()
         .with_bodies(BodyCollection::new().add(Body::black_hole(
             0,
