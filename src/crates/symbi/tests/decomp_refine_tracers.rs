@@ -1,9 +1,9 @@
 // =============================================================================
 // decomp_refine_tracers.rs
 //
-// global tracer ownership on a refined hierarchy decomposed across a root and
-// fine-level cut. the decomposed driver must reproduce monolithic owners while
-// migrating complete records between tiles.
+// global tracer ownership on a refined hierarchy decomposed across a root
+// cut. complete records migrate between tiles while refinement-interface
+// receipts migrate them between levels.
 // =============================================================================
 
 use symbi::prelude::*;
@@ -13,6 +13,8 @@ use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
     seed_decomposed_hierarchy_tracers,
 };
+use symbi_hydro::expr_bridge::{build_boundary_dag, build_user_source};
+use symbi_hydro::{NEWTONIAN_SPEC, SourceConfig};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -26,6 +28,41 @@ type Hier = Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostM
 
 fn kernels(sim: &Sim) -> Kern {
     Kern::new(GAMMA, CFL, &sim.geom.allocated)
+}
+
+fn source_kernels(sim: &Sim) -> Kern {
+    let source = SourceConfig::from_json(
+        r#"{
+            "kind": "raw", "dim": 1, "outputs": [0], "params": [],
+            "target": "den",
+            "nodes": [ {"op": "CONSTANT", "value": 0.2} ]
+        }"#,
+    )
+    .unwrap();
+    kernels(sim).with_runtime_source(
+        build_user_source(&source, &NEWTONIAN_SPEC).unwrap(),
+        source.params,
+    )
+}
+
+fn driven_kernels(sim: &Sim) -> Kern {
+    let boundary = SourceConfig::from_json(
+        r#"{
+            "kind": "dirichlet", "dim": 1, "outputs": [0, 1, 2], "params": [],
+            "nodes": [
+                {"op": "CONSTANT", "value": 2.0},
+                {"op": "CONSTANT", "value": 0.5},
+                {"op": "CONSTANT", "value": 1.0}
+            ]
+        }"#,
+    )
+    .unwrap();
+    kernels(sim)
+        .with_driven_boundary(
+            build_boundary_dag(&boundary, &NEWTONIAN_SPEC).unwrap(),
+            boundary.params,
+        )
+        .0
 }
 
 fn root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
@@ -46,6 +83,24 @@ fn root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
         .build()
 }
 
+fn resting_root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
+    Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([cells])
+        .origin([origin])
+        .spacing([1.0 / N as f64])
+        .boundaries(boundaries)
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0]),
+            pre: 1.0,
+        })
+        .build()
+}
+
 fn region() -> RefinementRegion<1> {
     RefinementRegion {
         x_lo: [0.125],
@@ -58,6 +113,40 @@ fn global() -> Hier {
     let hierarchy =
         Hier::with_refinement(coarse, kernels(&root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic))), &[region()], ProlongOrder::Plm, kernels)
             .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy
+}
+
+fn source_global() -> Hier {
+    let coarse = root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic));
+    let coarse_kernels = source_kernels(&coarse);
+    let hierarchy = Hier::with_refinement(
+        coarse,
+        coarse_kernels,
+        &[region()],
+        ProlongOrder::Plm,
+        source_kernels,
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy
+}
+
+fn driven_global() -> Hier {
+    let boundaries = Boundaries([[
+        BoundaryType::Driven(0),
+        BoundaryType::Outflow,
+    ]]);
+    let coarse = resting_root(N, 0.0, boundaries);
+    let coarse_kernels = driven_kernels(&coarse);
+    let hierarchy = Hier::with_refinement(
+        coarse,
+        coarse_kernels,
+        &[region()],
+        ProlongOrder::Plm,
+        driven_kernels,
+    )
+    .unwrap();
     hierarchy.seed_fine_from_coarse().unwrap();
     hierarchy
 }
@@ -97,6 +186,109 @@ fn tiles() -> Vec<Hier> {
         result.push(hierarchy);
     }
     result
+}
+
+fn source_tiles() -> Vec<Hier> {
+    let mut result = Vec::new();
+    for tile in 0..2 {
+        let boundaries = if tile == 0 {
+            Boundaries([[
+                BoundaryType::Periodic,
+                BoundaryType::CoarseFine,
+            ]])
+        } else {
+            Boundaries([[
+                BoundaryType::CoarseFine,
+                BoundaryType::Periodic,
+            ]])
+        };
+        let coarse = root(N / 2, tile as f64 * 0.5, boundaries);
+        let coarse_kernels = source_kernels(&coarse);
+        let mut hierarchy = if tile == 0 {
+            let hierarchy = Hier::with_refinement(
+                coarse,
+                coarse_kernels,
+                &[region()],
+                ProlongOrder::Plm,
+                source_kernels,
+            )
+            .unwrap();
+            hierarchy.seed_fine_from_coarse().unwrap();
+            hierarchy
+        } else {
+            Hier::single(coarse, coarse_kernels)
+        };
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.prime();
+        result.push(hierarchy);
+    }
+    result
+}
+
+fn driven_tiles() -> Vec<Hier> {
+    let mut result = Vec::new();
+    for tile in 0..2 {
+        let boundaries = if tile == 0 {
+            Boundaries([[
+                BoundaryType::Driven(0),
+                BoundaryType::CoarseFine,
+            ]])
+        } else {
+            Boundaries([[
+                BoundaryType::CoarseFine,
+                BoundaryType::Outflow,
+            ]])
+        };
+        let coarse = resting_root(N / 2, tile as f64 * 0.5, boundaries);
+        let coarse_kernels = driven_kernels(&coarse);
+        let mut hierarchy = if tile == 0 {
+            let hierarchy = Hier::with_refinement(
+                coarse,
+                coarse_kernels,
+                &[region()],
+                ProlongOrder::Plm,
+                driven_kernels,
+            )
+            .unwrap();
+            hierarchy.seed_fine_from_coarse().unwrap();
+            hierarchy
+        } else {
+            Hier::single(coarse, coarse_kernels)
+        };
+        hierarchy.set_tracer_root_layout([N], [tile * (N / 2)]);
+        hierarchy.prime();
+        result.push(hierarchy);
+    }
+    result
+}
+
+fn composite_mass(hierarchy: &[Hier]) -> f64 {
+    hierarchy
+        .iter()
+        .flat_map(|tile| &tile.levels)
+        .map(|level| {
+            let geometry = level
+                .state
+                .geom
+                .block_geometry(level.state.physics.metric);
+            level
+                .state
+                .geom
+                .interior
+                .iter()
+                .filter(|coord| {
+                    !level
+                        .coverage
+                        .as_ref()
+                        .is_some_and(|coverage| coverage.contains(*coord))
+                })
+                .map(|coord| {
+                    *level.state.fields.cons.den.view().at(coord)
+                        * geometry.volume(coord)
+                })
+                .sum::<f64>()
+        })
+        .sum()
 }
 
 fn owners(hierarchy: &[Hier]) -> std::collections::BTreeMap<u64, symbi_sim::mass_transport::ContainerId> {
@@ -181,5 +373,107 @@ fn decomposed_refined_tracers_migrate_across_level_and_tile_cuts() {
     assert!(
         crossed_level > 0,
         "no tracer crossed a refinement interface"
+    );
+}
+
+#[test]
+fn decomposed_refined_source_spawning_matches_composite_added_mass() {
+    let global_seed = source_global();
+    let mut decomposed = source_tiles();
+    seed_decomposed_hierarchy_tracers(&global_seed, &mut decomposed, N_TRACERS);
+    let mass_before = composite_mass(&decomposed);
+
+    evolve_hierarchy_decomposed(
+        &mut decomposed,
+        [2],
+        &[0, 0],
+        &LocalCopy,
+        Timestepping::Rk2,
+        0.0,
+        0.04,
+        u64::MAX,
+        |_, _, _| std::ops::ControlFlow::Continue(()),
+    );
+
+    let all_ids: Vec<_> = decomposed
+        .iter()
+        .flat_map(|tile| &tile.levels)
+        .flat_map(|level| level.state.tracers.as_ref().unwrap().id.iter().copied())
+        .collect();
+    let unique: std::collections::BTreeSet<_> = all_ids.iter().copied().collect();
+    let tracers = decomposed[0].levels[0].state.tracers.as_ref().unwrap();
+    let represented_added = (all_ids.len() - N_TRACERS) as f64 * tracers.weight
+        + tracers.injection_remainder;
+    let fluid_added = composite_mass(&decomposed) - mass_before;
+    let expected_added = 0.2 * 0.04;
+
+    assert_eq!(unique.len(), all_ids.len(), "spawned tracer IDs are not global");
+    assert!(
+        all_ids.len() > N_TRACERS,
+        "the decomposed source spawned no tracers"
+    );
+    assert!(
+        (represented_added - expected_added).abs() < 1.0e-12,
+        "represented source mass {represented_added:e} != analytic source integral \
+         {expected_added:e}"
+    );
+    // the decomposed periodic halo reduction closes the fluid budget to about
+    // 2.5e-11 on this grid; tracer apportionment above remains exact.
+    assert!(
+        (fluid_added - expected_added).abs() < 1.0e-10,
+        "composite fluid addition {fluid_added:e} != analytic source integral \
+         {expected_added:e}"
+    );
+    for tile in &decomposed {
+        for level in &tile.levels {
+            let state = level.state.tracers.as_ref().unwrap();
+            assert_eq!(state.next_id, tracers.next_id);
+            assert_eq!(
+                state.injection_remainder.to_bits(),
+                tracers.injection_remainder.to_bits()
+            );
+        }
+    }
+}
+
+#[test]
+fn decomposed_refined_driven_inflow_uses_one_global_spawn_stream() {
+    let global_seed = driven_global();
+    let mut decomposed = driven_tiles();
+    seed_decomposed_hierarchy_tracers(&global_seed, &mut decomposed, N_TRACERS);
+    let mass_before = composite_mass(&decomposed);
+
+    evolve_hierarchy_decomposed(
+        &mut decomposed,
+        [2],
+        &[0, 0],
+        &LocalCopy,
+        Timestepping::Rk2,
+        0.0,
+        0.04,
+        u64::MAX,
+        |_, _, _| std::ops::ControlFlow::Continue(()),
+    );
+
+    let all_ids: Vec<_> = decomposed
+        .iter()
+        .flat_map(|tile| &tile.levels)
+        .flat_map(|level| level.state.tracers.as_ref().unwrap().id.iter().copied())
+        .collect();
+    let unique: std::collections::BTreeSet<_> = all_ids.iter().copied().collect();
+    let tracers = decomposed[0].levels[0].state.tracers.as_ref().unwrap();
+    let represented_added = (all_ids.len() - N_TRACERS) as f64 * tracers.weight
+        + tracers.injection_remainder;
+    let fluid_added = composite_mass(&decomposed) - mass_before;
+
+    assert_eq!(unique.len(), all_ids.len(), "inflow tracer IDs are not global");
+    assert!(
+        all_ids.len() > N_TRACERS,
+        "the decomposed driven boundary spawned no tracers"
+    );
+    assert!(
+        (represented_added - fluid_added).abs() < 1.0e-10,
+        "represented inflow mass {represented_added:e} != composite fluid addition \
+         {fluid_added:e}"
     );
 }

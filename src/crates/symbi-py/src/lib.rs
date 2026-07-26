@@ -3681,9 +3681,9 @@ where
 /// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. hydro + a
 /// single refined region, carrying immersed bodies (with shapes), user sources, and driven
 /// boundaries -- each attached per tile and evolved in lockstep (oracle-gated:
-/// decomp_refine_{body,source,driven}_equivalence). mesh motion, the passive scalar, tracers, and
-/// bonded fragments are NOT carried here -- they are unwired with REFINEMENT generally (refused for
-/// single-grid refined runs too), not a decomposition-specific gap.
+/// decomp_refine_{body,source,driven}_equivalence). mass-transport tracers use global owners and
+/// migrate complete records across cuts. mesh motion, the passive scalar, and bonded fragments are
+/// not carried here.
 macro_rules! build_and_run_hydro_decomposed_refined {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
@@ -5919,16 +5919,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             );
         }
         if cfg.refinement_enabled {
-            if cfg.n_gpus > 1
-                && matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal")
-                && (!cfg.source_jsons.is_empty() || !cfg.driven_exprs.is_empty())
-            {
-                return Err(
-                    "n_tracers with decomposed refinement does not yet support runtime mass \
-                     sources or driven inflow until spawning is globally apportioned"
-                        .to_string(),
-                );
-            }
             if !cfg.gradient_bcs.is_empty() {
                 return Err(
                     "n_tracers with refinement does not yet support gradient boundaries until \

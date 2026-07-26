@@ -362,6 +362,42 @@ where
         }
     }
 
+    fn set_tracer_spawn_state(&mut self, next_id: u64, injection_remainder: f64) {
+        for level in &mut self.levels {
+            if let Some(tracers) = level.state.tracers.as_mut() {
+                tracers.next_id = next_id;
+                tracers.injection_remainder = injection_remainder;
+            }
+        }
+    }
+
+    fn spawn_pending_injection(
+        &mut self,
+        level: usize,
+        next_id: u64,
+        injection_remainder: f64,
+    ) -> Result<(u64, f64), String> {
+        if level >= self.levels.len() || !self.levels[level].state.has_tracers() {
+            return Ok((next_id, injection_remainder));
+        }
+        self.set_tracer_spawn_state(next_id, injection_remainder);
+        let ledger = std::mem::take(&mut self.injection_ledger);
+        let layout = self.tracer_layout(level);
+        let geometry = self.levels[level]
+            .state
+            .geom
+            .block_geometry(self.levels[level].state.physics.metric);
+        symbi_sim::tracers::spawn_boundary_injection_store(
+            &mut self.levels[level].state.store,
+            &geometry,
+            layout,
+            ledger,
+        )?;
+        self.sync_tracer_spawn_state(level);
+        let tracers = self.levels[level].state.tracers.as_ref().unwrap();
+        Ok((tracers.next_id, tracers.injection_remainder))
+    }
+
     fn tracer_cell_mass(
         &self,
         owner: symbi_sim::mass_transport::ContainerId,
@@ -2304,6 +2340,40 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
     }
 }
 
+fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    order: &[usize],
+    level: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let Some((mut next_id, mut injection_remainder)) = tiles
+        .iter()
+        .flat_map(|tile| &tile.levels)
+        .find_map(|data| {
+            data.state
+                .tracers
+                .as_ref()
+                .map(|tracers| (tracers.next_id, tracers.injection_remainder))
+        })
+    else {
+        return;
+    };
+    for &index in order {
+        (next_id, injection_remainder) = tiles[index]
+            .spawn_pending_injection(level, next_id, injection_remainder)
+            .unwrap_or_else(|detail| panic!("decomposed tracer injection: {detail}"));
+    }
+    for tile in tiles {
+        tile.set_tracer_spawn_state(next_id, injection_remainder);
+    }
+}
+
 /// the DECOMPOSED hierarchy driver (refinement x decomposition): lockstep-advance N
 /// per-tile hierarchies, decomposing the ROOT and the FIRST FINE level. the root stages run with a
 /// root halo exchange BETWEEN them (rk2 corrector reads each neighbor's stage-1 update); the fine
@@ -2379,6 +2449,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
             migrate_level_tracers(tiles, 0);
             exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
         }
+        spawn_decomposed_injections(tiles, &root_order, 0);
         // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
@@ -2434,6 +2505,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                     migrate_level_tracers(tiles, 1);
                     exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
                 }
+                spawn_decomposed_injections(tiles, &fg.order, 1);
                 for (k, &i) in fg.order.iter().enumerate() {
                     symbi_xpu::with_device(fg.devices[k], || {
                         tiles[i].level_step_tail(1, fine_dt, alpha)
