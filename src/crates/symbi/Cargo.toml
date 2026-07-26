@@ -65,5 +65,9 @@ harness = false
 name = "adiabatic_zone_cycle_bench"
 harness = false
 
+[[bench]]
+name = "tracer_overhead_bench"
+harness = false
+
 [lints]
 workspace = true
