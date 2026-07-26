@@ -20,17 +20,15 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric, Space, Tensor};
-use symbi_ir::algebra::Scalar;
+use symbi_geometry::{Metric, MotionState};
 use symbi_grid::Field;
 use symbi_grid::centering::Cell;
-use symbi_hydro::state::{Prim, Cons, PrimG, ConsG, SeedableCons};
 use symbi_hydro::energy::{EnergyModel, EnergySlot};
-use symbi_hydro::regime::Regime;
 use symbi_hydro::eos::Eos;
-use symbi_geometry::{Metric, MotionState};
-use symbi_xpu::{
-    Executor, ExecutionSpace, MemorySpace, DefaultSpace, DefaultMemory,
-};
+use symbi_hydro::regime::Regime;
+use symbi_hydro::state::{Cons, ConsG, Prim, PrimG, SeedableCons};
+use symbi_ir::algebra::Scalar;
+use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpace};
 
 // =============================================================================
 // energy/pressure FIELD slot — the field-layer analog of
@@ -43,7 +41,9 @@ use symbi_xpu::{
 /// the uniform surface of an energy/pressure field slot — a real `Field` (energy regimes) or the
 /// zero-sized [`FieldZero`] (isothermal). generic code resolves a slot through this without knowing
 /// which; regime-specific code names the concrete `Field` directly.
-pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace>: Sized {
+pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace>:
+    Sized
+{
     /// allocate the slot (a zeroed `Field`, or the free `FieldZero`).
     fn alloc(domain: &Domain<D>) -> symbi_xpu::Result<Self>;
     /// the backing field, if present (`None` for `FieldZero`). the ONE place absence is handled.
@@ -55,9 +55,15 @@ pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: Memo
 impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldSlot<Sc, D, Mem>
     for Field<Sc, D, Mem>
 {
-    fn alloc(domain: &Domain<D>) -> symbi_xpu::Result<Self> { Field::zeros(domain) }
-    fn as_field(&self) -> Option<&Field<Sc, D, Mem>> { Some(self) }
-    fn ptr(&self) -> u64 { self.as_ptr() as u64 }
+    fn alloc(domain: &Domain<D>) -> symbi_xpu::Result<Self> {
+        Field::zeros(domain)
+    }
+    fn as_field(&self) -> Option<&Field<Sc, D, Mem>> {
+        Some(self)
+    }
+    fn ptr(&self) -> u64 {
+        self.as_ptr() as u64
+    }
 }
 
 /// zero-sized energy/pressure field slot for isothermal regimes — the field-layer `Zero<S>`.
@@ -67,9 +73,15 @@ pub struct FieldZero;
 impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldSlot<Sc, D, Mem>
     for FieldZero
 {
-    fn alloc(_domain: &Domain<D>) -> symbi_xpu::Result<Self> { Ok(FieldZero) }
-    fn as_field(&self) -> Option<&Field<Sc, D, Mem>> { None }
-    fn ptr(&self) -> u64 { 0 }
+    fn alloc(_domain: &Domain<D>) -> symbi_xpu::Result<Self> {
+        Ok(FieldZero)
+    }
+    fn as_field(&self) -> Option<&Field<Sc, D, Mem>> {
+        None
+    }
+    fn ptr(&self) -> u64 {
+        0
+    }
 }
 
 /// bridge from an energy MARKER (`Adiabatic` / `IsoModel`, foreign `symbi-hydro` types) to its
@@ -105,7 +117,12 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
 /// (momentum-component) dimension — decoupled, so axisymmetric (r,z) hydro carries `DOF=3`
 /// momentum components (the v_phi swirl) on an `NDIM=2` grid. the `ConsFields<D>` alias fills
 /// `DOF = NDIM = D` (the natural case), so every existing site is unchanged.
-pub struct ConsFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct ConsFieldsGeneric<
+    const NDIM: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub den: Field<Sc, NDIM, M>,
     pub mom: [Field<Sc, NDIM, M>; DOF],
     pub nrg: Option<Field<Sc, NDIM, M>>,
@@ -118,14 +135,18 @@ pub struct ConsFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace
 /// the natural case: vector dimension == grid dimension.
 pub type ConsFields<const D: usize, M = DefaultMemory, Sc = f64> = ConsFieldsGeneric<D, D, M, Sc>;
 
-impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> ConsFieldsGeneric<NDIM, DOF, M, Sc> {
+impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    ConsFieldsGeneric<NDIM, DOF, M, Sc>
+{
     /// fill a u64 pointer array with [den, mom[0], ..., mom[D-1], nrg].
     /// the array must have at least D+2 elements.
     /// for isothermal regimes (nrg = None), writes a null pointer.
     pub fn fill_ptr_array(&self, arr: *mut u64) {
         unsafe {
             *arr.add(0) = self.den.as_ptr() as u64;
-            for dd in 0..DOF { *arr.add(1 + dd) = self.mom[dd].as_ptr() as u64; }
+            for dd in 0..DOF {
+                *arr.add(1 + dd) = self.mom[dd].as_ptr() as u64;
+            }
             *arr.add(DOF + 1) = self.nrg.as_ref().map_or(0u64, |f| f.as_ptr() as u64);
         }
     }
@@ -162,7 +183,9 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     pub fn all_ptrs(&self) -> Vec<*const Sc> {
         let mut ptrs = Vec::with_capacity(DOF + 2);
         ptrs.push(self.den.as_ptr());
-        for dd in 0..DOF { ptrs.push(self.mom[dd].as_ptr()); }
+        for dd in 0..DOF {
+            ptrs.push(self.mom[dd].as_ptr());
+        }
         ptrs.push(self.nrg.as_ref().map_or(std::ptr::null(), |f| f.as_ptr()));
         ptrs
     }
@@ -180,7 +203,11 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         Ok(Self {
             den: Field::zeros(domain)?,
             mom: array_field_zeros(domain)?,
-            nrg: if has_energy { Some(Field::zeros(domain)?) } else { None },
+            nrg: if has_energy {
+                Some(Field::zeros(domain)?)
+            } else {
+                None
+            },
             chi: None,
         })
     }
@@ -193,19 +220,25 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 
     /// whether this field set includes energy.
-    pub fn has_energy(&self) -> bool { self.nrg_field().is_some() }
+    pub fn has_energy(&self) -> bool {
+        self.nrg_field().is_some()
+    }
 
     /// **the passive-scalar-slot accessor**: the ONE accessor for the `chi`
     /// field, mirroring `nrg_field`. `None` when the run carries no dye.
     #[inline]
-    pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.chi.as_ref() }
+    pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> {
+        self.chi.as_ref()
+    }
 
     /// **the energy-slot accessor**: the ONE
     /// accessor for the `nrg` field. ALL readers route through this, so swapping the representation
     /// (`Option<Field>` -> a type-level `E::Slot`) is a one-place change behind this method; without
     /// the accessor it would be a 180-site sweep. returns the backing field, or `None` when energy is absent (isothermal).
     #[inline]
-    pub fn nrg_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.nrg.as_ref() }
+    pub fn nrg_field(&self) -> Option<&Field<Sc, NDIM, M>> {
+        self.nrg.as_ref()
+    }
 
     /// gather AoS from SoA at a coordinate.
     /// returns nrg=0.0 when energy field is absent (isothermal).
@@ -239,7 +272,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
             den: *self.den.view().at(coord),
             mom: Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
             nrg: E::Slot::<Sc>::from_scalar(
-                self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord))
+                self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
             ),
         }
     }
@@ -261,7 +294,12 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 /// primitive state in SoA layout. pre is None for isothermal regimes
 /// (pressure is derived from the eos and never stored). `NDIM` = grid dim, `DOF` = velocity-component
 /// dim (decoupled — the `PrimFields<D>` alias fills `DOF = NDIM = D`).
-pub struct PrimFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct PrimFieldsGeneric<
+    const NDIM: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub rho: Field<Sc, NDIM, M>,
     pub vel: [Field<Sc, NDIM, M>; DOF],
     pub pre: Option<Field<Sc, NDIM, M>>,
@@ -273,13 +311,17 @@ pub struct PrimFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace
 /// the natural case: velocity dimension == grid dimension.
 pub type PrimFields<const D: usize, M = DefaultMemory, Sc = f64> = PrimFieldsGeneric<D, D, M, Sc>;
 
-impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> PrimFieldsGeneric<NDIM, DOF, M, Sc> {
+impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    PrimFieldsGeneric<NDIM, DOF, M, Sc>
+{
     /// fill a u64 pointer array with [rho, vel[0], ..., vel[DOF-1], pre].
     /// for isothermal regimes (pre = None), writes a null pointer.
     pub fn fill_ptr_array(&self, arr: *mut u64) {
         unsafe {
             *arr.add(0) = self.rho.as_ptr() as u64;
-            for dd in 0..DOF { *arr.add(1 + dd) = self.vel[dd].as_ptr() as u64; }
+            for dd in 0..DOF {
+                *arr.add(1 + dd) = self.vel[dd].as_ptr() as u64;
+            }
             *arr.add(DOF + 1) = self.pre.as_ref().map_or(0u64, |f| f.as_ptr() as u64);
         }
     }
@@ -301,11 +343,18 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 
     /// allocate fields. when has_pressure is false, pre is None (isothermal).
-    pub fn zeros_with_pressure(domain: &Domain<NDIM>, has_pressure: bool) -> symbi_xpu::Result<Self> {
+    pub fn zeros_with_pressure(
+        domain: &Domain<NDIM>,
+        has_pressure: bool,
+    ) -> symbi_xpu::Result<Self> {
         Ok(Self {
             rho: Field::zeros(domain)?,
             vel: array_field_zeros(domain)?,
-            pre: if has_pressure { Some(Field::zeros(domain)?) } else { None },
+            pre: if has_pressure {
+                Some(Field::zeros(domain)?)
+            } else {
+                None
+            },
             chi: None,
         })
     }
@@ -320,11 +369,15 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// accessor for the `pre` field. ALL readers route through this so the representation is swappable
     /// in one place. `None` when pressure is not stored (isothermal — derived from the EOS).
     #[inline]
-    pub fn pre_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.pre.as_ref() }
+    pub fn pre_field(&self) -> Option<&Field<Sc, NDIM, M>> {
+        self.pre.as_ref()
+    }
 
     /// **the passive-scalar-slot accessor**, mirroring `pre_field`.
     #[inline]
-    pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> { self.chi.as_ref() }
+    pub fn chi_field(&self) -> Option<&Field<Sc, NDIM, M>> {
+        self.chi.as_ref()
+    }
 
     /// the cell-centered primitive components the flux stage reconstructs from and the
     /// decomposition exchanges each step, in a fixed order: rho, vel[0..DOF], pre
@@ -368,7 +421,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
             rho: *self.rho.view().at(coord),
             vel: Tensor::new(std::array::from_fn(|dd| *self.vel[dd].view().at(coord))),
             pre: E::Slot::<Sc>::from_scalar(
-                self.pre.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord))
+                self.pre.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
             ),
         }
     }
@@ -394,7 +447,12 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 /// all field storage for one partition. `NDIM` = grid dim, `DOF` = vector (momentum)
 /// component dim; the `PartitionFields<D>` alias fills `DOF = NDIM = D`.
 /// the MHD staggered fields stay keyed on `NDIM` (RMHD is full-3D, so its B is NDIM-component).
-pub struct PartitionFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct PartitionFieldsGeneric<
+    const NDIM: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub cons: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     pub prim: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
     pub flux: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
@@ -410,7 +468,8 @@ pub struct PartitionFieldsGeneric<const NDIM: usize, const DOF: usize, M: Memory
 }
 
 /// the natural case: vector dimension == grid dimension.
-pub type PartitionFields<const D: usize, M = DefaultMemory, Sc = f64> = PartitionFieldsGeneric<D, D, M, Sc>;
+pub type PartitionFields<const D: usize, M = DefaultMemory, Sc = f64> =
+    PartitionFieldsGeneric<D, D, M, Sc>;
 
 // =============================================================================
 // MHD staggered FieldGroups
@@ -434,69 +493,132 @@ pub type PartitionFields<const D: usize, M = DefaultMemory, Sc = f64> = Partitio
 // N = vector-component count (DOF for MHD), decoupled from the grid dimension D:
 // the cell-centered B is a DOF-vector on a D-axis grid, so the array length (N=DOF)
 // differs from the Field spatial dim (D) whenever D != DOF (1.5D / 2.5D MHD).
-pub struct BcellFields<const D: usize, const N: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct BcellFields<
+    const D: usize,
+    const N: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub b: [Field<Sc, D, M>; N],
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize> for BcellFields<D, N, M, Sc> {
+impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    std::ops::Index<usize> for BcellFields<D, N, M, Sc>
+{
     type Output = Field<Sc, D, M>;
-    #[inline] fn index(&self, dd: usize) -> &Self::Output { &self.b[dd] }
+    #[inline]
+    fn index(&self, dd: usize) -> &Self::Output {
+        &self.b[dd]
+    }
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize> for BcellFields<D, N, M, Sc> {
-    #[inline] fn index_mut(&mut self, dd: usize) -> &mut Self::Output { &mut self.b[dd] }
+impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    std::ops::IndexMut<usize> for BcellFields<D, N, M, Sc>
+{
+    #[inline]
+    fn index_mut(&mut self, dd: usize) -> &mut Self::Output {
+        &mut self.b[dd]
+    }
 }
 
 /// face-centered magnetic field group: bface[d] lives on the d-perpendicular
 /// face. CT-evolved "truth"; bcell is interpolated from this.
-pub struct BfaceFields<const D: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct BfaceFields<
+    const D: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub b: [Field<Sc, D, M>; D],
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize> for BfaceFields<D, M, Sc> {
+impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize>
+    for BfaceFields<D, M, Sc>
+{
     type Output = Field<Sc, D, M>;
-    #[inline] fn index(&self, dd: usize) -> &Self::Output { &self.b[dd] }
+    #[inline]
+    fn index(&self, dd: usize) -> &Self::Output {
+        &self.b[dd]
+    }
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize> for BfaceFields<D, M, Sc> {
-    #[inline] fn index_mut(&mut self, dd: usize) -> &mut Self::Output { &mut self.b[dd] }
+impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize>
+    for BfaceFields<D, M, Sc>
+{
+    #[inline]
+    fn index_mut(&mut self, dd: usize) -> &mut Self::Output {
+        &mut self.b[dd]
+    }
 }
 
 /// edge-centered electric field group: efield[d] lives on edges parallel
 /// to axis d. transient; recomputed each stage from fluxes.
-pub struct EfieldFields<const D: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct EfieldFields<
+    const D: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub e: [Field<Sc, D, M>; D],
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize> for EfieldFields<D, M, Sc> {
+impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize>
+    for EfieldFields<D, M, Sc>
+{
     type Output = Field<Sc, D, M>;
-    #[inline] fn index(&self, dd: usize) -> &Self::Output { &self.e[dd] }
+    #[inline]
+    fn index(&self, dd: usize) -> &Self::Output {
+        &self.e[dd]
+    }
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize> for EfieldFields<D, M, Sc> {
-    #[inline] fn index_mut(&mut self, dd: usize) -> &mut Self::Output { &mut self.e[dd] }
+impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize>
+    for EfieldFields<D, M, Sc>
+{
+    #[inline]
+    fn index_mut(&mut self, dd: usize) -> &mut Self::Output {
+        &mut self.e[dd]
+    }
 }
 
 /// per-axis B-flux group: f[c] is the c-th magnetic-component flux on an
 /// axis-d face. the owning MhdStaggeredFields uses `[BfluxFields<D, M>; D]`,
 /// indexed by axis-of-flux.
-pub struct BfluxFields<const D: usize, const N: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct BfluxFields<
+    const D: usize,
+    const N: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub f: [Field<Sc, D, M>; N],
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize> for BfluxFields<D, N, M, Sc> {
+impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    std::ops::Index<usize> for BfluxFields<D, N, M, Sc>
+{
     type Output = Field<Sc, D, M>;
-    #[inline] fn index(&self, dd: usize) -> &Self::Output { &self.f[dd] }
+    #[inline]
+    fn index(&self, dd: usize) -> &Self::Output {
+        &self.f[dd]
+    }
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize> for BfluxFields<D, N, M, Sc> {
-    #[inline] fn index_mut(&mut self, dd: usize) -> &mut Self::Output { &mut self.f[dd] }
+impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    std::ops::IndexMut<usize> for BfluxFields<D, N, M, Sc>
+{
+    #[inline]
+    fn index_mut(&mut self, dd: usize) -> &mut Self::Output {
+        &mut self.f[dd]
+    }
 }
 
 /// MHD field storage: cell-centered B + staggered CT fields.
 /// the cell-centered B is used for reconstruction and flux computation.
 /// the face-centered B is the CT "truth" (2D/3D only).
-pub struct MhdStaggeredFields<const D: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct MhdStaggeredFields<
+    const D: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     /// cell-centered B: bcell[c] on the allocated domain (same as cons/prim), one
     /// per DOF vector component. the D in-plane components [0..D) are interpolated
     /// from bface after CT; the (DOF-D) out-of-plane components [D..DOF) have no
@@ -576,17 +698,25 @@ pub struct MhdStaggeredFields<const D: usize, const DOF: usize, M: MemorySpace =
     pub bface_initialized: std::sync::atomic::AtomicBool,
 }
 
-impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> MhdStaggeredFields<D, DOF, M, Sc> {
+impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+    MhdStaggeredFields<D, DOF, M, Sc>
+{
     /// allocate MHD fields from the cell-centered domains.
     /// allocated_domain: full domain including ghost cells (for bcell, bflux).
     /// interior: interior domain (for bface, efield).
     pub fn zeros(allocated: &Domain<D>, interior: &Domain<D>) -> symbi_xpu::Result<Self> {
         // cell-centered B: same domain as cons/prim, DOF vector components.
-        let bcell = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
+        let bcell = BcellFields {
+            b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+        };
         // RK2 snapshot of bcell (same domain).
-        let bcell_n = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
+        let bcell_n = BcellFields {
+            b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+        };
         // FOFC stage-input cell-B snapshot (same domain).
-        let bcell_stage = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
+        let bcell_stage = BcellFields {
+            b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+        };
 
         // face-centered B: one extra in normal direction; for MHD the CT
         // stencil needs a TRANSVERSE halo. ±2 (not ±1): the faithful UCT edge EMF
@@ -607,8 +737,12 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             bface_vec.push(Field::zeros(&face_dom)?);
             bface_n_vec.push(Field::zeros(&face_dom)?); // FOFC bface^n snapshot (same face domain)
         }
-        let bface = BfaceFields { b: bface_vec.try_into().unwrap_or_else(|_| unreachable!()) };
-        let bface_n = BfaceFields { b: bface_n_vec.try_into().unwrap_or_else(|_| unreachable!()) };
+        let bface = BfaceFields {
+            b: bface_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
+        let bface_n = BfaceFields {
+            b: bface_n_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
 
         // edge-centered E: extra in both transverse directions.
         // for D=2, all efield slots use the corner domain (extend in both
@@ -619,24 +753,36 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         for dd in 0..D {
             let mut edge_dom = interior.clone();
             for ax in 0..D {
-                if ax != dd || D == 2 { edge_dom = edge_dom.extend(ax, 0, 1); }
+                if ax != dd || D == 2 {
+                    edge_dom = edge_dom.extend(ax, 0, 1);
+                }
             }
             efield_vec.push(Field::zeros(&edge_dom)?);
             efield_n_vec.push(Field::zeros(&edge_dom)?);
             efield_ho_vec.push(Field::zeros(&edge_dom)?); // FOFC HO-EMF save (same edge domain)
         }
-        let efield = EfieldFields { e: efield_vec.try_into().unwrap_or_else(|_| unreachable!()) };
-        let efield_n = EfieldFields { e: efield_n_vec.try_into().unwrap_or_else(|_| unreachable!()) };
-        let efield_ho = EfieldFields { e: efield_ho_vec.try_into().unwrap_or_else(|_| unreachable!()) };
+        let efield = EfieldFields {
+            e: efield_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
+        let efield_n = EfieldFields {
+            e: efield_n_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
+        let efield_ho = EfieldFields {
+            e: efield_ho_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
 
         // B-field flux arrays: per-axis group, same domain as hydro flux[d];
         // inner length DOF (one flux field per B-component).
         let mut bflux_outer: Vec<BfluxFields<D, DOF, M, Sc>> = Vec::with_capacity(D);
         let mut bflux_ho_outer: Vec<BfluxFields<D, DOF, M, Sc>> = Vec::with_capacity(D);
         for _dd in 0..D {
-            bflux_outer.push(BfluxFields { f: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? });
+            bflux_outer.push(BfluxFields {
+                f: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+            });
             // FOFC HO induction-flux save: same per-axis DOF-component layout as bflux.
-            bflux_ho_outer.push(BfluxFields { f: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? });
+            bflux_ho_outer.push(BfluxFields {
+                f: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+            });
         }
         let bflux = bflux_outer.try_into().unwrap_or_else(|_| unreachable!());
         let bflux_ho = bflux_ho_outer.try_into().unwrap_or_else(|_| unreachable!());
@@ -669,9 +815,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
 
     /// gather cell-centered B at a coordinate.
     pub fn gather_bcell(&self, coord: [isize; D]) -> symbi_algebra::Tensor<Sc, D> {
-        symbi_algebra::Tensor::new(std::array::from_fn(|dd| {
-            *self.bcell[dd].view().at(coord)
-        }))
+        symbi_algebra::Tensor::new(std::array::from_fn(|dd| *self.bcell[dd].view().at(coord)))
     }
 
     /// scatter cell-centered B at a coordinate.
@@ -698,7 +842,12 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim
 /// the `RkWorkspace<D>` alias fills `DOF = NDIM = D`.
-pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
+pub struct RkWorkspaceGeneric<
+    const NDIM: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
     pub u_n: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     pub prim_n: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
     /// the per-STAGE conserved snapshot. distinct from `u_n` (the per-STEP `u^n`
@@ -804,7 +953,9 @@ pub enum CylPlane {
 /// which defaults to r-z (`[0, 2]`) — the established axisymmetric convention (back-compat).
 pub fn default_grid_axes<const D: usize>(coords: symbi_geometry::Geometry) -> [usize; D] {
     match coords {
-        symbi_geometry::Geometry::Cylindrical if D == 2 => std::array::from_fn(|d| if d == 0 { 0 } else { 2 }),
+        symbi_geometry::Geometry::Cylindrical if D == 2 => {
+            std::array::from_fn(|d| if d == 0 { 0 } else { 2 })
+        }
         _ => std::array::from_fn(|d| d),
     }
 }
@@ -854,7 +1005,8 @@ pub struct NeedsCells;
 /// fully seeded (cells, and for MHD the staggered faces) — ready to `build()`.
 pub struct Ready;
 
-impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, NeedsGrid>
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
+    SimBuilder<R, D, DOF, M, E, S, Mem, Sc, NeedsGrid>
 where
     R: Regime<Sc, D>,
     M: Metric<Sc, D>,
@@ -937,8 +1089,17 @@ where
             std::array::from_fn(|d| (hi[d] - self.x_lo[d]) / n[d] as f64)
         });
         let sim = SimStateGeneric::new(
-            self.regime, self.eos, self.metric, n, self.x_lo, dx, self.ng, self.boundaries,
-            self.cfl, self.timestepping, self.device_id,
+            self.regime,
+            self.eos,
+            self.metric,
+            n,
+            self.x_lo,
+            dx,
+            self.ng,
+            self.boundaries,
+            self.cfl,
+            self.timestepping,
+            self.device_id,
         )?;
         Ok(match self.cyl_plane {
             Some(p) => sim.with_cyl_plane(p),
@@ -968,18 +1129,36 @@ where
         };
         for d in 0..D {
             if n[d] == 0 {
-                return Err(ConfigError::NonPositive { field: "cells", value: 0.0 });
+                return Err(ConfigError::NonPositive {
+                    field: "cells",
+                    value: 0.0,
+                });
             }
             if !(dx[d] > 0.0) {
-                return Err(ConfigError::NonPositive { field: "spacing", value: dx[d] });
+                return Err(ConfigError::NonPositive {
+                    field: "spacing",
+                    value: dx[d],
+                });
             }
         }
         if !(self.cfl > 0.0) {
-            return Err(ConfigError::NonPositive { field: "cfl", value: self.cfl });
+            return Err(ConfigError::NonPositive {
+                field: "cfl",
+                value: self.cfl,
+            });
         }
         let sim = SimStateGeneric::new(
-            self.regime, self.eos, self.metric, n, self.x_lo, dx, self.ng, self.boundaries,
-            self.cfl, self.timestepping, self.device_id,
+            self.regime,
+            self.eos,
+            self.metric,
+            n,
+            self.x_lo,
+            dx,
+            self.ng,
+            self.boundaries,
+            self.cfl,
+            self.timestepping,
+            self.device_id,
         )
         .map_err(ConfigError::Alloc)?;
         let sim = match self.cyl_plane {
@@ -1091,9 +1270,21 @@ where
     pub fn set_initial(
         self,
         prim_at: impl Fn([f64; D]) -> <R as Regime<Sc, DOF>>::Prim,
-    ) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, <<R as Regime<Sc, DOF>>::Cons as AfterSetInitial>::State>
-    {
-        self.sim.as_ref().expect("NeedsCells builder carries an allocated sim").seed_cells(prim_at);
+    ) -> SimBuilder<
+        R,
+        D,
+        DOF,
+        M,
+        E,
+        S,
+        Mem,
+        Sc,
+        <<R as Regime<Sc, DOF>>::Cons as AfterSetInitial>::State,
+    > {
+        self.sim
+            .as_ref()
+            .expect("NeedsCells builder carries an allocated sim")
+            .seed_cells(prim_at);
         self.retag()
     }
 
@@ -1102,10 +1293,22 @@ where
     pub fn set_initial_indexed(
         self,
         prim_at: impl Fn([isize; D], [f64; D]) -> <R as Regime<Sc, DOF>>::Prim,
-    ) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, <<R as Regime<Sc, DOF>>::Cons as AfterSetInitial>::State>
-    {
+    ) -> SimBuilder<
+        R,
+        D,
+        DOF,
+        M,
+        E,
+        S,
+        Mem,
+        Sc,
+        <<R as Regime<Sc, DOF>>::Cons as AfterSetInitial>::State,
+    > {
         {
-            let sim = self.sim.as_ref().expect("NeedsCells builder carries an allocated sim");
+            let sim = self
+                .sim
+                .as_ref()
+                .expect("NeedsCells builder carries an allocated sim");
             for c in sim.geom.interior.iter() {
                 let x = sim.geom.cell_coord(c);
                 sim.seed_cell(c, &prim_at(c, x));
@@ -1136,7 +1339,10 @@ where
         f: impl Fn(usize, [f64; D]) -> Sc,
     ) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, Ready> {
         {
-            let sim = self.sim.as_ref().expect("NeedsCells builder carries an allocated sim");
+            let sim = self
+                .sim
+                .as_ref()
+                .expect("NeedsCells builder carries an allocated sim");
             for d in 0..D {
                 sim.seed_face_with(d, |x| f(d, x));
             }
@@ -1146,12 +1352,12 @@ where
 
     /// seed each face-normal B `bface[d]` to a UNIFORM value `b0[d]` (the common case — a uniform
     /// field threading the domain), then reach `Ready`.
-    pub fn seed_faces_uniform(
-        self,
-        b0: [Sc; D],
-    ) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, Ready> {
+    pub fn seed_faces_uniform(self, b0: [Sc; D]) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, Ready> {
         {
-            let sim = self.sim.as_ref().expect("NeedsCells builder carries an allocated sim");
+            let sim = self
+                .sim
+                .as_ref()
+                .expect("NeedsCells builder carries an allocated sim");
             for d in 0..D {
                 sim.seed_face(d, b0[d]);
             }
@@ -1167,7 +1373,10 @@ where
         faces: &[Vec<Sc>],
     ) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc, Ready> {
         {
-            let sim = self.sim.as_ref().expect("NeedsCells builder carries an allocated sim");
+            let sim = self
+                .sim
+                .as_ref()
+                .expect("NeedsCells builder carries an allocated sim");
             for d in 0..D {
                 sim.seed_face_indexed(d, &faces[d]);
             }
@@ -1190,7 +1399,8 @@ where
 {
     /// take the fully-seeded simulation.
     pub fn build(self) -> SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc> {
-        self.sim.expect("Ready builder carries an allocated, seeded sim")
+        self.sim
+            .expect("Ready builder carries an allocated, seeded sim")
     }
 }
 
@@ -1233,7 +1443,10 @@ impl<const D: usize> PartitionGeometry<D> {
     /// transverse axes — the canonical staggering of a face-normal B-field.
     #[inline]
     pub fn face_coord(&self, coord: [isize; D], dir: usize) -> [f64; D] {
-        self.stagger_coord(coord, std::array::from_fn(|ax| if ax == dir { Loc::Face } else { Loc::Center }))
+        self.stagger_coord(
+            coord,
+            std::array::from_fn(|ax| if ax == dir { Loc::Face } else { Loc::Center }),
+        )
     }
 
     /// physical position of a CELL CENTER — the index->coordinate bridge an IC closure wants.
@@ -1259,7 +1472,10 @@ impl<const D: usize> PartitionGeometry<D> {
     }
 
     /// create a BlockGeometry that uses these maps (if set).
-    pub fn block_geometry<M: symbi_geometry::Metric<f64, D> + Copy>(&self, metric: M) -> symbi_geometry::BlockGeometry<M, f64, D> {
+    pub fn block_geometry<M: symbi_geometry::Metric<f64, D> + Copy>(
+        &self,
+        metric: M,
+    ) -> symbi_geometry::BlockGeometry<M, f64, D> {
         if let Some(maps) = self.maps {
             symbi_geometry::BlockGeometry::with_maps(metric, maps)
         } else {
@@ -1362,13 +1578,19 @@ impl std::fmt::Display for ConfigError {
         match self {
             ConfigError::MissingCells => write!(f, "config: .cells([..]) is required"),
             ConfigError::MissingSpacing => {
-                write!(f, "config: set the spacing via .spacing([..]) or .bounds(lo, hi)")
+                write!(
+                    f,
+                    "config: set the spacing via .spacing([..]) or .bounds(lo, hi)"
+                )
             }
             ConfigError::NonPositive { field, value } => {
                 write!(f, "config: {field} must be positive (got {value:e})")
             }
             ConfigError::SolverRegimeMismatch { solver, regime } => {
-                write!(f, "config: solver {solver:?} is invalid for regime {regime:?}")
+                write!(
+                    f,
+                    "config: solver {solver:?} is invalid for regime {regime:?}"
+                )
             }
             ConfigError::Alloc(e) => write!(f, "config: field allocation failed: {e}"),
         }
@@ -1475,12 +1697,16 @@ pub struct ImmersedBodies<const NDIM: usize> {
 impl<const NDIM: usize> ImmersedBodies<NDIM> {
     /// the published global Alfven stiffness, or `None` if unset (compute the local max).
     pub fn c_a2_override(&self) -> Option<f64> {
-        let v = f64::from_bits(self.c_a2_override.load(std::sync::atomic::Ordering::Relaxed));
+        let v = f64::from_bits(
+            self.c_a2_override
+                .load(std::sync::atomic::Ordering::Relaxed),
+        );
         (!v.is_nan()).then_some(v)
     }
     /// publish the global Alfven stiffness (the decomposed loop's cross-tile max).
     pub fn set_c_a2_override(&self, v: f64) {
-        self.c_a2_override.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        self.c_a2_override
+            .store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn reset_accretion_receipts(&self, cell_count: usize) {
@@ -1558,6 +1784,10 @@ pub struct FieldStore<
     /// discrete mass-transport tracers. position is derived output state;
     /// material ownership is authoritative.
     pub tracers: Option<crate::tracers::TracerSet<NDIM>>,
+    /// continuous-position ito tracers in the store's execution memory.
+    pub continuous_tracers: Option<crate::tracers::ContinuousTracerSet<NDIM, Mem>>,
+    /// accepted-flux moment rates consumed by continuous ito tracers.
+    pub ito_coefficients: Option<crate::tracers::ItoCoefficientFields<NDIM, Mem>>,
 
     // ---- time state ----
     pub time: f64,
@@ -1614,13 +1844,15 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// with at least one body — `immersed.is_some()` alone disagrees with this
     /// in the zero-body-collection state the historical parse bug produced).
     pub fn has_bodies(&self) -> bool {
-        self.immersed.as_ref().map_or(false, |im| !im.bodies.is_empty())
+        self.immersed
+            .as_ref()
+            .map_or(false, |im| !im.bodies.is_empty())
     }
 
     /// whether this run carries mass-transport tracers.
     #[inline]
     pub fn has_tracers(&self) -> bool {
-        self.tracers.is_some()
+        self.tracers.is_some() || self.continuous_tracers.is_some()
     }
 
     /// whether this run carries the passive scalar (dye): the cons `chi` slot is
@@ -1632,7 +1864,11 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
 
     #[inline]
     pub fn stage_input(&self) -> &ConsFieldsGeneric<NDIM, DOF, Mem, Sc> {
-        if self.workspace.stage_input_is_un.load(std::sync::atomic::Ordering::Relaxed) {
+        if self
+            .workspace
+            .stage_input_is_un
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             &self.workspace.u_n
         } else {
             &self.workspace.u_stage
@@ -1647,8 +1883,16 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// recomputed edge EMF reads the true stage-input field — a direct
     /// `bcell_stage` read at stage 0 hands it a stale buffer.
     pub fn bcell_stage_input(&self) -> &crate::state::BcellFields<NDIM, DOF, Mem, Sc> {
-        let mhd = self.fields.mhd.as_ref().expect("bcell_stage_input requires MHD fields");
-        if self.workspace.stage_input_is_un.load(std::sync::atomic::Ordering::Relaxed) {
+        let mhd = self
+            .fields
+            .mhd
+            .as_ref()
+            .expect("bcell_stage_input requires MHD fields");
+        if self
+            .workspace
+            .stage_input_is_un
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             &mhd.bcell_n
         } else {
             &mhd.bcell_stage
@@ -1692,7 +1936,9 @@ where
 {
     type Target = FieldStore<NDIM, DOF, Mem, Sc>;
     #[inline]
-    fn deref(&self) -> &Self::Target { &self.store }
+    fn deref(&self) -> &Self::Target {
+        &self.store
+    }
 }
 
 impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, Sc> std::ops::DerefMut
@@ -1706,19 +1952,14 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.store }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.store
+    }
 }
 
 /// the natural case: vector dimension == grid dimension (all existing sites use this).
-pub type SimState<
-    R,
-    const D: usize,
-    M,
-    E,
-    S = DefaultSpace,
-    Mem = DefaultMemory,
-    Sc = f64,
-> = SimStateGeneric<R, D, D, M, E, S, Mem, Sc>;
+pub type SimState<R, const D: usize, M, E, S = DefaultSpace, Mem = DefaultMemory, Sc = f64> =
+    SimStateGeneric<R, D, D, M, E, S, Mem, Sc>;
 
 // =============================================================================
 // construction
@@ -1731,7 +1972,13 @@ pub type SimState<
 // `N` component fields on a `D`-dimensional grid. `N` is the VECTOR (component) dimension,
 // decoupled from the grid `D` — `N == D` for the natural case, `N > D` for an
 // axisymmetric vector (the v_phi swirl on an (r,z) grid). `N` is inferred from the target array.
-pub fn array_field_zeros<const D: usize, const N: usize, M: MemorySpace, C: symbi_grid::centering::Centering, Sc: Scalar + OrderedNumeric>(
+pub fn array_field_zeros<
+    const D: usize,
+    const N: usize,
+    M: MemorySpace,
+    C: symbi_grid::centering::Centering,
+    Sc: Scalar + OrderedNumeric,
+>(
     domain: &Domain<D>,
 ) -> symbi_xpu::Result<[Field<Sc, D, M, C>; N]> {
     let mut fields: Vec<Field<Sc, D, M, C>> = Vec::with_capacity(N);
@@ -1742,7 +1989,12 @@ pub fn array_field_zeros<const D: usize, const N: usize, M: MemorySpace, C: symb
 }
 
 /// helper: create [ConsFields<D>; D] with optional energy field.
-fn array_cons_zeros_with_energy<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>(
+fn array_cons_zeros_with_energy<
+    const D: usize,
+    const DOF: usize,
+    M: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+>(
     domain: &Domain<D>,
     has_energy: bool,
 ) -> symbi_xpu::Result<[ConsFieldsGeneric<D, DOF, M, Sc>; D]> {
@@ -1767,7 +2019,8 @@ pub fn axis_name(ax: usize) -> &'static str {
 // on a 1.5D/2.5D grid, then routes through to_conserved + the EnergyModel-generic
 // scatter_from + (for MHD) bcell <- the magnetic 3-vector. ONE entry point for every
 // regime/EOS — no hand-built `Cons { den, mom, nrg }`, no iso-vs-adiabatic improvisation.
-impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc> SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
+    SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D> + Regime<Sc, DOF>,
     M: Metric<Sc, D> + Metric<Sc, DOF>,
@@ -1788,8 +2041,8 @@ where
     /// centroid, the SAME point the metric-aware c2p inverts at, so the storage↔recovery round-trip
     /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
     pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
-        use symbi_hydro::state::SeedableCons;
         use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
+        use symbi_hydro::state::SeedableCons;
         let cons = if matches!(self.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
             <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
         } else {
@@ -1858,9 +2111,7 @@ where
                         // the exact equatorial pi/2; zero would degenerate
                         // gamma_{phi phi} = r^2 sin^2(theta). every other ungridded slot is a
                         // symmetry direction the metric never reads.
-                        None if slot == 1
-                            && chart == symbi_geometry::Geometry::Spherical =>
-                        {
+                        None if slot == 1 && chart == symbi_geometry::Geometry::Spherical => {
                             Sc::from_f64(std::f64::consts::FRAC_PI_2)
                         }
                         None => Sc::ZERO,
@@ -1868,8 +2119,14 @@ where
                 }))
             };
             let sm = SpatialMetric::new(
-                Gamma::new(<M as Metric<Sc, DOF>>::spatial_metric(&self.physics.metric, x_dof)),
-                GammaInv::new(<M as Metric<Sc, DOF>>::spatial_metric_inv(&self.physics.metric, x_dof)),
+                Gamma::new(<M as Metric<Sc, DOF>>::spatial_metric(
+                    &self.physics.metric,
+                    x_dof,
+                )),
+                GammaInv::new(<M as Metric<Sc, DOF>>::spatial_metric_inv(
+                    &self.physics.metric,
+                    x_dof,
+                )),
             );
             let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
             let shift = <M as Metric<Sc, DOF>>::shift(&self.physics.metric, x_dof);
@@ -1879,7 +2136,13 @@ where
             // sqrt(-g) the densitized relativistic state carries.
             let sqrt_gamma = <M as Metric<Sc, DOF>>::volume_factor(&self.physics.metric, x_dof);
             <R as Regime<Sc, DOF>>::to_conserved_covariant(
-                &self.physics.regime, &self.physics.eos, prim, &sm, alpha, shift, sqrt_gamma,
+                &self.physics.regime,
+                &self.physics.eos,
+                prim,
+                &sm,
+                alpha,
+                shift,
+                sqrt_gamma,
             )
         };
         self.fields.cons.scatter_from(coord, cons.hydro_part());
@@ -1922,14 +2185,20 @@ where
     /// code is dropped; assert physicality yourself, or use `regime.to_primitive` for the full
     /// `C2pResult`).
     pub fn prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim {
-        <R as Regime<Sc, DOF>>::to_primitive(&self.physics.regime, &self.physics.eos, &self.cons_at(coord)).value
+        <R as Regime<Sc, DOF>>::to_primitive(
+            &self.physics.regime,
+            &self.physics.eos,
+            &self.cons_at(coord),
+        )
+        .value
     }
 }
 
 // the inherent impl, generic over the vector dimension `DOF`: `new` builds
 // a `DOF`-component state, so the `SimState<R,D,M,..>` alias gives the natural `DOF = D` and
 // `SimStateGeneric<R, 2, 3, ..>::new` gives axisymmetric (3-vector momentum on a 2D grid).
-impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc> SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
+    SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D>,
     M: Metric<Sc, D>,
@@ -1954,8 +2223,18 @@ where
         device_id: i64,
     ) -> symbi_xpu::Result<Self> {
         Self::new_at(
-            regime, eos, metric, [0; D], n_cells, x_lo, dx, ng, boundaries, cfl,
-            timestepping, device_id,
+            regime,
+            eos,
+            metric,
+            [0; D],
+            n_cells,
+            x_lo,
+            dx,
+            ng,
+            boundaries,
+            cfl,
+            timestepping,
+            device_id,
         )
     }
 
@@ -1982,20 +2261,28 @@ where
         device_id: i64,
     ) -> symbi_xpu::Result<Self> {
         let ng_i = ng as isize;
-        let allocated = Domain::new(std::array::from_fn(|ax| {
-            Space {
-                name: axis_name(ax),
-                lo: interior_lo[ax] - ng_i,
-                hi: interior_lo[ax] + n_cells[ax] as isize + ng_i,
-            }
+        let allocated = Domain::new(std::array::from_fn(|ax| Space {
+            name: axis_name(ax),
+            lo: interior_lo[ax] - ng_i,
+            hi: interior_lo[ax] + n_cells[ax] as isize + ng_i,
         }));
         let interior = allocated.contract(ng_i);
 
         let geom = PartitionGeometry {
-            dx, x_lo, allocated: allocated.clone(), interior, ng, coords: metric.geometry(),
+            dx,
+            x_lo,
+            allocated: allocated.clone(),
+            interior,
+            ng,
+            coords: metric.geometry(),
             spacetime: metric.spacetime(),
-            spacetime_scalars: metric.spacetime_scalars().into_iter().map(|(n, v)| (n.to_string(), v.to_f64())).collect(),
-            axes: default_grid_axes::<D>(metric.geometry()), maps: None,
+            spacetime_scalars: metric
+                .spacetime_scalars()
+                .into_iter()
+                .map(|(n, v)| (n.to_string(), v.to_f64()))
+                .collect(),
+            axes: default_grid_axes::<D>(metric.geometry()),
+            maps: None,
         };
         let has_energy = regime.has_energy();
 
@@ -2038,14 +2325,28 @@ where
 
         Ok(Self {
             store: FieldStore {
-                fields, workspace, geom, boundaries,
-                time: 0.0, dt: 0.0, max_dt: 0.0, iteration: 0, cfl, timestepping,
+                fields,
+                workspace,
+                geom,
+                boundaries,
+                time: 0.0,
+                dt: 0.0,
+                max_dt: 0.0,
+                iteration: 0,
+                cfl,
+                timestepping,
                 motion: MotionState::static_mesh(),
                 motion_law: None,
                 immersed: None,
                 tracers: None,
+                continuous_tracers: None,
+                ito_coefficients: None,
             },
-            physics: Physics { regime, metric, eos },
+            physics: Physics {
+                regime,
+                metric,
+                eos,
+            },
             ctx: Context { exec },
         })
     }
@@ -2097,11 +2398,18 @@ where
     /// `for c in bface[d].domain() { set(c, f(face_coord)); } + bface_initialized.store(...)`.
     /// the CT ground truth: seed the faces with `seed_face*`, the cells with `seed_cells`.
     pub fn seed_face_with(&self, d: usize, f: impl Fn([f64; D]) -> Sc) {
-        let mhd = self.fields.mhd.as_ref().expect("seed_face requires MHD fields");
+        let mhd = self
+            .fields
+            .mhd
+            .as_ref()
+            .expect("seed_face requires MHD fields");
         for c in mhd.bface[d].domain().clone().iter() {
-            mhd.bface[d].view_mut().set(c, f(self.geom.face_coord(c, d)));
+            mhd.bface[d]
+                .view_mut()
+                .set(c, f(self.geom.face_coord(c, d)));
         }
-        mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+        mhd.bface_initialized
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// seed a staggered face-normal B component to a UNIFORM value (the common case — e.g., a
@@ -2115,22 +2423,32 @@ where
     /// python `staggered_bfields` generators yield. the index analog of [`seed_face_with`] for
     /// array-sourced ICs (the CT divergence-free ground truth).
     pub fn seed_face_indexed(&self, d: usize, data: &[Sc]) {
-        let mhd = self.fields.mhd.as_ref().expect("seed_face requires MHD fields");
+        let mhd = self
+            .fields
+            .mhd
+            .as_ref()
+            .expect("seed_face requires MHD fields");
         let dom = self.geom.interior.extend(d, 0, 1);
         assert_eq!(
-            data.len(), dom.volume(),
-            "seed_face_indexed[{d}]: {} values for a {}-face domain", data.len(), dom.volume()
+            data.len(),
+            dom.volume(),
+            "seed_face_indexed[{d}]: {} values for a {}-face domain",
+            data.len(),
+            dom.volume()
         );
         let mut coord: [isize; D] = std::array::from_fn(|ax| dom.spaces[ax].lo);
         for &val in data {
             mhd.bface[d].view_mut().set(coord, val);
             for ax in 0..D {
                 coord[ax] += 1;
-                if coord[ax] < dom.spaces[ax].hi { break; }
+                if coord[ax] < dom.spaces[ax].hi {
+                    break;
+                }
                 coord[ax] = dom.spaces[ax].lo;
             }
         }
-        mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+        mhd.bface_initialized
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// start a fluent [`SimBuilder`]: named setters + sane defaults (ng=2, cfl=0.4, RK2, outflow,
@@ -2164,8 +2482,7 @@ where
         // only on cartesian charts today; off-cartesian every fragment pass
         // would sweep the full interior. fail loud instead of degrading.
         assert!(
-            bodies.fragment_count() == 0
-                || self.geom.coords == symbi_geometry::Geometry::Cartesian,
+            bodies.fragment_count() == 0 || self.geom.coords == symbi_geometry::Geometry::Cartesian,
             "fragments require a cartesian chart (per-fragment support boxes); \
              chart is {:?}",
             self.geom.coords,
@@ -2173,7 +2490,9 @@ where
         let n = bodies.len();
         let has_energy = self.physics.regime.has_energy();
         if self.fields.source.is_none() {
-            if let Ok(src_field) = ConsFieldsGeneric::zeros_with_energy(&self.geom.allocated, has_energy) {
+            if let Ok(src_field) =
+                ConsFieldsGeneric::zeros_with_energy(&self.geom.allocated, has_energy)
+            {
                 self.fields.source = Some(src_field);
             }
         }
@@ -2225,7 +2544,6 @@ where
             im.shapes = shapes;
         }
     }
-
 }
 
 // =============================================================================
@@ -2383,7 +2701,11 @@ where
                     let vk = *self.fields.prim.vel[k].view().at(c) as f64;
                     v2 += vk * vk;
                 }
-                if v2 < 1.0 { 1.0 / (1.0 - v2).sqrt() } else { 1.0 }
+                if v2 < 1.0 {
+                    1.0 / (1.0 - v2).sqrt()
+                } else {
+                    1.0
+                }
             }
             FieldKind::MagField => match self.fields.mhd.as_ref() {
                 Some(mhd) => {
@@ -2459,7 +2781,11 @@ where
             let size = sp.size() as isize;
             let span = (size >> zoom.min(4)).max(4.min(size));
             let mid = sp.lo + size / 2;
-            symbi_algebra::Space { name: sp.name, lo: mid - span / 2, hi: mid - span / 2 + span }
+            symbi_algebra::Space {
+                name: sp.name,
+                lo: mid - span / 2,
+                hi: mid - span / 2 + span,
+            }
         };
         let sp0 = windowed(&interior.spaces[ah]);
         let sp0 = &sp0;
@@ -2596,8 +2922,12 @@ where
         // the sector's (x, y) at both radii for the angular endpoints and every
         // quarter-turn extremum inside the span. meridional (x, y) = rho (sin, cos)
         // with theta from the +y pole; disk (x, y) = rho (cos, sin).
-        let (mut x_min, mut x_max, mut y_min, mut y_max) =
-            (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        let (mut x_min, mut x_max, mut y_min, mut y_max) = (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        );
         {
             let mut angles = vec![a_lo, a_hi];
             let mut k = (a_lo / std::f64::consts::FRAC_PI_2).ceil() as i64;
@@ -2692,12 +3022,11 @@ where
                 let (mut sum, mut cnt) = (0.0f64, 0u32);
                 for sj in 0..ss {
                     // rows top -> bottom = display y decreasing (pole / +y up).
-                    let y_d = y_max
-                        - (jj as f64 + (sj as f64 + 0.5) / ss as f64) / out_h as f64 * span_y;
+                    let y_d =
+                        y_max - (jj as f64 + (sj as f64 + 0.5) / ss as f64) / out_h as f64 * span_y;
                     for si in 0..ss {
                         let x_d = x_min
-                            + (ii as f64 + (si as f64 + 0.5) / ss as f64) / out_w as f64
-                                * span_x;
+                            + (ii as f64 + (si as f64 + 0.5) / ss as f64) / out_w as f64 * span_x;
                         let v = sample_at(x_d, y_d);
                         if !v.is_nan() {
                             sum += v;
@@ -2722,7 +3051,10 @@ where
             data,
             vmin,
             vmax,
-            name: format!("{name} · {}", if meridional { "meridional" } else { "disk" }),
+            name: format!(
+                "{name} · {}",
+                if meridional { "meridional" } else { "disk" }
+            ),
             preserve_aspect: true,
         })
     }
@@ -2760,9 +3092,9 @@ pub struct FieldDecimation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_hydro::newtonian::Newtonian;
-    use symbi_hydro::eos::IdealGas;
     use symbi_geometry::Cartesian;
+    use symbi_hydro::eos::IdealGas;
+    use symbi_hydro::newtonian::Newtonian;
     use symbi_xpu::{CpuSpace, HostMemory};
 
     // THE atlas invariant: the decomposition transport set is DERIVED from the store's
@@ -2772,8 +3104,16 @@ mod tests {
     #[test]
     fn exchange_set_tracks_the_optional_passive_scalar_slot() {
         let domain = Domain::<2>::new([
-            symbi_algebra::Space { name: "x", lo: 0, hi: 16 },
-            symbi_algebra::Space { name: "y", lo: 0, hi: 16 },
+            symbi_algebra::Space {
+                name: "x",
+                lo: 0,
+                hi: 16,
+            },
+            symbi_algebra::Space {
+                name: "y",
+                lo: 0,
+                hi: 16,
+            },
         ]);
 
         // adiabatic hydro: den + 2 momenta + nrg = 4 conserved, rho + 2 vel + pre = 4 prim.
@@ -2801,23 +3141,47 @@ mod tests {
     #[test]
     fn exchange_set_omits_the_absent_isothermal_energy_slot() {
         let domain = Domain::<2>::new([
-            symbi_algebra::Space { name: "x", lo: 0, hi: 16 },
-            symbi_algebra::Space { name: "y", lo: 0, hi: 16 },
+            symbi_algebra::Space {
+                name: "x",
+                lo: 0,
+                hi: 16,
+            },
+            symbi_algebra::Space {
+                name: "y",
+                lo: 0,
+                hi: 16,
+            },
         ]);
         let cons = ConsFields::<2, HostMemory>::zeros_with_energy(&domain, false).unwrap();
         let prim = PrimFields::<2, HostMemory>::zeros_with_pressure(&domain, false).unwrap();
-        assert_eq!(cons.exchange_fields().len(), 3, "den, mom[0], mom[1]; no nrg");
-        assert_eq!(prim.exchange_fields().len(), 3, "rho, vel[0], vel[1]; no pre");
+        assert_eq!(
+            cons.exchange_fields().len(),
+            3,
+            "den, mom[0], mom[1]; no nrg"
+        );
+        assert_eq!(
+            prim.exchange_fields().len(),
+            3,
+            "rho, vel[0], vel[1]; no pre"
+        );
     }
 
     #[test]
     fn sim_construction_1d() {
         let sim = SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 1.4 }, Cartesian,
-            [100], [0.0], [0.01],
-            2, Boundaries::uniform(BoundaryType::Outflow),
-            0.4, Timestepping::Rk2, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 1.4 },
+            Cartesian,
+            [100],
+            [0.0],
+            [0.01],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
 
         assert_eq!(sim.geom.interior.volume(), 100);
         assert_eq!(sim.geom.allocated.volume(), 104); // 100 + 2*2
@@ -2828,11 +3192,19 @@ mod tests {
     #[test]
     fn sim_construction_2d() {
         let sim = SimState::<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
-            [256, 256], [0.0, 0.0], [1.0/256.0, 1.0/256.0],
-            2, Boundaries::uniform(BoundaryType::Periodic),
-            0.4, Timestepping::Rk2, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+            [256, 256],
+            [0.0, 0.0],
+            [1.0 / 256.0, 1.0 / 256.0],
+            2,
+            Boundaries::uniform(BoundaryType::Periodic),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
 
         assert_eq!(sim.geom.interior.volume(), 256 * 256);
         assert_eq!(sim.geom.allocated.volume(), 260 * 260);
@@ -2841,11 +3213,19 @@ mod tests {
     #[test]
     fn sim_construction_3d() {
         let sim = SimState::<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
-            [32, 32, 32], [0.0, 0.0, 0.0], [1.0/32.0, 1.0/32.0, 1.0/32.0],
-            2, Boundaries::uniform(BoundaryType::Periodic),
-            0.4, Timestepping::Rk2, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+            [32, 32, 32],
+            [0.0, 0.0, 0.0],
+            [1.0 / 32.0, 1.0 / 32.0, 1.0 / 32.0],
+            2,
+            Boundaries::uniform(BoundaryType::Periodic),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
 
         assert_eq!(sim.geom.interior.volume(), 32 * 32 * 32);
         assert_eq!(sim.geom.allocated.volume(), 36 * 36 * 36);
@@ -2854,11 +3234,19 @@ mod tests {
     #[test]
     fn gather_scatter_roundtrip() {
         let sim = SimState::<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 1.4 }, Cartesian,
-            [10, 10], [0.0, 0.0], [0.1, 0.1],
-            2, Boundaries::uniform(BoundaryType::Outflow),
-            0.4, Timestepping::Euler, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 1.4 },
+            Cartesian,
+            [10, 10],
+            [0.0, 0.0],
+            [0.1, 0.1],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Euler,
+            0,
+        )
+        .unwrap();
 
         let val = Cons {
             den: 1.5,
@@ -2878,11 +3266,19 @@ mod tests {
     #[test]
     fn prim_gather_scatter() {
         let sim = SimState::<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 1.4 }, Cartesian,
-            [10, 10], [0.0, 0.0], [0.1, 0.1],
-            2, Boundaries::uniform(BoundaryType::Outflow),
-            0.4, Timestepping::Euler, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 1.4 },
+            Cartesian,
+            [10, 10],
+            [0.0, 0.0],
+            [0.1, 0.1],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Euler,
+            0,
+        )
+        .unwrap();
 
         let val = Prim {
             rho: 2.0,
@@ -2902,11 +3298,19 @@ mod tests {
     #[test]
     fn centroid_2d() {
         let sim = SimState::<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 1.4 }, Cartesian,
-            [100, 100], [0.0, 0.0], [0.01, 0.01],
-            2, Boundaries::uniform(BoundaryType::Outflow),
-            0.4, Timestepping::Euler, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 1.4 },
+            Cartesian,
+            [100, 100],
+            [0.0, 0.0],
+            [0.01, 0.01],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Euler,
+            0,
+        )
+        .unwrap();
 
         let c = sim.geom.centroid([0, 0]);
         assert!((c[0] - 0.005).abs() < 1e-14);
@@ -2921,10 +3325,19 @@ mod tests {
     fn stagger_coord_face_vs_center() {
         // distinct per-axis spacing so an axis mix-up is caught.
         let sim = SimState::<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
-            Newtonian, IdealGas { gamma: 1.4 }, Cartesian,
-            [8, 8, 8], [0.0, 0.0, 0.0], [0.1, 0.2, 0.4],
-            2, Boundaries::uniform(BoundaryType::Outflow), 0.4, Timestepping::Euler, 0,
-        ).unwrap();
+            Newtonian,
+            IdealGas { gamma: 1.4 },
+            Cartesian,
+            [8, 8, 8],
+            [0.0, 0.0, 0.0],
+            [0.1, 0.2, 0.4],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Euler,
+            0,
+        )
+        .unwrap();
         let g = &sim.geom;
         let approx = |a: f64, b: f64| (a - b).abs() < 1e-14;
 
