@@ -525,7 +525,7 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             .expect("ito coefficients were materialized");
         let (scale_start, scale_end, offset_start, offset_end) =
             symbi_sim::tracers::continuous_tracer_mesh_step(&sim.store, sim.dt);
-        symbi_sim::tracers::advance_continuous_tracers_affine_mesh_host(
+        symbi_sim::tracers::advance_continuous_tracers(
             &mut tracers,
             coefficients,
             &sim.geom,
