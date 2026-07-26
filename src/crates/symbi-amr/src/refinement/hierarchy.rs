@@ -43,25 +43,23 @@ use symbi_grid::Field;
 use super::emf_register::EmfRegister;
 use super::flux_register::FluxRegister;
 use super::transfer::{
-    ProlongOrder, bcell_from_bface_region, bface_cf_halo_slabs, cf_ghost_slabs, copy_field,
-    prolong_face_field, prolong_field, prolong_prims_swept,
-    restrict_bface, restrict_cell_field, ProlongSweepScratch,
-    restrict_cons,
+    ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
+    cf_ghost_slabs, copy_field, prolong_face_field, prolong_field, prolong_prims_swept,
+    restrict_bface, restrict_cell_field, restrict_cons,
 };
-use symbi_sim::stage::{fold_stage, HookPoint, StageArgs};
+use std::ops::ControlFlow;
+use symbi_sim::decomp::{HaloTransport, drain_devices, exchange_grid, flatten, unflatten};
 use symbi_sim::driver::{
-    advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic,
-    evolve_bodies, horizon_request, needs_step_snapshot, prof, select_timestep,
-    stage_time_fractions,
+    advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic, evolve_bodies,
+    horizon_request, needs_step_snapshot, prof, select_timestep, stage_time_fractions,
 };
 use symbi_sim::hydro_ops::scan_c2p_errors;
-use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
+use symbi_sim::stage::{HookPoint, StageArgs, fold_stage};
 use symbi_sim::state::{
     Boundaries, BoundaryType, FieldDecimation, FieldKind, FieldStore, PrimFieldsGeneric,
     SimStateGeneric, Timestepping, array_field_zeros, axis_name,
 };
 use symbi_sim::substrate_seam::KernelSet;
-use std::ops::ControlFlow;
 
 /// the refinement ratio. fixed at 2 (the transfer kernels are baked at 2 in
 /// the aot registry; the builders accept any ratio when that changes).
@@ -188,7 +186,9 @@ where
     ) -> Option<FieldDecimation> {
         // single grid: no coverage to descend, reuse the plain per-state decimation.
         if self.levels.len() <= 1 {
-            return self.levels[0].state.field_slice_oriented(max_dim, index, orient, zoom);
+            return self.levels[0]
+                .state
+                .field_slice_oriented(max_dim, index, orient, zoom);
         }
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
@@ -215,7 +215,11 @@ where
             let size = sp.size() as isize;
             let span = (size >> zoom.min(4)).max(4.min(size));
             let mid = sp.lo + size / 2;
-            symbi_algebra::Space { name: sp.name, lo: mid - span / 2, hi: mid - span / 2 + span }
+            symbi_algebra::Space {
+                name: sp.name,
+                lo: mid - span / 2,
+                hi: mid - span / 2 + span,
+            }
         };
         let sp0 = windowed(&interior.spaces[ah]);
         let sp1 = windowed(interior.spaces.get(av)?); // None on a 1D grid
@@ -289,9 +293,7 @@ where
                 _ => break,
             };
             let finer = &self.levels[lvl + 1].state.geom.interior;
-            idx = std::array::from_fn(|ax| {
-                finer.spaces[ax].lo + (idx[ax] - cov.spaces[ax].lo) * 2
-            });
+            idx = std::array::from_fn(|ax| finer.spaces[ax].lo + (idx[ax] - cov.spaces[ax].lo) * 2);
             lvl += 1;
         }
         self.levels[lvl].state.field_value(idx, kind)
@@ -644,7 +646,9 @@ where
             .as_ref()
             .is_some_and(|im| im.bodies.needs_feedback());
         if needs_fb {
-            prof("body_feedback", || finest.kernels.body_feedback(&finest.state, dt));
+            prof("body_feedback", || {
+                finest.kernels.body_feedback(&finest.state, dt)
+            });
         }
     }
 
@@ -849,7 +853,11 @@ where
         // the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL
         // estimators differ. applied AFTER the raw-cfl crash heuristics elsewhere.
         let clamp = self.levels[0].state.max_dt;
-        if clamp > 0.0 { dt_cfl.min(clamp) } else { dt_cfl }
+        if clamp > 0.0 {
+            dt_cfl.min(clamp)
+        } else {
+            dt_cfl
+        }
     }
 
     /// one root step: cfl-limited dt (clamped to t_final), the recursive level
@@ -887,19 +895,27 @@ where
             let r = &self.levels[0].state;
             (r.iteration, r.time, r.dt) // dt_prev = 0.0 before the first step
         };
-        let crashed = dt_cfl.is_nan()
-            || dt_cfl <= 0.0
-            || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
+        let crashed =
+            dt_cfl.is_nan() || dt_cfl <= 0.0 || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
         if crashed {
             // record the crash + STOP without advancing: the evolve loop reports it and the driver
             // snapshots `.crashed.h5` from this (last computed) state and stops, without panicking or
             // marching past t_final on garbage.
-            self.crash = Some(CrashReport { iter, time, dt_cfl, dt_prev });
+            self.crash = Some(CrashReport {
+                iter,
+                time,
+                dt_cfl,
+                dt_prev,
+            });
             return;
         }
         let root = &mut self.levels[0];
         let user_clamp = root.state.max_dt;
-        let dt_cfl = if user_clamp > 0.0 { dt_cfl.min(user_clamp) } else { dt_cfl };
+        let dt_cfl = if user_clamp > 0.0 {
+            dt_cfl.min(user_clamp)
+        } else {
+            dt_cfl
+        };
         let dt = dt_cfl.min(t_final - root.state.time);
         check_dt_or_panic(dt, root.state.iteration, root.state.time);
         root.state.dt = dt;
@@ -935,7 +951,9 @@ where
                 // the backward reduction sweeps the full domain (~11 outputs per
                 // body: force/torque/mass/energy) — a real per-step cost that must
                 // appear in the profile, so it does not hide in the wall-vs-instrumented gap.
-                prof("body_feedback", || finest.kernels.body_feedback(&finest.state, dt));
+                prof("body_feedback", || {
+                    finest.kernels.body_feedback(&finest.state, dt)
+                });
             }
             finest.state.dt = dt;
             prof("body_motion", || evolve_bodies(&mut finest.state));
@@ -956,20 +974,6 @@ where
                 }
             }
             self.assert_sinks_inside_finest();
-        }
-
-        // lagrangian tracers, ONCE per root step against the post-step
-        // primitive velocity — the same slot and order as the uni-grid driver.
-        // single-level only: a refined run's root velocity is coarse under the
-        // fine patches, so tracer advection there silently degrades — refuse.
-        if self.levels[0].state.has_tracers() {
-            assert!(
-                self.levels.len() == 1,
-                "tracers on a refined hierarchy are not wired (root-level advection \
-                 would silently use coarse velocities under the fine patches)",
-            );
-            let root = &mut self.levels[0];
-            prof("tracers", || symbi_sim::tracers::advance_tracers(&mut root.state));
         }
     }
 
@@ -1007,6 +1011,13 @@ where
         if needs_step_snapshot(stages) {
             let l = &self.levels[level];
             prof("snapshot", || l.kernels.snapshot(&l.state));
+        }
+        if self.levels[level].state.has_tracers() {
+            assert!(
+                self.levels.len() == 1,
+                "mass-transport tracers on a refined hierarchy are not wired",
+            );
+            symbi_sim::tracers::snapshot_transport_state(&mut self.levels[level].state);
         }
     }
 
@@ -1053,7 +1064,12 @@ where
                             }
                             let geo = l.state.geom.block_geometry(l.state.physics.metric);
                             for dd in 0..NDIM {
-                                reg.accumulate_coarse(&l.state.fields.flux, &geo, dd, weights[ii] * dt);
+                                reg.accumulate_coarse(
+                                    &l.state.fields.flux,
+                                    &geo,
+                                    dd,
+                                    weights[ii] * dt,
+                                );
                             }
                         }
                     }
@@ -1096,9 +1112,27 @@ where
         fold_stage(
             &l.state,
             &l.kernels,
-            StageArgs { dt, a0, ac, stage: ii, n_stages: n, allow_elision: true },
+            StageArgs {
+                dt,
+                a0,
+                ac,
+                stage: ii,
+                n_stages: n,
+                allow_elision: true,
+            },
             &mut hook,
         );
+        if self.levels[level].state.has_tracers() {
+            prof("tracers", || {
+                symbi_sim::tracers::advance_stage_mass_transport(
+                    &mut self.levels[level].state,
+                    a0,
+                    ac,
+                    ii,
+                )
+                .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
+            });
+        }
     }
 
     /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the
@@ -1130,21 +1164,12 @@ where
         // restriction below because the excised region is never a covered (finer-patch) region.
         self.level_tail_excise(level);
         if !has_finer {
-            if let Some((index, diagnostic_radius)) =
-                horizon_request(&self.levels[level].state)
-            {
+            if let Some((index, diagnostic_radius)) = horizon_request(&self.levels[level].state) {
                 let l = &self.levels[level];
                 let (mdot, edot) = prof("horizon_accretion", || {
-                    l.kernels
-                        .horizon_accretion(&l.state, diagnostic_radius)
+                    l.kernels.horizon_accretion(&l.state, diagnostic_radius)
                 });
-                book_horizon_receipt(
-                    &mut self.levels[level].state,
-                    index,
-                    mdot,
-                    edot,
-                    dt,
-                );
+                book_horizon_receipt(&mut self.levels[level].state, index, mdot, edot, dt);
             }
         }
         // rigid surfaces act on every level: a wall may cross a coarse-fine boundary, and its
@@ -1257,8 +1282,7 @@ where
                     restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
                 }
                 restrict_bface(&fmhd.bface, &cmhd.bface, cov);
-                let inv_dx: [f64; NDIM] =
-                    std::array::from_fn(|ax| 1.0 / coarse.state.geom.dx[ax]);
+                let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / coarse.state.geom.dx[ax]);
                 self.emf_registers[level]
                     .as_ref()
                     .unwrap()
@@ -1270,8 +1294,7 @@ where
         prof("refine_reflux_apply", || {
             let l = &self.levels[level];
             if uniform_cartesian(&l.state) {
-                self.flux_registers[level]
-                    .apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+                self.flux_registers[level].apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
             } else {
                 let geo = l.state.geom.block_geometry(l.state.physics.metric);
                 self.flux_registers[level].apply(&l.state.fields.cons, &geo);
@@ -1581,7 +1604,9 @@ where
     Mem: MemorySpace,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
-    let refined: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() > 1).collect();
+    let refined: Vec<usize> = (0..tiles.len())
+        .filter(|&i| tiles[i].levels.len() > 1)
+        .collect();
     if refined.is_empty() {
         return None;
     }
@@ -1609,7 +1634,11 @@ where
         "refinement x decomposition: refined tiles do not form a rectangle (SMR is single-box)"
     );
     let sub_devices: Vec<i32> = order.iter().map(|&i| devices[i]).collect();
-    Some(FineSubgrid { counts: sub_counts, order, devices: sub_devices })
+    Some(FineSubgrid {
+        counts: sub_counts,
+        order,
+        devices: sub_devices,
+    })
 }
 
 /// exchange one LEVEL's halos across an ordered set of tiles (a sub-grid of shape `counts`), then
@@ -1635,13 +1664,17 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
 {
     drain_devices::<Mem>(devices);
     {
-        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
-            order.iter().map(|&i| &*tiles[i].levels[level].state).collect();
+        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order
+            .iter()
+            .map(|&i| &*tiles[i].levels[level].state)
+            .collect();
         exchange_grid(&states, counts, devices, transport);
     }
     for (k, &i) in order.iter().enumerate() {
         symbi_xpu::with_device(devices[k], || {
-            tiles[i].levels[level].kernels.ghost_fill(&tiles[i].levels[level].state)
+            tiles[i].levels[level]
+                .kernels
+                .ghost_fill(&tiles[i].levels[level].state)
         });
     }
 }
@@ -1756,7 +1789,9 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                 for (k, &i) in fg.order.iter().enumerate() {
                     symbi_xpu::with_device(fg.devices[k], || {
                         tiles[i].prolong_cf(1, alpha);
-                        tiles[i].levels[1].kernels.ghost_fill(&tiles[i].levels[1].state);
+                        tiles[i].levels[1]
+                            .kernels
+                            .ghost_fill(&tiles[i].levels[1].state);
                     });
                 }
                 // fill the fine cut halo before the fine flux reads it.
@@ -1822,7 +1857,9 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                     tiles[i].apply_global_body_deltas(&global, gdt, t_now)
                 });
                 assert!(
-                    !(any_refined && tiles[i].levels.len() == 1 && tiles[i].accretion_overlaps_root()),
+                    !(any_refined
+                        && tiles[i].levels.len() == 1
+                        && tiles[i].accretion_overlaps_root()),
                     "refinement x decomposition: a sink sphere overlaps UNREFINED tile {i} — the \
                      refined patch must cover the sink on every tile it touches"
                 );

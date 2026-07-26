@@ -20,6 +20,7 @@
 // =============================================================================
 
 pub mod stage;
+pub mod mass_transport;
 pub mod tracers;
 pub mod state;
 pub mod substrate_seam;
