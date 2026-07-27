@@ -686,21 +686,15 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     (end_trace(), writes)
 }
 
-/// the SOURCE-admissibility CFL limit for GR-RMHD — the wu 2017 (arXiv:1708.07267) lambda_S
-/// mechanism. the geometric (gravity + covariant centrifugal + EM-tension) source
-/// S = (S_mom, S_tau) advances the conserved state U -> U + dt S; for the light-cone LxF flux to
-/// stay physical-constraint-preserving the timestep must ALSO keep U + dt S inside the admissible
-/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0, D > 0 (E = tau + D). q is concave along the
-/// source ray and lipschitz-bounded below: q(U + dt S) >= q(U) - dt (|S_tau| + ||S_mom||_gamma),
-/// so dt (|S_tau| + ||S_mom||_gamma)/q(U) <= 1 is SUFFICIENT for admissibility. this gives the
-/// source characteristic rate lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U), added into the CFL
-/// scratch alongside the flux light-cone rate (wu eq 22: dt (lambda_flux + lambda_S) < 1).
-/// lambda_S -> inf as q -> 0, collapsing dt at the cone boundary — the behavior that holds the
-/// magnetized-torus cusp admissible with no floor. conservative: the lipschitz slope underestimates
-/// the exact concave-quadratic root, so dt is at most that root. reads the flux rate already in the
-/// scratch and writes their sum in place; the momentum source takes p = 0 and the energy source
-/// the full p, matching the fused godunov source that actually advances U. metric at the cell
-/// centroid, ungridded polar slot at pi/2.
+/// the source-admissibility CFL limit for GR-RMHD. the geometric source advances the conserved
+/// state along a known ray `U(t) = U + t S`. the trial interval is the local state/source timescale;
+/// its endpoint is tested against the full wu-tang `(D,q,psi)` admissible set. convexity proves the
+/// interval safe when that endpoint is admissible; otherwise fixed-count bisection finds the largest
+/// known-safe subinterval. its inverse is added to the flux rate. this directional construction
+/// cannot collapse merely because `q` is small while the source points inward or tangent to the
+/// admissible set, unlike the nondirectional `|S|/q` lipschitz bound. the momentum source takes
+/// `p = 0` and the energy source the full pressure, matching the fused godunov update. metric at the
+/// cell centroid, ungridded polar slot at pi/2.
 pub fn rmhd_source_cfl_gr_gv(
     spacetime: Spacetime,
     coords: Coords,
@@ -741,7 +735,7 @@ pub fn rmhd_source_cfl_gr_gv(
     // source at p = 0, the energy source at the full p.
     // also harvest the lapse + shift: the evolved energy slot is the covariant ehat, so the eulerian
     // admissibility energy E = tau + D is recovered as E = (ehat + D + beta^i S_i) / alpha.
-    let (gm, gm_inv, alpha, beta, s_mom, s_tau): (
+    let (gm, gm_inv, alpha, beta, s_mom, _s_tau): (
         Matrix<Gv, 3>,
         Matrix<Gv, 3>,
         Gv,
@@ -900,13 +894,8 @@ pub fn rmhd_source_cfl_gr_gv(
         }
         acc
     };
-    let q0 = e_cons - (d_cons * d_cons + gamma_norm(&mom)).sqrt();
     let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
     let sm_norm = gamma_norm(&sm_arr).sqrt();
-    // lambda_S = (|S_tau| + ||S_mom||_gamma) / q. the denominator floor uses the same local
-    // one-power energy scale as the admissibility projection, including |B|^2. this keeps the rate
-    // homogeneous under a change of density units and prevents gas energy alone from setting the
-    // numerical margin in a magnetically dominated atmosphere.
     let state_scale = symbi_hydro::admissible::rmhd_state_scale(
         d_cons,
         &Tensor::new(mom),
@@ -915,8 +904,39 @@ pub fn rmhd_source_cfl_gr_gv(
         &gm_inv,
         &gm,
     );
-    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
-    let lam_s = (s_tau.abs() + sm_norm) / q_safe;
+    // follow the ACTUAL geometric-source ray through the full RMHD admissible set. the evolved
+    // killing-energy slot has no geometric source on a stationary metric, while the momentum update
+    // is dS/dt = alpha Smom. therefore dE/dt = beta.Smom after differentiating
+    // E = (ehat + D + beta.S)/alpha. the local state/source ratio supplies a dimensionally natural
+    // trial time. if its endpoint is admissible, convexity proves the whole segment safe; otherwise
+    // fixed-count bisection returns the largest known-safe fraction. unlike the lipschitz |source|/q
+    // bound, an inward or tangent source does not collapse dt merely because a previous projection
+    // left q near its strict floor.
+    let (source_mom, e_dot) =
+        symbi_hydro::admissible::stationary_killing_source_ray(alpha, &beta, Tensor::new(sm_arr));
+    let source_scale = e_dot.abs().max(alpha * sm_norm);
+    let eps_d = Gv::from_f64(1e-12) * state_scale;
+    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
+    let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
+        * state_scale
+        * state_scale.sqrt();
+    let safe_time = symbi_hydro::admissible::rmhd_source_admissible_time(
+        d_cons,
+        Tensor::new(mom),
+        e_cons,
+        source_mom,
+        e_dot,
+        &b,
+        &gm_inv,
+        &gm,
+        state_scale,
+        source_scale,
+        eps_d,
+        eps_q,
+        eps_psi,
+        16,
+    );
+    let lam_s = Gv::ONE / safe_time;
     // no cell inside the event horizon may throttle the global timestep. the outer horizon
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
     // interior reaches the exterior, so an interior cell's admissibility rate carries no information
@@ -1307,13 +1327,11 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 /// whose magnetic energy leaves no positive gas pressure to recover. see
 /// `symbi_hydro::admissible::rmhd_admissible_residuals`.
 ///
-/// CAVEAT, stated because it bounds the guarantee: the magnetic field cannot be blended (constrained
-/// transport owns it), so the projection searches only the affine slice B = B_candidate. the anchor
-/// is admissible with its OWN field and need not be admissible in that slice; when it is not, no
-/// blend along the segment succeeds and theta = 0 is returned. hydrodynamics has no such failure
-/// mode — there the anchor is unconditionally admissible and theta = 0 always lands. the freeze tier
-/// therefore REMAINS as the residual backstop for GRMHD, and the guard census measures how much of
-/// it survives.
+/// constrained transport owns the candidate magnetic field, so the anchor is rebuilt from the
+/// stage-input primitive gas state with that SAME field. converting this hybrid primitive state to
+/// conserved form produces a guaranteed-admissible anchor in the affine slice B = B_candidate
+/// without modifying a shared face field. the projection can therefore always recover the gas state
+/// while preserving div(B) = 0.
 pub fn fofc_project_gr_mhd_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1411,28 +1429,49 @@ pub fn fofc_project_gr_mhd_gv(
     let read = |k: &str| Gv::field(k, k);
     let x_den = read("x_den");
     let x_nrg = read("x_nrg");
-    let us_den = read("us_den");
-    let us_nrg = read("us_nrg");
     // RMHD momentum is ALWAYS a 3-vector (the physics is 3D; grid symmetry handles 1D/2D).
     let x_mom: Vec<Gv> = (0..3).map(|k| read(&format!("x_mom_{k}"))).collect();
-    let us_mom: Vec<Gv> = (0..3).map(|k| read(&format!("us_mom_{k}"))).collect();
     let s_c = Tensor::<Gv, 3>::new(std::array::from_fn(|k| x_mom[k]));
-    let s_a = Tensor::<Gv, 3>::new(std::array::from_fn(|k| us_mom[k]));
     let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |a, k| a + beta[k] * s[k]);
     let inv_alpha = Gv::ONE / alpha;
     let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
-    let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
     // the magnetic field is held FIXED at the candidate's cell-centered value: it is
     // constrained-transport-evolved on the staggered faces and shared between neighbors, so blending
     // it per cell would desynchronize the shared face value and break div(B) = 0.
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
         Gv::field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
     }));
+    // the stage-input primitives still occupy the primitive fields here: FOFC restored u_stage and
+    // ran c2p before constructing the first-order flux, while the candidate c2p has not run yet.
+    // combine that known-physical gas state with candidate B and convert it through the SAME GRMHD
+    // physics used by initialization. this makes the anchor admissible in the candidate magnetic
+    // slice by construction.
+    let anchor_gas = Prim {
+        rho: Gv::field("prim_rho", FieldRef::PrimRho),
+        vel: Tensor::new(std::array::from_fn(|kk| {
+            Gv::field(&format!("prim_vel_{kk}"), FieldRef::PrimVel(kk as u8))
+        })),
+        pre: Gv::field("prim_pre", FieldRef::PrimPre),
+    };
+    let anchor_regime = RmhdGr {
+        metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
+        alpha,
+    };
+    let anchor = anchor_regime.admissible_anchor(
+        &IdealGas {
+            gamma: Gv::scalar("gamma"),
+        },
+        anchor_gas,
+        b,
+    );
+    let a_den = anchor.den;
+    let s_a = anchor.mom;
+    let e_a = anchor.nrg + a_den;
+    let a_nrg = alpha * anchor.nrg + (alpha - Gv::ONE) * a_den - beta_dot(&s_a);
     // strict-interior floors use one shared local conserved-state scale. D, |S|, E, and |B|^2
     // carry one power of energy; psi carries three halves. including magnetic energy prevents a
     // magnetically dominated atmosphere from defining its numerical margin using gas energy alone.
-    let state_scale =
-        symbi_hydro::admissible::rmhd_state_scale(us_den, &s_a, e_a, &b, &gm_inv, &gm);
+    let state_scale = symbi_hydro::admissible::rmhd_state_scale(a_den, &s_a, e_a, &b, &gm_inv, &gm);
     let eps_d = Gv::from_f64(1e-12) * state_scale;
     let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
     let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
@@ -1443,23 +1482,23 @@ pub fn fofc_project_gr_mhd_gv(
     // inadmissible one, so the count trades kernel size against how sharply the projection hugs the
     // boundary.
     let theta = symbi_hydro::admissible::rmhd_admissible_theta(
-        x_den, s_c, e_c, us_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
+        x_den, s_c, e_c, a_den, s_a, e_a, &b, &gm_inv, &gm, eps_d, eps_q, eps_psi, 20,
     );
     let proj = |xc: Gv, ua: Gv| ua + theta * (xc - ua);
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
     writes.push((
         "x_den".to_string(),
         "x_den".into(),
-        proj(x_den, us_den).node(),
+        proj(x_den, a_den).node(),
     ));
     for k in 0..3 {
         let key = format!("x_mom_{k}");
-        writes.push((key.clone(), key.into(), proj(x_mom[k], us_mom[k]).node()));
+        writes.push((key.clone(), key.into(), proj(x_mom[k], s_a[k]).node()));
     }
     writes.push((
         "x_nrg".to_string(),
         "x_nrg".into(),
-        proj(x_nrg, us_nrg).node(),
+        proj(x_nrg, a_nrg).node(),
     ));
     (end_trace(), writes)
 }

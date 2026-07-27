@@ -450,6 +450,7 @@ where
                         sim,
                         Self::kernel_prefix(),
                         &sfx,
+                        self.eos_param,
                         sim.stage_input(),
                         &sim.fields.cons,
                         &sim.fields.prim,

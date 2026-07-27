@@ -75,6 +75,20 @@ pub fn rmhd_state_scale<S: Scalar>(
     d.abs().max(s_norm).max(e.abs()).max(magnetic_energy)
 }
 
+/// momentum and eulerian-energy derivatives for a stationary-spacetime killing-energy update.
+///
+/// the code evolves `ehat = alpha E - D - beta.S`, whose geometric source vanishes. with
+/// `dS/dt = alpha Smom` and static metric coefficients, `dE/dt = beta.Smom`.
+pub fn stationary_killing_source_ray<S: Scalar>(
+    alpha: S,
+    beta: &Tensor<S, 3>,
+    s_mom: Tensor<S, 3>,
+) -> (Tensor<S, 3>, S) {
+    let momentum_dot = Tensor::new(std::array::from_fn(|kk| alpha * s_mom[kk]));
+    let energy_dot = (0..3).fold(S::ZERO, |acc, kk| acc + beta[kk] * s_mom[kk]);
+    (momentum_dot, energy_dot)
+}
+
 /// the largest `theta` in [0, 1] with `anchor + theta (cand - anchor)` in the admissible set G,
 /// given the anchor is admissible (`f(anchor) > 0`, `D_anchor > 0`).
 ///
@@ -292,6 +306,55 @@ pub fn rmhd_admissible_theta<S: Scalar>(
     S::select(cand_ok, S::ONE, S::select(cand_finite, lo, S::ZERO))
 }
 
+/// a source-ray timestep that remains inside the RMHD admissible set.
+///
+/// the source changes only momentum and energy: `U(t) = (D, S + t Sdot, E + t Edot, B)`.
+/// `source_scale` has units of energy density per time, so `state_scale/source_scale` is the
+/// dimensionally natural trial time. when that endpoint is admissible, convexity makes every
+/// earlier point admissible. otherwise fixed-count bisection returns the largest known-admissible
+/// fraction of the trial time. a zero source returns an infinite timestep.
+#[allow(clippy::too_many_arguments)]
+pub fn rmhd_source_admissible_time<S: Scalar>(
+    d: S,
+    s: Tensor<S, 3>,
+    e: S,
+    s_dot: Tensor<S, 3>,
+    e_dot: S,
+    b: &Tensor<S, 3>,
+    gm_inv: &Matrix<S, 3>,
+    gm: &Matrix<S, 3>,
+    state_scale: S,
+    source_scale: S,
+    eps_d: S,
+    eps_q: S,
+    eps_psi: S,
+    iters: usize,
+) -> S {
+    let active = source_scale.cmp_gt(S::ZERO);
+    let guarded_source = S::select(active, source_scale, S::ONE);
+    let trial_time = state_scale / guarded_source;
+    let ok_at = |fraction: S| -> S::Mask {
+        let time = fraction * trial_time;
+        let source_state = Tensor::new(std::array::from_fn(|kk| s[kk] + time * s_dot[kk]));
+        let source_energy = e + time * e_dot;
+        let (q, psi) = rmhd_admissible_residuals(d, &source_state, source_energy, b, gm_inv, gm);
+        d.cmp_gt(eps_d) & q.cmp_gt(eps_q) & psi.cmp_gt(eps_psi)
+    };
+
+    let mut lo = S::ZERO;
+    let mut hi = S::ONE;
+    for _ in 0..iters {
+        let mid = S::from_f64(0.5) * (lo + hi);
+        let ok = ok_at(mid);
+        lo = S::select(ok, mid, lo);
+        hi = S::select(ok, hi, mid);
+    }
+    let fraction = S::select(ok_at(S::ONE), S::ONE, lo);
+    let fraction_floor = S::from_f64(2.0_f64.powi(-(iters as i32)));
+    let finite_time = trial_time * fraction.max(fraction_floor);
+    S::select(active, finite_time, S::from_f64(f64::INFINITY))
+}
+
 /// project a candidate conserved state onto G along the segment from an admissible anchor, returning
 /// `anchor + theta (cand - anchor)` component-wise in whatever variables the caller passes (the
 /// stored densitized conserveds). `theta` from [`admissible_theta`]; an already-admissible candidate
@@ -326,6 +389,94 @@ mod tests {
             }
         }
         e * e - d * d - sn
+    }
+
+    #[test]
+    fn rmhd_source_time_follows_the_directional_admissible_ray() {
+        let gm = Matrix::identity();
+        let d = 1.0;
+        let s = Tensor::zeros();
+        let e = 2.0;
+        let b = Tensor::new([0.1, 0.0, 0.0]);
+        let s_dot = Tensor::new([0.2, 0.0, 0.0]);
+        let scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+        let eps_d = 1e-12 * scale;
+        let eps_q = ADMISSIBLE_REL_FLOOR * scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
+
+        let inward = rmhd_source_admissible_time(
+            d, s, e, s_dot, 1.0, &b, &gm, &gm, scale, 1.0, eps_d, eps_q, eps_psi, 24,
+        );
+        assert_eq!(
+            inward, scale,
+            "an admissible trial endpoint must retain the full source timescale"
+        );
+
+        let outward = rmhd_source_admissible_time(
+            d, s, e, s_dot, -1.0, &b, &gm, &gm, scale, 1.0, eps_d, eps_q, eps_psi, 24,
+        );
+        assert!(outward > 0.0 && outward < scale);
+        let source_state = s + s_dot * outward;
+        let source_energy = e - outward;
+        let (q, psi) = rmhd_admissible_residuals(d, &source_state, source_energy, &b, &gm, &gm);
+        assert!(q > eps_q && psi > eps_psi);
+    }
+
+    #[test]
+    fn rmhd_source_time_is_invariant_under_conserved_unit_scaling() {
+        let gm = Matrix::identity();
+        let solve = |scale_units: f64| {
+            let d = scale_units;
+            let s = Tensor::new([0.1 * scale_units, 0.0, 0.0]);
+            let e = 2.0 * scale_units;
+            let b = Tensor::new([0.2 * scale_units.sqrt(), 0.0, 0.0]);
+            let s_dot = Tensor::new([0.3 * scale_units, 0.0, 0.0]);
+            let e_dot = -0.8 * scale_units;
+            let state_scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+            let source_scale = e_dot.abs().max(0.3 * scale_units);
+            rmhd_source_admissible_time(
+                d,
+                s,
+                e,
+                s_dot,
+                e_dot,
+                &b,
+                &gm,
+                &gm,
+                state_scale,
+                source_scale,
+                1e-12 * state_scale,
+                ADMISSIBLE_REL_FLOOR * state_scale,
+                ADMISSIBLE_REL_FLOOR * state_scale.powf(1.5),
+                24,
+            )
+        };
+        let reference = solve(1.0);
+        for units in [1e-12, 1e-6, 1e6, 1e12] {
+            let scaled = solve(units);
+            assert!((scaled - reference).abs() <= 32.0 * f64::EPSILON * reference);
+        }
+    }
+
+    #[test]
+    fn stationary_killing_source_ray_preserves_the_evolved_energy() {
+        let alpha = 0.37_f64;
+        let beta = Tensor::new([0.2, -0.1, 0.05]);
+        let source = Tensor::new([1.2, -0.7, 0.3]);
+        let (momentum_dot, energy_dot) = stationary_killing_source_ray(alpha, &beta, source);
+        let d = 0.8;
+        let momentum = Tensor::new([0.4, -0.2, 0.1]);
+        let energy = 1.7;
+        let dt = 1e-4;
+        let ehat = alpha * energy - d - (0..3).fold(0.0, |acc, kk| acc + beta[kk] * momentum[kk]);
+        let momentum_next: Tensor<f64, 3> = Tensor::new(std::array::from_fn(|kk| {
+            momentum[kk] + dt * momentum_dot[kk]
+        }));
+        let energy_next = energy + dt * energy_dot;
+        let ehat_next = alpha * energy_next
+            - d
+            - (0..3).fold(0.0, |acc, kk| acc + beta[kk] * momentum_next[kk]);
+        assert!((ehat_next - ehat).abs() <= 8.0 * f64::EPSILON * ehat.abs());
     }
 
     // a diagonal inverse-metric (identity for flat; a Schwarzschild-like radial stretch otherwise).

@@ -234,6 +234,7 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
     dof_sfx: &str,
+    eos_param: f64,
     u_stage: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
     cons: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
     prim: &symbi_sim::state::PrimFieldsGeneric<D, DOF, Mem, Sc>,
@@ -255,6 +256,8 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
             if let Some(c) = s.strip_prefix("us_") {
                 crate::regimes::fofc::fofc_comp(u_stage, prim, c)
             } else if let Some(c) = s.strip_prefix("x_") {
+                crate::regimes::fofc::fofc_comp(cons, prim, c)
+            } else if let Some(c) = s.strip_prefix("prim_") {
                 crate::regimes::fofc::fofc_comp(cons, prim, c)
             } else if let Some(c) = s.strip_prefix("bc_") {
                 let k: usize = c
@@ -291,6 +294,7 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
                     .map(|(_, v)| *v)
                     .expect("fofc_project: needs kerr_spin"),
             ),
+            ScalarRef::Gamma => Sc::from_f64(eos_param),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, other)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, other))
