@@ -158,15 +158,41 @@ Now `simbi` works from anywhere, no `uv run` prefix needed.
 
 ### Working on SIMBI itself?
 
-If you are hacking on the code rather than just running it, that is when you want an editable install. Use the project helper, which runs `maturin develop` so the Rust extension gets rebuilt in place:
+Keep dependency installation and native compilation separate during development.
+`uv sync` normally installs the current project too; because SIMBI's build backend is
+maturin, that implicitly compiles the Rust extension. Use `--no-install-project` so uv
+installs maturin and the other development dependencies without building SIMBI:
 
 ```bash
-./dev.py install            # editable, rebuilds the rust backend
-./dev.py install --cuda     # same, with the nvidia cuda backend
-./dev.py install --hip      # same, with the amd rocm/hip backend
+uv sync --no-install-project
 ```
 
-Plain `uv pip install -e .` works too for the Python side, but it will not recompile the Rust on its own, so `./dev.py install` is the better contributor loop.
+Build the desired backend explicitly through the project helper:
+
+```bash
+python dev.py install            # editable cpu build
+python dev.py install --cuda     # editable nvidia cuda build
+python dev.py install --hip      # editable amd rocm/hip build
+```
+
+After activating `.venv`, invoke Python tools directly:
+
+```bash
+python -m pytest
+simbi run sedov --mode cpu --resolution 256
+```
+
+If the environment is not activated, suppress uv's automatic synchronization so it
+does not rebuild the project:
+
+```bash
+uv run --no-sync pytest
+uv run --no-sync simbi run sedov --mode cpu --resolution 256
+```
+
+Run `uv sync --no-install-project` again after dependency changes. Run
+`python dev.py install` again after Rust, AOT, PyO3, or backend-feature changes.
+Pure Python changes require neither step.
 
 ### GPU builds
 
