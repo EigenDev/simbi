@@ -205,7 +205,6 @@ fn body_contribution(
     min_w: Gv,
     inv_dt: Gv,
 ) -> BodyContributionGv {
-    let (tiny, eps_r) = (Gv::from_f64(1e-30), Gv::from_f64(1e-24));
     let mass = Gv::scalar(&format!("body_{b}_mass"));
     let soft = Gv::scalar(&format!("body_{b}_soft"));
     let bpos = body_vec3(b, ndim, cart_axes, "pos");
@@ -234,7 +233,7 @@ fn body_contribution(
         || crate::ibm::drain_rate(r_mag, r_mask, min_w, sink_rate, cs),
         || Gv::ZERO,
     );
-    let _ = (tiny, eps_r, inv_dt, vel_cart, den); // unused by the drain (kept for the shared signature)
+    let _ = (inv_dt, vel_cart, den); // unused by the drain (kept for the shared signature)
     BodyContributionGv {
         g,
         drain_rate,

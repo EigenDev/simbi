@@ -28,6 +28,13 @@
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 
+fn harmonic_mean<S: Scalar>(a: S, b: S) -> S {
+    let sum = a + b;
+    let nonzero = sum.cmp_gt(S::ZERO);
+    let divisor = S::select(nonzero, sum, S::ONE);
+    S::select(nonzero, S::from_f64(2.0) * a * b / divisor, S::ZERO)
+}
+
 /// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
 /// velocity + density + viscosity stencil (2D, cartesian). additive onto
 /// `cons.mom`. `nu` is per-cell: constant-nu passes a uniform stencil (the face
@@ -71,10 +78,9 @@ pub fn viscous_update_2d<S: Scalar>(
     // torque-free surface) leaves a mask cell with tiny rho and O(1) momentum, so
     // v = mom/rho is enormous; the arithmetic mean would keep mu ~ rho_healthy and
     // the stress mu*grad(v) would explode, whereas the harmonic mean gives mu ~
-    // rho_vacuum, so mu*grad(v) ~ nu*(momentum) stays bounded. the tiny denominator
-    // floor guards an empty-empty face against 0/0.
-    let tiny = S::from_f64(1e-300);
-    let harm = |a: S, b: S| -> S { two * a * b / (a + b + tiny) };
+    // rho_vacuum, so mu*grad(v) ~ nu*(momentum) stays bounded. an empty-empty
+    // face has exactly zero dynamic viscosity.
+    let harm = harmonic_mean;
 
     // vx[jj][ii] / vy[jj][ii] accessors keep the face formulas readable.
     let vx = |jj: usize, ii: usize| v[jj][ii][0];
@@ -187,8 +193,7 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
-    let tiny = S::from_f64(1e-300);
-    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let harm = harmonic_mean;
     let u = |j: usize, i: usize| v[j][i][0];
     let w = |j: usize, i: usize| v[j][i][1];
     let mu_of = |ja: usize, ia: usize, jb: usize, ib: usize| {
@@ -336,8 +341,7 @@ pub fn viscous_update_orthogonal_2d<S: Scalar>(
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
-    let tiny = S::from_f64(1e-300);
-    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let harm = harmonic_mean;
     let u1a: [[S; 3]; 3] = std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][0]));
     let u2a: [[S; 3]; 3] = std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][1]));
 
@@ -462,9 +466,8 @@ fn face_stress_2p5d<S: Scalar>(
     let rr = |o: [usize; 2]| rho[o[1]][o[0]];
     let nn = |o: [usize; 2]| nu[o[1]][o[0]];
     let (lo, ro) = (mk(la, 1), mk(ra, 1));
-    let tiny = S::from_f64(1e-300);
     let (rl, rh_) = (rr(lo), rr(ro));
-    let mu = (two * rl * rh_ / (rl + rh_ + tiny)) * (half * (nn(lo) + nn(ro)));
+    let mu = harmonic_mean(rl, rh_) * (half * (nn(lo) + nn(ro)));
     // grad[j][k] = d v_j / d x_k at the face; k in {a, b} (in-plane), grad[.][2] = 0 (2.5D freeze).
     let mut grad = [[S::ZERO; 3]; 3];
     for j in 0..3 {
@@ -552,10 +555,10 @@ fn face_stress_3d<S: Scalar>(
     let nn = |o: [usize; 3]| nu[o[2]][o[1]][o[0]];
     // harmonic (series) density mean: vanishes as either cell empties so the
     // stress stays bounded next to a momentum-retaining mass sink (see the 2D
-    // core). arithmetic nu mean (nu never blows up). tiny denom floor guards 0/0.
-    let tiny = S::from_f64(1e-300);
+    // core). arithmetic nu mean (nu never blows up). an empty-empty face has
+    // exactly zero dynamic viscosity.
     let (rl, rh_) = (rr(lo), rr(ro));
-    let mu = (S::from_f64(2.0) * rl * rh_ / (rl + rh_ + tiny)) * (half * (nn(lo) + nn(ro)));
+    let mu = harmonic_mean(rl, rh_) * (half * (nn(lo) + nn(ro)));
 
     // grad[j][k] = d v_j / d x_k at the face.
     let mut grad = [[S::ZERO; 3]; 3];
@@ -1739,9 +1742,8 @@ pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
-    let tiny = S::from_f64(1e-300);
     let one = S::from_f64(1.0);
-    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let harm = harmonic_mean;
     let comp =
         |c: usize| -> [[S; 3]; 3] { std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][c])) };
     let (u1a, u2a, u3a) = (comp(0), comp(1), comp(2));
@@ -1899,10 +1901,9 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
-    let tiny = S::from_f64(1e-300);
     let one = S::from_f64(1.0);
     let two_thirds = S::from_f64(2.0 / 3.0);
-    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let harm = harmonic_mean;
     let at = |x: &[[[S; 3]; 3]; 3], o: [usize; 3]| x[o[2]][o[1]][o[0]];
     let vat = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];
     let ctr = [1usize; 3];

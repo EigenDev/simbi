@@ -30,6 +30,7 @@ use symbi_hydro::energy::Adiabatic;
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
+use symbi_ir::algebra::Scalar;
 use symbi_ir::gv::Writes;
 use symbi_ir::{Gv, GvKernel, ParamExpr};
 
@@ -739,7 +740,9 @@ fn penalize_porous_inner(
         None => {
             let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
             let r = x_rel.dot(&x_rel).sqrt();
-            let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
+            let nonzero = r.cmp_gt(Gv::ZERO);
+            let divisor = Gv::select(nonzero, r, Gv::ONE);
+            let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
             (0..ndim).map(|a| x_rel[a] * inv_r).collect()
         }
         Some(_) => {
@@ -928,7 +931,9 @@ pub fn penalize_torque_free_iso_gv(
     // the momentum lives in.
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
     let r = x_rel.dot(&x_rel).sqrt();
-    let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
+    let nonzero = r.cmp_gt(Gv::ZERO);
+    let divisor = Gv::select(nonzero, r, Gv::ONE);
+    let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
     let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
     let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
     let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
@@ -1099,7 +1104,9 @@ fn penalize_porous_iso_inner(
         None => {
             let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
             let r = x_rel.dot(&x_rel).sqrt();
-            let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
+            let nonzero = r.cmp_gt(Gv::ZERO);
+            let divisor = Gv::select(nonzero, r, Gv::ONE);
+            let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
             (0..ndim).map(|a| x_rel[a] * inv_r).collect()
         }
         Some(_) => {
@@ -1270,7 +1277,9 @@ pub fn penalize_torque_free_gv(
 
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
     let r = x_rel.dot(&x_rel).sqrt();
-    let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
+    let nonzero = r.cmp_gt(Gv::ZERO);
+    let divisor = Gv::select(nonzero, r, Gv::ONE);
+    let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
     let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
     let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
     let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {

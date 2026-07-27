@@ -137,10 +137,9 @@ impl<T: Copy> C2pResult<T> {
     }
 }
 
-/// floor value for the density/pressure returned when relativistic c2p rejects the input
-/// (non-positive / non-finite conserved density). a SAFE placeholder so callers never read
-/// a NaN — the ErrorCode carries the real signal. shared by RHD + RMHD.
-pub const C2P_FAILURE_FLOOR: f64 = 1e-12;
+/// finite placeholder returned when relativistic c2p rejects its conserved density before
+/// recovery. the error code is authoritative and the value must never enter evolution.
+pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 
 // the shared relativistic c2p diagnostic contract (RHD + RMHD). ONE source so the two
 // regimes' threshold conventions cannot drift (tier-1 #5: the density-scaled-vs-absolute
@@ -190,13 +189,14 @@ pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::
     }
 }
 
-/// the pressure written when a relativistic recovery finds the conserved state OUT of the
-/// physical cone. a small NEGATIVE value: finite (so it never poisons a neighbour the way a NaN
-/// does), yet non-positive so the FOFC probe's `finite_pos(pre)` and the post-hoc
-/// `relativistic_c2p_code` both flag it, and a downstream sound speed `sqrt(gamma p / rho h)`
-/// turns non-finite — the fail-loud that survives even where FOFC is inactive. shared by RHD + RMHD
-/// (the failing state is flagged as non-physical and never floored into a spurious-physical one).
-pub const C2P_CONE_FAIL_PRESSURE: f64 = -1e-30;
+/// the pressure written when a relativistic recovery finds the conserved state
+/// outside the physical cone. scaling the negative signal with `|D|` preserves
+/// homogeneity under a change of density units while remaining finite and
+/// non-positive for every valid conserved density.
+#[inline]
+pub fn c2p_cone_fail_pressure<S: symbi_ir::algebra::Scalar>(den: S) -> S {
+    S::ZERO - den.abs()
+}
 
 /// the shared relativistic-c2p velocity ceiling, squared: `v_limit^2 = r^2 / (1 + r^2)` with
 /// `r = |S| / D` the rescaled conserved-momentum magnitude (enthalpy floor `h0 = 1`; KKC/Kastaun
@@ -213,7 +213,7 @@ pub fn relativistic_velocity_ceiling_sq<S: symbi_ir::algebra::Scalar>(r_sq: S) -
 /// `r = |S| / D` (Wu 2017; the B-free hydro limit of the RMHD KKC form — the magnetic terms do
 /// not enter the cone bound). strictly positive iff a physical subluminal (`p > 0`, `v < 1`)
 /// recovery exists; non-positive marks an out-of-cone conserved state whose pressure the caller
-/// drives to `C2P_CONE_FAIL_PRESSURE`. ONE source shared by both recoveries. carrier-generic.
+/// drives to [`c2p_cone_fail_pressure`]. one source shared by both recoveries.
 #[inline]
 pub fn relativistic_cone_residual<S: symbi_ir::algebra::Scalar>(qq: S, r_sq: S) -> S {
     qq + S::ONE - (S::ONE + r_sq).sqrt()

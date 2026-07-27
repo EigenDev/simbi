@@ -128,11 +128,12 @@ pub fn detect_alignment<S: Scalar, const D: usize>(
 ) -> S {
     let v_l_mag = left.vel.norm();
     let v_r_mag = right.vel.norm();
-    let eps = S::from_f64(1e-10);
 
     // guard against zero |v| to avoid 0/0 = NaN on GPU
-    let safe_v_l = S::select(v_l_mag.cmp_gt(eps), v_l_mag, S::ONE);
-    let safe_v_r = S::select(v_r_mag.cmp_gt(eps), v_r_mag, S::ONE);
+    let moving_l = v_l_mag.cmp_gt(S::ZERO);
+    let moving_r = v_r_mag.cmp_gt(S::ZERO);
+    let safe_v_l = S::select(moving_l, v_l_mag, S::ONE);
+    let safe_v_r = S::select(moving_r, v_r_mag, S::ONE);
 
     let vn_l = left.vel.dot(nhat).abs();
     let vn_r = right.vel.dot(nhat).abs();
@@ -145,8 +146,8 @@ pub fn detect_alignment<S: Scalar, const D: usize>(
     let avg_mach = S::from_f64(0.5) * (v_l_mag / cs_l + v_r_mag / cs_r);
 
     // all four conditions ANDed via 0/1 mask product
-    let c_vl = S::select(v_l_mag.cmp_gt(eps), S::ONE, S::ZERO);
-    let c_vr = S::select(v_r_mag.cmp_gt(eps), S::ONE, S::ZERO);
+    let c_vl = S::select(moving_l, S::ONE, S::ZERO);
+    let c_vr = S::select(moving_r, S::ONE, S::ZERO);
     let c_align = S::select(max_align.cmp_gt(S::from_f64(0.8)), S::ONE, S::ZERO);
     let c_mach = S::select(avg_mach.cmp_gt(S::from_f64(0.5)), S::ONE, S::ZERO);
     c_vl * c_vr * c_align * c_mach
@@ -176,4 +177,27 @@ pub fn adaptive_phi<S: Scalar, const D: usize>(
     phi = phi.max(interface);
     phi = phi.max(alignment);
     phi.min(S::ONE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alignment_detector_is_invariant_to_velocity_units() {
+        let nhat = Tensor::new([1.0, 0.0]);
+        let state = |speed: f64| Prim {
+            rho: 1.0,
+            vel: Tensor::new([speed, 0.0]),
+            pre: speed * speed,
+        };
+        let reference = detect_alignment(&state(1.0), &state(1.0), &nhat, 1.4);
+
+        for scale in [1e-100, 1.0, 1e100] {
+            assert_eq!(
+                detect_alignment(&state(scale), &state(scale), &nhat, 1.4),
+                reference,
+            );
+        }
+    }
 }

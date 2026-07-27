@@ -18,6 +18,10 @@ use symbi_expr::load::{SourceConfig, nodes_from_descs};
 use symbi_ir::backends::interp::{Backend, Cpu};
 use symbi_ir::passes::scalarize::{LoweredFn, scalarize};
 
+fn finite_difference_step(t: f64, lo: f64, hi: f64) -> f64 {
+    1.0e-6 * t.abs().max((hi - lo).abs())
+}
+
 /// a traced scale-factor law a(t) with its analytic derivative a_dot(t). both are scalar functions
 /// of time only (the single param `t`).
 pub struct MotionLaw {
@@ -92,11 +96,12 @@ impl MotionLaw {
         };
         for k in 0..5 {
             let t = lo + (hi - lo) * (k as f64 + 0.5) / 5.0;
-            let h = 1.0e-6 * t.abs().max(1.0);
+            let h = finite_difference_step(t, lo, hi);
             let fd = (self.a_at(t + h) - self.a_at(t - h)) / (2.0 * h);
             let ad = self.adot_at(t);
-            let scale = ad.abs().max(fd.abs()).max(1.0e-8);
-            if (ad - fd).abs() / scale > 1.0e-3 {
+            let scale = ad.abs().max(fd.abs());
+            let inconsistent = scale > 0.0 && (ad - fd).abs() / scale > 1.0e-3;
+            if inconsistent {
                 return Err(format!(
                     "mesh motion: a_dot is inconsistent with da/dt at t={t:.4e} (a_dot={ad:.6e}, \
                      finite-difference={fd:.6e}). a_dot must be exactly da/dt — declare it as \
@@ -106,5 +111,21 @@ impl MotionLaw {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::finite_difference_step;
+
+    #[test]
+    fn finite_difference_step_tracks_time_units() {
+        let reference = finite_difference_step(0.4, 0.0, 1.0);
+        for factor in [2.0_f64.powi(-300), 1.0, 2.0_f64.powi(300)] {
+            assert_eq!(
+                finite_difference_step(0.4 * factor, 0.0, factor),
+                reference * factor,
+            );
+        }
     }
 }

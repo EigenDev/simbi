@@ -30,7 +30,3 @@ pub use hlld::{
 pub use hlle::{hlle, hlle_with_speeds};
 
 // shared solver tolerances (visible to the submodules via `super::`).
-/// guard against division by zero in intermediate expressions.
-const DIVZERO_GUARD: f64 = 1e-30;
-/// threshold below which a magnetic field component is treated as zero.
-const NULL_FIELD_THRESHOLD: f64 = 1e-14;

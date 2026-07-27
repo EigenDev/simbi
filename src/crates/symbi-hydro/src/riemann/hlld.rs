@@ -23,8 +23,6 @@ use crate::state::{Cons, ConsG, Prim};
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::{Scalar, Selectable};
 
-use super::{DIVZERO_GUARD, NULL_FIELD_THRESHOLD};
-
 /// physical-consistency tolerance for the intermediate-state checks.
 const CONSISTENCY_TOL: f64 = 1e-12;
 /// secant convergence tolerance on the f-function.
@@ -39,12 +37,11 @@ const SECANT_PERTURBATION: f64 = 1e-6;
 const LOW_B_PRESSURE_RATIO: f64 = 0.01;
 /// secant iteration count (`max_iter = 15`).
 const SECANT_STEPS: usize = 15;
-/// RELATIVE degeneracy tolerance for the transverse-star denominator at the
-/// Alfven resonance, shared by the newtonian and isothermal HLLD solvers. the
+/// relative degeneracy tolerance for the transverse-star denominator at the
+/// alfven resonance, shared by the newtonian and isothermal hlld solvers. the
 /// transverse star fields divide by a denominator that vanishes when the fast
-/// wave coincides with an Alfven wave; an ABSOLUTE 1e-30 guard never fires
-/// before the factors blow up (the diagnostic bug). switch to the no-rotation
-/// limit when the denominator is small RELATIVE to the magnitude of its two
+/// wave coincides with an alfven wave. switch to the no-rotation limit when
+/// the denominator is small relative to the magnitude of its two
 /// cancelling constituents.
 const ALFVEN_DEGENERACY_TOL: f64 = 1e-3;
 
@@ -73,11 +70,10 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     nhat: &Tensor<S, D>,
     metric: &SpatialMetric<S, D>,
 ) -> VdiffOut<S, D> {
-    let eps = S::from_f64(DIVZERO_GUARD);
     let one = S::ONE;
     let zero = S::ZERO;
-    // sign of bn, branchless. the eps offset keeps the sign well-defined at bn == 0.
-    let sgn_bn = S::select(bn.cmp_ge(zero), one + eps, -one + eps);
+    let rel = S::from_f64(32.0 * f64::EPSILON);
+    let sgn_bn = S::select(bn.cmp_ge(zero), one, -one);
 
     let big = S::from_f64(DIVERGENCE_GUARD * 10.0);
     // start with `physical = true`; bitand failed checks at the end.
@@ -109,11 +105,12 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         let q = -ag + bn * bn * (one - a_s * a_s);
         let x = bn * (a * a_s * bn + c) - ag * (a_s * p + ret);
 
-        // safe-division: when |x| < eps the state is unphysical. mark via mask,
-        // substitute 1.0 for x so the arithmetic doesn't NaN, then sentinel at end.
-        let x_tiny = x.abs().cmp_lt(eps);
-        physical = physical & !x_tiny;
-        let safe_x = S::select(x_tiny, one, x);
+        let x_scale = (bn * (a * a_s * bn + c))
+            .abs()
+            .max((ag * (a_s * p + ret)).abs());
+        let x_ok = x.abs().cmp_gt(rel * x_scale);
+        physical = physical & x_ok;
+        let safe_x = S::select(x_ok, x, one);
         let inv_x = one / safe_x;
 
         // Eqs (23)-(25): mignone, ugliano & bodo 2009.
@@ -122,7 +119,10 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         let vtrans = (rmtrans.scale(q) + rbtrans.scale(term)).scale(inv_x);
 
         // Eq (21).
-        let var1 = one / (a_s - vn + eps);
+        let den_v = a_s - vn;
+        let den_v_ok = den_v.abs().cmp_gt(rel * a_s.abs().max(vn.abs()));
+        physical = physical & den_v_ok;
+        let var1 = one / S::select(den_v_ok, den_v, one);
         let btrans = (rbtrans - vtrans.scale(bn)).scale(var1);
 
         // Eq (31).
@@ -135,7 +135,11 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         let sign = S::from_f64(sign_lit);
         eta[ii] = sign * sgn_bn * wt.abs().sqrt();
         let eta_s = eta[ii];
-        let var2 = one / (a_s * p + ret + bn * eta_s + eps);
+        let den_k = a_s * p + ret + bn * eta_s;
+        let den_k_scale = (a_s * p).abs().max(ret.abs()).max((bn * eta_s).abs());
+        let den_k_ok = den_k.abs().cmp_gt(rel * den_k_scale);
+        physical = physical & den_k_ok;
+        let var2 = one / S::select(den_k_ok, den_k, one);
         let kn = (rmn + p + rs.mag.dot(nhat) * eta_s) * var2;
         let ktrans = (rmtrans + rbtrans.scale(eta_s)).scale(var2);
 
@@ -152,8 +156,11 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let vn_r = vv[1].dot(nhat);
 
     // Eq (45): contact B-field.
-    let dkn = alf_r - alf_l + eps;
-    let inv_dkn = one / dkn;
+    let dkn = alf_r - alf_l;
+    let dkn_scale = alf_r.abs().max(alf_l.abs());
+    let dkn_ok = dkn.abs().cmp_gt(rel * dkn_scale);
+    physical = physical & dkn_ok;
+    let inv_dkn = one / S::select(dkn_ok, dkn, one);
     let bc = ((bv[1].scale(alf_r - vn_r) + vv[1].scale(bn))
         - (bv[0].scale(alf_l - vn_l) + vv[0].scale(bn)))
     .scale(inv_dkn);
@@ -161,22 +168,36 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     // Eq (47): contact velocity.
     let ksq_l = metric.norm_sq_contra(&kv[0]);
     let kdb_l = metric.contract_contra(&kv[0], &bc);
-    let vc_l = kv[0] - bc.scale((one - ksq_l) / (eta[0] - kdb_l + eps));
+    let vc_den_l = eta[0] - kdb_l;
+    let vc_den_l_ok = vc_den_l.abs().cmp_gt(rel * eta[0].abs().max(kdb_l.abs()));
+    physical = physical & vc_den_l_ok;
+    let vc_l = kv[0] - bc.scale((one - ksq_l) / S::select(vc_den_l_ok, vc_den_l, one));
 
     let ksq_r = metric.norm_sq_contra(&kv[1]);
     let kdb_r = metric.contract_contra(&kv[1], &bc);
-    let vc_r = kv[1] - bc.scale((one - ksq_r) / (eta[1] - kdb_r + eps));
+    let vc_den_r = eta[1] - kdb_r;
+    let vc_den_r_ok = vc_den_r.abs().cmp_gt(rel * eta[1].abs().max(kdb_r.abs()));
+    physical = physical & vc_den_r_ok;
+    let vc_r = kv[1] - bc.scale((one - ksq_r) / S::select(vc_den_r_ok, vc_den_r, one));
 
     // Eq (49) — denominator pre-clamped to avoid divide-by-zero in Gv.
-    let denom_l = eta[0] * dkn - kdb_l * dkn + eps;
-    let denom_r = eta[1] * dkn - kdb_r * dkn + eps;
-    let y_l = (one - ksq_l) / denom_l;
-    let y_r = (one - ksq_r) / denom_r;
+    let denom_l = (eta[0] - kdb_l) * dkn;
+    let denom_r = (eta[1] - kdb_r) * dkn;
+    let denom_l_scale = (eta[0] * dkn).abs().max((kdb_l * dkn).abs());
+    let denom_r_scale = (eta[1] * dkn).abs().max((kdb_r * dkn).abs());
+    let denom_l_ok = denom_l.abs().cmp_gt(rel * denom_l_scale);
+    let denom_r_ok = denom_r.abs().cmp_gt(rel * denom_r_scale);
+    physical = physical & denom_l_ok & denom_r_ok;
+    let y_l = (one - ksq_l) / S::select(denom_l_ok, denom_l, one);
+    let y_r = (one - ksq_r) / S::select(denom_r_ok, denom_r, one);
 
     // Eq (48), three-way branchless select on the magnitude of dkn and bn.
-    let null_thresh = S::from_f64(NULL_FIELD_THRESHOLD);
-    let dkn_small = dkn.abs().cmp_lt(null_thresh);
-    let bn_small = bn.abs().cmp_lt(null_thresh);
+    let dkn_small = !dkn_ok;
+    let b_scale = metric
+        .norm_sq_contra(&bv[0])
+        .max(metric.norm_sq_contra(&bv[1]))
+        .sqrt();
+    let bn_small = bn.abs().cmp_le(rel * b_scale);
     let f_default = dkn * (one - bn * (y_r - y_l));
     let f_when_bn_small = dkn;
     let f_inner = S::select(bn_small, f_when_bn_small, f_default);
@@ -231,8 +252,8 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
 ) -> HlldConverged<S, D> {
     let one = S::ONE;
     let zero = S::ZERO;
-    let eps = S::from_f64(DIVZERO_GUARD);
     let feps = S::from_f64(CONVERGENCE_TOL);
+    let relative_eps = S::from_f64(32.0 * f64::EPSILON);
     let div_guard = S::from_f64(DIVERGENCE_GUARD);
 
     let p_perturbed = p_init * (one + S::from_f64(SECANT_PERTURBATION));
@@ -246,9 +267,11 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
             let v = hlld_vdiff(p_cur, r_pair, lam, bn, nhat, metric);
             let f_cur = v.f;
             let f_too_big = f_cur.abs().cmp_gt(div_guard);
-            let slope_dead = (f_cur - f_prev).abs().cmp_lt(eps);
+            let slope = f_cur - f_prev;
+            let slope_scale = f_cur.abs().max(f_prev.abs());
+            let slope_dead = slope.abs().cmp_le(relative_eps * slope_scale);
             let diverged = f_too_big | slope_dead;
-            let slope_denom = S::select(slope_dead, one, f_cur - f_prev);
+            let slope_denom = S::select(slope_dead, one, slope);
             let dp = (p_cur - p_prev) / slope_denom * f_cur;
             let p_next_naive = p_cur - dp;
             let ptol = p_cur.abs() * feps;
@@ -398,8 +421,6 @@ where
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::from_f64(0.5);
-    let eps = S::from_f64(DIVZERO_GUARD);
-    let p_floor_val = S::from_f64(CONVERGENCE_TOL); // small positive floor
 
     // eagerly compute HLLE — fallback if HLLD reports divergence at the end.
     let hlle_flux = hlle(regime, eos, prim_l, prim_r, nhat, vface);
@@ -417,7 +438,11 @@ where
     let supersonic_l = a_l.cmp_ge(vface);
     let supersonic_r = a_r.cmp_le(vface);
 
-    let inv_dwave = one / (a_r - a_l + eps);
+    let dwave = a_r - a_l;
+    let dwave_ok = dwave
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(a_l.abs()));
+    let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
     let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
@@ -437,7 +462,11 @@ where
     let p_total = |prim: &MhdPrim<S, D>| -> S {
         prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) // |B|^2 (contravariant)
     };
-    let p_hll_raw = (p_total(prim_l) + p_total(prim_r)) * half;
+    let p_left = p_total(prim_l);
+    let p_right = p_total(prim_r);
+    let p_scale = p_left.abs().max(p_right.abs());
+    let p_floor_val = S::from_f64(CONVERGENCE_TOL) * p_scale;
+    let p_hll_raw = (p_left + p_right) * half;
     let p_hll = S::select(p_hll_raw.cmp_le(zero), p_floor_val, p_hll_raw);
     let _ = &regime; // silence unused-binding warning in this carrier-generic path
 
@@ -467,7 +496,7 @@ where
     let alf = v.alf;
     let vv_iso = v.vv;
     let bv_iso = v.bv;
-    let success = conv.success.cmp_gt(half);
+    let success = conv.success.cmp_gt(half) & dwave_ok;
 
     // pick fast-wave side via the contact-vs-vface test, branchless.
     let vnc = vc.dot(nhat); // v_c.n (contravariant)
@@ -483,7 +512,11 @@ where
      -> (MhdCons<S, D>, MhdCons<S, D>) {
         let vdba = metric.contract_contra(&va, &ba); // v.B (contravariant)
         let vna = va.dot(nhat); // v.n (contravariant)
-        let inv_lc_vna = one / (lc - vna + eps);
+        let denominator = lc - vna;
+        let denominator_ok = denominator
+            .abs()
+            .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * lc.abs().max(vna.abs()));
+        let inv_lc_vna = one / S::select(denominator_ok, denominator, one);
         let da = r_side.den * inv_lc_vna;
         let ea = (r_side.nrg + r_side.den + p_final * vna - vdba * bn) * inv_lc_vna;
         let ma = va.scale(ea + p_final) - ba.scale(vdba);
@@ -517,7 +550,11 @@ where
     // ---- contact-wave state (Section 3.3) ----
     let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
     let vna_used = S::select(on_left, vv_iso[0].dot(nhat), vv_iso[1].dot(nhat));
-    let inv_la_vnc = one / (la - vnc + eps);
+    let contact_denominator = la - vnc;
+    let contact_ok = contact_denominator
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * la.abs().max(vnc.abs()));
+    let inv_la_vnc = one / S::select(contact_ok, contact_denominator, one);
     let dc = ua.den * (la - vna_used) * inv_la_vnc;
     let man = ua.mom.dot(nhat);
     let ec = (ua.nrg + ua.den) * la;
@@ -540,7 +577,16 @@ where
     let flux_supersonic_l = f_l - u_l * vface;
     let flux_supersonic_r = f_r - u_r * vface;
 
-    let flux_inner = MhdCons::select(success, flux_hlld, hlle_flux);
+    let fast_den_l = a_l - vv_iso[0].dot(nhat);
+    let fast_den_r = a_r - vv_iso[1].dot(nhat);
+    let fast_ok_l = fast_den_l
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_l.abs().max(vv_iso[0].dot(nhat).abs()));
+    let fast_ok_r = fast_den_r
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(vv_iso[1].dot(nhat).abs()));
+    let fast_ok = S::Mask::select_mask(on_left, fast_ok_l, fast_ok_r);
+    let flux_inner = MhdCons::select(success & fast_ok & contact_ok, flux_hlld, hlle_flux);
     let flux_choose_r = MhdCons::select(supersonic_r, flux_supersonic_r, flux_inner);
     MhdCons::select(supersonic_l, flux_supersonic_l, flux_choose_r)
 }
@@ -578,8 +624,6 @@ where
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::from_f64(0.5);
-    let eps = S::from_f64(DIVZERO_GUARD);
-    let p_floor_val = S::from_f64(CONVERGENCE_TOL);
     // the spatial metric at the face: `SpatialMetric::flat()` for the SR path (bit-identical to
     // euclidean), the metric-aware gamma for the GR path. the MUB09 star-state algebra
     // (`hlld_vdiff`/`hlld_rmhd_converge`) is fully metric-generic; only the L/R conserved/flux
@@ -590,7 +634,11 @@ where
     let f_l = regime.to_flux(prim_l, nhat, eos);
     let f_r = regime.to_flux(prim_r, nhat, eos);
     let (a_l, a_r) = regime.extremal_speeds(eos, prim_l, prim_r, nhat);
-    let inv_dwave = one / (a_r - a_l + eps);
+    let dwave = a_r - a_l;
+    let dwave_ok = dwave
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(a_l.abs()));
+    let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
     let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
@@ -601,7 +649,10 @@ where
 
     let p_total =
         |prim: &MhdPrim<S, D>| -> S { prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) };
-    let p_hll_raw = (p_total(prim_l) + p_total(prim_r)) * half;
+    let p_left = p_total(prim_l);
+    let p_right = p_total(prim_r);
+    let p_floor_val = S::from_f64(CONVERGENCE_TOL) * p_left.abs().max(p_right.abs());
+    let p_hll_raw = (p_left + p_right) * half;
     let p_hll = S::select(p_hll_raw.cmp_le(zero), p_floor_val, p_hll_raw);
     let lowb_thresh = S::from_f64(LOW_B_PRESSURE_RATIO);
     let lowb_mask = (bn * bn / p_hll).cmp_lt(lowb_thresh);
@@ -626,7 +677,7 @@ where
         bc: v.bc,
         vc: v.vc,
         bn,
-        success: conv.success,
+        success: conv.success * S::select(dwave_ok, one, zero),
     }
 }
 
@@ -668,7 +719,6 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let one = S::ONE;
     let half = S::from_f64(0.5);
     let neg = S::from_f64(-1.0);
-    let eps = S::from_f64(DIVZERO_GUARD);
     let regime = NewtonianMhd;
 
     // the normal field is CONTINUOUS across the Riemann fan (div B = 0): Miyoshi-Kusano
@@ -713,7 +763,10 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let cl = (s_l - un_l) * rho_l;
     let cr = (s_r - un_r) * rho_r;
     let dm = cr - cl;
-    let dm_s = S::select(dm.abs().cmp_lt(eps), eps, dm);
+    let dm_ok = dm
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * cr.abs().max(cl.abs()));
+    let dm_s = S::select(dm_ok, dm, one);
     let s_m = (cr * un_r - cl * un_l - pt_r + pt_l) / dm_s;
     let pt_star = (cr * pt_l - cl * pt_r + cl * cr * (un_r - un_l)) / dm_s;
 
@@ -731,19 +784,21 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
                 pt_k: S|
      -> (MhdCons<S, D>, MhdCons<S, D>, Tensor<S, D>, Tensor<S, D>, S) {
         let smk = s_k - s_m;
-        let smk_s = S::select(smk.abs().cmp_lt(eps), eps, smk);
+        let smk_ok = smk
+            .abs()
+            .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_k.abs().max(s_m.abs()));
+        let smk_s = S::select(smk_ok, smk, one);
         let rho_star = rho_k * (s_k - un_k) / smk_s;
-        // the transverse * fields divide by den = rho_K(S_K-u_K)(S_K-S_M) - Bn^2, which
-        // vanishes at the ALFVEN RESONANCE (the rotational wave coincides with the
+        // the transverse star fields divide by den = rho_k(s_k-u_k)(s_k-s_m) - bn^2, which
+        // vanishes at the alfven resonance (the rotational wave coincides with the
         // entropy wave — frequent in 2D when the field is nearly face-normal). there the
         // factors below diverge -> singular star state -> negative pressure. switch to the
-        // NO-ROTATION limit (transverse fields unchanged) on a RELATIVE threshold, BEFORE
-        // they blow up. (an absolute 1e-30 guard never fires — the diagnostic bug.)
+        // no-rotation limit (transverse fields unchanged) on a relative threshold.
         let term = rho_k * (s_k - un_k) * smk;
         let den = term - bn_sq;
         let small = den
             .abs()
-            .cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (term.abs() + bn_sq) + eps);
+            .cmp_le(S::from_f64(ALFVEN_DEGENERACY_TOL) * (term.abs() + bn_sq));
         let den_s = S::select(small, one, den);
         let v_tang = tang(&prim_k.vel, un_k);
         let b_tang = tang(&prim_k.mag, bn);
@@ -779,11 +834,15 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let sqrt_rl = rs_l.safe_sqrt();
     let sqrt_rr = rs_r.safe_sqrt();
     let bn_abs = bn.abs();
-    let sa_l = s_m - bn_abs / S::select(sqrt_rl.cmp_lt(eps), eps, sqrt_rl);
-    let sa_r = s_m + bn_abs / S::select(sqrt_rr.cmp_lt(eps), eps, sqrt_rr);
+    let sqrt_l_ok = sqrt_rl.cmp_gt(zero);
+    let sqrt_r_ok = sqrt_rr.cmp_gt(zero);
+    let sa_l = s_m - bn_abs / S::select(sqrt_l_ok, sqrt_rl, one);
+    let sa_r = s_m + bn_abs / S::select(sqrt_r_ok, sqrt_rr, one);
 
     let sgn = S::select(bn.cmp_ge(zero), one, neg);
-    let inv_sden = one / S::select((sqrt_rl + sqrt_rr).cmp_lt(eps), eps, sqrt_rl + sqrt_rr);
+    let sqrt_sum = sqrt_rl + sqrt_rr;
+    let sqrt_sum_ok = sqrt_sum.cmp_gt(zero);
+    let inv_sden = one / S::select(sqrt_sum_ok, sqrt_sum, one);
     let vsl_t = tang(&vs_l, s_m);
     let vsr_t = tang(&vs_r, s_m);
     let bsl_t = tang(&bs_l, bn);
@@ -839,7 +898,21 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     );
 
     // physicality: any non-positive star density / pressure routes to HLLE.
-    let ok = rs_l.cmp_gt(zero) & rs_r.cmp_gt(zero) & pt_star.cmp_gt(zero);
+    let smk_l_ok = (s_l - s_m)
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_l.abs().max(s_m.abs()));
+    let smk_r_ok = (s_r - s_m)
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_m.abs()));
+    let ok = dm_ok
+        & smk_l_ok
+        & smk_r_ok
+        & sqrt_l_ok
+        & sqrt_r_ok
+        & sqrt_sum_ok
+        & rs_l.cmp_gt(zero)
+        & rs_r.cmp_gt(zero)
+        & pt_star.cmp_gt(zero);
     MhdCons::select(ok, pick, hlle_flux)
 }
 
@@ -857,10 +930,9 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
 ) -> (S, S, S) {
     let zero = S::ZERO;
     let one = S::ONE;
-    let neg = S::from_f64(-1.0);
     let two = S::from_f64(2.0);
     let half = S::from_f64(0.5);
-    let eps = S::from_f64(DIVZERO_GUARD);
+    let relative_eps = S::from_f64(32.0 * f64::EPSILON);
     let eps_deg = S::from_f64(1.0e-9);
     let regime = NewtonianMhd;
 
@@ -890,27 +962,52 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     // contact lambda* (Miyoshi-Kusano eq 38) — same as the flux.
     let cl = (s_l - un_l) * prim_l.rho;
     let cr = (s_r - un_r) * prim_r.rho;
-    let dm_s = S::select((cr - cl).abs().cmp_lt(eps), eps, cr - cl);
+    let dm = cr - cl;
+    let dm_ok = dm.abs().cmp_gt(relative_eps * cr.abs().max(cl.abs()));
+    let dm_s = S::select(dm_ok, dm, one);
     let s_m = (cr * un_r - cl * un_l - pt_r + pt_l) / dm_s;
 
     // star densities rho^{*s} (eq 43) + rotational speeds lambda^{*s} (eq 51).
-    let smk_l = S::select((s_l - s_m).abs().cmp_lt(eps), eps, s_l - s_m);
-    let smk_r = S::select((s_r - s_m).abs().cmp_lt(eps), eps, s_r - s_m);
+    let smk_l_raw = s_l - s_m;
+    let smk_r_raw = s_r - s_m;
+    let smk_l_ok = smk_l_raw
+        .abs()
+        .cmp_gt(relative_eps * s_l.abs().max(s_m.abs()));
+    let smk_r_ok = smk_r_raw
+        .abs()
+        .cmp_gt(relative_eps * s_r.abs().max(s_m.abs()));
+    let smk_l = S::select(smk_l_ok, smk_l_raw, one);
+    let smk_r = S::select(smk_r_ok, smk_r_raw, one);
     let rs_l = prim_l.rho * (s_l - un_l) / smk_l;
     let rs_r = prim_r.rho * (s_r - un_r) / smk_r;
     let bn_abs = bn.abs();
     let sqrt_rl = rs_l.safe_sqrt();
     let sqrt_rr = rs_r.safe_sqrt();
-    let sa_l = s_m - bn_abs / S::select(sqrt_rl.cmp_lt(eps), eps, sqrt_rl); // lambda^{*L}
-    let sa_r = s_m + bn_abs / S::select(sqrt_rr.cmp_lt(eps), eps, sqrt_rr); // lambda^{*R}
+    let sqrt_l_ok = sqrt_rl.cmp_gt(zero);
+    let sqrt_r_ok = sqrt_rr.cmp_gt(zero);
+    let sa_l = s_m - bn_abs / S::select(sqrt_l_ok, sqrt_rl, one); // lambda^{*L}
+    let sa_r = s_m + bn_abs / S::select(sqrt_r_ok, sqrt_rr, one); // lambda^{*R}
 
     // chi~^s (Eq. By_chi, singular factor cancelled); nu^s, nu* with the degenerate guard (Eq. 46).
-    let guard = |x: S| x + eps * S::select(x.cmp_ge(zero), one, neg);
-    let chitl = (un_l - s_m) * (s_l - s_m) / guard(sa_l + s_l - two * s_m);
-    let chitr = (un_r - s_m) * (s_r - s_m) / guard(sa_r + s_r - two * s_m);
-    let nul = (sa_l + s_l) / (sa_l.abs() + s_l.abs() + eps);
-    let nur = (sa_r + s_r) / (sa_r.abs() + s_r.abs() + eps);
-    let nustar_raw = (sa_r + sa_l) / (sa_r.abs() + sa_l.abs() + eps);
+    let chi_den_l = sa_l + s_l - two * s_m;
+    let chi_den_r = sa_r + s_r - two * s_m;
+    let chi_l_ok = chi_den_l
+        .abs()
+        .cmp_gt(relative_eps * (sa_l.abs() + s_l.abs() + two * s_m.abs()));
+    let chi_r_ok = chi_den_r
+        .abs()
+        .cmp_gt(relative_eps * (sa_r.abs() + s_r.abs() + two * s_m.abs()));
+    let chitl = (un_l - s_m) * (s_l - s_m) / S::select(chi_l_ok, chi_den_l, one);
+    let chitr = (un_r - s_m) * (s_r - s_m) / S::select(chi_r_ok, chi_den_r, one);
+    let nu_den_l = sa_l.abs() + s_l.abs();
+    let nu_den_r = sa_r.abs() + s_r.abs();
+    let nustar_den = sa_r.abs() + sa_l.abs();
+    let nu_l_ok = nu_den_l.cmp_gt(zero);
+    let nu_r_ok = nu_den_r.cmp_gt(zero);
+    let nustar_ok = nustar_den.cmp_gt(zero);
+    let nul = (sa_l + s_l) / S::select(nu_l_ok, nu_den_l, one);
+    let nur = (sa_r + s_r) / S::select(nu_r_ok, nu_den_r, one);
+    let nustar_raw = (sa_r + sa_l) / S::select(nustar_ok, nustar_den, one);
     let nustar = S::select(
         (sa_r - sa_l).abs().cmp_gt(eps_deg * (s_r - s_l).abs()),
         nustar_raw,
@@ -918,7 +1015,28 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     );
     let dl = half * (nul - nustar) * chitl + half * (sa_l.abs() - nustar * sa_l);
     let dr = half * (nur - nustar) * chitr + half * (sa_r.abs() - nustar * sa_r);
-    (half * (one + nustar), dl, dr)
+    let valid = dm_ok
+        & smk_l_ok
+        & smk_r_ok
+        & sqrt_l_ok
+        & sqrt_r_ok
+        & chi_l_ok
+        & chi_r_ok
+        & nu_l_ok
+        & nu_r_ok
+        & nustar_ok;
+    let ap = s_r.max(zero);
+    let am = (-s_l).max(zero);
+    let hll_sum = ap + am;
+    let hll_ok = hll_sum.cmp_gt(zero);
+    let hll_den = S::select(hll_ok, hll_sum, one);
+    let hll_al = S::select(hll_ok, ap / hll_den, half);
+    let hll_d = S::select(hll_ok, ap * am / hll_den, zero);
+    (
+        S::select(valid, half * (one + nustar), hll_al),
+        S::select(valid, dl, hll_d),
+        S::select(valid, dr, hll_d),
+    )
 }
 
 /// the UCT-HLLD edge-EMF coefficients `(a^L, d^L, d^R)` for ISOTHERMAL MHD (M&DZ 2020 Appendix A).
@@ -937,10 +1055,9 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let regime = IsothermalMhd;
     let zero = S::ZERO;
     let one = S::ONE;
-    let neg = S::from_f64(-1.0);
     let two = S::from_f64(2.0);
     let half = S::from_f64(0.5);
-    let eps = S::from_f64(DIVZERO_GUARD);
+    let relative_eps = S::from_f64(32.0 * f64::EPSILON);
     let eps_deg = S::from_f64(1.0e-9);
 
     // single continuous normal field (div B = 0), identical to the isothermal flux.
@@ -969,24 +1086,43 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let un_r = prim_r.vel.dot(nhat);
 
     // HLL central state: rho* = rho^hll, u* = F_rho^hll/rho^hll (Appendix A; same as the iso flux).
-    let inv_dwave = one / S::select((s_r - s_l).abs().cmp_lt(eps), eps, s_r - s_l);
+    let dwave = s_r - s_l;
+    let dwave_ok = dwave
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_l.abs()));
+    let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let u_hll = (u_r * s_r - u_l * s_l - f_r + f_l) * inv_dwave;
     let f_hll = (f_l * s_r - f_r * s_l + (u_r - u_l) * (s_l * s_r)) * inv_dwave;
     let rho_s = u_hll.den;
-    let rho_s_safe = S::select(rho_s.abs().cmp_lt(eps), eps, rho_s);
+    let rho_ok = rho_s.cmp_gt(zero);
+    let rho_s_safe = S::select(rho_ok, rho_s, one);
     let u_star = f_hll.den / rho_s_safe;
     let sqrt_rs = rho_s.safe_sqrt();
-    let cax = bn_abs / S::select(sqrt_rs.cmp_lt(eps), eps, sqrt_rs);
+    let sqrt_ok = sqrt_rs.cmp_gt(zero);
+    let cax = bn_abs / S::select(sqrt_ok, sqrt_rs, one);
     let sa_l = u_star - cax; // lambda^{*L}
     let sa_r = u_star + cax; // lambda^{*R}
 
     // chi~^s (Appendix A: u* + single rho* in place of the MK contact); nu/d/a unchanged (Eq. 44-46).
-    let guard = |x: S| x + eps * S::select(x.cmp_ge(zero), one, neg);
-    let chitl = (un_l - u_star) * (s_l - u_star) / guard(sa_l + s_l - two * u_star);
-    let chitr = (un_r - u_star) * (s_r - u_star) / guard(sa_r + s_r - two * u_star);
-    let nul = (sa_l + s_l) / (sa_l.abs() + s_l.abs() + eps);
-    let nur = (sa_r + s_r) / (sa_r.abs() + s_r.abs() + eps);
-    let nustar_raw = (sa_r + sa_l) / (sa_r.abs() + sa_l.abs() + eps);
+    let chi_den_l = sa_l + s_l - two * u_star;
+    let chi_den_r = sa_r + s_r - two * u_star;
+    let chi_l_ok = chi_den_l
+        .abs()
+        .cmp_gt(relative_eps * (sa_l.abs() + s_l.abs() + two * u_star.abs()));
+    let chi_r_ok = chi_den_r
+        .abs()
+        .cmp_gt(relative_eps * (sa_r.abs() + s_r.abs() + two * u_star.abs()));
+    let chitl = (un_l - u_star) * (s_l - u_star) / S::select(chi_l_ok, chi_den_l, one);
+    let chitr = (un_r - u_star) * (s_r - u_star) / S::select(chi_r_ok, chi_den_r, one);
+    let nu_den_l = sa_l.abs() + s_l.abs();
+    let nu_den_r = sa_r.abs() + s_r.abs();
+    let nustar_den = sa_r.abs() + sa_l.abs();
+    let nu_l_ok = nu_den_l.cmp_gt(zero);
+    let nu_r_ok = nu_den_r.cmp_gt(zero);
+    let nustar_ok = nustar_den.cmp_gt(zero);
+    let nul = (sa_l + s_l) / S::select(nu_l_ok, nu_den_l, one);
+    let nur = (sa_r + s_r) / S::select(nu_r_ok, nu_den_r, one);
+    let nustar_raw = (sa_r + sa_l) / S::select(nustar_ok, nustar_den, one);
     let nustar = S::select(
         (sa_r - sa_l).abs().cmp_gt(eps_deg * (s_r - s_l).abs()),
         nustar_raw,
@@ -994,7 +1130,19 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     );
     let dl = half * (nul - nustar) * chitl + half * (sa_l.abs() - nustar * sa_l);
     let dr = half * (nur - nustar) * chitr + half * (sa_r.abs() - nustar * sa_r);
-    (half * (one + nustar), dl, dr)
+    let valid = dwave_ok & rho_ok & sqrt_ok & chi_l_ok & chi_r_ok & nu_l_ok & nu_r_ok & nustar_ok;
+    let ap = s_r.max(zero);
+    let am = (-s_l).max(zero);
+    let hll_sum = ap + am;
+    let hll_ok = hll_sum.cmp_gt(zero);
+    let hll_den = S::select(hll_ok, hll_sum, one);
+    let hll_al = S::select(hll_ok, ap / hll_den, half);
+    let hll_d = S::select(hll_ok, ap * am / hll_den, zero);
+    (
+        S::select(valid, half * (one + nustar), hll_al),
+        S::select(valid, dl, hll_d),
+        S::select(valid, dr, hll_d),
+    )
 }
 
 // =============================================================================
@@ -1021,7 +1169,6 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let one = S::ONE;
     let half = S::from_f64(0.5);
     let neg = S::from_f64(-1.0);
-    let eps = S::from_f64(DIVZERO_GUARD);
 
     // transverse projection (any nhat): v - n (v.n).
     let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhat.scale(vn) };
@@ -1059,32 +1206,36 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let rho_r = prim_r.rho;
 
     // HLL single-average state + flux (eqs 15, 17).
-    let inv_dwave = one / S::select((s_r - s_l).abs().cmp_lt(eps), eps, s_r - s_l);
+    let dwave = s_r - s_l;
+    let dwave_ok = dwave
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_l.abs()));
+    let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let u_hll = (u_r * s_r - u_l * s_l - f_r + f_l) * inv_dwave;
     let f_hll = (f_l * s_r - f_r * s_l + (u_r - u_l) * (s_l * s_r)) * inv_dwave;
 
     // rho* = HLL density (eq 20); m_x* = HLL normal momentum (eq 21, constant in fan);
     // u* = F_rho^hll / rho^hll (eq 23 advective choice; m_x/rho would give the wrong star velocity).
     let rho_s = u_hll.den;
-    let rho_s_safe = S::select(rho_s.abs().cmp_lt(eps), eps, rho_s);
+    let rho_ok = rho_s.cmp_gt(zero);
+    let rho_s_safe = S::select(rho_ok, rho_s, one);
     let mx_hll = u_hll.mom.dot(nhat);
     let u_star = f_hll.den / rho_s_safe;
 
     // Alfven speeds (eq 29): S_L* = u* - |Bx|/sqrt(rho*), S_R* = u* + |Bx|/sqrt(rho*).
     let sqrt_rs = rho_s.safe_sqrt();
-    let sqrt_rs_safe = S::select(sqrt_rs.cmp_lt(eps), eps, sqrt_rs);
+    let sqrt_ok = sqrt_rs.cmp_gt(zero);
+    let sqrt_rs_safe = S::select(sqrt_ok, sqrt_rs, one);
     let cax = bn_abs / sqrt_rs_safe; // normal Alfven speed |Bn|/sqrt(rho*)
     let sa_l = u_star - cax;
     let sa_r = u_star + cax;
 
     // per-side star tangential state (eqs 30-33), vectorized over the transverse plane.
-    // den = (S_k - S_L*)(S_k - S_R*) = (S_k - u*)^2 - cax^2, which vanishes at the ALFVEN
-    // RESONANCE (the fast wave coincides with an Alfven wave — a purely-normal field, where
+    // den = (s_k - s_l*)(s_k - s_r*) = (s_k - u*)^2 - cax^2, which vanishes at the alfven
+    // resonance (the fast wave coincides with an alfven wave — a purely-normal field, where
     // c_fast -> cax). there fac_v / fac_b diverge -> singular star state. switch to the
-    // no-rotation limit (transverse fields unchanged) on a RELATIVE threshold measured
-    // against the magnitude of the two cancelling terms `(S_k-u*)^2` and `cax^2` — the
-    // product-form twin of the newtonian guard (an absolute 1e-30 guard never fires; the
-    // diagnostic bug). same `ALFVEN_DEGENERACY_TOL` so both MHD HLLD solvers agree.
+    // no-rotation limit (transverse fields unchanged) on a relative threshold measured
+    // against the magnitude of the two cancelling terms `(s_k-u*)^2` and `cax^2`.
     let star = |rho_k: S,
                 un_k: S,
                 s_k: S,
@@ -1095,7 +1246,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
         let den = (s_k - sa_l) * (s_k - sa_r);
         let small = den
             .abs()
-            .cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (su * su + cax * cax) + eps);
+            .cmp_le(S::from_f64(ALFVEN_DEGENERACY_TOL) * (su * su + cax * cax));
         let den_s = S::select(small, one, den);
         let fac_v = S::select(small, zero, bn * (u_star - un_k) / den_s);
         let fac_b = S::select(
@@ -1141,7 +1292,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     // central state (eqs 34-37): X = sqrt(rho*) sign(Bx).
     let sgn = S::select(bn.cmp_ge(zero), one, neg);
     let x = sqrt_rs * sgn;
-    let x_safe = S::select(x.abs().cmp_lt(eps), eps, x);
+    let x_safe = S::select(sqrt_ok, x, one);
     let mv_c = (mv_l + mv_r).scale(half) + (bs_r - bs_l).scale(x * half);
     let bs_c = (bs_l + bs_r).scale(half) + (mv_r - mv_l).scale(half / x_safe);
     let us_c = mk_cons(mv_c, bs_c);
@@ -1168,7 +1319,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     );
 
     // positivity fallback: rho* (the HLL density) must be positive.
-    IsoMhdCons::select(rho_s.cmp_gt(zero), pick, hlle_flux)
+    IsoMhdCons::select(dwave_ok & rho_ok & sqrt_ok, pick, hlle_flux)
 }
 
 #[cfg(test)]
@@ -2036,6 +2187,39 @@ mod tests {
             let flux = hlld_newtonian(&eos, prim, prim, &nhat, 0.0);
             let exact = NewtonianMhd.to_flux(prim, &nhat, &eos);
             assert_flux_eq(&flux, &exact, &format!("uniform case {ii}"));
+        }
+    }
+
+    #[test]
+    fn hlld_newtonian_is_homogeneous_under_state_rescaling() {
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let left = nm_prim(1.1, [0.35, -0.12, 0.08], 0.8, [0.45, 0.3, -0.2]);
+        let right = nm_prim(0.7, [-0.18, 0.09, -0.04], 0.5, [0.45, -0.15, 0.25]);
+        let reference = hlld_newtonian(&eos, &left, &right, &nhat, 0.0);
+        for factor in [1e-100_f64, 1.0, 1e100] {
+            let field_factor = factor.sqrt();
+            let scale = |prim: &MhdPrim<f64, 3>| {
+                nm_prim(
+                    prim.rho * factor,
+                    prim.vel.data,
+                    prim.pre * factor,
+                    prim.mag.data.map(|value| value * field_factor),
+                )
+            };
+            let flux = hlld_newtonian(&eos, &scale(&left), &scale(&right), &nhat, 0.0);
+            assert!((flux.den / (reference.den * factor) - 1.0).abs() < 1e-12);
+            assert!((flux.nrg / (reference.nrg * factor) - 1.0).abs() < 1e-12);
+            for dd in 0..3 {
+                assert!((flux.mom[dd] / (reference.mom[dd] * factor) - 1.0).abs() < 1e-12);
+                if reference.mag[dd] != 0.0 {
+                    assert!(
+                        (flux.mag[dd] / (reference.mag[dd] * field_factor) - 1.0).abs() < 1e-12
+                    );
+                } else {
+                    assert_eq!(flux.mag[dd], 0.0);
+                }
+            }
         }
     }
 

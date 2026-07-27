@@ -386,15 +386,31 @@ pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     r_exc: f64,
+    rho_atmosphere: f64,
+    pre_atmosphere: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("excise", || {
         for _ in 0..excise_pass_count_for(sim, r_exc) {
-            dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Sweep);
+            dispatch_excise_inner(
+                sim,
+                gamma,
+                r_exc,
+                rho_atmosphere,
+                pre_atmosphere,
+                ExcisePhase::Sweep,
+            );
         }
-        dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Finalize);
+        dispatch_excise_inner(
+            sim,
+            gamma,
+            r_exc,
+            rho_atmosphere,
+            pre_atmosphere,
+            ExcisePhase::Finalize,
+        );
     });
 }
 
@@ -406,12 +422,21 @@ pub fn dispatch_excise_sweep<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     r_exc: f64,
+    rho_atmosphere: f64,
+    pre_atmosphere: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("excise", || {
-        dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Sweep)
+        dispatch_excise_inner(
+            sim,
+            gamma,
+            r_exc,
+            rho_atmosphere,
+            pre_atmosphere,
+            ExcisePhase::Sweep,
+        )
     });
 }
 
@@ -420,12 +445,21 @@ pub fn dispatch_excise_finalize<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     r_exc: f64,
+    rho_atmosphere: f64,
+    pre_atmosphere: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("excise", || {
-        dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Finalize)
+        dispatch_excise_inner(
+            sim,
+            gamma,
+            r_exc,
+            rho_atmosphere,
+            pre_atmosphere,
+            ExcisePhase::Finalize,
+        )
     });
 }
 
@@ -465,6 +499,8 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     r_exc: f64,
+    rho_atmosphere: f64,
+    pre_atmosphere: f64,
     phase: ExcisePhase,
 ) where
     Mem: MemorySpace + Sync,
@@ -530,6 +566,8 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 .expect("excise: the kerr-schild metric supplies schwarzschild_mass"),
             ScalarBind::Ref(ScalarRef::KerrSpin) => spin,
             ScalarBind::Spec(s) if &**s == "excision_radius" => r_exc,
+            ScalarBind::Spec(s) if &**s == "excision_rho" => rho_atmosphere,
+            ScalarBind::Spec(s) if &**s == "excision_pre" => pre_atmosphere,
             ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
                 .unwrap_or_else(|| panic!("excise: unexpected scalar {sref:?}")),
             other => panic!("excise: unexpected scalar {other:?}"),
@@ -760,7 +798,10 @@ where
     let mut ratio_max = 0.0_f64;
     for c in geom.interior.iter() {
         let p = pre.view().at(c).to_f64();
-        let r = sim.fields.prim.rho.view().at(c).to_f64().max(1.0e-300);
+        let r = sim.fields.prim.rho.view().at(c).to_f64();
+        if !p.is_finite() || !r.is_finite() || r <= 0.0 {
+            return f64::INFINITY;
+        }
         ratio_max = ratio_max.max(p / r);
     }
     // the farthest in-plane corner from the body (the vertical axis does not enter Omega_K).

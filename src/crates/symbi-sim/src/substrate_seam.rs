@@ -209,12 +209,13 @@ pub trait WithResistivity: Sized {
     }
 }
 
-/// stash the config's horizon-excision radius onto a kernel set. same
+/// stash the horizon-excision radius and initial primitive scales onto a kernel set. same
 /// non-const-generic shape as [`WithViscosity`]; the default is a no-op
 /// (regimes without the baked excision kernels ignore it);
-/// `RhdSubstrateKernelSet` overrides it to store the value.
+/// `rhdsubstratekernelset` and the relativistic mhd set use the scales to define a
+/// unit-invariant atmosphere below the least dense and least pressurized initial state.
 pub trait WithExcision: Sized {
-    fn with_excision(self, _r_exc: f64) -> Self {
+    fn with_excision(self, _r_exc: f64, _rho_scale: f64, _pre_scale: f64) -> Self {
         self
     }
 }

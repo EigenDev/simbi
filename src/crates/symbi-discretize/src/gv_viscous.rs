@@ -31,6 +31,11 @@ use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
 
+fn alpha_viscosity(alpha: Gv, cs2: Gv, mass: Gv, radius: Gv) -> Gv {
+    let radius = radius.abs();
+    alpha * cs2 * (radius * radius * radius / mass).sqrt()
+}
+
 /// read the primitive `(velocity, density)` 3x3 stencil about the current cell.
 fn prim_stencil() -> ([[Tensor<Gv, 2>; 3]; 3], [[Gv; 3]; 3]) {
     const NDIM: u8 = 2;
@@ -164,7 +169,6 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
         NDIM as usize,
     );
     let (cx, cy) = (geo.centroid[0], geo.centroid[1]);
-    let floor = Gv::from_f64(1e-30);
 
     // per-stencil-cell nu from the LOCAL cs^2 = gamma p / rho and the keplerian
     // frequency at that cell's in-plane distance from body 0.
@@ -174,13 +178,12 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
             let off = [ii as i32 - 1, jj as i32 - 1];
             let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
             let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
-            let cs2 = gamma * pre / rho.max(floor);
+            let cs2 = gamma * pre / rho;
             let x = cx + Gv::from_f64(ii as f64 - 1.0) * dx;
             let y = cy + Gv::from_f64(jj as f64 - 1.0) * dy;
             let (rx, ry) = (x - bx, y - by);
-            let r = (rx * rx + ry * ry).sqrt().max(floor);
-            let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-            nust[jj][ii] = alpha * cs2 / omega_k;
+            let r = (rx * rx + ry * ry).sqrt();
+            nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
         }
     }
 
@@ -286,7 +289,6 @@ fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKe
     let mut h1 = [[Gv::ZERO; 3]; 3];
     let mut h2 = [[Gv::ZERO; 3]; 3];
     let mut nust = [[Gv::ZERO; 3]; 3];
-    let floor = Gv::from_f64(1e-30);
     for dj in 0..3usize {
         for di in 0..3usize {
             let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
@@ -303,10 +305,8 @@ fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKe
                 let off = [di as i32 - 1, dj as i32 - 1];
                 let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
                 let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
-                let cs2 = gamma * pre / rho.max(floor);
-                let r = x0.max(floor);
-                let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-                alpha * cs2 / omega_k
+                let cs2 = gamma * pre / rho;
+                alpha_viscosity(alpha, cs2, gm, x0)
             } else {
                 Gv::scalar("nu")
             };
@@ -387,7 +387,6 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     );
     let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
     let cs2 = cs * cs;
-    let floor = Gv::from_f64(1e-30);
 
     let mut h1 = [[Gv::ZERO; 3]; 3];
     let mut h2 = [[Gv::ZERO; 3]; 3];
@@ -400,9 +399,7 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
             h1[dj][di] = h[0];
             h2[dj][di] = h[1];
             // nu(R) = alpha cs^2 / Omega_k(R), R the radial coordinate x0.
-            let r = x0.max(floor);
-            let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-            nust[dj][di] = alpha * cs2 / omega_k;
+            nust[dj][di] = alpha_viscosity(alpha, cs2, gm, x0);
         }
     }
 
@@ -605,7 +602,6 @@ pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, Writes) {
     );
     let (cx, cy) = (geo.centroid[0], geo.centroid[1]);
     let cs2 = cs * cs;
-    let floor = Gv::from_f64(1e-30);
 
     // nu is z-invariant (cylindrical R), so every k-slice of the stencil is equal.
     let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
@@ -614,9 +610,8 @@ pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, Writes) {
             let x = cx + Gv::from_f64(ii as f64 - 1.0) * dx;
             let y = cy + Gv::from_f64(jj as f64 - 1.0) * dy;
             let (rx, ry) = (x - bx, y - by);
-            let r = (rx * rx + ry * ry).sqrt().max(floor);
-            let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-            let nu = alpha * cs2 / omega_k;
+            let r = (rx * rx + ry * ry).sqrt();
+            let nu = alpha_viscosity(alpha, cs2, gm, r);
             for kk in 0..3usize {
                 nust[kk][jj][ii] = nu;
             }
@@ -658,7 +653,6 @@ pub fn viscous_iso_alpha_gv() -> (GvKernel, Writes) {
     );
     let (cx, cy) = (geo.centroid[0], geo.centroid[1]);
     let cs2 = cs * cs;
-    let floor = Gv::from_f64(1e-30);
 
     let mut nust = [[Gv::ZERO; 3]; 3];
     for jj in 0..3usize {
@@ -666,9 +660,8 @@ pub fn viscous_iso_alpha_gv() -> (GvKernel, Writes) {
             let x = cx + Gv::from_f64(ii as f64 - 1.0) * dx;
             let y = cy + Gv::from_f64(jj as f64 - 1.0) * dy;
             let (rx, ry) = (x - bx, y - by);
-            let r = (rx * rx + ry * ry).sqrt().max(floor);
-            let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-            nust[jj][ii] = alpha * cs2 / omega_k;
+            let r = (rx * rx + ry * ry).sqrt();
+            nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
         }
     }
 
@@ -752,7 +745,6 @@ pub fn viscous_ortho_2p5d_gv(
         NDIM as usize,
     );
     let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
-    let floor = Gv::from_f64(1e-30);
 
     let mut h1 = [[Gv::ZERO; 3]; 3];
     let mut h2 = [[Gv::ZERO; 3]; 3];
@@ -774,14 +766,13 @@ pub fn viscous_ortho_2p5d_gv(
                     let off = [di as i32 - 1, dj as i32 - 1];
                     let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
                     let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
-                    gamma * pre / rho.max(floor)
+                    gamma * pre / rho
                 } else {
                     let cs = Gv::scalar("cs");
                     cs * cs
                 };
-                let r = ortho_25_orbital_radius(plane, x0, x1).max(floor);
-                let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-                a * cs2 / omega_k
+                let r = ortho_25_orbital_radius(plane, x0, x1);
+                alpha_viscosity(a, cs2, gm, r)
             } else {
                 Gv::scalar("nu")
             };
@@ -828,7 +819,6 @@ pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvK
     let (vst, rst) = prim_stencil_3d();
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; 3], &[0, 1, 2], 3);
     let c: [Gv; 3] = [geo.centroid[0], geo.centroid[1], geo.centroid[2]];
-    let floor = Gv::from_f64(1e-30);
 
     let mut h1 = [[[Gv::ZERO; 3]; 3]; 3];
     let mut h2 = [[[Gv::ZERO; 3]; 3]; 3];
@@ -854,14 +844,12 @@ pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvK
                         let off = [di as i32 - 1, dj as i32 - 1, dk as i32 - 1];
                         let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
                         let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
-                        gamma * pre / rho.max(floor)
+                        gamma * pre / rho
                     } else {
                         let cs = Gv::scalar("cs");
                         cs * cs
                     };
-                    let r = r_orb.max(floor);
-                    let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-                    a * cs2 / omega_k
+                    alpha_viscosity(a, cs2, gm, r_orb)
                 } else {
                     Gv::scalar("nu")
                 };

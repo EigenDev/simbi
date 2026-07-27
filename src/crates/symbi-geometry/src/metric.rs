@@ -1540,7 +1540,7 @@ impl<S: Scalar> KerrKSCylindrical<S> {
             z / r,
         ];
         // |l|^2 with g0^{-1} = diag(1, 1/R^2, 1); the azimuthal term is a^2 R^2/(r^2+a^2)^2.
-        let r_safe = rr_cyl.max(S::from_f64(1.0e-30));
+        let r_safe = rr_cyl.abs();
         let ll2 = l[0] * l[0] + (l[1] / r_safe) * (l[1] / r_safe) + l[2] * l[2];
         (two_h, l, ll2)
     }
@@ -1609,7 +1609,7 @@ impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
     fn shift(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let (two_h, l, ll2) = self.ks_quantities(x);
         let s = two_h / (S::ONE + two_h * ll2);
-        let r_safe = x[0].max(S::from_f64(1.0e-30));
+        let r_safe = x[0].abs();
         Tensor::new([s * l[0], s * l[1] / (r_safe * r_safe), s * l[2]])
     }
     fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
@@ -1625,7 +1625,7 @@ impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
     fn spatial_metric_inv(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
         let (two_h, l, ll2) = self.ks_quantities(x);
         let coef = two_h / (S::ONE + two_h * ll2);
-        let r_safe = x[0].max(S::from_f64(1.0e-30));
+        let r_safe = x[0].abs();
         let inv_base = [S::ONE, S::ONE / (r_safe * r_safe), S::ONE];
         let lu = [l[0], l[1] * inv_base[1], l[2]];
         Matrix::from_fn(|ii, jj| {
@@ -1636,7 +1636,7 @@ impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
     // det(g0 + 2H l l^T) = det(g0) (1 + 2H |l|^2) (rank-1 lemma on the base).
     fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
         let (two_h, _l, ll2) = self.ks_quantities(x);
-        let r_safe = x[0].max(S::from_f64(1.0e-30));
+        let r_safe = x[0].abs();
         (r_safe * r_safe * (S::ONE + two_h * ll2)).sqrt()
     }
     fn volume_factor(&self, x: Tensor<S, 3>) -> S {

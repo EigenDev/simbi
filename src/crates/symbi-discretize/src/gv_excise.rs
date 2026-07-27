@@ -53,21 +53,13 @@ use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
 use crate::coords::{Coords, Spacetime, Spacing};
 use crate::gv::cell_geometry_gv;
 
-/// the vacuum-sink floor an excised cell is frozen at (Dirichlet, every step). a cold, c2p-safe
-/// deep vacuum: `rho_floor` sits ~10 orders below a unit ambient (and 2 orders above the c2p
-/// failure floor 1e-12, so recovery never trips), `p_floor` keeps the interior cold and
-/// subluminal. the exact values are physically inert -- the interior is causally sealed and never
-/// evolved -- but they must be POSITIVE so the boundary Riemann sees a well-posed vacuum state.
-const RHO_FLOOR: f64 = 1e-10;
-const P_FLOOR: f64 = 1e-12;
-
 /// the vacuum-floor primitive at storage slot `kk` of a `[rho, vel_0.., pre]` set of arity `nf`:
 /// `rho_floor` at the density slot, `p_floor` at the pressure slot, zero velocity between.
 fn vacuum_floor(kk: usize, nf: usize) -> Gv {
     if kk == 0 {
-        Gv::from_f64(RHO_FLOOR)
+        Gv::scalar("excision_rho")
     } else if kk == nf - 1 {
-        Gv::from_f64(P_FLOOR)
+        Gv::scalar("excision_pre")
     } else {
         Gv::ZERO
     }
@@ -508,6 +500,23 @@ pub fn shell_flux_map_gv(
 #[cfg(test)]
 mod shell_flux_tests {
     use super::*;
+
+    #[test]
+    fn excision_fill_reads_scale_derived_atmosphere() {
+        let (kernel, _) = excise_fill_gv();
+        assert!(
+            kernel
+                .scalar_params
+                .iter()
+                .any(|name| name == "excision_rho")
+        );
+        assert!(
+            kernel
+                .scalar_params
+                .iter()
+                .any(|name| name == "excision_pre")
+        );
+    }
 
     #[test]
     fn shell_flux_map_wires_the_diagnostic_radius_and_reads_the_flux_field() {

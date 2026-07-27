@@ -741,113 +741,147 @@ pub fn rmhd_source_cfl_gr_gv(
     // source at p = 0, the energy source at the full p.
     // also harvest the lapse + shift: the evolved energy slot is the covariant ehat, so the eulerian
     // admissibility energy E = tau + D is recovered as E = (ehat + D + beta^i S_i) / alpha.
-    let (gm_inv, alpha, beta, s_mom, s_tau): (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>, Tensor<Gv, 3>, Gv) =
-        match (spacetime, coords) {
-            (Spacetime::Schwarzschild, _) => {
-                let mg = Schwarzschild { mass: mass_gv };
-                let (sm, _) =
-                    grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, Gv::ZERO, b);
-                let (_, st) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pre, b);
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-                let mg = SchwarzschildKSCartesian { mass: mass_gv };
-                let (sm, _) = grmhd_covariant_source(
-                    &SchwarzschildKSCartesian { mass },
-                    x,
-                    rho_h,
-                    v,
-                    Gv::ZERO,
-                    b,
-                );
-                let (_, st) =
-                    grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-                let mg = SchwarzschildKSCylindrical { mass: mass_gv };
-                let (sm, _) = grmhd_covariant_source(
-                    &SchwarzschildKSCylindrical { mass },
-                    x,
-                    rho_h,
-                    v,
-                    Gv::ZERO,
-                    b,
-                );
-                let (_, st) = grmhd_covariant_source(
-                    &SchwarzschildKSCylindrical { mass },
-                    x,
-                    rho_h,
-                    v,
-                    pre,
-                    b,
-                );
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            (Spacetime::SchwarzschildKS, _) => {
-                let mg = SchwarzschildKS { mass: mass_gv };
-                let (sm, _) =
-                    grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
-                let (_, st) =
-                    grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-            // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-            (Spacetime::KerrKS, Coords::Cartesian) => {
-                let spin_gv = Gv::scalar("kerr_spin");
-                let mg = KerrKSCartesian {
-                    mass: mass_gv,
-                    spin: spin_gv,
-                };
-                let spin = Dual::constant(spin_gv);
-                let (sm, _) = grmhd_covariant_source(
-                    &KerrKSCartesian { mass, spin },
-                    x,
-                    rho_h,
-                    v,
-                    Gv::ZERO,
-                    b,
-                );
-                let (_, st) =
-                    grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            (Spacetime::KerrKS, Coords::Cylindrical) => {
-                let spin_gv = Gv::scalar("kerr_spin");
-                let mg = KerrKSCylindrical {
-                    mass: mass_gv,
-                    spin: spin_gv,
-                };
-                let spin = Dual::constant(spin_gv);
-                let (sm, _) = grmhd_covariant_source(
-                    &KerrKSCylindrical { mass, spin },
-                    x,
-                    rho_h,
-                    v,
-                    Gv::ZERO,
-                    b,
-                );
-                let (_, st) =
-                    grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pre, b);
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            (Spacetime::KerrKS, _) => {
-                let spin_gv = Gv::scalar("kerr_spin");
-                let mg = KerrKS {
-                    mass: mass_gv,
-                    spin: spin_gv,
-                };
-                let spin = Dual::constant(spin_gv);
-                let (sm, _) =
-                    grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, Gv::ZERO, b);
-                let (_, st) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pre, b);
-                (mg.spatial_metric_inv(x), mg.lapse(x), mg.shift(x), sm, st)
-            }
-            (Spacetime::Minkowski, _) => {
-                unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
-            }
-        };
+    let (gm, gm_inv, alpha, beta, s_mom, s_tau): (
+        Matrix<Gv, 3>,
+        Matrix<Gv, 3>,
+        Gv,
+        Tensor<Gv, 3>,
+        Tensor<Gv, 3>,
+        Gv,
+    ) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
+            let mg = Schwarzschild { mass: mass_gv };
+            let (sm, _) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+            let mg = SchwarzschildKSCartesian { mass: mass_gv };
+            let (sm, _) = grmhd_covariant_source(
+                &SchwarzschildKSCartesian { mass },
+                x,
+                rho_h,
+                v,
+                Gv::ZERO,
+                b,
+            );
+            let (_, st) =
+                grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+            let mg = SchwarzschildKSCylindrical { mass: mass_gv };
+            let (sm, _) = grmhd_covariant_source(
+                &SchwarzschildKSCylindrical { mass },
+                x,
+                rho_h,
+                v,
+                Gv::ZERO,
+                b,
+            );
+            let (_, st) =
+                grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        (Spacetime::SchwarzschildKS, _) => {
+            let mg = SchwarzschildKS { mass: mass_gv };
+            let (sm, _) =
+                grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::KerrKS, Coords::Cartesian) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let mg = KerrKSCartesian {
+                mass: mass_gv,
+                spin: spin_gv,
+            };
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) =
+                grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) =
+                grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let mg = KerrKSCylindrical {
+                mass: mass_gv,
+                spin: spin_gv,
+            };
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) =
+                grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) =
+                grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        (Spacetime::KerrKS, _) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let mg = KerrKS {
+                mass: mass_gv,
+                spin: spin_gv,
+            };
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pre, b);
+            (
+                mg.spatial_metric(x),
+                mg.spatial_metric_inv(x),
+                mg.lapse(x),
+                mg.shift(x),
+                sm,
+                st,
+            )
+        }
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
+        }
+    };
     // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j. the stored
     // energy is the covariant ehat, so E = (ehat + D + beta^i S_i) / alpha (metric-free b^2 blocks a
     // direct e - p reconstruction; the invert is exact).
@@ -869,11 +903,19 @@ pub fn rmhd_source_cfl_gr_gv(
     let q0 = e_cons - (d_cons * d_cons + gamma_norm(&mom)).sqrt();
     let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
     let sm_norm = gamma_norm(&sm_arr).sqrt();
-    // lambda_S = (|S_tau| + ||S_mom||_gamma) / q; the floor keeps a near-boundary cell driving
-    // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0). it is RELATIVE to the
-    // cell's own energy because q carries one power of energy: an absolute floor would mean something
-    // different in a near-vacuum atmosphere than in a dense core.
-    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * e_cons.abs());
+    // lambda_S = (|S_tau| + ||S_mom||_gamma) / q. the denominator floor uses the same local
+    // one-power energy scale as the admissibility projection, including |B|^2. this keeps the rate
+    // homogeneous under a change of density units and prevents gas energy alone from setting the
+    // numerical margin in a magnetically dominated atmosphere.
+    let state_scale = symbi_hydro::admissible::rmhd_state_scale(
+        d_cons,
+        &Tensor::new(mom),
+        e_cons,
+        &b,
+        &gm_inv,
+        &gm,
+    );
+    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
     // no cell inside the event horizon may throttle the global timestep. the outer horizon
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
@@ -1105,7 +1147,9 @@ pub fn rhd_source_cfl_gr_gv(
     };
     let root = (d_cons * d_cons + gamma_norm(&mom)).sqrt();
     let q0 = e_cons - root;
-    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * e_cons.abs());
+    let state_scale =
+        symbi_hydro::admissible::rhd_state_scale(d_cons, &Tensor::new(mom), e_cons, &gm_inv);
+    let q_safe = q0.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
     // the rate at which the geometric source consumes the admissibility margin
     // q0 = E - sqrt(D^2 + |S|^2), evaluated for the COVARIANT (killing) energy variable.
     // over a source step the mass has no source and the killing energy has none either
@@ -1148,7 +1192,7 @@ pub fn rhd_source_cfl_gr_gv(
     // the valencia form's p — far weaker, but NOT absent. omitting it lets a stationary
     // rotating equilibrium on a zero-shift chart run past its admissible step.
     let root_safe =
-        root.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * e_cons.abs());
+        root.max(Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale);
     let sm_norm = gamma_norm(&sm_arr).sqrt();
     let lam_first = ((beta_dot_sm / alpha).abs() + (s_dot_sm / root_safe).abs()) / q_safe;
     let lam_second = sm_norm / (Gv::from_f64(2.0) * root_safe * q_safe).sqrt();
@@ -1384,11 +1428,16 @@ pub fn fofc_project_gr_mhd_gv(
     let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
         Gv::field(&format!("bcell_{k}"), &format!("mhd.bcell[{k}]"))
     }));
-    // strict-interior floors, each scaled to the dimensions of its own residual so the thresholds are
-    // relative rather than absolute: q carries one power of energy, psi carries three halves.
-    let eps_d = Gv::from_f64(1e-12) * us_den;
-    let eps_q = Gv::from_f64(1e-10) * e_a;
-    let eps_psi = Gv::from_f64(1e-10) * e_a * e_a.max(Gv::ZERO).sqrt();
+    // strict-interior floors use one shared local conserved-state scale. D, |S|, E, and |B|^2
+    // carry one power of energy; psi carries three halves. including magnetic energy prevents a
+    // magnetically dominated atmosphere from defining its numerical margin using gas energy alone.
+    let state_scale =
+        symbi_hydro::admissible::rmhd_state_scale(us_den, &s_a, e_a, &b, &gm_inv, &gm);
+    let eps_d = Gv::from_f64(1e-12) * state_scale;
+    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
+    let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
+        * state_scale
+        * state_scale.sqrt();
     // 20 halvings resolve theta to ~1e-6. every iteration unrolls into the traced expression graph,
     // and a truncated bisection only returns a SMALLER (more conservative) blend, never an
     // inadmissible one, so the count trades kernel size against how sharply the projection hugs the
@@ -1494,10 +1543,12 @@ pub fn fofc_project_gr_gv(
     let inv_alpha = Gv::ONE / alpha;
     let e_c = (x_nrg + x_den + beta_dot(&s_c)) * inv_alpha;
     let e_a = (us_nrg + us_den + beta_dot(&s_a)) * inv_alpha;
-    // strict-interior floors relative to the admissible anchor (keep the projected state off the exact
-    // boundary so the downstream c2p converges).
-    let eps_d = Gv::from_f64(1e-12) * us_den;
-    let eps_f = Gv::from_f64(1e-10) * e_a * e_a;
+    // strict-interior floors share the anchor's local one-power energy scale. the density threshold
+    // carries one power and the quadratic cone residual carries two.
+    let state_scale = symbi_hydro::admissible::rhd_state_scale(us_den, &s_a, e_a, &gm_inv);
+    let eps_d = Gv::from_f64(1e-12) * state_scale;
+    let eps_f =
+        Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale * state_scale;
     let theta = symbi_hydro::admissible::admissible_theta(
         x_den, s_c, e_c, us_den, s_a, e_a, &gm_inv, eps_d, eps_f,
     );
@@ -1657,6 +1708,7 @@ mod m1_log_radius_tests {
                 ("dx_0", slope),
                 ("_coord_0", i),
                 ("map_kind_0", 1.0),
+                ("map_param_0", 0.0),
             ],
         );
         end_trace();
@@ -1677,7 +1729,16 @@ mod m1_log_radius_tests {
         begin_trace();
         let node = gv_cell_center(0, &[Spacing::Uniform]).node();
         let (x_lo, dx, i) = (2.0_f64, 0.5_f64, 7.0_f64);
-        let got = eval(node, &[("x_lo_0", x_lo), ("dx_0", dx), ("_coord_0", i)]);
+        let got = eval(
+            node,
+            &[
+                ("x_lo_0", x_lo),
+                ("dx_0", dx),
+                ("_coord_0", i),
+                ("map_kind_0", 0.0),
+                ("map_param_0", 1.0),
+            ],
+        );
         end_trace();
         assert_eq!(
             got,

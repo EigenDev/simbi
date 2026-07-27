@@ -437,7 +437,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 // physical width is r*dx2, smallest at the inner edge.
                 let dr = sim.geom.dx[0];
                 let r_min = sim.geom.x_lo[0] + 0.5 * dr; // innermost cell centroid
-                dr.min((r_min * sim.geom.dx[1]).max(1e-30))
+                dr.min((r_min * sim.geom.dx[1]).abs())
             } else {
                 sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min)
             };

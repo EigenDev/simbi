@@ -1202,7 +1202,7 @@ where
             + ac * (*stage_input.den.view().at(coord) * volume - sim.dt * divergence);
         let actual_mass = *sim.fields.cons.den.view().at(coord) * volume;
         let residual = actual_mass - expected_mass;
-        let tolerance = 128.0 * f64::EPSILON * actual_mass.abs().max(expected_mass.abs()).max(1.0);
+        let tolerance = 128.0 * f64::EPSILON * actual_mass.abs().max(expected_mass.abs());
         if residual > tolerance && ac > 0.0 {
             transfers.push(crate::mass_transport::MassTransfer {
                 destination: cell_container(coord, &interior, layout),
@@ -2921,8 +2921,7 @@ where
                     + ac * (source_mass - sim.dt * divergence);
             let actual_mass = *sim.fields.cons.den.view().at(coord) * geometry.volume(coord);
             let residual = actual_mass - expected_mass;
-            let tolerance =
-                128.0 * f64::EPSILON * actual_mass.abs().max(expected_mass.abs()).max(1.0);
+            let tolerance = 128.0 * f64::EPSILON * actual_mass.abs().max(expected_mass.abs());
             if residual < -tolerance {
                 transfers.push(MassTransfer {
                     destination: MATERIAL_REMOVAL_RESERVOIR,
@@ -3189,7 +3188,7 @@ where
                 }
             }
             let removed_mass: f64 = transfers.iter().map(|(_, mass)| mass).sum();
-            let tolerance = 32.0 * f64::EPSILON * source_mass.max(removed_mass).max(1.0);
+            let tolerance = 32.0 * f64::EPSILON * source_mass.max(removed_mass);
             if removed_mass > source_mass + tolerance {
                 return Err(format!(
                     "accepted sink mass {removed_mass:?} exceeds source mass {source_mass:?}"

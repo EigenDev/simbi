@@ -188,10 +188,14 @@ fn ct_contact_emf_gv(face_e: [Gv; 4], cell_e: [Gv; 4], dflux: [Gv; 4]) -> Gv {
     let [ene, enw, ese, esw] = cell_e;
     let [fnf, fs, fe, fw] = dflux;
     let two = Gv::from_f64(2.0);
-    let eps = Gv::from_f64(1.0e-12);
+    let flux_scale = fnf.abs().max(fs.abs()).max(fe.abs()).max(fw.abs());
+    let eps = Gv::from_f64(32.0 * f64::EPSILON) * flux_scale;
     let eavg = Gv::from_f64(0.25) * (es + en + ew + ee);
     let soft = |f: Gv, a: Gv, b: Gv| {
-        let s = f / (f.abs() + eps);
+        let denominator = f.abs() + eps;
+        let nonzero = denominator.cmp_gt(Gv::ZERO);
+        let divisor = Gv::select(nonzero, denominator, Gv::ONE);
+        let s = Gv::select(nonzero, f / divisor, Gv::ZERO);
         Gv::from_f64(0.5) * ((a + b) + s * (a - b))
     };
     let de_jl = soft(fw, two * (es - esw), two * (en - enw)); // west
@@ -974,15 +978,23 @@ struct UctDir {
     dr: Gv,
 }
 
+fn weighted_average(ap: Gv, vp: Gv, am: Gv, vm: Gv) -> Gv {
+    let sum = ap + am;
+    let nonzero = sum.cmp_gt(Gv::ZERO);
+    let divisor = Gv::select(nonzero, sum, Gv::ONE);
+    Gv::select(nonzero, (ap * vp + am * vm) / divisor, Gv::ZERO)
+}
+
 /// HLL coefficients (Eq. 32) from the edge signal speeds `ap = max(0, lambda_max)`,
 /// `am = max(0, -lambda_min)`: a^L = ap/(ap+am), a^R = am/(ap+am), d^L = d^R = ap*am/(ap+am).
 fn uct_hll_coeffs(ap: Gv, am: Gv) -> UctDir {
-    let eps = Gv::from_f64(1.0e-30);
-    let sum = ap + am + eps;
-    let d = ap * am / sum;
+    let sum = ap + am;
+    let nonzero = sum.cmp_gt(Gv::ZERO);
+    let divisor = Gv::select(nonzero, sum, Gv::ONE);
+    let d = Gv::select(nonzero, ap * am / divisor, Gv::ZERO);
     UctDir {
-        al: ap / sum,
-        ar: am / sum,
+        al: Gv::select(nonzero, ap / divisor, Gv::from_f64(0.5)),
+        ar: Gv::select(nonzero, am / divisor, Gv::from_f64(0.5)),
         dl: d,
         dr: d,
     }
@@ -996,7 +1008,13 @@ fn uct_hll_coeffs(ap: Gv, am: Gv) -> UctDir {
 /// share this algebra; only `lstar` (the contact speed) is regime-specific (computed upstream).
 fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
     let half = Gv::from_f64(0.5);
-    let eps = Gv::from_f64(1.0e-30);
+    let speed_scale = ll
+        .abs()
+        .max(lr.abs())
+        .max(lstar.abs())
+        .max(vxl.abs())
+        .max(vxr.abs());
+    let eps = Gv::from_f64(32.0 * f64::EPSILON) * speed_scale;
     // guard the (lambda^s - lstar) denominators away from zero (preserve sign).
     let den_l = ll - lstar;
     let den_r = lr - lstar;
@@ -1097,9 +1115,8 @@ pub fn rmhd_edge_emf_uct_gv(
     let cy = uct_hll_coeffs(apy, amy);
     // upwind transverse velocities (Eq. 29): vbar_x upwind in x (alpha^+ carries the West/left state),
     // vbar_y upwind in y (alpha^+ carries the South/lower state).
-    let eps = Gv::from_f64(1.0e-30);
-    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
-    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
+    let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
     // staggered face B PLM-reconstructed a half-cell to the EDGE (M&DZ: the staggered transverse
     // field reconstructed from the adjacent interface — the load-bearing 2nd-order piece). geometry
     // VERIFIED vs the CT curl: Ez[i,j] is the corner (i-1/2,j-1/2); B_y is at the corner's y but
@@ -1194,9 +1211,8 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
     let cx = uct_hll_coeffs(apx, amx);
     let cy = uct_hll_coeffs(apy, amy);
-    let eps = Gv::from_f64(1.0e-30);
-    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
-    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
+    let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
     // the transport velocity at the corner: vtilde = alpha v - beta on EACH in-plane axis (beta_p1
     // vanishes on the spherical polar angle but not on cartesian y / cylindrical z). the metric at
     // the corner (a0_f, a1_f) also densitizes the whole EMF below.
@@ -1297,9 +1313,8 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
     let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
     let cx = uct_hll_coeffs(apx, amx);
     let cy = uct_hll_coeffs(apy, amy);
-    let eps = Gv::from_f64(1.0e-30);
-    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
-    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
+    let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
     // the corner metric: the edge midpoint — cell-centered along the edge, faces on
     // the transverse pair; the transport velocity is vtilde = alpha v - beta on each
     // transverse axis, and the corner sqrt(gamma) densitizes the whole EMF.
@@ -1529,7 +1544,6 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
     };
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
-    let eps = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
     let rho = |o: &[i32]| gv_field_at("e_rho", "rho", ndim, o);
     let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
@@ -1595,10 +1609,18 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
         let (mxl, mxr) = (rl * vl, rr * vr);
         let fl = rl * vl * vl + pl + half * bsl - bnl * bnl;
         let fr = rr * vr * vr + pr + half * bsr - bnr * bnr;
-        let inv = Gv::ONE / (sr - sl + eps);
+        let wave_span = sr - sl;
+        let wave_nonzero = wave_span.cmp_gt(Gv::ZERO);
+        let wave_divisor = Gv::select(wave_nonzero, wave_span, Gv::ONE);
+        let inv = Gv::select(wave_nonzero, Gv::ONE / wave_divisor, Gv::ZERO);
         let rho_hll = (sr * rr - sl * rl + mxl - mxr) * inv;
         let mx_hll = (sr * mxr - sl * mxl + fl - fr) * inv;
-        let lstar = mx_hll / guard_denominator(rho_hll, eps);
+        let rho_scale = rl.abs().max(rr.abs());
+        let rho_nonzero = rho_hll
+            .abs()
+            .cmp_gt(Gv::from_f64(32.0 * f64::EPSILON) * rho_scale);
+        let rho_divisor = Gv::select(rho_nonzero, rho_hll, Gv::ONE);
+        let lstar = Gv::select(rho_nonzero, mx_hll / rho_divisor, Gv::ZERO);
         let c = uct_hllc_coeffs(sl, sr, lstar, vl, vr);
         (c.dl, c.dr)
     };
@@ -1625,8 +1647,8 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
     let vx_e = avg2(vp1(&ne), vp1(&se));
     let vy_s = avg2(vp2(&sw), vp2(&se));
     let vy_n = avg2(vp2(&nw), vp2(&ne));
-    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
-    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
+    let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
     // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction).
     let theta = Gv::scalar("theta");
     let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
@@ -1678,7 +1700,6 @@ pub fn nmhd_edge_emf_uct_hlld_gv(
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
     let one = Gv::ONE;
-    let eps = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
     let ne = zero.clone();
     let nw = cm(&[g1]);
@@ -1779,8 +1800,8 @@ pub fn nmhd_edge_emf_uct_hlld_gv(
     let apy = zero_g.max(max4("h_wsr2", "wsr_p2"));
     let amy = zero_g.max(neg_min4("h_wsl2", "wsl_p2"));
     // upwind transverse velocity (eq:vt): alpha^+ carries the West/South state.
-    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
-    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
+    let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
     // staggered face B reconstructed to the EDGE (R+/-; theta=0 => identity = zeroth order). these are the
     // DISSIPATED transverse fields in the master composition (Eq. 16).
     let by_e = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &zero, g1, -1.0);
@@ -1854,7 +1875,6 @@ pub fn imhd_edge_emf_uct_hlld_gv(
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
     let one = Gv::ONE;
-    let eps = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
     let ne = zero.clone();
     let nw = cm(&[g1]);
@@ -1937,8 +1957,8 @@ pub fn imhd_edge_emf_uct_hlld_gv(
     let amx = zero_g.max(neg_min4("h_wsl1", "wsl_p1"));
     let apy = zero_g.max(max4("h_wsr2", "wsr_p2"));
     let amy = zero_g.max(neg_min4("h_wsl2", "wsl_p2"));
-    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
-    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let vbar_x = weighted_average(apx, vx_w, amx, vx_e);
+    let vbar_y = weighted_average(apy, vy_s, amy, vy_n);
     let by_e = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &zero, g1, -1.0);
     let by_w = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &nw, g1, 1.0);
     let bx_n = recon_face_to_edge(ndim, theta, "h_bface_a", "bface_a", &zero, g2, -1.0);
@@ -2017,7 +2037,6 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
     };
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
-    let eps = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
     let gamma = Gv::scalar("gamma");
     let eos = IdealGas { gamma };
@@ -2109,7 +2128,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
             );
         let ap = zero_g.max(st.lam[1]);
         let am = zero_g.max(zero_g - st.lam[0]);
-        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
     // x-Riemann dissipates B_y (component 1), normal B_x (0). PER-FACE: North (NW->NE) and South
@@ -2230,7 +2249,6 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     };
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
-    let eps = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
     let gamma = Gv::scalar("gamma");
     let eos = IdealGas { gamma };
@@ -2344,7 +2362,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
             );
         let ap = zero_g.max(l1);
         let am = zero_g.max(zero_g - l0);
-        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
     // the grid-g1-face Riemann (world normal pc1) at its two grid-g2 cell centres (N=0, S=-1): the
@@ -2446,7 +2464,6 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
     };
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
-    let eps = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
     let gamma = Gv::scalar("gamma");
     let eos = IdealGas { gamma };
@@ -2554,7 +2571,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
             );
         let ap = zero_g.max(l1);
         let am = zero_g.max(zero_g - l0);
-        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
     // the grid-g1-face Riemann (world normal pc1) at its two grid-g2 cell centres.

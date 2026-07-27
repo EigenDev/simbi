@@ -116,7 +116,7 @@ pub fn bondi_profile(r: f64, gamma: f64) -> BondiState {
     // bracket the requested branch. g -> +inf at both u -> 0 and u -> inf, so
     // stepping outward from u_min until g > 0 always closes the bracket.
     let (mut lo, mut hi) = if supersonic {
-        let mut hi = u_min.max(1e-12) * 2.0;
+        let mut hi = u_min * 2.0;
         while g(hi) < 0.0 {
             hi *= 2.0;
         }

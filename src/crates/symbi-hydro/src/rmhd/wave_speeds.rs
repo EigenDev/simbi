@@ -49,7 +49,8 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     // skips compute-all-paths via `S::select`. the
     // cheap shared prefix above (rho, hh, w2, cssq, bmu*) stays unconditional.
     let cond_vsq = vsq.cmp_lt(eps);
-    let cond_bn = (bn * bn).cmp_lt(eps);
+    let magnetic_scale = bsq + rho * hh;
+    let cond_bn = (bn * bn).cmp_lt(eps * magnetic_scale);
 
     let [sl, sr] = S::cond_vec(
         cond_vsq,
@@ -202,7 +203,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
     let sent_lo = S::from_f64(-1e30);
 
     // safe divisor for q / sqrt_2m (only used when q != 0)
-    let safe_sqrt = sqrt_2m.max(S::from_f64(1e-30));
+    let safe_sqrt = S::select(sqrt_2m.cmp_gt(S::ZERO), sqrt_2m, S::ONE);
     let q_over_s = q / safe_sqrt;
 
     // ---- q ~ 0 path: roots from degenerate biquadratic ----
@@ -283,7 +284,7 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
         p.abs().cmp_lt(eps),
         // case 1: p ~ 0 -> cube-root formula (the `powf` lives ONLY here).
         || {
-            let aq = q.abs().max(S::from_f64(1e-30));
+            let aq = q.abs();
             let cq = aq.powf(third);
             let scq = S::select(q.cmp_gt(S::ZERO), cq, S::ZERO - cq); // cheap sign flip
             S::ZERO - scq - b3
@@ -298,7 +299,7 @@ fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
                 // when its branch is taken.
                 || {
                     let safe_p = S::select(p.abs().cmp_gt(eps), p, S::ONE);
-                    let t = (p.abs().max(S::from_f64(1e-30)) / S::from_f64(3.0)).sqrt();
+                    let t = (p.abs() / S::from_f64(3.0)).sqrt();
                     let g = S::from_f64(1.5) * q / (safe_p * t);
                     let disc = S::from_f64(4.0) * p * p * p + S::from_f64(27.0) * q * q;
                     S::cond(
@@ -500,6 +501,36 @@ mod tests {
         }
         // sanity: the bound is genuinely an over-estimate (a strict margin everywhere).
         assert!(worst_margin >= -1e-9, "worst margin {worst_margin}");
+    }
+
+    #[test]
+    fn quartic_wave_speeds_are_invariant_to_state_units() {
+        let eos = IdealGas { gamma: 4.0 / 3.0 };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let reference = MhdPrim {
+            hydro: Prim {
+                rho: 1.3,
+                vel: Tensor::new([0.31, -0.17, 0.08]),
+                pre: 0.47,
+            },
+            mag: Tensor::new([2e-8, 0.61, -0.23]),
+        };
+        let expected = rmhd_wave_speeds(&eos, &reference, &nhat);
+
+        for factor in [1e-100_f64, 1.0, 1e100] {
+            let field_factor = factor.sqrt();
+            let scaled = MhdPrim {
+                hydro: Prim {
+                    rho: reference.rho * factor,
+                    vel: reference.vel,
+                    pre: reference.pre * factor,
+                },
+                mag: reference.mag.scale(field_factor),
+            };
+            let got = rmhd_wave_speeds(&eos, &scaled, &nhat);
+            assert!((got.0 - expected.0).abs() < 1e-12);
+            assert!((got.1 - expected.1).abs() < 1e-12);
+        }
     }
 
     // item 4: the CFL upper bound must PRESERVE NaN — an unphysical prim (NaN from a failed

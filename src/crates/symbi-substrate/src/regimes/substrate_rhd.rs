@@ -62,8 +62,10 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithExcision
     for RhdSubstrateKernelSet<Mem, Sc, D>
 {
-    fn with_excision(mut self, r_exc: f64) -> Self {
+    fn with_excision(mut self, r_exc: f64, rho_scale: f64, pre_scale: f64) -> Self {
         self.excision_radius = r_exc;
+        self.excision_rho = rho_scale * 1e-10;
+        self.excision_pre = pre_scale * 1e-12;
         self
     }
 }
@@ -102,6 +104,9 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// the horizon-excision sphere radius about the chart origin (cartesian
     /// kerr-schild only); 0 disables the excision pass entirely.
     pub excision_radius: f64,
+    /// density and pressure of the absorbing atmosphere inside the excision surface.
+    pub excision_rho: f64,
+    pub excision_pre: f64,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
@@ -122,6 +127,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             excision_radius: 0.0,
+            excision_rho: 1.0,
+            excision_pre: 1.0,
         }
     }
 
@@ -355,6 +362,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 sim,
                 self.gamma,
                 self.excision_radius,
+                self.excision_rho,
+                self.excision_pre,
             );
         }
     }
@@ -365,6 +374,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 sim,
                 self.gamma,
                 self.excision_radius,
+                self.excision_rho,
+                self.excision_pre,
             );
         }
     }

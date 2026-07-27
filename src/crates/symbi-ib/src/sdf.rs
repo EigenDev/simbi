@@ -256,8 +256,11 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
         for a in 0..D {
             sq = sq + g[a] * g[a];
         }
-        // a degenerate gradient (the exact center) divides by the guard, keeping the result finite.
-        let inv = S::ONE / sq.sqrt().max(S::from_f64(1e-300));
+        // a degenerate gradient has no preferred normal and maps to the zero vector.
+        let norm = sq.sqrt();
+        let nonzero = norm.cmp_gt(S::ZERO);
+        let divisor = S::select(nonzero, norm, S::ONE);
+        let inv = S::select(nonzero, S::ONE / divisor, S::ZERO);
         std::array::from_fn(|a| g[a] * inv)
     }
 }
@@ -568,6 +571,15 @@ mod tests {
         // an INSIDE point near the +x face still points outward along +x.
         let n = c.normal([0.9, 0.1, 0.0]);
         assert!(approx(n[0], 1.0, 1e-12));
+    }
+
+    #[test]
+    fn sphere_center_has_zero_normal_at_every_length_scale() {
+        for scale in [1e-200, 1e-100, 1.0, 1e100, 1e200] {
+            let center = [0.3 * scale, -0.4 * scale, 0.2 * scale];
+            let sphere = SdfExpr::sphere(center, scale);
+            assert_eq!(sphere.normal(center), [0.0; 3]);
+        }
     }
 
     #[test]

@@ -85,7 +85,7 @@ fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
     });
     let before = snapshot(&sim);
 
-    dispatch_excise(&sim, GAMMA, R_EXC);
+    dispatch_excise(&sim, GAMMA, R_EXC, 1e-10, 1e-12);
 
     let after = snapshot(&sim);
     let dx = 2.0 * L / N as f64;
@@ -142,7 +142,7 @@ fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
         pre: 0.02,
     });
     let before = snapshot(&sim);
-    dispatch_excise(&sim, GAMMA, R_EXC);
+    dispatch_excise(&sim, GAMMA, R_EXC, RHO_FLOOR, P_FLOOR);
     let once = snapshot(&sim);
 
     let dx = 2.0 * L / N as f64;
@@ -188,7 +188,7 @@ fn excision_freezes_the_vacuum_floor_and_is_idempotent() {
         "the deep sphere must carry the floor (got {n_floor} cells)"
     );
 
-    dispatch_excise(&sim, GAMMA, R_EXC);
+    dispatch_excise(&sim, GAMMA, R_EXC, RHO_FLOOR, P_FLOOR);
     let twice = snapshot(&sim);
     for (i, (a, b)) in twice.iter().zip(once.iter()).enumerate() {
         for k in 0..8 {

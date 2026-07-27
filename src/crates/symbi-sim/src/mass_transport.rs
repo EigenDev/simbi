@@ -13,6 +13,10 @@
 
 use std::collections::BTreeMap;
 
+fn mass_roundoff_tolerance(a: f64, b: f64) -> f64 {
+    32.0 * f64::EPSILON * a.abs().max(b.abs())
+}
+
 /// stable identity for a fluid cell or material reservoir.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -62,7 +66,7 @@ impl TransportKernel {
         }
 
         let outgoing: f64 = combined.values().sum();
-        let tolerance = 32.0 * f64::EPSILON * source_mass.max(outgoing).max(1.0);
+        let tolerance = mass_roundoff_tolerance(source_mass, outgoing);
         if outgoing > source_mass + tolerance {
             return Err(format!(
                 "outgoing mass {outgoing:?} exceeds source mass {source_mass:?} for container {}",
@@ -196,7 +200,7 @@ pub fn accepted_face_moment_rates(
         return Err("accepted outward face masses must be finite and non-negative".to_string());
     }
     let outgoing = mass_to_minus + mass_to_plus;
-    let tolerance = 32.0 * f64::EPSILON * source_mass.max(outgoing).max(1.0);
+    let tolerance = mass_roundoff_tolerance(source_mass, outgoing);
     if outgoing > source_mass + tolerance {
         return Err(format!(
             "accepted outward face mass {outgoing:?} exceeds source mass {source_mass:?}"
@@ -495,6 +499,57 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("exceeds source mass"), "{err}");
+    }
+
+    #[test]
+    fn mass_creation_validation_is_scale_invariant() {
+        for scale in [1e-200, 1e-100, 1.0, 1e100, 1e200] {
+            let accepted = TransportKernel::new(
+                ContainerId(1),
+                scale,
+                [MassTransfer {
+                    destination: ContainerId(2),
+                    mass: scale * (1.0 + 8.0 * f64::EPSILON),
+                }],
+            );
+            assert!(accepted.is_ok(), "roundoff rejected at scale {scale:e}");
+
+            let rejected = TransportKernel::new(
+                ContainerId(1),
+                scale,
+                [MassTransfer {
+                    destination: ContainerId(2),
+                    mass: scale * 1.01,
+                }],
+            );
+            assert!(
+                rejected.unwrap_err().contains("exceeds source mass"),
+                "mass creation accepted at scale {scale:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepted_face_validation_is_scale_invariant() {
+        for scale in [1e-200, 1e-100, 1.0, 1e100, 1e200] {
+            assert!(
+                accepted_face_moment_rates(
+                    scale,
+                    0.4 * scale,
+                    scale * (0.6 + 8.0 * f64::EPSILON),
+                    2.0,
+                    0.5,
+                )
+                .is_ok(),
+                "roundoff rejected at scale {scale:e}"
+            );
+            assert!(
+                accepted_face_moment_rates(scale, 0.5 * scale, 0.51 * scale, 2.0, 0.5)
+                    .unwrap_err()
+                    .contains("exceeds source mass"),
+                "mass creation accepted at scale {scale:e}"
+            );
+        }
     }
 
     #[test]

@@ -87,7 +87,7 @@ impl CheckpointSchedule {
         }
     }
     pub fn should_checkpoint(&self, time: f64) -> bool {
-        time >= self.next_time - 1e-14
+        time_at_or_after(time, self.next_time)
     }
     pub fn advance(&mut self) {
         self.index += 1;
@@ -112,6 +112,11 @@ impl CheckpointSchedule {
     pub fn filename(&self, prefix: &str, data_dir: &str) -> String {
         format!("{}/{}_{:04}.h5", data_dir, prefix, self.index)
     }
+}
+
+pub fn time_at_or_after(time: f64, boundary: f64) -> bool {
+    let tolerance = 32.0 * f64::EPSILON * time.abs().max(boundary.abs());
+    time >= boundary || (time - boundary).abs() <= tolerance
 }
 
 // =============================================================================
@@ -1388,6 +1393,21 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
+    load_checkpoint_level(sim, path, 0)
+}
+
+pub fn load_checkpoint_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+) -> Result<CheckpointMeta>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
     let tree = Hdf5Backend.read(Path::new(path))?;
     // the conserved group is the restart primary, so its MEASURE must match what this run
     // evolves. a densitized GR-hydro run reading an undensitized file (or the reverse) differs by
@@ -1410,9 +1430,10 @@ where
     sim.dt = meta.dt;
     sim.iteration = meta.iteration;
 
+    let level_name = format!("level_{level_index}");
     let level_0 = tree
-        .find_group("level_0")
-        .ok_or_else(|| IoError::MissingPath("level_0".into()))?;
+        .find_group(&level_name)
+        .ok_or_else(|| IoError::MissingPath(level_name.clone()))?;
     let interior = sim.geom.interior.clone();
 
     // conserved (primary — c2p will derive prims on restart). RegimeSpec-driven.
@@ -2029,6 +2050,48 @@ mod tests {
                 *nrg.view().at(c),
                 "cons.nrg transposed/garbled at {c:?}"
             );
+        }
+    }
+
+    #[test]
+    fn hierarchy_restart_restores_each_level_from_its_own_group() {
+        type Sim1 = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+        let build = || {
+            Sim1::new_at(
+                Newtonian,
+                IdealGas { gamma: 5.0 / 3.0 },
+                Cartesian,
+                [0isize],
+                [4usize],
+                [0.0],
+                [0.25],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
+            )
+            .unwrap()
+        };
+        let coarse = build();
+        let fine = build();
+        for coord in coarse.geom.interior.iter() {
+            coarse.fields.cons.den.view_mut().set(coord, 2.0);
+            fine.fields.cons.den.view_mut().set(coord, 7.0);
+        }
+        let dir = std::env::temp_dir().join("symbi_hierarchy_restart_levels");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hierarchy.h5");
+        let path = path.to_str().unwrap();
+        write_hierarchy_checkpoint(&[&coarse, &fine], path, &Metadata::new()).unwrap();
+
+        let mut loaded_coarse = build();
+        let mut loaded_fine = build();
+        load_checkpoint_level(&mut loaded_coarse, path, 0).unwrap();
+        load_checkpoint_level(&mut loaded_fine, path, 1).unwrap();
+        for coord in loaded_coarse.geom.interior.iter() {
+            assert_eq!(*loaded_coarse.fields.cons.den.view().at(coord), 2.0);
+            assert_eq!(*loaded_fine.fields.cons.den.view().at(coord), 7.0);
         }
     }
 

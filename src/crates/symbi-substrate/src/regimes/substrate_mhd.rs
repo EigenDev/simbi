@@ -186,8 +186,11 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     pub resistivity: f64,
     /// the horizon-excision radius on a cartesian kerr-schild background (0 = no
     /// excision). the gas fill + magnetized conserved rebuild run once per step;
-    /// the staggered faces stay CT-owned, so div(sqrt(gamma) B) is untouched.
+    /// the staggered faces stay ct-owned, so div(sqrt(gamma) b) is untouched.
     pub excision_radius: f64,
+    /// density and pressure of the absorbing atmosphere inside the excision surface.
+    pub excision_rho: f64,
+    pub excision_pre: f64,
     /// shakura-sunyaev alpha with the LOCAL sound speed (energy regimes only);
     /// takes precedence over the constant nu when positive.
     pub alpha: f64,
@@ -222,6 +225,8 @@ where
             resistivity: 0.0,
             viscosity: 0.0,
             excision_radius: 0.0,
+            excision_rho: 1.0,
+            excision_pre: 1.0,
             alpha: 0.0,
             _r: PhantomData,
         }
@@ -531,8 +536,10 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    fn with_excision(mut self, r_exc: f64) -> Self {
+    fn with_excision(mut self, r_exc: f64, rho_scale: f64, pre_scale: f64) -> Self {
         self.excision_radius = r_exc;
+        self.excision_rho = rho_scale * 1e-10;
+        self.excision_pre = pre_scale * 1e-12;
         self
     }
 }
@@ -792,6 +799,8 @@ where
                 sim,
                 self.eos_param,
                 self.excision_radius,
+                self.excision_rho,
+                self.excision_pre,
             );
         }
     }
@@ -802,6 +811,8 @@ where
                 sim,
                 self.eos_param,
                 self.excision_radius,
+                self.excision_rho,
+                self.excision_pre,
             );
         }
     }
