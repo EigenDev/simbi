@@ -231,6 +231,42 @@ pub fn rmhd_admissible_residuals<S: Scalar>(
     (q, psi)
 }
 
+/// raise only the eulerian energy of an analytically admissible RMHD anchor
+/// until it lies inside the requested finite-precision margins.
+///
+/// density, momentum, and magnetic field remain fixed. the upper endpoint adds
+/// one local conserved-state scale, which dominates the requested relative
+/// margins while preserving homogeneity under a change of conserved units.
+/// fixed-count bisection returns the least added energy resolved by `iters`.
+#[allow(clippy::too_many_arguments)]
+pub fn rmhd_anchor_energy_with_margin<S: Scalar>(
+    d: S,
+    s: &Tensor<S, 3>,
+    e: S,
+    b: &Tensor<S, 3>,
+    gm_inv: &Matrix<S, 3>,
+    gm: &Matrix<S, 3>,
+    state_scale: S,
+    eps_q: S,
+    eps_psi: S,
+    iters: usize,
+) -> S {
+    let ok = |energy: S| -> S::Mask {
+        let (q, psi) = rmhd_admissible_residuals(d, s, energy, b, gm_inv, gm);
+        q.cmp_gt(eps_q) & psi.cmp_gt(eps_psi)
+    };
+    let original_ok = ok(e);
+    let mut lo = e;
+    let mut hi = e + state_scale;
+    for _ in 0..iters {
+        let mid = S::from_f64(0.5) * (lo + hi);
+        let mid_ok = ok(mid);
+        hi = S::select(mid_ok, mid, hi);
+        lo = S::select(mid_ok, lo, mid);
+    }
+    S::select(original_ok, e, hi)
+}
+
 /// the largest `theta` in [0, 1] with `anchor + theta (cand - anchor)` in the RMHD admissible set,
 /// with the magnetic field held FIXED at `b` throughout.
 ///
@@ -420,6 +456,98 @@ mod tests {
         let source_energy = e - outward;
         let (q, psi) = rmhd_admissible_residuals(d, &source_state, source_energy, &b, &gm, &gm);
         assert!(q > eps_q && psi > eps_psi);
+    }
+
+    #[test]
+    fn rmhd_anchor_energy_establishes_the_bisection_lower_invariant() {
+        let gm = Matrix::identity();
+        let d = 1.0e-8;
+        let s = Tensor::zeros();
+        let b = Tensor::new([1.0, 0.0, 0.0]);
+        let e = 0.5 + d;
+        let scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+        let eps_q = ADMISSIBLE_REL_FLOOR * scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
+        let (q_before, psi_before) = rmhd_admissible_residuals(d, &s, e, &b, &gm, &gm);
+        assert!(
+            q_before <= eps_q || psi_before <= eps_psi,
+            "the setup must exercise an anchor below the numerical margin"
+        );
+
+        let safe =
+            rmhd_anchor_energy_with_margin(d, &s, e, &b, &gm, &gm, scale, eps_q, eps_psi, 48);
+        let (q_after, psi_after) = rmhd_admissible_residuals(d, &s, safe, &b, &gm, &gm);
+        assert!(q_after > eps_q);
+        assert!(psi_after > eps_psi);
+        assert!(safe > e);
+    }
+
+    #[test]
+    fn rmhd_anchor_energy_is_invariant_under_conserved_unit_scaling() {
+        let gm = Matrix::identity();
+        let solve = |units: f64| {
+            let d = 1.0e-8 * units;
+            let s = Tensor::zeros();
+            let b = Tensor::new([units.sqrt(), 0.0, 0.0]);
+            let e = (0.5 + 1.0e-8) * units;
+            let scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+            let safe = rmhd_anchor_energy_with_margin(
+                d,
+                &s,
+                e,
+                &b,
+                &gm,
+                &gm,
+                scale,
+                ADMISSIBLE_REL_FLOOR * scale,
+                ADMISSIBLE_REL_FLOOR * scale.powf(1.5),
+                48,
+            );
+            safe / units
+        };
+        let reference = solve(1.0);
+        for units in [1.0e-12, 1.0e-6, 1.0e6, 1.0e12] {
+            assert!((solve(units) - reference).abs() <= 1.0e-12 * reference);
+        }
+    }
+
+    #[test]
+    fn rmhd_projection_starts_from_a_margin_admissible_anchor() {
+        let gm = Matrix::identity();
+        let d = 1.0e-8;
+        let s_anchor = Tensor::zeros();
+        let b = Tensor::new([1.0, 0.0, 0.0]);
+        let e_anchor = 0.5 + d;
+        let scale = rmhd_state_scale(d, &s_anchor, e_anchor, &b, &gm, &gm);
+        let eps_d = 1.0e-12 * scale;
+        let eps_q = ADMISSIBLE_REL_FLOOR * scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
+        let safe_energy = rmhd_anchor_energy_with_margin(
+            d, &s_anchor, e_anchor, &b, &gm, &gm, scale, eps_q, eps_psi, 48,
+        );
+        let candidate_momentum = Tensor::new([10.0, 0.0, 0.0]);
+        let theta = rmhd_admissible_theta(
+            d,
+            candidate_momentum,
+            e_anchor,
+            d,
+            s_anchor,
+            safe_energy,
+            &b,
+            &gm,
+            &gm,
+            eps_d,
+            eps_q,
+            eps_psi,
+            48,
+        );
+        let projected_momentum = s_anchor + theta * (candidate_momentum - s_anchor);
+        let projected_energy = safe_energy + theta * (e_anchor - safe_energy);
+        let (q, psi) =
+            rmhd_admissible_residuals(d, &projected_momentum, projected_energy, &b, &gm, &gm);
+        assert!(theta < 1.0);
+        assert!(q > eps_q);
+        assert!(psi > eps_psi);
     }
 
     #[test]

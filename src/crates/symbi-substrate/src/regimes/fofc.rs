@@ -18,7 +18,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 use symbi_xpu::MemorySpace;
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use crate::kernels::support::FaceDomain;
 use crate::regimes::substrate_gpu::field_reduce;
@@ -47,6 +47,7 @@ static FOFC_FREEZE_CELLS_HORIZON: AtomicU64 = AtomicU64::new(0);
 // the horizon radius (f64 bits) for the region split; 0.0 = no split (flat runs,
 // and charts without a euclidean cell-center radius).
 static FOFC_HORIZON_RADIUS_BITS: AtomicU64 = AtomicU64::new(0);
+static FOFC_DIAGNOSTIC_POSTED: AtomicBool = AtomicBool::new(false);
 
 /// the cumulative (fallback-cell, freeze-cell) FOFC event totals since the last `fofc_reset_stats`.
 /// each is a sum over substages of the per-substage flagged/frozen interior-cell count.
@@ -81,6 +82,40 @@ pub fn fofc_reset_stats() {
     FOFC_FREEZE_CELLS.store(0, Ordering::Relaxed);
     FOFC_FALLBACK_CELLS_HORIZON.store(0, Ordering::Relaxed);
     FOFC_FREEZE_CELLS_HORIZON.store(0, Ordering::Relaxed);
+    FOFC_DIAGNOSTIC_POSTED.store(false, Ordering::Relaxed);
+}
+
+fn post_first_fallback<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    flag: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if std::env::var_os("SIMBI_FOFC_DIAGNOSTICS").is_none()
+        || Mem::IS_DEVICE_ACCESSIBLE
+        || FOFC_DIAGNOSTIC_POSTED.swap(true, Ordering::Relaxed)
+    {
+        return;
+    }
+    let fv = flag.view();
+    let rho = sim.fields.prim.rho.view();
+    let pre = sim.fields.prim.pre_field().map(Field::view);
+    for c in sim.geom.interior.iter() {
+        if (*fv.at(c)).to_f64() <= 0.5 {
+            continue;
+        }
+        let x: [f64; D] =
+            std::array::from_fn(|aa| sim.geom.x_lo[aa] + (c[aa] as f64 + 0.5) * sim.geom.dx[aa]);
+        let radius = x.iter().map(|xx| xx * xx).sum::<f64>().sqrt();
+        let pressure = pre.as_ref().map(|view| (*view.at(c)).to_f64());
+        eprintln!(
+            "fofc diagnostic: first fallback coord={c:?} x={x:?} r={radius:.9e} \
+             rho={:.9e} pre={pressure:?}",
+            (*rho.at(c)).to_f64(),
+        );
+        return;
+    }
 }
 
 /// count the flagged cells (flag > 0.5) whose cell center |x| lies inside `r_h`, on a
@@ -492,6 +527,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         return;
     }
     FOFC_FALLBACK_CELLS.fetch_add(fallback_cells as u64, Ordering::Relaxed);
+    post_first_fallback(sim, flag);
     // the horizon-region subtotal (inert without a configured split radius).
     book_horizon_events(sim, flag, &FOFC_FALLBACK_CELLS_HORIZON);
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
@@ -573,12 +609,19 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let exterior_froze = (froze as u64).saturating_sub(interior_froze);
     let streak = advance_freeze_streak(freeze_streak, exterior_froze);
-    if streak > 0 {
-        assert!(
-            streak < FOFC_FREEZE_HALT_STREAK,
+    if streak >= FOFC_FREEZE_HALT_STREAK {
+        let c2p_errors = symbi_sim::hydro_ops::scan_c2p_errors(sim);
+        let first_error = symbi_sim::hydro_ops::first_c2p_error(sim)
+            .map(|(coord, code)| format!("{coord:?}:{code}"))
+            .unwrap_or_else(|| "unavailable".to_string());
+        let first_state = symbi_sim::hydro_ops::first_c2p_failure_state(sim)
+            .unwrap_or_else(|| "unavailable".to_string());
+        panic!(
             "FOFC last-resort freeze fired on {streak} consecutive substages in the EXTERIOR (r > r_+, \
              regime={prefix}{dof_sfx}): a physical zone is persistently unrecoverable by the first-order \
-             redo — a genuine breakdown, not the rare isolated parachute. check the source / initial \
+             redo — a genuine breakdown, not the rare isolated parachute. projected c2p errors: \
+             {c2p_errors}; first host error: {first_error}; first state: {first_state}. \
+             check the source / initial \
              data / boundary for a poison. (freezes inside the horizon are expected and do not halt.)"
         );
     }

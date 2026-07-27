@@ -686,13 +686,10 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     (end_trace(), writes)
 }
 
-/// the source-admissibility CFL limit for GR-RMHD. the geometric source advances the conserved
-/// state along a known ray `U(t) = U + t S`. the trial interval is the local state/source timescale;
-/// its endpoint is tested against the full wu-tang `(D,q,psi)` admissible set. convexity proves the
-/// interval safe when that endpoint is admissible; otherwise fixed-count bisection finds the largest
-/// known-safe subinterval. its inverse is added to the flux rate. this directional construction
-/// cannot collapse merely because `q` is small while the source points inward or tangent to the
-/// admissible set, unlike the nondirectional `|S|/q` lipschitz bound. the momentum source takes
+/// the geometric-source resolution rate for GR-RMHD. the homogeneous `|S|/|U|` rate measures the
+/// fractional state change induced by curvature without converting distance to the strict
+/// admissible boundary into a global time scale. the q/psi projection and first-order flux
+/// correction enforce admissibility after the coupled flux/source update. the momentum source takes
 /// `p = 0` and the energy source the full pressure, matching the fused godunov update. metric at the
 /// cell centroid, ungridded polar slot at pi/2.
 pub fn rmhd_source_cfl_gr_gv(
@@ -912,31 +909,16 @@ pub fn rmhd_source_cfl_gr_gv(
     // fixed-count bisection returns the largest known-safe fraction. unlike the lipschitz |source|/q
     // bound, an inward or tangent source does not collapse dt merely because a previous projection
     // left q near its strict floor.
-    let (source_mom, e_dot) =
+    let (_source_mom, e_dot) =
         symbi_hydro::admissible::stationary_killing_source_ray(alpha, &beta, Tensor::new(sm_arr));
     let source_scale = e_dot.abs().max(alpha * sm_norm);
-    let eps_d = Gv::from_f64(1e-12) * state_scale;
-    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
-    let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
-        * state_scale
-        * state_scale.sqrt();
-    let safe_time = symbi_hydro::admissible::rmhd_source_admissible_time(
-        d_cons,
-        Tensor::new(mom),
-        e_cons,
-        source_mom,
-        e_dot,
-        &b,
-        &gm_inv,
-        &gm,
-        state_scale,
-        source_scale,
-        eps_d,
-        eps_q,
-        eps_psi,
-        16,
-    );
-    let lam_s = Gv::ONE / safe_time;
+    // resolve the geometric source on its own state-change timescale. admissibility is enforced by
+    // the post-update q/psi projection and first-order flux correction; using the distance to the
+    // strict admissible boundary as a TIME scale makes an otherwise finite atmosphere cell with
+    // p -> 0 throttle the entire domain, even when the source is tangent to the boundary. the
+    // homogeneous source/state ratio remains invariant under conserved-unit rescaling and measures
+    // the actual fractional change the explicit source can produce in one unit of coordinate time.
+    let lam_s = source_scale / state_scale;
     // no cell inside the event horizon may throttle the global timestep. the outer horizon
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
     // interior reaches the exterior, so an interior cell's admissibility rate carries no information
@@ -1466,17 +1448,30 @@ pub fn fofc_project_gr_mhd_gv(
     );
     let a_den = anchor.den;
     let s_a = anchor.mom;
-    let e_a = anchor.nrg + a_den;
-    let a_nrg = alpha * anchor.nrg + (alpha - Gv::ONE) * a_den - beta_dot(&s_a);
+    let e_anchor = anchor.nrg + a_den;
     // strict-interior floors use one shared local conserved-state scale. D, |S|, E, and |B|^2
     // carry one power of energy; psi carries three halves. including magnetic energy prevents a
     // magnetically dominated atmosphere from defining its numerical margin using gas energy alone.
-    let state_scale = symbi_hydro::admissible::rmhd_state_scale(a_den, &s_a, e_a, &b, &gm_inv, &gm);
+    let state_scale =
+        symbi_hydro::admissible::rmhd_state_scale(a_den, &s_a, e_anchor, &b, &gm_inv, &gm);
     let eps_d = Gv::from_f64(1e-12) * state_scale;
     let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
     let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
         * state_scale
         * state_scale.sqrt();
+    let e_a = symbi_hydro::admissible::rmhd_anchor_energy_with_margin(
+        a_den,
+        &s_a,
+        e_anchor,
+        &b,
+        &gm_inv,
+        &gm,
+        state_scale,
+        eps_q,
+        eps_psi,
+        20,
+    );
+    let a_nrg = alpha * e_a - a_den - beta_dot(&s_a);
     // 20 halvings resolve theta to ~1e-6. every iteration unrolls into the traced expression graph,
     // and a truncated bisection only returns a SMALLER (more conservative) blend, never an
     // inadmissible one, so the count trades kernel size against how sharply the projection hugs the

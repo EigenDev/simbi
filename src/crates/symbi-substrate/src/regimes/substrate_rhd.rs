@@ -34,11 +34,11 @@ use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries,
-    dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov,
-    dispatch_gradient_boundaries, dispatch_runtime_source, fused_runtime_cpu_kernel, geom_scalar,
-    geom_suffix, gr_chart_dof_tag, kernel_geom, resolve_params, scalars_for, shell_accretion_rates,
-    spacetime_slug,
+    GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_c2p_status,
+    dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
+    dispatch_godunov, dispatch_gradient_boundaries, dispatch_runtime_source,
+    fused_runtime_cpu_kernel, geom_scalar, geom_suffix, gr_chart_dof_tag, kernel_geom,
+    resolve_params, scalars_for, shell_accretion_rates, spacetime_slug,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
@@ -303,6 +303,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             &[],
             &scalars,
         );
+        let status_sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else {
+            ""
+        };
+        dispatch_c2p_status(sim, pre, "rhd", status_sfx);
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {

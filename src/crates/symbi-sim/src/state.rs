@@ -456,9 +456,10 @@ pub struct PartitionFieldsGeneric<
     pub cons: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     pub prim: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
     pub flux: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
-    /// per-cell c2p error codes. zero = success, nonzero = floored recovery.
-    /// scanned after c2p to detect and report failures.
-    pub c2p_error: Field<u8, NDIM, M>,
+    /// per-cell c2p validity status. zero means the recovered primitive lies in
+    /// the strict admissible interior; nonzero means recovery produced a state
+    /// rejected by the same predicate used by fofc.
+    pub c2p_error: Field<Sc, NDIM, M>,
     /// MHD staggered fields. None for pure hydro regimes.
     pub mhd: Option<MhdStaggeredFields<NDIM, DOF, M, Sc>>,
     /// external source term field (gravity, bodies, cooling, etc.).

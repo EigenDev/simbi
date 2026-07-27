@@ -34,10 +34,11 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
     body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
-    dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
-    dispatch_godunov_maybe_fused, dispatch_gradient_boundaries, dispatch_named, dispatch_penalize,
-    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, geom_scalar,
-    geom_suffix, resolve_body_only_fused, resolve_params, scalars_for,
+    dispatch_c2p_status, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
+    dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
+    dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
+    fused_runtime_cpu_kernel, geom_scalar, geom_suffix, resolve_body_only_fused, resolve_params,
+    scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_sim::state::FieldStore;
@@ -324,6 +325,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             o => panic!("adiabatic c2p: unexpected scalar {o:?}"),
         });
         dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
+        dispatch_c2p_status(sim, pre, "adiabatic", sfx);
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {

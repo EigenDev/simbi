@@ -32,10 +32,10 @@ use symbi_hydro::source_spec::BuiltSource;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
-    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_driven_boundaries,
-    dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
-    dispatch_godunov_with_body_source, dispatch_gradient_boundaries, dispatch_runtime_source,
-    dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
+    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_c2p_status,
+    dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
+    dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source, dispatch_gradient_boundaries,
+    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
@@ -352,6 +352,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &[],
             &[],
         );
+        dispatch_c2p_status(sim, &self.pre, "iso", "");
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
