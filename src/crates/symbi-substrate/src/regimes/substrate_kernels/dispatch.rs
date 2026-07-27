@@ -15,6 +15,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::kernels::support::{FaceDomain, cfl_from_lambda};
 use crate::regimes::substrate_gpu::{field_max_reduce, field_reduce};
@@ -29,6 +30,8 @@ use super::params::{
     resolve_body_scalars, scalars_for,
 };
 use super::types::Solver;
+
+static CFL_DIAGNOSTIC_CALLS: AtomicU64 = AtomicU64::new(0);
 
 fn plummer_peak_acceleration(mass: f64, softening: f64) -> f64 {
     if mass <= 0.0 || softening <= 0.0 {
@@ -240,12 +243,26 @@ where
         &[],
         &scalars,
     );
+    let diagnose_cfl = std::env::var_os("SIMBI_CFL_DIAGNOSTICS").is_some();
+    let flux_max = diagnose_cfl.then(|| field_max_reduce(scratch, &geom.interior));
     // fold the source-admissibility rate into the same scratch before the reduction (in place).
     if let Some(scfl) = source_cfl {
         let ss = scalars_for(scfl, &resolve);
         dispatch_named(sim, pre, Some(scratch), 0, scfl, &geom.interior, &[], &ss);
     }
     let mut lambda_max = field_max_reduce(scratch, &geom.interior);
+    if diagnose_cfl {
+        let call = CFL_DIAGNOSTIC_CALLS.fetch_add(1, Ordering::Relaxed);
+        if call == 0 || call.is_multiple_of(100) {
+            let source_increment = (lambda_max - flux_max.unwrap_or(0.0)).max(0.0);
+            eprintln!(
+                "cfl diagnostic: call={call} flux_max={:.9e} total_max={lambda_max:.9e} \
+                 max_increment_bound={source_increment:.9e} dt={:.9e}",
+                flux_max.unwrap_or(0.0),
+                cfl_from_lambda(lambda_max, cfl_number),
+            );
+        }
+    }
     // GHOST-BAND FAIL-LOUD: a poisoned boundary (a driven-inflow expression producing NaN, a broken
     // BC) leaves a non-finite ghost that first-order flux correction never touches — so the interior
     // finiteness guard (folded into the wave-speed map above) can miss it. probe the density over the
@@ -472,6 +489,30 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
     // cover/whole policy internally (host block-split when a serial twin exists; one whole launch
     // on device), so the scheduling seam is unchanged.
     super::exec::dispatch_fields_each::<Sc, Mem, D>(name, exec, &inputs, &outputs, ints, scalars);
+}
+
+/// materialize the authoritative post-c2p validity status using the same
+/// primitive predicate as fofc.
+pub fn dispatch_c2p_status<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    prefix: &str,
+    dof_sfx: &str,
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    let name = format!("{prefix}_c2p_status{dof_sfx}_{D}d");
+    dispatch_named(
+        sim,
+        pre,
+        Some(&sim.fields.c2p_error),
+        0,
+        &name,
+        &sim.geom.interior,
+        &[],
+        &[],
+    );
 }
 
 pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(

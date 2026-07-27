@@ -37,21 +37,21 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
     Coords, GeoSource, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
-    body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, chi_c2p_gv,
-    chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv, fofc_emf_splice_gv,
-    fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
-    geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
-    imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv, inertial_momentum_probe_gv,
-    iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv, nmhd_edge_emf_uct_hllc_gv,
-    nmhd_edge_emf_uct_hlld_gv, nmhd_wave_speed_map_gv, nmhd_wave_speeds_cell_gv,
-    rhd_wave_speed_map_gv, rmhd_average_efield_gv, rmhd_bcell_from_bface_gv,
-    rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv,
-    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_3d_dir_gv, rmhd_ct_curl_cyl_rphi_gv,
-    rmhd_ct_curl_cyl_rz_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, rmhd_edge_emf_uct_hlld_gv,
-    rmhd_ghost_fill_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv,
-    rmhd_resistive_emf_cyl_rz_gv, rmhd_resistive_emf_ortho_gv, rmhd_save_efield_gv,
-    rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, robin_ghost_fill_gv, snapshot_gv,
-    state_finite_probe_gv,
+    body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, c2p_status_gv,
+    chi_c2p_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
+    fofc_emf_splice_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
+    fofc_select_with_body_gv, fofc_splice_gv, geometric_momentum_source_probe_gv,
+    geometry_probe_gv, godunov_mass_gv, imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv,
+    inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv,
+    nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, nmhd_wave_speed_map_gv,
+    nmhd_wave_speeds_cell_gv, rhd_wave_speed_map_gv, rmhd_average_efield_gv,
+    rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv,
+    rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_3d_dir_gv,
+    rmhd_ct_curl_cyl_rphi_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv,
+    rmhd_edge_emf_uct_hlld_gv, rmhd_ghost_fill_gv, rmhd_resistive_emf_2d_gv,
+    rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_resistive_emf_ortho_gv,
+    rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, robin_ghost_fill_gv,
+    snapshot_gv, state_finite_probe_gv,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::{Graph, NodeId};
@@ -952,6 +952,14 @@ fn gen_fofc_tagged(
     emit_gv(
         out_dir,
         &format!("{prefix}_fofc_probe{dof_sfx}_{ndim}d"),
+        ndim,
+        &k,
+        &w,
+    );
+    let (k, w) = c2p_status_gv(ncomp, has_energy);
+    emit_gv(
+        out_dir,
+        &format!("{prefix}_c2p_status{dof_sfx}_{ndim}d"),
         ndim,
         &k,
         &w,

@@ -26,6 +26,7 @@ impl ErrorCode {
     pub const SUPERLUMINAL: Self = Self(1 << 3);
     pub const MAX_ITER: Self = Self(1 << 4);
     pub const NEGATIVE_ENERGY: Self = Self(1 << 5);
+    pub const INVALID_PRIMITIVE: Self = Self(1 << 6);
 
     #[inline]
     pub fn is_ok(self) -> bool {
@@ -69,6 +70,9 @@ impl ErrorCode {
         if self.contains(Self::NEGATIVE_ENERGY) {
             return "negative energy";
         }
+        if self.contains(Self::INVALID_PRIMITIVE) {
+            return "primitive outside the strict admissible interior";
+        }
         "unknown error"
     }
 }
@@ -83,6 +87,7 @@ impl std::fmt::Display for ErrorCode {
             (Self::SUPERLUMINAL, "superluminal"),
             (Self::MAX_ITER, "max_iter"),
             (Self::NEGATIVE_ENERGY, "negative_energy"),
+            (Self::INVALID_PRIMITIVE, "invalid_primitive"),
         ];
         for (flag, name) in &flags {
             if self.contains(*flag) {
@@ -149,9 +154,10 @@ pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 // the raw recovery value, this only reports what is non-physical (feedback_no_silent_floors).
 // thresholds are dimensionally clean:
 //   * NON_FINITE       : rho or pressure is NaN.
-//   * NEGATIVE_PRESSURE: pressure < 0 (strict). a near-zero
-//                        positive pressure is the valid cold limit — so no
-//                        arbitrary `1e-12` / `1e-12*rho` floor.
+//   * NEGATIVE_PRESSURE: pressure <= 0. a near-zero positive pressure is the
+//                        valid cold limit; the zero-pressure boundary is not
+//                        in the strict admissible interior used by the flux
+//                        and fofc kernels.
 //   * SUPERLUMINAL     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2
 //                        is NaN. no luminal margin.
 pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
@@ -163,7 +169,7 @@ pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::Order
     if !(rho == rho) || !(pre == pre) {
         code = code.merge(ErrorCode::NON_FINITE);
     }
-    if pre < S::ZERO {
+    if pre <= S::ZERO {
         code = code.merge(ErrorCode::NEGATIVE_PRESSURE);
     }
     if v_sq >= S::ONE || !(v_sq == v_sq) {
@@ -249,6 +255,18 @@ mod tests {
     fn error_code_merge_with_none() {
         let code = ErrorCode::NONE.merge(ErrorCode::NEGATIVE_PRESSURE);
         assert_eq!(code, ErrorCode::NEGATIVE_PRESSURE);
+    }
+
+    #[test]
+    fn zero_pressure_is_outside_the_strict_admissible_interior() {
+        let code = relativistic_c2p_code(1.0_f64, 0.0, 0.0);
+        assert!(code.contains(ErrorCode::NEGATIVE_PRESSURE));
+    }
+
+    #[test]
+    fn arbitrarily_small_positive_pressure_remains_admissible() {
+        let code = relativistic_c2p_code(1.0_f64, f64::MIN_POSITIVE, 0.0);
+        assert!(code.is_ok());
     }
 
     #[test]

@@ -12,6 +12,7 @@ use symbi_geometry::{
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
 };
 use symbi_ir::dual::Dual;
+use symbi_ir::gv::GvMask;
 
 /// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-INDEPENDENT
 /// (works for every coord system). copies the energy too when `has_energy`. write root == the
@@ -76,11 +77,7 @@ pub fn fofc_copy_gv(
 /// or, for an energy regime, pressure non-finite or non-positive), else 0. a max-reduce over the
 /// interior is > 0 exactly when some zone needs correcting; a clean substage reduces to 0 and skips
 /// the whole FOFC pass (which would keep the high-order everywhere anyway — bit-identical to skip).
-pub fn fofc_probe_gv(
-    ncomp: usize,
-    has_energy: bool,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
+fn primitive_physical_gv(ncomp: usize, has_energy: bool) -> GvMask {
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
     let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
@@ -101,10 +98,44 @@ pub fn fofc_probe_gv(
                 FieldRef::PrimVel(k as u8),
             ));
     }
+    physical
+}
+
+pub fn fofc_probe_gv(
+    ncomp: usize,
+    has_energy: bool,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let physical = primitive_physical_gv(ncomp, has_energy);
     let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (
         end_trace(),
         vec![("flag".to_string(), FieldRef::Scratch.into(), flag.node())],
+    )
+}
+
+/// write the authoritative primitive-validity status after c2p. zero means the
+/// recovered primitive lies in the same strict interior accepted by fofc;
+/// `INVALID_PRIMITIVE` means it does not. c2p and fofc share
+/// `primitive_physical_gv`, so their
+/// pressure-zero and finiteness semantics cannot diverge.
+pub fn c2p_status_gv(
+    ncomp: usize,
+    has_energy: bool,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let status = Gv::select(
+        primitive_physical_gv(ncomp, has_energy),
+        Gv::ZERO,
+        Gv::from_f64(symbi_hydro::c2p_result::ErrorCode::INVALID_PRIMITIVE.0 as f64),
+    );
+    (
+        end_trace(),
+        vec![(
+            "status".to_string(),
+            FieldRef::Scratch.into(),
+            status.node(),
+        )],
     )
 }
 
@@ -145,12 +176,9 @@ pub fn fofc_freeze_probe_gv(
     } else {
         finite_pos(x_rho)
     };
-    // the freeze count mirrors the select's physicality: each spliced velocity must be FINITE too
-    // (sign is physical), so a non-finite momentum the density/pressure test misses is still counted
-    // (and, in the select, frozen to the stage input).
     for k in 0..ncomp {
-        let p = format!("x_vel_{k}");
-        physical = physical & finite(Gv::field(&p, &p));
+        let path = format!("x_vel_{k}");
+        physical = physical & finite(Gv::field(&path, &path));
     }
     let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (

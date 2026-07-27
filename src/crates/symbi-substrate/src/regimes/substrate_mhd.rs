@@ -22,6 +22,7 @@
 // =============================================================================
 
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_grid::Field;
@@ -34,14 +35,16 @@ use crate::kernels::support::cfl_from_lambda;
 use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
-    RegimeKind, RuntimeSource, ScalarBind, Solver, dispatch_driven_boundaries, dispatch_named,
-    dispatch_runtime_source, geom_scalar, kernel_geom, mhd_flux_suffix, mhd_geom_suffix,
-    motion_scalar, scalars_for, spacetime_slug,
+    RegimeKind, RuntimeSource, ScalarBind, Solver, dispatch_c2p_status, dispatch_driven_boundaries,
+    dispatch_named, dispatch_runtime_source, geom_scalar, kernel_geom, mhd_flux_suffix,
+    mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
+
+static MHD_CFL_DIAGNOSTIC_CALLS: AtomicU64 = AtomicU64::new(0);
 
 /// the per-coordinate metric scale factor `h` (in f64): the
 /// physical width along an axis is `h * coordinate_width`. cartesian = 1; spherical theta = r,
@@ -677,6 +680,7 @@ where
             &[],
             &scalars,
         );
+        dispatch_c2p_status(sim, pre_bind, Self::kernel_prefix(), "");
     }
 
     fn wave_speeds(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
@@ -896,6 +900,10 @@ where
             &[],
             &scalars,
         );
+        let diagnose_cfl = std::env::var_os("SIMBI_CFL_DIAGNOSTICS").is_some();
+        let flux_max = diagnose_cfl.then(|| {
+            crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior)
+        });
         // the wu 2017 (arXiv:1708.07267) source-admissibility rate: on a curved background the
         // geometric source S advances U -> U + dt S and can push the conserved state out of the
         // physical-constraint set; the light-cone LxF FOFC flux is only physical-constraint-preserving
@@ -942,6 +950,46 @@ where
         }
         let mut lambda_max =
             crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
+        if diagnose_cfl {
+            let call = MHD_CFL_DIAGNOSTIC_CALLS.fetch_add(1, Ordering::Relaxed);
+            if call == 0 || call.is_multiple_of(100) {
+                let flux_max = flux_max.unwrap_or(0.0);
+                let minimum_source = (lambda_max - flux_max).max(0.0);
+                let owner = if Mem::IS_DEVICE_ACCESSIBLE {
+                    String::new()
+                } else {
+                    let rates = self.cfl_scratch.view();
+                    let rho = sim.fields.prim.rho.view();
+                    let pre = sim.fields.prim.pre_field().map(Field::view);
+                    let mut best = None;
+                    for c in geom.interior.iter() {
+                        let rate = (*rates.at(c)).to_f64();
+                        if best.is_none_or(|(_, best_rate): (_, f64)| rate > best_rate) {
+                            best = Some((c, rate));
+                        }
+                    }
+                    best.map(|(c, rate)| {
+                        let x: [f64; D] = std::array::from_fn(|aa| {
+                            geom.x_lo[aa] + (c[aa] as f64 + 0.5) * geom.dx[aa]
+                        });
+                        let radius = x.iter().map(|xx| xx * xx).sum::<f64>().sqrt();
+                        let pressure = pre.as_ref().map(|view| (*view.at(c)).to_f64());
+                        format!(
+                            " owner={c:?} x={x:?} r={radius:.9e} rate={rate:.9e} \
+                             rho={:.9e} pre={pressure:?}",
+                            (*rho.at(c)).to_f64(),
+                        )
+                    })
+                    .unwrap_or_default()
+                };
+                eprintln!(
+                    "mhd cfl diagnostic: call={call} flux_max={flux_max:.9e} \
+                     total_max={lambda_max:.9e} minimum_source={minimum_source:.9e} \
+                     dt={:.9e}{owner}",
+                    cfl_from_lambda(lambda_max, self.cfl_number),
+                );
+            }
+        }
         // OHMIC RESISTIVE CFL: explicit induction diffusion is stable for `dt <= dx^2 / (2 D eta)`;
         // fold the equivalent rate `2 D eta / min(dx)^2` (an inverse timescale, like the wave rate)
         // into lambda_max so the shared `dt = cfl / lambda_max` bounds the step. 0 off resistive MHD.
