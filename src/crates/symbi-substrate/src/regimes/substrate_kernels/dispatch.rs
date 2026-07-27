@@ -82,9 +82,21 @@ where
     gravity_limited_dt(hydro_dt, cfl, peak_acceleration, min_physical_width)
 }
 
+fn fofc_primitive_component(path: &str) -> Option<String> {
+    match path {
+        "prim.rho" | "prim_rho" => Some("rho".to_string()),
+        "prim.pre" | "prim_pre" => Some("pre".to_string()),
+        _ => path
+            .strip_prefix("prim.vel[")
+            .and_then(|rest| rest.strip_suffix(']'))
+            .or_else(|| path.strip_prefix("prim_vel_"))
+            .map(|index| format!("vel_{index}")),
+    }
+}
+
 #[cfg(test)]
 mod body_gravity_cfl_tests {
-    use super::{gravity_limited_dt, plummer_peak_acceleration};
+    use super::{fofc_primitive_component, gravity_limited_dt, plummer_peak_acceleration};
 
     #[test]
     fn plummer_peak_matches_the_analytic_maximum() {
@@ -118,6 +130,27 @@ mod body_gravity_cfl_tests {
     #[test]
     fn absent_gravity_leaves_the_hydrodynamic_step_unchanged() {
         assert_eq!(gravity_limited_dt(0.02, 0.4, 0.0, 0.01), 0.02);
+    }
+
+    #[test]
+    fn fofc_projection_resolves_canonical_primitive_manifest_paths() {
+        assert_eq!(fofc_primitive_component("prim.rho").as_deref(), Some("rho"));
+        assert_eq!(
+            fofc_primitive_component("prim.vel[2]").as_deref(),
+            Some("vel_2")
+        );
+        assert_eq!(fofc_primitive_component("prim.pre").as_deref(), Some("pre"));
+        assert_eq!(fofc_primitive_component("cons.den"), None);
+
+        for (bind, _) in super::kernel_field_binds("rmhd_fofc_project_kerr_3d").iter() {
+            let path = bind.name();
+            assert!(
+                path.starts_with("x_")
+                    || path.starts_with("bc_")
+                    || fofc_primitive_component(&path).is_some(),
+                "the GRMHD projection manifest contains an unresolved field path: {path}"
+            );
+        }
     }
 }
 
@@ -257,8 +290,8 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
                 crate::regimes::fofc::fofc_comp(u_stage, prim, c)
             } else if let Some(c) = s.strip_prefix("x_") {
                 crate::regimes::fofc::fofc_comp(cons, prim, c)
-            } else if let Some(c) = s.strip_prefix("prim_") {
-                crate::regimes::fofc::fofc_comp(cons, prim, c)
+            } else if let Some(c) = fofc_primitive_component(s) {
+                crate::regimes::fofc::fofc_comp(cons, prim, &c)
             } else if let Some(c) = s.strip_prefix("bc_") {
                 let k: usize = c
                     .parse()
