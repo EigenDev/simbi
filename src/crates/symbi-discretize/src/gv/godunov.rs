@@ -114,6 +114,50 @@ pub fn fofc_probe_gv(
     )
 }
 
+/// keep only the flagged cells whose admissibility carries information about the TIMESTEP: drop
+/// everything on the causally disconnected side of the mask surface. the outer horizon
+/// `r_+ = M + sqrt(M^2 - a^2)` is one-way on a horizon-penetrating chart, so no interior cell can
+/// destabilize the exterior; and an excised cell's state is donor-filled numerical padding that
+/// can sit arbitrarily close to the admissible boundary forever. the threshold is therefore the
+/// LARGER of `r_+` and the excision surface, tested on the kerr-schild radius level set — the same
+/// surface and the same test the source-admissibility CFL masks on, so the two agree cell for cell.
+/// cartesian kerr-schild charts only; every other chart passes each flag through unchanged.
+pub fn fofc_exterior_flag_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let centroid = cell_geometry_gv(coords, spacing, axes, ndim).centroid;
+    let mut position = [Gv::ZERO; 3];
+    for (grid_axis, &coordinate) in axes.iter().enumerate() {
+        position[coordinate] = centroid[grid_axis];
+    }
+    let bad = Gv::field("bad", "bad");
+    let exterior = if coords == Coords::Cartesian
+        && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
+    {
+        let spin = if spacetime == Spacetime::KerrKS {
+            Gv::scalar("kerr_spin")
+        } else {
+            Gv::ZERO
+        };
+        let mass = Gv::scalar("schwarzschild_mass");
+        let r_plus = mass + (mass * mass - spin * spin).max(Gv::ZERO).sqrt();
+        let r_mask = r_plus.max(Gv::scalar("excision_radius"));
+        let excised = symbi_ib::excise::ks_excised(&position, spin, r_mask);
+        Gv::select(excised, Gv::ZERO, bad)
+    } else {
+        bad
+    };
+    (
+        end_trace(),
+        vec![("exterior".to_string(), "exterior".into(), exterior.node())],
+    )
+}
+
 /// write the authoritative primitive-validity status after c2p. zero means the
 /// recovered primitive lies in the same strict interior accepted by fofc;
 /// `INVALID_PRIMITIVE` means it does not. c2p and fofc share
@@ -160,8 +204,9 @@ pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// cons after the face-based redo) is still unphysical — the zones the freeze tier holds at the
 /// stage input. reduced over the interior to count freezes per substage; a fully
 /// physical-constraint-preserving low-order scheme recovers every flagged cell (full first-order
-/// fluxes on all its faces), driving this to zero, so a nonzero count localizes where a PCP
-/// assumption leaks and the run trades a cell's conservation for finiteness.
+/// fluxes on all its faces), driving this to zero, so a nonzero count localizes where a
+/// physical-constraint-preserving assumption leaks and the run trades a cell's conservation for
+/// finiteness.
 pub fn fofc_freeze_probe_gv(
     ncomp: usize,
     has_energy: bool,
@@ -713,6 +758,43 @@ pub fn godunov_stage_gv_with_fused_built(
     // + body_source`, in that order, bit-for-bit. 0 leaves the update body-free.
     n_bodies: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    godunov_stage_gv_with_fused_built_and_geo_weight(
+        coords,
+        spacetime,
+        spacing,
+        axes,
+        ndim,
+        ncomp,
+        has_energy,
+        source,
+        sources,
+        mag_from_bcell,
+        n_bodies,
+        false,
+    )
+}
+
+/// the ssp stage core with an optional per-cell geometric-source multiplier.
+///
+/// `weighted_geo_source` is reserved for the grmhd fofc replay: the flux divergence,
+/// mesh dilution, user sources, and immersed-body operators remain unchanged while the
+/// local metric source is multiplied by the typed scratch field. the ordinary stage
+/// delegates here with `false`, so its graph and abi are unchanged.
+#[allow(clippy::too_many_arguments)]
+pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: u8,
+    ncomp: usize,
+    has_energy: bool,
+    source: GeoSource,
+    sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
+    mag_from_bcell: bool,
+    n_bodies: usize,
+    weighted_geo_source: bool,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let dt = Gv::scalar("dt");
     let a0 = Gv::scalar("a0");
@@ -1082,6 +1164,7 @@ pub fn godunov_stage_gv_with_fused_built(
     // the GR geodesic ENERGY source S_tau — the second output of the contraction (gravity's rate
     // of work on the infalling gas). zero on a flat background.
     let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
+    let geo_weight = weighted_geo_source.then(|| Gv::field("geo_source_weight", FieldRef::Scratch));
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse {
             Some(a) => a * div,
@@ -1089,6 +1172,7 @@ pub fn godunov_stage_gv_with_fused_built(
         };
         let mut r = u - dt * div - dt * (h_dil * u);
         if let Some(s) = geo_src {
+            let s = geo_weight.map_or(s, |w| w * s);
             let s = match lapse {
                 Some(a) => a * s,
                 None => s,
@@ -1876,4 +1960,49 @@ pub fn chi_snapshot_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
         dchi.node(),
     )];
     (end_trace(), writes)
+}
+
+#[cfg(test)]
+mod pcp_source_weight_tests {
+    use super::*;
+
+    fn rmhd_stage(weighted: bool) -> GvKernel {
+        godunov_stage_gv_with_fused_built_and_geo_weight(
+            Coords::Cartesian,
+            Spacetime::SchwarzschildKS,
+            &[Spacing::Uniform; 3],
+            &[0, 1, 2],
+            3,
+            3,
+            true,
+            GeoSource::Rmhd,
+            &[],
+            false,
+            0,
+            weighted,
+        )
+        .0
+    }
+
+    #[test]
+    fn ordinary_stage_does_not_carry_source_weight_field() {
+        let kernel = rmhd_stage(false);
+        assert!(
+            kernel
+                .field_inputs
+                .iter()
+                .all(|(_, bind)| *bind != FieldRef::Scratch.into())
+        );
+    }
+
+    #[test]
+    fn pcp_stage_carries_typed_source_weight_field() {
+        let kernel = rmhd_stage(true);
+        let weights = kernel
+            .field_inputs
+            .iter()
+            .filter(|(_, bind)| *bind == FieldRef::Scratch.into())
+            .count();
+        assert_eq!(weights, 1);
+    }
 }

@@ -169,6 +169,12 @@ where
     /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
     pub crash: Option<CrashReport>,
+
+    /// the previous step's RAW cfl-derived dt — the quantity the collapse guard compares against.
+    /// the level's `state.dt` is the ACCEPTED dt, which the `t_final` clamp and an explicit-step
+    /// rejection both shrink; comparing a fresh cfl estimate against it reports a "collapse" every
+    /// time a rejected step is replayed at a smaller dt and then recovers. 0 before the first step.
+    pub prev_dt_cfl: f64,
 }
 
 impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
@@ -835,6 +841,7 @@ where
             tracer_root_global_cells,
             tracer_root_offset: [0; NDIM],
             crash: None,
+            prev_dt_cfl: 0.0,
         }
     }
 
@@ -988,6 +995,7 @@ where
             tracer_root_global_cells: root_cells,
             tracer_root_offset: [0; NDIM],
             crash: None,
+            prev_dt_cfl: 0.0,
         })
     }
 
@@ -1394,10 +1402,14 @@ where
         // flow grows dt SMOOTHLY (cfl-limited), so detect a crash as: NaN / non-positive, or a sudden
         // >1000x one-step jump in the RAW cfl dt. a genuinely static state (dt_cfl = +inf) only
         // arises from the rest state at step 0 (dt_prev = 0, skipped) -> the clamp takes the run end.
-        let (iter, time, dt_prev) = {
+        let (iter, time) = {
             let r = &self.levels[0].state;
-            (r.iteration, r.time, r.dt) // dt_prev = 0.0 before the first step
+            (r.iteration, r.time)
         };
+        // compare cfl estimate against cfl estimate. `state.dt` is the ACCEPTED dt, which both the
+        // `t_final` clamp and a rejected-step replay shrink below the rate the wave speeds imply —
+        // measuring a fresh estimate against it reports a collapse whenever a reduced step recovers.
+        let dt_prev = self.prev_dt_cfl; // 0.0 before the first step
         let crashed =
             dt_cfl.is_nan() || dt_cfl <= 0.0 || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
         if crashed {
@@ -1412,6 +1424,9 @@ where
             });
             return;
         }
+        // the guard's reference for the NEXT step: the rate the wave speeds imply, before the
+        // user clamp, the `t_final` clamp, or any rejection reduces it.
+        self.prev_dt_cfl = dt_cfl;
         let root = &mut self.levels[0];
         let user_clamp = root.state.max_dt;
         let dt_cfl = if user_clamp > 0.0 {
@@ -1419,11 +1434,36 @@ where
         } else {
             dt_cfl
         };
-        let dt = dt_cfl.min(t_final - root.state.time);
+        let mut dt = dt_cfl.min(t_final - root.state.time);
         check_dt_or_panic(dt, root.state.iteration, root.state.time);
-        root.state.dt = dt;
-
-        self.advance_level(0, dt, 0.0);
+        let motion_n: Vec<_> = self.levels.iter().map(|level| level.state.motion).collect();
+        let clocks_n: Vec<_> = self
+            .levels
+            .iter()
+            .map(|level| (level.state.time, level.state.iteration))
+            .collect();
+        loop {
+            for level in &self.levels {
+                if level.kernels.fofc_active() {
+                    level.kernels.snapshot_retry(&level.state);
+                }
+            }
+            if !self.advance_level(0, dt, 0.0) {
+                break;
+            }
+            self.assert_step_is_reversible();
+            for (ii, level) in self.levels.iter_mut().enumerate() {
+                if level.kernels.fofc_active() {
+                    level.kernels.restore_step(&level.state);
+                }
+                symbi_sim::tracers::restore_transport_state(&mut level.state.store);
+                level.state.motion = motion_n[ii];
+                level.state.time = clocks_n[ii].0;
+                level.state.iteration = clocks_n[ii].1;
+            }
+            dt = symbi_sim::driver::retry_timestep(dt, time)
+                .unwrap_or_else(|err| panic!("{}", err.detail));
+        }
         if self
             .levels
             .iter()
@@ -1498,13 +1538,37 @@ where
     /// boundary to first order (tests/refine_temporal_convergence.rs). the stage
     /// loop mirrors sim/evolve.rs::step — the bit-for-bit gate holds the two
     /// in lockstep.
-    fn advance_level(&mut self, level: usize, dt: f64, alpha0: f64) {
+    /// a rejected step rolls back the conserved gas state, the magnetic field, the primitives,
+    /// the mesh motion, the level clocks, and discrete-tracer ancestry. on a REFINED hierarchy a
+    /// level's step epilogue — tracer spawning, immersed-body accretion, the horizon receipt —
+    /// commits BEFORE the finer level subcycles, and those ledgers have no inverse: a rejection
+    /// raised from inside the subcycle replays them and double-books. a single-level hierarchy
+    /// runs its epilogue only after every stage is accepted, so it is reversible unconditionally.
+    fn assert_step_is_reversible(&self) {
+        if self.levels.len() == 1 {
+            return;
+        }
+        for (ll, level) in self.levels.iter().enumerate() {
+            assert!(
+                !level.state.has_tracers()
+                    && level.state.continuous_tracers.is_none()
+                    && !level.state.has_bodies(),
+                "level {ll} rejected a timestep while carrying tracers or immersed bodies: on a \
+                 refined hierarchy their step-epilogue ledgers commit before the finer level \
+                 subcycles and have no inverse"
+            );
+        }
+    }
+
+    fn advance_level(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
         self.level_step_begin(level, dt);
         let n = self.levels[level].state.timestepping.stages().len();
         for ii in 0..n {
-            self.level_stage(level, ii, dt, alpha0);
+            if self.level_stage(level, ii, dt, alpha0) {
+                return true;
+            }
         }
-        self.level_step_tail(level, dt, alpha0);
+        self.level_step_tail(level, dt, alpha0)
     }
 
     /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost
@@ -1545,7 +1609,7 @@ where
 
     /// one SSP stage `ii` of level `level` -- the body of `advance_level`'s stage loop. `alpha0` is
     /// this level's substep start as a fraction of the parent step (0 on the root). pure extraction.
-    pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) {
+    pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) -> bool {
         // the phase sequence is THE shared table (symbi-sim::stage); this
         // driver contributes only its two structural interleaves through the
         // hook points — flux-register sampling (on the high-order fluxes,
@@ -1647,7 +1711,7 @@ where
                 }
             }
         };
-        fold_stage(
+        let outcome = fold_stage(
             &l.state,
             &l.kernels,
             StageArgs {
@@ -1660,6 +1724,9 @@ where
             },
             &mut hook,
         );
+        if outcome == symbi_sim::stage::StageOutcome::RetryStep {
+            return true;
+        }
         if self.levels[level].state.continuous_tracers.is_some() {
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
             let geometry = self.levels[level]
@@ -1722,13 +1789,14 @@ where
             self.apply_interface_event(&transfers, epoch)
                 .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
         }
+        false
     }
 
     /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the
     /// level clock. pure extraction from `advance_level`. for the DECOMPOSED root the driver calls
     /// this AFTER the (exchanged) root stages; the fine subcycle here is tile-local (the patch lives
     /// inside one tile), so it reuses the recursive `advance_level` on the finer level unchanged.
-    pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) {
+    pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
         let has_finer = level + 1 < self.levels.len();
         if self.levels[level].state.has_tracers() {
             let ledger = std::mem::take(&mut self.injection_ledger);
@@ -1825,13 +1893,16 @@ where
             self.prepare_level_ito_coefficients(level);
         }
         if has_finer {
-            self.level_subcycle(level, dt);
+            if self.level_subcycle(level, dt) {
+                return true;
+            }
             self.level_restrict_reflux(level, alpha0);
         }
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
         }
         self.level_clock(level, dt);
+        false
     }
 
     /// derive one level's accepted-step coefficients before its finer level
@@ -2005,15 +2076,18 @@ where
     /// this level's time-interpolated prims. the DECOMPOSED driver REPLICATES this loop but drives
     /// each fine substep's stages with a fine-level halo exchange between them (the fine patch may
     /// span a tile cut), so this method is the single-tile reference. PURE EXTRACTION.
-    fn level_subcycle(&mut self, level: usize, dt: f64) {
+    fn level_subcycle(&mut self, level: usize, dt: f64) -> bool {
         let fine_dt = dt / RATIO as f64;
         for sub in 0..RATIO {
             let alpha = sub as f64 / RATIO as f64;
             self.prolong_cf(level + 1, alpha);
             let f = &self.levels[level + 1];
             prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
-            self.advance_level(level + 1, fine_dt, alpha);
+            if self.advance_level(level + 1, fine_dt, alpha) {
+                return true;
+            }
         }
+        false
     }
 
     /// restrict the finer level into this level's coverage + apply the flux/emf reflux + re-derive
@@ -2742,7 +2816,12 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         // the root SSP stages, with a root halo exchange between each.
         for ii in 0..nstages {
             for i in 0..n {
-                symbi_xpu::with_device(devices[i], || tiles[i].level_stage(0, ii, gdt, 0.0));
+                let retry =
+                    symbi_xpu::with_device(devices[i], || tiles[i].level_stage(0, ii, gdt, 0.0));
+                assert!(
+                    !retry,
+                    "decomposed hierarchy retry requires collective rollback"
+                );
             }
             migrate_level_tracers(tiles, 0);
             exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
@@ -2796,18 +2875,26 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                 }
                 for jj in 0..nstages {
                     for (k, &i) in fg.order.iter().enumerate() {
-                        symbi_xpu::with_device(fg.devices[k], || {
+                        let retry = symbi_xpu::with_device(fg.devices[k], || {
                             tiles[i].level_stage(1, jj, fine_dt, alpha)
                         });
+                        assert!(
+                            !retry,
+                            "decomposed hierarchy retry requires collective rollback"
+                        );
                     }
                     migrate_level_tracers(tiles, 1);
                     exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
                 }
                 spawn_decomposed_injections(tiles, &fg.order, 1);
                 for (k, &i) in fg.order.iter().enumerate() {
-                    symbi_xpu::with_device(fg.devices[k], || {
+                    let retry = symbi_xpu::with_device(fg.devices[k], || {
                         tiles[i].level_step_tail(1, fine_dt, alpha)
                     });
+                    assert!(
+                        !retry,
+                        "decomposed hierarchy retry requires collective rollback"
+                    );
                 }
             }
             // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root.

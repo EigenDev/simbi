@@ -1297,18 +1297,12 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     let mut last_cb: u64 = 0;
     while t < t_final {
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
-        let dt = {
+        let mut dt = {
             let sh = shared!();
             let candidates =
                 (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
             let dt = crate::driver::select_timestep(candidates, t_final - t, iter, t)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
-            // snapshot u_n once before the stages for multi-stage schemes (the corrector reads it).
-            if multistage {
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || kernels[i].snapshot(sh[i]));
-                }
-            }
             dt
         };
         // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
@@ -1317,20 +1311,33 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         // applied in lockstep on every tile (identical inputs -> identical a). `a` is
         // restored to the step-entry value after the stages; the canonical step advance
         // lives at the step tail. static meshes assign a_n back to itself — no change.
-        let a_n: Vec<f64> = stores.iter().map(|s| s.motion.a).collect();
-        let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
-        for s in stores.iter_mut() {
-            s.dt = dt;
-            if has_discrete_tracers {
-                crate::tracers::snapshot_transport_state(&mut **s);
+        let motion_n: Vec<_> = stores.iter().map(|s| s.motion).collect();
+        let a_n: Vec<f64> = motion_n.iter().map(|motion| motion.a).collect();
+        let injection_ledgers = 'attempt: loop {
+            let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
+            {
+                let sh = shared!();
+                for ii in 0..n {
+                    if kernels[ii].fofc_active() {
+                        symbi_xpu::with_device(devices[ii], || kernels[ii].snapshot_retry(sh[ii]));
+                    }
+                    if multistage {
+                        symbi_xpu::with_device(devices[ii], || kernels[ii].snapshot(sh[ii]));
+                    }
+                }
             }
-            if has_continuous_tracers {
-                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
-                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
-                    .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
+            for s in stores.iter_mut() {
+                s.dt = dt;
+                if has_discrete_tracers {
+                    crate::tracers::snapshot_transport_state(&mut **s);
+                }
+                if has_continuous_tracers {
+                    let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                    crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                        .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
+                }
             }
-        }
-        {
+            let mut retry = false;
             for stage in crate::driver::stage_schedule(stages) {
                 for (i, s) in stores.iter_mut().enumerate() {
                     let t_entry = s.time + stage.entry * dt;
@@ -1353,7 +1360,7 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 // forward-euler (tag 1, the rk2-predictor identity) — a latent
                 // copy divergence the shared fold retires.
                 for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || {
+                    let outcome = symbi_xpu::with_device(devices[i], || {
                         // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
                         // / post_godunov are the MHD constrained-transport hooks; they are no-op
                         // defaults for hydro + iso, so this is byte-identical to the prior sequence
@@ -1382,8 +1389,12 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                                 allow_elision: false,
                             },
                             &mut |_| {},
-                        );
+                        )
                     });
+                    retry |= outcome == crate::stage::StageOutcome::RetryStep;
+                }
+                if retry {
+                    break;
                 }
                 // refresh the cut halos from each neighbor's stage-updated interior.
                 drain_devices::<M>(devices);
@@ -1450,7 +1461,35 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     }
                 }
             }
-        }
+            if !retry {
+                break 'attempt injection_ledgers;
+            }
+            // per-tile rollback restores the fields and each tracer's step-entry ancestry, but the
+            // stage loop MIGRATES tracer records between tiles as they cross a cut. a migrated
+            // record now lives in a different tile's storage and no per-tile restore puts it back.
+            assert!(
+                !has_discrete_tracers && !has_continuous_tracers,
+                "a decomposed step was rejected with tracers attached: cross-tile tracer \
+                 migration has no per-tile inverse"
+            );
+            for (ii, store) in stores.iter_mut().enumerate() {
+                if kernels[ii].fofc_active() {
+                    symbi_xpu::with_device(devices[ii], || kernels[ii].restore_step(&**store));
+                }
+                crate::tracers::restore_transport_state(&mut **store);
+                store.motion = motion_n[ii];
+            }
+            drain_devices::<M>(devices);
+            {
+                let sh = shared!();
+                exchange_grid(&sh, counts, devices, transport);
+                for ii in 0..n {
+                    symbi_xpu::with_device(devices[ii], || kernels[ii].ghost_fill(sh[ii]));
+                }
+            }
+            dt =
+                crate::driver::retry_timestep(dt, t).unwrap_or_else(|err| panic!("{}", err.detail));
+        };
         if has_discrete_tracers {
             spawn_decomposed_injection(stores, counts, injection_ledgers.clone());
         }

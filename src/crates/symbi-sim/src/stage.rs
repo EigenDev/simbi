@@ -222,13 +222,21 @@ pub struct StageArgs {
     pub allow_elision: bool,
 }
 
+#[must_use]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StageOutcome {
+    Accepted,
+    RetryStep,
+}
+
 /// fold ONE RK stage of the canonical pipeline over a kernel set.
 pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     kernels: &K,
     args: StageArgs,
     hook: &mut impl FnMut(HookPoint),
-) where
+) -> StageOutcome
+where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
@@ -292,7 +300,11 @@ pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
                 kernels.body_source(sim, args.ac * args.dt)
             }),
             PhaseKind::C2p => prof("c2p", || kernels.c2p(sim)),
-            PhaseKind::Fofc => prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag)),
+            PhaseKind::Fofc => {
+                if prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag)) {
+                    return StageOutcome::RetryStep;
+                }
+            }
             PhaseKind::ChiUpdate => prof("chi_update", || {
                 kernels.chi_update(sim, args.dt, args.a0, args.ac)
             }),
@@ -303,4 +315,5 @@ pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
         }
         have = have.or(ph.writes);
     }
+    StageOutcome::Accepted
 }

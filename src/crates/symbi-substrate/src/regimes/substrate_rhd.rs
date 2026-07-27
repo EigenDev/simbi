@@ -600,7 +600,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         true
     }
 
-    fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) {
+    fn fofc(
+        &self,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
+        dt: f64,
+        a0: f64,
+        ac: f64,
+        _stage: u8,
+    ) -> bool {
         // the first-order redo runs at theta = 0 (PCM). FLAT (Minkowski) SRHD uses HLLE — the
         // positivity-preserving Einfeldt fan — regardless of the production solver (HLLC can
         // undershoot in a strong rarefaction). the CURVED (GR) background uses the light-cone rusanov
@@ -646,11 +653,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     );
                 }
             },
-            None,  // no body-evolved freeze parachute (no rhd body source)
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no cell B to restore
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no CT re-sync
-        );
+            None,              // no body-evolved freeze parachute (no rhd body source)
+            || {},             // hydro: no induction flux
+            || {},             // hydro: no cell B to restore
+            || {},             // hydro: no induction flux
+            || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
+            || {},             // hydro: no CT re-sync
+            false,             // no projection tier below the freeze; keep the parachute
+        )
     }
 }

@@ -71,12 +71,17 @@ fn two_level(fused: bool) -> Hier {
         x_lo: [0.25; 3],
         x_hi: [0.75; 3],
     }];
-    Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, move |s| {
+    let hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, move |s| {
         let ks = Kset::new(GAMMA, CFL, &s.geom.allocated);
         if fused { ks.with_source_fusion() } else { ks }
     })
     .unwrap()
-    .with_bodies(central_black_hole())
+    .with_bodies(central_black_hole());
+    // refinement allocates the fine level ZEROED; the coarse initial condition has to be
+    // prolonged into its interior. without this the fine level carries vacuum, both kernel sets
+    // fold a body source into nothing, and the bit-for-bit comparison below holds trivially.
+    hier.seed_fine_from_coarse().expect("fine-level seed");
+    hier
 }
 
 #[test]

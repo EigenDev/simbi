@@ -144,16 +144,6 @@ mod body_gravity_cfl_tests {
         );
         assert_eq!(fofc_primitive_component("prim.pre").as_deref(), Some("pre"));
         assert_eq!(fofc_primitive_component("cons.den"), None);
-
-        for (bind, _) in super::kernel_field_binds("rmhd_fofc_project_kerr_3d").iter() {
-            let path = bind.name();
-            assert!(
-                path.starts_with("x_")
-                    || path.starts_with("bc_")
-                    || fofc_primitive_component(&path).is_some(),
-                "the GRMHD projection manifest contains an unresolved field path: {path}"
-            );
-        }
     }
 }
 
@@ -295,32 +285,32 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let geom = &sim.geom;
     let st = spacetime_slug(geom.spacetime);
-    // `dof_sfx` carries the chart/DOF tag the bake used: the hydro bake keys on `geom.suffix()`,
-    // the MHD bake on `mhd_geom_slug`. the caller passes whichever matches its own family.
+    // `dof_sfx` carries the chart/DOF tag the bake used (`geom.suffix()`).
     let name = format!("{prefix}_fofc_project{dof_sfx}{st}_{D}d");
     // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
-    // (read only; the magnetized admissibility residual needs the field but never blends it, since
-    // constrained transport owns the staggered value shared with the neighbor).
-    let slot =
-        |s: &str| -> &Field<Sc, D, Mem> {
-            if let Some(c) = s.strip_prefix("us_") {
-                crate::regimes::fofc::fofc_comp(u_stage, prim, c)
-            } else if let Some(c) = s.strip_prefix("x_") {
-                crate::regimes::fofc::fofc_comp(cons, prim, c)
-            } else if let Some(c) = fofc_primitive_component(s) {
-                crate::regimes::fofc::fofc_comp(cons, prim, &c)
-            } else if let Some(c) = s.strip_prefix("bc_") {
-                let k: usize = c
-                    .parse()
-                    .unwrap_or_else(|_| panic!("fofc_project: bad cell-B index '{s}'"));
-                bcell.unwrap_or_else(|| panic!(
-                "fofc_project: kernel '{name}' reads '{s}' but no cell-B was supplied — the \
-                 magnetized admissibility condition requires it"
-            ))[k]
-            } else {
-                panic!("fofc_project: unknown slot '{s}'")
-            }
-        };
+    // (read ONLY: the magnetized residual needs the field, but constrained transport owns the
+    // staggered value shared with the neighbor, so the blend never moves it and div(B) survives).
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        if let Some(c) = s.strip_prefix("us_") {
+            crate::regimes::fofc::fofc_comp(u_stage, prim, c)
+        } else if let Some(c) = s.strip_prefix("x_") {
+            crate::regimes::fofc::fofc_comp(cons, prim, c)
+        } else if let Some(c) = fofc_primitive_component(s) {
+            crate::regimes::fofc::fofc_comp(cons, prim, &c)
+        } else if let Some(c) = s.strip_prefix("bc_") {
+            let k: usize = c
+                .parse()
+                .unwrap_or_else(|_| panic!("fofc_project: bad cell-B index '{s}'"));
+            bcell.unwrap_or_else(|| {
+                panic!(
+                    "fofc_project: kernel '{name}' reads '{s}' but no cell-B was supplied — the \
+                     magnetized admissibility residual requires it"
+                )
+            })[k]
+        } else {
+            panic!("fofc_project: unknown slot '{s}'")
+        }
+    };
     // metric mass/spin + grid scalars, resolved as in cfl_wave_speed.
     let (x_lo_phys, dx_phys) =
         kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
@@ -361,6 +351,185 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
             outputs.push(fld);
         } else {
             inputs.push(fld);
+        }
+    }
+    super::exec::dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &geom.interior,
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
+}
+
+/// compute the grmhd geometric-source replay fraction from a source-free low-order
+/// anchor and the corresponding full-source candidate. the output is the per-cell
+/// `theta` field consumed through the weighted Godunov kernel's scratch binding.
+fn conserved_component<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    state: &'a symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    suffix: &str,
+    context: &str,
+) -> &'a Field<Sc, D, Mem>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if suffix == "den" {
+        &state.den
+    } else if suffix == "nrg" {
+        state
+            .nrg_field()
+            .expect("grmhd source theta requires energy")
+    } else if let Some(raw) = suffix.strip_prefix("mom_") {
+        let kk: usize = raw
+            .parse()
+            .unwrap_or_else(|_| panic!("fofc_source_theta: bad momentum slot '{context}'"));
+        &state.mom[kk]
+    } else {
+        panic!("fofc_source_theta: unknown conserved slot '{context}'")
+    }
+}
+
+pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    anchor: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    candidate: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    bcell: [&Field<Sc, D, Mem>; 3],
+    theta: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let sfx = super::mhd_geom_suffix(geom.coords, &geom.axes);
+    let name = format!(
+        "rmhd_fofc_source_theta{sfx}{}_{D}d",
+        spacetime_slug(geom.spacetime)
+    );
+    let slot = |path: &str| -> &Field<Sc, D, Mem> {
+        if let Some(suffix) = path.strip_prefix("a_") {
+            conserved_component(anchor, suffix, path)
+        } else if let Some(suffix) = path.strip_prefix("x_") {
+            conserved_component(candidate, suffix, path)
+        } else if let Some(raw) = path.strip_prefix("bc_") {
+            let kk: usize = raw
+                .parse()
+                .unwrap_or_else(|_| panic!("fofc_source_theta: bad magnetic slot '{path}'"));
+            bcell[kk]
+        } else if path == "theta" {
+            theta
+        } else {
+            panic!("fofc_source_theta: unknown slot '{path}'")
+        }
+    };
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let resolve = |bind: &ScalarBind| -> Sc {
+        let ScalarBind::Ref(sref) = bind else {
+            panic!("fofc_source_theta: unexpected spec scalar {bind:?}");
+        };
+        match *sref {
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                geom.spacetime_scalars
+                    .iter()
+                    .find(|(name, _)| name == "schwarzschild_mass")
+                    .map(|(_, value)| *value)
+                    .expect("fofc_source_theta: needs schwarzschild_mass"),
+            ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                geom.spacetime_scalars
+                    .iter()
+                    .find(|(name, _)| name == "kerr_spin")
+                    .map(|(_, value)| *value)
+                    .expect("fofc_source_theta: needs kerr_spin"),
+            ),
+            other => Sc::from_f64(
+                motion_scalar(&sim.motion, geom.coords, D, other)
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, other))
+                    .unwrap_or_else(|| panic!("fofc_source_theta: unexpected scalar {other:?}")),
+            ),
+        }
+    };
+    let scalars = scalars_for(&name, &resolve);
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (bind, is_output) in kernel_field_binds(&name).iter() {
+        let field = slot(&bind.name());
+        if *is_output {
+            outputs.push(field);
+        } else {
+            inputs.push(field);
+        }
+    }
+    super::exec::dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &geom.interior,
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
+}
+
+/// drop the causally disconnected cells from an anchor-failure mask: nothing inside the outer
+/// horizon reaches the exterior, and an excised cell's state is donor-filled padding the horizon
+/// fill overwrites, so neither says anything about whether the TIMESTEP was admissible. the
+/// threshold is `max(r_+, r_exc)` on the kerr-schild radius — the same surface the
+/// source-admissibility CFL masks on, so the veto and the timestep bound agree cell for cell.
+pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    r_exc: f64,
+    bad: &Field<Sc, D, Mem>,
+    exterior: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let sfx = super::mhd_geom_suffix(geom.coords, &geom.axes);
+    let name = format!(
+        "rmhd_fofc_exterior{sfx}{}_{D}d",
+        spacetime_slug(geom.spacetime)
+    );
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let metric_scalar = |name: &str| -> f64 {
+        geom.spacetime_scalars
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| *value)
+            .unwrap_or_else(|| panic!("fofc_exterior_mask: needs {name}"))
+    };
+    let resolve = |bind: &ScalarBind| -> Sc {
+        match bind {
+            ScalarBind::Spec(name) if &**name == "excision_radius" => Sc::from_f64(r_exc),
+            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => {
+                Sc::from_f64(metric_scalar("schwarzschild_mass"))
+            }
+            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(metric_scalar("kerr_spin")),
+            ScalarBind::Ref(sref) => Sc::from_f64(
+                motion_scalar(&sim.motion, geom.coords, D, *sref)
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
+                    .unwrap_or_else(|| panic!("fofc_exterior_mask: unexpected scalar {sref:?}")),
+            ),
+            other => panic!("fofc_exterior_mask: unexpected scalar {other:?}"),
+        }
+    };
+    let scalars = scalars_for(&name, &resolve);
+    let slot = |path: &str| match path {
+        "bad" => bad,
+        "exterior" => exterior,
+        _ => panic!("fofc_exterior_mask: unknown slot '{path}'"),
+    };
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (bind, is_output) in kernel_field_binds(&name).iter() {
+        let field = slot(&bind.name());
+        if *is_output {
+            outputs.push(field);
+        } else {
+            inputs.push(field);
         }
     }
     super::exec::dispatch_fields_each::<Sc, Mem, D>(

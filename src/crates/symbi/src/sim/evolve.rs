@@ -26,7 +26,7 @@ pub use crate::sim::substrate_seam::KernelSet;
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
     advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request, needs_step_snapshot,
-    prof, select_timestep, set_stage_motion, stage_schedule,
+    prof, retry_timestep, select_timestep, set_stage_motion, stage_schedule,
 };
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -66,7 +66,11 @@ pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     Mem: MemorySpace,
 {
     sim.dt = dt;
-    step(sim, kernels);
+    while step(sim, kernels) {
+        kernels.restore_step(sim);
+        symbi_sim::tracers::restore_transport_state(&mut sim.store);
+        sim.dt = retry_timestep(sim.dt, sim.time).unwrap_or_else(|err| panic!("{}", err.detail));
+    }
 }
 
 pub fn evolve_with_callback<R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -184,8 +188,15 @@ where
             }
         };
         sim.dt = dt;
-
-        step(sim, kernels);
+        loop {
+            if step(sim, kernels) {
+                kernels.restore_step(sim);
+                symbi_sim::tracers::restore_transport_state(&mut sim.store);
+                sim.dt = retry_timestep(sim.dt, sim.time)?;
+                continue;
+            }
+            break;
+        }
 
         // no per-step host-side scans: the `if !dt.is_finite()` check
         // above catches NaN/Inf cascades on the very next iteration
@@ -391,7 +402,8 @@ use symbi_sim::stage::{StageArgs, fold_stage};
 fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     k: &impl KernelSet<D, DOF, Mem, f64>,
-) where
+) -> bool
+where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
@@ -400,6 +412,9 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 {
     let stages = sim.timestepping.stages();
     let n = stages.len();
+    if k.fofc_active() {
+        prof("snapshot_retry", || k.snapshot_retry(sim));
+    }
     // snapshot u^n once for MULTI-STAGE schemes (RK2/RK3 corrector reads it with a0>0).
     // forward-Euler (n=1, a0=0) never reads u_n with non-zero weight, so the snapshot
     // write is pure bandwidth waste. RMHD additionally saves bcell -> bcell_n for the
@@ -422,7 +437,8 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     // (the time of its input state — the same clock the amr cf ghosts use). a is
     // restored afterward; the canonical step advance lives in the caller. static
     // meshes assign a_n back to itself — no behavioral change.
-    let a_n = sim.motion.a;
+    let motion_n = sim.motion;
+    let a_n = motion_n.a;
     let mut injection_ledger = std::collections::BTreeMap::new();
     for stage in stage_schedule(stages) {
         let t_entry = sim.time + stage.entry * sim.dt;
@@ -445,7 +461,7 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         // nothing has touched cons since, so u_n ALREADY holds the stage input. flag it and skip the
         // `snapshot_stage` copy — `stage_input()` binds u_n for this stage. forward-Euler (n == 1)
         // takes no snapshot, so u_n is stale there and the copy stands.
-        fold_stage(
+        let outcome = fold_stage(
             &*sim,
             k,
             StageArgs {
@@ -458,6 +474,10 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             },
             &mut |_| {},
         );
+        if outcome == symbi_sim::stage::StageOutcome::RetryStep {
+            sim.motion = motion_n;
+            return true;
+        }
         if sim.has_tracers() {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
             if sim.continuous_tracers.is_some() {
@@ -541,7 +561,8 @@ fn step<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         )
         .unwrap_or_else(|detail| panic!("continuous tracer boundary injection: {detail}"));
     }
-    sim.motion.a = a_n;
+    sim.motion = motion_n;
+    false
 }
 
 /// the time fraction of the state AFTER each shu-osher stage: the convex

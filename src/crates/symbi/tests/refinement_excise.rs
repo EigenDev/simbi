@@ -62,7 +62,7 @@ fn build_hier(
         pre: 0.1,
     })
     .build();
-    let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated).with_excision(r_exc);
+    let ck = Kset::new(GAMMA, CFL, &coarse.geom.allocated).with_excision(r_exc, 1.0, 1.0);
     // the fine patch sits in the far-field corner quadrant, clear of the excised
     // region (the request gate enforces this separation on the python path; the
     // harness honors the same contract).
@@ -71,7 +71,7 @@ fn build_hier(
         x_hi: [1.0, 1.0],
     };
     Hierarchy::with_refinement(coarse, ck, &[region], ProlongOrder::Ppm, |s| {
-        Kset::new(GAMMA, CFL, &s.geom.allocated).with_excision(r_exc)
+        Kset::new(GAMMA, CFL, &s.geom.allocated).with_excision(r_exc, 1.0, 1.0)
     })
     .unwrap()
 }

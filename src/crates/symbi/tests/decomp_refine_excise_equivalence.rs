@@ -46,7 +46,7 @@ type Hier =
     Hierarchy<Rhd, 2, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory, Kern>;
 
 fn kset(sim: &Sim) -> Kern {
-    Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC)
+    Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0)
 }
 
 fn kset_unexcised(sim: &Sim) -> Kern {

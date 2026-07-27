@@ -2226,8 +2226,25 @@ where
         screen.leave();
         table.set_dynamic(false);
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
+        // report WHICH halt condition fired and its numbers. the three are different failures with
+        // different fixes: a non-finite rate is a poisoned cell, a non-positive one a degenerate
+        // state, and a sudden jump means the cfl rate COLLAPSED (the wave speeds went to zero, or
+        // the scratch the reduction reads was left holding something other than a rate). asserting
+        // one diagnosis for all three sends every investigation down the same wrong path.
+        let cause = if c.dt_cfl.is_nan() {
+            "cfl dt is NaN — a non-finite wave speed (poisoned cell or boundary)".to_string()
+        } else if c.dt_cfl <= 0.0 {
+            format!("cfl dt is non-positive ({:.6e})", c.dt_cfl)
+        } else {
+            format!(
+                "cfl dt jumped {:.3e}x in one step ({:.6e} -> {:.6e}) — the cfl rate collapsed",
+                c.dt_cfl / c.dt_prev,
+                c.dt_prev,
+                c.dt_cfl
+            )
+        };
         let summary = format!(
-            "crashed — {} steps, t = {:.4} — wave speed collapsed (unphysical c2p near a boundary) · state {crashed}",
+            "crashed — {} steps, t = {:.4} — {cause} · state {crashed}",
             c.iter, c.time,
         );
         table.post_error(&summary);

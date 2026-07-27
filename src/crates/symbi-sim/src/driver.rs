@@ -84,6 +84,22 @@ pub fn select_timestep(
     Ok(dt)
 }
 
+/// reduce a rejected explicit timestep while preserving a representable clock
+/// increment. rejection is a numerical recovery action, not a state update.
+pub fn retry_timestep(dt: f64, time: f64) -> symbi_xpu::Result<f64> {
+    let retry = 0.5 * dt;
+    if !retry.is_finite() || retry <= 0.0 || time + retry == time {
+        return Err(symbi_xpu::XpuError {
+            operation: "evolve",
+            code: -1,
+            detail: format!(
+                "evolve: rejected timestep cannot be reduced further: dt={dt:e}, time={time:e}"
+            ),
+        });
+    }
+    Ok(retry)
+}
+
 /// return the simulation clock after one accepted step.
 pub fn advance_clock(time: f64, iteration: u64, dt: f64) -> (f64, u64) {
     (time + dt, iteration + 1)
@@ -332,7 +348,8 @@ pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, 
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_clock, check_dt_or_panic, needs_step_snapshot, select_timestep, stage_schedule,
+        advance_clock, check_dt_or_panic, needs_step_snapshot, retry_timestep, select_timestep,
+        stage_schedule,
     };
 
     #[test]
@@ -412,6 +429,17 @@ mod tests {
     fn timestep_selection_uses_the_smallest_valid_candidate_and_remaining_time() {
         assert_eq!(select_timestep([0.2, 0.1], 0.5, 0, 0.0).unwrap(), 0.1);
         assert_eq!(select_timestep([0.2, 0.1], 0.05, 0, 0.0).unwrap(), 0.05);
+    }
+
+    #[test]
+    fn rejected_timestep_is_halved_without_advancing_the_clock() {
+        assert_eq!(retry_timestep(0.25, 3.0).unwrap(), 0.125);
+    }
+
+    #[test]
+    fn rejected_timestep_fails_when_the_clock_cannot_represent_progress() {
+        let err = retry_timestep(f64::MIN_POSITIVE, 1.0).unwrap_err();
+        assert!(err.detail.contains("cannot be reduced further"));
     }
 
     #[test]

@@ -39,7 +39,7 @@ use symbi_discretize::{
     Coords, GeoSource, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
     body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, c2p_status_gv,
     chi_c2p_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
-    fofc_emf_splice_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
+    fofc_emf_splice_gv, fofc_exterior_flag_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
     fofc_select_with_body_gv, fofc_splice_gv, geometric_momentum_source_probe_gv,
     geometry_probe_gv, godunov_mass_gv, imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv,
     inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv,
@@ -921,6 +921,27 @@ fn gen_state_finite(out_dir: &str, ndim: u8) {
     emit_gv(out_dir, &format!("state_finite_{ndim}d"), ndim, &k, &w);
 }
 
+// the post-c2p primitive-validity status, emitted per (prefix, chart-suffix) alongside the c2p it
+// annotates: `c2p` dispatches it unconditionally, including on the DOF-lift charts where the regime
+// runs no first-order flux correction, so it must NOT be bound to the fofc family's chart coverage.
+fn gen_c2p_status(
+    out_dir: &str,
+    ndim: u8,
+    prefix: &str,
+    dof_sfx: &str,
+    ncomp: usize,
+    has_energy: bool,
+) {
+    let (k, w) = c2p_status_gv(ncomp, has_energy);
+    emit_gv(
+        out_dir,
+        &format!("{prefix}_c2p_status{dof_sfx}_{ndim}d"),
+        ndim,
+        &k,
+        &w,
+    );
+}
+
 // the fofc copy/select/probe triple + probe for one (prefix, ncomp). `dof_sfx` distinguishes the
 // spherical-swirl (DOF > D) instance (ncomp = DOF) from the DOF == D one (both share the `_{ndim}d`
 // grid tag) — "" for DOF == D and for the always-3-vector MHD, matching the runtime name build.
@@ -956,14 +977,7 @@ fn gen_fofc_tagged(
         &k,
         &w,
     );
-    let (k, w) = c2p_status_gv(ncomp, has_energy);
-    emit_gv(
-        out_dir,
-        &format!("{prefix}_c2p_status{dof_sfx}_{ndim}d"),
-        ndim,
-        &k,
-        &w,
-    );
+    gen_c2p_status(out_dir, ndim, prefix, dof_sfx, ncomp, has_energy);
     let (k, w) = fofc_freeze_probe_gv(ncomp, has_energy);
     emit_gv(
         out_dir,
@@ -1470,9 +1484,11 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // in the scratch and adds the source characteristic rate, folding the source-limited timestep into
 // the same reduction. curved spacetime only; mag_from_bcell = false to match the fused godunov
 // source (which reads prim.mag). name parallels the wave-speed map.
-// the GRMHD admissible-boundary projection (the provable freeze replacement): blends an
-// inadmissible spliced cell toward the admissible stage-input anchor onto partial-G. the RMHD cone
-// is B-free, so the staggered field is untouched and div(B) survives. curved spacetime only.
+// the GRMHD admissible-boundary projection: the TIER BELOW the conservative source limiter. the
+// limiter scales a source and cannot act on a state that is ALREADY outside G with no source left
+// to scale; this maps such a cell onto partial-G along the segment to the admissible stage-input
+// anchor. the blend touches only the hydro slots, so the constrained-transport staggered field is
+// untouched and div(B) survives by construction. curved spacetime only.
 fn gen_rmhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
     let name = format!(
@@ -1530,6 +1546,57 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
         /* mag_from_bcell = */ false,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
+
+    // the fofc replay uses the same conservative flux stage while multiplying only the local
+    // metric source by `scratch`. scratch = 0 forms the source-free low-order anchor; the
+    // admissible source-ray fraction then replays the identical stage with scratch = theta.
+    let weighted_name = format!(
+        "rmhd_godunov_stage_pcp{}{}_{ndim}d",
+        mhd_geom_slug(&geom),
+        geom.spacetime_suffix()
+    );
+    let (weighted, weighted_writes) =
+        symbi_discretize::gv::godunov_stage_gv_with_fused_built_and_geo_weight(
+            geom.coords,
+            geom.spacetime,
+            &geom.spacing,
+            &geom.axes,
+            ndim,
+            3,
+            true,
+            GeoSource::Rmhd,
+            &[],
+            /* mag_from_bcell = */ false,
+            0,
+            true,
+        );
+    emit_gv(out_dir, &weighted_name, ndim, &weighted, &weighted_writes);
+
+    let theta_name = format!(
+        "rmhd_fofc_source_theta{}{}_{ndim}d",
+        mhd_geom_slug(&geom),
+        geom.spacetime_suffix()
+    );
+    let (theta, theta_writes) = symbi_discretize::gv::fofc_source_theta_gr_mhd_gv(
+        geom.coords,
+        geom.spacetime,
+        &geom.spacing,
+        &geom.axes,
+    );
+    emit_gv(out_dir, &theta_name, ndim, &theta, &theta_writes);
+
+    let exterior_name = format!(
+        "rmhd_fofc_exterior{}{}_{ndim}d",
+        mhd_geom_slug(&geom),
+        geom.spacetime_suffix()
+    );
+    let (exterior, exterior_writes) = fofc_exterior_flag_gv(
+        geom.coords,
+        geom.spacetime,
+        &geom.spacing,
+        &geom.axes,
+    );
+    emit_gv(out_dir, &exterior_name, ndim, &exterior, &exterior_writes);
 }
 
 // the GRMHD cons->prim: the metric-aware KKC recovery at the volume-weighted centroid.
@@ -3327,6 +3394,9 @@ fn main() {
     // because DOF=3 != ndim=2 (the c2p/flux/snapshot/ghost can't reuse the cartesian ncomp).
     let cyl = Geom::cyl_rz();
     gen_adiabatic_c2p(&out_dir, 2, cyl.clone());
+    // the swirl chart runs no first-order flux correction (the fofc kernels are baked at
+    // ncomp = ndim), but c2p still annotates its recovery, so the status kernel is needed here.
+    gen_c2p_status(&out_dir, 2, "adiabatic", "_cyl_rz", 3, true);
     gen_iso_wave_speed_map(&out_dir, 2, cyl.clone());
     gen_iso_ghost_fill(&out_dir, 2, cyl.clone());
     gen_neumann_ghost_fill(&out_dir, 2, cyl.clone());

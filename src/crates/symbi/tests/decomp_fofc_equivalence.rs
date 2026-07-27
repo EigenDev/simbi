@@ -85,7 +85,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         }
     })
     .build();
-    let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC);
+    let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0);
     (sim, k)
 }
 

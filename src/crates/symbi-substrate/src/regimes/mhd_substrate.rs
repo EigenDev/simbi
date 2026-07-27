@@ -236,6 +236,62 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    godunov_stage_impl(sim, has_energy, gas_prefix, gamma, dt, a0, ac, None);
+}
+
+/// replay the GRMHD gas stage with a per-cell multiplier on the geometric (metric) source. the
+/// flux divergence, the mesh dilution, and every additive source are bit-identical to the ordinary
+/// stage; only the pointwise, non-conservative metric source is scaled. this is the
+/// physical-constraint-preserving (`pcp`) stage the FOFC source limiter replays through: weight 0
+/// forms the source-free low-order anchor, weight `theta` the largest admissible source fraction.
+pub(crate) fn godunov_stage_pcp<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    dt: f64,
+    a0: f64,
+    ac: f64,
+    source_weight: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    godunov_stage_impl(sim, true, "rmhd", gamma, dt, a0, ac, Some(source_weight));
+}
+
+/// assign one constant over the cell interior using the carrier-generic fill kernel.
+pub(crate) fn fill_cell_field<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    field: &Field<Sc, D, Mem>,
+    value: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("field_fill_{D}d");
+    dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &sim.geom.interior,
+        &[],
+        &[field],
+        &[],
+        &[Sc::from_f64(value)],
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn godunov_stage_impl<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    has_energy: bool,
+    gas_prefix: &str,
+    gamma: f64,
+    dt: f64,
+    a0: f64,
+    ac: f64,
+    source_weight: Option<&Field<Sc, D, Mem>>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
     // mhd_geom_suffix keys on the GRID-AXIS SET (sim.geom.axes): cyl r-z [0,2] -> "_cyl_rz",
     // r-phi disk [0,1] -> "_cyl_rphi", identity geometries -> "" / "_sph" / "_cyl". a curved
     // spacetime appends the spacing + spacetime slugs on BOTH the gas stage and the bcell
@@ -317,7 +373,20 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // magnetic-energy patch. the curvilinear geo-source prim reads are regime-specific (RMHD
     // rho/vel/pre/mag, NMHD/IMHD vel/mag/pre), so the buffer layout tracks the kernel artifact (a
     // hand-built list would scramble NMHD/IMHD when DOF != D).
-    let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
+    let weighted = source_weight.is_some();
+    assert!(
+        !weighted || gas_prefix == "rmhd",
+        "the geometric-source-weighted stage is defined only for GRMHD"
+    );
+    assert!(
+        !weighted || sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski,
+        "the geometric-source-weighted stage requires a curved spacetime"
+    );
+    let gname = if weighted {
+        format!("{gas_prefix}_godunov_stage_pcp{sfx}_{D}d")
+    } else {
+        format!("{gas_prefix}_godunov_stage{sfx}_{D}d")
+    };
     let gscalars = scalars_for(&gname, &scalar);
     let pre_bind = if has_energy {
         sim.fields.prim.pre_field().expect("prim.pre")
@@ -327,7 +396,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(
         sim,
         pre_bind,
-        None,
+        source_weight,
         0,
         &gname,
         &sim.geom.interior,
@@ -518,7 +587,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// snapshot u_n (gas D/S/tau) + bcell_n (for the RK2 cell-B combine).
+/// snapshot the ssp step-entry state used by the scheme's convex combination.
 pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,
@@ -578,6 +647,86 @@ pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
         let pairs: Vec<_> = (0..DOF).map(|c| (&mhd.bcell[c], &mhd.bcell_n[c])).collect();
         fused_save_buffers(&pairs);
     }
+}
+
+/// the `(live, saved)` field pairing of the step-entry rollback snapshot: the gas conserved
+/// vector plus BOTH magnetic representations. rolling `bface` back exactly is what keeps
+/// `div(B) = 0` across a rejection — the replay re-curls from the step-entry face field rather
+/// than compounding the rejected curl. empty where the regime cannot reject a step, in which
+/// case the snapshot storage was never allocated.
+fn step_snapshot_pairs<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'a FieldStore<D, DOF, Mem, Sc>,
+) -> Vec<(&'a Field<Sc, D, Mem>, &'a Field<Sc, D, Mem>)>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let Some(mhd) = sim.fields.mhd.as_ref() else {
+        return Vec::new();
+    };
+    let Some(saved) = mhd.step_snapshot.as_ref() else {
+        return Vec::new();
+    };
+    let cons = &sim.fields.cons;
+    let mut pairs = vec![(&cons.den, &saved.cons.den)];
+    for cc in 0..DOF {
+        pairs.push((&cons.mom[cc], &saved.cons.mom[cc]));
+    }
+    if let Some(live) = cons.nrg_field() {
+        pairs.push((
+            live,
+            saved
+                .cons
+                .nrg_field()
+                .expect("the rollback snapshot carries the energy slot"),
+        ));
+    }
+    if let Some(live) = cons.chi_field() {
+        pairs.push((
+            live,
+            saved
+                .cons
+                .chi_field()
+                .expect("the rollback snapshot carries the passive-scalar slot"),
+        ));
+    }
+    for cc in 0..DOF {
+        pairs.push((&mhd.bcell[cc], &saved.bcell[cc]));
+    }
+    for dd in 0..D {
+        pairs.push((&mhd.bface[dd], &saved.bface[dd]));
+    }
+    pairs
+}
+
+/// save the step-entry state a rejected step is replayed from. a no-op for the regimes that
+/// accept every step and therefore carry no snapshot storage.
+pub(crate) fn snapshot_retry<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    fofc_copy_fields(&step_snapshot_pairs(sim));
+}
+
+/// restore the step-entry gas + magnetic state after a rejected explicit step.
+pub(crate) fn restore_step<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let pairs: Vec<_> = step_snapshot_pairs(sim)
+        .into_iter()
+        .map(|(live, saved)| (saved, live))
+        .collect();
+    assert!(
+        !pairs.is_empty(),
+        "a step was rejected on a regime that carries no step-entry rollback snapshot: the \
+         replay would restart from the rejected state"
+    );
+    fofc_copy_fields(&pairs);
 }
 
 /// snapshot the stage-INPUT GAS conserved (den, mom, [nrg]) into `u_stage`, the
