@@ -29,8 +29,6 @@ use crate::state::{Cons, Prim};
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::{Scalar, Selectable};
 
-use super::{DIVZERO_GUARD, NULL_FIELD_THRESHOLD};
-
 /// the Quirk fallback gate shared by every regime — `D > 1` AND
 /// `shock_smoother == Quirk`. the `D > 1` half is a compile-time check
 /// (`const D: usize` is fixed per monomorphization, so the dead branch
@@ -326,11 +324,12 @@ fn rhd_contact_props<S: Scalar, const D: usize>(
     // s_norm == 0): unguarded this returns NaN/Inf and poisons the flux. mirrors the proven RMHD
     // guard (the `a_star` select above). Gv evaluates both arms, but the Inf is selected away, never
     // combined into an output — the same carrier-safe pattern the RMHD path uses.
-    let a_star = S::select(
-        quad.abs().cmp_gt(S::from_f64(DIVZERO_GUARD)),
-        cc / quad,
-        S::ZERO,
-    );
+    let quad_scale = bb.abs().max(disc_sqrt);
+    let quad_ok = quad
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * quad_scale);
+    let quad_divisor = S::select(quad_ok, quad, S::ONE);
+    let a_star = S::select(quad_ok, cc / quad_divisor, S::ZERO);
     let p_star = -a_star * fe + fs_norm;
     (a_star, p_star)
 }
@@ -520,7 +519,11 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
 
                     // contact-wave quadratic: compute null-B AND non-null-B
                     // coefficients in parallel, select via mask.
-                    let null_cond = bn.abs().cmp_lt(S::from_f64(NULL_FIELD_THRESHOLD));
+                    let b_scale = metric
+                        .norm_sq_contra(&prim_l.mag)
+                        .max(metric.norm_sq_contra(&prim_r.mag))
+                        .sqrt();
+                    let null_cond = bn.abs().cmp_le(S::from_f64(32.0 * f64::EPSILON) * b_scale);
                     let fdb = metric.contract_contra(&ft_hll, &bt_hll);
                     let bpsq = metric.norm_sq_contra(&bt_hll);
                     let fbpsq = metric.norm_sq_contra(&ft_hll);
@@ -533,11 +536,12 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                         (b_coeff * b_coeff - S::from_f64(4.0) * a_coeff * c_coeff).max(S::ZERO);
                     let sgn_b = S::select(b_coeff.cmp_ge(S::ZERO), S::ONE, -S::ONE);
                     let quad = S::from_f64(-0.5) * (b_coeff + sgn_b * disc.sqrt());
-                    let a_star = S::select(
-                        quad.abs().cmp_gt(S::from_f64(DIVZERO_GUARD)),
-                        c_coeff / quad,
-                        S::ZERO,
-                    );
+                    let quad_scale = b_coeff.abs().max(disc.sqrt());
+                    let quad_ok = quad
+                        .abs()
+                        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * quad_scale);
+                    let quad_divisor = S::select(quad_ok, quad, S::ONE);
+                    let a_star = S::select(quad_ok, c_coeff / quad_divisor, S::ZERO);
 
                     // safe_bn: avoid 0/0 in the non-null path when bn is tiny;
                     // when null_cond fires the non-null arm is discarded by select.
@@ -647,7 +651,6 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::from_f64(0.5);
-    let eps = S::from_f64(DIVZERO_GUARD);
     let regime = NewtonianMhd;
 
     let hlle_flux = hlle(&regime, eos, prim_l, prim_r, nhat, vface);
@@ -672,12 +675,19 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
     let cl = (s_l - un_l) * rho_l;
     let cr = (s_r - un_r) * rho_r;
     let dm = cr - cl;
-    let dm_s = S::select(dm.abs().cmp_lt(eps), eps, dm);
+    let dm_ok = dm
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * cr.abs().max(cl.abs()));
+    let dm_s = S::select(dm_ok, dm, one);
     let s_m = (cr * un_r - cl * un_l - pt_r + pt_l) / dm_s;
     let pt_star = (cr * pt_l - cl * pt_r + cl * cr * (un_r - un_l)) / dm_s;
 
     // HLL state -> the transverse B held CONTINUOUS across the contact.
-    let inv_dwave = one / S::select((s_r - s_l).abs().cmp_lt(eps), eps, s_r - s_l);
+    let dwave = s_r - s_l;
+    let dwave_ok = dwave
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_l.abs()));
+    let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let u_hll = (u_r * s_r - u_l * s_l - (f_r - f_l)) * inv_dwave;
     let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhat.scale(vn) };
     let bt_star = tang(&u_hll.mag, u_hll.mag.dot(nhat));
@@ -694,9 +704,16 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
                 pt_k: S,
                 c_k: S|
      -> (MhdCons<S, D>, MhdCons<S, D>, S) {
-        let smk_s = S::select((s_k - s_m).abs().cmp_lt(eps), eps, s_k - s_m);
+        let smk = s_k - s_m;
+        let smk_ok = smk
+            .abs()
+            .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_k.abs().max(s_m.abs()));
+        let smk_s = S::select(smk_ok, smk, one);
         let rho_star = rho_k * (s_k - un_k) / smk_s;
-        let c_safe = S::select(c_k.abs().cmp_lt(eps), eps, c_k); // rho_K(S_K - u_K)
+        let c_ok = c_k
+            .abs()
+            .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * rho_k.abs() * s_k.abs().max(un_k.abs()));
+        let c_safe = S::select(c_ok, c_k, one); // rho_K(S_K - u_K)
         let vt_k = tang(&prim_k.vel, un_k);
         let bt_k = tang(&prim_k.mag, bn);
         let vt_star = vt_k - (bt_star - bt_k).scale(bn / c_safe);
@@ -730,7 +747,27 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
             MhdCons::select(vface.cmp_lt(s_r), reg(fs_r, us_r), reg(f_r, u_r)),
         ),
     );
-    let ok = rs_l.cmp_gt(zero) & rs_r.cmp_gt(zero) & pt_star.cmp_gt(zero);
+    let smk_l_ok = (s_l - s_m)
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_l.abs().max(s_m.abs()));
+    let smk_r_ok = (s_r - s_m)
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_m.abs()));
+    let c_l_ok = cl
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * rho_l.abs() * s_l.abs().max(un_l.abs()));
+    let c_r_ok = cr
+        .abs()
+        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * rho_r.abs() * s_r.abs().max(un_r.abs()));
+    let ok = dm_ok
+        & dwave_ok
+        & smk_l_ok
+        & smk_r_ok
+        & c_l_ok
+        & c_r_ok
+        & rs_l.cmp_gt(zero)
+        & rs_r.cmp_gt(zero)
+        & pt_star.cmp_gt(zero);
     MhdCons::select(ok, pick, hlle_flux)
 }
 

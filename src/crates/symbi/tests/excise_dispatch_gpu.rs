@@ -109,8 +109,8 @@ fn excise_dispatch_matches_cpu_on_device() {
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
 
-    dispatch_excise(&h, GAMMA, R_EXC);
-    dispatch_excise(&d, GAMMA, R_EXC);
+    dispatch_excise(&h, GAMMA, R_EXC, 1e-10, 1e-12);
+    dispatch_excise(&d, GAMMA, R_EXC, 1e-10, 1e-12);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
 
     let (sh, sd) = (snapshot(&h), snapshot(&d));
@@ -167,8 +167,8 @@ fn excise_source_cfl_dt_matches_cpu_on_device() {
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
     // fill the excised sphere first: the cfl reads the post-excise state.
-    dispatch_excise(&h, GAMMA, R_EXC);
-    dispatch_excise(&d, GAMMA, R_EXC);
+    dispatch_excise(&h, GAMMA, R_EXC, 1e-10, 1e-12);
+    dispatch_excise(&d, GAMMA, R_EXC, 1e-10, 1e-12);
     let hk = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &h.geom.allocated)
         .with_excision(R_EXC);
     let dk = RhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, 0.3, &d.geom.allocated)
@@ -202,8 +202,8 @@ fn excise_uniform_state_matches_cpu_on_device() {
     };
     let h = build::<CpuSpace, HostMemory>(init);
     let d = build::<CudaSpace, UnifiedMemory>(init);
-    dispatch_excise(&h, GAMMA, R_EXC);
-    dispatch_excise(&d, GAMMA, R_EXC);
+    dispatch_excise(&h, GAMMA, R_EXC, 1e-10, 1e-12);
+    dispatch_excise(&d, GAMMA, R_EXC, 1e-10, 1e-12);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
     let (sh, sd) = (snapshot(&h), snapshot(&d));
     for (i, (a, b)) in sh.iter().zip(sd.iter()).enumerate() {

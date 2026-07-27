@@ -46,7 +46,7 @@ use symbi_hydro::regime::Regime;
 use symbi_hydro::state::PrimG;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
-use symbi_sim::checkpoint::{load_checkpoint, write_hierarchy_checkpoint};
+use symbi_sim::checkpoint::{load_checkpoint_level, time_at_or_after, write_hierarchy_checkpoint};
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
@@ -103,6 +103,8 @@ struct Config {
     // horizon-excision sphere radius about the chart origin (cartesian kerr-schild,
     // 2d or 3d); 0 disables excision. must sit inside the horizon r_+ = 2M.
     excision_radius: f64,
+    excision_rho_scale: f64,
+    excision_pre_scale: f64,
     x1_spacing: String,
     x1_spacing_ratio: f64,
     x2_spacing: String,
@@ -876,6 +878,8 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         alpha: get_f64_or(dict, "alpha", 0.0),
         resistivity: get_f64_or(dict, "resistivity", 0.0),
         excision_radius: get_f64_or(dict, "excision_radius", 0.0),
+        excision_rho_scale: 1.0,
+        excision_pre_scale: 1.0,
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
         x1_spacing_ratio: get_f64_or(dict, "x1_spacing_ratio", 1.0),
         x2_spacing: enum_str_or(dict, "x2_spacing", "linear"),
@@ -1343,6 +1347,51 @@ fn drain_prims(prim_gen: &Bound<'_, PyAny>) -> PyResult<Vec<Vec<f64>>> {
     Ok(buf)
 }
 
+fn initial_excision_scales(prims: &[Vec<f64>]) -> Result<(f64, f64), String> {
+    let rho_scale = prims
+        .iter()
+        .filter_map(|row| row.first().copied())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    let pre_scale = prims
+        .iter()
+        .filter_map(|row| row.last().copied())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    if !rho_scale.is_finite() || !pre_scale.is_finite() {
+        return Err(
+            "excision atmosphere requires positive finite initial density and pressure".to_string(),
+        );
+    }
+    Ok((rho_scale, pre_scale))
+}
+
+#[cfg(test)]
+mod excision_scale_tests {
+    use super::initial_excision_scales;
+
+    #[test]
+    fn initial_excision_scales_follow_state_units() {
+        let prims = vec![vec![2.0, 0.1, 0.0, 0.5], vec![5.0, -0.2, 0.1, 3.0]];
+
+        for factor in [1e-100_f64, 1.0, 1e100] {
+            let scaled: Vec<Vec<f64>> = prims
+                .iter()
+                .map(|row| vec![row[0] * factor, row[1], row[2], row[3] * factor])
+                .collect();
+            let (rho, pre) = initial_excision_scales(&scaled).unwrap();
+            assert_eq!(rho, 2.0 * factor);
+            assert_eq!(pre, 0.5 * factor);
+        }
+    }
+
+    #[test]
+    fn initial_excision_scales_reject_nonpositive_atmospheres() {
+        let prims = vec![vec![1.0, 0.0, 0.0, 0.0]];
+        assert!(initial_excision_scales(&prims).is_err());
+    }
+}
+
 /// drain the `staggered_bfields` list (one face-field generator per axis: bx, by,
 /// bz) into flat per-axis buffers. each generator yields face values in
 /// axis-0-fastest order over its staggered (ni+dx)x(nj+dy)x(nk+dz) extent.
@@ -1455,7 +1504,6 @@ fn partition_configured_tracers<
     }
 }
 
-/// the time-scheduled checkpoint loop. ONE path for every run: a single grid is a
 /// the number of scheduled checkpoint boundaries already at or before `resume_time`, i.e. the
 /// count a restart must SKIP so the next write lands on the first boundary strictly in the future.
 /// `boundary(fired)` is the (fired+1)-th scheduled checkpoint time and is monotonic increasing
@@ -1474,7 +1522,7 @@ fn checkpoints_at_or_before(
         return 0;
     }
     let mut fired = 0u64;
-    while boundary(fired).is_finite() && boundary(fired) <= resume_time + 1e-12 {
+    while boundary(fired).is_finite() && time_at_or_after(resume_time, boundary(fired)) {
         fired += 1;
     }
     fired
@@ -1482,7 +1530,17 @@ fn checkpoints_at_or_before(
 
 #[cfg(test)]
 mod checkpoint_schedule_tests {
-    use super::checkpoints_at_or_before;
+    use super::{checkpoints_at_or_before, time_at_or_after};
+
+    #[test]
+    fn clock_boundary_comparison_tracks_time_units() {
+        for factor in [1e-100_f64, 1.0, 1e100] {
+            let boundary = factor;
+            let roundoff = 16.0 * f64::EPSILON * factor;
+            assert!(time_at_or_after(boundary - roundoff, boundary));
+            assert!(!time_at_or_after(0.9 * boundary, boundary));
+        }
+    }
 
     // log cadence anchored at a FIXED reference: the k-th checkpoint lands at anchor*10^(k*dlogt).
     // cp_at(fired) is the (fired+1)-th boundary. a restart at index k resumes with the clock at the
@@ -1564,15 +1622,22 @@ where
 {
     let data_dir = &cfg.data_dir;
     if let Some(path) = cfg.restart_path.as_deref() {
-        if hier.levels.len() != 1 {
+        for (level_index, level) in hier.levels.iter_mut().enumerate() {
+            level.state.tracers = None;
+            level.state.continuous_tracers = None;
+            load_checkpoint_level(&mut level.state, path, level_index)?;
+        }
+        if hier.levels.len() > 1
+            && hier.levels.iter().any(|level| {
+                level.state.tracers.is_some() || level.state.continuous_tracers.is_some()
+            })
+        {
             return Err(format!(
-                "checkpoint restart requires one level; '{path}' cannot yet restore a refined hierarchy"
+                "refined checkpoint '{path}' contains tracers; hierarchy restart requires \
+                 repartitioning the global tracer population"
             )
             .into());
         }
-        hier.levels[0].state.tracers = None;
-        hier.levels[0].state.continuous_tracers = None;
-        load_checkpoint(&mut hier.levels[0].state, path)?;
     }
     // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
     // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
@@ -1905,7 +1970,7 @@ where
         // intermediate states were never computed, and the file name is keyed by
         // the current time — looping would just re-write the SAME file N times and
         // spam the board with identical entries.
-        if time + 1e-12 >= next_cp && next_cp.is_finite() {
+        if time_at_or_after(time, next_cp) && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let path = checkpoint_name(
                 cfg,
@@ -1927,7 +1992,7 @@ where
             next_cp = cp_at(cp_fired);
             // advance past every boundary this step crossed (log or linear) so a
             // single large dt yields ONE write covering all of them.
-            while time + 1e-12 >= next_cp && next_cp.is_finite() {
+            while time_at_or_after(time, next_cp) && next_cp.is_finite() {
                 cp_fired += 1;
                 next_cp = cp_at(cp_fired);
             }
@@ -1941,7 +2006,7 @@ where
         // the frame dirty so the write is visible the moment it happens.
         if let Some(dp) = &diag_path {
             let mut wrote = false;
-            while time + 1e-12 >= next_diag {
+            while time_at_or_after(time, next_diag) {
                 if let Some(im) = h.levels.last().and_then(|l| l.state.immersed.as_ref()) {
                     let _ = append_diagnostics(dp, time, &im.bodies);
                 }
@@ -3648,7 +3713,11 @@ macro_rules! build_and_run_hydro {
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .with_viscosity(cfg.viscosity)
             .with_resistivity(cfg.resistivity)
-            .with_excision(cfg.excision_radius);
+            .with_excision(
+                cfg.excision_radius,
+                cfg.excision_rho_scale,
+                cfg.excision_pre_scale,
+            );
         // attach a user source expression (force/cooling/relax/raw) when present.
         // lowered against THIS regime's spec via the source front door — the bridge rejects
         // force/cooling/relax on relativistic regimes (use raw). the base level attaches it here;
@@ -4139,7 +4208,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     .with_viscosity(cfg.viscosity)
                     .with_resistivity(cfg.resistivity)
-                    .with_excision(cfg.excision_radius);
+                    .with_excision(
+                        cfg.excision_radius,
+                        cfg.excision_rho_scale,
+                        cfg.excision_pre_scale,
+                    );
                 // register the DRIVEN (DYNAMIC) boundary DAGs on the tile root AND every fine
                 // level, in Driven-id order: an edge tile's exterior faces carry Driven(id)
                 // from the physical-boundary copy above, and a fine level flush against one
@@ -4937,7 +5010,11 @@ macro_rules! build_and_run_mhd {
             .ct_method(cfg.ct_method)
             .with_viscosity(cfg.viscosity)
             .with_resistivity(cfg.resistivity)
-            .with_excision(cfg.excision_radius);
+            .with_excision(
+                cfg.excision_radius,
+                cfg.excision_rho_scale,
+                cfg.excision_pre_scale,
+            );
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
         // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
         // B is CT-evolved, so it takes no cell source. single-grid only.
@@ -5259,7 +5336,11 @@ macro_rules! build_and_run_mhd_decomposed {
                     .ct_method(ct)
                     .with_viscosity(cfg.viscosity)
                     .with_resistivity(cfg.resistivity)
-                    .with_excision(cfg.excision_radius);
+                    .with_excision(
+                        cfg.excision_radius,
+                        cfg.excision_rho_scale,
+                        cfg.excision_pre_scale,
+                    );
                 // attach the user source per tile (two-pass). targets the mhd hydro slots
                 // (den/mom/nrg); B is CT-evolved, so it takes no cell source. each tile evaluates S at its
                 // own global coords. rmhd is relativistic -> raw only (enforced in build_user_source).
@@ -5456,7 +5537,11 @@ macro_rules! build_and_run_imhd_decomposed {
                     .ct_method(ct)
                     .with_viscosity(cfg.viscosity)
                     .with_resistivity(cfg.resistivity)
-                    .with_excision(cfg.excision_radius);
+                    .with_excision(
+                        cfg.excision_radius,
+                        cfg.excision_rho_scale,
+                        cfg.excision_pre_scale,
+                    );
                 // attach the user source per tile (two-pass). iso mhd has no energy -> momentum-only
                 // force/relax, raw den/mom; B is CT-evolved. each tile evaluates S at its own coords.
                 let sub = attach_configured_sources(
@@ -7204,6 +7289,10 @@ fn run_simulation(
         cfg.scale_adot = adot.call1((t0,))?.extract::<f64>()?;
     }
     let prims = drain_prims(prim_gen)?;
+    if cfg.excision_radius > 0.0 {
+        (cfg.excision_rho_scale, cfg.excision_pre_scale) =
+            initial_excision_scales(&prims).map_err(PyValueError::new_err)?;
+    }
     let bfields = drain_bfields(staggered_bfields)?;
 
     // the solve is pure rust with no python access — release the GIL so rayon
@@ -7216,9 +7305,6 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     validate_gpu_request(cfg.n_gpus)?;
     if cfg.restart_path.is_some() && cfg.n_gpus > 1 {
         return Err("checkpoint restart is not yet supported with decomposition".to_string());
-    }
-    if cfg.restart_path.is_some() && cfg.refinement_enabled {
-        return Err("checkpoint restart is not yet supported for refined hierarchies".to_string());
     }
     check_horizon_containment(
         &cfg.spacetime,

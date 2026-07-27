@@ -146,15 +146,16 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let r_sq = metric.norm_sq_cov(&rvec);
     let r_mag = r_sq.sqrt();
     let hvec = bfield.scale(isqrtd);
-    // h is CONTRAVARIANT (rescaled B^i) -> lower: |h|^2 = gamma_{ij} h^i h^j. + epsilon: divzero guard when B=0.
-    let bee_sq = metric.norm_sq_contra(&hvec) + eps;
+    // h is CONTRAVARIANT (rescaled B^i) -> lower: |h|^2 = gamma_{ij} h^i h^j.
+    let bee_sq = metric.norm_sq_contra(&hvec);
+    let bee_sq_safe = S::select(bee_sq.cmp_gt(S::ZERO), bee_sq, S::ONE);
     // r.h = r_i h^i is a COVARIANT*CONTRAVARIANT pairing -> METRIC-FREE (no gamma factor); stays `.dot()`.
     let rdb = rvec.dot(&hvec);
     let rdb_sq = rdb * rdb;
     // the perp invariant |r_perp|^2 = gamma^{ij} (r - r_par)_i (r - r_par)_j with the parallel
     // projection LOWERED to match r's variance: r_par_i = (r.b / |b|^2) h_i. identity gamma ->
     // the euclidean decomposition bit-for-bit (lower = id, norm_sq_cov = dot).
-    let rparr = metric.lower(&hvec).scale(rdb / bee_sq);
+    let rparr = metric.lower(&hvec).scale(rdb / bee_sq_safe);
     let rperp = rvec - rparr;
     let rp_sq = metric.norm_sq_cov(&rperp);
 
@@ -223,11 +224,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // neighbour's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
     // routes the zone through first-order correction instead. r_sq is metric-raised (line ~115).
     let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
-    let pre = S::select(
-        cone_ok,
-        pre,
-        S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE),
-    );
+    let pre = S::select(cone_ok, pre, crate::c2p_result::c2p_cone_fail_pressure(dd));
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
     // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the
@@ -259,9 +256,9 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = MhdPrim {
             hydro: Prim {
-                rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+                rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
                 vel: Tensor::zeros(),
-                pre: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+                pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
             },
             mag: cons.mag,
         };

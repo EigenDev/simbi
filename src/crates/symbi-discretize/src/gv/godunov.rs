@@ -68,7 +68,7 @@ pub fn fofc_copy_gv(
 /// (PCM + HLLE) result, aliased to the live cons/prim `out_*` (in-place read+write). the failure
 /// test is metric-free and needs only rho/pre: both relativistic recoveries drive an out-of-cone
 /// state to a FINITE flagged result — density from the ceiling-clamped Lorentz factor, pressure to
-/// the non-positive `C2P_CONE_FAIL_PRESSURE` sentinel (see c2p_result) — so an unphysical recovery
+/// the density-scaled non-positive cone-failure sentinel (see c2p_result) — so an unphysical recovery
 /// always shows up as rho <= 0 or pre <= 0 (both fail `> 0`), never needing a velocity test. so a
 /// cell whose HIGH-ORDER c2p is physical keeps its sharp state; only the failed cells take the
 /// diffusive first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).

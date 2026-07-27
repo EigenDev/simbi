@@ -38,6 +38,43 @@ use symbi_algebra::{Matrix, Tensor};
 pub const ADMISSIBLE_REL_FLOOR: f64 = 1e-10;
 use symbi_ir::algebra::Scalar;
 
+/// one-power-of-energy scale for relativistic hydrodynamic conserved states.
+/// `D`, `|S|`, and `E` have the same dimensions.
+pub fn rhd_state_scale<S: Scalar>(d: S, s: &Tensor<S, 3>, e: S, gm_inv: &Matrix<S, 3>) -> S {
+    let mut s2 = S::ZERO;
+    for ii in 0..3 {
+        for jj in 0..3 {
+            s2 = s2 + gm_inv[(ii, jj)] * s[ii] * s[jj];
+        }
+    }
+    d.abs().max(s2.max(S::ZERO).sqrt()).max(e.abs())
+}
+
+/// one-power-of-energy scale for relativistic magnetohydrodynamic conserved
+/// states. `D`, `|S|`, `E`, and `|B|^2` have the same dimensions, so their
+/// maximum defines a local scale without privileging a density normalization.
+pub fn rmhd_state_scale<S: Scalar>(
+    d: S,
+    s: &Tensor<S, 3>,
+    e: S,
+    b: &Tensor<S, 3>,
+    gm_inv: &Matrix<S, 3>,
+    gm: &Matrix<S, 3>,
+) -> S {
+    let contract = |m: &Matrix<S, 3>, u: &Tensor<S, 3>| -> S {
+        let mut acc = S::ZERO;
+        for ii in 0..3 {
+            for jj in 0..3 {
+                acc = acc + m[(ii, jj)] * u[ii] * u[jj];
+            }
+        }
+        acc
+    };
+    let s_norm = contract(gm_inv, s).max(S::ZERO).sqrt();
+    let magnetic_energy = contract(gm, b).max(S::ZERO);
+    d.abs().max(s_norm).max(e.abs()).max(magnetic_energy)
+}
+
 /// the largest `theta` in [0, 1] with `anchor + theta (cand - anchor)` in the admissible set G,
 /// given the anchor is admissible (`f(anchor) > 0`, `D_anchor > 0`).
 ///
@@ -88,7 +125,14 @@ pub fn admissible_theta<S: Scalar>(
     // passes through bit-for-bit); an inadmissible candidate has EXACTLY one crossing, and this is it.
     let g0 = (c - eps_f).max(S::ZERO);
     let disc = (b * b - S::from_f64(4.0) * a * g0).max(S::ZERO);
-    let denom = ((S::ZERO - b) + disc.sqrt()).max(S::from_f64(1e-300));
+    let denom_raw = (S::ZERO - b) + disc.sqrt();
+    let coeff_scale = a.abs().max(b.abs()).max(g0.abs());
+    let denom_floor = S::select(
+        coeff_scale.cmp_gt(S::ZERO),
+        S::from_f64(f64::EPSILON) * coeff_scale,
+        S::ONE,
+    );
+    let denom = denom_raw.max(denom_floor);
     let theta_f = (two * g0 / denom).min(S::ONE).max(S::ZERO);
 
     // density floor D(theta) = d_a + theta d_delta >= eps_d, binding only when the density falls
@@ -287,6 +331,45 @@ mod tests {
     // a diagonal inverse-metric (identity for flat; a Schwarzschild-like radial stretch otherwise).
     fn metric(f_rr: f64) -> Matrix<f64, 3> {
         Matrix::diag(Tensor::new([f_rr, 1.0, 1.0]))
+    }
+
+    #[test]
+    fn rhd_state_scale_tracks_conserved_rescaling() {
+        let gm_inv = metric(0.5);
+        let d = 0.4;
+        let s = Tensor::new([0.3, -0.2, 0.1]);
+        let e = 0.9;
+        let reference = rhd_state_scale(d, &s, e, &gm_inv);
+
+        for factor in [1.0e-12_f64, 1.0e-4, 1.0e4, 1.0e12] {
+            let scaled = rhd_state_scale(d * factor, &(s * factor), e * factor, &gm_inv);
+            assert!(
+                (scaled / (reference * factor) - 1.0).abs() < 1.0e-14,
+                "state scale is not homogeneous at factor {factor:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn rmhd_state_scale_tracks_conserved_rescaling() {
+        let gm = metric(2.0);
+        let gm_inv = metric(0.5);
+        let d = 0.4;
+        let s = Tensor::new([0.3, -0.2, 0.1]);
+        let e = 0.9;
+        let b = Tensor::new([0.5, 0.25, -0.1]);
+        let reference = rmhd_state_scale(d, &s, e, &b, &gm_inv, &gm);
+
+        for factor in [1.0e-12_f64, 1.0e-4, 1.0e4, 1.0e12] {
+            let scaled_s = s * factor;
+            let scaled_b = b * factor.sqrt();
+            let scaled =
+                rmhd_state_scale(d * factor, &scaled_s, e * factor, &scaled_b, &gm_inv, &gm);
+            assert!(
+                (scaled / (reference * factor) - 1.0).abs() < 1.0e-14,
+                "state scale is not homogeneous at factor {factor:e}"
+            );
+        }
     }
 
     // a deterministic admissible conserved state from a physical primitive on the given metric.

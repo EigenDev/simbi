@@ -240,7 +240,12 @@ pub(crate) fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]
 /// an exact zero takes the positive branch — at zero either direction is equally valid, so the
 /// choice is arbitrary and only the magnitude matters.
 fn guard_denominator(x: Gv, eps: Gv) -> Gv {
-    Gv::select(x.cmp_ge(Gv::ZERO), x.max(eps), x.min(Gv::ZERO - eps))
+    let threshold = Gv::select(eps.cmp_gt(Gv::ZERO), eps, Gv::ONE);
+    Gv::select(
+        x.abs().cmp_gt(eps),
+        x,
+        Gv::select(x.cmp_ge(Gv::ZERO), threshold, Gv::ZERO - threshold),
+    )
 }
 
 #[cfg(test)]

@@ -286,12 +286,11 @@ impl<S: Scalar> BodySource<S> {
         S::cond(
             r_mag.cmp_lt(r_cut),
             || {
-                let tiny = S::from_f64(1e-30);
                 let r_norm = r_mag / (S::from_f64(0.5) * self.racc);
                 let weight = (S::ZERO - r_norm * r_norm).exp();
-                let sound_crossing = min_w / cs;
-                let t_ff = (r_mag * r_mag * r_mag / (S::from_f64(2.0) * self.mass + tiny)).sqrt();
-                let nat_rate = S::ONE / (sound_crossing.min(t_ff) + tiny);
+                let sound_rate = cs / min_w;
+                let freefall_rate = (S::from_f64(2.0) * self.mass / (r_mag * r_mag * r_mag)).sqrt();
+                let nat_rate = sound_rate.max(freefall_rate);
                 let sr = self.sink.min(nat_rate).min(inv_dt);
                 rho * sr * weight
             },
@@ -302,10 +301,12 @@ impl<S: Scalar> BodySource<S> {
     /// the sink velocity `v_star` (Cartesian): radial + `delta`*angular, in the body
     /// frame. the accreted momentum sink is `-v_star * den_dot`.
     pub fn sink_velocity(&self, vel: &[S; 3], x: &[S; 3]) -> [S; 3] {
-        let eps_r = S::from_f64(1e-24);
         let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
-        let inv_safe = S::ONE / (dot(&dx, &dx) + eps_r).sqrt();
-        let rhat: [S; 3] = std::array::from_fn(|k| dx[k] * inv_safe);
+        let radius = dot(&dx, &dx).sqrt();
+        let nonzero = radius.cmp_gt(S::ZERO);
+        let divisor = S::select(nonzero, radius, S::ONE);
+        let inv_radius = S::select(nonzero, S::ONE / divisor, S::ZERO);
+        let rhat: [S; 3] = std::array::from_fn(|k| dx[k] * inv_radius);
         let vrel: [S; 3] = std::array::from_fn(|k| vel[k] - self.vm[k]);
         let vrad_comp = dot(&vrel, &rhat);
         std::array::from_fn(|k| {

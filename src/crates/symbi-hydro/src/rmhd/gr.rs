@@ -103,9 +103,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
             let floored = MhdPrim {
                 hydro: Prim {
-                    rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+                    rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
                     vel: Tensor::zeros(),
-                    pre: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+                    pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
                 },
                 mag: cons.mag,
             };

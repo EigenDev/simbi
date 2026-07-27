@@ -167,11 +167,15 @@ impl<S: Scalar> Numeric for Dual<S> {
     }
     #[inline]
     fn sqrt(self) -> Self {
-        // (sqrt a)' = a' / (2 sqrt a).
+        // the derivative diverges at zero. a zero primal with zero tangent is
+        // locally constant along the seeded direction, so its selected
+        // one-sided derivative is zero.
         let sv = self.value.sqrt();
+        let nonzero = sv.cmp_gt(S::ZERO);
+        let divisor = S::select(nonzero, S::from_f64(2.0) * sv, S::ONE);
         Self {
             value: sv,
-            tangent: self.tangent / (S::from_f64(2.0) * sv),
+            tangent: S::select(nonzero, self.tangent / divisor, S::ZERO),
         }
     }
     #[inline]

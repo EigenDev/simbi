@@ -233,7 +233,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     /// convenience: a spin RATE about `axis` (any nonzero vector, normalized here). fluent.
     pub fn with_spin_about(mut self, rate: S, axis: Tensor<S, 3>) -> Self {
         let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
-        let s = rate / n.max(S::from_f64(1e-300));
+        let s = rate / n;
         self.omega = Tensor::new([axis[0] * s, axis[1] * s, axis[2] * s]);
         self
     }
@@ -278,7 +278,9 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         // roll the orientation by the updated angular velocity.
         let w = [self.omega[0], self.omega[1], self.omega[2]];
         let wmag = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
-        let inv = S::ONE / wmag.max(S::from_f64(1e-300));
+        let nonzero = wmag.cmp_gt(S::ZERO);
+        let divisor = S::select(nonzero, wmag, S::ONE);
+        let inv = S::select(nonzero, S::ONE / divisor, S::ZERO);
         let axis = [w[0] * inv, w[1] * inv, w[2] * inv];
         let dr = rodrigues_matrix(axis, wmag * dt);
         self.orientation = matmul3(dr, r);

@@ -77,8 +77,8 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // AND the Gv carrier's sticky-done freeze (so the baked fixed-count kernel returns the
     // same recovered pressure the host does — see Scalar::iterate / Gv::iterate).
     let p_eq = p_init.iterate(max_iter, &newton_step, |prev, cur| {
-        let tol = dd * S::from_f64(1e-12);
-        (cur - prev).abs().cmp_lt(tol)
+        let tol = prev.abs().max(cur.abs()) * S::from_f64(1e-12);
+        (cur - prev).abs().cmp_le(tol)
     });
 
     // recover primitives: the CONTRAVARIANT 3-velocity v^i = gamma^{ij} S_j / (tau+D+p) (RAISE the
@@ -99,11 +99,7 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // and math to rmhd_recover.
     let qq = tau / dd;
     let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
-    let pre = S::select(
-        cone_ok,
-        p_eq,
-        S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE),
-    );
+    let pre = S::select(cone_ok, p_eq, crate::c2p_result::c2p_cone_fail_pressure(dd));
     Prim { rho, vel, pre }
 }
 
@@ -124,9 +120,9 @@ pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     // kernel path) that keeps the recovery's `dd/ww`, `tau+dd+p` finite for callers.
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = Prim {
-            rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+            rho: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
             vel: Tensor::zeros(),
-            pre: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR),
+            pre: S::from_f64(crate::c2p_result::C2P_FAILURE_SENTINEL),
         };
         return C2pResult::err(floored, code);
     }
@@ -288,7 +284,7 @@ mod tests {
 
     // the unified relativistic-c2p contract (shared with rmhd_recover): the branch-free kernel body
     // recovers a FINITE state for an out-of-cone conserved input — density from the ceiling-clamped
-    // Lorentz factor, pressure driven to the shared non-positive `C2P_CONE_FAIL_PRESSURE` sentinel
+    // Lorentz factor, pressure driven to the shared density-scaled non-positive sentinel
     // by the Wu-2017 cone test — a finite sentinel. rationale for the change from the old NaN convention:
     // the FOFC probe's `finite_pos(pre)` rejects the non-positive sentinel IDENTICALLY to a NaN (so
     // the fail-loud is preserved), while a finite sentinel cannot poison a neighbour's
