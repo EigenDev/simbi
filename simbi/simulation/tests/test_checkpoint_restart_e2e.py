@@ -19,6 +19,7 @@ from simbi.simulation.runner import run, to_execution_dict
 from simbi.types.bodies import (
     AccretionProperties,
     BodyCapability,
+    GravitationalProperties,
     ImmersedBodyConfig,
 )
 from simbi.types.typing import GasStateGenerator, InitialStateType
@@ -61,11 +62,15 @@ class AccretionRestartProbe(RestartProbe):
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         return [
             ImmersedBodyConfig(
-                capability=BodyCapability.ACCRETION,
+                capability=BodyCapability.ACCRETION
+                | BodyCapability.GRAVITATIONAL,
                 mass=1.0,
                 radius=0.08,
                 position=(0.5, 0.0, 0.0),
                 velocity=(0.0, 0.0, 0.0),
+                gravitational=GravitationalProperties(
+                    softening_length=0.08,
+                ),
                 accretion=AccretionProperties(
                     accretion_radius=0.08,
                     sink_rate=10.0,
@@ -85,11 +90,15 @@ class TwoAccretorRestartProbe(AccretionRestartProbe):
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         return [
             ImmersedBodyConfig(
-                capability=BodyCapability.ACCRETION,
+                capability=BodyCapability.ACCRETION
+                | BodyCapability.GRAVITATIONAL,
                 mass=1.0,
                 radius=0.08,
                 position=(position, 0.0, 0.0),
                 velocity=(0.0, 0.0, 0.0),
+                gravitational=GravitationalProperties(
+                    softening_length=0.08,
+                ),
                 accretion=AccretionProperties(
                     accretion_radius=0.08,
                     sink_rate=10.0,
