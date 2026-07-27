@@ -33,8 +33,17 @@ fn dec(c: [usize; 3], ax: usize) -> [usize; 3] {
 }
 
 // soft-sign upwind (the production soft_upwind).
-fn soft(f: f64, a: f64, b: f64) -> f64 {
-    let s = f / (f.abs() + 1.0e-12);
+// the soft-sign switch. `eps` is RELATIVE to the local density-flux magnitude: an absolute
+// floor lets a near-static edge (every |f| far below it) drive `s` from roundoff, so two
+// mirror-symmetric edges pick opposite upwind sides. a fully zero flux stencil leaves the
+// denominator at 0 and the blend degenerates to the plain average.
+fn soft(f: f64, a: f64, b: f64, flux_scale: f64) -> f64 {
+    let denominator = f.abs() + 32.0 * f64::EPSILON * flux_scale;
+    let s = if denominator > 0.0 {
+        f / denominator
+    } else {
+        0.0
+    };
     0.5 * ((a + b) + s * (a - b))
 }
 
@@ -68,10 +77,11 @@ fn ref_edge_emf(
     let fe = at(gp2, c);
     let fw = at(gp2, dec(c, p1));
     let eavg = 0.25 * (es + en + ew + ee);
-    let de_jl = soft(fw, 2.0 * (es - esw), 2.0 * (en - enw));
-    let de_jr = soft(fe, 2.0 * (ese - es), 2.0 * (ene - en));
-    let de_kl = soft(fs, 2.0 * (ew - esw), 2.0 * (ee - ese));
-    let de_kr = soft(fn_, 2.0 * (enw - ew), 2.0 * (ene - ee));
+    let flux_scale = fn_.abs().max(fs.abs()).max(fe.abs()).max(fw.abs());
+    let de_jl = soft(fw, 2.0 * (es - esw), 2.0 * (en - enw), flux_scale);
+    let de_jr = soft(fe, 2.0 * (ese - es), 2.0 * (ene - en), flux_scale);
+    let de_kl = soft(fs, 2.0 * (ew - esw), 2.0 * (ee - ese), flux_scale);
+    let de_kr = soft(fn_, 2.0 * (enw - ew), 2.0 * (ene - ee), flux_scale);
     eavg + 0.125 * (de_jl - de_jr + de_kl - de_kr)
 }
 

@@ -45,7 +45,7 @@ fn make(timestepping: Timestepping) -> (Sim, Kern) {
     })
     .build()
     .with_bodies(BodyCollection::new().add(Body::horizon(0, R_EXC, R_DIAG)));
-    let kernels = Kern::new(GAMMA, 0.3, &sim.geom.allocated).with_excision(R_EXC);
+    let kernels = Kern::new(GAMMA, 0.3, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0);
     (sim, kernels)
 }
 

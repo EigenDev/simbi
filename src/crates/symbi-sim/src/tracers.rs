@@ -2301,6 +2301,21 @@ mod tests {
     }
 
     #[test]
+    fn rejected_step_restores_discrete_tracer_ancestry() {
+        let mut tracers =
+            TracerSet::seed_stratified(&[([0.0], [1.0]), ([1.0], [1.0])], &[1, 1], 1.0);
+        tracers.step_owner.clone_from(&tracers.owner);
+        tracers.step_flags.clone_from(&tracers.flags);
+        tracers.owner.swap(0, 1);
+        tracers.flags[0].escaped = true;
+
+        restore_discrete_transport_state(&mut tracers);
+
+        assert_eq!(tracers.owner, tracers.step_owner);
+        assert_eq!(tracers.flags, tracers.step_flags);
+    }
+
+    #[test]
     fn accepted_density_source_residual_spawns_tracers() {
         use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
         use symbi_geometry::Cartesian;
@@ -2636,6 +2651,23 @@ pub fn snapshot_transport_state<const D: usize, const DOF: usize, Mem: MemorySpa
     };
     tracers.step_owner.clone_from(&tracers.owner);
     tracers.step_flags.clone_from(&tracers.flags);
+}
+
+/// restore discrete tracer ownership after a rejected fluid step. injection is
+/// committed only after every stage accepts, so identities and spawn state are
+/// unchanged at this boundary.
+pub fn restore_transport_state<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+) {
+    let Some(tracers) = sim.tracers.as_mut() else {
+        return;
+    };
+    restore_discrete_transport_state(tracers);
+}
+
+fn restore_discrete_transport_state<const D: usize>(tracers: &mut TracerSet<D>) {
+    tracers.owner.clone_from(&tracers.step_owner);
+    tracers.flags.clone_from(&tracers.step_flags);
 }
 
 /// advance cell-owned tracers through one accepted forward-euler mass-flux

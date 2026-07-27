@@ -155,11 +155,13 @@ impl KernelRun {
             .map(|name| {
                 if let Some(&v) = self.scalars.get(name) {
                     v
-                } else if name.starts_with("map_kind_") {
-                    // spacing is a per-axis RUNTIME scalar (0 = uniform, 1 = log); every kernel now
-                    // carries `map_kind_{ax}` even on a uniform grid. default the unbound ones to 0
-                    // (uniform) so a test that does not exercise log spacing needs no boilerplate; a
-                    // log-axis test binds it explicitly.
+                } else if name.starts_with("map_kind_") || name.starts_with("map_param_") {
+                    // spacing is a per-axis RUNTIME scalar: `map_kind_{ax}` selects the face map
+                    // (0 = uniform, 1 = log, 2 = geometric cell widths) and `map_param_{ax}` carries
+                    // that map's parameter (the grading ratio). every kernel that positions a face
+                    // carries both even on a uniform grid, so default the unbound ones to 0 —
+                    // map_kind 0 IS uniform, and the ratio is then unread. a graded- or log-axis
+                    // test binds them explicitly.
                     0.0
                 } else {
                     panic!("KernelRun: no value bound for scalar '{name}'")

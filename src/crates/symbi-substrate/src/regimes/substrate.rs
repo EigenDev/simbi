@@ -564,7 +564,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         true
     }
 
-    fn fofc(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) {
+    fn fofc(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) -> bool {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
         // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
         // feeds the flux as in the production sweep.
@@ -599,11 +599,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             || {}, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no cell B to restore
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no CT re-sync
-        );
+            || {},             // hydro: no induction flux
+            || {},             // hydro: no cell B to restore
+            || {},             // hydro: no induction flux
+            || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
+            || {},             // hydro: no CT re-sync
+            false,             // no projection tier below the freeze; keep the parachute
+        )
     }
 
     fn snapshot_stage(&self, sim: &FieldStore<D, D, Mem, Sc>) {

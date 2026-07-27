@@ -36,7 +36,7 @@ fn scalar_value(name: &str) -> f64 {
         "gamma" => 1.4,
         "x_lo_0" | "x_lo_1" => X_LO,
         "dx_0" | "dx_1" => DX,
-        "map_kind_0" | "map_kind_1" => 0.0,
+        "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
         "body_0_mass" => 1.0,
         "body_0_soft" => 0.05,
         "body_0_pos_0" => BODY_POS[0],

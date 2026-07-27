@@ -88,6 +88,10 @@ fn covered_coarse_cells_are_the_restriction_adiabatic() {
         Kset::new(GAMMA, CFL, &s.geom.allocated)
     })
     .unwrap();
+    // refinement allocates the fine level ZEROED; the coarse initial condition has to be
+    // prolonged into its interior. an unseeded fine level restricts vacuum into the covered
+    // coarse cells, which the equality below would then confirm against vacuum.
+    hier.seed_fine_from_coarse().expect("fine-level seed");
 
     hier.evolve_steps(STEPS).unwrap();
 
@@ -146,6 +150,10 @@ fn covered_coarse_cells_are_the_restriction_iso() {
         IKset::new(cs, CFL, &s.geom.allocated)
     })
     .unwrap();
+    // refinement allocates the fine level ZEROED; the coarse initial condition has to be
+    // prolonged into its interior. an unseeded fine level restricts vacuum into the covered
+    // coarse cells, which the equality below would then confirm against vacuum.
+    hier.seed_fine_from_coarse().expect("fine-level seed");
 
     hier.evolve_steps(STEPS).unwrap();
 

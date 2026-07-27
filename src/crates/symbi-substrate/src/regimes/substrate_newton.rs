@@ -547,12 +547,19 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         DOF == D
     }
 
-    fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) {
+    fn fofc(
+        &self,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
+        dt: f64,
+        a0: f64,
+        ac: f64,
+        _stage: u8,
+    ) -> bool {
         // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D). `fofc` is
         // called unconditionally by the driver, so
         // the gate lives here (fofc_active only guards the stage-input snapshot).
         if DOF != D {
-            return;
+            return false;
         }
         // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
         // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
@@ -592,11 +599,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || {}, // newtonian: no admissible-boundary projection (keeps the freeze parachute)
             // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
             sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no cell B to restore
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no CT re-sync
-        );
+            || {},             // hydro: no induction flux
+            || {},             // hydro: no cell B to restore
+            || {},             // hydro: no induction flux
+            || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
+            || {},             // hydro: no CT re-sync
+            false,             // no projection tier below the freeze; keep the parachute
+        )
     }
 
     fn snapshot_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {

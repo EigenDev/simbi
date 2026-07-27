@@ -122,7 +122,7 @@ fn run_compiled(g: &mut Grid) {
             "excision_radius" => R_EXC,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
-            "map_kind_0" | "map_kind_1" => 0.0,
+            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };

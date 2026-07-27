@@ -69,6 +69,11 @@ where
     /// is kept everywhere else. a floor-free robustness layer: cells the sharp scheme cannot recover
     /// fall back to the diffusive-but-robust first-order update with no pressure floor. host-gated
     /// on a failure reduction, so a clean substage pays only the scan. default: no-op.
+    ///
+    /// returns whether the WHOLE STEP must be rejected: GRMHD limits the geometric source against
+    /// a source-free low-order anchor, and an anchor that is itself inadmissible is a statement
+    /// about the timestep, not the source. the driver then rolls the step back through
+    /// `restore_step` and replays it at a smaller dt.
     fn fofc(
         &self,
         _store: &FieldStore<NDIM, DOF, Mem, Sc>,
@@ -76,7 +81,8 @@ where
         _a0: f64,
         _ac: f64,
         _stage: u8,
-    ) {
+    ) -> bool {
+        false
     }
 
     /// whether this kernel set runs FOFC (`fofc` is non-trivial). when true the driver also takes the
@@ -85,6 +91,19 @@ where
     fn fofc_active(&self) -> bool {
         false
     }
+
+    /// retain the complete state needed to replay a rejected explicit step. paired with
+    /// `restore_step`; a kernel set that implements one must implement the other, and a driver
+    /// must gate BOTH on `fofc_active` — restoring from a snapshot that was never taken would
+    /// overwrite the live state with zeros.
+    fn snapshot_retry(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
+
+    /// restore the complete step-entry state after `fofc` requests a retry: the conserved gas
+    /// state, the staggered and cell-centered magnetic field, AND the primitives derived from
+    /// them. the retried step re-enters at `wave_speeds`/`flux`, which reconstruct from `prim`,
+    /// so an implementation that rolls back only the conserved state would reconstruct the
+    /// rejected attempt's primitives.
+    fn restore_step(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
     /// post-godunov hook (e.g., constrained transport for MHD). default: no-op.
     fn post_godunov(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _stage: u8) {}

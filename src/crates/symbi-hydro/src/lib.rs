@@ -13,6 +13,7 @@
 pub mod admissible;
 pub mod boundary_term;
 pub mod c2p_result;
+pub mod constraints;
 pub mod dissipation;
 pub mod energy;
 pub mod eos;

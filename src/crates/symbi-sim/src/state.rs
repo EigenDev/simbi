@@ -611,6 +611,21 @@ impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric
     }
 }
 
+/// the step-entry state an explicit step is replayed from after it is REJECTED: the gas
+/// conserved state plus both representations of the magnetic field. rolling the face field
+/// back exactly is what keeps `div(B) = 0` across a rejection — re-curling from a restored
+/// `bface` reproduces the accepted-step history rather than accumulating the rejected curl.
+pub struct MhdStepSnapshot<
+    const D: usize,
+    const DOF: usize,
+    M: MemorySpace = DefaultMemory,
+    Sc: Scalar + OrderedNumeric = f64,
+> {
+    pub cons: ConsFieldsGeneric<D, DOF, M, Sc>,
+    pub bcell: BcellFields<D, DOF, M, Sc>,
+    pub bface: BfaceFields<D, M, Sc>,
+}
+
 /// MHD field storage: cell-centered B + staggered CT fields.
 /// the cell-centered B is used for reconstruction and flux computation.
 /// the face-centered B is the CT "truth" (2D/3D only).
@@ -620,6 +635,13 @@ pub struct MhdStaggeredFields<
     M: MemorySpace = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
+    /// the step-entry rollback state, present only where a step can be rejected: the GRMHD
+    /// physical-constraint-preserving redo halves the timestep and replays when its source-free
+    /// low-order anchor is itself inadmissible. every other MHD regime accepts every step it
+    /// takes, so the snapshot would be a permanently dead allocation the size of the whole
+    /// conserved + magnetic state.
+    pub step_snapshot: Option<MhdStepSnapshot<D, DOF, M, Sc>>,
+
     /// cell-centered B: bcell[c] on the allocated domain (same as cons/prim), one
     /// per DOF vector component. the D in-plane components [0..D) are interpolated
     /// from bface after CT; the (DOF-D) out-of-plane components [D..DOF) have no
@@ -705,7 +727,12 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
     /// allocate MHD fields from the cell-centered domains.
     /// allocated_domain: full domain including ghost cells (for bcell, bflux).
     /// interior: interior domain (for bface, efield).
-    pub fn zeros(allocated: &Domain<D>, interior: &Domain<D>) -> symbi_xpu::Result<Self> {
+    /// `rejectable` allocates the step-entry rollback snapshot (see `step_snapshot`).
+    pub fn zeros(
+        allocated: &Domain<D>,
+        interior: &Domain<D>,
+        rejectable: bool,
+    ) -> symbi_xpu::Result<Self> {
         // cell-centered B: same domain as cons/prim, DOF vector components.
         let bcell = BcellFields {
             b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
@@ -728,6 +755,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         // to the narrower readers. on-disk checkpoint is interior-only, unaffected.
         let mut bface_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         let mut bface_n_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
+        let mut face_doms: Vec<Domain<D>> = Vec::with_capacity(D);
         for dd in 0..D {
             let mut face_dom = interior.extend(dd, 0, 1);
             for tt in 0..D {
@@ -737,12 +765,30 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             }
             bface_vec.push(Field::zeros(&face_dom)?);
             bface_n_vec.push(Field::zeros(&face_dom)?); // FOFC bface^n snapshot (same face domain)
+            face_doms.push(face_dom);
         }
         let bface = BfaceFields {
             b: bface_vec.try_into().unwrap_or_else(|_| unreachable!()),
         };
         let bface_n = BfaceFields {
             b: bface_n_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
+        let step_snapshot = if rejectable {
+            let mut snapshot_faces: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
+            for face_dom in &face_doms {
+                snapshot_faces.push(Field::zeros(face_dom)?);
+            }
+            Some(MhdStepSnapshot {
+                cons: ConsFieldsGeneric::zeros_with_energy(allocated, true)?,
+                bcell: BcellFields {
+                    b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)?,
+                },
+                bface: BfaceFields {
+                    b: snapshot_faces.try_into().unwrap_or_else(|_| unreachable!()),
+                },
+            })
+        } else {
+            None
         };
 
         // edge-centered E: extra in both transverse directions.
@@ -797,6 +843,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         }
 
         Ok(MhdStaggeredFields {
+            step_snapshot,
             bcell,
             bcell_n,
             bcell_stage,
@@ -2289,9 +2336,17 @@ where
         };
         let has_energy = regime.has_energy();
 
-        // allocate MHD fields if the regime has magnetic fields
+        // allocate MHD fields if the regime has magnetic fields. only GRMHD (magnetized, with
+        // energy, on a curved background) can reject a step: its physical-constraint-preserving
+        // redo falls back to halving the timestep when the source-free low-order anchor is
+        // itself inadmissible. that alone allocates the step-entry rollback snapshot.
         let mhd = if regime.is_mhd() {
-            Some(MhdStaggeredFields::zeros(&allocated, &geom.interior)?)
+            let rejectable = has_energy && geom.spacetime != symbi_geometry::Spacetime::Minkowski;
+            Some(MhdStaggeredFields::zeros(
+                &allocated,
+                &geom.interior,
+                rejectable,
+            )?)
         } else {
             None
         };
@@ -2371,6 +2426,16 @@ where
         self.fields.cons.alloc_chi(&allocated)?;
         self.fields.prim.alloc_chi(&allocated)?;
         self.workspace.u_n.alloc_chi(&allocated)?;
+        // the dye rides in the conserved vector, so the step-entry rollback snapshot must carry
+        // it too — otherwise a rejected step would replay from an undyed conserved state.
+        if let Some(snapshot) = self
+            .fields
+            .mhd
+            .as_mut()
+            .and_then(|mhd| mhd.step_snapshot.as_mut())
+        {
+            snapshot.cons.alloc_chi(&allocated)?;
+        }
         Ok(self)
     }
 

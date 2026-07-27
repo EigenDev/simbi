@@ -170,9 +170,9 @@ fn excise_source_cfl_dt_matches_cpu_on_device() {
     dispatch_excise(&h, GAMMA, R_EXC, 1e-10, 1e-12);
     dispatch_excise(&d, GAMMA, R_EXC, 1e-10, 1e-12);
     let hk = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &h.geom.allocated)
-        .with_excision(R_EXC);
+        .with_excision(R_EXC, 1.0, 1.0);
     let dk = RhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, 0.3, &d.geom.allocated)
-        .with_excision(R_EXC);
+        .with_excision(R_EXC, 1.0, 1.0);
     let hdt = hk.cfl(&h);
     let ddt = dk.cfl(&d);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();

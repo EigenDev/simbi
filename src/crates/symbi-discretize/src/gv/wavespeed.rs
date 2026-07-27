@@ -909,16 +909,38 @@ pub fn rmhd_source_cfl_gr_gv(
     // fixed-count bisection returns the largest known-safe fraction. unlike the lipschitz |source|/q
     // bound, an inward or tangent source does not collapse dt merely because a previous projection
     // left q near its strict floor.
-    let (_source_mom, e_dot) =
+    let (source_mom, e_dot) =
         symbi_hydro::admissible::stationary_killing_source_ray(alpha, &beta, Tensor::new(sm_arr));
     let source_scale = e_dot.abs().max(alpha * sm_norm);
-    // resolve the geometric source on its own state-change timescale. admissibility is enforced by
-    // the post-update q/psi projection and first-order flux correction; using the distance to the
-    // strict admissible boundary as a TIME scale makes an otherwise finite atmosphere cell with
-    // p -> 0 throttle the entire domain, even when the source is tangent to the boundary. the
-    // homogeneous source/state ratio remains invariant under conserved-unit rescaling and measures
-    // the actual fractional change the explicit source can produce in one unit of coordinate time.
-    let lam_s = source_scale / state_scale;
+    // the rate MUST be the reciprocal of an admissible-ray TIME, not a fractional-change ratio.
+    // `source_scale / state_scale` measures how fast the source moves the state; it says nothing
+    // about where the admissible boundary lies, so it permits a step that carries a cell straight
+    // out of G. the explicit update has no other guard on the geometric source: the first-order
+    // flux correction rebuilds a cell from its neighbors' fluxes, and the source limiter can only
+    // scale a source that is already being integrated over an admissible-length step. bisecting the
+    // actual ray is what makes `U + dt S` provably admissible for every cell.
+    let eps_d = Gv::from_f64(1e-12) * state_scale;
+    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * state_scale;
+    let eps_psi = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR)
+        * state_scale
+        * state_scale.sqrt();
+    let safe_time = symbi_hydro::admissible::rmhd_source_admissible_time(
+        d_cons,
+        Tensor::new(mom),
+        e_cons,
+        source_mom,
+        e_dot,
+        &b,
+        &gm_inv,
+        &gm,
+        state_scale,
+        source_scale,
+        eps_d,
+        eps_q,
+        eps_psi,
+        16,
+    );
+    let lam_s = Gv::ONE / safe_time;
     // no cell inside the event horizon may throttle the global timestep. the outer horizon
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
     // interior reaches the exterior, so an interior cell's admissibility rate carries no information
@@ -1277,17 +1299,6 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     (end_trace(), writes)
 }
 
-/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-hydro (adiabatic) — the provable replacement for the
-/// freeze parachute. where the spliced first-order conserved `x_*` is inadmissible, blend it toward the
-/// stage-input anchor `us_*` (admissible from stage entry) exactly onto the boundary of the
-/// relativistic admissible set `G = { D > 0, E^2 > D^2 + gamma^{ij} S_i S_j }` (Wu & Tang 2015). G is
-/// CONVEX, so the segment from an admissible anchor to any candidate crosses partial-G at most once and
-/// the projection ALWAYS yields an admissible state — an already-admissible cell passes through
-/// untouched (theta = 1), so no cell is ever unrecoverable. reads + writes the densitized conserveds
-/// `x_den`/`x_mom_k`/`x_nrg` in place, reads the anchor `us_*`; the metric at the cell midpoint supplies
-/// gamma^{ij} (for |S|^2) and alpha/beta (to reconstruct the eulerian energy E = (ehat + D + beta^i
-/// S_i)/alpha from the stored killing energy). densitization is a common positive factor that cancels
-/// in the admissibility sign, so this works directly on the stored state. curved spacetime only.
 /// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-MHD — the magnetized twin of
 /// [`fofc_project_gr_gv`], and the provable replacement for the RMHD freeze parachute.
 ///
@@ -1498,6 +1509,308 @@ pub fn fofc_project_gr_mhd_gv(
     (end_trace(), writes)
 }
 
+/// the STATE-CONSTRAINT PROJECTION (axioms A2-A4): blend the candidate toward the admissible anchor
+/// until EVERY declared constraint is satisfied, in one operation over the whole family.
+///
+/// this traces `symbi_hydro::constraints` at `S = Gv`. it is not a second implementation of the
+/// projection — it is the SAME functions the host unit gates exercise, evaluated at the trace
+/// carrier, exactly as `admissible_theta` is already shared between `f64` and `Gv`. so the algebra
+/// cannot diverge between host and kernel; what an oracle must check here is the WIRING: that the
+/// anchor and candidate are not swapped, that each field lands in the slot the residual expects,
+/// that the metric enters with the valence each contraction demands, and that the stored covariant
+/// energy is mapped to the eulerian energy the admissible set is defined on.
+///
+/// the blend is applied to the STORED slots. that is legitimate rather than convenient: the stored
+/// to eulerian map `E = (ehat + D + beta^i S_i) / alpha` is AFFINE in the stored slots, so blending
+/// and converting commute, and a blend parameter computed on eulerian residuals applies unchanged
+/// to the stored state.
+///
+/// each constraint's parameter is a RUNTIME scalar, so one baked kernel serves every configuration:
+/// a neutral value leaves a constraint declared, applicable and reporting a real residual, but never
+/// binding — which is deliberately NOT the same as a constraint that does not structurally apply.
+///
+/// writes the projected conserved slots in place, plus `theta` (the joint blend, for the injected
+/// budget) and `binding` (the index of the constraint that bound, or -1 if none did, for the
+/// per-constraint attribution the ledger charges against).
+pub fn constraint_projection_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_hydro::constraints::{
+        ConstraintState, DensityFloor, MagnetizationCeiling, StateConstraint, TemperatureFloor,
+        WuTangAdmissibility, constraint_thetas, joint_theta,
+    };
+    begin_trace();
+    let ndim = axes.len();
+    let mid = gv_cell_midpoints(spacing, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => mid[d],
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
+        match (spacetime, coords) {
+            (Spacetime::Schwarzschild, _) => {
+                let m = Schwarzschild { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+                let m = SchwarzschildKSCartesian { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+                let m = SchwarzschildKSCylindrical { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::SchwarzschildKS, _) => {
+                let m = SchwarzschildKS { mass };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::KerrKS, Coords::Cartesian) => {
+                let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::KerrKS, Coords::Cylindrical) => {
+                let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::KerrKS, _) => {
+                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+            }
+            (Spacetime::Minkowski, _) => (
+                Matrix::identity(),
+                Matrix::identity(),
+                Gv::ONE,
+                Tensor::zeros(),
+            ),
+        };
+
+    let read = |key: &str| Gv::field(key, key);
+    // `a_` is the ANCHOR (the admissible stage input), `x_` the CANDIDATE (projected in place).
+    let a_den = read("a_den");
+    let a_nrg = read("a_nrg");
+    let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("a_mom_{k}"))));
+    let x_den = read("x_den");
+    let x_nrg = read("x_nrg");
+    let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("x_mom_{k}"))));
+    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| read(&format!("bc_{k}"))));
+
+    // the blended STORED state, mapped to the eulerian slots the admissible set is defined on.
+    let blend_slots = |t: Gv| -> (Gv, Tensor<Gv, 3>, Gv) {
+        let den = a_den + t * (x_den - a_den);
+        let mom = Tensor::new(std::array::from_fn(|k| a_mom[k] + t * (x_mom[k] - a_mom[k])));
+        let ehat = a_nrg + t * (x_nrg - a_nrg);
+        (den, mom, ehat)
+    };
+    let blend = |t: Gv| -> ConstraintState<'_, Gv> {
+        let (den, mom, ehat) = blend_slots(t);
+        let beta_s = (0..3).fold(Gv::ZERO, |acc, k| acc + beta[k] * mom[k]);
+        ConstraintState {
+            den,
+            mom,
+            nrg: Some((ehat + den + beta_s) / alpha),
+            mag: Some(b),
+            gm: &gm,
+            gm_inv: &gm_inv,
+        }
+    };
+
+    // the admissibility margins come from the ANCHOR's own state scale — the same derivation the
+    // source-admissibility rate uses, rather than a constant re-chosen here.
+    let anchor = blend(Gv::ZERO);
+    let e_anchor = anchor.nrg.expect("the projection targets an energy regime");
+    let state_scale =
+        symbi_hydro::admissible::rmhd_state_scale(a_den, &a_mom, e_anchor, &b, &gm_inv, &gm);
+    let rel = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR);
+    let g = WuTangAdmissibility {
+        eps_d: Gv::from_f64(1e-12) * state_scale,
+        eps_q: rel * state_scale,
+        eps_psi: rel * state_scale * state_scale.sqrt(),
+    };
+    let temperature = TemperatureFloor { f_min: Gv::scalar("floor_temperature") };
+    let magnetization = MagnetizationCeiling { sigma_max: Gv::scalar("ceiling_magnetization") };
+    let density = DensityFloor { den_min: Gv::scalar("floor_density") };
+    let family: Vec<&dyn StateConstraint<Gv>> = vec![&g, &temperature, &magnetization, &density];
+
+    let thetas = constraint_thetas(&family, &blend, 20);
+    let theta = joint_theta(&thetas);
+    // the BINDING member, for the ledger. -1 when nothing bound, which is distinct from "member 0
+    // bound at theta = 1" and is what lets the budget separate a quiet substage from a charged one.
+    let mut binding = Gv::from_f64(-1.0);
+    let mut best = Gv::ONE;
+    for (index, candidate) in thetas.iter().enumerate() {
+        if let Some(tk) = candidate {
+            let tighter = tk.cmp_lt(best);
+            binding = Gv::select(tighter, Gv::from_f64(index as f64), binding);
+            best = Gv::select(tighter, *tk, best);
+        }
+    }
+
+    let (den, mom, ehat) = blend_slots(theta);
+    let mut writes = vec![
+        ("x_den".to_string(), "x_den".into(), den.node()),
+        ("x_nrg".to_string(), "x_nrg".into(), ehat.node()),
+        ("theta".to_string(), "theta".into(), theta.node()),
+        ("binding".to_string(), "binding".into(), binding.node()),
+    ];
+    for k in 0..3 {
+        writes.push((format!("x_mom_{k}"), format!("x_mom_{k}").into(), mom[k].node()));
+    }
+    (end_trace(), writes)
+}
+
+/// the grmhd fofc geometric-source fraction. `a_*` is the admissible source-free
+/// low-order flux+ct anchor and `x_*` is the same conservative update with the full
+/// metric source. the kernel writes only `theta`; replaying the Godunov stage with
+/// that multiplier preserves the single-valued face fluxes and constrained-transport
+/// field instead of blending complete neighboring cell states.
+pub fn fofc_source_theta_gr_mhd_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let mid = gv_cell_midpoints(spacing, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => mid[d],
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
+        match (spacetime, coords) {
+            (Spacetime::Schwarzschild, _) => {
+                let m = Schwarzschild { mass };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+                let m = SchwarzschildKSCartesian { mass };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+                let m = SchwarzschildKSCylindrical { mass };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::SchwarzschildKS, _) => {
+                let m = SchwarzschildKS { mass };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::KerrKS, Coords::Cartesian) => {
+                let m = KerrKSCartesian {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::KerrKS, Coords::Cylindrical) => {
+                let m = KerrKSCylindrical {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::KerrKS, _) => {
+                let m = KerrKS {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
+            }
+            (Spacetime::Minkowski, _) => {
+                unreachable!("the grmhd source limiter requires curved spacetime")
+            }
+        };
+    let read = |key: &str| Gv::field(key, key);
+    let a_den = read("a_den");
+    let a_nrg = read("a_nrg");
+    let x_nrg = read("x_nrg");
+    let a_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("a_mom_{kk}"))));
+    let x_mom = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("x_mom_{kk}"))));
+    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|kk| read(&format!("bc_{kk}"))));
+    let beta_dot = |s: &Tensor<Gv, 3>| (0..3).fold(Gv::ZERO, |sum, kk| sum + beta[kk] * s[kk]);
+    let e_anchor = (a_nrg + a_den + beta_dot(&a_mom)) / alpha;
+    // a geometric source has no baryon component, so both endpoints share the anchor density
+    // by construction. omitting candidate density from the graph makes that invariant structural.
+    let e_candidate = (x_nrg + a_den + beta_dot(&x_mom)) / alpha;
+    let delta_s = Tensor::new(std::array::from_fn(|kk| x_mom[kk] - a_mom[kk]));
+    let scale =
+        symbi_hydro::admissible::rmhd_state_scale(a_den, &a_mom, e_anchor, &b, &gm_inv, &gm);
+    let eps_d = Gv::from_f64(1e-12) * scale;
+    let eps_q = Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * scale;
+    let eps_psi =
+        Gv::from_f64(symbi_hydro::admissible::ADMISSIBLE_REL_FLOOR) * scale * scale.sqrt();
+    let (theta, _, _) = symbi_hydro::admissible::rmhd_limit_source_increment(
+        a_den,
+        a_mom,
+        e_anchor,
+        delta_s,
+        e_candidate - e_anchor,
+        &b,
+        &gm_inv,
+        &gm,
+        eps_d,
+        eps_q,
+        eps_psi,
+        20,
+    );
+    let writes = vec![("theta".to_string(), "theta".into(), theta.node())];
+    (end_trace(), writes)
+}
+
+/// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-hydro (adiabatic) — the provable replacement for the
+/// freeze parachute. where the spliced first-order conserved `x_*` is inadmissible, blend it toward the
+/// stage-input anchor `us_*` (admissible from stage entry) exactly onto the boundary of the
+/// relativistic admissible set `G = { D > 0, E^2 > D^2 + gamma^{ij} S_i S_j }` (Wu & Tang 2015). G is
+/// CONVEX, so the segment from an admissible anchor to any candidate crosses partial-G at most once and
+/// the projection ALWAYS yields an admissible state — an already-admissible cell passes through
+/// untouched (theta = 1), so no cell is ever unrecoverable. reads + writes the densitized conserveds
+/// `x_den`/`x_mom_k`/`x_nrg` in place, reads the anchor `us_*`; the metric at the cell midpoint supplies
+/// gamma^{ij} (for |S|^2) and alpha/beta (to reconstruct the eulerian energy E = (ehat + D + beta^i
+/// S_i)/alpha from the stored killing energy). densitization is a common positive factor that cancels
+/// in the admissibility sign, so this works directly on the stored state. curved spacetime only.
 pub fn fofc_project_gr_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1779,5 +2092,33 @@ mod m1_log_radius_tests {
             x_lo + (i + 0.5) * dx,
             "uniform center must equal the old formula bit-for-bit"
         );
+    }
+}
+
+#[cfg(test)]
+mod pcp_source_theta_tests {
+    use super::*;
+
+    #[test]
+    fn source_theta_uses_one_shared_density_endpoint() {
+        let (kernel, writes) = fofc_source_theta_gr_mhd_gv(
+            Coords::Cartesian,
+            Spacetime::KerrKS,
+            &[Spacing::Uniform; 3],
+            &[0, 1, 2],
+        );
+        let paths: Vec<String> = kernel
+            .field_inputs
+            .iter()
+            .map(|(_, bind)| bind.name())
+            .collect();
+        assert!(paths.iter().any(|path| path == "a_den"));
+        assert!(
+            paths.iter().all(|path| path != "x_den"),
+            "a metric source must not introduce a second density endpoint"
+        );
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].0, "theta");
+        assert_eq!(writes[0].1.name(), "theta");
     }
 }

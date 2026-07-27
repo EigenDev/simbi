@@ -342,6 +342,12 @@ pub fn rmhd_admissible_theta<S: Scalar>(
     S::select(cand_ok, S::ONE, S::select(cand_finite, lo, S::ZERO))
 }
 
+/// how many trial times out the "the ray never leaves G" probe is evaluated. the magnetized
+/// residual `psi` carries the FIXED `|B|`, which becomes negligible against `t |Sdot|` as `t`
+/// grows; by this multiple the set along the ray is the B-free cone to well past f64 precision,
+/// so an admissible endpoint here is the cone membership the certificate below needs.
+const SOURCE_RAY_FAR: f64 = 1.0e6;
+
 /// a source-ray timestep that remains inside the RMHD admissible set.
 ///
 /// the source changes only momentum and energy: `U(t) = (D, S + t Sdot, E + t Edot, B)`.
@@ -349,6 +355,19 @@ pub fn rmhd_admissible_theta<S: Scalar>(
 /// dimensionally natural trial time. when that endpoint is admissible, convexity makes every
 /// earlier point admissible. otherwise fixed-count bisection returns the largest known-admissible
 /// fraction of the trial time. a zero source returns an infinite timestep.
+///
+/// AN INWARD SOURCE IMPOSES NO TIMESTEP AT ALL (Wu, arXiv:1610.06274, theorem 1: `lambda_S = 0`
+/// whenever `q(S) >= 0`). the unmagnetized set is a convex cone, so `U + t Sdot` provably never
+/// leaves it and the bound does not exist to be computed. the MAGNETIZED set is not a cone —
+/// `psi` carries `|B|`, which does not scale with `(D, S, E)` — so cone membership of the source
+/// alone does not certify the ray. two facts do: the set at fixed `B` is convex (Wu & Tang,
+/// arXiv:1709.05838, theorem 2.2), which covers `[0, T]` once the endpoint at `T` is admissible;
+/// and the ray's own magnetic terms vanish relative to `t |Sdot|`, so beyond `T` the set is the
+/// B-free cone and `q(Sdot) > 0` covers `[T, inf)`. together they certify the whole ray.
+///
+/// this clause is what keeps a near-vacuum cell from throttling the global step: an evacuated
+/// atmosphere cell has `state_scale -> 0`, so its trial time collapses and the bisection returns
+/// an arbitrarily small "safe" time — for a source that was never driving it out of G.
 #[allow(clippy::too_many_arguments)]
 pub fn rmhd_source_admissible_time<S: Scalar>(
     d: S,
@@ -377,6 +396,18 @@ pub fn rmhd_source_admissible_time<S: Scalar>(
         d.cmp_gt(eps_d) & q.cmp_gt(eps_q) & psi.cmp_gt(eps_psi)
     };
 
+    // the inward-source certificate: `q` of the SOURCE VECTOR (no baryon component, no magnetic
+    // component — the geometric source touches neither) together with an admissible far endpoint.
+    let (q_source, _) = rmhd_admissible_residuals(
+        S::ZERO,
+        &s_dot,
+        e_dot,
+        &Tensor::zeros(),
+        gm_inv,
+        gm,
+    );
+    let unbounded = q_source.cmp_gt(S::ZERO) & ok_at(S::from_f64(SOURCE_RAY_FAR));
+
     let mut lo = S::ZERO;
     let mut hi = S::ONE;
     for _ in 0..iters {
@@ -388,7 +419,57 @@ pub fn rmhd_source_admissible_time<S: Scalar>(
     let fraction = S::select(ok_at(S::ONE), S::ONE, lo);
     let fraction_floor = S::from_f64(2.0_f64.powi(-(iters as i32)));
     let finite_time = trial_time * fraction.max(fraction_floor);
-    S::select(active, finite_time, S::from_f64(f64::INFINITY))
+    let bounded = S::select(unbounded, S::from_f64(f64::INFINITY), finite_time);
+    S::select(active, bounded, S::from_f64(f64::INFINITY))
+}
+
+/// limit one already-integrated geometric-source increment along the affine source ray.
+///
+/// the flux and constrained-transport candidate `(d, s, e, b)` is the anchor. the geometric source
+/// proposes `(0, delta_s, delta_e, 0)`. only that local, physically nonconservative source increment
+/// is scaled; density, every shared magnetic face value, and every conservative face flux remain
+/// untouched. an admissible full increment passes through exactly with `theta = 1`.
+///
+/// the caller must provide an admissible flux anchor. this is the low-order physical-constraint-
+/// preserving invariant: a first-order flux + constrained-transport update under the CFL bound
+/// lands in the admissible set. an anchor that does not is a statement about the TIMESTEP, not
+/// about the source — no source fraction can repair the flux operator, so the caller's only
+/// recourse is to reject the step and replay it at a smaller dt.
+#[allow(clippy::too_many_arguments)]
+pub fn rmhd_limit_source_increment<S: Scalar>(
+    d: S,
+    s: Tensor<S, 3>,
+    e: S,
+    delta_s: Tensor<S, 3>,
+    delta_e: S,
+    b: &Tensor<S, 3>,
+    gm_inv: &Matrix<S, 3>,
+    gm: &Matrix<S, 3>,
+    eps_d: S,
+    eps_q: S,
+    eps_psi: S,
+    iters: usize,
+) -> (S, Tensor<S, 3>, S) {
+    let candidate_s = Tensor::new(std::array::from_fn(|kk| s[kk] + delta_s[kk]));
+    let candidate_e = e + delta_e;
+    let theta = rmhd_admissible_theta(
+        d,
+        candidate_s,
+        candidate_e,
+        d,
+        s,
+        e,
+        b,
+        gm_inv,
+        gm,
+        eps_d,
+        eps_q,
+        eps_psi,
+        iters,
+    );
+    let limited_s = Tensor::new(std::array::from_fn(|kk| s[kk] + theta * delta_s[kk]));
+    let limited_e = e + theta * delta_e;
+    (theta, limited_s, limited_e)
 }
 
 /// project a candidate conserved state onto G along the segment from an admissible anchor, returning
@@ -440,12 +521,17 @@ mod tests {
         let eps_q = ADMISSIBLE_REL_FLOOR * scale;
         let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
 
+        // q(source) = e_dot - |s_dot| = 1.0 - 0.2 > 0: the source vector lies in the cone, so the
+        // ray U + t Sdot never leaves G and NO timestep bound exists (Wu, arXiv:1610.06274,
+        // theorem 1: lambda_S = 0). returning the finite trial timescale here would throttle the
+        // global step for a cell the source is not endangering.
         let inward = rmhd_source_admissible_time(
             d, s, e, s_dot, 1.0, &b, &gm, &gm, scale, 1.0, eps_d, eps_q, eps_psi, 24,
         );
         assert_eq!(
-            inward, scale,
-            "an admissible trial endpoint must retain the full source timescale"
+            inward,
+            f64::INFINITY,
+            "an inward source imposes no timestep bound"
         );
 
         let outward = rmhd_source_admissible_time(
@@ -456,6 +542,152 @@ mod tests {
         let source_energy = e - outward;
         let (q, psi) = rmhd_admissible_residuals(d, &source_state, source_energy, &b, &gm, &gm);
         assert!(q > eps_q && psi > eps_psi);
+    }
+
+    #[test]
+    fn an_evacuated_cell_with_an_inward_source_does_not_throttle_the_step() {
+        // the funnel pathology: an atmosphere cell evacuated by ten orders in pressure has
+        // state_scale -> 0, so the dimensional trial time state_scale/source_scale collapses and a
+        // bisection over it returns an arbitrarily small "safe" time. one such cell then sets dt
+        // for the whole grid. it must not, when the source is not driving the cell out of G.
+        let gm = Matrix::identity();
+        let d = 6.3e-6;
+        let s = Tensor::zeros();
+        let e = 1.2 * d; // cold: total energy just above rest mass
+        let b = Tensor::new([1.0e-5, 0.0, 0.0]);
+        let scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+        let eps_d = 1e-12 * scale;
+        let eps_q = ADMISSIBLE_REL_FLOOR * scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
+
+        // an inward source: energy gain dominates the momentum push, so q(Sdot) > 0.
+        let s_dot = Tensor::new([1.0e-7, 0.0, 0.0]);
+        let e_dot: f64 = 1.0e-6;
+        let source_scale: f64 = e_dot.abs().max(1.0e-7);
+        let time = rmhd_source_admissible_time(
+            d,
+            s,
+            e,
+            s_dot,
+            e_dot,
+            &b,
+            &gm,
+            &gm,
+            scale,
+            source_scale,
+            eps_d,
+            eps_q,
+            eps_psi,
+            16,
+        );
+        assert_eq!(
+            time,
+            f64::INFINITY,
+            "an evacuated cell with an inward source must impose no bound; a finite time here \
+             is the near-vacuum dt collapse"
+        );
+
+        // PREMISE: the same cell with an OUTWARD source must still be bounded, else this gate
+        // would pass on a function that returns infinity unconditionally.
+        let outward = rmhd_source_admissible_time(
+            d,
+            s,
+            e,
+            Tensor::new([1.0e-6, 0.0, 0.0]),
+            -1.0e-6,
+            &b,
+            &gm,
+            &gm,
+            scale,
+            source_scale,
+            eps_d,
+            eps_q,
+            eps_psi,
+            16,
+        );
+        assert!(
+            outward.is_finite() && outward > 0.0,
+            "an outward source must still bound the step, got {outward:e}"
+        );
+    }
+
+    #[test]
+    fn rmhd_source_limiter_preserves_the_flux_anchor_and_clips_only_the_source() {
+        let gm = Matrix::identity();
+        let d = 1.0;
+        let s = Tensor::zeros();
+        let e = 2.0;
+        let b = Tensor::new([0.1, 0.0, 0.0]);
+        let delta_s = Tensor::new([10.0, 0.0, 0.0]);
+        let scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+        let eps_d = 1e-12 * scale;
+        let eps_q = ADMISSIBLE_REL_FLOOR * scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
+
+        let (theta, limited_s, limited_e) = rmhd_limit_source_increment(
+            d, s, e, delta_s, 0.0, &b, &gm, &gm, eps_d, eps_q, eps_psi, 24,
+        );
+        assert!(theta > 0.0 && theta < 1.0);
+        let (q, psi) = rmhd_admissible_residuals(d, &limited_s, limited_e, &b, &gm, &gm);
+        assert!(q > eps_q);
+        assert!(psi > eps_psi);
+        assert_eq!(limited_e, e);
+        assert_eq!(limited_s[1], s[1]);
+        assert_eq!(limited_s[2], s[2]);
+    }
+
+    #[test]
+    fn rmhd_source_limiter_is_exact_for_an_admissible_full_increment() {
+        let gm = Matrix::identity();
+        let d = 1.0;
+        let s = Tensor::new([0.1, 0.0, 0.0]);
+        let e = 2.0;
+        let b = Tensor::new([0.1, 0.0, 0.0]);
+        let delta_s = Tensor::new([0.01, -0.02, 0.03]);
+        let delta_e = 0.05;
+        let scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+        let eps_d = 1e-12 * scale;
+        let eps_q = ADMISSIBLE_REL_FLOOR * scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * scale.powf(1.5);
+
+        let (theta, limited_s, limited_e) = rmhd_limit_source_increment(
+            d, s, e, delta_s, delta_e, &b, &gm, &gm, eps_d, eps_q, eps_psi, 24,
+        );
+        assert_eq!(theta, 1.0);
+        assert_eq!(limited_s, s + delta_s);
+        assert_eq!(limited_e, e + delta_e);
+    }
+
+    #[test]
+    fn rmhd_source_limiter_is_invariant_under_conserved_unit_scaling() {
+        let gm = Matrix::identity();
+        let solve = |unit_scale: f64| {
+            let d = unit_scale;
+            let s = Tensor::zeros();
+            let e = 2.0 * unit_scale;
+            let b = Tensor::new([0.1 * unit_scale.sqrt(), 0.0, 0.0]);
+            let delta_s = Tensor::new([10.0 * unit_scale, 0.0, 0.0]);
+            let state_scale = rmhd_state_scale(d, &s, e, &b, &gm, &gm);
+            rmhd_limit_source_increment(
+                d,
+                s,
+                e,
+                delta_s,
+                0.0,
+                &b,
+                &gm,
+                &gm,
+                1e-12 * state_scale,
+                ADMISSIBLE_REL_FLOOR * state_scale,
+                ADMISSIBLE_REL_FLOOR * state_scale.powf(1.5),
+                24,
+            )
+            .0
+        };
+        let reference = solve(1.0);
+        for unit_scale in [1e-12, 1e-6, 1e6, 1e12] {
+            assert!((solve(unit_scale) - reference).abs() < 2e-15);
+        }
     }
 
     #[test]

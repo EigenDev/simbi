@@ -83,8 +83,9 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
     fn snapshot(&self, _s: &Store) {
         self.push("snapshot");
     }
-    fn fofc(&self, _s: &Store, _dt: f64, _a0: f64, _ac: f64, _stage: u8) {
+    fn fofc(&self, _s: &Store, _dt: f64, _a0: f64, _ac: f64, _stage: u8) -> bool {
         self.push("fofc");
+        false
     }
     fn fofc_active(&self) -> bool {
         self.fofc

@@ -406,7 +406,22 @@ where
     /// (a) restores the HO induction flux for the cell-B predictor so its magnetic-energy patch is
     /// the small HO reconciliation (not the FO-vs-HO shock), and (b) re-runs `bcell_from_bface` on the
     /// patch stages to re-attach `bcell = interp(bface_HO)` + the patch onto the corrected gas.
-    fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
+    ///
+    /// on a CURVED background the redo continues into the conservative source replay: with the
+    /// spliced flux and EMF fixed, the pointwise geometric source is scaled per cell to the
+    /// largest fraction of the source ray that stays inside the GRMHD admissible set (Wu & Tang,
+    /// arXiv:1709.05838, theorem 2.1). nothing shared between neighbors moves, so the update
+    /// telescopes and `div(B)` is untouched; the only clipped quantity is a local, already
+    /// non-conservative metric source. an anchor that is inadmissible with NO source at all is a
+    /// timestep failure and rejects the step (`true`).
+    fn fofc_impl(
+        &self,
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        dt: f64,
+        a0: f64,
+        ac: f64,
+        stage: u8,
+    ) -> bool {
         let pre_bind = if R::SPEC.has_energy {
             sim.fields
                 .prim
@@ -420,6 +435,30 @@ where
         // bcell flux-predicted). re-sync exactly there.
         let patch_stage = stage == 0 || stage == 2;
         let has_energy = R::SPEC.has_energy;
+        let rebuild_spliced_ct = || {
+            use crate::regimes::mhd_substrate as ct;
+            let prefix = Self::kernel_prefix();
+            let flag = &sim.workspace.fofc_flag;
+            ct::fofc_splice_induction(sim, prefix, flag);
+            if patch_stage {
+                ct::efield(
+                    sim,
+                    CtMethod::Contact,
+                    self.solver,
+                    prefix,
+                    self.eos_param,
+                    0.0,
+                );
+                ct::fofc_emf_splice(sim, flag);
+                ct::fofc_restore_bface_n(sim);
+                ct::ct_curl(sim, dt);
+            }
+        };
+        let resync_ct = || {
+            if patch_stage {
+                crate::regimes::mhd_substrate::bcell_from_bface(sim, has_energy);
+            }
+        };
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             Self::kernel_prefix(),
@@ -434,25 +473,27 @@ where
             || self.source_apply(sim, ac * dt),
             || {}, // MHD has no immersed-body source (trait-default no-op)
             || {
-                // ADMISSIBLE-BOUNDARY PROJECTION on a curved background, enforcing the SUFFICIENT
-                // rmhd admissibility condition (D > 0, q > 0, psi > 0). the cell-centered B enters
-                // the residual but is never blended: constrained transport owns the staggered value
-                // shared with the neighbor, so div(B) survives by construction. the magnetic slot
-                // is a 3-vector on every MHD grid (the physics is 3D; grid symmetry handles 1D/2D),
-                // matching the 3-component momentum the same kernel reads. energy regimes only (the
-                // iso cone has no tau).
-                if R::SPEC.has_energy && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
+                // TIER 2, below the conservative source limiter: the limiter SCALES a source and
+                // therefore cannot act on a cell that is already outside G with no source left to
+                // scale. this maps such a cell onto partial-G along the segment to the admissible
+                // stage-input anchor, enforcing the SUFFICIENT condition (D > 0, q > 0, psi > 0).
+                // exact passthrough on an admissible cell (theta = 1, bit-for-bit), so it is a
+                // no-op everywhere except the states nothing above it can resolve. the cell-B
+                // enters the residual but is never blended — constrained transport owns the
+                // staggered field, so div(B) survives by construction. curved GRMHD only.
+                if Self::kernel_prefix() == "rmhd"
+                    && has_energy
+                    && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
                 {
-                    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
                     let mhd = sim
                         .fields
                         .mhd
                         .as_ref()
-                        .expect("GRMHD projection requires mhd fields");
+                        .expect("the GRMHD projection requires magnetic fields");
                     crate::regimes::substrate_kernels::fofc_project(
                         sim,
-                        Self::kernel_prefix(),
-                        &sfx,
+                        "rmhd",
+                        "", // MHD momentum is always a 3-vector; no DOF-lift tag
                         self.eos_param,
                         sim.stage_input(),
                         &sim.fields.cons,
@@ -464,37 +505,122 @@ where
             None, // no body-evolved freeze parachute (no MHD body source)
             || crate::regimes::mhd_substrate::fofc_ct_save(sim),
             || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
+            rebuild_spliced_ct,
             || {
+                use crate::regimes::fofc::SourceReplay;
+                // the source limiter is defined against the GRMHD admissible set (Wu & Tang
+                // theorem 2.1), which needs the energy slot and a curved metric to have a
+                // geometric source at all.
+                let curved_rmhd = Self::kernel_prefix() == "rmhd"
+                    && has_energy
+                    && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
+                if !curved_rmhd {
+                    return SourceReplay::NotApplicable;
+                }
                 use crate::regimes::mhd_substrate as ct;
-                let prefix = Self::kernel_prefix();
-                let flag = &sim.workspace.fofc_flag;
-                // splice the induction flux at EVERY firing stage (the cell-B predictor reads it);
-                ct::fofc_splice_induction(sim, prefix, flag);
-                // the CT curl runs only on the patch stages (euler / corrector). there the redo
-                // recomputes the FIRST-ORDER edge EMF (Contact/HLL — no UCT per-face wave-speed
-                // dependency), splices it by the edge flag (HO off the fallback region, FO on it),
-                // restores the pre-curl face field, and re-curls -> flagged cells get diffused,
-                // recoverable B; non-flagged faces are unchanged; div(B) stays zero.
-                if patch_stage {
-                    ct::efield(
+                // the cfl scratch carries the per-cell source weight (first the anchor's zero,
+                // then the inadmissibility mask, then theta). the CFL reduction runs between
+                // steps and the freeze probe re-uses the same buffer only AFTER this replay has
+                // consumed theta, so the three lifetimes never overlap.
+                let source_weight = &self.cfl_scratch;
+                let cons = &sim.fields.cons;
+                let prim = &sim.fields.prim;
+                let mhd = sim
+                    .fields
+                    .mhd
+                    .as_ref()
+                    .expect("the GRMHD source replay requires magnetic fields");
+                let resync = resync_ct;
+                let restore_stage = || {
+                    crate::regimes::fofc::fofc_copy(
                         sim,
-                        CtMethod::Contact,
-                        self.solver,
-                        prefix,
-                        self.eos_param,
-                        0.0,
+                        "rmhd",
+                        "",
+                        "restore",
+                        (sim.stage_input(), prim),
+                        (cons, prim),
                     );
-                    ct::fofc_emf_splice(sim, flag);
-                    ct::fofc_restore_bface_n(sim);
-                    ct::ct_curl(sim, dt);
+                    ct::fofc_restore_bcell_stage(sim);
+                    self.c2p(sim);
+                };
+                let apply_additive = || {
+                    if self.has_additive_source() {
+                        self.source_apply(sim, ac * dt);
+                    }
+                };
+
+                // the ANCHOR: the same conservative flux + CT update with the geometric source
+                // switched OFF (weight 0). that operator is the low-order physical-constraint-
+                // preserving one, so under the CFL its output is admissible — unless the timestep
+                // itself is too large, which no source fraction can repair.
+                ct::fill_cell_field(sim, source_weight, 0.0);
+                ct::godunov_stage_pcp(sim, self.eos_param, dt, a0, ac, source_weight);
+                resync();
+                apply_additive();
+                self.c2p(sim);
+                crate::regimes::fofc::fofc_probe(sim, "rmhd", "", pre_bind, source_weight);
+                // cells inside the excision surface are causally disconnected and their state is
+                // overwritten by the horizon fill, so they must not veto the step. the c2p error
+                // field is the scratch for the masked count: the next c2p rewrites it before any
+                // reader, on both the reject and the continue path.
+                crate::regimes::substrate_kernels::fofc_exterior_mask(
+                    sim,
+                    self.excision_radius,
+                    source_weight,
+                    &sim.fields.c2p_error,
+                );
+                if crate::regimes::fofc::fofc_flag_count(sim, &sim.fields.c2p_error) != 0 {
+                    // the source-free low-order anchor is itself inadmissible, so there is no
+                    // admissible endpoint to measure a source fraction against — this tier cannot
+                    // act. hand the substage to the ORDINARY redo, whose projection maps the cell
+                    // onto partial-G. shrinking the timestep is NOT the answer here: the anchor is
+                    // inadmissible because the state cannot be represented, not because the step
+                    // was too long, so rejecting merely replays the same failure at half dt.
+                    restore_stage();
+                    return SourceReplay::NotApplicable;
                 }
+                // every face splice has already consumed flux_ho; its first component group is
+                // dead for the remainder of this fallback and safely retains the cell anchor.
+                let anchor = &sim.workspace.flux_ho[0];
+                crate::regimes::fofc::fofc_copy(
+                    sim,
+                    "rmhd",
+                    "",
+                    "restore",
+                    (cons, prim),
+                    (anchor, prim),
+                );
+
+                // evaluate the matching full-source candidate from the identical stage input.
+                restore_stage();
+                self.godunov_stage(sim, dt, a0, ac);
+                resync();
+                apply_additive();
+                crate::regimes::substrate_kernels::fofc_source_theta(
+                    sim,
+                    anchor,
+                    cons,
+                    [&mhd.bcell[0], &mhd.bcell[1], &mhd.bcell[2]],
+                    source_weight,
+                );
+
+                // replay once more with only the local metric source scaled by theta. the flux
+                // divergence and the CT curl are re-run bit-identically, so every face still
+                // carries ONE flux and div(B) is untouched — only the pointwise, non-conservative
+                // geometric source is clipped, and only on the cells that needed it.
+                restore_stage();
+                ct::godunov_stage_pcp(sim, self.eos_param, dt, a0, ac, source_weight);
+                resync();
+                apply_additive();
+                SourceReplay::Completed
             },
-            || {
-                if patch_stage {
-                    crate::regimes::mhd_substrate::bcell_from_bface(sim, has_energy);
-                }
-            },
-        );
+            resync_ct,
+            // curved GRMHD alone has the projection tier; where it ran and still left an exterior
+            // cell outside G, replaying the step beats waiving that cell's conservation.
+            Self::kernel_prefix() == "rmhd"
+                && has_energy
+                && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski,
+        )
     }
 }
 
@@ -592,12 +718,22 @@ where
         self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
     }
 
-    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
-        self.fofc_impl(sim, dt, a0, ac, stage);
+    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) -> bool {
+        self.fofc_impl(sim, dt, a0, ac, stage)
     }
 
     fn fofc_active(&self) -> bool {
         true
+    }
+
+    fn snapshot_retry(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        crate::regimes::mhd_substrate::snapshot_retry(sim);
+    }
+
+    fn restore_step(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        crate::regimes::mhd_substrate::restore_step(sim);
+        self.c2p(sim);
+        self.ghost_fill(sim);
     }
 
     fn penalize(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
@@ -952,7 +1088,11 @@ where
             crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
         if diagnose_cfl {
             let call = MHD_CFL_DIAGNOSTIC_CALLS.fetch_add(1, Ordering::Relaxed);
-            if call == 0 || call.is_multiple_of(100) {
+            // `SIMBI_CFL_DIAGNOSTICS=all` reports EVERY call. the sampled cadence shows the
+            // steady state but never the excursion that actually halts a run: a rate spike lasts
+            // one step, so sampling every hundredth call is guaranteed to miss it.
+            let every = std::env::var("SIMBI_CFL_DIAGNOSTICS").is_ok_and(|v| v == "all");
+            if every || call == 0 || call.is_multiple_of(100) {
                 let flux_max = flux_max.unwrap_or(0.0);
                 let minimum_source = (lambda_max - flux_max).max(0.0);
                 let owner = if Mem::IS_DEVICE_ACCESSIBLE {

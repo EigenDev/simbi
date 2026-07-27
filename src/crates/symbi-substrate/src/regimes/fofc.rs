@@ -7,6 +7,13 @@
 // robust HLLE/light-cone) update from the physical stage-input state and, per zone, keeps
 // whichever tier is physical: high-order, else first-order, else the frozen stage input.
 //
+// GRMHD replaces the last two tiers with a CONSERVATIVE recovery (`SourceReplay`): the spliced
+// first-order flux and edge EMF are kept single-valued, and the only thing clipped is the
+// pointwise geometric (metric) source, scaled to the largest fraction of the source ray that
+// stays inside the Wu & Tang admissible set. that leaves nothing to freeze — a state the
+// source-free low-order operator cannot make admissible is a statement about the TIMESTEP, and
+// the orchestrator reports it up so the driver rejects the step and replays at a smaller dt.
+//
 // usage:
 //  fofc_orchestrate(sim, prefix, has_additive, first_order_flux, c2p, godunov, source_apply);
 //  where the closures dispatch the substrate's own first-order flux / c2p / godunov / source.
@@ -76,7 +83,7 @@ pub fn fofc_set_horizon_radius(r_h: f64) {
     FOFC_HORIZON_RADIUS_BITS.store(r_h.to_bits(), Ordering::Relaxed);
 }
 
-/// zero the FOFC event counters (call at run start / after reading a window delta).
+/// zero the fofc event counters (call at run start / after reading a window delta).
 pub fn fofc_reset_stats() {
     FOFC_FALLBACK_CELLS.store(0, Ordering::Relaxed);
     FOFC_FREEZE_CELLS.store(0, Ordering::Relaxed);
@@ -344,6 +351,34 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &scalars);
 }
 
+/// write the per-cell inadmissibility mask (1 where the current primitive state is unphysical)
+/// over the interior into `bad`.
+pub(crate) fn fofc_probe<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dof_sfx: &str,
+    pre: &Field<Sc, D, Mem>,
+    bad: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
+    dispatch_named(sim, pre, Some(bad), 0, &name, &sim.geom.interior, &[], &[]);
+}
+
+/// the number of set cells in a 0/1 interior mask.
+pub(crate) fn fofc_flag_count<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    flag: &Field<Sc, D, Mem>,
+) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    field_reduce(flag, &sim.geom.interior, ReductionOp::Add) as u64
+}
+
 /// dispatch the FACE-BASED FLUX SPLICE kernel `{prefix}_fofc_splice_{D}d_{dir}` over the axis-`dir`
 /// interior face domain: on each face the live first-order flux (`fo_*` = `fields.flux[dir]`, spliced
 /// in place) is kept where either adjacent cell is flagged, else replaced with the saved high-order
@@ -438,6 +473,18 @@ where
     field_reduce(scratch, &sim.geom.interior, ReductionOp::Add)
 }
 
+/// what the GRMHD conservative source replay did with the spliced first-order state. every other
+/// regime reports `NotApplicable` and takes the shared redo.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SourceReplay {
+    /// the regime has no source replay; the shared godunov / source / body redo completes the
+    /// substage.
+    NotApplicable,
+    /// the replay completed the substage itself (godunov, CT re-sync, additive sources) with the
+    /// geometric source scaled to the largest admissible fraction.
+    Completed,
+}
+
 /// the FACE-BASED FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
 /// over the interior), boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
 /// (3) restore cons <- u_stage so the first-order flux reconstructs from the PHYSICAL stage input;
@@ -449,6 +496,11 @@ where
 /// face carries ONE flux, the update telescopes exactly across every fallback boundary — the mass /
 /// momentum / energy created at flag boundaries by a per-cell state replacement is gone. the caller
 /// supplies the substrate's own first-order flux (per direction) / c2p / godunov / source_apply.
+///
+/// step (6) is where GRMHD diverges: `source_replay` completes the substage itself with the
+/// geometric source limited per cell, and steps (7)'s freeze tier then only ever counts. returns
+/// TRUE when the substage cannot be completed at this timestep at all and the caller must reject
+/// and replay the whole step.
 pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
@@ -496,8 +548,19 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     ct_save: impl Fn(),
     ct_restore: impl Fn(),
     ct_flux_and_curl: impl Fn(),
+    // the GRMHD conservative source replay, called once the single-valued gas flux and edge EMF are
+    // spliced: it limits the (non-conservative) geometric source to the largest admissible fraction
+    // of the source ray instead of blending whole cell states, so the flux and CT operators stay
+    // untouched. see `SourceReplay`. every other regime reports `NotApplicable`.
+    source_replay: impl Fn() -> SourceReplay,
     ct_resync: impl Fn(),
-) where
+    // whether an exterior cell the projection could not recover should REJECT the step (replay it
+    // at a smaller dt) rather than freeze. true only where a projection exists to have tried and
+    // failed first; a regime with no projection has no tier below the freeze and must keep it.
+    retry_on_freeze: bool,
+    // whether the caller must reject the whole step and replay it at a smaller timestep.
+) -> bool
+where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
@@ -524,7 +587,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     let fallback_cells = field_reduce(flag, &sim.geom.interior, ReductionOp::Add);
     if fallback_cells < 0.5 {
         advance_freeze_streak(freeze_streak, 0);
-        return;
+        return false;
     }
     FOFC_FALLBACK_CELLS.fetch_add(fallback_cells as u64, Ordering::Relaxed);
     post_first_fallback(sim, flag);
@@ -572,16 +635,24 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         fofc_splice(sim, prefix, dof_sfx, dir, flag, &ws.flux_ho[dir]);
     }
     ct_flux_and_curl(); // MHD: splice bflux, recompute + splice the edge EMF, re-curl bface_n -> FO B on flagged
-    godunov();
-    ct_resync(); // MHD: bcell_from_bface (patch stages) — re-interp bcell + the small FO-vs-FO patch
-    if has_additive {
-        source_apply();
+    match source_replay() {
+        SourceReplay::Completed => {}
+        SourceReplay::NotApplicable => {
+            godunov();
+            ct_resync(); // MHD: bcell_from_bface (patch stages) — re-interp bcell + the small FO-vs-FO patch
+            if has_additive {
+                source_apply();
+            }
+            body_apply(); // re-apply the immersed-body source on the redo (mirrors the HO godunov->additive->body order)
+        }
     }
-    body_apply(); // re-apply the immersed-body source on the redo (mirrors the HO godunov->additive->body order)
-    // ADMISSIBLE-BOUNDARY PROJECTION (GR-hydro): map every spliced cell into G along the segment to
-    // the admissible stage-input anchor, BEFORE the c2p that follows — so the recovery converges on
-    // every cell and the freeze tier below counts only genuinely-inadmissible-anchor cells. a no-op
-    // for regimes without a baked projection.
+    // ADMISSIBLE-BOUNDARY PROJECTION — the tier BELOW every conservative correction above, and it
+    // must sit below ALL of them: the flux splice and the source limiter both act on the OPERATOR
+    // (a face flux, a source magnitude) and neither can move a cell that is already outside G. this
+    // maps such a cell onto partial-G along the segment to the admissible stage-input anchor, so the
+    // freeze tier afterwards counts only a genuinely inadmissible ANCHOR. exact passthrough on an
+    // admissible cell, hence a no-op wherever the tiers above already succeeded. a no-op entirely
+    // for regimes with no baked projection (flat MHD, iso), which keep the freeze parachute.
     project();
     c2p();
     // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier holds the stage input where even full first-order
@@ -609,6 +680,15 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let exterior_froze = (froze as u64).saturating_sub(interior_froze);
     let streak = advance_freeze_streak(freeze_streak, exterior_froze);
+    // TIER 3, the last resort below the projection: an EXTERIOR cell that even the projection could
+    // not land in G has an inadmissible ANCHOR — its stage input is already unrecoverable — so the
+    // substage cannot be completed at this timestep. replaying the whole step at a smaller dt is
+    // strictly better than the freeze below, which holds the cell at that same anchor and waives
+    // its conservation. bounded by the SAME streak the halt uses, so a state no timestep can rescue
+    // still fails loudly instead of halving forever.
+    if exterior_froze > 0 && streak < FOFC_FREEZE_HALT_STREAK && retry_on_freeze {
+        return true;
+    }
     if streak >= FOFC_FREEZE_HALT_STREAK {
         let c2p_errors = symbi_sim::hydro_ops::scan_c2p_errors(sim);
         let first_error = symbi_sim::hydro_ops::first_c2p_error(sim)
@@ -630,6 +710,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         None => fofc_select(sim, prefix, dof_sfx, sim.stage_input(), cons, prim),
     }
     c2p();
+    false
 }
 
 #[cfg(test)]
