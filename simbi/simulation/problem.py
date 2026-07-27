@@ -1336,7 +1336,7 @@ class SimbiProblem(BaseModel):
     def get_checkpoint_immutable_fields(self) -> set[str]:
         """get field names that cannot be overridden when loading from checkpoint."""
         immutable = set()
-        for field_name, field_info in self.model_fields.items():
+        for field_name, field_info in type(self).model_fields.items():
             metadata = get_param_metadata(field_info)
             if not metadata.checkpoint_safe:
                 immutable.add(field_name)
@@ -1345,7 +1345,7 @@ class SimbiProblem(BaseModel):
     def get_checkpoint_safe_fields(self) -> set[str]:
         """get field names that can be overridden when loading from checkpoint."""
         safe = set()
-        for field_name, field_info in self.model_fields.items():
+        for field_name, field_info in type(self).model_fields.items():
             metadata = get_param_metadata(field_info)
             if metadata.checkpoint_safe:
                 safe.add(field_name)
