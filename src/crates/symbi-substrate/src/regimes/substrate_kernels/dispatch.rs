@@ -30,6 +30,97 @@ use super::params::{
 };
 use super::types::Solver;
 
+fn plummer_peak_acceleration(mass: f64, softening: f64) -> f64 {
+    if mass <= 0.0 || softening <= 0.0 {
+        return 0.0;
+    }
+    2.0 * mass / (3.0 * 3.0_f64.sqrt() * softening * softening)
+}
+
+fn gravity_limited_dt(
+    hydro_dt: f64,
+    cfl: f64,
+    peak_acceleration: f64,
+    min_physical_width: f64,
+) -> f64 {
+    if peak_acceleration == 0.0 {
+        return hydro_dt;
+    }
+    let transport_rate = cfl / hydro_dt;
+    let acceleration_rate = peak_acceleration / min_physical_width;
+    let discriminant = transport_rate * transport_rate + 4.0 * acceleration_rate * cfl;
+    (2.0 * cfl / (transport_rate + discriminant.sqrt())).min(hydro_dt)
+}
+
+pub fn body_gravity_limited_dt<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    hydro_dt: f64,
+    cfl: f64,
+    min_physical_width: f64,
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let peak_acceleration = sim
+        .immersed
+        .as_ref()
+        .map(|immersed| {
+            (0..immersed.bodies.len())
+                .map(|body| {
+                    let body = immersed.bodies.get(body);
+                    body.softening()
+                        .map(|softening| plummer_peak_acceleration(body.mass, softening))
+                        .unwrap_or(0.0)
+                })
+                .sum::<f64>()
+        })
+        .unwrap_or(0.0);
+    if peak_acceleration == 0.0 {
+        return hydro_dt;
+    }
+    gravity_limited_dt(hydro_dt, cfl, peak_acceleration, min_physical_width)
+}
+
+#[cfg(test)]
+mod body_gravity_cfl_tests {
+    use super::{gravity_limited_dt, plummer_peak_acceleration};
+
+    #[test]
+    fn plummer_peak_matches_the_analytic_maximum() {
+        let mass = 2.5;
+        let softening = 0.4;
+        let radius = softening / 2.0_f64.sqrt();
+        let direct = mass * radius / (radius * radius + softening * softening).powf(1.5);
+        let peak = plummer_peak_acceleration(mass, softening);
+        assert!((peak - direct).abs() <= 16.0 * f64::EPSILON * peak);
+        for ii in 0..1000 {
+            let sampled_radius = softening * 4.0 * (ii as f64 + 0.5) / 1000.0;
+            let sampled = mass * sampled_radius
+                / (sampled_radius * sampled_radius + softening * softening).powf(1.5);
+            assert!(sampled <= peak * (1.0 + 16.0 * f64::EPSILON));
+        }
+    }
+
+    #[test]
+    fn gravity_cap_satisfies_the_combined_transport_bound() {
+        let hydro_dt = 0.02;
+        let cfl = 0.4;
+        let acceleration = 80.0;
+        let width = 0.015625;
+        let dt = gravity_limited_dt(hydro_dt, cfl, acceleration, width);
+        let transport_rate = cfl / hydro_dt;
+        let bounded_courant = transport_rate * dt + acceleration * dt * dt / width;
+        assert!(dt < hydro_dt);
+        assert!((bounded_courant - cfl).abs() <= 32.0 * f64::EPSILON * cfl);
+    }
+
+    #[test]
+    fn absent_gravity_leaves_the_hydrodynamic_step_unchanged() {
+        assert_eq!(gravity_limited_dt(0.02, 0.4, 0.0, 0.01), 0.02);
+    }
+}
+
 /// the ONE CFL dispatch every hydro regime shares: run `{prefix}_wave_speed_map{sfx}` over
 /// the per-cell wave speeds (the regime's only contribution is which map — i.e., its wave
 /// speed), reduce by max, form `dt = cfl / lambda_max`. the scalar tail is the SHARED

@@ -394,13 +394,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         } else {
             self.viscosity
         };
-        if nu_max > 0.0 {
+        let dt = if nu_max > 0.0 {
             const C_VISC: f64 = 0.1;
             let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
             dt.min(C_VISC * min_dx * min_dx / nu_max)
         } else {
             dt
-        }
+        };
+        let min_physical_width = super::substrate_mhd::max_inv_physical_width(&sim.geom).recip();
+        crate::regimes::substrate_kernels::body_gravity_limited_dt(
+            sim,
+            dt,
+            self.cfl_number,
+            min_physical_width,
+        )
     }
 
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
