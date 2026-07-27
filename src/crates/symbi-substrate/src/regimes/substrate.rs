@@ -423,7 +423,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         } else {
             self.viscosity
         };
-        if nu_max > 0.0 {
+        let dt = if nu_max > 0.0 {
             const C_VISC: f64 = 0.1;
             // the diffusion cap uses the PHYSICAL min cell size. cylindrical (R, phi)
             // has a coordinate azimuthal width dphi, so its physical extent is R dphi,
@@ -444,7 +444,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             dt_hydro.min(C_VISC * min_dx * min_dx / nu_max)
         } else {
             dt_hydro
-        }
+        };
+        let min_physical_width = super::substrate_mhd::max_inv_physical_width(&sim.geom).recip();
+        crate::regimes::substrate_kernels::body_gravity_limited_dt(
+            sim,
+            dt,
+            self.cfl_number,
+            min_physical_width,
+        )
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {

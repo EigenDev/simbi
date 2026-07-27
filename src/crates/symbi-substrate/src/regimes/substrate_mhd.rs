@@ -65,7 +65,9 @@ fn host_scale_factor(coords: symbi_geometry::Geometry, ci: usize, pos: &[f64; 3]
 /// CORNER — evaluate the `2^D` corner cells, O(1). the resistive diffusion crosses PHYSICAL widths, so
 /// a curvilinear grid (small r / near the poles) is stiffer than its coordinate spacing suggests;
 /// Cartesian falls through to `1/dx` (h = 1).
-fn max_inv_physical_width<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>) -> f64 {
+pub(crate) fn max_inv_physical_width<const D: usize>(
+    geom: &symbi_sim::state::PartitionGeometry<D>,
+) -> f64 {
     let mut max_inv = 0.0f64;
     for corner in 0..(1usize << D) {
         let coord: [isize; D] = std::array::from_fn(|d| {
@@ -1001,13 +1003,19 @@ where
         // resistive rate. cartesian 3D only (where MHD viscosity is built), so coordinate dx is
         // physical. the resistive and viscous limits stack: a resistive-viscous run is bounded by
         // whichever diffusion is stiffer.
-        if self.viscosity > 0.0 {
+        let dt = if self.viscosity > 0.0 {
             const C_VISC: f64 = 0.1;
             let min_dx = geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
             dt.min(C_VISC * min_dx * min_dx / self.viscosity)
         } else {
             dt
-        }
+        };
+        crate::regimes::substrate_kernels::body_gravity_limited_dt(
+            sim,
+            dt,
+            self.cfl_number,
+            max_inv_physical_width(geom).recip(),
+        )
     }
 
     // ---- regime-agnostic tails: the gas godunov + the full CT stack (shared AOT kernels) ----

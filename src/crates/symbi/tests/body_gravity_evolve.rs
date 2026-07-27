@@ -65,6 +65,16 @@ fn fofc_redo_preserves_body_gravity() {
         vel: Tensor::new([if x > 0.4 { 6.0 } else { -6.0 }, 0.0]),
         pre: 1e-8, // near-zero internal energy -> the diverging flux over-removes it -> p < 0 -> FOFC
     };
+    let redo_body = || {
+        BodyCollection::new().add(Body::gravitational(
+            0,
+            Tensor::new([0.0, 0.0]),
+            Tensor::zeros(),
+            MASS,
+            0.1,
+            5.0,
+        ))
+    };
     // FOFC runs only through the AMR hierarchy's level_stage (the uni-grid evolve() has no fofc
     // phase), so drive the single-level hierarchy one Euler step (one substage -> a flagged cell
     // cannot recover the body source on a later substage). returns the stepped state.
@@ -80,14 +90,18 @@ fn fofc_redo_preserves_body_gravity() {
             .set_initial(ic)
             .build();
         let s = if with_body {
-            s.with_bodies(central_mass())
+            // broad softening keeps the source impulse measurable without letting
+            // the body-force cfl remove the deliberately inadmissible high-order update.
+            s.with_bodies(redo_body())
         } else {
             s
         };
+        // cfl > 1 deliberately makes the high-order double-rarefaction update
+        // inadmissible so the redo path remains exercised as safer floors evolve.
         let kset =
-            AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &s.geom.allocated);
+            AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 2.0, &s.geom.allocated);
         let mut hier = Hierarchy::single(s, kset);
-        hier.evolve(1e-4).expect("hierarchy step"); // one Euler step (t_final < first dt)
+        hier.evolve_steps(1).expect("hierarchy step");
         assert_eq!(hier.levels[0].state.iteration, 1, "expected one step");
         hier.levels.into_iter().next().unwrap().state
     };
