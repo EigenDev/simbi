@@ -58,6 +58,27 @@ impl<S: Scalar, const D: usize> RmhdGr<S, D> {
         let vdb = self.metric.contract_contra(&prim.vel, &prim.mag);
         (bsq, vdb, bsq / w_sq + vdb * vdb)
     }
+
+    /// a guaranteed-physical conserved anchor in the affine slice of a CT-owned magnetic field.
+    ///
+    /// `stage_gas` comes from an accepted stage state, while `candidate_mag` comes from the
+    /// current constrained-transport update. rebuilding through the canonical primitive-to-conserved
+    /// map makes the anchor admissible with that exact field without modifying the shared CT state.
+    #[inline]
+    pub fn admissible_anchor(
+        &self,
+        eos: &impl Eos<S>,
+        stage_gas: Prim<S, D>,
+        candidate_mag: Tensor<S, D>,
+    ) -> MhdCons<S, D> {
+        self.to_conserved(
+            eos,
+            &MhdPrim {
+                hydro: stage_gas,
+                mag: candidate_mag,
+            },
+        )
+    }
 }
 
 impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
@@ -259,6 +280,108 @@ mod tests {
                 "c2p v={v:?}"
             );
         }
+    }
+
+    #[test]
+    fn ct_slice_anchor_recovers_with_the_candidate_field() {
+        use crate::admissible::{
+            ADMISSIBLE_REL_FLOOR, admissible_project, rmhd_admissible_residuals,
+            rmhd_admissible_theta, rmhd_state_scale,
+        };
+
+        let eos = IdealGas { gamma: 4.0 / 3.0 };
+        let regime = RmhdGr::<f64, 3> {
+            metric: SpatialMetric::flat(),
+            alpha: 1.0,
+        };
+        let old_field = Tensor::new([0.01, 0.0, 0.0]);
+        let candidate_field = Tensor::new([10.0, -3.0, 2.0]);
+        let stage_prim = MhdPrim {
+            hydro: Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.1, -0.03, 0.02]),
+                pre: 0.2,
+            },
+            mag: old_field,
+        };
+        let stale_anchor = regime.to_conserved(&eos, &stage_prim);
+        let rebuilt = regime.admissible_anchor(&eos, stage_prim.hydro, candidate_field);
+        let gm = Matrix::identity();
+        let stale_energy = stale_anchor.nrg + stale_anchor.den;
+        let (_, stale_psi) = rmhd_admissible_residuals(
+            stale_anchor.den,
+            &stale_anchor.mom,
+            stale_energy,
+            &candidate_field,
+            &gm,
+            &gm,
+        );
+        assert!(
+            stale_psi <= 0.0,
+            "the old-field anchor remains admissible in the candidate magnetic slice"
+        );
+
+        let anchor_energy = rebuilt.nrg + rebuilt.den;
+        let state_scale = rmhd_state_scale(
+            rebuilt.den,
+            &rebuilt.mom,
+            anchor_energy,
+            &candidate_field,
+            &gm,
+            &gm,
+        );
+        let eps_d = 1e-12 * state_scale;
+        let eps_q = ADMISSIBLE_REL_FLOOR * state_scale;
+        let eps_psi = ADMISSIBLE_REL_FLOOR * state_scale.powf(1.5);
+        let (anchor_q, anchor_psi) = rmhd_admissible_residuals(
+            rebuilt.den,
+            &rebuilt.mom,
+            anchor_energy,
+            &candidate_field,
+            &gm,
+            &gm,
+        );
+        assert!(anchor_q > eps_q && anchor_psi > eps_psi);
+        assert_eq!(rebuilt.mag.data, candidate_field.data);
+
+        let candidate_den = 0.5 * rebuilt.den;
+        let candidate_mom = rebuilt.mom.scale(20.0);
+        let candidate_energy = 0.1 * anchor_energy;
+        let theta = rmhd_admissible_theta(
+            candidate_den,
+            candidate_mom,
+            candidate_energy,
+            rebuilt.den,
+            rebuilt.mom,
+            anchor_energy,
+            &candidate_field,
+            &gm,
+            &gm,
+            eps_d,
+            eps_q,
+            eps_psi,
+            40,
+        );
+        let (projected_den, projected_mom, projected_energy) = admissible_project(
+            candidate_den,
+            candidate_mom.data,
+            candidate_energy,
+            rebuilt.den,
+            rebuilt.mom.data,
+            anchor_energy,
+            theta,
+        );
+        let (projected_q, projected_psi) = rmhd_admissible_residuals(
+            projected_den,
+            &Tensor::new(projected_mom),
+            projected_energy,
+            &candidate_field,
+            &gm,
+            &gm,
+        );
+        assert!(theta < 1.0);
+        assert!(projected_den > eps_d && projected_q > eps_q && projected_psi > eps_psi);
+        assert_eq!(rebuilt.mag.data, candidate_field.data);
     }
 
     #[test]

@@ -632,6 +632,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         sim,
                         "rhd",
                         dof_sfx,
+                        self.gamma,
                         sim.stage_input(),
                         &sim.fields.cons,
                         &sim.fields.prim,
