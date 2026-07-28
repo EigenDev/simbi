@@ -39,6 +39,7 @@ from simbi.types.typing import (
     StaggeredBFieldGenerator,
 )
 from simbi_configs.examples.grhd.gr_michel import MichelSolution
+from simbi_configs.examples.grhd.gr_michel import michel_chart
 
 
 class GrMichelMagnetized2D(SimbiProblem):
@@ -49,7 +50,13 @@ class GrMichelMagnetized2D(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(
+            # kerr-schild at zero spin IS schwarzschild-kerr-schild: one horizon-
+            # penetrating family covers both, so the 2d spherical GRMHD bake carries a
+            # single (chart, spacetime) pair instead of one per hole type.
+            Spacetime.KERR_KS,
+            description="background spacetime",
+        ),
     ]
     schwarzschild_mass: Annotated[
         float,
@@ -167,7 +174,7 @@ class GrMichelMagnetized2D(SimbiProblem):
         def gas_state() -> GasStateGenerator:
             for _jj in range(npolar):
                 for r in centroids:
-                    rho, v1, pre = sol.primitive(r)
+                    rho, v1, pre = sol.primitive(r, michel_chart(self.spacetime))
                     yield (rho, v1, 0.0, 0.0, pre)
 
         def b_field(bn: str) -> StaggeredBFieldGenerator:

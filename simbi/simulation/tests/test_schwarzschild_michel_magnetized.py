@@ -47,29 +47,29 @@ needs_backend = pytest.mark.skipif(
     _BACKEND is None, reason="rust cpu_ext backend not built"
 )
 
-# the hold is measured while the discretization is still HEALTHY.
+# the hold is measured on the HORIZON-PENETRATING chart, at a time where the state has
+# actually evolved.
 #
-# past t ~ 0.2 this configuration develops a timestep collapse: dt falls from ~0.4 of
-# the light-crossing step to ~2e-3 of it, the run stalls near t = 0.318, and one or two
-# cells trip the first-order fallback on every step thereafter (~8000 events by step
-# 4000 at N=256, scaling with N). the collapse is INDEPENDENT OF THE FIELD -- b_ref =
-# 0, 0.5 and 2.0 stall at the identical time with identical counts -- so it lives in the
-# GRHD path, not in the magnetic terms this file is about. measuring a magnetized hold
-# through that regime reports a magnetic defect for a hydrodynamic one, and inverts the
-# convergence order into the bargain (the finer grid stalls sooner, so it carries MORE
-# error: measured p = -0.39 at t = 0.2 against +0.53 at t = 0.1).
+# t = 0.1 is too early to measure a convergence order: the state has barely departed
+# from the seeded solution, so the residual is the initial condition's own
+# representation rather than evolution truncation, and it does not fall under
+# refinement (measured p = -0.01 at L1 ~ 5.6e-7). by t = 0.5 the flow has evolved and
+# the truncation error dominates.
+_HOLD_TIME = 0.5
+# measured in kerr-schild at t = 0.5: L1 rho vs michel 1.076e-5 (128) -> 3.353e-6 (256),
+# order p = 1.68, constant C = 3.78e-2, with dt at 0.31 / 0.71 of the light-crossing
+# step and ZERO limiter activations at either resolution. the same hold in schwarzschild
+# coordinates converged at only p = 0.53 and, past t ~ 0.2, stopped converging at all as
+# the timestep collapsed -- the chart, not the scheme.
 #
-# so the hold is asserted where the scheme is behaving, and the health of the
-# discretization is asserted alongside it -- if the collapse ever moves earlier, the
-# timestep gate below fails rather than the convergence quietly inverting.
-_HOLD_TIME = 0.1
-# measured at t = 0.1: L1 rho vs michel 1.556e-5 (128) -> 1.081e-5 (256), order p = 0.53,
-# constant C = 2.00e-4. the bounds are stated in those grid-free terms (see
-# convergence.py) so refining the test does not invalidate them.
-_HOLD_MIN_ORDER = 0.3
-_HOLD_MAX_CONSTANT = 1.0e-3
-# the discretization must still be healthy where the hold is measured: dt within reach
-# of the light-crossing step, and no limiter firing on a smooth stationary solution.
+# the bounds are stated grid-free (see convergence.py): MIN_ORDER separates convergence
+# from a resolution-independent floor with ~1.7x margin on the measurement, and
+# MAX_CONSTANT carries ~3x, making it a smoke alarm for a uniformly more diffusive
+# scheme rather than a pin on today's dissipation.
+_HOLD_MIN_ORDER = 1.0
+_HOLD_MAX_CONSTANT = 1.2e-1
+# a smooth stationary solution needs no limiter, and its step must stay within reach of
+# the light-crossing step. both fail FIRST if the timestep collapse ever migrates in.
 _HOLD_MIN_DT_FRACTION = 0.05
 # the one-step residual gate, stated WITHOUT reference to a grid.
 #
