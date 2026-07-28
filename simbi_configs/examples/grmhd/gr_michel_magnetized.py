@@ -40,7 +40,7 @@ from simbi.types.typing import (
     InitialStateType,
     StaggeredBFieldGenerator,
 )
-from simbi_configs.examples.grhd.gr_michel import MichelSolution
+from simbi_configs.examples.grhd.gr_michel import michel_chart, MichelSolution
 
 
 class GrMichelMagnetized(SimbiProblem):
@@ -51,7 +51,7 @@ class GrMichelMagnetized(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="background spacetime"),
     ]
     schwarzschild_mass: Annotated[
         float,
@@ -142,7 +142,7 @@ class GrMichelMagnetized(SimbiProblem):
 
         def gas_state() -> GasStateGenerator:
             for r in centroids:
-                rho, v1, pre = sol.primitive(r)
+                rho, v1, pre = sol.primitive(r, michel_chart(self.spacetime))
                 yield (rho, v1, 0.0, 0.0, pre)
 
         def b_field(bn: str) -> StaggeredBFieldGenerator:

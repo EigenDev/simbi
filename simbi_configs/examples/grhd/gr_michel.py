@@ -144,13 +144,57 @@ class MichelSolution:
             return self.u_sonic
         return _bisect(bernoulli_residual, lo, hi)
 
-    def primitive(self, r: float) -> tuple[float, float, float]:
-        """(rho, v^r, p) at radius r; v^r is the valencia contravariant velocity."""
+    def primitive(self, r: float, chart: str) -> tuple[float, float, float]:
+        """(rho, v^r, p) at radius r; v^r is the valencia contravariant velocity.
+
+        the SOLUTION is chart-independent: schwarzschild and ingoing kerr-schild share
+        the radial coordinate, so rho(r), p(r) and the proper radial velocity
+        u = |u^r| = |dr/dtau| are the same numbers in both. only the split into
+        (lorentz factor, three-velocity) differs, because that split is taken against
+        the chart's NORMAL observer -- static for schwarzschild, infalling for
+        kerr-schild.
+
+        `chart` is REQUIRED and carries no default. the split is only meaningful against
+        a stated normal observer, and a default would let a caller seed an initial
+        condition in one chart while the metric evolves in another -- a mismatch that
+        produces a plausible-looking wrong answer rather than an error. callers pass the
+        chart their problem declares.
+
+        that difference is the whole reason to evolve in kerr-schild. the static
+        observer sees the infalling gas at a lorentz factor that climbs without bound
+        toward the horizon (W = 1.95 at 1.25 r_+), and a large W sits near the boundary
+        of the admissible set, where the margin q = E - sqrt(D^2 + |S|^2) closes. the
+        infalling observer falls WITH the flow, so W stays near unity all the way in
+        (1.018 at the same radius) and the margin stays open.
+        """
         u = self.proper_velocity(r)
         rho = self.jm / (r * r * u)
-        f = 1.0 - 2.0 * self.mass / r
-        v1 = -u * math.sqrt(f) / math.sqrt(f + u * u)
-        return rho, v1, self.kk * rho**self.gamma
+        p = self.kk * rho**self.gamma
+        if chart == "schwarzschild":
+            # static normal observer: alpha = sqrt(f), zero shift.
+            f = 1.0 - 2.0 * self.mass / r
+            return rho, -u * math.sqrt(f) / math.sqrt(f + u * u), p
+        # ingoing kerr-schild: alpha = 1/sqrt(1+H), beta^r = H/(1+H), gamma_rr = 1+H.
+        # u^t follows from normalisation; the form below is the rationalised root, which
+        # stays finite at r = 2M where the naive quadratic solution is 0/0.
+        h = 2.0 * self.mass / r
+        u_t = (u * u * (1.0 + h) + 1.0) / (
+            math.sqrt(max(u * u + 1.0 - h, 0.0)) + h * u
+        )
+        w = u_t / math.sqrt(1.0 + h)
+        return rho, -u / w + h / math.sqrt(1.0 + h), p
+
+
+def michel_chart(spacetime) -> str:
+    """the chart a michel initial condition must be split against.
+
+    the analytic solution is chart-independent; the split into (lorentz factor,
+    three-velocity) is not, so seeding must use the chart the metric evolves in.
+    deriving it from the problem's own `spacetime` is what keeps the two from drifting
+    apart, which is a silently wrong initial condition rather than an error.
+    """
+    tag = str(spacetime).split(".")[-1].lower()
+    return "schwarzschild" if tag == "schwarzschild" else "kerr_schild"
 
 
 class GrMichel(SimbiProblem):
@@ -163,7 +207,7 @@ class GrMichel(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="background spacetime"),
     ]
     schwarzschild_mass: Annotated[
         float,
@@ -251,6 +295,6 @@ class GrMichel(SimbiProblem):
 
         def gas_state() -> GasStateGenerator:
             for r in centroids:
-                yield sol.primitive(r)
+                yield sol.primitive(r, michel_chart(self.spacetime))
 
         return gas_state

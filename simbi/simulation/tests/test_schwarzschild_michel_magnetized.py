@@ -35,6 +35,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
+from simbi_configs.examples.grhd.gr_michel import michel_chart
 from simbi.simulation.tests.convergence import (
     assert_converges,
     assert_structurally_silent,
@@ -126,7 +127,7 @@ def _hold(n: int, b_ref: float):
     f0, f1 = _prims(first, n), _prims(final, n)
     sol = p.michel_solution()
     rc = np.array(p.cell_centroids())
-    ref = np.array([sol.primitive(r)[0] for r in rc])
+    ref = np.array([sol.primitive(r, michel_chart(p.spacetime))[0] for r in rc])
     interior = slice(2, n - 2)
     assert f1["pre"][interior].min() > 0.0, "pressure went non-positive"
     l1 = float(np.abs(f1["rho"][interior] / ref[interior] - 1.0).mean())

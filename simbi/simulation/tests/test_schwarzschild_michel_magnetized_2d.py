@@ -32,6 +32,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
+from simbi_configs.examples.grhd.gr_michel import michel_chart
 from simbi.simulation.tests.convergence import (
     assert_converges,
     assert_structurally_silent,
@@ -137,7 +138,7 @@ def test_curved_ct_holds_michel_and_divergence() -> None:
     # the hydro hold equals the 1D gate.
     sol = p.michel_solution()
     rc = np.array(p.cell_centroids())
-    ref = np.array([sol.primitive(r)[0] for r in rc])
+    ref = np.array([sol.primitive(r, michel_chart(p.spacetime))[0] for r in rc])
     interior = (slice(2, _NP - 2), slice(2, _NR - 2))
     l1 = float(np.abs(rho[interior] / ref[None, 2 : _NR - 2] - 1.0).mean())
     # the hold, stated grid-free at ONE resolution: divide out the expected scaling and

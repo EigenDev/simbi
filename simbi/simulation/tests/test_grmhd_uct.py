@@ -32,6 +32,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
+from simbi_configs.examples.grhd.gr_michel import michel_chart
 from simbi.types import CtMethod
 
 _BACKEND = runner._load_backend("cpu")
@@ -76,7 +77,7 @@ def test_uct_holds_the_michel_monopole_like_contact() -> None:
     assert float(np.abs(b1_1 - b1_0).max()) < 1e-8, "staggered B drifted under UCT"
     sol = p.michel_solution()
     rc = np.array(p.cell_centroids())
-    ref = np.array([sol.primitive(r)[0] for r in rc])
+    ref = np.array([sol.primitive(r, michel_chart(p.spacetime))[0] for r in rc])
     interior = (slice(2, 14), slice(2, 126))
     l1 = float(np.abs(rho[interior] / ref[None, 2:126] - 1.0).mean())
     assert l1 < 3.6e-4, f"UCT michel hold L1 {l1:.3e} (the 1D gate is 1.19e-4)"

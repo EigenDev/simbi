@@ -29,6 +29,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
+from simbi_configs.examples.grhd.gr_michel import michel_chart
 
 _BACKEND = runner._load_backend("cpu")
 needs_backend = pytest.mark.skipif(
@@ -57,7 +58,7 @@ _MAX_TOL_128 = 6.0e-2
 
 
 def _michel_problem(res: int, data_dir: str):
-    from simbi_configs.examples.grhd.gr_michel import GrMichel
+    from simbi_configs.examples.grhd.gr_michel import michel_chart, GrMichel
 
     p = GrMichel.from_cli(["--resolution", str(res)])
     p.end_time = _END_TIME
@@ -87,8 +88,12 @@ def test_michel_oracle_satisfies_the_flow_invariants() -> None:
         sol.u_sonic**2, sol.mass / (2.0 * sol.r_sonic), rel_tol=1e-12
     )
 
+    # the SCHWARZSCHILD split, explicitly: the invariants below are written in the
+    # static frame (the bernoulli constant is h^2 (f + u^2) with f = 1 - 2M/r), so this
+    # is a statement about the analytic solution itself, not about whatever chart a
+    # simulation happens to evolve in.
     for r in [3.0, 5.0, 10.0, sol.r_sonic, 40.0, 100.0]:
-        rho, v1, pre = sol.primitive(r)
+        rho, v1, pre = sol.primitive(r, "schwarzschild")
         u = sol.proper_velocity(r)
         f = 1.0 - 2.0 * sol.mass / r
         h = 1.0 + sol.gamma / (sol.gamma - 1.0) * pre / rho
@@ -105,14 +110,14 @@ def test_michel_oracle_satisfies_the_flow_invariants() -> None:
         )
 
     # sound speed equals the flow speed exactly at the sonic radius.
-    rho, v1, pre = sol.primitive(sol.r_sonic)
+    rho, v1, pre = sol.primitive(sol.r_sonic, "schwarzschild")
     h = 1.0 + sol.gamma / (sol.gamma - 1.0) * pre / rho
     a_s = math.sqrt(sol.gamma * pre / (rho * h))
     f_s = 1.0 - 2.0 * sol.mass / sol.r_sonic
     assert math.isclose(abs(v1) / math.sqrt(f_s), a_s, rel_tol=1e-10)
 
     # asymptotic state: the profile relaxes to the ambient density far out.
-    assert abs(sol.primitive(1.0e6)[0] - 1.0) < 1e-3
+    assert abs(sol.primitive(1.0e6, "schwarzschild")[0] - 1.0) < 1e-3
 
 
 def _held_profile_errors(res: int):
@@ -138,7 +143,7 @@ def _held_profile_errors(res: int):
         rho, pre, v1 = _read_interior(finals[0], res)
 
         sol = p.michel_solution()
-        ref = np.array([sol.primitive(r) for r in p.cell_centroids()])
+        ref = np.array([sol.primitive(r, michel_chart(p.spacetime)) for r in p.cell_centroids()])
 
     assert pre.min() > 0.0, f"pressure went non-positive: {pre.min():.3e}"
     e_rho = np.abs(rho / ref[:, 0] - 1.0)
