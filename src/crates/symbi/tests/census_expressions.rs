@@ -290,6 +290,46 @@ fn ghost_cells_are_excluded_rather_than_binned() {
 }
 
 #[test]
+fn a_census_sampled_before_the_recovery_fails_loudly() {
+    // seeding writes the CONSERVED state; the primitives a census reads come from the
+    // conserved-to-primitive recovery. sampling before that ran would report a total
+    // mass of zero with no complaint, which reads as physics rather than as a mistake.
+    let sim = SimSph::build(Newtonian, IdealGas { gamma: GAMMA }, Spherical)
+        .cells([N])
+        .origin([R_LO])
+        .spacing([DR])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("spherical sim construction failed")
+        .set_initial(|x| Prim {
+            rho: density_at(x[0]),
+            vel: Tensor::new([0.0]),
+            pre: pressure_at(x[0]),
+        })
+        .build();
+    assert!(
+        !sim.store.has_recovered_primitives(),
+        "a freshly seeded store has not recovered its primitives"
+    );
+
+    let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
+    let panicked =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev)))
+            .is_err();
+    assert!(
+        panicked,
+        "sampling before the recovery must fail loudly, not report zeros"
+    );
+
+    // and after the recovery the same census samples normally.
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    sub.c2p(&sim.store);
+    assert!(sim.store.has_recovered_primitives());
+    assert!(sim.census_fields(&ev).is_some());
+}
+
+#[test]
 fn a_forward_referencing_dag_is_refused_with_a_readable_error() {
     // the wire format is a topologically ordered dag. a node whose operand comes later is
     // malformed, and it must be reported against the config rather than surfacing as an

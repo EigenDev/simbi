@@ -221,6 +221,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        // the primitives now hold a state recovered from the conserved fields; anything
+        // reading prim.* outside the evolve loop checks this before trusting it.
+        sim.mark_primitives_recovered();
         let cnrg = sim.fields.cons.nrg_field().expect("Rhd requires cons.nrg");
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
 

@@ -780,6 +780,9 @@ where
     }
 
     fn c2p(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        // the primitives now hold a state recovered from the conserved fields; anything
+        // reading prim.* outside the evolve loop checks this before trusting it.
+        sim.mark_primitives_recovered();
         let st = spacetime_slug(sim.geom.spacetime);
         let cname = if st.is_empty() {
             format!("{}_c2p_{D}d", Self::kernel_prefix())

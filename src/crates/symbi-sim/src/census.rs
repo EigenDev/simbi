@@ -358,6 +358,106 @@ fn resolve_census_param<const D: usize>(
     panic!("census: unresolved cell param '{name}' (rho | vel_k | pre | dv | x_k | t | p{{i}})")
 }
 
+/// the per-sample time series a registered census produces, columnar so the checkpoint
+/// writer borrows each series as one flat dataset.
+///
+/// the series covers THIS RUN SEGMENT ONLY and restarts empty on checkpoint load — earlier
+/// segments live in the earlier checkpoint files, and segments concatenate offline. keeping
+/// the accumulator out of restart state is what lets a chain of restarts be combined by a
+/// reader without the run having to carry the whole history forward.
+#[derive(Clone, Debug)]
+pub struct CensusHistory {
+    n_segments: usize,
+    n_values: usize,
+    /// simulation time of each sample: shape [len].
+    time: Vec<f64>,
+    /// the accumulators, segment-major within a sample: shape [len, n_segments, n_values].
+    values: Vec<f64>,
+    /// cells that fell outside the binning, per sample: shape [len].
+    dropped: Vec<u64>,
+}
+
+impl CensusHistory {
+    pub fn new(n_segments: usize, n_values: usize) -> Self {
+        CensusHistory {
+            n_segments,
+            n_values,
+            time: Vec::new(),
+            values: Vec::new(),
+            dropped: Vec::new(),
+        }
+    }
+
+    /// append one sample. the accumulator count is fixed by the registration, so a
+    /// mismatch is a wiring error rather than a data condition.
+    pub fn push(&mut self, time: f64, values: &[f64], dropped: u64) {
+        assert_eq!(
+            values.len(),
+            self.n_segments * self.n_values,
+            "census sample has {} accumulators; the registration declares {} segments x {} values",
+            values.len(),
+            self.n_segments,
+            self.n_values
+        );
+        self.time.push(time);
+        self.values.extend_from_slice(values);
+        self.dropped.push(dropped);
+    }
+
+    pub fn len(&self) -> usize {
+        self.time.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.time.is_empty()
+    }
+
+    pub fn n_segments(&self) -> usize {
+        self.n_segments
+    }
+
+    pub fn n_values(&self) -> usize {
+        self.n_values
+    }
+
+    pub fn time(&self) -> &[f64] {
+        &self.time
+    }
+
+    pub fn values(&self) -> &[f64] {
+        &self.values
+    }
+
+    pub fn dropped(&self) -> &[u64] {
+        &self.dropped
+    }
+}
+
+/// a registered census plus the samples taken so far this run segment.
+pub struct RegisteredCensus {
+    pub evaluator: CensusEvaluator,
+    pub history: CensusHistory,
+}
+
+impl RegisteredCensus {
+    pub fn new(evaluator: CensusEvaluator) -> Self {
+        let history = CensusHistory::new(
+            evaluator.spec().n_segments(),
+            evaluator.spec().n_values(),
+        );
+        RegisteredCensus { evaluator, history }
+    }
+}
+
+impl std::fmt::Debug for RegisteredCensus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RegisteredCensus")
+            .field("evaluator", &self.evaluator)
+            .field("samples", &self.history.len())
+            .finish()
+    }
+}
+
 /// the per-cell artifacts a census sample reduces over: one field per accumulator, plus the
 /// destination bucket of every cell.
 pub struct CensusFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
@@ -389,6 +489,15 @@ where
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
+        // a census reads the PRIMITIVES, and seeding writes only the conserved state. on a
+        // store whose primitives have never been recovered they are still zeros, so a
+        // census sampled there would report a total mass of zero as though it were physics.
+        assert!(
+            self.store.has_recovered_primitives(),
+            "census '{}' sampled before the conserved-to-primitive recovery has run; the \
+             primitive fields are still empty, so every accumulator would read zero",
+            ev.spec.name()
+        );
         // an isothermal regime carries no pressure field. a census that reads `pre` there
         // would silently accumulate zeros, so it is refused instead.
         assert!(

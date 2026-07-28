@@ -1839,6 +1839,13 @@ pub struct FieldStore<
     /// full-step accepted mass-transfer receipt accumulated across hydro stages.
     pub ito_transport: Option<crate::tracers::ItoTransportReceipt<NDIM, Mem>>,
 
+    /// whether the primitive fields hold a state recovered from the conserved fields.
+    /// seeding writes the CONSERVED state only, so the primitives are meaningless until
+    /// the conserved-to-primitive recovery has run. a reader of `prim.*` on a freshly
+    /// seeded store would find zeros and no error, so anything that consumes primitives
+    /// outside the evolve loop checks this first.
+    pub primitives_recovered: std::sync::atomic::AtomicBool,
+
     // ---- time state ----
     pub time: f64,
     pub dt: f64,
@@ -1858,6 +1865,11 @@ pub struct FieldStore<
 
     // ---- immersed bodies (optional side-car) ----
     pub immersed: Option<ImmersedBodies<NDIM>>,
+
+    // ---- registered binned reductions (optional side-car) ----
+    /// user-registered censuses and the samples taken this run segment. empty when the
+    /// config registers none, in which case nothing is evaluated and nothing is written.
+    pub censuses: Vec<crate::census::RegisteredCensus>,
 }
 
 /// the TYPE-LEVEL physics tags: regime, metric, eos. pure config — never read by a kernel
@@ -1910,6 +1922,23 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     #[inline]
     pub fn has_passive_scalar(&self) -> bool {
         self.fields.cons.chi_field().is_some()
+    }
+
+    /// record that the primitive fields now hold a state recovered from the conserved
+    /// fields. every conserved-to-primitive pass calls this; readers of `prim.*` outside
+    /// the evolve loop check it before trusting what they find there.
+    #[inline]
+    pub fn mark_primitives_recovered(&self) {
+        self.primitives_recovered
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// whether the primitive fields have been recovered from the conserved fields at
+    /// least once. false on a freshly seeded store, where `prim.*` is still zeros.
+    #[inline]
+    pub fn has_recovered_primitives(&self) -> bool {
+        self.primitives_recovered
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     #[inline]
@@ -2387,6 +2416,10 @@ where
                 workspace,
                 geom,
                 boundaries,
+                // seeding writes the conserved state; the primitives stay meaningless
+                // until the recovery has run.
+                primitives_recovered: std::sync::atomic::AtomicBool::new(false),
+                censuses: Vec::new(),
                 time: 0.0,
                 dt: 0.0,
                 max_dt: 0.0,

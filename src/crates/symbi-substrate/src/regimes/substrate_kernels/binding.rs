@@ -91,14 +91,20 @@ pub(crate) fn kernel_field_binds(name: &str) -> Arc<[(FieldBind, bool)]> {
     if let Some(b) = cache.read().unwrap().get(name) {
         return Arc::clone(b);
     }
-    let mut w = cache.write().unwrap();
-    if let Some(b) = w.get(name) {
-        return Arc::clone(b);
-    }
+    // the parse happens OUTSIDE the lock. `expect_kernel` panics on an unbaked kernel, and
+    // a panic while holding the write guard would poison this lock for the life of the
+    // process, turning one missing kernel into a failure of every later dispatch.
     let (_, ir) = expect_kernel::<f64>(name);
     let parsed: Arc<[(FieldBind, bool)]> = symbi_ir::kernel_bindings_from_ir(ir).into();
-    w.insert(name.to_string(), Arc::clone(&parsed));
-    parsed
+    // a racing thread may have inserted first; the value is a pure function of `name`, so
+    // either copy is correct and the loser's parse is simply dropped.
+    Arc::clone(
+        cache
+            .write()
+            .unwrap()
+            .entry(name.to_string())
+            .or_insert(parsed),
+    )
 }
 
 pub(crate) fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
@@ -111,15 +117,16 @@ pub(crate) fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
     // slow path: first time this name is seen. double-checked under the write lock
     // so two threads racing the miss don't parse twice (one inserts, the other's
     // parse is dropped). the string -> FieldRef parse is paid ONCE per kernel name here.
-    let mut w = cache.write().unwrap();
-    if let Some(b) = w.get(name) {
-        return Arc::clone(b);
-    }
     let (_, ir) = expect_kernel::<f64>(name);
     let parsed: Arc<[(FieldRef, bool)]> =
         parse_manifest(name, symbi_ir::kernel_bindings_from_ir(ir)).into();
-    w.insert(name.to_string(), Arc::clone(&parsed));
-    parsed
+    Arc::clone(
+        cache
+            .write()
+            .unwrap()
+            .entry(name.to_string())
+            .or_insert(parsed),
+    )
 }
 
 /// the TYPE-SORTED scalar manifest of a kernel, cached: each scalar param as a typed `ScalarBind`
@@ -133,14 +140,15 @@ pub(crate) fn kernel_scalar_kinds(name: &str) -> Arc<[(ScalarBind, bool)]> {
     if let Some(s) = cache.read().unwrap().get(name) {
         return Arc::clone(s);
     }
-    let mut w = cache.write().unwrap();
-    if let Some(s) = w.get(name) {
-        return Arc::clone(s);
-    }
     let (_, ir) = expect_kernel::<f64>(name);
     let parsed: Arc<[(ScalarBind, bool)]> = symbi_ir::kernel_scalar_params_typed_from_ir(ir).into();
-    w.insert(name.to_string(), Arc::clone(&parsed));
-    parsed
+    Arc::clone(
+        cache
+            .write()
+            .unwrap()
+            .entry(name.to_string())
+            .or_insert(parsed),
+    )
 }
 
 /// the declared OUTPUT SUPPORT of a kernel, cached: the
@@ -155,14 +163,14 @@ pub(crate) fn kernel_output_support(name: &str) -> Option<Arc<symbi_ir::Support>
     if let Some(s) = cache.read().unwrap().get(name) {
         return s.clone();
     }
-    let mut w = cache.write().unwrap();
-    if let Some(s) = w.get(name) {
-        return s.clone();
-    }
     let (_, ir) = expect_kernel::<f64>(name);
     let parsed = symbi_ir::kernel_output_support_from_ir(ir).map(Arc::new);
-    w.insert(name.to_string(), parsed.clone());
-    parsed
+    cache
+        .write()
+        .unwrap()
+        .entry(name.to_string())
+        .or_insert(parsed)
+        .clone()
 }
 
 /// a kernel's scalar manifest with MATERIALIZED param names, cached: one
@@ -277,5 +285,57 @@ where
         // in the dispatch's sweep direction.
         FieldRef::ConsMag(c) => &mhd().bcell[c as usize],
         FieldRef::FluxMag(c) => &mhd().bflux[dir][c as usize],
+    }
+}
+
+#[cfg(test)]
+mod cache_poisoning_tests {
+    use super::*;
+
+    /// asking for a kernel that was never baked panics, which is correct. that panic must
+    /// stay LOCAL to the caller.
+    ///
+    /// these caches memoize a pure function of the kernel name. computing the value while
+    /// holding the write guard made the panic poison the lock for the life of the process,
+    /// so every later dispatch failed with `PoisonError` instead of doing its work — one
+    /// unsupported configuration turning into a cascade of unrelated failures whose real
+    /// cause is buried. the parse therefore happens before the lock is taken.
+    #[test]
+    fn a_missing_kernel_leaves_the_manifest_caches_usable() {
+        const MISSING: &str = "a_kernel_that_was_never_baked_9d";
+
+        let first = std::panic::catch_unwind(|| kernel_scalar_kinds(MISSING))
+            .expect_err("an unbaked kernel must fail loudly");
+        let first = panic_message(&first);
+        assert!(
+            first.contains("no AOT kernel"),
+            "the miss must name the missing kernel; got: {first}"
+        );
+
+        // the second miss must report the SAME thing. a poisoned lock would replace this
+        // with `PoisonError`, hiding which kernel was actually absent.
+        let second = std::panic::catch_unwind(|| kernel_scalar_kinds(MISSING))
+            .expect_err("the second miss must still fail");
+        let second = panic_message(&second);
+        assert!(
+            second.contains("no AOT kernel"),
+            "a failed lookup must not poison the cache; got: {second}"
+        );
+
+        // and a kernel that DOES exist still resolves, so unrelated dispatch is unaffected
+        // by the failed lookup above.
+        let good = std::panic::catch_unwind(|| kernel_scalar_kinds("adiabatic_c2p_1d"));
+        assert!(
+            good.is_ok(),
+            "a baked kernel must still resolve after an unrelated miss"
+        );
+    }
+
+    fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+        payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default()
     }
 }
