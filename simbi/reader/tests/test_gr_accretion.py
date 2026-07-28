@@ -90,7 +90,10 @@ def test_reducer_reproduces_analytic_michel_mdot():
     rho = np.empty_like(r)
     v_r = np.empty_like(r)
     for ii, rr in enumerate(r):
-        rho_i, v1_i, _ = sol.primitive(rr)
+        # the SCHWARZSCHILD split, explicitly: this builds a synthetic state in that
+        # chart and checks the reducer against it, so the split must match what the
+        # reducer assumes rather than any evolution chart.
+        rho_i, v1_i, _ = sol.primitive(rr, "schwarzschild")
         rho[ii] = rho_i
         v_r[ii] = v1_i  # valencia contravariant radial velocity, negative (inflow)
 

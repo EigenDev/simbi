@@ -41,7 +41,16 @@ class GrBondi(SimbiProblem):
     spacetime: Annotated[
         Spacetime,
         ProblemParam(
-            Spacetime.SCHWARZSCHILD_KS, description="background spacetime"
+            # STILL the singular chart, deliberately. this problem's gate probes the
+            # banyuls-font riemann fan in the |V| > alpha regime, and |V| is measured
+            # against the chart's normal observer: the STATIC one sees the infalling gas
+            # cross that threshold, the infalling kerr-schild one never does, so the fan
+            # regime is simply not reached there and the gate goes vacuous. porting it
+            # means moving the probe inside the horizon, which needs spherical excision
+            # (currently cartesian-only) -- a real piece of work, not a chart rename.
+            # this is a HYDRO config, so it carries no source-admissibility rate and the
+            # singular chart costs it nothing.
+            Spacetime.SCHWARZSCHILD, description="background spacetime"
         ),
     ]
     schwarzschild_mass: Annotated[
