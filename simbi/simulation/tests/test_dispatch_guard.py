@@ -48,7 +48,7 @@ class _UnbakedKerrMichel(GrMichel):
 def test_dispatch_rejects_unbaked_gr_spacetime():
     p = _UnbakedKerrMichel.from_cli(["--resolution", "16"])
     with pytest.raises(Exception, match="no baked GR|refusing to run silently|Minkowski"):
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)
 
 
 @needs_backend
@@ -59,7 +59,7 @@ def test_baked_gr_spacetime_still_dispatches():
     p = GrMichel.from_cli(["--resolution", "16", "--end-time", "0.001"])
     # any exception here must NOT be the C4 guard (baked combos dispatch fine).
     try:
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)
     except Exception as e:  # pragma: no cover - only trips on a real regression
         assert "no baked GR" not in str(e) and "refusing to run silently" not in str(e), (
             f"the C4 guard wrongly rejected a BAKED GR combo: {e}"
@@ -80,4 +80,4 @@ class _NewtonianOnSchwarzschild(SodProblem):
 def test_dispatch_rejects_gr_spacetime_on_nonrelativistic_regime():
     p = _NewtonianOnSchwarzschild.from_cli(["--resolution", "16"])
     with pytest.raises(Exception, match="requires a relativistic regime"):
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)

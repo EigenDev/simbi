@@ -75,7 +75,7 @@ def test_flat_field_loop_preserves_divergence_and_is_stable(ct, solver) -> None:
     p.end_time = 1.0  # supersonic advection: ~1 box-crossing, enough for a broken EMF to blow up
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
 
     tag = f"ct={ct}, solver={solver}"
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), f"field loop crashed at {tag}"

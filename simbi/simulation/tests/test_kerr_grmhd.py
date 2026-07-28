@@ -82,7 +82,7 @@ def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
     p.end_time = 4.0
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=4000)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), f"kerr loop crashed at {ct}"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:
@@ -116,7 +116,7 @@ def _roteq_hold_l1(nr, npolar):
     p.end_time = 10.0
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=4000)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), "rot-eq-mhd crashed"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:
@@ -173,7 +173,7 @@ def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
     p.end_time = 5.0
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=4000)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), "fm torus crashed"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:

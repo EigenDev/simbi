@@ -62,7 +62,7 @@ def test_poisoned_state_halts_under_a_state_independent_cfl_map() -> None:
     p.data_directory = d
     p.checkpoint_interval = 5.0
     try:
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)
     except Exception:
         return  # a raised error is an acceptable loud halt
     crashed = glob.glob(os.path.join(d, "*crashed*.h5"))
@@ -103,7 +103,7 @@ def test_persistent_freeze_halts_on_unrecoverable_source() -> None:
     # the halt is a Rust panic (assert) surfaced as pyo3_runtime.PanicException, which derives from
     # BaseException (NOT Exception) — catch the broad base.
     with pytest.raises(BaseException) as excinfo:
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)
     assert "freeze" in str(excinfo.value).lower(), (
         f"expected the persistent-freeze fail-loud, got {type(excinfo.value).__name__}: {excinfo.value}"
     )

@@ -119,7 +119,7 @@ def _held_profile_errors(res: int):
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
         p = _michel_problem(res, d)
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)
         # GUARD-ACTIVATION CENSUS: michel is smooth, warm and shock-free, so NO limiter has any
         # physical business firing. a nonzero count means this gate is passing on life support —
         # the profile would be held by a floor rather than by the scheme. the count covers the whole

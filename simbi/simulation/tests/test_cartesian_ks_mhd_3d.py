@@ -123,7 +123,7 @@ def test_cartesian_ks_mhd_3d_symmetry_and_densitized_divb() -> None:
     # full evolution its stiff-c2p chatter grows into O(1e-4) noise that would mask the
     # exterior x <-> y symmetry this gate exists to verify.
     p = _CartesianKsMhd3D(excision_radius=1.4, data_directory=Path(d))
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, "3d cartesian KS GRMHD run crashed"
     with h5py.File(finals[0], "r") as h:

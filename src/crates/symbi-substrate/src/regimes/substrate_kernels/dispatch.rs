@@ -273,7 +273,7 @@ where
 pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
-    dof_sfx: &str,
+    keying: symbi_discretize::kernel_slug::ChartKeying,
     eos_param: f64,
     u_stage: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
     cons: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
@@ -284,9 +284,18 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    let st = spacetime_slug(geom.spacetime);
-    // `dof_sfx` carries the chart/DOF tag the bake used (`geom.suffix()`).
-    let name = format!("{prefix}_fofc_project{dof_sfx}{st}_{D}d");
+    // the chart segment is DERIVED from the grid, not handed in: a caller that types it
+    // gets to type it wrong, and both of them did. the caller now states only WHICH grid
+    // property its family keys on, which is a two-valued choice the type system carries.
+    // the name itself is built by the same function the bake calls.
+    let chart = symbi_discretize::kernel_slug::fofc_project_chart(
+        keying,
+        geom.coords,
+        &geom.axes,
+        DOF,
+        D,
+    );
+    let name = symbi_discretize::kernel_slug::fofc_project_name(prefix, chart, geom.spacetime, D);
     // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
     // (read ONLY: the magnetized residual needs the field, but constrained transport owns the
     // staggered value shared with the neighbor, so the blend never moves it and div(B) survives).

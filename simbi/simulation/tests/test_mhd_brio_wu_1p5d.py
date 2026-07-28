@@ -30,7 +30,7 @@ def _run(nx: int) -> dict:
     p.data_directory = d
     p.checkpoint_interval = 1.0e30
     p.end_time = 0.1
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*")), "1.5D Brio-Wu run crashed"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:

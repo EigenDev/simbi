@@ -87,6 +87,66 @@ pub fn viscous_ortho_name(base: &str, coords: Geometry, ndim: usize) -> String {
     format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
 }
 
+/// which grid property a family keys its chart segment on.
+///
+/// the two are NOT interchangeable on a curvilinear grid. hydro keys on the momentum-DOF
+/// lift, so a 2-axis spherical grid carrying azimuthal momentum is `_sph_swirl`. MHD B is
+/// always a 3-vector, so the lift cannot separate the two cylindrical planes and the chart
+/// keys on the grid-axis set instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChartKeying {
+    /// hydro: `geom_suffix(coords, dof, ndim)`.
+    MomentumDof,
+    /// MHD: `mhd_geom_suffix(coords, axes)`.
+    GridAxes,
+}
+
+/// the chart segment of an admissible-boundary projection kernel name, derived from the
+/// GRID rather than typed at the call site.
+///
+/// each call site used to spell this itself, and both got it wrong in the same way — by
+/// short-circuiting to an empty segment on the reasoning that their regime carried no DOF
+/// lift. an empty segment is correct only on cartesian, so both spelled a never-emitted
+/// name on every curvilinear chart: the MHD one panicked the first time a spherical cell
+/// needed the projection, and the hydro one is the same mistake waiting for its first
+/// spherical FOFC event. deriving it here leaves no call site with the opportunity.
+pub fn fofc_project_chart(
+    keying: ChartKeying,
+    coords: Geometry,
+    axes: &[usize],
+    dof: usize,
+    ndim: usize,
+) -> &'static str {
+    match keying {
+        ChartKeying::MomentumDof => geom_suffix(coords, dof, ndim),
+        ChartKeying::GridAxes => mhd_geom_suffix(coords, axes),
+    }
+}
+
+/// the admissible-boundary projection kernel name: `{prefix}_fofc_project{chart}{st}_{ndim}d`.
+///
+/// the family is CURVED-SPACETIME ONLY, and the two regimes key their chart segment on
+/// different axes — hydro on the DOF lift (`geom_suffix`), MHD on the grid-axis set
+/// (`mhd_geom_suffix`, since B is always a 3-vector and the DOF lift cannot separate the
+/// two cylindrical planes). the caller supplies the chart segment its regime uses; the
+/// ORDER and the surrounding literals live here, once, so the bake and the dispatch cannot
+/// spell the same kernel two ways.
+///
+/// they did: the MHD dispatch passed an empty chart segment on the reasoning that MHD
+/// carries no DOF lift, which resolves only on cartesian (whose segment is empty anyway)
+/// and asks for a never-emitted name on every curvilinear chart.
+pub fn fofc_project_name(
+    prefix: &str,
+    chart_suffix: &str,
+    spacetime: Spacetime,
+    ndim: usize,
+) -> String {
+    format!(
+        "{prefix}_fofc_project{chart_suffix}{}_{ndim}d",
+        spacetime_slug(spacetime)
+    )
+}
+
 /// the MHD curvilinear suffix, keyed on the GRID-AXIS SET (not DOF-vs-ndim). MHD
 /// B is ALWAYS a 3-vector, so both cylindrical 2D planes carry DOF = 3 and the
 /// DOF lift cannot tell them apart: r-z axisymmetric = axes `[0, 2]` (out-of-plane

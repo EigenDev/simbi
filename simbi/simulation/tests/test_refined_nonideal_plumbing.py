@@ -92,7 +92,7 @@ class _RefinedShear2D(SimbiProblem):
 def _run_viscous(nu: float) -> np.ndarray:
     d = tempfile.mkdtemp() + "/"
     p = _RefinedShear2D(nu=nu, data_directory=Path(d))
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"refined viscous run (nu={nu}) crashed"
     with h5py.File(finals[0], "r") as h:

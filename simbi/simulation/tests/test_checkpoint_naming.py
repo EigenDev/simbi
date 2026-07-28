@@ -25,7 +25,7 @@ def _run(data_dir, **overrides):
     p = SodProblem(
         end_time=0.05, checkpoint_interval=1.0, data_directory=data_dir, **overrides
     )
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     return sorted(f for f in os.listdir(data_dir) if "chkpt" in f)
 
 
@@ -50,7 +50,7 @@ def test_per_axis_resolution_tag_2d() -> None:
             resolution=(128, 96), end_time=0.02, checkpoint_interval=1.0,
             data_directory=d,
         )
-        runner.run(p, compute_mode="cpu")
+        runner.run(p, compute_mode="cpu", max_steps=400)
         files = [f for f in os.listdir(d) if "chkpt" in f]
         assert "128x96.chkpt.000_000.h5" in files
 

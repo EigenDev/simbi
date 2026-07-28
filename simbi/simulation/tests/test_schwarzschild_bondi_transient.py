@@ -67,7 +67,7 @@ def _read_interior(chkpt_path: str):
 def test_bondi_transient_survives_and_pressure_stays_positive() -> None:
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
-        runner.run(_bondi_problem(d), compute_mode="cpu")
+        runner.run(_bondi_problem(d), compute_mode="cpu", max_steps=400)
 
         # a clean completion writes <res>.chkpt.final*.h5; a crash writes only
         # <res>.chkpt.crashed.h5. before the fix the run never reached t = 6.

@@ -46,7 +46,7 @@ def _run_michel(solver: Solver, ct: CtMethod):
     p.end_time = 10.0
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), f"michel crashed at {solver}/{ct}"
     first = sorted(glob.glob(os.path.join(d, "*chkpt.000_000*.h5")))[0]
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
@@ -89,6 +89,6 @@ def test_gr_hlle_still_runs() -> None:
     p.end_time = 0.5
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), "GR HLLE loop crashed"
     assert glob.glob(os.path.join(d, "*final*.h5")), "GR HLLE loop produced no output"

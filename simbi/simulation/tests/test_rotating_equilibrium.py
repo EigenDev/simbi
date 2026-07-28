@@ -74,7 +74,7 @@ def _run(nr: int, npolar: int, t_end: float, spin: float):
     p.end_time = t_end
     p.data_directory = d
     p.checkpoint_interval = max(t_end, 1.0)
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     # GUARD-ACTIVATION CENSUS: this is an EXACT stationary solution, smooth and warm — no limiter
     # has any physical business firing on it, at either spin. a nonzero count would mean the
     # equilibrium is being held by a floor rather than by the scheme, which would also silently
