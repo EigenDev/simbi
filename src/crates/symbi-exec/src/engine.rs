@@ -257,6 +257,161 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     acc
 }
 
+/// whether a reduction's combine order is pinned, and so whether its result is
+/// bit-reproducible from run to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReductionOrder {
+    /// the combine order follows the data layout, not the schedule, so repeat runs at any
+    /// thread count produce identical bits.
+    Exact,
+    /// the combine order is whatever the hardware scheduler produced. `Min`/`Max` are
+    /// order-agnostic and land on the same answer regardless; a sum reassociates, so its
+    /// low bits move from run to run.
+    Unspecified,
+}
+
+/// the result of a segmented reduction: one accumulator per (segment, value) pair,
+/// segment-major, plus the cells that fell outside the binning.
+#[derive(Clone, Debug)]
+pub struct SegmentedReduction {
+    /// `n_segments * n_values` accumulators, indexed `segment * n_values + value`.
+    pub values: Vec<f64>,
+    /// cells whose segment index was at or beyond `n_segments`. a binning that silently
+    /// under-covers its domain is indistinguishable from a physics result, so the shortfall
+    /// travels with the answer.
+    pub dropped: u64,
+    /// whether these numbers are bit-reproducible.
+    pub order: ReductionOrder,
+}
+
+/// reduce each of `values` by `op` into the bucket named by `segment`, over `domain` — the
+/// segmented Reduce morphism, and the scatter half of a binned reduction. one pass yields
+/// `n_segments * values.len()` accumulators, where repeated whole-field reductions would
+/// need one pass apiece.
+///
+/// the destination bucket is data-dependent, so this cannot be traced as pointwise code and
+/// sits beside the generated kernels rather than going through codegen, exactly as
+/// `field_reduce` does.
+///
+/// HOST accumulates a private bucket set per outer-axis slab and folds the slabs in slab
+/// order, so the answer is bit-reproducible across thread counts — the `field_reduce`
+/// contract. DEVICE accumulates through device-wide atomics, whose order the scheduler
+/// picks: `Min`/`Max` are order-agnostic and still exact, but `Add` reassociates. The
+/// returned `order` reports which of the two happened rather than leaving the caller to
+/// guess, because silently crossing that line is the failure mode worth avoiding.
+pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+    values: &[&symbi_grid::Field<Sc, D, Mem>],
+    segment: &symbi_grid::Field<u32, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
+    n_segments: usize,
+    op: ReductionOp,
+) -> SegmentedReduction {
+    assert!(
+        !values.is_empty(),
+        "field_segmented_reduce: needs at least one value field"
+    );
+    assert!(
+        n_segments >= 1,
+        "field_segmented_reduce: needs at least one segment"
+    );
+    // a product over a bin's cells overflows to zero or infinity at any realistic cell count
+    // and is not a census statistic; refused rather than silently producing garbage.
+    assert!(
+        !matches!(op, ReductionOp::Mul),
+        "field_segmented_reduce: Mul is not a meaningful segmented reduction"
+    );
+
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        #[cfg(feature = "gpu")]
+        {
+            return field_segmented_reduce_device::<DefaultGpuBackend, _, _, D>(
+                values, segment, domain, n_segments, op,
+            );
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
+        }
+    }
+
+    let n_values = values.len();
+    let n_slots = n_segments * n_values;
+    let (identity, combine) = host_identity_combine(op);
+
+    // fold one cell's values into `acc`, skip it as excluded, or count it as outside the
+    // binning. the two exclusions are distinct: an excluded cell is not part of the
+    // reduction (covered by finer data, inside a body mask), while a cell past the last
+    // segment was to be reduced and fell outside the declared edges.
+    let visit = |acc: &mut [f64], dropped: &mut u64, c: [isize; D]| {
+        let raw = *segment.view().at(c);
+        if raw == symbi_ir::SEGMENT_EXCLUDED {
+            return;
+        }
+        let seg = raw as usize;
+        if seg >= n_segments {
+            *dropped += 1;
+            return;
+        }
+        for (v, field) in values.iter().enumerate() {
+            let slot = seg * n_values + v;
+            acc[slot] = combine(acc[slot], field.view().at(c).to_f64());
+        }
+    };
+
+    const PAR_THRESHOLD: usize = 1 << 16;
+    // slab the OUTERMOST axis so each worker walks a contiguous run, and so the partition is
+    // a function of the domain shape ALONE — one slab per outer index, never one per thread.
+    // a thread-count-dependent partition would regroup the sums and move the low bits when
+    // the machine changed.
+    let split = symbi_algebra::nest_order(D)
+        .next()
+        .expect("Domain rank >= 1");
+    let (outer_lo, outer_hi) = (domain.spaces[split].lo, domain.spaces[split].hi);
+    if domain.volume() >= PAR_THRESHOLD && (outer_hi - outer_lo) > 1 {
+        use rayon::prelude::*;
+        let partials: Vec<(Vec<f64>, u64)> = (outer_lo..outer_hi)
+            .into_par_iter()
+            .map(|ii| {
+                let mut slab = domain.clone();
+                slab.spaces[split].lo = ii;
+                slab.spaces[split].hi = ii + 1;
+                let mut acc = vec![identity; n_slots];
+                let mut dropped = 0u64;
+                for c in slab.iter() {
+                    visit(&mut acc, &mut dropped, c);
+                }
+                (acc, dropped)
+            })
+            .collect();
+        // combine the slab partials in SLAB ORDER, never in rayon's join order — the fixed
+        // shape is what makes the sum reproducible.
+        let mut acc = vec![identity; n_slots];
+        let mut dropped = 0u64;
+        for (slab_acc, slab_dropped) in partials {
+            for (slot, v) in slab_acc.into_iter().enumerate() {
+                acc[slot] = combine(acc[slot], v);
+            }
+            dropped += slab_dropped;
+        }
+        return SegmentedReduction {
+            values: acc,
+            dropped,
+            order: ReductionOrder::Exact,
+        };
+    }
+
+    let mut acc = vec![identity; n_slots];
+    let mut dropped = 0u64;
+    for c in domain.iter() {
+        visit(&mut acc, &mut dropped, c);
+    }
+    SegmentedReduction {
+        values: acc,
+        dropped,
+        order: ReductionOrder::Exact,
+    }
+}
+
 /// the host (f64) identity + combine for a reduction op — the CPU algebra mirroring
 /// the device's `reduction_identity_combine`.
 fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
@@ -423,6 +578,137 @@ fn field_reduce_device<
         }
         acc
     })
+}
+
+/// GPU segmented reduction: render the privatized-bucket kernel for this
+/// (ndim, precision, op, shape), NVRTC-compile (cached by shape), launch a FIXED block
+/// count over a grid-stride walk of the window, and read back the
+/// `n_segments * n_values` accumulators. only the accumulators cross, never per-cell data.
+///
+/// the accumulator and drop counter are allocated per call rather than cached across steps,
+/// unlike the CFL reduction's partials: a census samples once per level step, so the
+/// allocation is amortized over a whole pass, and the buffer size follows the registered
+/// census shape rather than the grid.
+#[cfg(feature = "gpu")]
+fn field_segmented_reduce_device<
+    B: GpuBackend,
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+    const D: usize,
+>(
+    values: &[&symbi_grid::Field<Sc, D, Mem>],
+    segment: &symbi_grid::Field<u32, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
+    n_segments: usize,
+    op: ReductionOp,
+) -> SegmentedReduction {
+    use symbi_ir::emit::Precision;
+    use symbi_ir::{REDUCTION_BLOCK_SIZE, SEGMENTED_MAX_BLOCKS, render_field_segmented_reduction};
+    use symbi_xpu::LaunchConfig;
+    use symbi_xpu::ctx_sync;
+    use symbi_xpu::runtime::GpuRuntime;
+    use symbi_xpu::{DeviceMemory, MemoryBlock};
+
+    let n_values = values.len();
+    let n_slots = n_segments * n_values;
+    let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
+    let precision = if is_f64 {
+        Precision::F64
+    } else {
+        Precision::F32
+    };
+    let op_tag = match op {
+        ReductionOp::Add => "add",
+        ReductionOp::Mul => unreachable!("Mul is rejected by field_segmented_reduce"),
+        ReductionOp::Min => "min",
+        ReductionOp::Max => "max",
+    };
+    let name = format!("symbi_field_segreduce_{op_tag}_{D}d_{n_segments}x{n_values}");
+    let desc = render_field_segmented_reduction(&name, D, precision, op, n_values, n_segments);
+
+    // every value field shares the segment field's allocated layout by construction (they
+    // are all cell-centered over the same block), so one buffer layout serves the pack.
+    let total_cells = domain.volume() as u32;
+    let grid: Vec<u32> = (0..D).map(|a| domain.spaces[a].size() as u32).collect();
+    let dom_lo: Vec<i32> = (0..D).map(|a| domain.spaces[a].lo as i32).collect();
+
+    let (identity, _) = host_identity_combine(op);
+    let mut acc_host = MemoryBlock::<DeviceMemory>::new(n_slots * std::mem::size_of::<Sc>())
+        .expect("unified alloc for segmented reduction accumulators");
+    let mut dropped_host = MemoryBlock::<DeviceMemory>::new(std::mem::size_of::<u64>())
+        .expect("unified alloc for the segmented reduction drop counter");
+    let acc_ptr = acc_host.as_mut_ptr::<Sc>();
+    let dropped_ptr = dropped_host.as_mut_ptr::<u64>();
+    // seed the accumulators with the op's identity. `Add` wants zero, but `Min`/`Max` want
+    // their sentinel, so a zeroed allocation is not enough.
+    for i in 0..n_slots {
+        unsafe { *acc_ptr.add(i) = Sc::from_f64(identity) };
+    }
+    unsafe { *dropped_ptr = 0 };
+
+    let module_key = format!("{name}#{}", if is_f64 { "f64" } else { "f32" });
+    let kernel = B::dispatcher().jit_kernel_keyed(&desc.source, &module_key, &name);
+
+    // the block count is FIXED — the kernel grid-strides — so the launch shape does not
+    // grow with the resolution and the accumulator contention stays bounded.
+    let n_blocks = total_cells
+        .div_ceil(REDUCTION_BLOCK_SIZE)
+        .clamp(1, SEGMENTED_MAX_BLOCKS);
+    let config = LaunchConfig {
+        grid: [n_blocks, 1, 1],
+        block: [REDUCTION_BLOCK_SIZE, 1, 1],
+        shared_mem_bytes: 0,
+    };
+    let acc_arg = acc_ptr as *const u8;
+    let dropped_arg = dropped_ptr as *const u8;
+    symbi_xpu::with_pooled_args(|args| {
+        let alloc = segment.domain();
+        let buf_extent: Vec<u32> = (0..D).map(|a| alloc.spaces[a].size() as u32).collect();
+        let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
+        for field in values {
+            let a = field.domain();
+            let e: Vec<u32> = (0..D).map(|k| a.spaces[k].size() as u32).collect();
+            let l: Vec<i32> = (0..D).map(|k| a.spaces[k].lo as i32).collect();
+            B::push_field(args, field.as_ptr() as *const u8, &l, &e);
+        }
+        B::push_field(args, segment.as_ptr() as *const u8, &buf_lo, &buf_extent);
+        args.push(&total_cells);
+        for g in &grid {
+            args.push(g);
+        }
+        for d in &dom_lo {
+            args.push(d);
+        }
+        args.push(&acc_arg);
+        args.push(&dropped_arg);
+        unsafe {
+            B::dispatcher()
+                .runtime()
+                .launch(&kernel, config, args.as_mut_slice())
+                .unwrap_or_else(|e| {
+                    panic!("GPU segmented reduction launch '{name}' failed: {e:?}")
+                });
+        }
+    });
+    ctx_sync();
+
+    let out: Vec<f64> = (0..n_slots)
+        .map(|i| unsafe { (*acc_ptr.add(i)).to_f64() })
+        .collect();
+    let dropped = unsafe { *dropped_ptr };
+    SegmentedReduction {
+        values: out,
+        dropped,
+        // the accumulators were combined by device-wide atomics in scheduler order. min/max
+        // are order-agnostic and land on the same bits regardless; a sum reassociates.
+        // privatizing into shared memory cuts the contention, not the ordering, so the
+        // shape of the accumulator does not enter this choice.
+        order: if matches!(op, ReductionOp::Min | ReductionOp::Max) {
+            ReductionOrder::Exact
+        } else {
+            ReductionOrder::Unspecified
+        },
+    }
 }
 
 /// dispatch a structured invocation to the GPU when `Mem` is device-accessible,

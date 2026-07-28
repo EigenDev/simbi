@@ -111,3 +111,26 @@ def test_rt_config_emits_force_source() -> None:
     ay_node = src["nodes"][src["outputs"][1]]
     assert ay_node["op"] == "CONSTANT"
     assert ay_node["value"] == -0.3
+
+
+def test_cell_volume_leaf_serializes_to_the_dv_op() -> None:
+    # the extensive-quantity weight: `density() * cell_volume()` is the cell mass, and it
+    # is the measure the finite-volume update uses, so the sum stays correct on a
+    # curvilinear grid. the rust bridge lowers VARIABLE_DV to the per-cell `dv` read.
+    g = expr.ExprGraph()
+    mass = expr.density(g) * expr.cell_volume(g)
+    cfg = g.compile([mass]).serialize_source("raw", dim=1)
+
+    assert [n["op"] for n in cfg["nodes"]] == [
+        "VARIABLE_RHO",
+        "VARIABLE_DV",
+        "MULTIPLY",
+    ]
+    json.dumps(cfg)
+
+
+def test_cell_volume_accepts_its_aliases() -> None:
+    for alias in ("dv", "cell_volume", "volume"):
+        g = expr.ExprGraph()
+        cfg = g.compile([expr.variable(alias, g)]).serialize_source("raw", dim=1)
+        assert [n["op"] for n in cfg["nodes"]] == ["VARIABLE_DV"], alias

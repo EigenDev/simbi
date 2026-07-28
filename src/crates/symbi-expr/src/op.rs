@@ -31,6 +31,12 @@ pub enum Op {
     VariableVel3,
     VariablePressure,
 
+    // the cell's lab-frame volume measure dV (arity 0). the natural weight for every
+    // extensive quantity, and what keeps a sum correct on a curvilinear grid, where the
+    // measure is r^2 sin(theta) dr dtheta dphi rather than dx^3. resolved like the state
+    // leaves above — a bridge-level per-cell read, never a VM register.
+    VariableCellVolume,
+
     // arithmetic
     Add,
     Sub,
@@ -98,7 +104,8 @@ impl Op {
             | Op::VariableVel1
             | Op::VariableVel2
             | Op::VariableVel3
-            | Op::VariablePressure => 0,
+            | Op::VariablePressure
+            | Op::VariableCellVolume => 0,
 
             // unary
             Op::Neg
@@ -161,6 +168,7 @@ impl Op {
             "VARIABLE_VEL2" => Some(Op::VariableVel2),
             "VARIABLE_VEL3" => Some(Op::VariableVel3),
             "VARIABLE_PRESSURE" => Some(Op::VariablePressure),
+            "VARIABLE_DV" => Some(Op::VariableCellVolume),
             "ADD" => Some(Op::Add),
             "SUBTRACT" => Some(Op::Sub),
             "MULTIPLY" => Some(Op::Mul),
