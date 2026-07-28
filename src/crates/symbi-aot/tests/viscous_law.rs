@@ -183,13 +183,16 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
         kernel(&inputs, &mut outs, &disp_ext, &disp_lo, &ints, &scalars);
     }
 
-    // the per-cell alpha viscosity: nu(x) = alpha cs^2 / Omega_k(r).
+    // the per-cell alpha viscosity nu(x) = alpha cs^2 / Omega_k(r), Omega_k = sqrt(GM/r^3),
+    // spelled as the kernel spells it: `alpha cs^2 sqrt(r^3/GM)`. dividing by
+    // `sqrt(GM/r^3)` is the same number in exact arithmetic and a DIFFERENT f64 operation
+    // sequence — a reciprocal of a square root against a square root of a reciprocal — so a
+    // bitwise law stated against that form is only accidentally true.
     let nu_at = |ii: usize, jj: usize| -> f64 {
         let (x, y) = (cc(ii), cc(jj));
         let (rx, ry) = (x - BODY[0], y - BODY[1]);
-        let r = (rx * rx + ry * ry).sqrt().max(1e-30);
-        let omega_k = (GM / (r * r * r)).sqrt().max(1e-30);
-        ALPHA * CS * CS / omega_k
+        let r = (rx * rx + ry * ry).sqrt();
+        ALPHA * CS * CS * (r * r * r / GM).sqrt()
     };
 
     let mut checked = 0usize;
@@ -388,7 +391,8 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
             "body_0_pos_1" => BODY[1],
             "dx_0" | "dx_1" | "dx_2" => DX,
             "x_lo_0" | "x_lo_1" | "x_lo_2" => X_LO,
-            "map_kind_0" | "map_kind_1" | "map_kind_2" | "map_param_0" | "map_param_1" | "map_param_2" => 0.0,
+            "map_kind_0" | "map_kind_1" | "map_kind_2" | "map_param_0" | "map_param_1"
+            | "map_param_2" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -431,11 +435,14 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
     // sqrt/division in nu(x) amplifies.
     let face = |i_f: f64| X_LO + i_f * DX;
     let centroid = |c: usize| (face(c as f64) + face(c as f64 + 1.0)) * 0.5;
+    // nu(x) = alpha cs^2 / Omega_k(r) in the kernel's spelling, `alpha cs^2 sqrt(r^3/GM)`.
+    // dividing by `sqrt(GM/r^3)` instead is the same number in exact arithmetic but a
+    // different f64 operation sequence, and the square root amplifies the disagreement past
+    // the last bit.
     let nu_at = |cx: f64, cy: f64| -> f64 {
         let (rx, ry) = (cx - BODY[0], cy - BODY[1]);
-        let r = (rx * rx + ry * ry).sqrt().max(1e-30);
-        let omega_k = (GM / (r * r * r)).sqrt().max(1e-30);
-        ALPHA * CS * CS / omega_k
+        let r = (rx * rx + ry * ry).sqrt();
+        ALPHA * CS * CS * (r * r * r / GM).sqrt()
     };
 
     let mut checked = 0usize;
@@ -718,9 +725,10 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
                     rst[dj][di] = rho[c];
                     let x0 = rc + (di as f64 - 1.0) * DR;
                     h2[dj][di] = x0;
-                    let r = x0.max(1e-30);
-                    let omega_k = (GM / (r * r * r)).sqrt().max(1e-30);
-                    nst[dj][di] = ALPHA * CS * CS / omega_k;
+                    // the kernel's spelling of nu = alpha cs^2 / Omega_k: on the axis-aligned
+                    // radial chart the radius is the coordinate itself, taken absolute.
+                    let r = x0.abs();
+                    nst[dj][di] = ALPHA * CS * CS * (r * r * r / GM).sqrt();
                 }
             }
             let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nst, &ones, &h2, DR, DPHI, DT);

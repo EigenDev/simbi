@@ -7,9 +7,9 @@
 // on the guarded cartesian kerr-schild metric), run as the same sequence
 // (K sweeps, then the rebuild). the geometry mirror uses the kernel's own
 // centroid arithmetic — faces x_lo + i dx, centroid = face midpoint.
-// every excised cell is frozen at the cold c2p-safe vacuum floor (RHO_FLOOR,
-// v = 0, P_FLOOR) — a one-way absorbing horizon — and the rebuild recomputes the
-// covariant conserved state from it; live cells pass through untouched.
+// every excised cell is frozen at the cold c2p-safe vacuum floor (the `excision_rho` /
+// `excision_pre` scalars, v = 0) — a one-way absorbing horizon — and the rebuild recomputes
+// the covariant conserved state from it; live cells pass through untouched.
 // =============================================================================
 
 use symbi_algebra::Tensor;
@@ -28,6 +28,14 @@ const DX: f64 = 0.05;
 const R_EXC: f64 = 0.35;
 const MASS: f64 = 0.3;
 const GAMMA: f64 = 4.0 / 3.0;
+
+// the cold c2p-safe vacuum the excised cells are frozen at. the kernel takes these as the
+// `excision_rho` / `excision_pre` scalars rather than baking literals, so the substrate can
+// scale the floor to the problem's density and pressure units. the compiled kernel and the
+// f64 chain below are handed the SAME pair — the law under test is that the two paths agree
+// bitwise on a given floor, not what the floor's value happens to be.
+const RHO_VAC: f64 = 1e-10;
+const PRE_VAC: f64 = 1e-12;
 
 fn face(ii: usize) -> f64 {
     X_LO + ii as f64 * DX
@@ -120,6 +128,10 @@ fn run_compiled(g: &mut Grid) {
             // matching the f64 oracle's disk criterion.
             "kerr_spin" => 0.0,
             "excision_radius" => R_EXC,
+            // the vacuum floor the fill writes into an excised cell, handed to the kernel as
+            // a scalar so it can be scaled to the problem's units.
+            "excision_rho" => RHO_VAC,
+            "excision_pre" => PRE_VAC,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
             "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
@@ -234,9 +246,9 @@ fn run_compiled(g: &mut Grid) {
 /// the f64 chain: the same sweep + rebuild sequence from the same carrier code.
 fn run_reference(g: &mut Grid) {
     // the vacuum-floor sink: every excised cell is frozen at the cold c2p-safe vacuum the kernel
-    // writes (RHO_FLOOR = 1e-10, v = 0, P_FLOOR = 1e-12; the bitwise f64 literals gv_excise emits).
-    // live cells are untouched. the pass count is retained (the write is idempotent) so the sweep
-    // structure matches the compiled dispatch.
+    // writes (rho = RHO_VAC, v = 0, p = PRE_VAC — the same scalars bound into the compiled
+    // dispatch). live cells are untouched. the pass count is retained (the write is idempotent)
+    // so the sweep structure matches the compiled dispatch.
     for _ in 0..onion_pass_count(R_EXC, DX) {
         for jj in 1..(N - 1) as isize {
             for ii in 1..(N - 1) as isize {
@@ -245,10 +257,10 @@ fn run_reference(g: &mut Grid) {
                 let (x, y) = (xc(ii as usize), xc(jj as usize));
                 if x * x + y * y < R_EXC * R_EXC {
                     let c = ii as usize + jj as usize * N;
-                    g.rho[c] = 1e-10;
+                    g.rho[c] = RHO_VAC;
                     g.v0[c] = 0.0;
                     g.v1[c] = 0.0;
-                    g.pre[c] = 1e-12;
+                    g.pre[c] = PRE_VAC;
                 }
             }
         }
@@ -374,15 +386,15 @@ fn uniform_state_round_trips_bitwise() {
                 // excised: the cold vacuum floor + its covariant conserved rebuild.
                 n_excised += 1;
                 let vac = Prim::<f64, 2> {
-                    rho: 1e-10,
+                    rho: RHO_VAC,
                     vel: Tensor::new([0.0, 0.0]),
-                    pre: 1e-12,
+                    pre: PRE_VAC,
                 };
                 let cons = to_conserved_at(x, y, &vac);
-                assert_eq!(g.rho[c].to_bits(), 1e-10_f64.to_bits(), "rho vacuum at {c}");
+                assert_eq!(g.rho[c].to_bits(), RHO_VAC.to_bits(), "rho vacuum at {c}");
                 assert_eq!(g.v0[c].to_bits(), 0.0_f64.to_bits(), "v0 vacuum at {c}");
                 assert_eq!(g.v1[c].to_bits(), 0.0_f64.to_bits(), "v1 vacuum at {c}");
-                assert_eq!(g.pre[c].to_bits(), 1e-12_f64.to_bits(), "pre vacuum at {c}");
+                assert_eq!(g.pre[c].to_bits(), PRE_VAC.to_bits(), "pre vacuum at {c}");
                 assert_eq!(g.den[c].to_bits(), cons.den.to_bits(), "den at {c}");
                 assert_eq!(g.m0[c].to_bits(), cons.mom[0].to_bits(), "m0 at {c}");
                 assert_eq!(g.m1[c].to_bits(), cons.mom[1].to_bits(), "m1 at {c}");

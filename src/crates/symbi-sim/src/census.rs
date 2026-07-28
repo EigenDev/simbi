@@ -155,6 +155,33 @@ impl CensusSpec {
         })
     }
 
+    /// build a spec from the serialized wire form the python front door emits. the expression
+    /// dags themselves are lowered separately (`expr_bridge::build_census_expressions`); this
+    /// takes the binning and the reduce, which are what the spec is responsible for.
+    pub fn from_config(cfg: &symbi_hydro::CensusConfig) -> Result<Self, String> {
+        let op = match cfg.op.as_str() {
+            "add" => ReductionOp::Add,
+            "min" => ReductionOp::Min,
+            "max" => ReductionOp::Max,
+            // a product is not a census statistic, and mean/variance/percentile are not
+            // order-agnostic, so they cannot be reduced in parallel or combined across restart
+            // segments. those are functions of sums the reader forms offline.
+            other => {
+                return Err(format!(
+                    "census '{}': unknown reduce op '{other}' (expected add, min or max)",
+                    cfg.name
+                ));
+            }
+        };
+        let axes = cfg
+            .axes
+            .iter()
+            .map(|a| BinAxis::new(a.name.clone(), a.edges.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("census '{}': {e}", cfg.name))?;
+        Self::new(cfg.name.clone(), axes, cfg.value_names.clone(), op)
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -208,6 +235,226 @@ impl CensusSpec {
     pub fn segment_marker(&self, coords: &[f64]) -> u32 {
         self.segment(coords)
             .map_or(self.n_segments() as u32, |s| s as u32)
+    }
+}
+
+/// a registered census with its expressions lowered and compiled — the runtime artifact.
+///
+/// the bin-axis coordinates and the accumulator values share ONE compiled graph, so a
+/// subexpression both use (a radius, its logarithm) is evaluated once per cell. cost scales
+/// with the size of that graph, not with the number of registered accumulators.
+pub struct CensusEvaluator {
+    spec: CensusSpec,
+    eval: symbi_hydro::SourceEvaluator,
+    /// the config's tunable parameter values, indexed by `PARAMETER` node index.
+    params: Vec<f64>,
+    n_nodes: usize,
+}
+
+/// the compiled-expression kernel key. a census lowers to a single graph, so one entry.
+const CENSUS_FIELD: &str = "census";
+
+impl CensusEvaluator {
+    /// lower and compile a serialized census.
+    pub fn new(cfg: &symbi_hydro::CensusConfig) -> Result<Self, String> {
+        let spec = CensusSpec::from_config(cfg)?;
+        let built = symbi_hydro::expr_bridge::build_census_expressions(cfg)?;
+        let n_nodes = built.graph.len();
+        let eval = symbi_hydro::SourceEvaluator::from_built(&[(CENSUS_FIELD.to_string(), built)]);
+        Ok(CensusEvaluator {
+            spec,
+            eval,
+            params: cfg.params.clone(),
+            n_nodes,
+        })
+    }
+
+    pub fn spec(&self) -> &CensusSpec {
+        &self.spec
+    }
+
+    /// the compiled node count. a bin axis that recomputes a square root and a logarithm per
+    /// cell is not free, and this is the number that says so before a job is submitted.
+    pub fn node_count(&self) -> usize {
+        self.n_nodes
+    }
+
+    /// the declared per-cell parameter names, in the order the compiled kernel expects them.
+    pub fn params_for(&self) -> &[String] {
+        self.eval
+            .params_for(CENSUS_FIELD)
+            .expect("a census lowers to exactly one compiled field")
+    }
+
+    /// does any expression read the per-cell pressure? an isothermal regime carries no
+    /// pressure field, so such a census must be refused rather than silently fed a zero.
+    pub fn reads_pressure(&self) -> bool {
+        self.params_for().iter().any(|p| p == "pre")
+    }
+}
+
+/// resolve one census parameter name at a cell. the vocabulary is the source path's
+/// (`x_k`, `t`, `rho`, `vel_k`, `pre`, `p{i}`) plus `dv`, the cell's lab-frame volume
+/// measure — the weight that makes an extensive sum correct on a curvilinear grid.
+#[allow(clippy::too_many_arguments)]
+fn resolve_census_param<const D: usize>(
+    name: &str,
+    rho: f64,
+    vel: &[f64],
+    pre: f64,
+    dv: f64,
+    x: &[f64; D],
+    t: f64,
+    params: &[f64],
+) -> f64 {
+    match name {
+        "rho" => return rho,
+        "pre" => return pre,
+        "dv" => return dv,
+        "t" => return t,
+        _ => {}
+    }
+    if let Some(k) = name.strip_prefix("vel_") {
+        let k: usize = k.parse().expect("vel_ index");
+        // an out-of-plane component the regime does not carry reads zero rather than
+        // panicking: a 2.5D grid has a third velocity, a 2D one does not.
+        return vel.get(k).copied().unwrap_or(0.0);
+    }
+    if let Some(k) = name.strip_prefix("x_") {
+        let k: usize = k.parse().expect("x_ index");
+        return x.get(k).copied().unwrap_or(0.0);
+    }
+    if let Some(i) = name.strip_prefix('p')
+        && let Ok(i) = i.parse::<usize>()
+    {
+        return *params
+            .get(i)
+            .unwrap_or_else(|| panic!("census: param p{i} not provided"));
+    }
+    panic!("census: unresolved cell param '{name}' (rho | vel_k | pre | dv | x_k | t | p{{i}})")
+}
+
+/// the per-cell artifacts a census sample reduces over: one field per accumulator, plus the
+/// destination bucket of every cell.
+pub struct CensusFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
+    pub values: Vec<symbi_grid::Field<f64, D, Mem>>,
+    pub segment: symbi_grid::Field<u32, D, Mem>,
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
+    crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem, f64>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: symbi_xpu::MemorySpace,
+{
+    /// evaluate a census over this level's interior, producing the value fields and the
+    /// bucket assignment a segmented reduction consumes.
+    ///
+    /// the bin coordinates and the values come from ONE compiled graph per cell, so a
+    /// subexpression shared between an axis and a value is evaluated once. the `dv` leaf
+    /// resolves to the block geometry's lab-frame cell volume — the same measure the
+    /// finite-volume update uses — which is what keeps an extensive sum correct on a
+    /// curvilinear grid.
+    ///
+    /// returns `None` when the fields are not host-accessible (a device-resident run); the
+    /// device path renders its own kernel rather than reading cells from the host.
+    pub fn census_fields(&self, ev: &CensusEvaluator) -> Option<CensusFields<D, Mem>> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return None;
+        }
+        // an isothermal regime carries no pressure field. a census that reads `pre` there
+        // would silently accumulate zeros, so it is refused instead.
+        assert!(
+            !(ev.reads_pressure() && self.fields.prim.pre.is_none()),
+            "census '{}' reads the per-cell pressure, but this regime carries no pressure \
+             field (isothermal)",
+            ev.spec.name()
+        );
+
+        let bg = self.geom.block_geometry(self.physics.metric);
+        // the lab-frame measure: on a homologously expanding mesh the conserved density
+        // multiplies the PHYSICAL volume, so an extensive total stays constant as a(t) grows.
+        let a = self.motion.a;
+        let n_axes = ev.spec.axes().len();
+        let n_values = ev.spec.n_values();
+
+        let values: Vec<symbi_grid::Field<f64, D, Mem>> = (0..n_values)
+            .map(|_| symbi_grid::Field::<f64, D, Mem>::zeros(&self.geom.allocated))
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let segment = symbi_grid::Field::<u32, D, Mem>::zeros(&self.geom.allocated).ok()?;
+        // a cell the sweep never visits is not part of the reduction. ghost cells sit
+        // outside the interior, so they must not read as bucket zero.
+        for c in self.geom.allocated.iter() {
+            segment.view_mut().set(c, SEGMENT_EXCLUDED);
+        }
+
+        let params = ev.params_for();
+        // the census dag has a handful of leaves (position, time, the local primitives, dv,
+        // the config's tunables); the fixed buffers keep the per-cell path allocation-free.
+        const MAX_PARAMS: usize = 32;
+        const MAX_OUT: usize = 64;
+        assert!(
+            params.len() <= MAX_PARAMS,
+            "census '{}': more than {MAX_PARAMS} declared params",
+            ev.spec.name()
+        );
+        assert!(
+            n_axes + n_values <= MAX_OUT,
+            "census '{}': more than {MAX_OUT} axis + value expressions",
+            ev.spec.name()
+        );
+
+        let pre_field = self.fields.prim.pre.as_ref();
+        let jit = ev.eval.jit_components(CENSUS_FIELD);
+        for c in self.geom.interior.iter() {
+            let rho = *self.fields.prim.rho.view().at(c);
+            let vel: [f64; DOF] = std::array::from_fn(|k| *self.fields.prim.vel[k].view().at(c));
+            let pre = pre_field.map_or(0.0, |f| *f.view().at(c));
+            let dv = bg.labframe_volume(c, a);
+            let x = self.geom.cell_coord(c);
+
+            let mut inbuf = [0.0f64; MAX_PARAMS];
+            for (i, p) in params.iter().enumerate() {
+                inbuf[i] =
+                    resolve_census_param::<D>(p, rho, &vel, pre, dv, &x, self.time, &ev.params);
+            }
+            let inputs = &inbuf[..params.len()];
+
+            // the native path when every expression compiled, else the interpreter (only
+            // when a node fell outside the jit subset).
+            let mut out = [0.0f64; MAX_OUT];
+            if let Some(jit) = jit {
+                for (k, cf) in jit.iter().enumerate() {
+                    cf.call(inputs, &mut out[k..k + 1]);
+                }
+            } else {
+                let named: Vec<(&str, f64)> = params
+                    .iter()
+                    .zip(inputs)
+                    .map(|(n, v)| (n.as_str(), *v))
+                    .collect();
+                let s = ev
+                    .eval
+                    .eval(CENSUS_FIELD, &named)
+                    .expect("census: compiled field missing");
+                out[..s.len()].copy_from_slice(&s);
+            }
+
+            // the outputs are the axis coordinates followed by the accumulator values,
+            // matching `CensusConfig::output_nodes`.
+            segment
+                .view_mut()
+                .set(c, ev.spec.segment_marker(&out[..n_axes]));
+            for v in 0..n_values {
+                values[v].view_mut().set(c, out[n_axes + v]);
+            }
+        }
+
+        Some(CensusFields { values, segment })
     }
 }
 
