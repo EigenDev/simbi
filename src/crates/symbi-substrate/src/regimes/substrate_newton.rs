@@ -307,6 +307,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        // the primitives now hold a state recovered from the conserved fields; anything
+        // reading prim.* outside the evolve loop checks this before trusting it.
+        sim.mark_primitives_recovered();
         // cons -> prim, all DOF velocities; the manifest binds cons.* -> prim.* (the cyl
         // c2p writes prim.vel_0..2, automatic). "prim.pre" resolves to the prim pressure.
         let pre = sim

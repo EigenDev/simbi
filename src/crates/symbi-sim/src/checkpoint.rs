@@ -1147,7 +1147,70 @@ where
                 )),
         );
     }
+    // the registered binned reductions, one group each. like the body series these cover
+    // THIS RUN SEGMENT ONLY and restart empty on checkpoint load, so a restart chain
+    // concatenates offline rather than the run carrying its whole history forward.
+    for registered in &sim.censuses {
+        let spec = registered.evaluator.spec();
+        let history = &registered.history;
+        if history.is_empty() {
+            continue;
+        }
+        let (n, n_seg, n_val) = (history.len(), history.n_segments(), history.n_values());
+        let mut group = Tree::new(&format!("census/{}", spec.name()))
+            .with_attr("n_segments", n_seg as u64)
+            .with_attr("n_values", n_val as u64)
+            // the accumulator labels, in the order the `values` axis carries them, so a
+            // reader names a column without re-deriving the registration order.
+            .with_attr("value_names", spec.value_names().join(","))
+            .with_attr("op", reduction_op_tag(spec.op()))
+            // the size of the compiled per-cell graph: what a census actually costs, since
+            // the cost scales with the dag rather than with the accumulator count.
+            .with_attr("node_count", registered.evaluator.node_count() as u64)
+            .with_dataset(Dataset::new("time", vec![n], DataRef::F64(history.time())))
+            // segment-major within a sample. a reader reshapes the segment axis to the
+            // per-axis bin counts in registration order, last axis varying fastest.
+            .with_dataset(Dataset::new(
+                "values",
+                vec![n, n_seg, n_val],
+                DataRef::F64(history.values()),
+            ))
+            // cells that fell outside the binning. a census that silently under-covers its
+            // domain is indistinguishable from a physics result, so the shortfall travels
+            // with the numbers.
+            .with_dataset(Dataset::new(
+                "dropped",
+                vec![n],
+                DataRef::U64(history.dropped()),
+            ));
+        // the edges are a property of the registration, not of a sample, so they are
+        // written once per axis rather than per row.
+        for (k, axis) in spec.axes().iter().enumerate() {
+            group = group
+                .with_attr(&format!("axis{k}_name"), axis.name().to_string())
+                .with_dataset(Dataset::new(
+                    &format!("axis{k}_edges"),
+                    vec![axis.edges().len()],
+                    DataRef::F64(axis.edges()),
+                ));
+        }
+        root.push_group(group);
+    }
     root
+}
+
+/// the checkpoint tag for a reduce op — what a reader needs to know to interpret the
+/// accumulators (a sum combines across restart segments; an extremum does not).
+fn reduction_op_tag(op: symbi_ir::emit::ReductionOp) -> String {
+    match op {
+        symbi_ir::emit::ReductionOp::Add => "add",
+        symbi_ir::emit::ReductionOp::Min => "min",
+        symbi_ir::emit::ReductionOp::Max => "max",
+        symbi_ir::emit::ReductionOp::Mul => {
+            unreachable!("a product is refused at census registration")
+        }
+    }
+    .to_string()
 }
 
 // =============================================================================

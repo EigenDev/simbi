@@ -329,6 +329,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+        // the primitives now hold a state recovered from the conserved fields; anything
+        // reading prim.* outside the evolve loop checks this before trusting it.
+        sim.mark_primitives_recovered();
         // inputs (manifest order): cons den, mom_0.., then the prescribed cs2 field.
         // outputs: prim rho, vel_0.., self.pre (= cs2*rho). cs2 is a read-only FIELD,
         // so the run can be locally isothermal. no scalar params.

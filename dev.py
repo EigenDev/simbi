@@ -40,6 +40,24 @@ def maturin() -> list:
     return [sys.executable, "-m", "maturin"]
 
 
+def target_python() -> str:
+    """the interpreter maturin installs the extension into.
+
+    maturin targets VIRTUAL_ENV, which is not necessarily the interpreter running this
+    script — invoking `./dev.py` picks whatever the shebang resolves to. validating the
+    install with the wrong one reports a working build as a failure (typically a missing
+    h5py, which only the project venv carries).
+    """
+    venv = os.environ.get("VIRTUAL_ENV") or (
+        sys.prefix if sys.prefix != sys.base_prefix else None
+    )
+    if venv:
+        for candidate in (Path(venv) / "bin" / "python", Path(venv) / "Scripts" / "python.exe"):
+            if candidate.exists():
+                return str(candidate)
+    return sys.executable
+
+
 def _fast_linker_flag():
     """the fastest link-time-only linker installed, as a rustc `-C link-arg`, or None. mold
     and lld cut the final cdylib link (a heavily-monomorphized artifact) from minutes to
@@ -281,10 +299,14 @@ def install_command(args) -> None:
         if gpu:
             _restore_cpu_ext(stashed)
     print(f"done in {time.time() - start:.1f}s")
+    # validate with the interpreter maturin installed INTO, not the one running this
+    # script: they differ whenever dev.py is invoked directly rather than through the
+    # venv, and importing from the wrong one reports a good build as a failure.
+    python = target_python()
     try:
         result = subprocess.run(
             [
-                sys.executable,
+                python,
                 "-c",
                 "import simbi; print('verified', simbi.__version__)",
             ],
@@ -292,11 +314,10 @@ def install_command(args) -> None:
             text=True,
             timeout=30,
         )
-        print(
-            "validation:",
-            result.stdout.strip() if result.returncode == 0 else "FAILED",
-        )
-        if result.returncode != 0:
+        if result.returncode == 0:
+            print("validation:", result.stdout.strip())
+        else:
+            print(f"validation: FAILED (under {python})")
             print(result.stderr, file=sys.stderr)
     except subprocess.TimeoutExpired:
         print("warning: validation timeout", file=sys.stderr)

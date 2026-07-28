@@ -555,6 +555,22 @@ where
     substrate.attach_runtime_source(built, params)
 }
 
+/// the static regime spec a config's `regime` string names. the spec drives every
+/// source-term validation (which conservation laws are well posed, whether an energy
+/// equation exists), so resolving it here is what lets a source be lowered at preflight
+/// rather than only at dispatch, where the regime is a type parameter.
+fn regime_spec_for(regime: &str) -> Result<&'static symbi_hydro::RegimeSpec, String> {
+    match regime {
+        "newtonian" => Ok(&symbi_hydro::NEWTONIAN_SPEC),
+        "isothermal" => Ok(&symbi_hydro::ISO_NEWTONIAN_SPEC),
+        "rhd" => Ok(&symbi_hydro::RHD_SPEC),
+        "rmhd" => Ok(&symbi_hydro::RMHD_SPEC),
+        "nmhd" => Ok(&symbi_hydro::NEWTONIAN_MHD_SPEC),
+        "imhd" => Ok(&symbi_hydro::ISO_MHD_SPEC),
+        other => Err(format!("unknown regime '{other}'")),
+    }
+}
+
 fn lower_configured_sources(
     source_jsons: &[SourcePayload],
     spec: &symbi_hydro::RegimeSpec,
@@ -7503,6 +7519,12 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
             ));
         }
     }
+    // LOWER every source, not just parse it. the bridge is where a source is checked
+    // against the regime it will run under — a newtonian conservation law asked for on a
+    // relativistic regime, a cooling term on a regime with no energy equation, an operator
+    // with no carrier primitive, a reference to the cell measure. parsing alone accepts all
+    // of those and defers the failure to dispatch, after a queue slot has been spent.
+    lower_configured_sources(&cfg.source_jsons, regime_spec_for(&cfg.regime)?)?;
     for (ii, json) in cfg.driven_exprs.iter().enumerate() {
         symbi_hydro::SourceConfig::from_json(json)
             .map_err(|err| format!("driven boundary {ii} parse: {err}"))?;
