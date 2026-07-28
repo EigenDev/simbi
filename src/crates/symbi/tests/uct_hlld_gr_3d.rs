@@ -36,7 +36,10 @@ const GAMMA: f64 = 4.0 / 3.0;
 const CFL: f64 = 0.3;
 const MASS: f64 = 0.2;
 const B0: f64 = 0.1;
-const T_FINAL: f64 = 0.25;
+// the magnetosonic CFL on this state gives dt ~ 7e-2 (the swirl is gas-dominated:
+// c_ms ~ 0.47, |v| <= 0.1), so 0.5 exercises ~7 curl updates — enough steps that a
+// non-telescoping EMF would compound past the 1e-12 gate.
+const T_FINAL: f64 = 0.5;
 const DIVB_TOL: f64 = 1e-12;
 
 // the conserved discrete object on a curved chart is the DENSITIZED face flux
@@ -247,6 +250,7 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
     let mhd_g = sim_gr.fields.mhd.as_ref().expect("mhd");
     let mhd_f = flat.fields.mhd.as_ref().expect("mhd");
     let mut worst = 0.0_f64;
+    let mut worst_at = (0usize, [0isize; 3]);
     for c in sim_gr.geom.interior.iter() {
         let pairs = [
             (
@@ -269,12 +273,18 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
             (*mhd_g.bface[1].view().at(c), *mhd_f.bface[1].view().at(c)),
             (*mhd_g.bface[2].view().at(c), *mhd_f.bface[2].view().at(c)),
         ];
-        for (g, f) in pairs {
-            worst = worst.max((g - f).abs() / f.abs().max(1.0));
+        for (fi, (g, f)) in pairs.into_iter().enumerate() {
+            let rel = (g - f).abs() / f.abs().max(1.0);
+            if rel > worst {
+                worst = rel;
+                worst_at = (fi, c);
+            }
         }
     }
     assert!(
         worst < 1e-12,
-        "M = 0 kerr-schild diverges from flat: rel {worst:e}"
+        "M = 0 kerr-schild diverges from flat: rel {worst:e} at field {} cell {:?}",
+        worst_at.0,
+        worst_at.1,
     );
 }

@@ -1452,15 +1452,17 @@ fn gen_rmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2
 // the RMHD CFL wave-speed map (3D): per-cell max over axes of the quartic
 // max(|lambda_-|,|lambda_+|). host folds max + cfl_from_smax.
 fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    // curved spacetime: the generic coordinate light-cone bound (state-independent, safe for
-    // any matter); the name gains the spacetime slug like every GR kernel.
+    // curved spacetime: the state-dependent fast-magnetosonic bound through the banyuls-font
+    // two-velocity transform, shifted to coordinate speeds — the GR counterpart of the flat
+    // magnetosonic CFL bound (dt scales with the gas, not the coordinate light cone). the
+    // name gains the spacetime slug like every GR kernel.
     if geom.spacetime != Spacetime::Minkowski {
         let name = format!(
             "rmhd_wave_speed_map{}{}_{ndim}d",
             mhd_geom_slug(&geom),
             geom.spacetime_suffix()
         );
-        let (k, writes) = symbi_discretize::gv::gr_light_cone_wave_speed_map_gv(
+        let (k, writes) = symbi_discretize::gv::rmhd_magnetosonic_cfl_map_gr_gv(
             geom.spacetime,
             geom.coords,
             &geom.spacing,

@@ -1131,17 +1131,6 @@ pub fn rmhd_flux_gr_gv(
         metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)),
         alpha,
     };
-    // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
-    // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
-    // applied by the has_shift fan below). this is the provably admissibility-preserving low-order
-    // scheme: unlike the state-dependent extremal speeds, it cannot under-bound near the boundary of
-    // the physical set, so the update keeps the conserved state inside the physical cone.
-    let (s_l, s_r) = if rusanov {
-        let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
-        (Gv::ZERO - lam, lam)
-    } else {
-        regime.extremal_speeds(&eos, &left, &right, &nhat)
-    };
     let has_shift = matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS);
     // GR HLLD (the ORTHONORMAL-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
     // local orthonormal frame where the validated flat solver runs, and the intercell flux maps back
@@ -1210,6 +1199,32 @@ pub fn rmhd_flux_gr_gv(
         });
         return (k, writes);
     }
+    // the HLL fan speeds. rusanov / local lax-friedrichs (the FOFC first-order fallback):
+    // the light-cone speeds s = +/- alpha sqrt(gamma^{nn}) — the state-independent maximal
+    // signal bound (the shift is applied by the has_shift fan below); provably
+    // admissibility-preserving because it cannot under-bound near the boundary of the
+    // physical set. otherwise: the per-cell EXACT-QUARTIC speeds materialized by the
+    // wave-speed cell kernel, davis min/max over the two cells sharing this face — the
+    // same one-computation-many-consumers layout as the flat flux. the stored values are
+    // COORDINATE speeds (the writing kernel subtracts beta^d at each cell), so the face
+    // shift is added back to restore the frame speeds this fan consumes; the relativistic
+    // zero-clamp then pins the stationary state inside the fan (stored speeds are raw).
+    let (s_l, s_r) = if rusanov {
+        let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
+        (Gv::ZERO - lam, lam)
+    } else {
+        let lo = format!("wave_speed_l[{dir}]");
+        let hi = format!("wave_speed_r[{dir}]");
+        let wsl_m1 = Gv::field_shifted("ws_l", &lo, ndim as u8, dir, -1);
+        let wsl_0 = Gv::field_shifted("ws_l", &lo, ndim as u8, dir, 0);
+        let wsr_m1 = Gv::field_shifted("ws_r", &hi, ndim as u8, dir, -1);
+        let wsr_0 = Gv::field_shifted("ws_r", &hi, ndim as u8, dir, 0);
+        let beta_n = beta[coord_n];
+        (
+            (wsl_m1.min(wsl_0) + beta_n).min(Gv::ZERO),
+            (wsr_m1.max(wsr_0) + beta_n).max(Gv::ZERO),
+        )
+    };
     let mut flux = if has_shift {
         // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
         let beta_n = beta[coord_n];
