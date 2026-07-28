@@ -1,7 +1,9 @@
+from .census import BinAxis, Census, linear_edges, log_edges
 from .dag_expression import (
     ConservedField,
     Expr,
     ExprGraph,
+    ReductionOp,
     SourceKind,
     TableBounds,
     acos,
@@ -51,6 +53,11 @@ __all__ = [
     "Expr",
     "ExprGraph",
     "SourceKind",
+    "ReductionOp",
+    "Census",
+    "BinAxis",
+    "log_edges",
+    "linear_edges",
     "ConservedField",
     "TableBounds",
     "constant",

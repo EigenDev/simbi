@@ -256,6 +256,7 @@ class RichSimulationSummary:
             "bx3_inner_expressions": "User-defined inner boundary conditions for inner x3 boundary",
             "bx3_outer_expressions": "User-defined outer boundary conditions for outer x3 boundary",
             "source_expressions": "Source term expressions",
+            "census_expressions": "Binned reductions emitted as a time series",
         }
         return descriptions.get(param_name, "")
 

@@ -254,6 +254,30 @@ pub struct CensusEvaluator {
 /// the compiled-expression kernel key. a census lowers to a single graph, so one entry.
 const CENSUS_FIELD: &str = "census";
 
+// the compiled kernels are not printable, so the report is the registration's shape:
+// what it bins on, how many buckets that makes, what it accumulates, and how big the
+// per-cell graph is — the numbers worth seeing before a job is submitted.
+impl std::fmt::Debug for CensusEvaluator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CensusEvaluator")
+            .field("name", &self.spec.name())
+            .field(
+                "axes",
+                &self
+                    .spec
+                    .axes()
+                    .iter()
+                    .map(|a| (a.name(), a.n_bins()))
+                    .collect::<Vec<_>>(),
+            )
+            .field("segments", &self.spec.n_segments())
+            .field("values", &self.spec.value_names())
+            .field("op", &self.spec.op())
+            .field("nodes", &self.n_nodes)
+            .finish()
+    }
+}
+
 impl CensusEvaluator {
     /// lower and compile a serialized census.
     pub fn new(cfg: &symbi_hydro::CensusConfig) -> Result<Self, String> {
