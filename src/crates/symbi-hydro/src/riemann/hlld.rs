@@ -155,11 +155,24 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let vn_l = vv[0].dot(nhat);
     let vn_r = vv[1].dot(nhat);
 
+    // bn -> 0 degeneracy flag: the alfven waves collapse onto the contact, so the K-speed
+    // spread `dkn = alf_r - alf_l` is DRIVEN to zero by the pressure iteration itself (f =
+    // dkn is the residual on this path). a vanishing dkn is then the converged degenerate
+    // geometry, not an unphysical state, so the dkn-proportional guards below act as pure
+    // DIVISION guards here and must not fold into `physical`: folding them made the
+    // success verdict the roundoff bit of whether the residual cleared the epsilon, and
+    // that bit selects between the fan and the O(1)-different HLLE fallback.
+    let b_scale = metric
+        .norm_sq_contra(&bv[0])
+        .max(metric.norm_sq_contra(&bv[1]))
+        .sqrt();
+    let bn_small = bn.abs().cmp_le(rel * b_scale);
+
     // Eq (45): contact B-field.
     let dkn = alf_r - alf_l;
     let dkn_scale = alf_r.abs().max(alf_l.abs());
     let dkn_ok = dkn.abs().cmp_gt(rel * dkn_scale);
-    physical = physical & dkn_ok;
+    physical = physical & (dkn_ok | bn_small);
     let inv_dkn = one / S::select(dkn_ok, dkn, one);
     let bc = ((bv[1].scale(alf_r - vn_r) + vv[1].scale(bn))
         - (bv[0].scale(alf_l - vn_l) + vv[0].scale(bn)))
@@ -187,17 +200,14 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let denom_r_scale = (eta[1] * dkn).abs().max((kdb_r * dkn).abs());
     let denom_l_ok = denom_l.abs().cmp_gt(rel * denom_l_scale);
     let denom_r_ok = denom_r.abs().cmp_gt(rel * denom_r_scale);
-    physical = physical & denom_l_ok & denom_r_ok;
+    // dkn-proportional: division guards only when bn -> 0 (y_l/y_r feed f_default, which
+    // the bn-small residual path never consumes).
+    physical = physical & ((denom_l_ok & denom_r_ok) | bn_small);
     let y_l = (one - ksq_l) / S::select(denom_l_ok, denom_l, one);
     let y_r = (one - ksq_r) / S::select(denom_r_ok, denom_r, one);
 
     // Eq (48), three-way branchless select on the magnitude of dkn and bn.
     let dkn_small = !dkn_ok;
-    let b_scale = metric
-        .norm_sq_contra(&bv[0])
-        .max(metric.norm_sq_contra(&bv[1]))
-        .sqrt();
-    let bn_small = bn.abs().cmp_le(rel * b_scale);
     let f_default = dkn * (one - bn * (y_r - y_l));
     let f_when_bn_small = dkn;
     let f_inner = S::select(bn_small, f_when_bn_small, f_default);
@@ -550,6 +560,10 @@ where
     // ---- contact-wave state (Section 3.3) ----
     let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
     let vna_used = S::select(on_left, vv_iso[0].dot(nhat), vv_iso[1].dot(nhat));
+    // `la - vnc` is analytically ZERO when bn -> 0 (the alfven waves collapse onto the
+    // contact), so this comparison decides on pure roundoff there; it must therefore gate
+    // only the EMPTY contact wedge (see the flux_hlld select below), never an HLLE
+    // fallback — either arm of a roundoff-decided select has to produce the same flux.
     let contact_denominator = la - vnc;
     let contact_ok = contact_denominator
         .abs()
@@ -571,7 +585,13 @@ where
 
     let flux_fast = fa - ua * vface;
     let flux_contact = fa + (ut - ua) * la - ut * vface;
-    let flux_hlld = MhdCons::select(at_contact, flux_contact, flux_fast);
+    // degenerate contact (la -> vnc, i.e. bn -> 0): the alfven waves coincide with the
+    // contact, the wedge between them is EMPTY, and the fan reduces to the per-side
+    // single-star (fast) state — the HLLC-like limit, not a failure. routing this case
+    // to flux_fast (instead of an HLLE fallback) keeps the flux continuous across the
+    // roundoff-decided contact_ok boundary: with an empty wedge, flux_contact is never
+    // the selected arm, so both sides of the select agree.
+    let flux_hlld = MhdCons::select(at_contact & contact_ok, flux_contact, flux_fast);
 
     // wave-bracket select chain.
     let flux_supersonic_l = f_l - u_l * vface;
@@ -586,7 +606,7 @@ where
         .abs()
         .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(vv_iso[1].dot(nhat).abs()));
     let fast_ok = S::Mask::select_mask(on_left, fast_ok_l, fast_ok_r);
-    let flux_inner = MhdCons::select(success & fast_ok & contact_ok, flux_hlld, hlle_flux);
+    let flux_inner = MhdCons::select(success & fast_ok, flux_hlld, hlle_flux);
     let flux_choose_r = MhdCons::select(supersonic_r, flux_supersonic_r, flux_inner);
     MhdCons::select(supersonic_l, flux_supersonic_l, flux_choose_r)
 }

@@ -178,6 +178,53 @@ pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
     (sl, sr)
 }
 
+/// the curved-background magnetosonic UPPER BOUND — for the CFL TIMESTEP ONLY.
+///
+/// the SAME product-form bound as `rmhd_magnetosonic_cfl_speeds`, with the euclidean
+/// contractions replaced by the spatial metric and the coordinate-frame factors of the
+/// Banyuls-Font transform applied: `gamma^{nn}` scales the discriminant and `alpha` the
+/// whole fan (the shift is the caller's coordinate correction). the discriminant
+/// `gamma^{nn} (1 - v^2) c_f^2` bounds the exact Banyuls-Font radical
+/// `(1 - v^2)(gamma^{nn}(1 - v^2 c_f^2) - vn^2(1 - c_f^2))` because
+/// `gamma^{nn} >= gamma^{nn}(1 - v^2 c_f^2) - vn^2(1 - c_f^2)` for physical inputs, so the
+/// fan never under-estimates a signal speed and stays CFL-safe. at `alpha = 1`,
+/// `gamma = delta` every extra factor is an exact 1.0 multiply, so the bound equals the
+/// flat `rmhd_magnetosonic_cfl_speeds` — minkowski-limit runs take the flat timestep.
+/// do NOT route the Riemann/flux path here — HLLE diffusion needs the tight quartic.
+/// nan-preserving for the same reasons as the flat form: no clamp, no light-cone cap.
+pub fn rmhd_magnetosonic_cfl_speeds_gr<S: Scalar, const D: usize>(
+    eos: &impl Eos<S>,
+    prim: &MhdPrim<S, D>,
+    nhat: &Tensor<S, D>,
+    metric: &crate::spatial_metric::SpatialMetric<S, D>,
+    alpha: S,
+) -> (S, S) {
+    let rho = prim.rho;
+    let hh = rhd::enthalpy(eos, rho, prim.pre);
+    let cs = eos.sound_speed(rho, prim.pre);
+    let cssq = cs * cs / hh;
+
+    let vsq = metric.norm_sq_contra(&prim.vel);
+    let vn = prim.vel.dot(nhat);
+    let w2 = rhd::lorentz_factor_sq(vsq);
+
+    let bsq = metric.norm_sq_contra(&prim.mag);
+    let vdb = metric.contract_contra(&prim.vel, &prim.mag);
+    let b_mu_sq = bsq / w2 + vdb * vdb;
+    let rho_h = rho * hh;
+    let va_sq = b_mu_sq / (rho_h + b_mu_sq);
+
+    let cf_sq = S::ONE - (S::ONE - cssq) * (S::ONE - va_sq);
+
+    let gamma_nn = metric.norm_sq_cov(nhat);
+    let one_m_vsq = S::ONE - vsq;
+    let denom = S::ONE / (S::ONE - vsq * cf_sq);
+    let disc = (gamma_nn * one_m_vsq * cf_sq).safe_sqrt();
+    let sl = alpha * (vn * (S::ONE - cf_sq) - disc) * denom;
+    let sr = alpha * (vn * (S::ONE - cf_sq) + disc) * denom;
+    (sl, sr)
+}
+
 /// solve quartic x^4 + bx^3 + cx^2 + dx + e = 0 and return (min_root, max_root).
 /// uses resolvent cubic method. for RMHD wave speed computation.
 /// GPU-traceable: all root pairs computed unconditionally, invalid roots

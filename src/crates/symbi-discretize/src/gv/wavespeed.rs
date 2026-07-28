@@ -414,6 +414,159 @@ fn gv_state_finite_guard(lambda: Gv) -> Gv {
     lambda / Gv::select(diff.cmp_eq(diff), Gv::ONE, Gv::ZERO)
 }
 
+/// the 3+1 metric fields (gamma_ij, gamma^ij, alpha, beta^i) traced at position `x`,
+/// dispatched by (spacetime, chart). the kerr-schild spacetime is expressed in spherical,
+/// cartesian, or cylindrical coordinates — the metric computes r = |x| (cartesian) /
+/// sqrt(R^2 + z^2) (cylindrical) internally, so the wrong-chart spherical metric (which
+/// would read x[0] as the radius) is never used. mass and spin bind as runtime scalars.
+fn gr_metric_fields_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    x: Tensor<Gv, 3>,
+) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+    let mass = Gv::scalar("schwarzschild_mass");
+    match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
+            let m = Schwarzschild { mass };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        (Spacetime::SchwarzschildKS, _) => {
+            let m = SchwarzschildKS { mass };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::KerrKS, Coords::Cartesian) => {
+            let m = KerrKSCartesian {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        (Spacetime::KerrKS, Coords::Cylindrical) => {
+            let m = KerrKSCylindrical {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        (Spacetime::KerrKS, _) => {
+            let m = KerrKS {
+                mass,
+                spin: Gv::scalar("kerr_spin"),
+            };
+            (
+                m.spatial_metric(x),
+                m.spatial_metric_inv(x),
+                m.lapse(x),
+                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GR metric fields are traced only for a curved spacetime")
+        }
+    }
+}
+
+/// the STATE-DEPENDENT curved-background RMHD CFL wave-speed map — the coordinate-frame
+/// magnetosonic bound (`rmhd_magnetosonic_cfl_speeds_gr`: the flat product-form bound
+/// with metric contractions, `gamma^{nn}` in the discriminant, and the `alpha` prefactor),
+/// shifted to COORDINATE speeds `lambda_pm - beta^d` and folded per gridded axis with the
+/// physical inverse width (the flat scale factor h_d restores the coordinate width, as in
+/// the light-cone map). the bound never under-estimates a signal speed, so it is
+/// CFL-safe, and it is TIGHT where the light cone is not: dt scales with the gas, not
+/// with c. at alpha = 1, gamma = delta, beta = 0 every curved factor is an exact 1.0
+/// multiply, so the map equals the flat magnetosonic map to roundoff. nan-preserving
+/// like the flat map: no light-cone clamp, no finite guard — an unphysical prim
+/// propagates to the dt guard unmasked. metric at the spacing-aware cell center,
+/// ungridded polar slot at pi/2.
+pub fn rmhd_magnetosonic_cfl_map_gr_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let vel: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+    let mag: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
+    let prim = MhdPrim::<Gv, 3> {
+        hydro: Prim {
+            rho,
+            vel: Tensor::new(vel),
+            pre,
+        },
+        mag: Tensor::new(mag),
+    };
+    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => gv_cell_center(d, spacing),
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(spacetime, coords, x);
+    let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
+    let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
+    let mut lambda = Gv::ZERO;
+    for d in 0..ndim {
+        let c = axes[d];
+        let nhat = Tensor::<Gv, 3>::unit(c);
+        let (sl, sr) = symbi_hydro::rmhd::rmhd_magnetosonic_cfl_speeds_gr(
+            &eos, &prim, &nhat, &metric, alpha,
+        );
+        let lam_c = (sl - beta[c]).abs().max((sr - beta[c]).abs());
+        let h_flat = gv_scale_factor(coords, c, &pos);
+        lambda = lambda.max(lam_c * h_flat * inv_w[d]);
+    }
+    let writes = wave_speed_map_writes(lambda.node());
+    (end_trace(), writes)
+}
+
 /// the SPINNING-KERR CFL wave-speed map — the coordinate LIGHT-CONE bound per gridded axis:
 /// `lambda_d = alpha sqrt(gamma^{dd}) + |beta^d|`, folded over axes with the in-kernel physical
 /// inverse widths. every fluid characteristic lies inside the coordinate light cone, so the bound
@@ -582,86 +735,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
-    let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let m = SchwarzschildKSCartesian { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let m = SchwarzschildKSCylindrical { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let m = SchwarzschildKS { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let m = KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let m = KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            let m = KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the GR cell wave speeds are baked only for a curved spacetime")
-        }
-    };
+    let (gm, gm_inv, alpha, beta) = gr_metric_fields_gv(spacetime, coords, x);
     let regime = RmhdGr {
         metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)),
         alpha,
