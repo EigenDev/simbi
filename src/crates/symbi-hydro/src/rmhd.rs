@@ -37,7 +37,7 @@ pub use algebra::{
 };
 pub use cons::rmhd_recover;
 use cons::rmhd_to_primitive;
-pub use gr::RmhdGr;
+pub use gr::{RmhdGr, rmhd_gr_wave_speeds_axis};
 pub use wave_speeds::rmhd_magnetosonic_cfl_speeds;
 use wave_speeds::rmhd_wave_speeds;
 

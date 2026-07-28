@@ -668,9 +668,19 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     };
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
-        let nhat = Tensor::<Gv, 3>::unit(axes[d]);
-        // the unshifted BF fast-bound speeds, then the shift for this coordinate direction.
-        let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
+        // the EXACT quartic roots through the local orthonormal frame -- the same solve the flat
+        // chain performs, so these buffers hold the same quantity on every chart. the fast
+        // magnetosonic bound the cheap CFL rate uses is a valid HLL estimate but a DIFFERENT
+        // number, and the UCT edge EMF reads these directly: filling them with a bound made every
+        // curved-spacetime EMF more diffusive than its flat counterpart on identical physics.
+        // the shift is subtracted here; alpha is already folded in by the tetrad map.
+        let (sl, sr) = symbi_hydro::rmhd::rmhd_gr_wave_speeds_axis(
+            &eos,
+            &prim,
+            &regime.metric,
+            alpha,
+            axes[d],
+        );
         let bd = beta[axes[d]];
         writes.push((
             format!("ws_l_{d}"),

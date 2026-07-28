@@ -48,6 +48,52 @@ pub struct RmhdGr<S: Scalar, const D: usize> {
     pub alpha: S,
 }
 
+/// the EXACT GR RMHD characteristic speeds along coordinate axis `dir`, through the local
+/// ORTHONORMAL frame.
+///
+/// the tetrad `E = metric.orthonormal_basis(dir)` maps the state into the frame where the spatial
+/// metric is the identity, so the flat Mignone & Del Zanna quartic applies there verbatim -- the
+/// same solve, and the same code, the flat chain runs. the characteristic velocity maps back with
+/// the single normal factor `E_dd = E[dir][dir]`, exactly as the tetrad HLLD flux does, and `alpha`
+/// converts the normal observer's time to coordinate time. the shift is the caller's to subtract.
+///
+/// WHY THIS RATHER THAN THE FAST-MAGNETOSONIC BOUND. `c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2` is a
+/// valid HLL estimate and is what the cheap CFL rate uses, but it is a BOUND, not the characteristic
+/// speed. the per-cell speed buffers exist so the flux fan and the UCT edge EMF can read the exact
+/// quartic roots without re-solving per face; filling them with a bound instead made every
+/// curved-spacetime UCT EMF more diffusive than its flat counterpart on identical physics. on an
+/// EXACTLY minkowski metric the two differed by 55% on the left-going speed, which is what the
+/// zero-mass kerr-schild oracle detects.
+///
+/// on a flat metric the tetrad is the identity and `alpha` is one, so this reduces to the flat
+/// quartic BIT-FOR-BIT -- the zero-mass identity holds by construction rather than by tolerance.
+pub fn rmhd_gr_wave_speeds_axis<S: Scalar, const D: usize>(
+    eos: &impl Eos<S>,
+    prim: &MhdPrim<S, D>,
+    metric: &SpatialMetric<S, D>,
+    alpha: S,
+    dir: usize,
+) -> (S, S) {
+    let e = metric.orthonormal_basis(dir);
+    let e_t = e.transpose();
+    let e_dd = e[(dir, dir)];
+    // the tetrad is orthonormal w.r.t. gamma, so the forward map needs no matrix inverse:
+    // V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a. every lorentz scalar is preserved, so W,
+    // |B|^2 and v.B are unchanged and the flat solver sees a physically identical state.
+    let hat = MhdPrim {
+        hydro: Prim {
+            rho: prim.hydro.rho,
+            vel: e_t.mul_vec(&metric.lower(&prim.hydro.vel)),
+            pre: prim.hydro.pre,
+        },
+        mag: e_t.mul_vec(&metric.lower(&prim.mag)),
+    };
+    let (sl_hat, sr_hat) =
+        super::wave_speeds::rmhd_wave_speeds(eos, &hat, &Tensor::<S, D>::unit(dir));
+    let scale = alpha * e_dd;
+    (sl_hat * scale, sr_hat * scale)
+}
+
 impl<S: Scalar, const D: usize> RmhdGr<S, D> {
     /// the frame-local magnetic invariants at a prim state: (B^2, v.B, b^2) with
     /// B^2 = gamma_ij B^i B^j, v.B = gamma_ij v^i B^j, b^2 = B^2/W^2 + (v.B)^2 (the
