@@ -24,6 +24,8 @@ import os
 import tempfile
 
 import numpy as np
+
+from simbi_configs.examples.grhd.gr_michel import michel_chart
 import h5py
 import pytest
 
@@ -72,7 +74,7 @@ def test_gr_hlld_flux_uct_hlld_emf_holds_the_michel_monopole() -> None:
     assert float(np.abs(b1_1 - b1_0).max()) < 1e-8, "staggered B drifted under GR-UCT-HLLD"
     sol = p.michel_solution()
     rc = np.array(p.cell_centroids())
-    ref = np.array([sol.primitive(r)[0] for r in rc])
+    ref = np.array([sol.primitive(r, michel_chart(p.spacetime))[0] for r in rc])
     l1 = float(np.abs(rho[2:14, 2:126] / ref[None, 2:126] - 1.0).mean())
     assert l1 < 3.6e-4, f"GR HLLD michel hold L1 {l1:.3e} (the 1D gate is 1.19e-4)"
 

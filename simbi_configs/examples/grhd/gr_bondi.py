@@ -41,7 +41,7 @@ class GrBondi(SimbiProblem):
     spacetime: Annotated[
         Spacetime,
         ProblemParam(
-            Spacetime.SCHWARZSCHILD, description="background spacetime"
+            Spacetime.SCHWARZSCHILD_KS, description="background spacetime"
         ),
     ]
     schwarzschild_mass: Annotated[

@@ -145,12 +145,29 @@ def _declared_resolution(problem, ndim: int) -> tuple[int, ...]:
 
 
 def assert_timestep_is_not_collapsed(
-    health: RunHealth, *, min_fraction: float = DEFAULT_MIN_DT_FRACTION, label: str = ""
+    health: RunHealth,
+    *,
+    min_fraction: float = DEFAULT_MIN_DT_FRACTION,
+    label: str = "",
 ) -> None:
     """the selected step must stay within reach of the light-crossing step.
 
     this is the cheapest signal that something other than the hyperbolic system is
     setting the timestep, and it is available after a handful of steps.
+
+    there is deliberately NO upper bound here. `dt_light` is the step a signal moving
+    at c would impose, but the cfl reduction sizes dt against the FAST MAGNETOSONIC
+    speed, which is strictly sub-luminal -- so a healthy relativistic run routinely
+    selects dt ABOVE cfl * dx and the ratio exceeds one. measured: 2.1 on 1D
+    schwarzschild michel (where the coordinate light speed alpha^2 = 1 - 2M/r is well
+    below one near the hole) and 1.26 on the 3D cartesian kerr torus (where the gas
+    fast speed had fallen to 0.79c). asserting dt <= dt_light would fail both, and
+    reading such a ratio as "stepping past the light cone" is a misdiagnosis -- it is
+    the ordinary signature of sub-luminal waves.
+
+    the COLLAPSE direction is the one that carries information, because nothing makes
+    dt orders of magnitude SMALLER than the hyperbolic limit except a term that has no
+    business setting the timestep.
     """
     tag = f"{label}: " if label else ""
     assert health.dt > 0.0, f"{tag}the timestep is not positive: {health.dt:.3e}"
@@ -160,13 +177,6 @@ def assert_timestep_is_not_collapsed(
         "nothing propagates faster than light, so a step this far below the "
         "hyperbolic limit is being set by a source rate, a limiter or a metric "
         "evaluated where it is singular — not by the physics."
-    )
-    # a step ABOVE the light-crossing limit is the opposite failure: the cfl bound is
-    # being computed from a wave speed that is too small, and the run is unstable.
-    assert health.dt <= health.dt_light * (1.0 + 1e-9), (
-        f"{tag}the timestep {health.dt:.4e} EXCEEDS the light-crossing step "
-        f"{health.dt_light:.4e}. the cfl reduction is reading a wave speed below c, "
-        "so the scheme is stepping past its own domain of dependence."
     )
 
 
