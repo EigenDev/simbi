@@ -383,6 +383,36 @@ pub fn joint_theta<S: Scalar>(thetas: &[Option<S>]) -> S {
         .fold(S::ONE, |acc, &t| acc.min(t))
 }
 
+/// the ANCHOR FEASIBILITY residual: the least constraint residual at `t = 0`.
+///
+/// every result in this module is conditional on the anchor being acceptable — A2's minimality and
+/// the single-crossing argument both assume `c_k(anchor) >= 0`. that is a precondition ON THE
+/// CALLER, and it is invisible to any gate that only ever exercises the projection, because such a
+/// gate necessarily supplies a feasible anchor by construction.
+///
+/// IT IS ALSO EASY TO VIOLATE IN A WAY THAT LOOKS FINE. an anchor certifies "this conserved state is
+/// admissible", and that certificate is valid ONLY alongside the magnetic field it was actually
+/// computed against. constrained transport evolves `B` on shared faces, so a state assembled against
+/// the stage-input field says nothing about its admissibility next to the candidate's post-CT field
+/// — pairing them asserts the admissibility of a state that was never assembled. the projection then
+/// cannot recover the cell at ANY blend, including `t = 0`, and returns a perfectly well-formed
+/// theta that happens to be useless.
+///
+/// so the projection reports this rather than assuming it: a negative value means the caller handed
+/// in an infeasible anchor, which is a DIFFERENT failure from "the candidate needed correcting" and
+/// must not be silently folded into `theta = 0`.
+pub fn anchor_feasibility<'a, S, B>(family: &[&dyn StateConstraint<S>], blend: &B) -> S
+where
+    S: Scalar,
+    B: Fn(S) -> ConstraintState<'a, S>,
+{
+    let at_anchor = blend(S::ZERO);
+    family
+        .iter()
+        .filter_map(|c| c.residual(&at_anchor))
+        .fold(S::from_f64(f64::INFINITY), |acc, r| acc.min(r))
+}
+
 /// the numerical concavity check for axiom A1: the largest violation of
 /// `c((U1+U2)/2) >= (c(U1) + c(U2)) / 2` over the supplied sample pairs, normalized by the residual
 /// scale. non-positive means no violation was found.
@@ -890,6 +920,66 @@ mod tests {
             let v = concavity_violation(&DensityFloor { den_min }, &s, &gm, &gi);
             assert!(v.abs() <= 1e-12, "density_floor bends at den_min={den_min:e}: {v:e}");
         }
+    }
+
+    #[test]
+    fn an_anchor_certified_against_a_different_field_is_reported_infeasible() {
+        // THE BUG THIS EXISTS FOR, as a property rather than a repro. an anchor certifies "this
+        // conserved state is admissible", and the certificate holds only alongside the magnetic
+        // field it was computed against. constrained transport advances B on shared faces, so a
+        // stage-input-derived anchor paired with the candidate's post-CT field asserts the
+        // admissibility of a state that was never assembled. the projection cannot then recover the
+        // cell at ANY blend — it returns a well-formed theta that is simply useless — so the
+        // infeasibility has to be REPORTED rather than folded into theta = 0.
+        let (gm, gi) = (identity(), identity());
+        let family: Vec<&dyn StateConstraint<f64>> = vec![&WuTangAdmissibility {
+            eps_d: 0.0,
+            eps_q: 0.0,
+            eps_psi: 0.0,
+        }];
+
+        // a cold, weakly magnetized state: admissible alongside the field it was built with.
+        let own_field = Tensor::new([0.05, 0.0, 0.0]);
+        let with_own = |_t: f64| ConstraintState {
+            den: 1.0,
+            mom: Tensor::zeros(),
+            nrg: Some(1.4),
+            mag: Some(own_field),
+            gm: &gm,
+            gm_inv: &gi,
+        };
+        assert!(
+            anchor_feasibility(&family, &with_own) > 0.0,
+            "PREMISE: the anchor must be feasible against its OWN field, or the contrast below \
+             says nothing"
+        );
+
+        // the SAME conserved state, now paired with a much stronger field — what CT would have
+        // advanced to. psi carries the magnetic energy, so the certificate is void.
+        let strong_field = Tensor::new([3.0, 0.0, 0.0]);
+        let with_candidate_field = |_t: f64| ConstraintState {
+            den: 1.0,
+            mom: Tensor::zeros(),
+            nrg: Some(1.4),
+            mag: Some(strong_field),
+            gm: &gm,
+            gm_inv: &gi,
+        };
+        assert!(
+            anchor_feasibility(&family, &with_candidate_field) < 0.0,
+            "an anchor paired with a field it was never certified against was reported FEASIBLE; \
+             the projection would then return a theta that recovers nothing and the caller would \
+             have no signal that its anchor construction was wrong"
+        );
+
+        // and the projection over such an anchor is degenerate — which is exactly why the
+        // feasibility residual must be surfaced separately rather than inferred from theta.
+        let theta = joint_theta(&constraint_thetas(&family, &with_candidate_field, 32));
+        assert_eq!(
+            theta, 0.0,
+            "an infeasible anchor collapses the blend, which is indistinguishable from a candidate \
+             needing full correction unless feasibility is reported on its own"
+        );
     }
 
     #[test]

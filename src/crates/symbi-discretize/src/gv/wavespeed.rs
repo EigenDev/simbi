@@ -1529,6 +1529,17 @@ pub fn fofc_project_gr_mhd_gv(
 /// a neutral value leaves a constraint declared, applicable and reporting a real residual, but never
 /// binding — which is deliberately NOT the same as a constraint that does not structurally apply.
 ///
+/// PRECONDITION ON THE ANCHOR, and it is the sharp edge here. `a_*` must be admissible ALONGSIDE THE
+/// SAME cell-centered field `bc_*` the blend uses. constrained transport advances `B` on shared
+/// faces, so a conserved state taken from the stage input was certified against the STAGE-INPUT
+/// field, not the candidate's; pairing the two asserts the admissibility of a state that was never
+/// assembled, and the projection then recovers nothing at any blend while still returning a
+/// well-formed theta. an anchor for this kernel must therefore be RECONSTRUCTED — p2c from the
+/// stage-input primitive gas state combined with `bc_*`, then raised to the numerical margin — the
+/// way `fofc_project_gr_mhd_gv` builds it. `symbi_hydro::constraints::anchor_feasibility` is the
+/// residual that detects a violation; it is a distinct signal from `theta` and has to stay that way,
+/// because an infeasible anchor and a fully-corrected candidate both drive `theta` to zero.
+///
 /// writes the projected conserved slots in place, plus `theta` (the joint blend, for the injected
 /// budget) and `binding` (the index of the constraint that bound, or -1 if none did, for the
 /// per-constraint attribution the ledger charges against).
