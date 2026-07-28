@@ -151,6 +151,9 @@ struct Config {
     // ordered user source expressions in the rust `SourceConfig` wire format.
     // contributions are lowered, grouped by target, and added on the hydro path.
     source_jsons: Vec<SourcePayload>,
+    // registered binned reductions in the rust `CensusConfig` wire format. each is a
+    // pointwise map plus a segmented reduce, emitted as a time series in the checkpoint.
+    census_jsons: Vec<SourcePayload>,
     // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
     motion_json: Option<String>,
@@ -354,6 +357,52 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
     let json = obj.py().import("json")?;
     let s: String = json.call_method1("dumps", (obj,))?.extract()?;
     Ok(Some(s))
+}
+
+/// read the registered censuses (already in the rust `CensusConfig` wire format,
+/// emitted by python's `Census.serialize`) as json strings. same shape as the source
+/// intake: the payload crosses through `json.dumps` so the node dag does not need a
+/// hand-written PyDict walk.
+fn get_census_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
+    let mut censuses = Vec::new();
+    if let Some(obj) = dict.get_item("census_expressions")? {
+        let list = obj.downcast::<PyList>().map_err(|_| {
+            PyValueError::new_err("census_expressions must be a list of census payloads")
+        })?;
+        let json = obj.py().import("json")?;
+        for (index, census) in list.iter().enumerate() {
+            censuses.push(SourcePayload {
+                origin: format!("census_expressions[{index}]"),
+                json: json.call_method1("dumps", (census,))?.extract()?,
+            });
+        }
+    }
+    Ok(censuses)
+}
+
+/// parse and lower every registered census, so a malformed binning or an
+/// unlowerable expression fails at SETUP rather than at the first sample. duplicate
+/// names are refused here because the name is the checkpoint group: two censuses
+/// sharing one would have the second silently overwrite the first.
+fn lower_configured_censuses(
+    census_jsons: &[SourcePayload],
+) -> Result<Vec<symbi_sim::census::CensusEvaluator>, String> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    census_jsons
+        .iter()
+        .map(|census| {
+            let config = symbi_hydro::CensusConfig::from_json(&census.json)
+                .map_err(|error| format!("{} parse: {error}", census.origin))?;
+            if !seen.insert(config.name.clone()) {
+                return Err(format!(
+                    "{} reuses the census name '{}'; each names its own output group",
+                    census.origin, config.name
+                ));
+            }
+            symbi_sim::census::CensusEvaluator::new(&config)
+                .map_err(|error| format!("{} lower: {error}", census.origin))
+        })
+        .collect()
 }
 
 fn get_source_jsons(dict: &Bound<'_, PyDict>) -> PyResult<Vec<SourcePayload>> {
@@ -565,6 +614,86 @@ mod source_collection_tests {
             Ok(_) => panic!("malformed source json was accepted"),
         };
         assert!(error.contains("source_expressions[2] parse:"), "{error}");
+    }
+
+    fn census_payload(origin: &str, name: &str) -> SourcePayload {
+        SourcePayload {
+            origin: origin.to_string(),
+            json: format!(
+                r#"{{ "name":"{name}", "axes":[], "values":[2], "value_names":["mass"],
+                      "op":"add", "params":[],
+                      "nodes":[{{"op":"VARIABLE_RHO"}}, {{"op":"VARIABLE_DV"}},
+                               {{"op":"MULTIPLY","left":0,"right":1}}] }}"#
+            ),
+        }
+    }
+
+    #[test]
+    fn a_well_formed_census_lowers_at_setup() {
+        let censuses = [census_payload("census_expressions[0]", "conservation")];
+        let evaluated = lower_configured_censuses(&censuses).expect("census lowers");
+        assert_eq!(evaluated.len(), 1);
+        assert_eq!(evaluated[0].spec().name(), "conservation");
+        // no bin axes is a global reduction over the grid: one bucket.
+        assert_eq!(evaluated[0].spec().n_segments(), 1);
+    }
+
+    #[test]
+    fn census_lower_error_names_the_registration_index() {
+        // an unlowerable expression must be reported against the registration that
+        // carries it, not as an anonymous failure at the first sample.
+        let censuses = [SourcePayload {
+            origin: "census_expressions[3]".to_string(),
+            json: r#"{ "name":"bad", "axes":[], "values":[2], "value_names":["v"],
+                       "op":"add", "params":[],
+                       "nodes":[{"op":"CONSTANT","value":1.0},
+                                {"op":"CONSTANT","value":2.0},
+                                {"op":"MOD","left":0,"right":1}] }"#
+                .to_string(),
+        }];
+        let error =
+            lower_configured_censuses(&censuses).expect_err("unsupported op was accepted");
+        assert!(error.contains("census_expressions[3] lower:"), "{error}");
+    }
+
+    #[test]
+    fn census_parse_error_names_the_registration_index() {
+        let censuses = [SourcePayload {
+            origin: "census_expressions[2]".to_string(),
+            json: "{".to_string(),
+        }];
+        let error =
+            lower_configured_censuses(&censuses).expect_err("malformed json was accepted");
+        assert!(error.contains("census_expressions[2] parse:"), "{error}");
+    }
+
+    #[test]
+    fn a_duplicate_census_name_is_refused_at_setup() {
+        // the name is the checkpoint group, so a collision would have the second
+        // registration silently overwrite the first.
+        let censuses = [
+            census_payload("census_expressions[0]", "shells"),
+            census_payload("census_expressions[1]", "shells"),
+        ];
+        let error =
+            lower_configured_censuses(&censuses).expect_err("duplicate name was accepted");
+        assert!(error.contains("reuses the census name 'shells'"), "{error}");
+    }
+
+    #[test]
+    fn a_census_binning_is_validated_at_setup() {
+        // non-increasing edges make a bin no cell can land in. the registration must
+        // fail here rather than produce a census that quietly bins nothing.
+        let censuses = [SourcePayload {
+            origin: "census_expressions[0]".to_string(),
+            json: r#"{ "name":"shells",
+                       "axes":[{"name":"r","expr":0,"edges":[2.0,1.0]}],
+                       "values":[0], "value_names":["v"], "op":"add", "params":[],
+                       "nodes":[{"op":"VARIABLE_RHO"}] }"#
+                .to_string(),
+        }];
+        let error = lower_configured_censuses(&censuses).expect_err("bad edges accepted");
+        assert!(error.contains("strictly increase"), "{error}");
     }
 }
 
@@ -950,6 +1079,8 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .max(1),
         // ordered source configs use the sole public source-expression wire.
         source_jsons: get_source_jsons(dict)?,
+        // registered binned reductions, lowered at setup so a malformed one fails there.
+        census_jsons: get_census_jsons(dict)?,
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
         driven_exprs,
         gradient_bcs,
@@ -7380,6 +7511,10 @@ fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
         symbi_hydro::motion_law::MotionLaw::from_json(json, cfg.start_time, cfg.t_final)
             .map_err(|err| format!("mesh motion parse: {err}"))?;
     }
+    // compile every registered census here so an unlowerable expression, a malformed
+    // binning or a duplicate name is reported before the run starts rather than at the
+    // first sample, when a queue slot has already been spent.
+    lower_configured_censuses(&cfg.census_jsons)?;
     Ok(())
 }
 

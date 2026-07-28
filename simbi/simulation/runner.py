@@ -240,8 +240,63 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     return model_dict
 
 
+def _validate_census_payloads(model_dict: dict[str, Any]) -> None:
+    """reject malformed census registrations before rust.
+
+    a census carries no `kind` (there is no conservation law to wrap), so it is
+    checked on its own terms: a name, a reduce op the backend implements, and one
+    label per accumulator. a binning that reaches the grid malformed has already
+    cost a queue slot; one that reaches it SILENTLY wrong is worse, because an
+    under-covering census reads exactly like a physics result.
+    """
+    seen: set[str] = set()
+    for index, payload in enumerate(model_dict.get("census_expressions", ()) or ()):
+        field = f"census_expressions[{index}]"
+        if not isinstance(payload, dict):
+            raise ValueError(f"{field} must be a serialized census dictionary")
+        for key in ("name", "values", "value_names", "op", "nodes"):
+            if key not in payload:
+                raise ValueError(
+                    f"{field} is missing `{key}`; use Census(...).serialize() instead "
+                    "of serialize()"
+                )
+        name = str(payload["name"])
+        if name in seen:
+            raise ValueError(
+                f"{field} reuses the census name {name!r}; each names its own output "
+                "group"
+            )
+        seen.add(name)
+
+        op = str(payload["op"]).lower()
+        if op not in {"add", "min", "max"}:
+            raise ValueError(
+                f"{field} has unknown reduce op {op!r} (expected add, min or max). a "
+                "mean or variance is not order-agnostic; register the sums and divide "
+                "when reading"
+            )
+        values = payload["values"]
+        names = payload["value_names"]
+        if not isinstance(values, list) or not isinstance(names, list):
+            raise ValueError(f"{field} must contain `values` and `value_names` lists")
+        if not values:
+            raise ValueError(f"{field} registers no values")
+        if len(values) != len(names):
+            raise ValueError(
+                f"{field} has {len(values)} value expressions against {len(names)} "
+                "labels"
+            )
+        for axis_index, axis in enumerate(payload.get("axes", ()) or ()):
+            edges = axis.get("edges")
+            if not isinstance(edges, list) or len(edges) < 2:
+                raise ValueError(
+                    f"{field} axis {axis_index} needs at least 2 edges to define a bin"
+                )
+
+
 def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
     """reject backend-invalid expression wires before rust."""
+    _validate_census_payloads(model_dict)
     source_payloads = [
         (f"source_expressions[{index}]", payload)
         for index, payload in enumerate(model_dict.get("source_expressions", ()))

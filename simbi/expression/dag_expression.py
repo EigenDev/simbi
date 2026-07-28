@@ -29,6 +29,27 @@ class SourceKind(str, enum.Enum):
     RAW = "raw"
 
 
+class ReductionOp(str, enum.Enum):
+    """how a census combines the cells that land in one bin.
+
+    the accumulated object must be a commutative monoid — associative and
+    order-agnostic — or it cannot be reduced in parallel, blocked, or combined across
+    restart segments. ADD gives moments, histograms, mass budgets and fluxes; MIN and
+    MAX give per-bin extrema.
+
+    mean, variance, dispersion and percentile are deliberately absent. they are not
+    monoids, they are FUNCTIONS OF SUMS: register `m*v` and `m` and divide in the
+    reader. an api offering variance directly would compute `<v^2> - <v>^2`, which
+    loses most of its significant digits whenever the mean dominates the dispersion —
+    register `m*(v - v_ref)^2` against a known reference instead. a product is absent
+    because it overflows to zero or infinity at any realistic cell count.
+    """
+
+    ADD = "add"
+    MIN = "min"
+    MAX = "max"
+
+
 class ConservedField(str, enum.Enum):
     """conserved slot a `kind=RAW` source targets (`target` field)."""
 
@@ -1544,6 +1565,46 @@ class CompiledExpr:
                 target.value if isinstance(target, ConservedField) else str(target)
             )
         return cfg
+
+    def serialize_census(
+        self,
+        name: str,
+        *,
+        axes: "Sequence[tuple[str, Sequence[float]]]",
+        value_names: "Sequence[str]",
+        op: "ReductionOp | str" = "add",
+        params: "Sequence[float] | None" = None,
+    ) -> dict[str, object]:
+        """serialize to the rust `CensusConfig` wire format consumed by symbi-expr and
+        lowered by symbi-hydro's `build_census_expressions`.
+
+        the compiled outputs must be the bin-axis coordinates FIRST, in `axes` order,
+        then the accumulator values in `value_names` order — the order
+        `Census.serialize` assembles them in. compiling them together is the point:
+        a subexpression an axis and a value share (a radius, its logarithm) is written
+        once and evaluated once per cell.
+        """
+        base = self._serialize_nodes()
+        out = base["output_indices"]
+        n_axes = len(axes)
+        if len(out) != n_axes + len(value_names):
+            raise ValueError(
+                f"census '{name}': compiled {len(out)} outputs for {n_axes} axes and "
+                f"{len(value_names)} values"
+            )
+        op_str = op.value if isinstance(op, ReductionOp) else str(op)
+        return {
+            "name": name,
+            "axes": [
+                {"name": axis_name, "expr": out[ii], "edges": [float(e) for e in edges]}
+                for ii, (axis_name, edges) in enumerate(axes)
+            ],
+            "values": out[n_axes:],
+            "value_names": [str(v) for v in value_names],
+            "op": op_str,
+            "params": [float(p) for p in (params or [])],
+            "nodes": base["expressions"],
+        }
 
     def serialize_boundary(self, dim: int) -> dict[str, object]:
         """serialize a DRIVEN (Dirichlet) boundary prescription to the rust

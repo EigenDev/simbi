@@ -763,6 +763,23 @@ class SimbiProblem(BaseModel):
 
     @computed_field
     @property
+    def census_expressions(self) -> list[ExpressionDict]:
+        """binned reductions over the grid, emitted as a time series in the checkpoint.
+
+        each entry is a `simbi.expression.Census(...).serialize()`. a census is a
+        pointwise map followed by a segmented reduce: bin axes cut the grid into
+        buckets, and each registered accumulator is combined within its bucket. no
+        axes at all is a global reduction, which is how a total mass or energy is
+        expressed.
+
+        accumulate SUMS, not statistics. a mean or a variance is not order-agnostic,
+        so it cannot be reduced in parallel or combined across restart segments —
+        register `m*v` and `m` and divide when reading.
+        """
+        return []
+
+    @computed_field
+    @property
     def scale_factor_expressions(self) -> ExpressionDict:
         """mesh-motion scale factor a(t) + its derivative a_dot(t) as a TRACED expression pair,
         evaluated exactly in the rust time loop (no linearization, no python in the loop). override

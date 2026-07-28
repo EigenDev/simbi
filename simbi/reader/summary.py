@@ -387,6 +387,7 @@ class SimulationParameterSummary:
                     "bx3_inner_expressions",
                     "bx3_outer_expressions",
                     "source_expressions",
+                    "census_expressions",
                 ],
             },
         }
