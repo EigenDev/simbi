@@ -58,7 +58,8 @@ pub fn evaluate(
             | Op::VariableVel1
             | Op::VariableVel2
             | Op::VariableVel3
-            | Op::VariablePressure => {
+            | Op::VariablePressure
+            | Op::VariableCellVolume => {
                 unreachable!("state-variable ops are bridge-only; not valid in the coordinate VM")
             }
 

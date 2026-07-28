@@ -478,6 +478,261 @@ fn reduction_identity_combine(
 /// the block size for grid reductions — threads per block, also the `sdata` length.
 pub const REDUCTION_BLOCK_SIZE: u32 = 256;
 
+/// shared-memory budget a privatized segmented reduction may claim, in bytes. below the
+/// 64 kB an MI250X compute unit carries so several blocks stay resident per unit —
+/// claiming the whole allocation would serialize the grid at one block per unit and cost
+/// more than the accumulator contention it saves.
+pub const SEGMENTED_LDS_BUDGET_BYTES: usize = 32 * 1024;
+
+/// blocks a segmented reduction launches, regardless of grid size. the kernel walks the
+/// domain with a grid-stride loop, so this bounds the accumulator contention and makes the
+/// launch shape independent of the resolution.
+pub const SEGMENTED_MAX_BLOCKS: u32 = 1024;
+
+/// the segment index marking a cell that is NOT PART OF THE REDUCTION AT ALL — a cell
+/// covered by finer data, inside an immersed body's mask, or otherwise not physical gas.
+/// distinct from an index past the last segment, which means the cell WAS to be reduced but
+/// fell outside the declared bin edges. only the latter is a shortfall of the binning and
+/// only the latter is counted; conflating the two would report a body's footprint as
+/// under-coverage.
+pub const SEGMENT_EXCLUDED: u32 = u32::MAX;
+
+/// does a segmented reduction of this shape privatize its accumulators into shared memory,
+/// or accumulate straight into the global output? one home for the policy so the launcher
+/// and the setup-time report agree.
+pub fn segmented_privatizes(n_segments: usize, n_values: usize, precision: Precision) -> bool {
+    let width = match precision {
+        Precision::F64 => 8,
+        Precision::F32 => 4,
+    };
+    n_segments.saturating_mul(n_values).saturating_mul(width) <= SEGMENTED_LDS_BUDGET_BYTES
+}
+
+/// the NVRTC-safe read-modify-write of one accumulator slot. `Add` has a native
+/// `atomicAdd`; `Min`/`Max` have none for floating point, so they compare-and-swap on the
+/// bit pattern until the slot holds the combined value. every form is a device-wide atomic,
+/// so the COMBINE ORDER IS UNSPECIFIED: `Min`/`Max` are order-agnostic and land on the same
+/// answer regardless, but `Add` reassociates, which is why a summing segmented reduction
+/// cannot claim bit-reproducibility on device.
+fn segmented_atomic_helpers(op: ReductionOp, precision: Precision) -> String {
+    let f32 = matches!(precision, Precision::F32);
+    let ty = precision.c_type();
+    if matches!(op, ReductionOp::Add) {
+        return format!(
+            "__device__ inline void __symbi_seg_accum({ty}* addr, {ty} v) {{ atomicAdd(addr, v); }}\n"
+        );
+    }
+    let (bits_ty, to_bits, from_bits) = if f32 {
+        ("unsigned int", "__float_as_uint", "__uint_as_float")
+    } else {
+        (
+            "unsigned long long",
+            "__double_as_longlong",
+            "__longlong_as_double",
+        )
+    };
+    let (_, combine) = reduction_identity_combine(op, precision);
+    let combined = combine("cur", "v");
+    // the cas retries until the slot's bits are the ones this thread computed from the value
+    // it read, so a racing update is never lost. the combine is the SAME NaN-propagating
+    // ternary the block reduction and the host fold use.
+    format!(
+        "__device__ inline void __symbi_seg_accum({ty}* addr, {ty} v) {{\n\
+         \x20   {bits_ty}* p = ({bits_ty}*)addr;\n\
+         \x20   {bits_ty} old = *p, assumed;\n\
+         \x20   do {{\n\
+         \x20       assumed = old;\n\
+         \x20       {ty} cur = {from_bits}(assumed);\n\
+         \x20       {ty} nxt = {combined};\n\
+         \x20       old = atomicCAS(p, assumed, {to_bits}(nxt));\n\
+         \x20   }} while (assumed != old);\n\
+         }}\n"
+    )
+}
+
+/// render a SEGMENTED reduction: the scatter-add half of a binned reduction (a census).
+/// each cell carries a destination bucket in `segment`, and every one of the `n_values`
+/// value fields is combined by `op` into that bucket's accumulator, giving
+/// `n_segments * n_values` outputs from ONE pass over the domain. this is not expressible
+/// by tracing pointwise code — the destination is data-dependent — so it sits beside the
+/// generated kernels as its own morphism, exactly as the whole-field reduction does.
+///
+/// two accumulation strategies, chosen by `segmented_privatizes`:
+///   - PRIVATIZED: a block-local shared accumulator absorbs the block's cells, then each
+///     slot is folded into the global output once per block. contention scales with the
+///     block count rather than the cell count.
+///   - DIRECT: the accumulator does not fit shared memory, so cells combine straight into
+///     the global output.
+/// both are device-wide atomic at the final combine, so `Add` reassociates run to run.
+///
+/// a cell whose segment index is at or beyond `n_segments` lies outside the binning. it is
+/// dropped and counted, because a silently under-covering binning is indistinguishable from
+/// a physics result.
+///
+/// ABI: value views `field0..field{n_values-1}`, segment view `field{n_values}`,
+/// total_cells, grid_size_{0..}, dom_lo_{0..}, out, dropped
+pub fn render_field_segmented_reduction(
+    kernel_name: &str,
+    ndim: usize,
+    precision: Precision,
+    op: ReductionOp,
+    n_values: usize,
+    n_segments: usize,
+) -> KernelDescriptor {
+    assert!(
+        (1..=3).contains(&ndim),
+        "render_field_segmented_reduction: ndim must be 1..=3 (got {ndim})"
+    );
+    assert!(
+        n_values >= 1,
+        "render_field_segmented_reduction: needs at least one value field"
+    );
+    assert!(
+        n_segments >= 1,
+        "render_field_segmented_reduction: needs at least one segment"
+    );
+    // a product over bins overflows to zero or infinity on any realistic cell count and
+    // carries no meaning as a census statistic, so it is refused rather than allowed to
+    // silently produce garbage.
+    assert!(
+        !matches!(op, ReductionOp::Mul),
+        "render_field_segmented_reduction: Mul is not a meaningful segmented reduction"
+    );
+
+    let ty = precision.c_type();
+    let (identity, _) = reduction_identity_combine(op, precision);
+    let privatize = segmented_privatizes(n_segments, n_values, precision);
+    let n_slots = n_segments * n_values;
+    let seg_buf = n_values;
+
+    let mut out = String::new();
+    out.push_str(emit::header(Target::Cuda));
+    out.push_str(&format!(
+        "struct __symbi_View {{ {ty}* __restrict__ data; int lo[4]; int strides[4]; int extent[4]; }};\n",
+    ));
+    // the segment view carries the same host-packed layout as a value view; only the
+    // element type differs, and the index formulas read lo/strides alone.
+    out.push_str(
+        "struct __symbi_SegView { const unsigned int* __restrict__ data; int lo[4]; int strides[4]; int extent[4]; };\n",
+    );
+    out.push_str(&segmented_atomic_helpers(op, precision));
+
+    // ---- signature ----
+    let mut params: Vec<String> = (0..n_values)
+        .map(|v| format!("    __symbi_View field{v}"))
+        .collect();
+    params.push(format!("    __symbi_SegView field{seg_buf}"));
+    params.push("    unsigned int total_cells".to_string());
+    for aa in 0..ndim {
+        params.push(format!("    unsigned int grid_size_{aa}"));
+    }
+    for aa in 0..ndim {
+        params.push(format!("    int dom_lo_{aa}"));
+    }
+    params.push(format!("    {ty}* out"));
+    params.push("    unsigned long long* dropped".to_string());
+    out.push_str(&format!(
+        "{} void {kernel_name}(\n",
+        emit::global_qualifier(Target::Cuda)
+    ));
+    out.push_str(&params.join(",\n"));
+    out.push_str("\n) {\n");
+
+    // ---- accumulator setup ----
+    if privatize {
+        out.push_str(&format!("    __shared__ {ty} acc[{n_slots}];\n"));
+        out.push_str(&format!(
+            "    for (unsigned int i = threadIdx.x; i < {n_slots}; i += blockDim.x) acc[i] = {identity};\n"
+        ));
+        out.push_str("    __syncthreads();\n");
+    }
+    out.push_str("    unsigned long long n_dropped = 0;\n");
+
+    // ---- grid-stride walk ----
+    // the block count is fixed by the launcher, so a thread visits a strided run of cells
+    // and the launch shape does not grow with the resolution.
+    out.push_str(
+        "    for (unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x; gid < total_cells; gid += blockDim.x * gridDim.x) {\n",
+    );
+    match ndim {
+        1 => out.push_str("        int ii = (int)gid + dom_lo_0;\n"),
+        2 => {
+            out.push_str("        int ii = (int)(gid / grid_size_1) + dom_lo_0;\n");
+            out.push_str("        int jj = (int)(gid % grid_size_1) + dom_lo_1;\n");
+        }
+        _ => {
+            out.push_str("        int ii = (int)(gid / (grid_size_1 * grid_size_2)) + dom_lo_0;\n");
+            out.push_str("        int jj = (int)((gid / grid_size_2) % grid_size_1) + dom_lo_1;\n");
+            out.push_str("        int kk = (int)(gid % grid_size_2) + dom_lo_2;\n");
+        }
+    }
+    let comps: &[&str] = &["ii", "jj", "kk"][..ndim];
+    // every buffer's cell index goes through the same formula the pointwise emitters use.
+    for buf in 0..=seg_buf {
+        out.push_str("    ");
+        out.push_str(&emit::emit_cell_index_base(
+            emit::IndexLang::Cuda,
+            ndim as u8,
+            buf as u32,
+            false,
+        ));
+        out.push('\n');
+    }
+    let seg_flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, seg_buf as u32, comps);
+    out.push_str(&format!(
+        "        unsigned int seg = field{seg_buf}.data[{seg_flat}];\n"
+    ));
+    // a cell excluded from the reduction is skipped silently; a cell past the last segment
+    // was meant to be reduced but fell outside the bin edges, and that shortfall is counted.
+    out.push_str(&format!(
+        "        if (seg == {SEGMENT_EXCLUDED}u) continue;\n"
+    ));
+    out.push_str(&format!(
+        "        if (seg >= {n_segments}u) {{ n_dropped += 1ull; continue; }}\n"
+    ));
+    for v in 0..n_values {
+        let flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, v as u32, comps);
+        let slot = format!("seg * {n_values}u + {v}u");
+        if privatize {
+            out.push_str(&format!(
+                "        __symbi_seg_accum(&acc[{slot}], field{v}.data[{flat}]);\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "        __symbi_seg_accum(&out[{slot}], field{v}.data[{flat}]);\n"
+            ));
+        }
+    }
+    out.push_str("    }\n");
+
+    // ---- fold the block's private accumulator into the global output ----
+    if privatize {
+        out.push_str("    __syncthreads();\n");
+        out.push_str(&format!(
+            "    for (unsigned int i = threadIdx.x; i < {n_slots}; i += blockDim.x) __symbi_seg_accum(&out[i], acc[i]);\n"
+        ));
+    }
+    out.push_str("    if (n_dropped) atomicAdd(dropped, n_dropped);\n");
+    out.push_str("}\n");
+
+    KernelDescriptor {
+        source: out,
+        kernel_name: kernel_name.to_string(),
+        field_bindings: (0..=seg_buf)
+            .map(|b| crate::emit::FieldBinding {
+                // the census scratch buffers are hand-built, outside the closed cell-centered
+                // vocab — held verbatim as Raw, as the whole-field reduction's input is.
+                field: symbi_abi::FieldBind::Raw(format!("buf{b}").into()),
+                buffer_index: b as u32,
+                is_output: false,
+            })
+            .collect(),
+        param_names: vec![],
+        scalar_is_int: vec![],
+        tile_spec: None,
+    }
+}
+
 /// render a GRID reduction (the Reduce morphism): reduce ONE input
 /// field by `op` over the dispatch window, emitting one partial per block (the host
 /// folds the partials — only the partials cross, never per-cell). C-family
@@ -861,6 +1116,126 @@ mod tests {
         assert!(s.contains("val = field0.data["));
         assert_eq!(desc.field_bindings.len(), 1);
         assert!(!desc.field_bindings[0].is_output);
+    }
+
+    #[test]
+    fn segmented_reduction_privatizes_and_folds_once_per_block() {
+        let desc = render_field_segmented_reduction(
+            "census_add_2d",
+            2,
+            Precision::F64,
+            ReductionOp::Add,
+            3,
+            8,
+        );
+        let s = &desc.source;
+        assert!(
+            s.contains("extern \"C\" __global__ void census_add_2d("),
+            "src:\n{s}"
+        );
+        // three value views, then the segment view; one binding each.
+        assert!(s.contains("__symbi_View field0"));
+        assert!(s.contains("__symbi_View field2"));
+        assert!(s.contains("__symbi_SegView field3"));
+        assert_eq!(desc.field_bindings.len(), 4);
+        assert!(desc.field_bindings.iter().all(|b| !b.is_output));
+
+        // 8 segments * 3 values fits the shared budget, so the block absorbs its cells
+        // privately and touches the global output once per slot.
+        assert!(s.contains("__shared__ double acc[24];"), "src:\n{s}");
+        assert!(
+            s.contains("__symbi_seg_accum(&acc[seg * 3u + 0u]"),
+            "src:\n{s}"
+        );
+        assert!(
+            s.contains("__symbi_seg_accum(&out[i], acc[i]);"),
+            "src:\n{s}"
+        );
+        // a fixed block count walking the domain with a grid stride.
+        assert!(s.contains("gid += blockDim.x * gridDim.x"), "src:\n{s}");
+        // add accumulates with the native atomic, not a compare-and-swap.
+        assert!(s.contains("atomicAdd(addr, v)"), "src:\n{s}");
+        assert!(!s.contains("atomicCAS"), "src:\n{s}");
+    }
+
+    #[test]
+    fn segmented_reduction_falls_back_to_direct_global_accumulation() {
+        // an accumulator past the shared budget cannot be privatized, so cells combine
+        // straight into the global output. the choice must follow `segmented_privatizes`.
+        let n_segments = SEGMENTED_LDS_BUDGET_BYTES / 8 + 1;
+        assert!(!segmented_privatizes(n_segments, 1, Precision::F64));
+        let desc = render_field_segmented_reduction(
+            "census_wide_1d",
+            1,
+            Precision::F64,
+            ReductionOp::Add,
+            1,
+            n_segments,
+        );
+        let s = &desc.source;
+        assert!(!s.contains("__shared__"), "src:\n{s}");
+        assert!(
+            s.contains("__symbi_seg_accum(&out[seg * 1u + 0u]"),
+            "src:\n{s}"
+        );
+    }
+
+    #[test]
+    fn segmented_reduction_min_uses_a_nan_propagating_cas() {
+        // there is no floating-point atomic min, so the slot is compare-and-swapped until
+        // it holds the combined value. the combine is the same `x != x` NaN-propagating
+        // ternary the block reduction uses, so a poisoned cell cannot be silently dropped.
+        let desc = render_field_segmented_reduction(
+            "census_min_1d",
+            1,
+            Precision::F64,
+            ReductionOp::Min,
+            1,
+            4,
+        );
+        let s = &desc.source;
+        assert!(s.contains("atomicCAS(p, assumed"), "src:\n{s}");
+        assert!(s.contains("__double_as_longlong"), "src:\n{s}");
+        assert!(s.contains("(cur != cur)"), "src:\n{s}");
+        assert!(!s.contains("INFINITY"), "src:\n{s}");
+        assert!(s.contains("acc[i] = 1.0e308;"), "src:\n{s}");
+    }
+
+    #[test]
+    fn segmented_reduction_counts_cells_outside_the_binning() {
+        // a cell whose bin index lies past the last segment is outside the binning. it must
+        // be dropped and counted — an under-covering binning that reported nothing would be
+        // indistinguishable from a physics result.
+        let desc = render_field_segmented_reduction(
+            "census_drop_1d",
+            1,
+            Precision::F64,
+            ReductionOp::Add,
+            1,
+            5,
+        );
+        let s = &desc.source;
+        assert!(s.contains("unsigned long long* dropped"), "src:\n{s}");
+        assert!(
+            s.contains("if (seg >= 5u) { n_dropped += 1ull; continue; }"),
+            "src:\n{s}"
+        );
+        assert!(s.contains("atomicAdd(dropped, n_dropped);"), "src:\n{s}");
+    }
+
+    #[test]
+    #[should_panic(expected = "Mul is not a meaningful segmented reduction")]
+    fn segmented_reduction_refuses_a_product() {
+        // a product over a bin's cells overflows to zero or infinity at any realistic cell
+        // count and is not a census statistic.
+        render_field_segmented_reduction(
+            "census_mul_1d",
+            1,
+            Precision::F64,
+            ReductionOp::Mul,
+            1,
+            4,
+        );
     }
 
     #[test]

@@ -114,6 +114,13 @@ VEL1_ALIASES = ["vel1", "vx", "v1"]
 VEL2_ALIASES = ["vel2", "vy", "v2"]
 VEL3_ALIASES = ["vel3", "vz", "v3"]
 
+# the cell's lab-frame volume measure, the natural weight for an extensive quantity in a
+# binned reduction. it is the measure the finite-volume update itself uses, so a mass sum
+# `rho*dV` stays correct on a curvilinear grid, where the measure is
+# r^2 sin(theta) dr dtheta dphi rather than dx^3. reduction weight only: a source term is a
+# per-unit-volume density and is rejected if it references this leaf.
+DV_ALIASES = ["dv", "cell_volume", "volume"]
+
 
 class ExprGraph:
     """Immutable directed acyclic graph of expressions."""
@@ -445,6 +452,19 @@ def pressure(graph: Optional[ExprGraph] = None) -> Expr:
     """the per-cell pressure (energy-bearing regimes only; rejected on isothermal)."""
     g = graph or ExprGraph()
     return Expr(g, g.add_node("variable", name="pre"))
+
+
+def cell_volume(graph: Optional[ExprGraph] = None) -> Expr:
+    """the cell's lab-frame volume measure dV, the weight for an extensive quantity.
+
+    this is the measure the finite-volume update itself uses, so `density() * cell_volume()`
+    is the cell mass on a curvilinear grid as well as a cartesian one. valid in a binned
+    reduction only; a source term referencing it is rejected, because a source is a
+    per-unit-volume density and weighting it by the measure would make the deposited
+    amount depend on the resolution.
+    """
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name="dv"))
 
 
 # math functions
@@ -1137,6 +1157,8 @@ class CompiledExpr:
                     expressions.append({"op": "VARIABLE_VEL3"})
                 elif name in PRE_ALIASES:
                     expressions.append({"op": "VARIABLE_PRESSURE"})
+                elif name in DV_ALIASES:
+                    expressions.append({"op": "VARIABLE_DV"})
                 else:
                     raise ValueError(f"unknown variable '{name}'")
             elif op == "parameter":

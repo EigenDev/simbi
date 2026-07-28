@@ -96,8 +96,8 @@ fn map_op(op: Op) -> Option<Mapped> {
         Atanh => Mapped::Trans(TranscendentalOp::Atanh),
         // leaves / ternary handled in the walk; Sgn + Mod have no carrier primitive.
         Constant | VariableX1 | VariableX2 | VariableX3 | VariableT | Parameter | VariableRho
-        | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure | IfThenElse | Sgn
-        | Mod => return None,
+        | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure | VariableCellVolume
+        | IfThenElse | Sgn | Mod => return None,
     })
 }
 
@@ -116,6 +116,10 @@ fn variable_name(op: Op) -> Option<&'static str> {
         Op::VariableVel2 => Some("vel_1"),
         Op::VariableVel3 => Some("vel_2"),
         Op::VariablePressure => Some("pre"),
+        // the cell's lab-frame volume measure. bound to the finite-volume cell volume the
+        // update itself uses (the reciprocal of the in-kernel `inv_volume`), so an extensive
+        // sum weighted by it is correct on curvilinear grids.
+        Op::VariableCellVolume => Some("dv"),
         _ => None,
     }
 }
@@ -175,7 +179,8 @@ pub fn lower_dag_to_builtsource(
             | Op::VariableVel1
             | Op::VariableVel2
             | Op::VariableVel3
-            | Op::VariablePressure => {
+            | Op::VariablePressure
+            | Op::VariableCellVolume => {
                 let name = variable_name(node.op).expect("variable op has a name");
                 declare_param(&mut g, name, &mut param_cache, &mut params)
             }
@@ -290,6 +295,19 @@ pub fn build_user_source(
         .region
         .map(|_| field.outputs.pop().expect("region output"));
     let n_out = cfg.outputs.len();
+
+    // the cell-volume leaf is a REDUCTION weight, not a source-term input: a source is a
+    // density (per unit volume) added to a conserved density, so multiplying it by the cell
+    // measure would make the deposited amount depend on the grid. the per-cell source param
+    // resolver has no `dv` binding, so without this the run would panic mid-evolve instead.
+    if field.params.iter().any(|p| p == "dv") {
+        return Err(
+            "cell volume is not a source-term input: a source is a per-unit-volume density, so \
+             weighting it by the cell measure makes the deposited amount resolution-dependent. \
+             it is a binned-reduction weight only"
+                .to_string(),
+        );
+    }
 
     let reject_relativistic = |law: &str| -> Result<(), String> {
         if spec.is_relativistic {
@@ -695,6 +713,24 @@ mod tests {
             Err(e) => e,
             Ok(_) => panic!("expected build_user_source to reject the config"),
         }
+    }
+
+    #[test]
+    fn cell_volume_is_rejected_as_a_source_input() {
+        // a source term is a per-unit-volume density added to a conserved density. weighting
+        // it by the cell measure would make the deposited amount scale with the resolution,
+        // so the leaf must be refused at build time — the per-cell source param resolver has
+        // no `dv` binding, and without this check the run panics mid-evolve instead.
+        let cfg = cfg_from(
+            r#"{ "kind":"raw", "dim":1, "outputs":[1], "params":[], "target":"den",
+                 "nodes":[ {"op":"VARIABLE_DV"},
+                           {"op":"MULTIPLY","left":0,"right":0} ] }"#,
+        );
+        let err = expect_err(&cfg, &NEWTONIAN_SPEC);
+        assert!(
+            err.contains("cell volume is not a source-term input"),
+            "expected the cell-volume rejection, got: {err}"
+        );
     }
 
     #[test]
