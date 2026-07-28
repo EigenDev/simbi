@@ -33,6 +33,15 @@ pub enum LoadError {
         index: usize,
         num_nodes: usize,
     },
+    /// a node referencing itself or a LATER node. the wire format is a topologically
+    /// ordered dag, so every operand must already exist when its parent is read. without
+    /// this check the malformed graph loads and the failure surfaces much later, as an
+    /// out-of-bounds inside a graph pass, with nothing pointing back at the config.
+    ForwardReference {
+        node: usize,
+        field: &'static str,
+        index: usize,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -52,6 +61,14 @@ impl std::fmt::Display for LoadError {
                     f,
                     "node {}: field '{}' index {} >= num_nodes {}",
                     node, field, index, num_nodes
+                )
+            }
+            LoadError::ForwardReference { node, field, index } => {
+                write!(
+                    f,
+                    "node {node}: field '{field}' references node {index}, which is not \
+                     earlier in the dag; nodes must be topologically ordered so every \
+                     operand is defined before it is used"
                 )
             }
         }
@@ -184,6 +201,25 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
     let nn = node_descs.len();
     let mut nodes = Vec::with_capacity(nn);
 
+    // an operand must be EARLIER in the array, which is what topological order means and
+    // what every downstream pass assumes. checking only against the node count would admit
+    // a self-reference or a forward edge, and the graph would then fail deep inside a pass
+    // rather than at the config that caused it.
+    let child = |node: usize, field: &'static str, index: usize| -> Result<usize, LoadError> {
+        if index >= nn {
+            return Err(LoadError::InvalidIndex {
+                node,
+                field,
+                index,
+                num_nodes: nn,
+            });
+        }
+        if index >= node {
+            return Err(LoadError::ForwardReference { node, field, index });
+        }
+        Ok(index)
+    };
+
     for (ii, desc) in node_descs.iter().enumerate() {
         let op = Op::from_name(&desc.op).ok_or_else(|| LoadError::UnknownOp(desc.op.clone()))?;
 
@@ -204,19 +240,11 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
             }
             0 => Payload::None, // variable
             1 => {
-                let child = desc.left.ok_or(LoadError::MissingField {
+                let c = desc.left.ok_or(LoadError::MissingField {
                     node: ii,
                     field: "left",
                 })?;
-                if child >= nn {
-                    return Err(LoadError::InvalidIndex {
-                        node: ii,
-                        field: "left",
-                        index: child,
-                        num_nodes: nn,
-                    });
-                }
-                Payload::Unary(child)
+                Payload::Unary(child(ii, "left", c)?)
             }
             2 => {
                 let left = desc.left.ok_or(LoadError::MissingField {
@@ -227,23 +255,7 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
                     node: ii,
                     field: "right",
                 })?;
-                if left >= nn {
-                    return Err(LoadError::InvalidIndex {
-                        node: ii,
-                        field: "left",
-                        index: left,
-                        num_nodes: nn,
-                    });
-                }
-                if right >= nn {
-                    return Err(LoadError::InvalidIndex {
-                        node: ii,
-                        field: "right",
-                        index: right,
-                        num_nodes: nn,
-                    });
-                }
-                Payload::Binary(left, right)
+                Payload::Binary(child(ii, "left", left)?, child(ii, "right", right)?)
             }
             3 => {
                 let cond = desc.condition.ok_or(LoadError::MissingField {
@@ -258,31 +270,11 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
                     node: ii,
                     field: "false_case",
                 })?;
-                if cond >= nn {
-                    return Err(LoadError::InvalidIndex {
-                        node: ii,
-                        field: "condition",
-                        index: cond,
-                        num_nodes: nn,
-                    });
-                }
-                if then_ >= nn {
-                    return Err(LoadError::InvalidIndex {
-                        node: ii,
-                        field: "true_case",
-                        index: then_,
-                        num_nodes: nn,
-                    });
-                }
-                if else_ >= nn {
-                    return Err(LoadError::InvalidIndex {
-                        node: ii,
-                        field: "false_case",
-                        index: else_,
-                        num_nodes: nn,
-                    });
-                }
-                Payload::Ternary(cond, then_, else_)
+                Payload::Ternary(
+                    child(ii, "condition", cond)?,
+                    child(ii, "true_case", then_)?,
+                    child(ii, "false_case", else_)?,
+                )
             }
             _ => unreachable!(),
         };
@@ -349,6 +341,83 @@ impl SourceConfig {
     /// `self.nodes` + `self.outputs` to `symbi-hydro::expr_bridge::lower_dag_to_builtsource`.
     pub fn to_expression(&self) -> Result<Expression, LoadError> {
         load_expression(&self.nodes, &self.outputs, &self.params)
+    }
+}
+
+/// one bin axis of a census: the expression giving the coordinate to bin on, and the edges
+/// that cut it. edges are explicit rather than a spacing rule, so log spacing, linear
+/// spacing and hand-chosen edges all cross the wire the same way.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CensusAxisConfig {
+    /// labels the axis's edges in the output.
+    pub name: String,
+    /// node index (into the census `nodes`) of the coordinate expression.
+    pub expr: usize,
+    /// `n + 1` strictly increasing edges cutting the coordinate into `n` bins.
+    pub edges: Vec<f64>,
+}
+
+/// a serialized USER census — a pointwise map followed by a segmented reduce, emitted by the
+/// python front door as json alongside the source expressions.
+///
+/// the axis expressions and the value expressions share ONE dag, so a subexpression used by
+/// both (a radius, its logarithm) is written once and evaluated once per cell.
+///
+/// json shape:
+/// ```json
+/// { "name": "shells", "op": "add", "params": [],
+///   "axes": [ {"name": "r", "expr": 0, "edges": [1.0, 2.0, 4.0]} ],
+///   "values": [1], "value_names": ["mass"],
+///   "nodes": [ {"op":"VARIABLE_X1"},
+///              {"op":"MULTIPLY","left":2,"right":3},
+///              {"op":"VARIABLE_RHO"}, {"op":"VARIABLE_DV"} ] }
+/// ```
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CensusConfig {
+    /// names the census's output group. unique across a run's registrations.
+    pub name: String,
+    /// bin axes, in registration order. they take an OUTER PRODUCT, and an empty list is a
+    /// global reduction over the grid — the case total mass and energy occupy.
+    #[serde(default)]
+    pub axes: Vec<CensusAxisConfig>,
+    /// node indices of the accumulator expressions.
+    pub values: Vec<usize>,
+    /// one label per accumulator, so a reader can name a column without re-deriving the
+    /// registration order.
+    pub value_names: Vec<String>,
+    /// how accumulators combine: `"add"` for moments, histograms, mass budgets and fluxes;
+    /// `"min"` / `"max"` for per-bin extrema. a product is refused — it overflows to zero or
+    /// infinity at any realistic cell count and is not a census statistic. mean, variance and
+    /// percentile are deliberately absent: they are not order-agnostic, so they cannot be
+    /// reduced in parallel or combined across restart segments. a census accumulates `m*v`
+    /// and `m`, and the reader divides.
+    pub op: String,
+    /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
+    #[serde(default)]
+    pub params: Vec<f64>,
+    /// the flat, topologically-ordered DAG shared by every axis and value expression.
+    pub nodes: Vec<NodeDesc>,
+}
+
+impl CensusConfig {
+    /// parse the python-emitted json.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    /// serialize back to json (round-trip / golden tests).
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// the axis and value expression node indices, axes first — the output order a lowered
+    /// census graph produces, and the order the per-cell evaluation unpacks.
+    pub fn output_nodes(&self) -> Vec<usize> {
+        self.axes
+            .iter()
+            .map(|a| a.expr)
+            .chain(self.values.iter().copied())
+            .collect()
     }
 }
 

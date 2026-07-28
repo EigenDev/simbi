@@ -275,6 +275,48 @@ pub fn lower_dag_to_builtsource(
 /// contribution is multiplied by it. the conservation lifts are LINEAR in the field, so masking the
 /// field (for `relax`: only the rate `kappa`) equals masking the conserved contribution — no splice
 /// change, CPU + GPU fall out of the existing path.
+/// lower a census's bin-axis and value expressions into ONE `BuiltSource`, whose outputs are
+/// the axis coordinates followed by the accumulator values (the order
+/// `CensusConfig::output_nodes` declares).
+///
+/// sharing one graph is the point: a shell census bins on `log r` and accumulates several
+/// moments that each reference `r`, so hash-consing the common subexpression evaluates the
+/// radius and its logarithm ONCE per cell rather than once per registered output. cost then
+/// scales with the size of the dag rather than with the number of accumulators.
+///
+/// unlike a source, `dv` IS a legal leaf here — the cell measure is the natural weight for an
+/// extensive quantity, and it is what keeps a sum correct on a curvilinear grid.
+pub fn build_census_expressions(cfg: &symbi_expr::CensusConfig) -> Result<BuiltSource, String> {
+    if cfg.values.is_empty() {
+        return Err(format!("census '{}': registers no values", cfg.name));
+    }
+    if cfg.values.len() != cfg.value_names.len() {
+        return Err(format!(
+            "census '{}': {} value expressions against {} labels",
+            cfg.name,
+            cfg.values.len(),
+            cfg.value_names.len()
+        ));
+    }
+    let nodes = symbi_expr::nodes_from_descs(&cfg.nodes)
+        .map_err(|e| format!("census '{}': dag load: {e}", cfg.name))?;
+    let outputs = cfg.output_nodes();
+    for &o in &outputs {
+        if o >= nodes.len() {
+            return Err(format!(
+                "census '{}': output node {o} is past the end of a {}-node dag",
+                cfg.name,
+                nodes.len()
+            ));
+        }
+    }
+    // constant-power strength reduction: `r ** (-2.0)` becomes a multiply/divide chain,
+    // avoiding a per-cell libm pow in a kernel that runs over every leaf cell.
+    let (nodes, outputs) = symbi_expr::strength_reduce(&nodes, &outputs);
+    lower_dag_to_builtsource(&nodes, &outputs)
+        .map_err(|e| format!("census '{}': bridge: {e:?}", cfg.name))
+}
+
 pub fn build_user_source(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
