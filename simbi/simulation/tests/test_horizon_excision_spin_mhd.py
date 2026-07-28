@@ -90,7 +90,7 @@ class _KerrExcised3D(SimbiProblem):
 def _run_kerr(excision: float) -> np.ndarray:
     d = tempfile.mkdtemp() + "/"
     p = _KerrExcised3D(excision_radius=excision, data_directory=Path(d))
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"spinning excised run (r_exc={excision}) crashed"
     with h5py.File(finals[0], "r") as h:
@@ -215,7 +215,7 @@ class _KsMhdExcised3D(SimbiProblem):
 def _run_mhd(excision: float) -> dict[str, np.ndarray]:
     d = tempfile.mkdtemp() + "/"
     p = _KsMhdExcised3D(excision_radius=excision, data_directory=Path(d))
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"excised MHD run (r_exc={excision}) crashed"
     out = {}

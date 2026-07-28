@@ -52,7 +52,7 @@ def _run(b_ref: float) -> dict:
     p.end_time = _T_END
     p.data_directory = d
     p.checkpoint_interval = _T_END
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=4000)
     crashed = glob.glob(os.path.join(d, "*crashed*.h5"))
     assert not crashed, f"ks magnetized bondi crashed at b_ref={b_ref}"
     first = sorted(glob.glob(os.path.join(d, "*chkpt.000_000*.h5")))[0]

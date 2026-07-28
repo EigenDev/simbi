@@ -521,7 +521,9 @@ where
                     crate::regimes::substrate_kernels::fofc_project(
                         sim,
                         "rmhd",
-                        "", // MHD momentum is always a 3-vector; no DOF-lift tag
+                        // MHD keys its chart on the grid-axis set: B is always a 3-vector,
+                        // so the momentum-DOF lift cannot separate the two cylindrical planes.
+                        symbi_discretize::kernel_slug::ChartKeying::GridAxes,
                         self.eos_param,
                         sim.stage_input(),
                         &sim.fields.cons,

@@ -1214,10 +1214,11 @@ fn gen_rhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
 // spacetime only; name parallels the source-CFL so the fofc dispatch builds the matching string.
 fn gen_rhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
-    let name = format!(
-        "rhd_fofc_project{}{}_{ndim}d",
+    let name = symbi_discretize::kernel_slug::fofc_project_name(
+        "rhd",
         geom.suffix(),
-        geom.spacetime_suffix()
+        geom.spacetime.to_spacetime(),
+        ndim as usize,
     );
     let (k, writes) = symbi_discretize::gv::fofc_project_gr_gv(
         geom.coords,
@@ -1494,10 +1495,11 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // untouched and div(B) survives by construction. curved spacetime only.
 fn gen_rmhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
-    let name = format!(
-        "rmhd_fofc_project{}{}_{ndim}d",
+    let name = symbi_discretize::kernel_slug::fofc_project_name(
+        "rmhd",
         mhd_geom_slug(&geom),
-        geom.spacetime_suffix()
+        geom.spacetime.to_spacetime(),
+        ndim as usize,
     );
     let (k, writes) = symbi_discretize::gv::fofc_project_gr_mhd_gv(
         geom.coords,

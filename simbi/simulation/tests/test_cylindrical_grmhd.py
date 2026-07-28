@@ -60,7 +60,7 @@ def _run(p, d, ct, end_time=2.5, solver=None):
     p.end_time = end_time
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), f"run crashed at {ct}"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:

@@ -88,7 +88,7 @@ def _run(spacetime: Spacetime, spin: float) -> dict[str, np.ndarray]:
     p = _CartesianKerrBH3D(data_directory=Path(d))
     p.spacetime = spacetime
     p.kerr_spin = spin
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"3d cartesian kerr run (a={spin}) crashed"
     out = {}

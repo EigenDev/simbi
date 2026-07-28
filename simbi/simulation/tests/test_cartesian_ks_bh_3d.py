@@ -76,7 +76,7 @@ class _CartesianKsBH3D(SimbiProblem):
 def _run(excision: float) -> dict[str, np.ndarray]:
     d = tempfile.mkdtemp() + "/"
     p = _CartesianKsBH3D(excision_radius=excision, data_directory=Path(d))
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"3d cartesian KS run (r_exc={excision}) crashed"
     out = {}

@@ -113,7 +113,7 @@ class _MagnetizedVortex2D(SimbiProblem):
 def _run(nu: float, eta: float) -> dict[str, np.ndarray]:
     d = tempfile.mkdtemp() + "/"
     p = _MagnetizedVortex2D(nu=nu, eta=eta, data_directory=Path(d))
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"nonideal MHD run (nu={nu}, eta={eta}) crashed"
     out = {}

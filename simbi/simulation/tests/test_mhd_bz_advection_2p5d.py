@@ -27,7 +27,7 @@ def test_bz_advection_2p5d_out_of_plane_predictor() -> None:
     p.data_directory = d
     p.checkpoint_interval = 1.0e30
     p.end_time = 0.5  # half period -> the IC shifted by (0.5, 0.5)
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=4000)
     assert not glob.glob(os.path.join(d, "*crashed*")), "2.5D Bz advection run crashed"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:

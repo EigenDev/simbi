@@ -119,7 +119,7 @@ def _run(spin: float, spacetime: Spacetime = Spacetime.KERR_KS) -> dict[str, np.
     p = _CartesianKerrMhd3D(data_directory=Path(d))
     p.kerr_spin = spin
     p.spacetime = spacetime
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     finals = glob.glob(os.path.join(d, "*final*.h5"))
     assert finals, f"3d cartesian kerr GRMHD run (a={spin}) crashed"
     out = {}

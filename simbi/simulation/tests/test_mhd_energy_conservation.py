@@ -26,7 +26,7 @@ def _tau_sum(nx: int, end_time: float) -> float:
     p.data_directory = d
     p.checkpoint_interval = 1.0e30
     p.end_time = end_time
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*")), "run crashed"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:

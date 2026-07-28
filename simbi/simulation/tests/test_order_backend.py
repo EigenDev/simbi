@@ -46,7 +46,7 @@ def test_order1_emits_pcm_rk1() -> None:
 def test_order1_runs_through_rust_backend() -> None:
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
-        runner.run(_order_problem(1, d), compute_mode="cpu")
+        runner.run(_order_problem(1, d), compute_mode="cpu", max_steps=400)
         # final snapshot follows the <resolution>.chkpt.final[.unit].h5 convention.
         assert glob.glob(os.path.join(d, "*.chkpt.final*.h5"))
 
@@ -55,6 +55,6 @@ def test_order1_runs_through_rust_backend() -> None:
 def test_order2_runs_through_rust_backend() -> None:
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
-        runner.run(_order_problem(2, d), compute_mode="cpu")
+        runner.run(_order_problem(2, d), compute_mode="cpu", max_steps=400)
         # final snapshot follows the <resolution>.chkpt.final[.unit].h5 convention.
         assert glob.glob(os.path.join(d, "*.chkpt.final*.h5"))

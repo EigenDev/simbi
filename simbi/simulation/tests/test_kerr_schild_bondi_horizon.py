@@ -58,7 +58,7 @@ def test_ks_bondi_crosses_horizon_stable_and_positive() -> None:
         # the inner boundary must sit inside the horizon — that is the whole point.
         assert prob.bounds[0][0] < _HORIZON
 
-        runner.run(prob, compute_mode="cpu")
+        runner.run(prob, compute_mode="cpu", max_steps=4000)
 
         # a clean completion writes <res>.chkpt.final*.h5; a crash writes only crashed.h5.
         finals = glob.glob(os.path.join(d, "*.chkpt.final*.h5"))

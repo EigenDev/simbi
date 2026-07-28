@@ -40,7 +40,7 @@ def _run(data_dir: str):
     p.end_time = 0.5
     p.data_directory = data_dir
     p.checkpoint_interval = 0.5
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
 
     finals = glob.glob(os.path.join(data_dir, "*.chkpt.final*.h5"))
     assert finals, "3D cylindrical KS BH run crashed"

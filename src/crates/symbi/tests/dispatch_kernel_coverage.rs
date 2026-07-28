@@ -151,3 +151,166 @@ fn chi_family_is_baked_for_every_dimension() {
         }
     }
 }
+
+// =============================================================================
+// the CURVED-spacetime families.
+//
+// the gates above are FLAT-only, and they enumerate the four families a flat step
+// requests. that leaves the curved-only families — the wu 2017 source-admissibility CFL
+// and the admissible-boundary projection — outside any coverage at all, on both axes:
+// wrong spacetime AND absent from the family list.
+//
+// the gap was not hypothetical. the MHD projection dispatch built its name with an EMPTY
+// chart segment, on the reasoning that MHD carries no momentum-DOF lift. the bake names it
+// with the grid-axis chart segment, so the two agreed only on cartesian (segment empty
+// either way) and diverged on every curvilinear chart — the spherical GRMHD projection
+// panicked the first time a cell needed it, in 1D and 2D alike, and had therefore never
+// run. a name divergence must fail HERE, at a gate that builds both sides, rather than
+// mid-run inside a physics test whose failure names a missing kernel instead of a bug.
+//
+// the arms mirror the curved match arms of `hydro_dispatch!` / `mhd_dispatch!` in
+// symbi-py: those are the (dimension, chart, spacetime) combinations a config can select.
+// =============================================================================
+
+use symbi::regimes::substrate_kernels::{fofc_project_name, spacetime_slug};
+use symbi_discretize::kernel_slug::{ChartKeying, fofc_project_chart};
+use symbi_geometry::Spacetime;
+
+/// one CLI-reachable curved dispatch arm: the grid shape and background a config selects.
+/// `dof` is the momentum-component count — the spherical GR arms lift the azimuthal
+/// component (DOF = 3 on a 2-axis grid), which is what makes the hydro chart segment
+/// `_sph_swirl` rather than `_sph`.
+struct CurvedArm {
+    dims: usize,
+    coords: Geometry,
+    axes: &'static [usize],
+    dof: usize,
+    spacetime: Spacetime,
+}
+
+const fn arm(
+    dims: usize,
+    coords: Geometry,
+    axes: &'static [usize],
+    dof: usize,
+    spacetime: Spacetime,
+) -> CurvedArm {
+    CurvedArm {
+        dims,
+        coords,
+        axes,
+        dof,
+        spacetime,
+    }
+}
+
+/// the curved GRHD arms of `hydro_dispatch!`.
+fn curved_hydro_arms() -> Vec<CurvedArm> {
+    use Geometry::{Cartesian, Cylindrical, Spherical};
+    use Spacetime::{KerrKS, Schwarzschild, SchwarzschildKS};
+    vec![
+        arm(1, Spherical, &[0], 1, Schwarzschild),
+        arm(1, Spherical, &[0], 1, SchwarzschildKS),
+        // the 2D spherical wedge carries the azimuthal momentum lift.
+        arm(2, Spherical, &[0, 1], 3, Schwarzschild),
+        arm(2, Spherical, &[0, 1], 3, SchwarzschildKS),
+        arm(2, Spherical, &[0, 1], 3, KerrKS),
+        arm(2, Cartesian, &[0, 1], 2, SchwarzschildKS),
+        arm(3, Cartesian, &[0, 1, 2], 3, SchwarzschildKS),
+        arm(2, Cartesian, &[0, 1], 2, KerrKS),
+        arm(3, Cartesian, &[0, 1, 2], 3, KerrKS),
+        arm(2, Cylindrical, &[0, 2], 3, SchwarzschildKS),
+        arm(3, Cylindrical, &[0, 1, 2], 3, SchwarzschildKS),
+        arm(3, Cylindrical, &[0, 1, 2], 3, KerrKS),
+    ]
+}
+
+/// the curved GRMHD arms of `mhd_dispatch!`. MHD momentum is always a 3-vector, so the
+/// chart segment keys on the grid-axis set rather than on the DOF lift.
+fn curved_mhd_arms() -> Vec<CurvedArm> {
+    use Geometry::{Cartesian, Spherical};
+    use Spacetime::{KerrKS, Schwarzschild, SchwarzschildKS};
+    vec![
+        arm(1, Spherical, &[0], 3, Schwarzschild),
+        arm(1, Spherical, &[0], 3, SchwarzschildKS),
+        arm(2, Spherical, &[0, 1], 3, Schwarzschild),
+        arm(2, Spherical, &[0, 1], 3, KerrKS),
+        arm(2, Cartesian, &[0, 1], 3, SchwarzschildKS),
+        arm(3, Cartesian, &[0, 1, 2], 3, SchwarzschildKS),
+        arm(2, Cartesian, &[0, 1], 3, KerrKS),
+        arm(3, Cartesian, &[0, 1, 2], 3, KerrKS),
+    ]
+}
+
+#[test]
+fn every_curved_admissibility_kernel_is_emitted() {
+    let mut missing = Vec::new();
+
+    // GRHD: the chart segment comes from the SAME derivation the dispatch runs. calling
+    // `geom_suffix` directly here would re-spell it, and a gate that re-spells the thing it
+    // is checking passes whatever the dispatch does — which is exactly how both call sites
+    // shipped an empty segment unnoticed.
+    for a in curved_hydro_arms() {
+        let chart = fofc_project_chart(ChartKeying::MomentumDof, a.coords, a.axes, a.dof, a.dims);
+        assert_family(
+            &mut missing,
+            fofc_project_name("rhd", chart, a.spacetime, a.dims),
+        );
+        assert_family(
+            &mut missing,
+            format!(
+                "rhd_source_cfl{chart}{}_{}d",
+                spacetime_slug(a.spacetime),
+                a.dims
+            ),
+        );
+    }
+
+    // GRMHD: same derivation, keyed on the grid-axis set.
+    for a in curved_mhd_arms() {
+        let chart = fofc_project_chart(ChartKeying::GridAxes, a.coords, a.axes, a.dof, a.dims);
+        assert_family(
+            &mut missing,
+            fofc_project_name("rmhd", chart, a.spacetime, a.dims),
+        );
+        assert_family(
+            &mut missing,
+            format!(
+                "rmhd_source_cfl{chart}{}_{}d",
+                spacetime_slug(a.spacetime),
+                a.dims
+            ),
+        );
+    }
+
+    assert!(
+        missing.is_empty(),
+        "{} curved-spacetime kernel(s) the dispatch can request are NOT emitted and are not \
+         in KNOWN_UNBAKED (mid-run expect_kernel panic):\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
+}
+
+#[test]
+fn the_projection_name_is_built_once_for_both_sides() {
+    // the bake and the dispatch must not be able to spell this kernel two ways. they call
+    // ONE builder, so the chart segment and the spacetime slug appear in one order, in one
+    // place. this pins the resulting shape so a change to it is a deliberate edit rather
+    // than a silent divergence that only shows up on one chart.
+    assert_eq!(
+        fofc_project_name("rmhd", "_sph", Spacetime::Schwarzschild, 2),
+        "rmhd_fofc_project_sph_schw_2d"
+    );
+    // cartesian's chart segment is empty, which is exactly why an empty segment passed
+    // unnoticed there while breaking every curvilinear chart.
+    assert_eq!(
+        fofc_project_name("rmhd", "", Spacetime::SchwarzschildKS, 3),
+        fofc_project_name("rmhd", "", Spacetime::SchwarzschildKS, 3),
+    );
+    assert_ne!(
+        fofc_project_name("rmhd", "", Spacetime::Schwarzschild, 2),
+        fofc_project_name("rmhd", "_sph", Spacetime::Schwarzschild, 2),
+        "the chart segment must change the name, else the dispatch cannot select a chart"
+    );
+}

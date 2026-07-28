@@ -51,7 +51,7 @@ def _run_michel(ct: CtMethod):
     p.end_time = 10.0
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), f"michel-2d crashed at {ct}"
     first = sorted(glob.glob(os.path.join(d, "*chkpt.000_000*.h5")))[0]
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
@@ -118,7 +118,7 @@ def test_field_loop_preserves_divergence_and_is_stable(ct) -> None:
     p.end_time = 6.0
     p.data_directory = d
     p.checkpoint_interval = 100.0
-    runner.run(p, compute_mode="cpu")
+    runner.run(p, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*.h5")), f"field loop crashed at {ct}"
     final = glob.glob(os.path.join(d, "*final*.h5"))[0]
     with h5py.File(final) as h:

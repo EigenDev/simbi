@@ -647,7 +647,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     crate::regimes::substrate_kernels::fofc_project(
                         sim,
                         "rhd",
-                        dof_sfx,
+                        // hydro keys its chart on the momentum-DOF lift: the 2-axis spherical
+                        // wedge carrying azimuthal momentum is a different kernel from the plain
+                        // 2D spherical one.
+                        symbi_discretize::kernel_slug::ChartKeying::MomentumDof,
                         self.gamma,
                         sim.stage_input(),
                         &sim.fields.cons,

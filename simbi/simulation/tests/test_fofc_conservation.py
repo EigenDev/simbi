@@ -41,7 +41,7 @@ def _conserved_totals(end_time: float) -> tuple[float, float, float]:
     prob.data_directory = d
     prob.checkpoint_interval = 1.0e30
     prob.end_time = end_time
-    runner.run(prob, compute_mode="cpu")
+    runner.run(prob, compute_mode="cpu", max_steps=400)
     assert not glob.glob(os.path.join(d, "*crashed*")), "run crashed"
     final = glob.glob(os.path.join(d, "*final*.h5"))
     assert final, "no final checkpoint written"
