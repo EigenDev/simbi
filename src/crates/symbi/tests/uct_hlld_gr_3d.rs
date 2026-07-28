@@ -111,7 +111,7 @@ fn swirl_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
 }
 
 macro_rules! gr_divb_gate {
-    ($metric:expr, $metric_ty:ty, $x_lo:expr, $t_final:expr, $min_steps:expr, $what:literal) => {{
+    ($metric:expr, $metric_ty:ty, $x_lo:expr, $t_final:expr, $min_steps:expr, $solver:expr, $ct:expr, $what:literal) => {{
         type Sim = SimState<Rmhd, 3, $metric_ty, IdealGas<f64>, CpuSpace, HostMemory>;
         let dx = 1.0 / N as f64;
         // seed the DENSITIZED flux uniform: bface = B0 / sqrt(gamma)(face), so
@@ -146,9 +146,9 @@ macro_rules! gr_divb_gate {
         );
         let sub =
             RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
-                .with_solver(Solver::Hlld)
-                .expect("hlld")
-                .ct_method(CtMethod::Uct);
+                .with_solver($solver)
+                .expect("solver")
+                .ct_method($ct);
         let mut steps: u64 = 0;
         evolve_with_callback(&mut sim, &sub, $t_final, 1, |s| {
             let (max_div, max_b) = max_divb(s, &metric, $x_lo, inv_d);
@@ -182,6 +182,8 @@ fn schwarzschild_ks_3d_uct_hlld_preserves_divb() {
         1.2,
         T_FINAL,
         5,
+        Solver::Hlld,
+        CtMethod::Uct,
         "ks 3d uct-hlld"
     );
 }
@@ -197,33 +199,29 @@ fn spinning_kerr_3d_uct_hlld_preserves_divb() {
         1.2,
         T_FINAL,
         5,
+        Solver::Hlld,
+        CtMethod::Uct,
         "kerr 3d uct-hlld"
     );
 }
 
-#[test]
-fn zero_mass_ks_3d_matches_flat_to_roundoff() {
-    // M = 0 collapses the kerr-schild chart to minkowski exactly (the metric
-    // factors evaluate to exact 1.0 / 0.0), so the GR UCT-HLLD chain must
-    // reproduce the flat chain on identical initial data. the two kernels
-    // assemble algebraically identical arithmetic through different f64
-    // operation orders, so the comparison is roundoff-tight; the differing
-    // operation orders rule out a bitwise match.
-    // ONE step: t_final sits below both charts' CFL estimates, so the loop's
-    // dt = min(cfl, t_final - t) clamp pins the SAME dt on both chains (the
-    // GR and flat wave-speed maps are different, both valid, bounds — free
-    // stepping would diverge in step count while agreeing on physics).
-    const T_ONE: f64 = 0.005;
-    let sim_gr = gr_divb_gate!(
-        SchwarzschildKSCartesian { mass: 0.0 },
-        SchwarzschildKSCartesian<f64>,
-        1.2,
-        T_ONE,
-        1,
-        "ks M=0"
-    );
+// M = 0 collapses the kerr-schild chart to minkowski exactly (the metric factors evaluate to exact
+// 1.0 / 0.0), so a GR chain must reproduce the FLAT chain on identical initial data, whatever
+// solver and CT method it runs. the two kernels assemble algebraically identical arithmetic through
+// different f64 operation orders, so the comparison is roundoff-tight rather than bitwise.
+//
+// this is the sharpest available probe of the wave-speed fan, because both chains build theirs the
+// same way: the flat and curved HLL fluxes alike READ the per-cell speeds a separate pass
+// materializes. if either chain's substrate skips that pass its fan degenerates onto the shift
+// (zero on both sides at M = 0) while the other keeps the real magnetosonic bounds, and the two
+// disagree at O(1) rather than at roundoff.
+//
+// ONE step: t_final sits below both charts' CFL estimates, so the loop's dt = min(cfl, t_final - t)
+// clamp pins the SAME dt on both chains (the GR and flat wave-speed maps are different, both valid,
+// bounds — free stepping would diverge in step count while agreeing on physics).
+const T_ONE: f64 = 0.005;
 
-    type FlatSim = SimState<Rmhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+fn flat_reference(solver: Solver, ct: CtMethod) -> FlatSim {
     let dx = 1.0 / N as f64;
     let mut flat = FlatSim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N; 3])
@@ -238,11 +236,20 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
         .build();
     let sub =
         RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &flat.geom.allocated)
-            .with_solver(Solver::Hlld)
-            .expect("hlld")
-            .ct_method(CtMethod::Uct);
+            .with_solver(solver)
+            .expect("solver")
+            .ct_method(ct);
     evolve_with_callback(&mut flat, &sub, T_ONE, 1, |_| {}).expect("flat evolve");
+    flat
+}
 
+type FlatSim = SimState<Rmhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+
+fn assert_gr_matches_flat(
+    sim_gr: &SimState<Rmhd, 3, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>,
+    flat: &FlatSim,
+    what: &str,
+) {
     assert_eq!(
         sim_gr.iteration, flat.iteration,
         "step counts diverged at M = 0"
@@ -283,8 +290,53 @@ fn zero_mass_ks_3d_matches_flat_to_roundoff() {
     }
     assert!(
         worst < 1e-12,
-        "M = 0 kerr-schild diverges from flat: rel {worst:e} at field {} cell {:?}",
+        "{what}: M = 0 kerr-schild diverges from flat: rel {worst:e} at field {} cell {:?}",
         worst_at.0,
         worst_at.1,
+    );
+}
+
+#[test]
+fn zero_mass_ks_3d_matches_flat_to_roundoff() {
+    let sim_gr = gr_divb_gate!(
+        SchwarzschildKSCartesian { mass: 0.0 },
+        SchwarzschildKSCartesian<f64>,
+        1.2,
+        T_ONE,
+        1,
+        Solver::Hlld,
+        CtMethod::Uct,
+        "ks M=0 hlld-uct"
+    );
+    assert_gr_matches_flat(
+        &sim_gr,
+        &flat_reference(Solver::Hlld, CtMethod::Uct),
+        "hlld + uct",
+    );
+}
+
+#[test]
+fn zero_mass_ks_3d_hlle_contact_matches_flat_to_roundoff() {
+    // the HLLE + contact combination, which neither the divergence gates above nor any other
+    // curved test exercises. it is the one arm whose fan is assembled ENTIRELY from the
+    // materialized per-cell speeds — HLLD solves its own five-wave fan and the rusanov fallback
+    // uses the state-independent light-cone bound, so both are blind to whether that pass ran, and
+    // UCT forces it to run for its own edge coefficients. only here does the flux stand or fall on
+    // the producer, and only here does the whole cylindrical GRMHD family live: those charts bake
+    // no HLLD arm at all.
+    let sim_gr = gr_divb_gate!(
+        SchwarzschildKSCartesian { mass: 0.0 },
+        SchwarzschildKSCartesian<f64>,
+        1.2,
+        T_ONE,
+        1,
+        Solver::Hlle,
+        CtMethod::Contact,
+        "ks M=0 hlle-contact"
+    );
+    assert_gr_matches_flat(
+        &sim_gr,
+        &flat_reference(Solver::Hlle, CtMethod::Contact),
+        "hlle + contact",
     );
 }

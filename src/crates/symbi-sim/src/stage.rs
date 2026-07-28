@@ -29,6 +29,41 @@ use symbi_algebra::OrderedNumeric;
 use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
+/// arms `workspace.stage_writes` for one stage and disarms it on drop, so the audit is scoped to
+/// the stage pipeline rather than to the process. a caller that drives a substrate entry point
+/// directly — a harness that seeds flux buffers by hand and then invokes one kernel — is outside
+/// any stage, and "was this written earlier in the stage" has no meaning there.
+#[cfg(debug_assertions)]
+struct StageWriteAudit<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    &'a FieldStore<D, DOF, Mem, Sc>,
+)
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric;
+
+#[cfg(debug_assertions)]
+impl<'a, const D: usize, const DOF: usize, Mem, Sc> StageWriteAudit<'a, D, DOF, Mem, Sc>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    fn arm(sim: &'a FieldStore<D, DOF, Mem, Sc>) -> Self {
+        *sim.workspace.stage_writes.lock().unwrap() = Some(Default::default());
+        Self(sim)
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<const D: usize, const DOF: usize, Mem, Sc> Drop for StageWriteAudit<'_, D, DOF, Mem, Sc>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    fn drop(&mut self) {
+        *self.0.workspace.stage_writes.lock().unwrap() = None;
+    }
+}
+
 /// the regime-independent data-flow sets a phase reads/writes; the fold
 /// asserts (debug) that a phase's reads were produced earlier in the stage.
 #[derive(Clone, Copy)]
@@ -261,6 +296,14 @@ where
     sim.workspace
         .stage_input_is_un
         .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
+
+    // arm the stage-local write audit for the duration of this stage. the fluxes and per-cell wave
+    // speeds carry nothing across a stage boundary — whatever a previous stage left in them
+    // describes a state that no longer exists — so each stage starts from an empty ledger and every
+    // read of one is checked against THIS stage's producers. the guard disarms on every exit path,
+    // including the fofc retry.
+    #[cfg(debug_assertions)]
+    let _audit = StageWriteAudit::arm(sim);
 
     let tag = stage_tag(args.stage, args.n_stages);
     let mut have = FieldSet::CONS.or(FieldSet::PRIM);

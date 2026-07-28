@@ -292,6 +292,62 @@ fn every_curved_admissibility_kernel_is_emitted() {
     );
 }
 
+// the GRMHD HLL face flux does not compute its own fan: it READS `wave_speed_l[dir]` and
+// `wave_speed_r[dir]` from the two cells sharing each face (the davis estimate), and a separate
+// per-cell pass materializes them. that producer/consumer coupling is invisible in the names, and
+// its failure mode is silent rather than loud: with the producer absent the flux reads the fields'
+// ZERO initialization, so both fan speeds collapse onto the shift and every axis whose shift
+// component vanishes loses its dissipation entirely. the sweep on that axis becomes one-sided and
+// odd-even decoupled — no crash, no missing-kernel panic, just a smooth stationary state growing a
+// grid-scale checkerboard over tens of dynamical times.
+//
+// so assert BOTH halves: the producer exists for every curved family whose HLL flux exists, and the
+// flux really is a consumer (otherwise the pairing is vacuous and would keep passing if the flux
+// were later changed to compute its speeds inline).
+#[test]
+fn every_curved_hll_flux_has_the_wave_speeds_it_reads() {
+    use symbi::regimes::substrate_kernels::kernel_bindings;
+    use symbi_ir::FieldRef;
+
+    let mut missing = Vec::new();
+    let mut non_consumers = Vec::new();
+    for a in curved_mhd_arms() {
+        let chart = mhd_geom_suffix(a.coords, a.axes);
+        let st = spacetime_slug(a.spacetime);
+        let dims = a.dims;
+        // the HLL arm carries no solver tag; the HLLD arm solves its own five-wave fan and the
+        // rusanov fallback uses the state-independent light-cone bound, so neither is a consumer.
+        let flux = format!("rmhd_face_flux{chart}{st}_{dims}d_0");
+        if !kernel_exists(&flux) {
+            continue;
+        }
+        let reads = kernel_bindings(&flux).iter().any(|(field, is_output)| {
+            !is_output && matches!(field, FieldRef::WaveSpeedL(_) | FieldRef::WaveSpeedR(_))
+        });
+        if !reads {
+            non_consumers.push(flux.clone());
+        }
+        assert_family(
+            &mut missing,
+            format!("rmhd_wave_speeds_cell{chart}{st}_{dims}d"),
+        );
+    }
+
+    assert!(
+        non_consumers.is_empty(),
+        "the curved HLL flux no longer reads the materialized per-cell wave speeds, so this gate \
+         asserts nothing: {}",
+        non_consumers.join(", ")
+    );
+    assert!(
+        missing.is_empty(),
+        "{} curved GRMHD family/families bake an HLL face flux with NO per-cell wave-speed \
+         producer. the flux would read zeros and run with no dissipation:\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
+}
+
 #[test]
 fn the_projection_name_is_built_once_for_both_sides() {
     // the bake and the dispatch must not be able to spell this kernel two ways. they call

@@ -2031,10 +2031,13 @@ fn gen_rmhd_gr_uct_hlld(out_dir: &str, geom: &Geom) {
     );
 }
 
-fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
+// the per-cell shifted BF-bound wave speeds on a curved chart -> wave_speed_l/r[d]. TWO consumers:
+// the GR HLL face flux (its davis fan reads the two cells sharing each face) and the GR-UCT edge
+// EMF (its corner coefficients). every GR RMHD family that bakes an HLL face flux must bake this,
+// or that flux reads the fields' zero initialization and runs with no dissipation.
+fn gen_rmhd_gr_wave_speeds_cell(out_dir: &str, ndim: u8, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let st = geom.spacetime_suffix();
-    let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
         geom.spacetime,
         geom.coords,
@@ -2043,11 +2046,18 @@ fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     );
     emit_gv(
         out_dir,
-        &format!("rmhd_wave_speeds_cell{gs}{st}_2d"),
-        2,
+        &format!("rmhd_wave_speeds_cell{gs}{st}_{ndim}d"),
+        ndim,
         &k,
         &w,
     );
+}
+
+fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
+    let gs = mhd_geom_slug(geom);
+    let st = geom.spacetime_suffix();
+    let ok = gr_ct_out_of_plane(geom);
+    gen_rmhd_gr_wave_speeds_cell(out_dir, 2, geom);
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_gv(
         geom.spacetime,
         geom.coords,
@@ -2069,19 +2079,7 @@ fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
 fn gen_rmhd_gr_uct_3d(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let st = geom.spacetime_suffix();
-    let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
-        geom.spacetime,
-        geom.coords,
-        &geom.spacing,
-        &geom.axes,
-    );
-    emit_gv(
-        out_dir,
-        &format!("rmhd_wave_speeds_cell{gs}{st}_3d"),
-        3,
-        &k,
-        &w,
-    );
+    gen_rmhd_gr_wave_speeds_cell(out_dir, 3, geom);
     for dir in 0..3usize {
         let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_3d_gv(
             dir,
@@ -3150,6 +3148,7 @@ fn main() {
     ] {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
+        gen_rmhd_gr_wave_speeds_cell(&out_dir, 1, &geom);
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
         gen_rmhd_face_flux_gr_mode(&out_dir, 1, 0, geom.clone(), false, true); // FOFC rusanov fallback

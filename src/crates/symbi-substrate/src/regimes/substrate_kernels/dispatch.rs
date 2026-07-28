@@ -760,6 +760,68 @@ where
     field_max_reduce(scratch, &sim.geom.allocated) <= 0.5
 }
 
+/// every STAGE-LOCAL field a kernel reads must have been written by an earlier dispatch of the
+/// same stage; every one it writes joins the ledger. see `FieldRef::is_stage_local` for which
+/// fields those are and why the persistent ones are exempt.
+///
+/// this catches the case a name-level coverage gate cannot: the producer kernel EXISTS and the
+/// consumer kernel EXISTS, but the substrate decided not to run the producer for this
+/// configuration. the consumer then reads a zero-initialized buffer, which for a wave-speed pair
+/// means an HLL fan with no dissipation — no panic, no missing kernel, just a silently
+/// non-dissipative sweep that grows a grid-scale checkerboard many dynamical times later.
+///
+/// debug builds only: it is a bug detector, not an invariant the physics depends on, and the
+/// per-dispatch set operations have no place in a production step.
+#[cfg(debug_assertions)]
+fn audit_stage_local_reads<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'a FieldStore<D, DOF, Mem, Sc>,
+    name: &str,
+    bindings: &[(symbi_ir::FieldRef, bool)],
+    mut resolve: impl FnMut(symbi_ir::FieldRef) -> &'a Field<Sc, D, Mem>,
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    // the buffer's own address is the identity: the several wire names that resolve to one field
+    // (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`) all resolve to the SAME reference, so aliases
+    // need no canonical spelling.
+    let id = |f: &Field<Sc, D, Mem>| f as *const _ as usize;
+    let mut ledger = sim.workspace.stage_writes.lock().unwrap();
+    // outside a stage there is no "earlier in this stage" to check against.
+    let Some(written) = ledger.as_mut() else {
+        return;
+    };
+    for &(fref, is_output) in bindings {
+        if is_output || !fref.is_stage_local() {
+            continue;
+        }
+        assert!(
+            written.contains(&id(resolve(fref))),
+            "'{name}' reads the stage-local field {fref:?}, which nothing has written this stage. \
+             the pass that produces it did not run for this configuration, so the kernel is \
+             consuming a zero-initialized buffer"
+        );
+    }
+    for &(fref, is_output) in bindings {
+        if is_output {
+            written.insert(id(resolve(fref)));
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+fn audit_stage_local_reads<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    _sim: &'a FieldStore<D, DOF, Mem, Sc>,
+    _name: &str,
+    _bindings: &[(symbi_ir::FieldRef, bool)],
+    _resolve: impl FnMut(symbi_ir::FieldRef) -> &'a Field<Sc, D, Mem>,
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+}
+
 /// bind a kernel's buffers by its recorded manifest, then dispatch. the buffer order +
 /// input/output split come from the artifact (`kernel_bindings`), so no caller hand-builds
 /// a per-kernel layout. `exec` is the kernel's iteration domain; `pre`/`scratch`/`dir` feed
@@ -780,6 +842,9 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let bindings = kernel_bindings(name);
     let (inputs, outputs) = bind_manifest(&bindings, |fref| {
+        resolve_path(sim, Some(pre), scratch, dir, fref)
+    });
+    audit_stage_local_reads(sim, name, &bindings, |fref| {
         resolve_path(sim, Some(pre), scratch, dir, fref)
     });
     // PER-BUFFER LAYOUT: every buffer's (lo, extent, vol) comes from its OWN `Field::domain()`
