@@ -107,7 +107,7 @@ pub(crate) fn kernel_field_binds(name: &str) -> Arc<[(FieldBind, bool)]> {
     )
 }
 
-pub(crate) fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
+pub fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
     static CACHE: OnceLock<RwLock<HashMap<String, Arc<[(FieldRef, bool)]>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
     // fast path: every dispatch hits this after warmup. read-only, no contention.

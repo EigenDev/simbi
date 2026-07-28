@@ -145,6 +145,35 @@ pub enum FieldRef {
 }
 
 impl FieldRef {
+    /// true for a field that is DERIVED FROM THE CURRENT PRIMITIVES WITHIN A STAGE and carries no
+    /// meaning across a stage boundary: the intercell fluxes (gas, induction, passive scalar) and
+    /// the per-cell Riemann wave speeds. every such field is produced by an earlier pass of the
+    /// same stage and consumed by a later one, so a read that finds no producer is a defect
+    /// regardless of what the buffer happens to hold.
+    ///
+    /// the distinction matters because it separates the two ways a buffer can be read. the
+    /// conserved state, the primitives, the staggered face field and the stage snapshots all
+    /// persist — a pass may legitimately read what a PREVIOUS stage or the initial condition left
+    /// there, and "not written yet in this stage" says nothing about them. these carry no such
+    /// history: an unwritten one holds its zero initialization, and zero wave speeds silently
+    /// collapse an HLL fan onto the shift, leaving a one-sided sweep with no dissipation on any
+    /// axis whose shift component vanishes.
+    pub fn is_stage_local(&self) -> bool {
+        matches!(
+            self,
+            FieldRef::State {
+                slot: StateSlot::Flux,
+                ..
+            } | FieldRef::MassFlux(_)
+                | FieldRef::NrgFlux(_)
+                | FieldRef::MomFlux { .. }
+                | FieldRef::BFlux { .. }
+                | FieldRef::FluxMag(_)
+                | FieldRef::WaveSpeedL(_)
+                | FieldRef::WaveSpeedR(_)
+        )
+    }
+
     // concise constructors for the conserved/flux slot family — the producers mint these
     // as typed values, so a mistyped binding is a compile
     // error caught at build time. they wrap `State { slot, comp }` so the call sites stay readable

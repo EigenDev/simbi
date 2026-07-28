@@ -556,9 +556,8 @@ pub fn rmhd_magnetosonic_cfl_map_gr_gv(
     for d in 0..ndim {
         let c = axes[d];
         let nhat = Tensor::<Gv, 3>::unit(c);
-        let (sl, sr) = symbi_hydro::rmhd::rmhd_magnetosonic_cfl_speeds_gr(
-            &eos, &prim, &nhat, &metric, alpha,
-        );
+        let (sl, sr) =
+            symbi_hydro::rmhd::rmhd_magnetosonic_cfl_speeds_gr(&eos, &prim, &nhat, &metric, alpha);
         let lam_c = (sl - beta[c]).abs().max((sr - beta[c]).abs());
         let h_flat = gv_scale_factor(coords, c, &pos);
         lambda = lambda.max(lam_c * h_flat * inv_w[d]);
@@ -770,12 +769,18 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     (end_trace(), writes)
 }
 
-/// the geometric-source resolution rate for GR-RMHD. the homogeneous `|S|/|U|` rate measures the
-/// fractional state change induced by curvature without converting distance to the strict
-/// admissible boundary into a global time scale. the q/psi projection and first-order flux
-/// correction enforce admissibility after the coupled flux/source update. the momentum source takes
-/// `p = 0` and the energy source the full pressure, matching the fused godunov update. metric at the
-/// cell centroid, ungridded polar slot at pi/2.
+/// the SOURCE-admissibility CFL for GR-RMHD — the wu 2017 `lambda_S` mechanism. the covariant
+/// geodesic + EM-stress source advances `U -> U + dt S`, and the step must leave the result inside
+/// the admissible set: `D > 0`, `q(U) = E - sqrt(D^2 + |S|^2) > 0` AND `psi(U) > 0` (Wu & Tang,
+/// theorem 2.1).
+///
+/// the rate is the RECIPROCAL of the largest time the source ray may be followed before it leaves
+/// that set, located by bisection along the ray. no closed-form rate reproduces it: `psi` carries
+/// the magnetic field at FIXED `|B|`, which does not scale with `(D, S, E)`, so membership along
+/// the ray is not a function of the state's magnitude alone the way the hydrodynamic cone's is.
+///
+/// the momentum source takes `p = 0` and the energy source the full pressure, matching the fused
+/// godunov update. metric at the cell centroid, ungridded polar slot at pi/2.
 pub fn rmhd_source_cfl_gr_gv(
     spacetime: Spacetime,
     coords: Coords,
@@ -1029,8 +1034,8 @@ pub fn rmhd_source_cfl_gr_gv(
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
     // interior reaches the exterior, so an interior cell's admissibility rate carries no information
     // about exterior stability. infalling gas drives the interior pressure toward zero, which sends
-    // the cone margin q -> 0 and the source rate lambda_S = (|S_tau| + ||S_mom||_gamma)/q -> inf, so
-    // without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
+    // the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to infinity
+    // with it, so without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
     // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
     // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
     //
@@ -1066,8 +1071,12 @@ pub fn rmhd_source_cfl_gr_gv(
 /// the SOURCE-admissibility CFL for GR-HYDRO — the wu 2017 lambda_S mechanism, the perfect-fluid
 /// analogue of [`rmhd_source_cfl_gr_gv`] (no magnetic field). the covariant geodesic source
 /// S = (S_mom, S_tau) advances U -> U + dt S; the timestep must keep U + dt S inside the admissible
-/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0 (E = tau + D). lambda_S = (|S_tau| +
-/// ||S_mom||_gamma)/q(U), added into the CFL scratch alongside the flux light-cone rate. `ncomp` is
+/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0 (E = tau + D). without `psi` the cone is
+/// homogeneous in the state, so the rate is available in CLOSED FORM as the sum of the two orders
+/// at which the margin is consumed: the first-order `(|beta.Smom|/alpha + |S.Smom|/root)/q` and the
+/// second-order `|Smom| / sqrt(2 root q)` derived below, `root = sqrt(D^2 + |S|^2)`. the second term
+/// is what survives where cold gas at rest kills the first. added into the CFL scratch alongside
+/// the flux light-cone rate. `ncomp` is
 /// the momentum DOF (1..3): momentum/velocity slots >= ncomp carry zero, so the metric-3D
 /// contraction reduces to the actual gridded momenta. the energy input to the source is
 /// e = rho + tau + p (the total energy density), matching the fused godunov hydro source.
@@ -1309,8 +1318,8 @@ pub fn rhd_source_cfl_gr_gv(
     // r_+ = M + sqrt(M^2 - a^2) is a one-way causal boundary on a horizon-penetrating chart: nothing
     // interior reaches the exterior, so an interior cell's admissibility rate carries no information
     // about exterior stability. infalling gas drives the interior pressure toward zero, which sends
-    // the cone margin q -> 0 and the source rate lambda_S = (|S_tau| + ||S_mom||_gamma)/q -> inf, so
-    // without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
+    // the cone margin q = E - sqrt(D^2 + |S|^2) to zero and the source rate lambda_S to infinity
+    // with it, so without this mask a handful of sub-horizon cells set dt for the whole grid — measured on the
     // spinning magnetized torus, 24 cells lying between the excision surface and r_+ held lambda_S at
     // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
     //
@@ -1651,31 +1660,75 @@ pub fn constraint_projection_gv(
         match (spacetime, coords) {
             (Spacetime::Schwarzschild, _) => {
                 let m = Schwarzschild { mass };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
                 let m = SchwarzschildKSCartesian { mass };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
                 let m = SchwarzschildKSCylindrical { mass };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::SchwarzschildKS, _) => {
                 let m = SchwarzschildKS { mass };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::KerrKS, Coords::Cartesian) => {
-                let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                let m = KerrKSCartesian {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::KerrKS, Coords::Cylindrical) => {
-                let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                let m = KerrKSCylindrical {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::KerrKS, _) => {
-                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-                (m.spatial_metric_inv(x), m.spatial_metric(x), m.lapse(x), m.shift(x))
+                let m = KerrKS {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                (
+                    m.spatial_metric_inv(x),
+                    m.spatial_metric(x),
+                    m.lapse(x),
+                    m.shift(x),
+                )
             }
             (Spacetime::Minkowski, _) => (
                 Matrix::identity(),
@@ -1698,7 +1751,9 @@ pub fn constraint_projection_gv(
     // the blended STORED state, mapped to the eulerian slots the admissible set is defined on.
     let blend_slots = |t: Gv| -> (Gv, Tensor<Gv, 3>, Gv) {
         let den = a_den + t * (x_den - a_den);
-        let mom = Tensor::new(std::array::from_fn(|k| a_mom[k] + t * (x_mom[k] - a_mom[k])));
+        let mom = Tensor::new(std::array::from_fn(|k| {
+            a_mom[k] + t * (x_mom[k] - a_mom[k])
+        }));
         let ehat = a_nrg + t * (x_nrg - a_nrg);
         (den, mom, ehat)
     };
@@ -1727,9 +1782,15 @@ pub fn constraint_projection_gv(
         eps_q: rel * state_scale,
         eps_psi: rel * state_scale * state_scale.sqrt(),
     };
-    let temperature = TemperatureFloor { f_min: Gv::scalar("floor_temperature") };
-    let magnetization = MagnetizationCeiling { sigma_max: Gv::scalar("ceiling_magnetization") };
-    let density = DensityFloor { den_min: Gv::scalar("floor_density") };
+    let temperature = TemperatureFloor {
+        f_min: Gv::scalar("floor_temperature"),
+    };
+    let magnetization = MagnetizationCeiling {
+        sigma_max: Gv::scalar("ceiling_magnetization"),
+    };
+    let density = DensityFloor {
+        den_min: Gv::scalar("floor_density"),
+    };
     let family: Vec<&dyn StateConstraint<Gv>> = vec![&g, &temperature, &magnetization, &density];
 
     let thetas = constraint_thetas(&family, &blend, 20);
@@ -1754,7 +1815,11 @@ pub fn constraint_projection_gv(
         ("binding".to_string(), "binding".into(), binding.node()),
     ];
     for k in 0..3 {
-        writes.push((format!("x_mom_{k}"), format!("x_mom_{k}").into(), mom[k].node()));
+        writes.push((
+            format!("x_mom_{k}"),
+            format!("x_mom_{k}").into(),
+            mom[k].node(),
+        ));
     }
     (end_trace(), writes)
 }

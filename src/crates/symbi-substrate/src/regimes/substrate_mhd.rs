@@ -11,6 +11,11 @@
 //   - `R::SPEC.materializes_wave_speeds` -> RMHD writes the quartic ws_l/ws_r in a
 //                                           `wave_speeds` pass for the HLLE flux to read;
 //                                           NMHD/iMHD compute the magnetosonic speed inline
+//
+// on a CURVED chart that pass is conditional rather than regime-fixed, because two independent
+// kernels may consume its output: the HLL face flux (which reads the per-cell speeds instead of
+// solving its own fan — unlike the HLLD and rusanov arms) and the UCT edge EMF. the condition is
+// read off the flux kernel's OWN manifest, so it cannot drift from what that kernel actually does.
 // the gas godunov + the ENTIRE constrained-transport stack are regime-agnostic and delegate
 // to `mhd_substrate` (the SAME AOT kernels). the per-regime structs (`RmhdSubstrateKernelSet`
 // etc.) are now back-compat type aliases of this one.
@@ -27,8 +32,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
-use symbi_ir::ScalarRef;
 use symbi_ir::algebra::Scalar;
+use symbi_ir::{FieldRef, ScalarRef};
 use symbi_xpu::MemorySpace;
 
 use crate::kernels::support::cfl_from_lambda;
@@ -36,8 +41,8 @@ use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
     RegimeKind, RuntimeSource, ScalarBind, Solver, dispatch_c2p_status, dispatch_driven_boundaries,
-    dispatch_named, dispatch_runtime_source, geom_scalar, kernel_geom, mhd_flux_suffix,
-    mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
+    dispatch_named, dispatch_runtime_source, geom_scalar, kernel_bindings, kernel_geom,
+    mhd_flux_suffix, mhd_geom_suffix, motion_scalar, scalars_for, spacetime_slug,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::CtMethod;
@@ -329,6 +334,43 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    /// the face-flux kernel name for one sweep direction. flat charts key on the geometry + the
+    /// solver's own suffix; curved charts key on the metric-aware valencia family, where the solver
+    /// tag is "" (HLLE), "_hlld" (tetrad MUB09) or "_rusanov" (the light-cone Lax-Friedrichs fan the
+    /// first-order flux correction falls back to). the SINGLE spelling of the name — anything that
+    /// needs to know what the sweep will run asks here rather than re-deriving it.
+    fn flux_kernel_name(
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        dir: usize,
+        flat_suffix: &str,
+        gr_solver: &str,
+    ) -> String {
+        let st = spacetime_slug(sim.geom.spacetime);
+        if st.is_empty() {
+            let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
+            format!(
+                "{}_face_flux{gsfx}{flat_suffix}_{D}d_{dir}",
+                Self::kernel_prefix()
+            )
+        } else {
+            let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+            format!(
+                "{}_face_flux{gr_solver}{gsfx}{st}_{D}d_{dir}",
+                Self::kernel_prefix()
+            )
+        }
+    }
+
+    /// the face-flux kernel the PRODUCTION sweep runs for `dir` under the configured solver.
+    fn face_flux_kernel(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize) -> String {
+        let gr_solver = if matches!(self.solver, Solver::Hlld) {
+            "_hlld"
+        } else {
+            ""
+        };
+        Self::flux_kernel_name(sim, dir, self.solver.kernel_suffix(), gr_solver)
+    }
+
     /// the flux sweep, parameterized by the flat solver suffix, the GR HLLD toggle, and the slope
     /// limiter `theta` — so FOFC can re-run it at FIRST ORDER (HLLE + theta = 0) through the same
     /// code path the production sweep uses. the production `flux` calls this with the configured
@@ -348,23 +390,7 @@ where
                 face = face.expand(ax, 1);
             }
         }
-        let st = spacetime_slug(sim.geom.spacetime);
-        let flux_name = if st.is_empty() {
-            let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
-            format!(
-                "{}_face_flux{gsfx}{flat_suffix}_{D}d_{dir}",
-                Self::kernel_prefix()
-            )
-        } else {
-            // the metric-aware valencia flux (RmhdGr). "" = HLLE, "_hlld" = tetrad MUB09, "_rusanov"
-            // = the light-cone Lax-Friedrichs fan (the FOFC first-order fallback).
-            let solver = gr_solver;
-            let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-            format!(
-                "{}_face_flux{solver}{gsfx}{st}_{D}d_{dir}",
-                Self::kernel_prefix()
-            )
-        };
+        let flux_name = Self::flux_kernel_name(sim, dir, flat_suffix, gr_solver);
         let (x_lo_k, dx_k) = kernel_geom(
             &sim.geom.x_lo,
             &sim.geom.dx,
@@ -859,11 +885,22 @@ where
             || (self.ct_method == CtMethod::Uct
                 && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
         let st = spacetime_slug(sim.geom.spacetime);
-        // GR: the flux computes its bound speeds inline, so the ONLY consumer of the materialized
-        // per-cell speeds is the GR-UCT edge EMF. materialize (the cheap SHIFTED BF bound) exactly
-        // when UCT is requested on the curved background; skip on GR otherwise.
+        // GR: the per-cell speeds have TWO consumers — the GR-UCT edge EMF (its corner
+        // coefficients) and the GR HLL flux fan, which reads `wave_speed_{l,r}[dir]` from the two
+        // cells sharing each face (davis estimate). the HLLD arm solves its own five-wave fan and
+        // the rusanov fallback uses the state-independent light-cone bound, so neither reads them.
+        // ASK THE KERNEL rather than re-deriving which arm reads what: a flux that consumes the
+        // fields while this pass is skipped sees their zero initialization, which collapses the fan
+        // onto the shift alone and leaves ZERO dissipation on every axis whose shift component
+        // vanishes — a one-sided, odd-even-decoupled sweep that grows a grid-scale checkerboard.
         if !st.is_empty() {
-            if self.ct_method != CtMethod::Uct {
+            let reads_speeds = |name: &str| {
+                kernel_bindings(name).iter().any(|(field, is_output)| {
+                    !is_output && matches!(field, FieldRef::WaveSpeedL(_) | FieldRef::WaveSpeedR(_))
+                })
+            };
+            let flux_consumes = (0..D).any(|dir| reads_speeds(&self.face_flux_kernel(sim, dir)));
+            if !flux_consumes && self.ct_method != CtMethod::Uct {
                 return;
             }
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);

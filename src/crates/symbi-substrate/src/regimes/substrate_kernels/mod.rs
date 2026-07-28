@@ -40,6 +40,10 @@ pub use types::*;
 // the raw field manifest accessor — for the component-agnostic CT kernels (edge EMF / curl) that
 // bind generic slots positionally, ordered by the recorded manifest.
 pub(crate) use binding::kernel_field_binds;
+// the typed (field, is_output) manifest: what a kernel actually reads and writes. public so a
+// caller deciding whether to run a PRODUCER can ask the consumer instead of re-deriving which
+// solver arm consumes what.
+pub use binding::kernel_bindings;
 pub use boundary::*;
 pub use dispatch::*;
 pub use params::*;

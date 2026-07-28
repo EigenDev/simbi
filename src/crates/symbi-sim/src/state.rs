@@ -933,6 +933,24 @@ pub struct RkWorkspaceGeneric<
     /// cartesian path needs D+5 fields, the combined curvilinear path MAX_SOURCE_BODIES*(D+5);
     /// a sim's geometry picks exactly one path for its lifetime.
     pub body_scratch: std::sync::OnceLock<Vec<Field<Sc, NDIM, M>>>,
+    /// the stage-local write ledger (debug builds only): the set of buffers a dispatch has
+    /// WRITTEN since the stage began, identified by address so the several wire names that alias
+    /// one buffer (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`, `flux.mag_k` / `bf_d_c`) collapse to
+    /// one entry. `dispatch_named` records its outputs here and checks its stage-local inputs
+    /// against it.
+    ///
+    /// this closes a gap the phase table cannot see. that table declares reads and writes per
+    /// PHASE, but which fields a phase touches depends on the configuration — the curved HLL flux
+    /// consumes the materialized wave speeds while the HLLD arm solves its own fan — so a phase
+    /// whose kernel set makes it a no-op still credits its declared writes and the next phase's
+    /// read check passes on a buffer nobody filled. the ledger records what was ACTUALLY written.
+    ///
+    /// `None` OUTSIDE a stage, which disables the check. the question "did an earlier pass of this
+    /// stage write this?" only has an answer inside one; a caller driving a kernel directly (a
+    /// harness seeding flux buffers by hand, then invoking one substrate entry point) is not in a
+    /// stage and its writes never reach this ledger.
+    #[cfg(debug_assertions)]
+    pub stage_writes: std::sync::Mutex<Option<std::collections::HashSet<usize>>>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -2406,6 +2424,8 @@ where
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
             body_scratch: std::sync::OnceLock::new(),
+            #[cfg(debug_assertions)]
+            stage_writes: std::sync::Mutex::new(None),
         };
 
         let exec = Executor::<S>::new(device_id)?;
