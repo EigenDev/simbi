@@ -1470,7 +1470,8 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         emit_gv(out_dir, &name, ndim, &k, &writes);
         // the wu 2017 source-admissibility rate folds into the same scratch after this map.
         gen_rmhd_source_cfl_gr(out_dir, ndim, geom.clone());
-        gen_rmhd_fofc_project_gr(out_dir, ndim, geom);
+        gen_rmhd_fofc_project_gr(out_dir, ndim, geom.clone());
+        gen_rmhd_constraint_projection(out_dir, ndim, geom);
         return;
     }
     // flat: the radial spacing is a runtime `map_kind` scalar (a log-radial grid selects the
@@ -1497,6 +1498,26 @@ fn gen_rmhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
         geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::fofc_project_gr_mhd_gv(
+        geom.coords,
+        geom.spacetime,
+        &geom.spacing,
+        &geom.axes,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the STATE-CONSTRAINT PROJECTION: the whole declared family (admissibility + whatever floors and
+// ceilings the run configures) enforced by ONE simultaneous projection onto `G ∩ C`. each member's
+// parameter is a RUNTIME scalar, so a single baked kernel serves every configuration and a neutral
+// value leaves a member declared and applicable but never binding. curved spacetime only.
+fn gen_rmhd_constraint_projection(out_dir: &str, ndim: u8, geom: Geom) {
+    assert!(geom.spacetime != Spacetime::Minkowski);
+    let name = format!(
+        "rmhd_constraint_projection{}{}_{ndim}d",
+        mhd_geom_slug(&geom),
+        geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::constraint_projection_gv(
         geom.coords,
         geom.spacetime,
         &geom.spacing,

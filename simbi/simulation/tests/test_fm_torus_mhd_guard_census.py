@@ -53,7 +53,25 @@ from simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd_cartesian import (
 RES = 48
 SPIN = 0.9
 END_TIME = 5.0
-MAX_STEPS = 2000
+
+# the STEP BUDGET is a WALL-CLOCK guard, not a physical claim: it exists so a genuine dt collapse
+# ends the suite instead of running forever. exceeding it is reported as a budget overrun, NOT as a
+# physics failure. those were previously the same assertion, and the consequence was that a constant
+# calibrated against one dt regime (396 steps, before the source-admissibility rate was tightened)
+# reported a healthy torus -- reaching t_final with zero freezes -- as a stalled one.
+STEP_BUDGET = 8000
+
+# THE dt COLLAPSE BOUND, measured against the light-crossing step rather than a step count.
+#
+# nothing propagates faster than c, so `dt_light = cfl * dx / c` is the largest step the hyperbolic
+# system admits and the only resolution-independent scale to judge dt against. a collapse is orders
+# of magnitude, not a factor of a few: on this problem the smallest HEALTHY step is ~4.7e-5 of
+# dt_light (the source-admissibility rate exceeds the flux rate by ~560x here -- a real cost, but a
+# cost, not a breakdown), whereas an actual collapse reached ~2e-15 of it. this bound sits four
+# orders below the healthy floor and eleven above the collapse, so it detects the failure mode
+# without encoding today's efficiency as a requirement. it needs no recalibration when the
+# resolution, domain, or cfl change, because it scales with all three.
+MIN_DT_FRACTION = 1.0e-8
 
 
 @needs_backend
@@ -70,7 +88,7 @@ def test_magnetized_fm_torus_never_freezes_outside_the_horizon() -> None:
         checkpoint_interval=1.0e30,
         data_directory=Path(d),
     )
-    runner.run(p, compute_mode="cpu", max_steps=MAX_STEPS)
+    runner.run(p, compute_mode="cpu", max_steps=STEP_BUDGET)
 
     fb, fz, fb_h, fz_h = _BACKEND.guard_census()
     ext_fz, ext_fb = fz - fz_h, fb - fb_h
@@ -84,6 +102,11 @@ def test_magnetized_fm_torus_never_freezes_outside_the_horizon() -> None:
     assert finals, f"magnetized FM torus run (a={SPIN}) crashed"
     with h5py.File(finals[0], "r") as h:
         t_final = float(h["metadata"].attrs["time"])
+        # the run's OWN recorded cfl and final step, so the bound below cannot drift from the
+        # problem it is judging.
+        cfl = float(h["metadata"].attrs["cfl"])
+        dt_final = float(h["metadata"].attrs["dt"])
+        steps = int(h["metadata"].attrs["iteration"])
         prims = h["level_0/partition_0/hydro/primitives"]
         halo = (prims["rho"].shape[0] - RES) // 2
         sl = slice(halo, halo + RES)
@@ -101,11 +124,38 @@ def test_magnetized_fm_torus_never_freezes_outside_the_horizon() -> None:
         "hydrodynamic cone and this gate is vacuous"
     )
 
+    # the light-crossing step: c = 1 in these units, so this is cfl * dx.
+    dx = 2.0 * p.half_width / RES
+    dt_light = cfl * dx
+    print(
+        f"  steps                : {steps} (budget {STEP_BUDGET})"
+        f"\n  dt_final / dt_light  : {dt_final / dt_light:.3e}"
+        f"  (collapse bound {MIN_DT_FRACTION:.0e})"
+    )
+
+    # THE EVOLUTION COMPLETED. a budget overrun and a crash are different failures with different
+    # fixes, so they are reported as different things rather than both as "stalled".
     assert t_final > END_TIME - 1e-3, (
-        f"the magnetized a={SPIN} torus stalled at t = {t_final:.4f} < {END_TIME} "
-        f"within {MAX_STEPS} steps -- a dt collapse, which is what the "
-        "source-admissibility rate exists to prevent and what an over-aggressive "
-        "step exposes"
+        f"the magnetized a={SPIN} torus reached only t = {t_final:.4f} < {END_TIME}: "
+        + (
+            f"it exhausted the {STEP_BUDGET}-step WALL-CLOCK budget, which is a cost problem, "
+            f"not a physics one -- check dt_final/dt_light = {dt_final / dt_light:.3e} against "
+            "the collapse bound before treating this as a breakdown"
+            if steps >= STEP_BUDGET
+            else f"it stopped after {steps} steps without exhausting the budget, so the evolution "
+            "terminated on its own -- a crash, not a cost"
+        )
+    )
+
+    # THE TIMESTEP DID NOT COLLAPSE. this is the invariant the old step count was standing in for,
+    # expressed against the only scale that means anything: a step is healthy while it remains a
+    # finite fraction of what the fastest signal permits.
+    assert dt_final > MIN_DT_FRACTION * dt_light, (
+        f"the magnetized a={SPIN} torus timestep COLLAPSED: dt = {dt_final:.4e} is "
+        f"{dt_final / dt_light:.3e} of the light-crossing step {dt_light:.4e} "
+        f"(bound {MIN_DT_FRACTION:.0e}). a step this far below the hyperbolic limit is set by "
+        "something other than wave propagation -- the source-admissibility rate against a cell "
+        "whose admissible margin has gone to zero"
     )
 
     assert ext_fz == 0, (

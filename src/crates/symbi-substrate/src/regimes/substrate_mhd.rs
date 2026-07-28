@@ -166,6 +166,14 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// theta-MC limiter compression in [1,2]: 1 = minmod, 2 = monotonized-central.
     pub theta: f64,
     pub cfl_scratch: Field<Sc, D, Mem>,
+    /// the joint constraint blend and the index of the member that bound it, written by the
+    /// state-constraint projection. `binding` is what lets the injection budget name the constraint
+    /// it charges rather than reporting one aggregate number.
+    pub constraint_theta: Field<Sc, D, Mem>,
+    pub constraint_binding: Field<Sc, D, Mem>,
+    /// the run's DECLARED constraint family parameters. neutral by default — nothing is floored
+    /// unless a caller asks, so there is no hidden default floor.
+    pub constraints: crate::regimes::substrate_kernels::ConstraintParams,
     /// Riemann solver — HLLE (default) / HLLC / HLLD; validated against the regime at attach.
     pub solver: Solver,
     /// constrained-transport edge-EMF scheme: Contact (Gardiner-Stone, default) or Uct (Del Zanna
@@ -217,11 +225,18 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
+        let alloc = |what: &str| {
+            Field::<Sc, D, Mem>::zeros(alloc_domain)
+                .unwrap_or_else(|_| panic!("failed to allocate {} {what}", Self::kernel_prefix()))
+        };
         Self {
             eos_param,
             cfl_number,
             theta,
             cfl_scratch,
+            constraint_theta: alloc("constraint theta"),
+            constraint_binding: alloc("constraint binding"),
+            constraints: Default::default(),
             solver: Solver::Hlle,
             ct_method: CtMethod::Contact,
             runtime_source: None,
@@ -475,8 +490,11 @@ where
             || {
                 // TIER 2, below the conservative source limiter: the limiter SCALES a source and
                 // therefore cannot act on a cell that is already outside G with no source left to
-                // scale. this maps such a cell onto partial-G along the segment to the admissible
-                // stage-input anchor, enforcing the SUFFICIENT condition (D > 0, q > 0, psi > 0).
+                // scale. this projects such a cell onto the boundary of `G ∩ C` — the admissible
+                // set intersected with the run's DECLARED constraint family — along the segment to
+                // the admissible stage-input anchor. admissibility is simply the always-present
+                // member, so floors and the sufficient condition are enforced in ONE operation
+                // rather than as two projections that could disagree.
                 // exact passthrough on an admissible cell (theta = 1, bit-for-bit), so it is a
                 // no-op everywhere except the states nothing above it can resolve. the cell-B
                 // enters the residual but is never blended — constrained transport owns the
@@ -490,6 +508,16 @@ where
                         .mhd
                         .as_ref()
                         .expect("the GRMHD projection requires magnetic fields");
+                    // NOTE: the state-constraint family projection (`constraint_projection`) is
+                    // landed and gated but NOT hooked up here yet. it currently takes the
+                    // stage-input CONSERVED state as its anchor, which is wrong: constrained
+                    // transport has already advanced B, so `u_stage` paired with the CANDIDATE's
+                    // cell B is a hybrid with no admissibility guarantee, and the projection then
+                    // cannot recover the cell at any blend. the anchor must instead be rebuilt by
+                    // p2c from the stage-input PRIMITIVES with the candidate's B (and raised to the
+                    // margin), exactly as this kernel does — measured: substituting the family
+                    // without that reconstruction collapses the torus from t = 4.02 to a dt
+                    // underflow at t = 2.286.
                     crate::regimes::substrate_kernels::fofc_project(
                         sim,
                         "rmhd",

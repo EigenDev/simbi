@@ -472,6 +472,130 @@ pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// the STATE-CONSTRAINT PROJECTION dispatch: enforce the whole declared family in one operation.
+///
+/// binds `a_*` to the admissible anchor (the stage input), `x_*` to the live candidate (projected IN
+/// PLACE), `bc_*` to the cell-centered B the magnetized residual reads but never blends, and writes
+/// the joint blend `theta` plus the `binding` member index for the per-constraint injection budget.
+///
+/// each member's parameter arrives as a RUNTIME scalar, so one baked kernel serves every
+/// configuration. NEUTRAL values (`f_min = 0`, `sigma_max = +inf`, `den_min = 0`) leave a member
+/// declared, applicable and reporting a real residual, but never binding — deliberately NOT the same
+/// as a member that does not structurally apply to the regime.
+#[allow(clippy::too_many_arguments)]
+pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    anchor: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    candidate: &symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    bcell: [&Field<Sc, D, Mem>; 3],
+    theta: &Field<Sc, D, Mem>,
+    binding: &Field<Sc, D, Mem>,
+    floors: ConstraintParams,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let sfx = super::mhd_geom_suffix(geom.coords, &geom.axes);
+    let name = format!(
+        "rmhd_constraint_projection{sfx}{}_{D}d",
+        spacetime_slug(geom.spacetime)
+    );
+    let slot = |path: &str| -> &Field<Sc, D, Mem> {
+        if let Some(c) = path.strip_prefix("a_") {
+            conserved_component(anchor, c, path)
+        } else if let Some(c) = path.strip_prefix("x_") {
+            conserved_component(candidate, c, path)
+        } else if let Some(raw) = path.strip_prefix("bc_") {
+            let kk: usize = raw
+                .parse()
+                .unwrap_or_else(|_| panic!("constraint_projection: bad magnetic slot '{path}'"));
+            bcell[kk]
+        } else if path == "theta" {
+            theta
+        } else if path == "binding" {
+            binding
+        } else {
+            panic!("constraint_projection: unknown slot '{path}'")
+        }
+    };
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let metric_scalar = |name: &str| -> f64 {
+        geom.spacetime_scalars
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| *value)
+            .unwrap_or_else(|| panic!("constraint_projection: needs {name}"))
+    };
+    let resolve = |bind: &ScalarBind| -> Sc {
+        match bind {
+            ScalarBind::Spec(key) if &**key == "floor_temperature" => {
+                Sc::from_f64(floors.floor_temperature)
+            }
+            ScalarBind::Spec(key) if &**key == "ceiling_magnetization" => {
+                Sc::from_f64(floors.ceiling_magnetization)
+            }
+            ScalarBind::Spec(key) if &**key == "floor_density" => {
+                Sc::from_f64(floors.floor_density)
+            }
+            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => {
+                Sc::from_f64(metric_scalar("schwarzschild_mass"))
+            }
+            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(metric_scalar("kerr_spin")),
+            ScalarBind::Ref(sref) => Sc::from_f64(
+                motion_scalar(&sim.motion, geom.coords, D, *sref)
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
+                    .unwrap_or_else(|| {
+                        panic!("constraint_projection: unexpected scalar {sref:?}")
+                    }),
+            ),
+            other => panic!("constraint_projection: unexpected scalar {other:?}"),
+        }
+    };
+    let scalars = scalars_for(&name, &resolve);
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (bind, is_output) in kernel_field_binds(&name).iter() {
+        let field = slot(&bind.name());
+        if *is_output {
+            outputs.push(field);
+        } else {
+            inputs.push(field);
+        }
+    }
+    super::exec::dispatch_fields_each::<Sc, Mem, D>(
+        &name,
+        &geom.interior,
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
+}
+
+/// the run's declared constraint parameters. NEUTRAL by default: nothing is floored unless a caller
+/// asks for it, so there is no hidden default floor anywhere in the code.
+#[derive(Clone, Copy, Debug)]
+pub struct ConstraintParams {
+    /// minimum `p / rho`. numerical (stands in for truncation error); 0 disables.
+    pub floor_temperature: f64,
+    /// maximum `|B|^2 / rho`; +inf disables.
+    pub ceiling_magnetization: f64,
+    /// minimum rest-mass density. a PHYSICAL model term (vacuum), not a numerical aid; 0 disables.
+    pub floor_density: f64,
+}
+
+impl Default for ConstraintParams {
+    fn default() -> Self {
+        Self {
+            floor_temperature: 0.0,
+            ceiling_magnetization: f64::INFINITY,
+            floor_density: 0.0,
+        }
+    }
+}
+
 /// drop the causally disconnected cells from an anchor-failure mask: nothing inside the outer
 /// horizon reaches the exterior, and an excised cell's state is donor-filled padding the horizon
 /// fill overwrites, so neither says anything about whether the TIMESTEP was admissible. the
