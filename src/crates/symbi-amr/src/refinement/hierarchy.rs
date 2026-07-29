@@ -1485,20 +1485,35 @@ where
         // primitives every census reads belong to the state at this time. sampling mid-stage
         // would bin a partially advanced state.
         //
-        // a REFINED hierarchy is refused rather than sampled: the reduction would visit every
-        // level's cells, counting a covered coarse cell and the fine cells covering it both,
-        // so the totals would be wrong by the refined volume — a plausible-looking number, not
-        // an obvious failure. that needs the leaf predicate, not a silent partial answer.
+        // EVERY level contributes its LEAF cells: a cell a finer level resolves is excluded
+        // here and counted there, so the refined volume enters the reduction exactly once at
+        // the finest resolution that covers it. counting a covered coarse cell as well would
+        // inflate every extensive total by the refined volume — a wrong number that looks
+        // entirely reasonable, since it is smooth, positive, and of the right order.
         if !self.levels[0].state.censuses.is_empty() {
-            assert_eq!(
-                self.levels.len(),
-                1,
-                "a census is registered on a refined hierarchy ({} levels). the segmented \
-                 reduction has no leaf predicate yet, so it would double-count every cell a \
-                 finer patch covers. run this configuration unrefined, or drop the census.",
-                self.levels.len()
+            let ops: Vec<_> = self.levels[0]
+                .state
+                .censuses
+                .iter()
+                .map(|r| r.evaluator.spec().op())
+                .collect();
+            let mut totals = symbi_substrate::census_sample::level_partials(
+                &self.levels[0].state,
+                self.levels[0].coverage.as_ref(),
             );
-            symbi_substrate::census_sample::sample_censuses(&mut self.levels[0].state);
+            for level in 1..self.levels.len() {
+                let partial = symbi_substrate::census_sample::level_partials(
+                    &self.levels[level].state,
+                    self.levels[level].coverage.as_ref(),
+                );
+                symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
+            }
+            let time = self.levels[0].state.time;
+            symbi_substrate::census_sample::record_samples(
+                &mut self.levels[0].state,
+                time,
+                totals,
+            );
         }
 
         let root = &mut self.levels[0];

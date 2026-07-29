@@ -106,7 +106,7 @@ fn a_mass_expression_census_reproduces_the_conservation_diagnostic() {
         "the census must declare the cell-volume leaf, else it is not weighting by the measure"
     );
 
-    let fields = sim.census_fields(&ev).expect("host-resident sim");
+    let fields = sim.census_fields(&ev, None).expect("host-resident sim");
     let refs: Vec<_> = fields.values.iter().collect();
     let census = field_segmented_reduce(
         &refs,
@@ -176,7 +176,7 @@ fn an_accumulator_can_reconstruct_the_conserved_energy_from_primitives() {
     .expect("census config parses");
 
     let ev = CensusEvaluator::new(&cfg).expect("census compiles");
-    let fields = sim.census_fields(&ev).expect("host-resident sim");
+    let fields = sim.census_fields(&ev, None).expect("host-resident sim");
     let refs: Vec<_> = fields.values.iter().collect();
     let census = field_segmented_reduce(
         &refs,
@@ -224,7 +224,7 @@ fn a_binned_expression_census_partitions_the_total() {
     let ev = CensusEvaluator::new(&cfg).expect("census compiles");
     assert_eq!(ev.spec().n_segments(), 4, "four shells from five edges");
 
-    let fields = sim.census_fields(&ev).expect("host-resident sim");
+    let fields = sim.census_fields(&ev, None).expect("host-resident sim");
     let refs: Vec<_> = fields.values.iter().collect();
     let census = field_segmented_reduce(
         &refs,
@@ -267,7 +267,7 @@ fn ghost_cells_are_excluded_rather_than_binned() {
     // the halo would be reported as a shortfall of the binning.
     let sim = build_sim();
     let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
-    let fields = sim.census_fields(&ev).expect("host-resident sim");
+    let fields = sim.census_fields(&ev, None).expect("host-resident sim");
 
     let interior: std::collections::HashSet<[isize; 1]> = sim.geom.interior.iter().collect();
     let mut n_ghost = 0usize;
@@ -314,7 +314,7 @@ fn a_census_sampled_before_the_recovery_fails_loudly() {
 
     let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
     let panicked =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev)))
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev, None)))
             .is_err();
     assert!(
         panicked,
@@ -326,7 +326,7 @@ fn a_census_sampled_before_the_recovery_fails_loudly() {
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     sub.c2p(&sim.store);
     assert!(sim.store.has_recovered_primitives());
-    assert!(sim.census_fields(&ev).is_some());
+    assert!(sim.census_fields(&ev, None).is_some());
 }
 
 #[test]
@@ -397,9 +397,72 @@ fn a_census_reading_pressure_is_refused_on_a_regime_without_one() {
     assert!(ev.reads_pressure());
 
     let panicked =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev))).is_err();
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev, None))).is_err();
     assert!(
         panicked,
         "a census reading pressure on an isothermal regime must fail loudly, not read zeros"
+    );
+}
+
+#[test]
+fn a_covered_region_is_excluded_so_a_refined_grid_counts_it_once() {
+    // the LEAF predicate. on a refined hierarchy the coarse cells a finer level resolves are
+    // not the coarse level's to count: the finer level contributes the same physical volume at
+    // its own resolution. counting both inflates every extensive total by exactly the refined
+    // volume — smooth, positive, of the right order, and wrong.
+    //
+    // exercised here on ONE store by handing the same census a covered region directly, which
+    // isolates the predicate from the hierarchy's level bookkeeping.
+    let sim = build_sim();
+    let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
+
+    let total = |covered: Option<&symbi_algebra::Domain<1>>| {
+        let fields = sim
+            .census_fields(&ev, covered)
+            .expect("host-resident sim");
+        let refs: Vec<_> = fields.values.iter().collect();
+        field_segmented_reduce(
+            &refs,
+            &fields.segment,
+            &sim.geom.interior,
+            ev.spec().n_segments(),
+            ev.spec().op(),
+        )
+        .values[0]
+    };
+
+    let whole = total(None);
+    // cover the inner half of the interior.
+    let sp = &sim.geom.interior.spaces[0];
+    let mid = sp.lo + (sp.hi - sp.lo) / 2;
+    let covered = symbi_algebra::Domain::new([symbi_algebra::Space {
+        name: sp.name,
+        lo: sp.lo,
+        hi: mid,
+    }]);
+    let leaves = total(Some(&covered));
+
+    // the premise: the covered region must actually hold mass, or excluding it proves nothing.
+    assert!(
+        whole > 0.0 && leaves > 0.0,
+        "degenerate totals (whole {whole:e}, leaves {leaves:e})"
+    );
+    assert!(
+        leaves < 0.99 * whole,
+        "excluding half the interior did not reduce the total ({leaves:e} vs {whole:e}); the \
+         covered region is not being skipped, so a refined run would count it twice"
+    );
+
+    // and the split is exact: what the covered region holds plus what the leaves hold is the
+    // whole. a predicate that dropped or duplicated a cell at the boundary would miss this.
+    let complement = symbi_algebra::Domain::new([symbi_algebra::Space {
+        name: sp.name,
+        lo: mid,
+        hi: sp.hi,
+    }]);
+    let inner = total(Some(&complement));
+    assert!(
+        (inner + leaves - whole).abs() <= 1.0e-12 * whole,
+        "the covered and leaf halves do not partition the total: {inner:e} + {leaves:e} != {whole:e}"
     );
 }

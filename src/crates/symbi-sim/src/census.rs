@@ -25,6 +25,7 @@
 //  let segment = spec.segment(&[log_r_at_cell]);
 // =============================================================================
 
+use symbi_ir::algebra::Scalar;
 use symbi_ir::emit::ReductionOp;
 
 /// the segment index marking a cell that is not part of the reduction at all — covered
@@ -232,10 +233,47 @@ impl CensusSpec {
     /// the segment index to write for a cell, ready for the segmented reduction: the
     /// bucket if the cell bins, else an index past the last bucket so the reduction counts
     /// it as outside the binning.
+    /// delegates to the CARRIER-GENERIC form, so the host and any traced device kernel run the
+    /// same binning by construction rather than by two implementations happening to agree.
     pub fn segment_marker(&self, coords: &[f64]) -> u32 {
-        self.segment(coords)
-            .map_or(self.n_segments() as u32, |s| s as u32)
+        segment_marker_generic::<f64>(&self.axes, coords, self.n_segments()) as u32
     }
+}
+
+/// the bucket a cell's axis coordinates fall in, as a CARRIER-GENERIC branch-free expression:
+/// the flat segment index, or `n_segments` (one past the last bucket) when any axis coordinate
+/// lies outside its declared edges, which is what the reduction counts as dropped.
+///
+/// ONE definition for every carrier. `S = f64` evaluates it on the host; `S = Gv` traces it into a
+/// kernel. the binning is the part of a census a device path would otherwise have to reimplement,
+/// and a host/device split there is invisible: both produce a smooth, plausible profile, and only
+/// their disagreement — which nothing would be comparing — reveals it.
+///
+/// the search is a COUNT rather than a branchy partition point: `bin = #{edges at or below x} - 1`,
+/// saturated at the last bin so a value sitting exactly on the outer edge lands in it rather than
+/// one past. edges are known at registration, so the loop unrolls at trace time. a NaN coordinate
+/// compares false against both bounds and is therefore dropped, never binned.
+pub fn segment_marker_generic<S: Scalar>(axes: &[BinAxis], coords: &[S], n_segments: usize) -> S {
+    debug_assert_eq!(axes.len(), coords.len(), "one coordinate per bin axis");
+    let mut flat = S::ZERO;
+    let mut all_in_range = S::ONE.cmp_gt(S::ZERO); // a true mask, carrier-generically
+    for (axis, &x) in axes.iter().zip(coords) {
+        let edges = axis.edges();
+        let n_bins = axis.n_bins();
+        let lo = S::from_f64(edges[0]);
+        let hi = S::from_f64(edges[n_bins]);
+        all_in_range = all_in_range & x.cmp_ge(lo) & x.cmp_le(hi);
+
+        let mut count = S::ZERO;
+        for &edge in edges {
+            count = count + S::select(x.cmp_ge(S::from_f64(edge)), S::ONE, S::ZERO);
+        }
+        // count >= 1 on any in-range x, so `count - 1` is the index of the last edge at or
+        // below it; the clamp keeps the outer edge in the final bin.
+        let bin = (count - S::ONE).min(S::from_f64((n_bins - 1) as f64)).max(S::ZERO);
+        flat = flat * S::from_f64(n_bins as f64) + bin;
+    }
+    S::select(all_in_range, flat, S::from_f64(n_segments as f64))
 }
 
 /// a registered census with its expressions lowered and compiled — the runtime artifact.
@@ -483,9 +521,19 @@ where
     /// finite-volume update uses — which is what keeps an extensive sum correct on a
     /// curvilinear grid.
     ///
+    /// `covered` is this level's cells that a FINER level resolves. they are excluded from the
+    /// reduction: the finer level contributes the same physical volume at its own resolution, so
+    /// counting both would add the refined region twice — a total that is wrong by exactly the
+    /// refined volume and otherwise entirely plausible. a level with no finer neighbour passes
+    /// `None` and every interior cell is a leaf.
+    ///
     /// returns `None` when the fields are not host-accessible (a device-resident run); the
     /// device path renders its own kernel rather than reading cells from the host.
-    pub fn census_fields(&self, ev: &CensusEvaluator) -> Option<CensusFields<D, Mem>> {
+    pub fn census_fields(
+        &self,
+        ev: &CensusEvaluator,
+        covered: Option<&symbi_algebra::Domain<D>>,
+    ) -> Option<CensusFields<D, Mem>> {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
@@ -544,6 +592,11 @@ where
         let pre_field = self.fields.prim.pre.as_ref();
         let jit = ev.eval.jit_components(CENSUS_FIELD);
         for c in self.geom.interior.iter() {
+            // a covered cell is not a leaf: it stays EXCLUDED, so the finer level owns that
+            // volume outright and the reduction visits it exactly once.
+            if covered.is_some_and(|region| region.contains(c)) {
+                continue;
+            }
             let rho = *self.fields.prim.rho.view().at(c);
             let vel: [f64; DOF] = std::array::from_fn(|k| *self.fields.prim.vel[k].view().at(c));
             let pre = pre_field.map_or(0.0, |f| *f.view().at(c));
@@ -739,5 +792,77 @@ mod tests {
         assert_eq!(a.bin(1000.0), Some(3));
         assert_eq!(a.bin(10000.0), Some(3));
         assert_eq!(a.bin(0.5), None);
+    }
+}
+
+#[cfg(test)]
+mod generic_binning_tests {
+    use super::*;
+
+    fn spec(axes: Vec<BinAxis>) -> CensusSpec {
+        CensusSpec::new("t", axes, vec!["v".to_string()], ReductionOp::Add).expect("spec")
+    }
+
+    /// the carrier-generic binning must agree EXACTLY with the independent partition-point
+    /// implementation, on every coordinate a cell can present.
+    ///
+    /// compared against `segment` — the `edges.partition_point` search — and NOT against
+    /// `segment_marker`, which now delegates to the generic form and would compare the function
+    /// to itself. two genuinely different searches (a binary partition versus a linear count of
+    /// edges at or below x) agreeing on the whole edge-case sweep is the evidence; the delegation
+    /// is then what keeps host and device from drifting apart afterwards.
+    #[test]
+    fn the_generic_marker_matches_the_host_marker_everywhere() {
+        let cases: Vec<Vec<BinAxis>> = vec![
+            vec![BinAxis::new("a", vec![0.0, 1.0, 2.0, 3.0]).unwrap()],
+            vec![BinAxis::new("a", vec![-2.0, -0.5, 0.5, 4.0, 9.0]).unwrap()],
+            vec![
+                BinAxis::new("a", vec![0.0, 1.0, 2.0]).unwrap(),
+                BinAxis::new("b", vec![10.0, 20.0, 30.0, 40.0]).unwrap(),
+            ],
+        ];
+        for axes in cases {
+            let sp = spec(axes.clone());
+            let n_seg = sp.n_segments();
+            // a sweep that lands ON every edge, just inside and just outside each, between
+            // edges, far outside both ends, and NaN — the coordinates where a binning rule
+            // differs from a neighbouring one.
+            let mut probes: Vec<f64> = vec![f64::NAN, -1.0e300, 1.0e300];
+            for axis in &axes {
+                for &e in axis.edges() {
+                    probes.extend([e, e - 1.0e-12, e + 1.0e-12, e - 0.5, e + 0.5]);
+                }
+            }
+            for &x in &probes {
+                for &y in &probes {
+                    let coords: Vec<f64> = if axes.len() == 1 { vec![x] } else { vec![x, y] };
+                    let want = sp.segment(&coords).map_or(n_seg, |b| b);
+                    let got = segment_marker_generic::<f64>(&axes, &coords, n_seg);
+                    assert_eq!(
+                        got, want as f64,
+                        "binning disagrees at {coords:?}: counting search {got} vs partition \
+                         point {want}"
+                    );
+                    if axes.len() == 1 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// the outer edge is IN the last bin, not one past it: a value sitting exactly on the
+    /// domain's outer boundary is real data, and dropping it would quietly under-count the
+    /// outermost shell of every profile.
+    #[test]
+    fn a_value_on_the_outer_edge_lands_in_the_last_bin() {
+        let axes = vec![BinAxis::new("a", vec![0.0, 1.0, 2.0]).unwrap()];
+        let sp = spec(axes.clone());
+        assert_eq!(segment_marker_generic::<f64>(&axes, &[2.0], sp.n_segments()), 1.0);
+        // and just past it is dropped, not folded back in.
+        assert_eq!(
+            segment_marker_generic::<f64>(&axes, &[2.0 + 1.0e-9], sp.n_segments()),
+            sp.n_segments() as f64
+        );
     }
 }
