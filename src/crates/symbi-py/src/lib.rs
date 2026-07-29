@@ -1593,6 +1593,23 @@ fn configured_ito_order(
     }
 }
 
+/// install the configured censuses onto a store. lowering ALREADY happened at preflight, where
+/// a malformed registration is rejected before any grid is allocated; this is the step that makes
+/// the run actually carry them. without it a census validates, reports no error, and records
+/// nothing — a checkpoint with no census group is indistinguishable from a run that never
+/// registered one.
+fn attach_configured_censuses<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
+    store: &mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    cfg: &Config,
+) -> Result<(), String> {
+    for evaluator in lower_configured_censuses(&cfg.census_jsons)? {
+        store
+            .censuses
+            .push(symbi_sim::census::RegisteredCensus::new(evaluator));
+    }
+    Ok(())
+}
+
 fn attach_configured_tracers<
     const D: usize,
     const DOF: usize,
@@ -3861,11 +3878,15 @@ macro_rules! build_and_run_hydro {
             }
             sim
         };
-        let sim = if cfg.n_tracers == 0 {
-            sim
-        } else {
+        let sim = {
             let mut sim = sim;
-            attach_configured_tracers(&mut sim, cfg)?;
+            if cfg.n_tracers != 0 {
+                attach_configured_tracers(&mut sim, cfg)?;
+            }
+            // UNCONDITIONAL: the census list is empty on a run that registered none, so this
+            // costs nothing there, and a run that did register one must carry it. attaching
+            // only under a flag is how the registration reached preflight and stopped.
+            attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
         let theta = build_theta(cfg);
@@ -5138,11 +5159,15 @@ macro_rules! build_and_run_mhd {
         } else {
             sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
         };
-        let sim = if cfg.n_tracers == 0 {
-            sim
-        } else {
+        let sim = {
             let mut sim = sim;
-            attach_configured_tracers(&mut sim, cfg)?;
+            if cfg.n_tracers != 0 {
+                attach_configured_tracers(&mut sim, cfg)?;
+            }
+            // UNCONDITIONAL: the census list is empty on a run that registered none, so this
+            // costs nothing there, and a run that did register one must carry it. attaching
+            // only under a flag is how the registration reached preflight and stopped.
+            attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
         let theta = build_theta(cfg);
@@ -5291,11 +5316,15 @@ macro_rules! build_and_run_imhd {
         } else {
             sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
         };
-        let sim = if cfg.n_tracers == 0 {
-            sim
-        } else {
+        let sim = {
             let mut sim = sim;
-            attach_configured_tracers(&mut sim, cfg)?;
+            if cfg.n_tracers != 0 {
+                attach_configured_tracers(&mut sim, cfg)?;
+            }
+            // UNCONDITIONAL: the census list is empty on a run that registered none, so this
+            // costs nothing there, and a run that did register one must carry it. attaching
+            // only under a flag is how the registration reached preflight and stopped.
+            attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
         let theta = build_theta(cfg);
@@ -6202,11 +6231,15 @@ macro_rules! build_and_run_iso {
             }
             sim
         };
-        let sim = if cfg.n_tracers == 0 {
-            sim
-        } else {
+        let sim = {
             let mut sim = sim;
-            attach_configured_tracers(&mut sim, cfg)?;
+            if cfg.n_tracers != 0 {
+                attach_configured_tracers(&mut sim, cfg)?;
+            }
+            // UNCONDITIONAL: the census list is empty on a run that registered none, so this
+            // costs nothing there, and a run that did register one must carry it. attaching
+            // only under a flag is how the registration reached preflight and stopped.
+            attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.

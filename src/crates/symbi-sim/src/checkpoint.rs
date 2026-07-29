@@ -1146,53 +1146,7 @@ where
                 )),
         );
     }
-    // the registered binned reductions, one group each. like the body series these cover
-    // THIS RUN SEGMENT ONLY and restart empty on checkpoint load, so a restart chain
-    // concatenates offline rather than the run carrying its whole history forward.
-    for registered in &sim.censuses {
-        let spec = registered.evaluator.spec();
-        let history = &registered.history;
-        if history.is_empty() {
-            continue;
-        }
-        let (n, n_seg, n_val) = (history.len(), history.n_segments(), history.n_values());
-        let mut group = Tree::new(&format!("census/{}", spec.name()))
-            .with_attr("n_segments", n_seg as u64)
-            .with_attr("n_values", n_val as u64)
-            // the accumulator labels, in the order the `values` axis carries them, so a
-            // reader names a column without re-deriving the registration order.
-            .with_attr("value_names", spec.value_names().join(","))
-            .with_attr("op", reduction_op_tag(spec.op()))
-            // the size of the compiled per-cell graph: what a census actually costs, since
-            // the cost scales with the dag rather than with the accumulator count.
-            .with_attr("node_count", registered.evaluator.node_count() as u64)
-            .with_dataset(Dataset::new("time", vec![n], DataRef::F64(history.time())))
-            // segment-major within a sample. a reader reshapes the segment axis to the
-            // per-axis bin counts in registration order, last axis varying fastest.
-            .with_dataset(Dataset::new(
-                "values",
-                vec![n, n_seg, n_val],
-                DataRef::F64(history.values()),
-            ))
-            // cells that fell outside the binning. a census that silently under-covers its
-            // domain is indistinguishable from a physics result, so the shortfall travels
-            // with the numbers.
-            .with_dataset(Dataset::new(
-                "dropped",
-                vec![n],
-                DataRef::U64(history.dropped()),
-            ));
-        // the edges are a property of the registration, not of a sample, so they are
-        // written once per axis rather than per row.
-        for (k, axis) in spec.axes().iter().enumerate() {
-            group = group
-                .with_attr(&format!("axis{k}_name"), axis.name().to_string())
-                .with_dataset(Dataset::new(
-                    &format!("axis{k}_edges"),
-                    vec![axis.edges().len()],
-                    DataRef::F64(axis.edges()),
-                ));
-        }
+    for group in census_groups(sim) {
         root.push_group(group);
     }
     root
@@ -1368,6 +1322,12 @@ where
                     DataRef::F64(im.history.torque()),
                 )),
         );
+    }
+    // the censuses live on the ROOT level's store, which is where both drivers register and
+    // sample them; a refined hierarchy is refused at the sampling site rather than reduced
+    // across levels, so there is no second level's history to merge here.
+    for group in census_groups(levels[0]) {
+        root.push_group(group);
     }
     write_tree_atomic(Path::new(path), &root)
 }
@@ -2619,4 +2579,74 @@ mod tests {
             "energy-regime metadata must not carry a constant sound_speed"
         );
     }
+}
+
+
+/// the recorded census groups of a store, one per registration carrying at least one sample.
+///
+/// EXTRACTED so BOTH checkpoint writers emit them. the uni-grid writer and the hierarchy writer
+/// build their trees separately, and a census group written by only one of them leaves every run
+/// on the other driver recording nothing — a checkpoint with no census group reads exactly like a
+/// run that registered none, so the omission carries no signal at all.
+fn census_groups<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+) -> Vec<Tree<'a>>
+where
+    R: symbi_hydro::regime::Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: symbi_xpu::MemorySpace,
+{
+    // the registered binned reductions, one group each. like the body series these cover
+    // THIS RUN SEGMENT ONLY and restart empty on checkpoint load, so a restart chain
+    // concatenates offline rather than the run carrying its whole history forward.
+    let mut out = Vec::new();
+    for registered in &sim.censuses {
+        let spec = registered.evaluator.spec();
+        let history = &registered.history;
+        if history.is_empty() {
+            continue;
+        }
+        let (n, n_seg, n_val) = (history.len(), history.n_segments(), history.n_values());
+        let mut group = Tree::new(&format!("census/{}", spec.name()))
+            .with_attr("n_segments", n_seg as u64)
+            .with_attr("n_values", n_val as u64)
+            // the accumulator labels, in the order the `values` axis carries them, so a
+            // reader names a column without re-deriving the registration order.
+            .with_attr("value_names", spec.value_names().join(","))
+            .with_attr("op", reduction_op_tag(spec.op()))
+            // the size of the compiled per-cell graph: what a census actually costs, since
+            // the cost scales with the dag rather than with the accumulator count.
+            .with_attr("node_count", registered.evaluator.node_count() as u64)
+            .with_dataset(Dataset::new("time", vec![n], DataRef::F64(history.time())))
+            // segment-major within a sample. a reader reshapes the segment axis to the
+            // per-axis bin counts in registration order, last axis varying fastest.
+            .with_dataset(Dataset::new(
+                "values",
+                vec![n, n_seg, n_val],
+                DataRef::F64(history.values()),
+            ))
+            // cells that fell outside the binning. a census that silently under-covers its
+            // domain is indistinguishable from a physics result, so the shortfall travels
+            // with the numbers.
+            .with_dataset(Dataset::new(
+                "dropped",
+                vec![n],
+                DataRef::U64(history.dropped()),
+            ));
+        // the edges are a property of the registration, not of a sample, so they are
+        // written once per axis rather than per row.
+        for (k, axis) in spec.axes().iter().enumerate() {
+            group = group
+                .with_attr(&format!("axis{k}_name"), axis.name().to_string())
+                .with_dataset(Dataset::new(
+                    &format!("axis{k}_edges"),
+                    vec![axis.edges().len()],
+                    DataRef::F64(axis.edges()),
+                ));
+        }
+        out.push(group);
+    }
+    out
 }

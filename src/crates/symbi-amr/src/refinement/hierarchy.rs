@@ -1479,6 +1479,28 @@ where
         // viscous / excise / horizon-ledger / penalize now run in the finest
         // level's tail (level_step_tail), in the uni-grid driver's exact order.
 
+        // the registered binned reductions, at the tail of the accepted step — the same point
+        // the uni-grid driver samples them, and for the same reason: the stage sequence has
+        // finished and its last stage ended in a conserved-to-primitive recovery, so the
+        // primitives every census reads belong to the state at this time. sampling mid-stage
+        // would bin a partially advanced state.
+        //
+        // a REFINED hierarchy is refused rather than sampled: the reduction would visit every
+        // level's cells, counting a covered coarse cell and the fine cells covering it both,
+        // so the totals would be wrong by the refined volume — a plausible-looking number, not
+        // an obvious failure. that needs the leaf predicate, not a silent partial answer.
+        if !self.levels[0].state.censuses.is_empty() {
+            assert_eq!(
+                self.levels.len(),
+                1,
+                "a census is registered on a refined hierarchy ({} levels). the segmented \
+                 reduction has no leaf predicate yet, so it would double-count every cell a \
+                 finer patch covers. run this configuration unrefined, or drop the census.",
+                self.levels.len()
+            );
+            symbi_substrate::census_sample::sample_censuses(&mut self.levels[0].state);
+        }
+
         let root = &mut self.levels[0];
         // homologous linear advance ONLY when there is no traced motion law.
         advance_state_clock(&mut root.state, dt);
