@@ -439,8 +439,8 @@ mod tests {
             hi: 7,
         }]);
         let reg = FluxRegister::new(&coverage, &interior, true).unwrap();
-        let coarse_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.1]);
-        let fine_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.05]);
+        let coarse_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.1], std::array::from_fn(|d| d));
+        let fine_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.05], std::array::from_fn(|d| d));
         (reg, coarse_geo, fine_geo)
     }
 

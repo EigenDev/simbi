@@ -772,9 +772,9 @@ class SimbiProblem(BaseModel):
         axes at all is a global reduction, which is how a total mass or energy is
         expressed.
 
-        accumulate SUMS, not statistics. a mean or a variance is not order-agnostic,
-        so it cannot be reduced in parallel or combined across restart segments —
-        register `m*v` and `m` and divide when reading.
+        the reduce combines SUMS or extrema, not statistics. a mean or a variance is
+        not order-agnostic, so it cannot be reduced in parallel or combined across
+        restart segments — register `m*v` and `m` and divide when reading.
         """
         return []
 

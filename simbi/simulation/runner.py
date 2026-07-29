@@ -565,6 +565,12 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
             f"{compute_mode} backend is required for production Rust validation"
         )
     backend.validate_simulation(sim_info=exec_dict)
+    # the registered binned reductions, reported alongside the validation because every number in
+    # them is fixed at registration and each one decides a cost paid for the whole job. it is a
+    # COURTESY, so it must not be able to fail a validation that has already passed.
+    from ..expression.census import describe as describe_censuses
+
+    print(describe_censuses(getattr(problem, "census_expressions", ())))
     print(f"{type(problem).__name__}: validation passed")
 
 

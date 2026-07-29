@@ -2619,6 +2619,13 @@ where
             // the size of the compiled per-cell graph: what a census actually costs, since
             // the cost scales with the dag rather than with the accumulator count.
             .with_attr("node_count", registered.evaluator.node_count() as u64)
+            // an ACCUMULATING census stores one row folded from many samples rather than a row
+            // apiece, so the row alone does not say what it is an accumulation OF. the count and
+            // the two endpoints make it self-describing: a reader forms the time average by
+            // dividing an additive row by the count, and two run segments combine as a
+            // count-weighted sum without either having stored its samples.
+            .with_attr("accumulated", u64::from(history.accumulate()))
+            .with_attr("cadence", spec.cadence().tag().to_string())
             .with_dataset(Dataset::new("time", vec![n], DataRef::F64(history.time())))
             // segment-major within a sample. a reader reshapes the segment axis to the
             // per-axis bin counts in registration order, last axis varying fastest.
@@ -2634,6 +2641,22 @@ where
                 "dropped",
                 vec![n],
                 DataRef::U64(history.dropped()),
+            ))
+            // which level produced each row, and the span it covers. an accumulating row is folded
+            // from many samples, so without the count there is no way to recover a time average
+            // from a running sum, and without the level a per-level row is indistinguishable from a
+            // composite one. all ones and all zeros respectively in the ordinary case, which costs
+            // sixteen bytes a row and makes every row self-describing.
+            .with_dataset(Dataset::new("level", vec![n], DataRef::U64(history.level())))
+            .with_dataset(Dataset::new(
+                "n_samples",
+                vec![n],
+                DataRef::U64(history.n_samples()),
+            ))
+            .with_dataset(Dataset::new(
+                "t_start",
+                vec![n],
+                DataRef::F64(history.t_start()),
             ));
         // the edges are a property of the registration, not of a sample, so they are
         // written once per axis rather than per row.

@@ -495,7 +495,15 @@ pub const SEGMENTED_MAX_BLOCKS: u32 = 1024;
 /// fell outside the declared bin edges. only the latter is a shortfall of the binning and
 /// only the latter is counted; conflating the two would report a body's footprint as
 /// under-coverage.
-pub const SEGMENT_EXCLUDED: u32 = u32::MAX;
+/// the marker for a cell EXCLUDED from a reduction, as an offset past the last bucket. a census
+/// writes `n_segments + EXCLUDED_OFFSET`; the reduction treats anything strictly above
+/// `n_segments` as excluded and `n_segments` itself as a cell that fell outside the bin edges.
+///
+/// an offset rather than a fixed sentinel because every marker must stay a SMALL integer: the
+/// segment travels on the scalar carrier (a generated kernel has one scalar type for all of its
+/// buffers), and a `u32::MAX` marker is not representable in f32 — it rounds to 2^32 and stops
+/// comparing equal, which would silently reclassify every excluded cell.
+pub const SEGMENT_EXCLUDED_OFFSET: u32 = 1;
 
 /// does a segmented reduction of this shape privatize its accumulators into shared memory,
 /// or accumulate straight into the global output? one home for the policy so the launcher
@@ -613,7 +621,7 @@ pub fn render_field_segmented_reduction(
     // the segment view carries the same host-packed layout as a value view; only the
     // element type differs, and the index formulas read lo/strides alone.
     out.push_str(
-        "struct __symbi_SegView { const unsigned int* __restrict__ data; int lo[4]; int strides[4]; int extent[4]; };\n",
+        "",
     );
     out.push_str(&segmented_atomic_helpers(op, precision));
 
@@ -621,7 +629,7 @@ pub fn render_field_segmented_reduction(
     let mut params: Vec<String> = (0..n_values)
         .map(|v| format!("    __symbi_View field{v}"))
         .collect();
-    params.push(format!("    __symbi_SegView field{seg_buf}"));
+    params.push(format!("    __symbi_View field{seg_buf}"));
     params.push("    unsigned int total_cells".to_string());
     for aa in 0..ndim {
         params.push(format!("    unsigned int grid_size_{aa}"));
@@ -679,16 +687,22 @@ pub fn render_field_segmented_reduction(
         out.push('\n');
     }
     let seg_flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, seg_buf as u32, comps);
+    // the segment rides the SCALAR carrier, like every other kernel buffer: a generated kernel is
+    // `fn k<S: Scalar>`, one type for all of its buffers, so a bucket index cannot arrive as its
+    // own integer field. every marker is therefore a SMALL non-negative integer, exact in f32 and
+    // f64 alike — bucket in `[0, n)`, `n` for a cell that fell outside the bin edges, and anything
+    // above `n` for a cell excluded from the reduction entirely. no sentinel depends on the
+    // carrier's width, which a `u32::MAX` marker silently would once the carrier is f32.
     out.push_str(&format!(
-        "        unsigned int seg = field{seg_buf}.data[{seg_flat}];\n"
+        "        unsigned int seg = (unsigned int) field{seg_buf}.data[{seg_flat}];\n"
     ));
-    // a cell excluded from the reduction is skipped silently; a cell past the last segment
-    // was meant to be reduced but fell outside the bin edges, and that shortfall is counted.
+    // a cell EXCLUDED (covered by finer data, inside a body mask, a ghost) is skipped silently; a
+    // cell that was to be reduced and fell outside the declared edges is a shortfall and counted.
     out.push_str(&format!(
-        "        if (seg == {SEGMENT_EXCLUDED}u) continue;\n"
+        "        if (seg > {n_segments}u) continue;\n"
     ));
     out.push_str(&format!(
-        "        if (seg >= {n_segments}u) {{ n_dropped += 1ull; continue; }}\n"
+        "        if (seg == {n_segments}u) {{ n_dropped += 1ull; continue; }}\n"
     ));
     for v in 0..n_values {
         let flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, v as u32, comps);
@@ -1136,7 +1150,10 @@ mod tests {
         // three value views, then the segment view; one binding each.
         assert!(s.contains("__symbi_View field0"));
         assert!(s.contains("__symbi_View field2"));
-        assert!(s.contains("__symbi_SegView field3"));
+        // the segment rides the SCALAR view like every other buffer: a generated kernel has one
+        // scalar type for all of them, so the bucket index arrives as a small exact integer in
+        // that carrier rather than as an integer field of its own.
+        assert!(s.contains("__symbi_View field3"));
         assert_eq!(desc.field_bindings.len(), 4);
         assert!(desc.field_bindings.iter().all(|b| !b.is_output));
 
@@ -1217,7 +1234,7 @@ mod tests {
         let s = &desc.source;
         assert!(s.contains("unsigned long long* dropped"), "src:\n{s}");
         assert!(
-            s.contains("if (seg >= 5u) { n_dropped += 1ull; continue; }"),
+            s.contains("if (seg == 5u) { n_dropped += 1ull; continue; }"),
             "src:\n{s}"
         );
         assert!(s.contains("atomicAdd(dropped, n_dropped);"), "src:\n{s}");

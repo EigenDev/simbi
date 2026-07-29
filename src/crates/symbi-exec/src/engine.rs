@@ -301,7 +301,7 @@ pub struct SegmentedReduction {
 /// guess, because silently crossing that line is the failure mode worth avoiding.
 pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
     values: &[&symbi_grid::Field<Sc, D, Mem>],
-    segment: &symbi_grid::Field<u32, D, Mem>,
+    segment: &symbi_grid::Field<Sc, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
     n_segments: usize,
     op: ReductionOp,
@@ -343,12 +343,14 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
     // reduction (covered by finer data, inside a body mask), while a cell past the last
     // segment was to be reduced and fell outside the declared edges.
     let visit = |acc: &mut [f64], dropped: &mut u64, c: [isize; D]| {
-        let raw = *segment.view().at(c);
-        if raw == symbi_ir::SEGMENT_EXCLUDED {
+        // the marker rides the SCALAR carrier and is a small non-negative integer, so the cast is
+        // exact: bucket in [0, n), `n` for a cell outside the declared edges, above `n` for one
+        // excluded from the reduction entirely.
+        let seg = segment.view().at(c).to_f64() as usize;
+        if seg > n_segments {
             return;
         }
-        let seg = raw as usize;
-        if seg >= n_segments {
+        if seg == n_segments {
             *dropped += 1;
             return;
         }
@@ -597,7 +599,7 @@ fn field_segmented_reduce_device<
     const D: usize,
 >(
     values: &[&symbi_grid::Field<Sc, D, Mem>],
-    segment: &symbi_grid::Field<u32, D, Mem>,
+    segment: &symbi_grid::Field<Sc, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
     n_segments: usize,
     op: ReductionOp,
@@ -609,6 +611,12 @@ fn field_segmented_reduce_device<
     use symbi_xpu::runtime::GpuRuntime;
     use symbi_xpu::{DeviceMemory, MemoryBlock};
 
+    // the device accumulators ride the FIELD's carrier, unlike the host path, which widens every
+    // term to f64 before combining. a single-precision field therefore sums in single precision
+    // here: over a few million cells the running sum outgrows the terms being added to it and the
+    // tail of each bin is absorbed, giving a smooth, positive total wrong in its third digit. the
+    // census reduces f64 artifacts regardless of the simulation's carrier, which is what keeps
+    // that off the census path.
     let n_values = values.len();
     let n_slots = n_segments * n_values;
     let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
