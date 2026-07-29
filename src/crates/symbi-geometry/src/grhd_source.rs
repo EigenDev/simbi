@@ -793,18 +793,26 @@ mod tests {
         }
     }
 
-    // rotating (swirl) flow off the equator: the MOMENTUM closed forms follow from the diagonal
+    // rotating (swirl) flow off the equator. the MOMENTUM closed forms follow from the diagonal
     // spatial metric — S_theta = (E (v^phi)^2 + p g^{phi phi}) r^2 sin(theta) cos(theta), S_r gains
     // the azimuthal centrifugal block E (v^phi)^2 r sin^2(theta), and S_phi vanishes by axisymmetry.
     //
-    // the ENERGY source is NOT asserted here. the radial-block oracle below supplies it from the
-    // (t, r) sector alone, which is exact only where the shift vanishes; on a horizon-penetrating
-    // chart the azimuthal block couples into the energy source too, and reproducing that would mean
-    // re-deriving the oracle rather than reading it off the radial one. the energy source on this
-    // chart is gated for RADIAL flow by `covariant_source_radial_flow_matches_oracle_plus_angular_blocks`
-    // — what is uncovered is specifically its swirl contribution.
+    // the ENERGY source needs one term the radial-block oracle cannot supply. that oracle carries
+    // the angular blocks at ISOTROPIC PRESSURE only, so the fluid's angular kinetic blocks are
+    // missing from `T^{mu nu} Gamma^t_{mu nu}`. on this chart
+    //
+    //     Gamma^t_{kk} = -(1/2) g^{tr} d_r g_{kk},        g^{tr} = beta^r / alpha^2
+    //
+    // (every other term of Gamma^t_{kk} carries a time or azimuthal derivative of a static,
+    // axisymmetric metric), so each angular slot contributes `-alpha E (v^k)^2 Gamma^t_{kk}`:
+    //
+    //     dS_tau = (beta^r / alpha) E [ (v^theta)^2 r + (v^phi)^2 r sin^2(theta) ]
+    //
+    // which vanishes identically when beta^r does. that is why a static chart's energy source reads
+    // off the radial block alone, and why a horizon-penetrating one does not — the shift is exactly
+    // the coupling.
     #[test]
-    fn covariant_source_swirl_momentum_closed_form() {
+    fn covariant_source_swirl_closed_form_including_the_shifted_energy_coupling() {
         use crate::metric::SchwarzschildKS;
         let m = 1.0;
         let (e, p) = (2.3_f64, 0.05_f64);
@@ -842,7 +850,66 @@ mod tests {
         assert!(approx(s[0], s_r_cf), "S_r: {} != {s_r_cf}", s[0]);
         assert!(approx(s[1], s_th_cf), "S_theta: {} != {s_th_cf}", s[1]);
         assert!(s[2].abs() < 1e-14, "S_phi must vanish: {}", s[2]);
-        let _ = (s_tau, tau_cf);
+        // the shift-coupled angular kinetic block, derived above. v^theta = 0 here, so only the
+        // azimuthal slot contributes.
+        let beta_r = br;
+        let tau_swirl = tau_cf + (beta_r / a) * e * vphi * vphi * r * st * st;
+        assert!(
+            approx(s_tau, tau_swirl),
+            "S_tau: {s_tau} != {tau_swirl} (radial block {tau_cf} + azimuthal coupling {})",
+            tau_swirl - tau_cf
+        );
+    }
+
+    // the same coupling with BOTH angular slots carrying fluid motion, so neither term of
+    // `dS_tau = (beta^r/alpha) E [ (v^theta)^2 r + (v^phi)^2 r sin^2(theta) ]` can hide the other.
+    // asserts the ENERGY source only: a nonzero v^theta also moves S_r and S_theta, whose closed
+    // forms the swirl test above already pins at v^theta = 0.
+    #[test]
+    fn shifted_chart_energy_source_carries_both_angular_kinetic_blocks() {
+        use crate::metric::SchwarzschildKS;
+        let m = 1.0;
+        let (e, p) = (2.3_f64, 0.05_f64);
+        let (r, theta) = (6.0_f64, 1.1_f64);
+        let (vr, vth, vphi) = (-0.1_f64, 0.04_f64, 0.02_f64);
+        let st = theta.sin();
+
+        let g = SchwarzschildKS {
+            mass: Dual::constant(m),
+        };
+        let (_, s_tau) = grhd_covariant_source(
+            &g,
+            Tensor::new([r, theta, 0.0]),
+            e,
+            Tensor::new([vr, vth, vphi]),
+            p,
+        );
+
+        let (a, br, grr, d) = schwarzschild_ks_adm(r, m);
+        let (_, tau_cf) = grhd_radial_geodesic_source(
+            r,
+            a,
+            br,
+            grr,
+            d.d_lapse,
+            d.d_shift_r,
+            d.d_gamma_rr,
+            e,
+            vr * grr.sqrt(),
+            p,
+        );
+        let want = tau_cf + (br / a) * e * (vth * vth * r + vphi * vphi * r * st * st);
+        assert!(
+            approx(s_tau, want),
+            "S_tau with both angular slots moving: {s_tau} != {want}"
+        );
+        // the premise: the coupling must be RESOLVED here, not lost in the radial block's roundoff.
+        assert!(
+            (want - tau_cf).abs() > 1e-6 * tau_cf.abs().max(1.0),
+            "the angular kinetic coupling is negligible at these parameters ({}); the gate would \
+             pass with the term omitted",
+            want - tau_cf
+        );
     }
 
     // the M = 0 limit is flat spherical: the contraction must reproduce the covariant
