@@ -33,7 +33,6 @@ use symbi_display::{
     Colormap, ExitKind, FieldSlice, LiveDashboard, ScreenGuard, SignalGuard, Table,
 };
 use symbi_geometry::MotionState;
-use symbi_geometry::Schwarzschild;
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
@@ -4855,35 +4854,16 @@ macro_rules! hydro_dispatch {
             (3, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, 3, Cartesian, Cartesian)
             }
-            // GR (Schwarzschild) spherical: select the Schwarzschild metric (lapse-densitized +
-            // GR-wavespeed `_schw` kernels). baked for 1D/2D (the Michel accretion targets); 3D
-            // spherical Schwarzschild has no baked kernel and is rejected by the fail-loud guard
-            // above (never silently run on a flat metric). the spacetime is orthogonal to the regime.
-            (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
-                $cfg, $prims, $regime, $regime_ty, 1, 1,
-                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
-            ),
-            // 2D GR: the generator row length picks the momentum DOF — (rho, v_r, v_theta, pre)
-            // is the axisymmetric in-plane flow (DOF = 2); (rho, v_r, v_theta, v_phi, pre) lifts
-            // the azimuthal momentum onto the (r, theta) grid (DOF = 3, the `_sph_swirl`
-            // kernels: rotating flows — tori, spinning-hole accretion).
-            (2, "spherical") if $cfg.spacetime == "schwarzschild" => {
-                if $prims.first().map_or(false, |row| row.len() == 5) {
-                    build_and_run_hydro!(
-                        $cfg, $prims, $regime, $regime_ty, 2, 3,
-                        Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
-                    )
-                } else {
-                    build_and_run_hydro!(
-                        $cfg, $prims, $regime, $regime_ty, 2, 2,
-                        Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
-                    )
-                }
-            }
-            // GR (ingoing Kerr-Schild) spherical: the HORIZON-PENETRATING chart (regular across
-            // r = 2M) — the `_ks` shift-advection-flux + KS-densitized/wavespeed kernels. reuses the
-            // `schwarzschild_mass` scalar. 1D radial + the 2D plane (with the same row-length DOF
-            // pick as schwarzschild: 5-tuples lift the azimuthal momentum, `_sph_swirl`).
+            // GR (ingoing Kerr-Schild) spherical: the HORIZON-PENETRATING chart, regular across
+            // r = 2M — the `_ks` shift-advection-flux + KS-densitized/wavespeed kernels. baked for
+            // 1D radial (the michel / bondi accretion targets) and the 2D (r, theta) plane; 3D
+            // spherical has no baked kernel and is rejected by the fail-loud guard above, never
+            // silently run on a flat metric. the spacetime is orthogonal to the regime.
+            //
+            // in 2D the generator row length picks the momentum DOF: (rho, v_r, v_theta, pre) is
+            // the axisymmetric in-plane flow (DOF = 2), while (rho, v_r, v_theta, v_phi, pre) lifts
+            // the azimuthal momentum onto the grid (DOF = 3, the `_sph_swirl` kernels — rotating
+            // flows: tori, spinning-hole accretion).
             (1, "spherical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 1, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
@@ -5824,24 +5804,13 @@ macro_rules! mhd_dispatch {
                     $cfg.spacetime
                 ))
             }
-            // GR (Schwarzschild) spherical MHD: the metric type selects the `_schw` GRMHD
-            // kernel row (RmhdGr valencia flux + metric-aware KKC c2p + the ideal-MHD stress
-            // in the covariant source). baked 1D radial (the magnetized-michel target).
-            (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
-                $cfg, $prims, $bufs, $regime, $regime_ty, 1,
-                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
-            ),
-            // the horizon-penetrating chart: the `_ks` GRMHD row (the shifted riemann fan with
-            // the induction transpose term). the inner boundary can sit below r = 2M.
+            // GR spherical MHD on the horizon-penetrating chart: the `_ks` GRMHD kernel row
+            // (RmhdGr valencia flux with the shifted riemann fan + induction transpose,
+            // metric-aware KKC c2p, and the ideal-MHD stress in the covariant source). baked 1D
+            // radial (the magnetized-michel target); the inner boundary can sit below r = 2M.
             (1, "spherical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
-            ),
-            // the 2D (r, theta) GRMHD row: the curved-CT machinery (densitized corner EMF +
-            // curl + metric-contracted interpolation; contact EMF only).
-            (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
-                $cfg, $prims, $bufs, $regime, $regime_ty, 2,
-                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
             ),
             // the 2D (r, theta) SPINNING-KERR GRMHD row: the non-diagonal
             // gamma_{r phi} rides the tetrad HLLD, the radial shift the moving-interface fan, and
@@ -6913,18 +6882,31 @@ fn check_excision_request(
     // faces stay CT-owned, so div(sqrt(gamma) B) is untouched. non-relativistic
     // regimes never reach here (a curved spacetime on a newtonian/iso regime is
     // rejected upstream).
-    if !matches!(spacetime, "schwarzschild_ks" | "kerr_ks")
-        || coord_system != "cartesian"
-        || dims != 3
-    {
+    // the admissible charts. 3d cartesian: the excised region is the kerr-schild-radius level set,
+    // staircased across the lattice. 1d radial and 2d (r, theta) spherical: r is a COORDINATE, so
+    // the excision surface is a coordinate surface — no staircase, and the region is an exact slab
+    // of innermost cells.
+    //
+    // a 2d CARTESIAN slice is excluded for a reason that does not carry over: it is
+    // z-translation-invariant, a black string rather than a point black hole, so its spherical
+    // metric evaluated at z = 0 is inconsistent with the planar dynamics, and its staircased
+    // excision circle seeds an m = 4 mode that grows into the exterior. the spherical reductions
+    // are genuine symmetry reductions (spherical symmetry in 1d, axisymmetry in 2d), not slices of
+    // a 3d problem, and their excision surface carries no grid imprint at all.
+    let chart_ok = match coord_system {
+        "cartesian" => dims == 3,
+        "spherical" => dims == 1 || dims == 2,
+        _ => false,
+    };
+    if !matches!(spacetime, "schwarzschild_ks" | "kerr_ks") || !chart_ok {
         return Err(format!(
-            "excision_radius = {excision_radius} requires a 3d cartesian kerr-schild chart \
-             (spacetime schwarzschild_ks or kerr_ks); got (dims={dims}, coords={coord_system}, \
-             spacetime={spacetime}). a 2d cartesian slice is z-translation-invariant — a black \
-             string, not a point black hole: its spherical metric evaluated at z = 0 is \
-             inconsistent with the planar dynamics, and the excision circle is grid-staircased \
-             (it seeds an m = 4 mode that grows into the exterior). excise on a 3d cartesian box, \
-             or model the horizon on a spherical / cylindrical chart behind r_min."
+            "excision_radius = {excision_radius} requires a horizon-penetrating kerr-schild chart \
+             (spacetime schwarzschild_ks or kerr_ks) on a 3d cartesian box or a 1d/2d spherical \
+             grid; got (dims={dims}, coords={coord_system}, spacetime={spacetime}). a 2d cartesian \
+             slice is z-translation-invariant — a black string, not a point black hole: its \
+             spherical metric evaluated at z = 0 is inconsistent with the planar dynamics, and the \
+             excision circle is grid-staircased (it seeds an m = 4 mode that grows into the \
+             exterior)."
         ));
     }
     // the excision surface is the kerr-schild-radius level set r_ks = r_exc, which

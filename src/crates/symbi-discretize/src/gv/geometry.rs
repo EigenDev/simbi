@@ -7,7 +7,7 @@
 use super::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{
-    Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    Geometry, KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical, volume_weighted_centroid,
 };
 
@@ -188,7 +188,6 @@ pub(crate) fn gv_metric_volume_factor_at(
 ) -> Gv {
     let mass = Gv::scalar("schwarzschild_mass");
     match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => Schwarzschild { mass }.volume_factor(x),
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             SchwarzschildKSCartesian { mass }.volume_factor(x)
         }
@@ -230,7 +229,6 @@ pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>)
     match spacetime {
         // alpha = sqrt(1 - 2M/r) (schwarzschild coords) / alpha = 1/sqrt(1 + 2M/r) (kerr-schild),
         // each from its `Metric` impl (the SINGLE source of the lapse expression).
-        Spacetime::Schwarzschild => Schwarzschild { mass }.lapse(Tensor::new([r])),
         Spacetime::SchwarzschildKS => SchwarzschildKS { mass }.lapse(Tensor::new([r])),
         Spacetime::KerrKS => {
             let spin = Gv::scalar("kerr_spin");
@@ -248,7 +246,6 @@ pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>)
 pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Gv {
     let mass = Gv::scalar("schwarzschild_mass");
     match spacetime {
-        Spacetime::Schwarzschild => Schwarzschild { mass }.lapse_sq(Tensor::new([r])),
         Spacetime::SchwarzschildKS => SchwarzschildKS { mass }.lapse_sq(Tensor::new([r])),
         Spacetime::KerrKS => {
             let spin = Gv::scalar("kerr_spin");
@@ -264,7 +261,7 @@ pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv, theta: Option<G
 /// beta = 0 -> None so the caller elides the shift term (bit-identical, no `- 0`).
 pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Option<Gv> {
     match spacetime {
-        Spacetime::Minkowski | Spacetime::Schwarzschild => None,
+        Spacetime::Minkowski => None,
         Spacetime::SchwarzschildKS => {
             let mass = Gv::scalar("schwarzschild_mass");
             Some(SchwarzschildKS { mass }.shift(Tensor::new([r]))[0])

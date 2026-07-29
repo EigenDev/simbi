@@ -6,7 +6,7 @@
 // Btilde^i = sqrt(gamma) B^i with the coordinate curl of the densitized corner
 // EMF Etilde_phi, dividing back by the face's own constant weight
 //   w_r  = sqrt(gamma)(r_f, th_c) dth,   w_th = sqrt(gamma)(r_c, th_f) dr,
-// with sqrt(gamma) = r^2 sin(theta)/sqrt(1 - 2M/r). the preserved discrete
+// with sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r). the preserved discrete
 // divergence is the w-weighted flux balance
 //   div(B)[i,j] = w_r(i+1,j) B_r(i+1,j) - w_r(i,j) B_r(i,j)
 //               + w_th(j+1,i) B_th(i,j+1) - w_th(j,i) B_th(i,j)
@@ -45,9 +45,11 @@ fn mid(ax: usize, idx: usize) -> f64 {
     0.5 * (af(ax, idx) + af(ax, idx + 1))
 }
 
-// schwarzschild sqrt(gamma) = r^2 sin(theta) / sqrt(1 - 2M/r).
+// the ingoing kerr-schild spatial measure sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r), from
+// gamma = diag(1 + 2M/r, r^2, r^2 sin^2 theta). the curl telescopes for ANY face weight, so what
+// this pins is that the SAME measure the kernel uses is the one the divergence is read with.
 fn sqrtg(r: f64, th: f64) -> f64 {
-    r * r * th.sin() / (1.0 - 2.0 * MASS / r).sqrt()
+    r * r * th.sin() * (1.0 + 2.0 * MASS / r).sqrt()
 }
 
 // the per-face constant weights the kernel divides by.
@@ -70,7 +72,7 @@ fn run_curl(b_in: &[Vec<f64>; 2], ez: &[f64], dt: f64) -> [Vec<f64>; 2] {
         let (bvec, ezv) = (b_in[dir].clone(), ez.to_vec());
         let out = KernelRun::new(rmhd_ct_curl_2d_sph_gr_gv(
             dir,
-            Spacetime::Schwarzschild,
+            Spacetime::SchwarzschildKS,
             Coords::Spherical,
             &[Spacing::Uniform; 2],
             &[0, 1],

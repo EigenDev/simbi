@@ -45,7 +45,7 @@ class GrRotatingEquilibrium(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(Spacetime.KERR_KS, description="background spacetime"),
     ]
     schwarzschild_mass: Annotated[
         float,
@@ -119,11 +119,9 @@ class GrRotatingEquilibrium(SimbiProblem):
     def compute_defaults(self) -> "GrRotatingEquilibrium":
         self.resolution = (self.nr, self.npolar)
         theta_c = math.pi / 2.0
-        if self.kerr_spin != 0.0:
-            # spinning: the kerr spacetime. the domain stays OUTSIDE the horizon —
-            # a stationary constant-l azimuthal flow needs a timelike LNRF
-            # (Delta > 0), so this state has no through-horizon continuation.
-            self.spacetime = Spacetime.KERR_KS
+        # the domain stays OUTSIDE the horizon at every spin: a stationary constant-l azimuthal
+        # flow needs a timelike LNRF (Delta > 0), so this state has no through-horizon
+        # continuation.
         self.bounds = [
             (3.0, 100.0),
             (theta_c - self.theta_halfwidth, theta_c + self.theta_halfwidth),
@@ -140,7 +138,7 @@ class GrRotatingEquilibrium(SimbiProblem):
             bounds_r=self.bounds[0],
             bounds_theta=tuple(self.bounds[1]),
             spin=self.kerr_spin,
-            chart="ks" if self.kerr_spin != 0.0 else "bl",
+            chart="ks",
         )
 
     def _boundary_prescription(self) -> dict:
@@ -185,17 +183,19 @@ class GrRotatingEquilibrium(SimbiProblem):
         u_t = expr.sqrt(1.0 + u_lnrf * u_lnrf) / e_nu
         u_p = omega * u_t + u_lnrf / e_psi
         zero = expr.constant(0.0, g)
-        if self.kerr_spin != 0.0:
-            # ks chart: v^r = b/sqrt(1+b) (the orbiter's drift against the infalling
-            # eulerian observers), v^phi = u^phi sqrt(1+b) / u^t.
-            b = (2.0 * mm) * r / sigma
-            sq_b = expr.sqrt(1.0 + b)
-            v_r = b / sq_b
-            vphi = u_p * sq_b / u_t
-        else:
-            # bl chart at a = 0: alpha = e^nu, zero shift.
-            v_r = zero
-            vphi = u_p / (e_nu * u_t)
+        # the ingoing kerr-schild chart at every spin, a = 0 included (where it is the
+        # schwarzschild kerr-schild metric): v^r = b/sqrt(1+b) is the orbiter's drift against the
+        # INFALLING eulerian observers, and v^phi = u^phi sqrt(1+b)/u^t. u^t is built from the LNRF
+        # and is chart-independent for this state, since u^r = 0 makes the BL -> KS map act only
+        # through terms proportional to u^r.
+        #
+        # keyed on the CHART, which is fixed: a branch keyed on the SPIN would hand a = 0 runs
+        # boyer-lindquist initial data on a kerr-schild metric, which is not a visible failure —
+        # the state simply is not the equilibrium the gate measures against.
+        b = (2.0 * mm) * r / sigma
+        sq_b = expr.sqrt(1.0 + b)
+        v_r = b / sq_b
+        vphi = u_p * sq_b / u_t
 
         compiled = g.compile([rho, v_r, zero, vphi, pre])
         return compiled.serialize_boundary(dim=3)

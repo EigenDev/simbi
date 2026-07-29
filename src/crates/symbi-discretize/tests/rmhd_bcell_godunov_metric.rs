@@ -275,10 +275,10 @@ fn assert_gr_bcell_updates(
 }
 
 #[test]
-fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
-    // schwarzschild (r,theta), contravariant B: the out-of-plane B^phi (comp 2) obeys the densitized
-    // law with the covariant r^2 sin(theta) measure (M-independent), lapse-weighted by
-    // alpha = sqrt(1 - 2M/r_cen) at the volume-weighted radial centroid.
+fn schwarzschild_ks_sph_bcell_predictor_applies_lapse_weight() {
+    // ingoing kerr-schild (r,theta), contravariant B: the out-of-plane B^phi (comp 2) obeys the
+    // densitized law with the covariant r^2 sin(theta) measure (M-independent), lapse-weighted by
+    // alpha = 1/sqrt(1 + 2M/r_cen) at the volume-weighted radial centroid.
     let mass = 0.2;
     let th0 = 0.4;
     let dth = 0.1;
@@ -295,7 +295,7 @@ fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
         s.push(("schwarzschild_mass", m));
         let b = run_bcell_euler(
             Coords::Spherical,
-            Spacetime::Schwarzschild,
+            Spacetime::SchwarzschildKS,
             &[0, 1],
             &s,
             uniform_radial,
@@ -315,13 +315,17 @@ fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
         let (rl, rh) = (R0 + i as f64 * DR, R0 + (i + 1) as f64 * DR);
         3.0 * (rh * rh - rl * rl) / (rh * rh * rh - rl * rl * rl)
     };
-    // lapse at the volume-weighted radial centroid r_cen = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3).
+    // the ingoing kerr-schild lapse alpha = 1/sqrt(1 + 2M/r) at the volume-weighted radial centroid
+    // r_cen = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3). the LAW under test is chart-generic — the densitized
+    // divergence carries the lapse weight — but the lapse itself is not: the static chart's
+    // sqrt(1 - 2M/r) vanishes at the horizon where this one stays finite, which is the whole reason
+    // the flow can be evolved through r = 2M here.
     let alpha = |i: usize, _j: usize| {
         let (rl, rh) = (R0 + i as f64 * DR, R0 + (i + 1) as f64 * DR);
         let r_cen = 0.75 * (rh.powi(4) - rl.powi(4)) / (rh.powi(3) - rl.powi(3));
-        (1.0 - 2.0 * mass / r_cen).sqrt()
+        1.0 / (1.0 + 2.0 * mass / r_cen).sqrt()
     };
-    assert_gr_bcell_updates(&upd0, &upd_m, div, alpha, "schwarzschild sph");
+    assert_gr_bcell_updates(&upd0, &upd_m, div, alpha, "kerr-schild sph");
 }
 
 #[test]

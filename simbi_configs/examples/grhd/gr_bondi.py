@@ -1,19 +1,23 @@
 # =============================================================================
 # gr_bondi.py
 #
-# spherical (bondi) accretion onto a schwarzschild black hole, started from a
-# uniform gas at rest. the schwarzschild geodesic source pulls the gas inward; the
-# inflow accelerates, and (once the flow develops) passes through a sonic surface
-# and exits supersonically through the inner boundary toward the hole.
+# spherical (bondi) accretion onto a non-rotating black hole in ingoing kerr-schild
+# coordinates, started from a uniform gas at rest. the geodesic source pulls the gas
+# inward; the inflow accelerates, passes through a sonic surface, and crosses the
+# horizon at r = 2M into the excised region.
 #
 # scales (G = c = 1): the central mass M sets the gravitational radius r_g = M
 # (horizon at 2M). the ambient sound speed c_inf = sqrt(gamma p / (rho h)) sets the
 # bondi radius r_bondi ~ M / c_inf^2, where gravity overtakes pressure and the flow
-# goes transonic; the domain spans from outside the horizon to beyond r_bondi.
+# goes transonic; the domain spans from inside the horizon to beyond r_bondi.
 #
-# the inflow becomes ultra-relativistic (V -> 1, W -> infinity) as r -> 2M, which is
-# a coordinate singularity of schwarzschild coordinates: the inner boundary is held
-# away from 2M, and through-horizon flow requires horizon-penetrating coordinates.
+# the chart is horizon-penetrating, so r = 2M is an ordinary surface rather than a
+# coordinate singularity and the domain reaches through it. the region inside the
+# excision radius is frozen at a cold vacuum floor: every characteristic there points
+# inward, so the exterior rarefies into it and nothing returns — a one-way absorbing
+# boundary, which is what a horizon is. the alternative, an inner wall held outside
+# 2M, makes the gas pile up against a surface the flow should cross freely.
+#
 # radial zones are log-spaced (geometric-mean cell centers): the bondi flow spans many
 # decades in r, with the finest zones near the inner boundary.
 # =============================================================================
@@ -32,7 +36,7 @@ from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
 class GrBondi(SimbiProblem):
-    """schwarzschild spherical accretion developing from a uniform gas at rest."""
+    """through-horizon spherical accretion developing from a uniform gas at rest."""
 
     # physics
     adiabatic_index: Annotated[
@@ -41,16 +45,7 @@ class GrBondi(SimbiProblem):
     spacetime: Annotated[
         Spacetime,
         ProblemParam(
-            # STILL the singular chart, deliberately. this problem's gate probes the
-            # banyuls-font riemann fan in the |V| > alpha regime, and |V| is measured
-            # against the chart's normal observer: the STATIC one sees the infalling gas
-            # cross that threshold, the infalling kerr-schild one never does, so the fan
-            # regime is simply not reached there and the gate goes vacuous. porting it
-            # means moving the probe inside the horizon, which needs spherical excision
-            # (currently cartesian-only) -- a real piece of work, not a chart rename.
-            # this is a HYDRO config, so it carries no source-admissibility rate and the
-            # singular chart costs it nothing.
-            Spacetime.SCHWARZSCHILD, description="background spacetime"
+            Spacetime.SCHWARZSCHILD_KS, description="background spacetime"
         ),
     ]
     schwarzschild_mass: Annotated[
@@ -77,7 +72,22 @@ class GrBondi(SimbiProblem):
     bounds: Annotated[
         list[tuple[float, float]],
         ProblemParam(
-            [(3.0, 100.0)], description="radial domain bounds (r > 2M)"
+            # the domain reaches THROUGH the horizon at r = 2M: the chart is regular there,
+            # so the accreting gas crosses it rather than piling up against an artificial
+            # inner wall, and the excision surface below carries the causal boundary.
+            [(1.0, 100.0)], description="radial domain bounds, spanning r_+ = 2M"
+        ),
+    ]
+    excision_radius: Annotated[
+        float,
+        ProblemParam(
+            # inside the outer horizon r_+ = 2M and above the M/2 metric-guard radius. every
+            # characteristic inside r_+ points inward, so the excised cells are causally
+            # disconnected: freezing them at the vacuum floor makes the surface a one-way
+            # absorber, which is what a horizon is.
+            1.4,
+            cli=True,
+            description="horizon excision radius (0 disables)",
         ),
     ]
     coord_system: Annotated[

@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
 };
 use symbi_hydro::RmhdGr;
@@ -436,7 +436,6 @@ pub fn rhd_flux_gr_gv<const D: usize>(
     rusanov: bool,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
 where
-    Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
     KerrKSCartesian<Gv>: Metric<Gv, D>,
@@ -479,16 +478,6 @@ where
     // r^2/sqrt(f)); `alpha * volume_factor = sqrt(-g)` is the densitization the state and the flux
     // both ride on.
     let (gamma, gamma_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (
@@ -998,15 +987,6 @@ pub fn rmhd_flux_gr_gv(
     }));
     let mass = Gv::scalar("schwarzschild_mass");
     let (gamma, gamma_inv, alpha, beta) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (

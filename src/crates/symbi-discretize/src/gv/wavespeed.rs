@@ -8,7 +8,7 @@ use super::*;
 use symbi_algebra::Matrix;
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
 };
 use symbi_ir::dual::Dual;
@@ -314,14 +314,6 @@ pub fn gr_light_cone_wave_speed_map_gv(
     // (cylindrical) internally, so the wrong-chart spherical metric (which would read x[0] as the
     // radius) is never used.
     let (alpha, gi, beta) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let g = Schwarzschild { mass };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let g = SchwarzschildKSCartesian { mass };
             (
@@ -426,15 +418,6 @@ fn gr_metric_fields_gv(
 ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
     let mass = Gv::scalar("schwarzschild_mass");
     match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (
@@ -829,19 +812,6 @@ pub fn rmhd_source_cfl_gr_gv(
         Tensor<Gv, 3>,
         Gv,
     ) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let mg = Schwarzschild { mass: mass_gv };
-            let (sm, _) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, Gv::ZERO, b);
-            let (_, st) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pre, b);
-            (
-                mg.spatial_metric(x),
-                mg.spatial_metric_inv(x),
-                mg.lapse(x),
-                mg.shift(x),
-                sm,
-                st,
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let mg = SchwarzschildKSCartesian { mass: mass_gv };
             let (sm, _) = grmhd_covariant_source(
@@ -1130,14 +1100,6 @@ pub fn rhd_source_cfl_gr_gv(
         Gv,
         Tensor<Gv, 3>,
     ) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let gi = Schwarzschild { mass: mass_gv }.spatial_metric_inv(x);
-            let al = Schwarzschild { mass: mass_gv }.lapse(x);
-            let bt = Schwarzschild { mass: mass_gv }.shift(x);
-            let (sm, _) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, Gv::ZERO);
-            let (_, st) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pre);
-            (gi, sm, st, al, bt)
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
             let al = SchwarzschildKSCartesian { mass: mass_gv }.lapse(x);
@@ -1436,15 +1398,6 @@ pub fn fofc_project_gr_mhd_gv(
     let mass = Gv::scalar("schwarzschild_mass");
     let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
         match (spacetime, coords) {
-            (Spacetime::Schwarzschild, _) => {
-                let m = Schwarzschild { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
             (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
                 let m = SchwarzschildKSCartesian { mass };
                 (
@@ -1658,15 +1611,6 @@ pub fn constraint_projection_gv(
     let mass = Gv::scalar("schwarzschild_mass");
     let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
         match (spacetime, coords) {
-            (Spacetime::Schwarzschild, _) => {
-                let m = Schwarzschild { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
             (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
                 let m = SchwarzschildKSCartesian { mass };
                 (
@@ -1847,15 +1791,6 @@ pub fn fofc_source_theta_gr_mhd_gv(
     let mass = Gv::scalar("schwarzschild_mass");
     let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
         match (spacetime, coords) {
-            (Spacetime::Schwarzschild, _) => {
-                let m = Schwarzschild { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
             (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
                 let m = SchwarzschildKSCartesian { mass };
                 (
@@ -1989,10 +1924,6 @@ pub fn fofc_project_gr_gv(
     }));
     let mass = Gv::scalar("schwarzschild_mass");
     let (gm_inv, alpha, beta): (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))

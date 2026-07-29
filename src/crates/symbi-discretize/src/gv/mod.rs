@@ -54,7 +54,7 @@ use super::coords::{Coords, Spacetime, Spacing};
 mod c2p;
 mod ct_emf;
 mod flux;
-mod geometry;
+pub(crate) mod geometry;
 mod ghost;
 mod godunov;
 mod sources;
@@ -1543,7 +1543,7 @@ mod tests {
         // the flat spherical map does NOT (bit-identical to pre-B.5).
         let (k_gr, _) = rhd_wave_speed_map_gv(
             Coords::Spherical,
-            Spacetime::Schwarzschild,
+            Spacetime::SchwarzschildKS,
             &[Spacing::Uniform],
             &[0],
             1,
@@ -1577,7 +1577,7 @@ mod tests {
         // stays bit-identical to the lapse-free flat result. proves the (Spherical, Schwarzschild) -> metric.lapse path.
         let (k_gr, _) = godunov_stage_gv(
             Coords::Spherical,
-            Spacetime::Schwarzschild,
+            Spacetime::SchwarzschildKS,
             &[Spacing::Uniform],
             &[0],
             1,

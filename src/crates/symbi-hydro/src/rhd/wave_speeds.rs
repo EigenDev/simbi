@@ -268,4 +268,70 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn conflating_the_physical_velocity_into_the_contravariant_slot_collapses_the_fan() {
+        // the gate above asserts the fan is REAL at a transonic near-horizon state. on its own that
+        // says nothing — a formula that never produced a NaN would satisfy it too. this pins the
+        // other side: the specific defect it defends against does collapse the fan, at the same
+        // state, so the regression is exerting real pressure rather than passing vacuously.
+        //
+        // the defect is a slot conflation. `vn` is the CONTRAVARIANT normal velocity v^n and
+        // `v_sq` the PHYSICAL speed squared gamma_ij v^i v^j; on a static diagonal chart they are
+        // related by v^n = alpha V, so passing the physical V into the contravariant slot inflates
+        // vn by 1/alpha. the discriminant carries `- vn^2 (1 - cs^2)`, so the inflated value drives
+        // it negative once |V| approaches alpha and the square root returns NaN.
+        //
+        // this is CHART-INDEPENDENT, which is why it belongs here rather than in an accretion run:
+        // it needs only gamma_nn != 1 and a fast enough flow, not a particular problem on a
+        // particular chart whose observer happens to see the gas approach c.
+        let (cs_sq, alpha) = (0.0132_f64, 0.587_f64);
+        let grr_inv = alpha * alpha;
+        let mut collapsed = 0;
+        for &big_v in &[-0.64_f64, -0.7, -0.85, -0.95] {
+            // the CONFLATION: the physical velocity handed to the contravariant slot.
+            let (sl, sr) = rhd_speeds_from_vn_gr(cs_sq, big_v, big_v * big_v, grr_inv, alpha);
+            if !(sl.is_finite() && sr.is_finite()) {
+                collapsed += 1;
+            }
+        }
+        assert!(
+            collapsed > 0,
+            "the conflated velocity slot no longer collapses the fan at any transonic state, so \
+             `gr_fan_is_finite_at_transonic_inner_state` defends nothing: either the discriminant \
+             changed or these states stopped being transonic"
+        );
+    }
+
+    #[test]
+    fn the_discriminant_is_non_negative_for_every_admissible_state() {
+        // the THEOREM behind the fix, exercised directly instead of through a problem that happens
+        // to reach the dangerous regime. with the slots split correctly, cauchy-schwarz gives
+        // vn^2 <= gamma^{nn} v_sq, hence
+        //   disc = (1 - v^2)( gamma^{nn}(1 - v^2 cs^2) - vn^2 (1 - cs^2) ) >= gamma^{nn}(1 - v^2)^2
+        // which is non-negative for any subluminal state on any positive-definite metric. so the
+        // fan is real EVERYWHERE, not merely at the states some accretion run visits: no chart, no
+        // lapse and no flow speed can produce the NaN, which is a strictly stronger statement than
+        // any single-problem regression can make.
+        for &gamma_nn in &[0.2_f64, 0.5, 1.0, 2.5, 8.0] {
+            for &alpha in &[0.15_f64, 0.6, 1.0] {
+                for &cs_sq in &[1e-6_f64, 0.05, 0.33] {
+                    for &v_sq in &[0.0_f64, 0.25, 0.81, 0.9801] {
+                        // the cauchy-schwarz extreme: vn^2 at its maximum gamma^{nn} v_sq, where
+                        // the bound is tight and the discriminant is smallest.
+                        for sign in [-1.0_f64, 1.0] {
+                            let vn = sign * (gamma_nn * v_sq).sqrt();
+                            let (sl, sr) =
+                                rhd_speeds_from_vn_gr(cs_sq, vn, v_sq, gamma_nn, alpha);
+                            assert!(
+                                sl.is_finite() && sr.is_finite() && sl <= sr,
+                                "fan not real at gamma_nn={gamma_nn} alpha={alpha} \
+                                 cs^2={cs_sq} v^2={v_sq} vn={vn}: ({sl},{sr})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

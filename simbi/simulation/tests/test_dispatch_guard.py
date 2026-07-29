@@ -72,7 +72,7 @@ class _NewtonianOnSchwarzschild(SodProblem):
     # dispatch. the mass is positive so the earlier
     # GR-parameter gate (a curved spacetime with M = 0 is rejected first) does not mask the
     # regime-vs-spacetime rejection this test exercises.
-    spacetime: Spacetime = Spacetime.SCHWARZSCHILD
+    spacetime: Spacetime = Spacetime.SCHWARZSCHILD_KS
     schwarzschild_mass: float = 1.0
 
 

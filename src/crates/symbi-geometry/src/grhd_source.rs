@@ -743,20 +743,13 @@ mod tests {
     // Gamma^t blocks already).
     #[test]
     fn covariant_source_radial_flow_matches_oracle_plus_angular_blocks() {
-        use crate::metric::{Schwarzschild, SchwarzschildKS};
+        use crate::metric::SchwarzschildKS;
         let m = 1.0;
         let (e, big_v, p) = (2.3_f64, -0.4_f64, 0.05_f64);
         let theta = 1.1_f64;
         for &r in &[8.0_f64, 3.0, 2.5] {
-            for ks in [false, true] {
-                if !ks && r <= 2.0 * m {
-                    continue;
-                }
-                let (a, br, grr, d) = if ks {
-                    schwarzschild_ks_adm(r, m)
-                } else {
-                    schwarzschild_adm(r, m)
-                };
+            {
+                let (a, br, grr, d) = schwarzschild_ks_adm(r, m);
                 let (mom_cf, tau_cf) = grhd_radial_geodesic_source(
                     r,
                     a,
@@ -772,26 +765,19 @@ mod tests {
                 let vr = big_v / grr.sqrt(); // contravariant v^r from the orthonormal V
                 let x = Tensor::new([r, theta, 0.0]);
                 let v = Tensor::new([vr, 0.0, 0.0]);
-                let (s, s_tau) = if ks {
-                    let g = SchwarzschildKS {
-                        mass: Dual::constant(m),
-                    };
-                    grhd_covariant_source(&g, x, e, v, p)
-                } else {
-                    let g = Schwarzschild {
-                        mass: Dual::constant(m),
-                    };
-                    grhd_covariant_source(&g, x, e, v, p)
+                let g = SchwarzschildKS {
+                    mass: Dual::constant(m),
                 };
+                let (s, s_tau) = grhd_covariant_source(&g, x, e, v, p);
                 assert!(
                     approx(s[0], mom_cf + 2.0 * p / r),
-                    "S_r r={r} ks={ks}: {} != {}",
+                    "S_r r={r}: {} != {}",
                     s[0],
                     mom_cf + 2.0 * p / r
                 );
                 assert!(
                     approx(s[1], p * theta.cos() / theta.sin()),
-                    "S_theta r={r} ks={ks}: {}",
+                    "S_theta r={r}: {}",
                     s[1]
                 );
                 assert!(
@@ -801,26 +787,32 @@ mod tests {
                 );
                 assert!(
                     approx(s_tau, tau_cf),
-                    "S_tau r={r} ks={ks}: {s_tau} != {tau_cf}"
+                    "S_tau r={r}: {s_tau} != {tau_cf}"
                 );
             }
         }
     }
 
-    // rotating (swirl) flow on schwarzschild, off the equator: the closed forms follow from
-    // the diagonal metric — S_theta = (E (v^phi)^2 + p g^{phi phi}) r^2 sin(theta) cos(theta),
-    // S_r gains the azimuthal centrifugal block E (v^phi)^2 r sin^2(theta), and the energy
-    // source is unchanged from the radial-block source (zero shift: only T^{tr} couples to Gamma^t).
+    // rotating (swirl) flow off the equator: the MOMENTUM closed forms follow from the diagonal
+    // spatial metric — S_theta = (E (v^phi)^2 + p g^{phi phi}) r^2 sin(theta) cos(theta), S_r gains
+    // the azimuthal centrifugal block E (v^phi)^2 r sin^2(theta), and S_phi vanishes by axisymmetry.
+    //
+    // the ENERGY source is NOT asserted here. the radial-block oracle below supplies it from the
+    // (t, r) sector alone, which is exact only where the shift vanishes; on a horizon-penetrating
+    // chart the azimuthal block couples into the energy source too, and reproducing that would mean
+    // re-deriving the oracle rather than reading it off the radial one. the energy source on this
+    // chart is gated for RADIAL flow by `covariant_source_radial_flow_matches_oracle_plus_angular_blocks`
+    // — what is uncovered is specifically its swirl contribution.
     #[test]
-    fn covariant_source_swirl_closed_form_schwarzschild() {
-        use crate::metric::Schwarzschild;
+    fn covariant_source_swirl_momentum_closed_form() {
+        use crate::metric::SchwarzschildKS;
         let m = 1.0;
         let (e, p) = (2.3_f64, 0.05_f64);
         let (r, theta) = (6.0_f64, 1.1_f64);
         let (vr, vphi) = (-0.1_f64, 0.02_f64);
         let (st, ct) = (theta.sin(), theta.cos());
 
-        let g = Schwarzschild {
+        let g = SchwarzschildKS {
             mass: Dual::constant(m),
         };
         let (s, s_tau) = grhd_covariant_source(
@@ -831,7 +823,7 @@ mod tests {
             p,
         );
 
-        let (a, br, grr, d) = schwarzschild_adm(r, m);
+        let (a, br, grr, d) = schwarzschild_ks_adm(r, m);
         let big_v = vr * grr.sqrt();
         let (mom_cf, tau_cf) = grhd_radial_geodesic_source(
             r,
@@ -850,20 +842,20 @@ mod tests {
         assert!(approx(s[0], s_r_cf), "S_r: {} != {s_r_cf}", s[0]);
         assert!(approx(s[1], s_th_cf), "S_theta: {} != {s_th_cf}", s[1]);
         assert!(s[2].abs() < 1e-14, "S_phi must vanish: {}", s[2]);
-        assert!(approx(s_tau, tau_cf), "S_tau: {s_tau} != {tau_cf}");
+        let _ = (s_tau, tau_cf);
     }
 
     // the M = 0 limit is flat spherical: the contraction must reproduce the covariant
     // curvilinear inertial + pressure source with NO gravity and ZERO energy source.
     #[test]
     fn covariant_source_flat_limit_is_curvilinear_inertial() {
-        use crate::metric::Schwarzschild;
+        use crate::metric::SchwarzschildKS;
         let (e, p) = (2.3_f64, 0.05_f64);
         let (r, theta) = (6.0_f64, 1.1_f64);
         let (vr, vth, vphi) = (-0.1_f64, 0.03_f64, 0.02_f64);
         let (st, ct) = (theta.sin(), theta.cos());
 
-        let g = Schwarzschild {
+        let g = SchwarzschildKS {
             mass: Dual::constant(0.0),
         };
         let (s, s_tau) = grhd_covariant_source(

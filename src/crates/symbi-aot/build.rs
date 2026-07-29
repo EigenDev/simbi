@@ -539,12 +539,6 @@ impl Geom {
         }
     }
 
-    // select the Schwarzschild spacetime (lapse alpha = sqrt(1-2M/r)); the spatial `coords` stay
-    // Spherical. only the relativistic regimes (rhd/rmhd) compose with it physically.
-    fn schwarzschild(mut self) -> Self {
-        self.spacetime = Spacetime::Schwarzschild;
-        self
-    }
 
     // select the ingoing Kerr-Schild spacetime (horizon-penetrating: lapse 1/sqrt(1+2M/r), radial
     // shift beta^r = 2M/(r+2M), gamma_rr = 1+2M/r); the spatial `coords` stay Spherical. selects the
@@ -2916,6 +2910,23 @@ fn main() {
         emit_gv(&out_dir, "excise_p2c_mhd_cart_ks_2d", 2, &k, &writes);
         let (k, writes) = symbi_discretize::excise_p2c_mhd_3d_gv();
         emit_gv(&out_dir, "excise_p2c_mhd_cart_ks_3d", 3, &k, &writes);
+        // the SPHERICAL kerr-schild rows. on a chart whose radial coordinate IS r the excised
+        // region is an exact slab of innermost cells and its surface is a coordinate surface, so
+        // the mask is one comparison rather than the cartesian chart's kerr-schild-radius quartic.
+        // the spinning metric at a = 0 is the schwarzschild kerr-schild one, so a single p2c per
+        // dimension covers the whole horizon-penetrating family.
+        let (k, writes) = symbi_discretize::excise_fill_sph_1d_gv();
+        emit_gv(&out_dir, "excise_fill_sph_1d", 1, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_writeback_dof1_gv();
+        emit_gv(&out_dir, "excise_writeback_sph_1d", 1, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_p2c_sph_ks_1d_gv();
+        emit_gv(&out_dir, "excise_p2c_sph_ks_1d", 1, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_fill_sph_2d_gv();
+        emit_gv(&out_dir, "excise_fill_sph_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_writeback_dof3_gv();
+        emit_gv(&out_dir, "excise_writeback_sph_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_p2c_sph_ks_2d_gv();
+        emit_gv(&out_dir, "excise_p2c_sph_ks_2d", 2, &k, &writes);
         // the horizon shell-flux accretion diagnostic: the per-cell outward boundary flux of
         // Omega = { r_ks < diagnostic_radius }, reduced (field_reduce Add) per quantity into the
         // accretion ledger. cartesian kerr-schild (a = 0); the mass + covariant-energy fluxes.
@@ -2983,28 +2994,15 @@ fn main() {
     for ndim in 1u8..=3 {
         gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim));
     }
-    // GR (Schwarzschild) RHD godunov stage — the lapse-densitized relativistic gas update on a
-    // spherically-symmetric BH background (`rhd_godunov_stage_sph_schw_{1,2}d`). only the
-    // RELATIVISTIC regime composes physically (no adiabatic/iso on a horizon). 1D radial (the
-    // Michel accretion solution) + 2D axisymmetric.
-    for ndim in 1u8..=2 {
-        let bh = Geom::sph(ndim).schwarzschild();
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, bh.clone(), None);
-        // the GR CFL wave-speed map: the Banyuls-Font coordinate signal speed (the lapse + radial
-        // proper-width correction) -> the correct dt near the horizon.
-        gen_rhd_wave_speed_map(&out_dir, ndim, bh.clone());
-        // the Valencia covariant-storage GR path (covariant `S_i`): the metric-aware c2p + per-sweep
-        // face flux (radial + angular in 2D — the angular gamma_{theta theta} = r^2 lowers S_theta).
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, bh.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, bh.clone());
-        }
-    }
-    // GR (ingoing Kerr-Schild) RHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
-    // densitized godunov + KS coordinate wave speeds (the radial shift rides the flux fan). 1D radial
-    // (the through-horizon accretion target); the inner boundary can sit BELOW 2M where the flow is
-    // unconditionally ingoing. uniform + log-radial grids share one kernel tagged `_sph_ks` (the
-    // radial spacing is a runtime `map_kind` scalar; encoding it as a kernel-name axis would bake a separate kernel per map).
+    // GR (ingoing Kerr-Schild) SPHERICAL RHD — the HORIZON-PENETRATING chart, regular across
+    // r = 2M: the KS densitized godunov (the radial shift rides the flux fan), the KS coordinate
+    // wave speeds, the metric-aware c2p and the per-sweep face flux (radial + angular in 2D, where
+    // gamma_{theta theta} = r^2 lowers S_theta). only the RELATIVISTIC regime composes physically —
+    // there is no adiabatic or isothermal gas on a horizon. 1D radial (michel accretion, the
+    // through-horizon target: the inner boundary may sit BELOW 2M, where the flow is
+    // unconditionally ingoing) + 2D axisymmetric. uniform and log-radial grids share one kernel
+    // tagged `_sph_ks`: the radial spacing is a runtime `map_kind` scalar, and encoding it as a
+    // kernel-name axis would bake a separate kernel per map.
     for ndim in 1u8..=2 {
         let ks = Geom::sph(ndim).schwarzschild_ks();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
@@ -3103,10 +3101,7 @@ fn main() {
     // axisymmetric source; the covariant stress-energy contraction carries the centrifugal
     // blocks. per (spacetime, spacing): godunov + wave-speed + c2p + per-sweep flux + snapshot
     // + ghost fill.
-    for base in [
-        Geom::sph_swirl().schwarzschild(),
-        Geom::sph_swirl().schwarzschild_ks(),
-    ] {
+    for base in [Geom::sph_swirl().schwarzschild_ks()] {
         for geom in [base.clone()] {
             gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
             gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
@@ -3142,10 +3137,7 @@ fn main() {
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
     // zero — the transverse-B curved measures land with the phase-B densitized CT).
-    for geom in [
-        Geom::sph(1).schwarzschild(),
-        Geom::sph(1).schwarzschild_ks(),
-    ] {
+    for geom in [Geom::sph(1).schwarzschild_ks()] {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_gr_wave_speeds_cell(&out_dir, 1, &geom);
@@ -3159,26 +3151,6 @@ fn main() {
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_from_bface_gr(&out_dir, 1, &geom);
-    }
-    // GRMHD phase B: the 2D (r, theta) schwarzschild row — the gas/flux/c2p/map gens are
-    // ndim-generic; the CT trio (densitized EMF + curl + interpolation) is the curved-CT
-    // machinery. ghost fill reuses the flat rmhd_ghost_fill_2d
-    // (a spacetime-free lattice pullback).
-    for geom in [Geom::sph(2).schwarzschild()] {
-        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
-        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
-        for dir in 0..2 {
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
-            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
-            // the metric-generalized MUB09 HLLD gas flux (schwarzschild, zero shift).
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
-        }
-        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
-        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
-        gen_rmhd_ct_gr(&out_dir, &geom);
-        gen_rmhd_gr_uct(&out_dir, &geom);
-        gen_rmhd_gr_uct_hlld(&out_dir, &geom);
     }
     // GRMHD in the cartesian kerr-schild (x, y) plane: the spatial metric is NON-DIAGONAL
     // (gamma_ij = delta_ij + 2H x_i x_j / r^2, H = M/r, r = |x|), so the gas flux runs the

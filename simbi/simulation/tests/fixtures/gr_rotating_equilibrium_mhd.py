@@ -80,14 +80,12 @@ class GrRotatingEquilibriumMhd(GrRotatingEquilibrium):
         u_t = expr.sqrt(1.0 + u_lnrf * u_lnrf) / e_nu
         u_p = omega * u_t + u_lnrf / e_psi
         zero = expr.constant(0.0, g)
-        if self.kerr_spin != 0.0:
-            b = (2.0 * mm) * r / sigma
-            sq_b = expr.sqrt(1.0 + b)
-            v_r = b / sq_b
-            vphi = u_p * sq_b / u_t
-        else:
-            v_r = zero
-            vphi = u_p / (e_nu * u_t)
+        # the ingoing kerr-schild chart at every spin (a = 0 is the schwarzschild kerr-schild
+        # metric). keyed on the chart, not the spin — see the hydro base for why.
+        b = (2.0 * mm) * r / sigma
+        sq_b = expr.sqrt(1.0 + b)
+        v_r = b / sq_b
+        vphi = u_p * sq_b / u_t
 
         compiled = g.compile([rho, v_r, zero, vphi, pre, zero, zero, zero])
         return compiled.serialize_boundary(dim=3)

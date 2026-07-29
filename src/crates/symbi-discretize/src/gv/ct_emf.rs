@@ -14,7 +14,7 @@ use super::*;
 /// vanishes identically and the generic form reduces to the single-shift spherical EMF.
 fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
     use symbi_geometry::{
-        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
         SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
     };
     let mass = Gv::scalar("schwarzschild_mass");
@@ -29,7 +29,6 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
         }};
     }
     match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => adm!(Schwarzschild { mass }, Schwarzschild<Gv>),
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             adm!(
                 SchwarzschildKSCartesian { mass },
@@ -87,7 +86,7 @@ fn gr_spatial_metric_at(
     x: Tensor<Gv, 3>,
 ) -> SpatialMetric<Gv, 3> {
     use symbi_geometry::{
-        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
         SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
     };
     let mass = Gv::scalar("schwarzschild_mass");
@@ -101,7 +100,6 @@ fn gr_spatial_metric_at(
         }};
     }
     match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => sm!(Schwarzschild { mass }, Schwarzschild<Gv>),
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             sm!(
                 SchwarzschildKSCartesian { mass },

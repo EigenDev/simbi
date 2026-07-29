@@ -42,8 +42,6 @@ pub enum Spacetime {
     #[default]
     Minkowski,
     /// static spherically-symmetric vacuum: lapse alpha = sqrt(1 - 2M/r), shift = 0. the codegen
-    /// TAG (M-agnostic — M rides as a kernel value, like `dx`). mirrors `symbi_geometry::Spacetime`.
-    Schwarzschild,
     /// schwarzschild in ingoing kerr-schild coords: lapse alpha = 1/sqrt(1 + 2M/r), radial shift
     /// beta^r = 2M/(r + 2M), gamma_rr = 1 + 2M/r. horizon-penetrating codegen TAG selecting the
     /// shift-advection flux + KS densitization path. mirrors `symbi_geometry::Spacetime::SchwarzschildKS`.
@@ -75,7 +73,6 @@ impl Spacetime {
     pub fn to_spacetime(self) -> symbi_geometry::Spacetime {
         match self {
             Spacetime::Minkowski => symbi_geometry::Spacetime::Minkowski,
-            Spacetime::Schwarzschild => symbi_geometry::Spacetime::Schwarzschild,
             Spacetime::SchwarzschildKS => symbi_geometry::Spacetime::SchwarzschildKS,
             Spacetime::KerrKS => symbi_geometry::Spacetime::KerrKS,
         }

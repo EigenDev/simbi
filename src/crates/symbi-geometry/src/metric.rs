@@ -53,13 +53,8 @@ impl Geometry {
 pub enum Spacetime {
     #[default]
     Minkowski = 0,
-    /// static spherically-symmetric vacuum (standard coords). DIAGONAL spatial metric, shift = 0,
-    /// non-trivial lapse alpha = sqrt(1 - 2M/r). the mass M is a kernel parameter — the tag
-    /// selects the kernel STRUCTURE and M rides as a value (the `Schwarzschild` Metric
-    /// impl's field at host, a scalar in the trace).
-    Schwarzschild = 1,
-    /// schwarzschild in ingoing kerr-schild (eddington-finkelstein) coords — the SAME physical
-    /// vacuum as `Schwarzschild` in a HORIZON-PENETRATING chart: regular across r = 2M, nonzero
+    /// the static spherically-symmetric vacuum in ingoing kerr-schild (eddington-finkelstein)
+    /// coords — HORIZON-PENETRATING: regular across r = 2M, nonzero
     /// radial shift beta^r, DIAGONAL spatial metric gamma_{rr} = 1 + 2M/r. reuses the
     /// `schwarzschild_mass` scalar. selects the shift-advection flux + KS densitization kernel path.
     SchwarzschildKS = 2,
@@ -704,214 +699,6 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 //   the trait default (zero) here — only the metric geometry + lapse are provided.
 // ============================================================
 
-/// the Schwarzschild (static spherically-symmetric vacuum) metric in standard coordinates. `mass`
-/// is the geometric mass M (G = c = 1). a DIAGONAL metric (impls [`DiagonalMetric`]); the curvature
-/// is the radial stretch f(r) = 1 - 2M/r and the lapse sqrt(f).
-#[derive(Debug, Clone, Copy)]
-pub struct Schwarzschild<S> {
-    /// the geometric mass M (units G = c = 1). the horizon is at r = 2M. CARRIER-GENERIC over `S`:
-    /// an `f64` at the host, a `Gv::scalar` in the trace (host-filled) so the kernel stays M-agnostic
-    /// (one Schwarzschild kernel serves every mass), and `metric.lapse` remains the single source of
-    /// the alpha = sqrt(1 - 2M/r) expression.
-    pub mass: S,
-}
-
-impl<S: Scalar> Schwarzschild<S> {
-    /// f(r) = 1 - 2M/r — the lapse-squared `alpha^2` AND the inverse radial metric coefficient
-    /// `gamma^{rr}` (so `gamma_{rr} = 1/f`). positive outside the horizon (r > 2M).
-    #[inline]
-    fn f(&self, r: S) -> S {
-        S::ONE - S::from_f64(2.0) * self.mass / r
-    }
-}
-
-impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
-    fn geometry(&self) -> Geometry {
-        Geometry::Spherical
-    }
-    fn spacetime(&self) -> Spacetime {
-        Spacetime::Schwarzschild
-    }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
-        vec![("schwarzschild_mass", self.mass)]
-    }
-
-    fn lapse(&self, x: Tensor<S, 1>) -> S {
-        self.f(x[0]).sqrt()
-    }
-    fn lapse_sq(&self, x: Tensor<S, 1>) -> S {
-        self.f(x[0])
-    } // alpha^2 = f = 1 - 2M/r
-
-    fn spatial_metric(&self, x: Tensor<S, 1>) -> Matrix<S, 1> {
-        Matrix::diag(Tensor::new([S::ONE / self.f(x[0])]))
-    }
-    fn spatial_metric_inv(&self, x: Tensor<S, 1>) -> Matrix<S, 1> {
-        Matrix::diag(Tensor::new([self.f(x[0])]))
-    }
-    fn sqrt_det_gamma(&self, x: Tensor<S, 1>) -> S {
-        S::ONE / self.f(x[0]).sqrt()
-    }
-    fn scale_factors(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
-        Tensor::new([S::ONE / self.f(x[0]).sqrt()])
-    }
-
-    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
-        x
-    }
-    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
-        x
-    }
-
-    /// the full proper volume element including the 2 suppressed angular directions: r^2 / sqrt(f).
-    fn volume_factor(&self, x: Tensor<S, 1>) -> S {
-        let r = x[0];
-        r * r / self.f(r).sqrt()
-    }
-}
-
-impl<S: Scalar> Metric<S, 2> for Schwarzschild<S> {
-    fn geometry(&self) -> Geometry {
-        Geometry::Spherical
-    }
-    fn spacetime(&self) -> Spacetime {
-        Spacetime::Schwarzschild
-    }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
-        vec![("schwarzschild_mass", self.mass)]
-    }
-
-    fn lapse(&self, x: Tensor<S, 2>) -> S {
-        self.f(x[0]).sqrt()
-    }
-    fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
-        self.f(x[0])
-    } // alpha^2 = f = 1 - 2M/r
-
-    fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
-        let r = x[0];
-        Matrix::diag(Tensor::new([S::ONE / self.f(r), r * r]))
-    }
-    fn spatial_metric_inv(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
-        let r = x[0];
-        Matrix::diag(Tensor::new([self.f(r), S::ONE / (r * r)]))
-    }
-    fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
-        let r = x[0];
-        r / self.f(r).sqrt() // sqrt((1/f) * r^2)
-    }
-    fn scale_factors(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
-        let r = x[0];
-        Tensor::new([S::ONE / self.f(r).sqrt(), r])
-    }
-
-    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
-        let (r, theta) = (x[0], x[1]);
-        Tensor::new([r * theta.cos(), r * theta.sin()])
-    }
-    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
-        let (cx, cy) = (x[0], x[1]);
-        let r = (cx * cx + cy * cy).sqrt();
-        Tensor::new([r, cy.atan2(cx)])
-    }
-    fn vector_to_cartesian(&self, x: Tensor<S, 2>, v: Physical<S, 2>) -> Embedded<S, 2> {
-        let theta = x[1];
-        let (ct, st) = (theta.cos(), theta.sin());
-        Embedded::new(Tensor::new([v[0] * ct - v[1] * st, v[0] * st + v[1] * ct]))
-    }
-    fn vector_from_cartesian(&self, x: Tensor<S, 2>, v: Embedded<S, 2>) -> Physical<S, 2> {
-        let theta = x[1];
-        let (ct, st) = (theta.cos(), theta.sin());
-        Physical::new(Tensor::new([v[0] * ct + v[1] * st, -v[0] * st + v[1] * ct]))
-    }
-
-    /// proper volume incl. the suppressed phi direction: r^2 sin(theta) / sqrt(f).
-    fn volume_factor(&self, x: Tensor<S, 2>) -> S {
-        let r = x[0];
-        r * r * x[1].sin().abs() / self.f(r).sqrt()
-    }
-}
-
-impl<S: Scalar> Metric<S, 3> for Schwarzschild<S> {
-    fn geometry(&self) -> Geometry {
-        Geometry::Spherical
-    }
-    fn spacetime(&self) -> Spacetime {
-        Spacetime::Schwarzschild
-    }
-    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
-        vec![("schwarzschild_mass", self.mass)]
-    }
-
-    fn lapse(&self, x: Tensor<S, 3>) -> S {
-        self.f(x[0]).sqrt()
-    }
-    fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
-        self.f(x[0])
-    } // alpha^2 = f = 1 - 2M/r
-
-    fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
-        let r = x[0];
-        let st = x[1].sin();
-        Matrix::diag(Tensor::new([S::ONE / self.f(r), r * r, r * r * st * st]))
-    }
-    fn spatial_metric_inv(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
-        let r = x[0];
-        let st = x[1].sin();
-        let r2 = r * r;
-        Matrix::diag(Tensor::new([
-            self.f(r),
-            S::ONE / r2,
-            S::ONE / (r2 * st * st),
-        ]))
-    }
-    fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
-        let r = x[0];
-        r * r * x[1].sin().abs() / self.f(r).sqrt() // sqrt((1/f) r^2 r^2 sin^2)
-    }
-    // full-rank spherical chart: the proper measure is sqrt_det_gamma.
-    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
-        self.sqrt_det_gamma(x)
-    }
-    fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
-        let r = x[0];
-        let st = x[1].sin();
-        Tensor::new([S::ONE / self.f(r).sqrt(), r, r * st.abs()])
-    }
-
-    fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
-        let (r, theta, phi) = (x[0], x[1], x[2]);
-        let st = theta.sin();
-        Tensor::new([r * st * phi.cos(), r * st * phi.sin(), r * theta.cos()])
-    }
-    fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
-        let (cx, cy, cz) = (x[0], x[1], x[2]);
-        let r = (cx * cx + cy * cy + cz * cz).sqrt();
-        Tensor::new([r, (cz / r).acos(), cy.atan2(cx)])
-    }
-    fn vector_to_cartesian(&self, x: Tensor<S, 3>, v: Physical<S, 3>) -> Embedded<S, 3> {
-        let (theta, phi) = (x[1], x[2]);
-        let (st, ct, sp, cp) = (theta.sin(), theta.cos(), phi.sin(), phi.cos());
-        Embedded::new(Tensor::new([
-            v[0] * st * cp + v[1] * ct * cp - v[2] * sp,
-            v[0] * st * sp + v[1] * ct * sp + v[2] * cp,
-            v[0] * ct - v[1] * st,
-        ]))
-    }
-    fn vector_from_cartesian(&self, x: Tensor<S, 3>, v: Embedded<S, 3>) -> Physical<S, 3> {
-        let (theta, phi) = (x[1], x[2]);
-        let (st, ct, sp, cp) = (theta.sin(), theta.cos(), phi.sin(), phi.cos());
-        Physical::new(Tensor::new([
-            v[0] * st * cp + v[1] * st * sp + v[2] * ct,
-            v[0] * ct * cp + v[1] * ct * sp - v[2] * st,
-            -v[0] * sp + v[1] * cp,
-        ]))
-    }
-}
-
-impl<S: Scalar> DiagonalMetric<S, 1> for Schwarzschild<S> {}
-impl<S: Scalar> DiagonalMetric<S, 2> for Schwarzschild<S> {}
-impl<S: Scalar> DiagonalMetric<S, 3> for Schwarzschild<S> {}
 
 // ============================================================
 // schwarzschild in ingoing kerr-schild (eddington-finkelstein) coords: x = (r, theta, phi)
@@ -3131,79 +2918,6 @@ mod tests {
         assert!(approx(rz[0], 0.0) && approx(rz[1], 0.0));
     }
 
-    #[test]
-    fn test_schwarzschild_lapse_and_metric_3d() {
-        // M = 1, r = 5 -> f = 1 - 2/5 = 0.6 (outside the horizon r = 2M = 2).
-        let bh = Schwarzschild { mass: 1.0_f64 };
-        let (r, theta) = (5.0_f64, FRAC_PI_4);
-        let f = 1.0 - 2.0 / r; // 0.6
-        let st = theta.sin();
-        let x = Tensor::new([r, theta, 0.3]);
-
-        // lapse alpha = sqrt(f).
-        assert!(approx(bh.lapse(x), f.sqrt()));
-        // diagonal gamma = (1/f, r^2, r^2 sin^2 theta).
-        let g = bh.spatial_metric(x);
-        assert!(approx(g[(0, 0)], 1.0 / f));
-        assert!(approx(g[(1, 1)], r * r));
-        assert!(approx(g[(2, 2)], r * r * st * st));
-        // gamma^{ij} gamma_{jk} = delta (diagonal).
-        let gi = bh.spatial_metric_inv(x);
-        for ii in 0..3 {
-            assert!(approx(g[(ii, ii)] * gi[(ii, ii)], 1.0));
-        }
-        // sqrt(gamma) = r^2 sin(theta) / sqrt(f).
-        assert!(approx(bh.sqrt_det_gamma(x), r * r * st / f.sqrt()));
-    }
-
-    #[test]
-    fn test_schwarzschild_sqrt_minus_g_is_flat_spherical_area() {
-        // the densitization identity: sqrt(-g) = alpha * sqrt(gamma) = r^2 sin(theta), the FLAT
-        // spherical area element — so GR flux face areas are unchanged; only the time-volume
-        // (1/sqrt(f)) and the source pick up the lapse.
-        let bh = Schwarzschild { mass: 0.7_f64 };
-        let (r, theta) = (6.0, FRAC_PI_4);
-        let x = Tensor::new([r, theta, 0.0]);
-        assert!(approx(
-            bh.lapse(x) * bh.volume_factor(x),
-            r * r * theta.sin()
-        ));
-    }
-
-    #[test]
-    fn test_schwarzschild_zero_mass_equals_spherical() {
-        // M = 0 -> f = 1 -> the flat spherical metric exactly (lapse 1, gamma = spherical gamma).
-        let bh = Schwarzschild { mass: 0.0_f64 };
-        let x = Tensor::new([4.0, FRAC_PI_4, 1.1]);
-        assert!(approx(bh.lapse(x), 1.0));
-        let (g, gs) = (bh.spatial_metric(x), Spherical.spatial_metric(x));
-        for ii in 0..3 {
-            assert!(approx(g[(ii, ii)], gs[(ii, ii)]));
-        }
-        assert!(approx(bh.sqrt_det_gamma(x), Spherical.sqrt_det_gamma(x)));
-        // the orthogonal axes: spatial geometry is spherical, spacetime is the curved tag.
-        assert_eq!(
-            <Schwarzschild<f64> as Metric<f64, 3>>::geometry(&bh),
-            Geometry::Spherical
-        );
-        assert_eq!(
-            <Schwarzschild<f64> as Metric<f64, 3>>::spacetime(&bh),
-            Spacetime::Schwarzschild
-        );
-    }
-
-    #[test]
-    fn test_schwarzschild_1d_radial() {
-        // the radial reduction (the first GR target): M = 1, r = 10 -> f = 0.8.
-        let bh = Schwarzschild { mass: 1.0_f64 };
-        let x = Tensor::new([10.0_f64]);
-        let f = 0.8_f64;
-        assert!(approx(bh.lapse(x), f.sqrt()));
-        assert!(approx(bh.spatial_metric(x)[(0, 0)], 1.0 / f)); // gamma_rr = 1/f
-        // volume_factor incl. the 2 suppressed angular dirs: r^2 / sqrt(f).
-        assert!(approx(bh.volume_factor(x), 100.0 / f.sqrt()));
-    }
-
     // ---- schwarzschild in kerr-schild (horizon-penetrating) ----
 
     #[test]
@@ -3386,27 +3100,6 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
         let fd = |f: &dyn Fn(f64) -> f64, r: f64| (f(r + dr) - f(r - dr)) / (2.0 * dr);
         let seed = |r: f64| Tensor::new([Dual::variable(r)]);
-        for &r in &[3.0_f64, 5.0, 9.0] {
-            let m = Schwarzschild {
-                mass: Dual::constant(1.0_f64),
-            };
-            let mf = Schwarzschild { mass: 1.0_f64 };
-            assert!(
-                close(
-                    m.lapse(seed(r)).tangent,
-                    fd(&|x| mf.lapse(Tensor::new([x])), r)
-                ),
-                "schw d_lapse r={r}"
-            );
-            assert!(
-                close(
-                    m.spatial_metric(seed(r))[(0, 0)].tangent,
-                    fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)
-                ),
-                "schw d_grr r={r}"
-            );
-            assert!(m.shift(seed(r))[0].tangent == 0.0, "schw d_shift r={r}");
-        }
         for &r in &[1.2_f64, 1.8, 2.0, 4.0, 9.0] {
             let m = SchwarzschildKS {
                 mass: Dual::constant(1.0_f64),
@@ -3438,18 +3131,15 @@ mod tests {
 
     #[test]
     fn test_lapse_sq_is_exact_closed_form_not_sqrt_roundtrip() {
-        // alpha^2 must be the EXACT closed form (schwarzschild f = 1 - 2M/r, KS 1/(1 + 2M/r));
-        // lapse().powi(2) = sqrt(f)^2 rounds differently. the GR CFL radial factor depends on
-        // this being bitwise f, so the genericized wave-speed map bit-diffs the pre-refactor kernel.
-        let schw = Schwarzschild { mass: 1.0_f64 };
+        // alpha^2 must be the EXACT closed form 1/(1 + 2M/r); `lapse()` squared is
+        // (1/sqrt(1 + 2M/r))^2, which rounds differently. the GR CFL radial factor depends on this
+        // being bitwise the closed form, so the genericized wave-speed map bit-diffs against it.
         let ks = SchwarzschildKS { mass: 1.0_f64 };
         for &r in &[2.3_f64, 5.0, 11.7] {
             let x = Tensor::new([r]);
-            let f = 1.0 - 2.0 / r;
-            assert_eq!(schw.lapse_sq(x), f); // BITWISE equal to the closed form
             assert_eq!(ks.lapse_sq(x), 1.0 / (1.0 + 2.0 / r));
             // and it genuinely differs from the sqrt round-trip at some radius (the trap this avoids).
-            let _ = schw.lapse(x) * schw.lapse(x); // = sqrt(f)^2, may != f in the last bit
+            let _ = ks.lapse(x) * ks.lapse(x);
         }
     }
 

@@ -207,12 +207,10 @@ const fn arm(
 /// the curved GRHD arms of `hydro_dispatch!`.
 fn curved_hydro_arms() -> Vec<CurvedArm> {
     use Geometry::{Cartesian, Cylindrical, Spherical};
-    use Spacetime::{KerrKS, Schwarzschild, SchwarzschildKS};
+    use Spacetime::{KerrKS, SchwarzschildKS};
     vec![
-        arm(1, Spherical, &[0], 1, Schwarzschild),
         arm(1, Spherical, &[0], 1, SchwarzschildKS),
         // the 2D spherical wedge carries the azimuthal momentum lift.
-        arm(2, Spherical, &[0, 1], 3, Schwarzschild),
         arm(2, Spherical, &[0, 1], 3, SchwarzschildKS),
         arm(2, Spherical, &[0, 1], 3, KerrKS),
         arm(2, Cartesian, &[0, 1], 2, SchwarzschildKS),
@@ -229,11 +227,9 @@ fn curved_hydro_arms() -> Vec<CurvedArm> {
 /// chart segment keys on the grid-axis set rather than on the DOF lift.
 fn curved_mhd_arms() -> Vec<CurvedArm> {
     use Geometry::{Cartesian, Spherical};
-    use Spacetime::{KerrKS, Schwarzschild, SchwarzschildKS};
+    use Spacetime::{KerrKS, SchwarzschildKS};
     vec![
-        arm(1, Spherical, &[0], 3, Schwarzschild),
         arm(1, Spherical, &[0], 3, SchwarzschildKS),
-        arm(2, Spherical, &[0, 1], 3, Schwarzschild),
         arm(2, Spherical, &[0, 1], 3, KerrKS),
         arm(2, Cartesian, &[0, 1], 3, SchwarzschildKS),
         arm(3, Cartesian, &[0, 1, 2], 3, SchwarzschildKS),
@@ -355,8 +351,8 @@ fn the_projection_name_is_built_once_for_both_sides() {
     // place. this pins the resulting shape so a change to it is a deliberate edit rather
     // than a silent divergence that only shows up on one chart.
     assert_eq!(
-        fofc_project_name("rmhd", "_sph", Spacetime::Schwarzschild, 2),
-        "rmhd_fofc_project_sph_schw_2d"
+        fofc_project_name("rmhd", "_sph", Spacetime::SchwarzschildKS, 2),
+        "rmhd_fofc_project_sph_ks_2d"
     );
     // cartesian's chart segment is empty, which is exactly why an empty segment passed
     // unnoticed there while breaking every curvilinear chart.
@@ -365,8 +361,8 @@ fn the_projection_name_is_built_once_for_both_sides() {
         fofc_project_name("rmhd", "", Spacetime::SchwarzschildKS, 3),
     );
     assert_ne!(
-        fofc_project_name("rmhd", "", Spacetime::Schwarzschild, 2),
-        fofc_project_name("rmhd", "_sph", Spacetime::Schwarzschild, 2),
+        fofc_project_name("rmhd", "", Spacetime::SchwarzschildKS, 2),
+        fofc_project_name("rmhd", "_sph", Spacetime::SchwarzschildKS, 2),
         "the chart segment must change the name, else the dispatch cannot select a chart"
     );
 }
