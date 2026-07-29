@@ -214,7 +214,33 @@ where
         sim.census_fill_interpreted(ev, scratch)?;
     }
     if let Some(region) = covered {
-        sim.census_exclude_covered(ev, scratch, region);
+        exclude_covered(ev, &scratch.segment, region);
     }
     Some(scratch)
 }
+
+/// mark a level's covered cells EXCLUDED: the cells a finer level resolves are counted there, not
+/// here, so they must carry the marker that keeps them out of the reduction.
+///
+/// a constant fill over the covered region, dispatched through the same generic kernel path every
+/// other field operation uses, so a device-resident hierarchy excludes on the device. walking the
+/// region on the host instead would work only where the fields happen to be host-accessible — and
+/// where they are not, the covered cells keep the bucket the map assigned them and the refined
+/// volume is counted on BOTH levels, inflating every extensive total by exactly that volume.
+fn exclude_covered<const D: usize, Mem: MemorySpace>(
+    ev: &symbi_sim::census::CensusEvaluator,
+    segment: &symbi_grid::Field<f64, D, Mem>,
+    covered: &symbi_algebra::Domain<D>,
+) {
+    let name = symbi_ir::KernelId::FieldFill { ndim: D as u8 }.name();
+    let excluded = ev.spec().excluded_marker();
+    crate::regimes::substrate_kernels::dispatch_fields_each::<f64, Mem, D>(
+        name,
+        covered,
+        &[],
+        &[segment],
+        &[],
+        &[excluded],
+    );
+}
+

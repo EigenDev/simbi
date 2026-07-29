@@ -1785,11 +1785,15 @@ where
 {
     let data_dir = &cfg.data_dir;
     if let Some(path) = cfg.restart_path.as_deref() {
-        for (level_index, level) in hier.levels.iter_mut().enumerate() {
+        // a restart may run DEEPER than the file it resumes from — the bootstrap ladder, where a
+        // rung converges at its own resolution and the next resumes it with one more level. the
+        // sequence (count the file's levels, verify their grids, load them, inject the rest) lives
+        // on the hierarchy so it is reachable from a test rather than only from here.
+        for level in hier.levels.iter_mut() {
             level.state.tracers = None;
             level.state.continuous_tracers = None;
-            load_checkpoint_level(&mut level.state, path, level_index)?;
         }
+        hier.restore_from_checkpoint(path)?;
         if hier.levels.len() > 1
             && hier.levels.iter().any(|level| {
                 level.state.tracers.is_some() || level.state.continuous_tracers.is_some()

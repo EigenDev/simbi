@@ -146,13 +146,24 @@ where
         inputs.len() + outputs.len(),
         "disjoint_host_buffers('{name}'): one layout per field required",
     );
-    let mut seen_ptrs = std::collections::HashSet::with_capacity(inputs.len() + outputs.len());
+    // the hazard is a WRITE that aliases another binding: `&` + `&mut`, or two `&mut`. every output
+    // must therefore be distinct from every other binding. two INPUTS sharing an allocation are two
+    // `&[T]` to the same memory, which is sound, and is a real calling pattern — a prolongation
+    // whose old and new coarse states are the same buffer is the no-time-interpolation case, and a
+    // kernel reading one field through two manifest paths reads it twice to no ill effect.
+    let mut written = std::collections::HashSet::with_capacity(outputs.len());
     assert!(
-        inputs
-            .iter()
-            .chain(outputs.iter())
-            .all(|f| seen_ptrs.insert(f.as_ptr() as usize)),
-        "disjoint_host_buffers('{name}'): two bindings resolve to the same allocation — input/output aliasing would be UB. either the kernel's IR manifest has a duplicate path, or the caller bound the same field twice."
+        outputs.iter().all(|f| written.insert(f.as_ptr() as usize)),
+        "disjoint_host_buffers('{name}'): two OUTPUT bindings resolve to the same allocation — two \
+         `&mut` to one buffer is UB. either the kernel's IR manifest has a duplicate output path, \
+         or the caller bound the same field twice as an output."
+    );
+    assert!(
+        inputs.iter().all(|f| !written.contains(&(f.as_ptr() as usize))),
+        "disjoint_host_buffers('{name}'): a binding is both an input and an output — the resulting \
+         `&` + `&mut` to one buffer is UB, and on release it is a silent garbled-physics bug rather \
+         than a fault. either the kernel's IR manifest repeats a path across the two roles, or the \
+         caller bound one field on both sides."
     );
     let mut buffers: Vec<Buf<'a, Sc>> = Vec::with_capacity(inputs.len() + outputs.len());
     for (f, (lo, ext, vol)) in inputs.iter().zip(layouts.iter()) {
@@ -589,3 +600,69 @@ mod block_tests {
         assert!(auto_block_size([64usize, 64, 4], 12).is_none());
     }
 }
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+    use symbi_algebra::{Domain, Space};
+    use symbi_xpu::HostMemory;
+
+    fn dom() -> Domain<1> {
+        Domain::new([Space {
+            name: "x",
+            lo: 0,
+            hi: 8,
+        }])
+    }
+
+    fn field() -> Field<f64, 1, HostMemory> {
+        Field::zeros(&dom()).expect("field")
+    }
+
+    fn layouts(n: usize) -> Vec<([i32; 1], [u32; 1], usize)> {
+        vec![([0i32; 1], [8u32; 1], 8usize); n]
+    }
+
+    /// the WRITE hazard: two `&mut` to one buffer. must stay refused, and on RELEASE too — a
+    /// debug-only guard would let a garbled-physics bug through in exactly the builds that run
+    /// production.
+    #[test]
+    #[should_panic(expected = "two OUTPUT bindings")]
+    fn two_outputs_on_one_buffer_are_refused() {
+        let f = field();
+        let l = layouts(2);
+        let _ = disjoint_host_buffers::<f64, 1, HostMemory>("probe", &[], &[&f, &f], &l);
+    }
+
+    /// the other write hazard: `&` and `&mut` to one buffer.
+    #[test]
+    #[should_panic(expected = "both an input and an output")]
+    fn a_buffer_bound_as_both_input_and_output_is_refused() {
+        let f = field();
+        let l = layouts(2);
+        let _ = disjoint_host_buffers::<f64, 1, HostMemory>("probe", &[&f], &[&f], &l);
+    }
+
+    /// two INPUTS on one buffer are two `&[T]` — sound, and a real calling pattern: a prolongation
+    /// whose old and new coarse states are the same field is the no-time-interpolation case, which
+    /// is how a level is initialized from its parent. refusing it would force a caller to duplicate
+    /// a full-grid buffer to satisfy a check stricter than the hazard it guards.
+    #[test]
+    fn two_inputs_may_share_a_buffer() {
+        let f = field();
+        let out = field();
+        let l = layouts(3);
+        let bufs = disjoint_host_buffers::<f64, 1, HostMemory>("probe", &[&f, &f], &[&out], &l);
+        assert_eq!(bufs.len(), 3, "one binding per field");
+    }
+
+    /// distinct buffers on both sides: the ordinary case must remain unaffected.
+    #[test]
+    fn distinct_bindings_are_accepted() {
+        let (a, b, out) = (field(), field(), field());
+        let l = layouts(3);
+        let bufs = disjoint_host_buffers::<f64, 1, HostMemory>("probe", &[&a, &b], &[&out], &l);
+        assert_eq!(bufs.len(), 3);
+    }
+}
+

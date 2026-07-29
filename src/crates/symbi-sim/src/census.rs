@@ -913,12 +913,24 @@ where
     }
 
     /// mark a level's covered cells excluded, after a fill that did not know about them.
+    ///
+    /// HOST ONLY, and reachable only behind the per-cell interpreter, which refuses a
+    /// device-resident store. the production path dispatches a constant fill over the covered
+    /// region instead, because walking it here on a device-resident hierarchy would leave the
+    /// covered cells carrying the bucket the map assigned them — counting the refined volume on
+    /// both levels and inflating every extensive total by exactly that volume.
     pub fn census_exclude_covered(
         &self,
         ev: &CensusEvaluator,
         fields: &CensusFields<D, Mem>,
         covered: &symbi_algebra::Domain<D>,
     ) {
+        assert!(
+            Mem::IS_HOST_ACCESSIBLE,
+            "census '{}': the covered region cannot be excluded by a host walk on a \
+             device-resident store; dispatch a constant fill over it instead",
+            ev.spec.name()
+        );
         let excluded = ev.spec.excluded_marker();
         for c in covered.iter() {
             fields.segment.view_mut().set(c, excluded);
