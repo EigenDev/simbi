@@ -1,17 +1,23 @@
 // =============================================================================
 // dissipation.rs
 //
-// adaptive numerical dissipation for the HLLC riemann solver.
-// fleischmann et al. (2020) low-mach fix: adaptive phi in [0,1].
-// all detectors take nhat (the unit normal vector) as the direction argument.
+// the low-mach acoustic-dissipation scaling of the HLLC-LM riemann solver
+// (Fleischmann, Adami & Adams, J. Comput. Phys. 423:109762, 2020).
+//
+// a grid-aligned shock has a vanishing velocity component transverse to its propagation, so the
+// transverse-face Riemann problems run at a local mach number near zero. There the acoustic
+// dissipation of a classical HLLC flux scales with the sound speed rather than the flow speed, and
+// that mismatch drives the grid-aligned shock instability (the carbuncle). Scaling the acoustic
+// signal speeds by `phi(Ma_local)` removes the excess.
+//
+// the scaling is keyed on the FACE-NORMAL velocity component, and it is the only modulation of the
+// dissipation — see `adaptive_phi`.
 //
 // usage:
 //   let nhat = Tensor::unit(0);
 //   let phi = adaptive_phi(&prim_l, &prim_r, &nhat, gamma);
 // =============================================================================
 
-use crate::state::Prim;
-use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 
 /// shockwave limiter selector for the HLLC riemann solver. picks the flavor of
@@ -63,120 +69,50 @@ pub fn quirk_strong_shock<S: Scalar>(p_l: S, p_r: S) -> S::Mask {
     (jump / p_min).cmp_gt(S::from_f64(QUIRK_THRESHOLD))
 }
 
-/// local mach number: max of left and right |v| / cs.
+/// the local mach number of a face's Riemann problem: `max(|u_L/c_L|, |u_R/c_R|)` where `u` is the
+/// velocity component ALONG THE FACE NORMAL and `c` the sound speed.
+///
+/// takes the projected velocities and sound speeds directly rather than the states, because the
+/// sound speed is a property of the REGIME: the newtonian `sqrt(gamma p / rho)` and the
+/// relativistic `sqrt(gamma p / (rho h))` differ by the specific enthalpy, and the newtonian form
+/// evaluated on a relativistic gas readily exceeds the speed of light. every caller has already
+/// computed the value its own wave speeds are built from; recomputing one here would be a second,
+/// silently regime-wrong definition.
+///
+/// the DIRECTION is the mechanism. a grid-aligned shock carries a large velocity along its
+/// propagation direction and a vanishing component transverse to it, so the transverse faces run at
+/// a local mach number near zero. keyed on the speed instead, those faces read as supersonic and the
+/// correction does nothing on the only faces it exists for.
 #[inline]
-pub fn local_mach<S: Scalar, const D: usize>(left: &Prim<S, D>, right: &Prim<S, D>, gamma: S) -> S {
-    let cs_l = (gamma * left.pre / left.rho).sqrt();
-    let cs_r = (gamma * right.pre / right.rho).sqrt();
-    let ma_l = left.vel.norm() / cs_l;
-    let ma_r = right.vel.norm() / cs_r;
-    ma_l.max(ma_r)
+pub fn local_mach<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S) -> S {
+    (vn_l / cs_l).abs().max((vn_r / cs_r).abs())
 }
 
-/// shock detector: entropy production + velocity convergence along nhat.
-/// branchless: AND of two conditions via multiplication (both are 0/1 from cmp_*).
+/// reference mach number below which the acoustic dissipation is reduced. above it the scheme is
+/// classical HLLC exactly. `MACH_LIMIT = 0.1` — the modification acts only where the local flow
+/// component is under a tenth of the local sound speed.
+pub const MACH_LIMIT: f64 = 0.1;
+
+/// the acoustic-dissipation scaling `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)`.
+///
+/// applied to the acoustic signal speeds `S_L` and `S_R` alone, so the acoustic dissipation falls
+/// off in proportion to the local flow speed rather than the sound speed, while the advective
+/// dissipation carried by the contact speed is untouched. the sine gives a smooth decay with zero
+/// derivative at the crossover, so a face drifting across `Ma_limit` does not see a kink in its
+/// flux; `phi = 1` recovers classical HLLC identically.
+///
+/// nothing else modulates this. a detector that raised `phi` back toward one at shocks, at contact
+/// discontinuities, or in grid-aligned high-mach flow would be adding dissipation, which is the
+/// opposite of what the scheme is for — every competing shock-stable HLLC variant stabilizes by
+/// adding dissipation somewhere, and the point of this one is that it removes it instead. Where a
+/// strong shock genuinely needs a more dissipative flux, that is the job of a solver fallback
+/// (`ShockwaveLimiter::Quirk`), not of a term buried in the low-mach scaling.
 #[inline]
-pub fn detect_shock<S: Scalar, const D: usize>(
-    left: &Prim<S, D>,
-    right: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
-    gamma: S,
-) -> S {
-    let s_l = left.pre.ln() - gamma * left.rho.ln();
-    let s_r = right.pre.ln() - gamma * right.rho.ln();
-    let entropy_production = s_r - s_l;
-
-    let vn_l = left.vel.dot(nhat);
-    let vn_r = right.vel.dot(nhat);
-    let velocity_convergence = vn_l - vn_r;
-
-    // AND = product of 0/1 masks. result is 1 if both conditions hold, else 0.
-    // (mask -> S via select(m, ONE, ZERO); `cmp_*` returns `S::Mask`.)
-    let c1 = S::select(
-        entropy_production.cmp_gt(S::from_f64(0.01)),
-        S::ONE,
-        S::ZERO,
-    );
-    let c2 = S::select(velocity_convergence.cmp_gt(S::ZERO), S::ONE, S::ZERO);
-    c1 * c2
-}
-
-/// interface detector: large density jump with small pressure jump.
-/// branchless via cmp_* masks.
-#[inline]
-pub fn detect_interface<S: Scalar, const D: usize>(left: &Prim<S, D>, right: &Prim<S, D>) -> S {
-    let half = S::from_f64(0.5);
-    let rho_avg = half * (left.rho + right.rho);
-    let pre_avg = half * (left.pre + right.pre);
-    let rho_jump = (left.rho - right.rho).abs() / rho_avg;
-    let pre_jump = (left.pre - right.pre).abs() / pre_avg;
-
-    let c1 = S::select(rho_jump.cmp_gt(S::from_f64(0.1)), S::ONE, S::ZERO);
-    let c2 = S::select(pre_jump.cmp_lt(S::from_f64(0.05)), S::ONE, S::ZERO);
-    S::from_f64(0.4) * c1 * c2
-}
-
-/// alignment detector: high-speed flow aligned with nhat.
-/// branchless: guards division by |v| via select on safe denominator,
-/// then combines conditions with product of 0/1 masks.
-#[inline]
-pub fn detect_alignment<S: Scalar, const D: usize>(
-    left: &Prim<S, D>,
-    right: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
-    gamma: S,
-) -> S {
-    let v_l_mag = left.vel.norm();
-    let v_r_mag = right.vel.norm();
-
-    // guard against zero |v| to avoid 0/0 = NaN on GPU
-    let moving_l = v_l_mag.cmp_gt(S::ZERO);
-    let moving_r = v_r_mag.cmp_gt(S::ZERO);
-    let safe_v_l = S::select(moving_l, v_l_mag, S::ONE);
-    let safe_v_r = S::select(moving_r, v_r_mag, S::ONE);
-
-    let vn_l = left.vel.dot(nhat).abs();
-    let vn_r = right.vel.dot(nhat).abs();
-    let align_l = vn_l / safe_v_l;
-    let align_r = vn_r / safe_v_r;
-    let max_align = align_l.max(align_r);
-
-    let cs_l = (gamma * left.pre / left.rho).sqrt();
-    let cs_r = (gamma * right.pre / right.rho).sqrt();
-    let avg_mach = S::from_f64(0.5) * (v_l_mag / cs_l + v_r_mag / cs_r);
-
-    // all four conditions ANDed via 0/1 mask product
-    let c_vl = S::select(moving_l, S::ONE, S::ZERO);
-    let c_vr = S::select(moving_r, S::ONE, S::ZERO);
-    let c_align = S::select(max_align.cmp_gt(S::from_f64(0.8)), S::ONE, S::ZERO);
-    let c_mach = S::select(avg_mach.cmp_gt(S::from_f64(0.5)), S::ONE, S::ZERO);
-    c_vl * c_vr * c_align * c_mach
-}
-
-/// adaptive dissipation parameter phi. fleischmann et al. (2020).
-/// nhat-parametrized: ONE function for all directions.
-#[inline]
-pub fn adaptive_phi<S: Scalar, const D: usize>(
-    left: &Prim<S, D>,
-    right: &Prim<S, D>,
-    nhat: &Tensor<S, D>,
-    gamma: S,
-) -> S {
-    let mach_lim = S::from_f64(0.1);
+pub fn adaptive_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S) -> S {
     let half_pi = S::from_f64(std::f64::consts::FRAC_PI_2);
-    let ma = local_mach(left, right, gamma);
-
-    let ratio = (ma / mach_lim).min(S::ONE);
-    let mut phi = (ratio * half_pi).sin();
-
-    let shock = detect_shock(left, right, nhat, gamma);
-    let interface = detect_interface(left, right);
-    let alignment = detect_alignment(left, right, nhat, gamma);
-
-    phi = phi.max(shock);
-    phi = phi.max(interface);
-    phi = phi.max(alignment);
-    phi.min(S::ONE)
+    let ma = local_mach(vn_l, vn_r, cs_l, cs_r);
+    let ratio = (ma / S::from_f64(MACH_LIMIT)).min(S::ONE);
+    (ratio * half_pi).sin()
 }
 
 #[cfg(test)]
@@ -184,20 +120,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn alignment_detector_is_invariant_to_velocity_units() {
-        let nhat = Tensor::new([1.0, 0.0]);
-        let state = |speed: f64| Prim {
-            rho: 1.0,
-            vel: Tensor::new([speed, 0.0]),
-            pre: speed * speed,
-        };
-        let reference = detect_alignment(&state(1.0), &state(1.0), &nhat, 1.4);
-
-        for scale in [1e-100, 1.0, 1e100] {
+    fn the_scaling_depends_only_on_the_ratio_of_the_two_speeds() {
+        // `phi` is a function of a mach number, which is dimensionless, so scaling the flow speed
+        // and the sound speed together must leave it unchanged. a formula that compared a velocity
+        // against an absolute threshold would instead move with the units, making the solver's
+        // dissipation depend on whether lengths are metres or parsecs.
+        let reference = adaptive_phi(0.03, 0.03, 1.0, 1.0);
+        assert!(
+            reference < 1.0,
+            "this state must sit on the ramp for the invariance to be non-trivial, got {reference}"
+        );
+        for scale in [1e-100, 1e-3, 1.0, 1e3, 1e100] {
+            let got = adaptive_phi(0.03 * scale, 0.03 * scale, scale, scale);
+            // exact: `phi` divides the two before anything transcendental, and both scale
+            // identically, so the quotient is bit-for-bit the same.
             assert_eq!(
-                detect_alignment(&state(scale), &state(scale), &nhat, 1.4),
-                reference,
+                got, reference,
+                "rescaling both speeds by {scale:e} changed phi"
             );
         }
+    }
+
+    #[test]
+    fn the_scaling_takes_the_larger_mach_number_of_the_two_sides() {
+        // eq 25 is a max over the two sides, each against its OWN sound speed. taking one side, or
+        // an average, would let a face with one nearly-stagnant side reduce its dissipation while
+        // the other side is moving — dissipation set by half the Riemann problem.
+        let hot = adaptive_phi(0.001, 0.5, 1.0, 1.0);
+        let both = adaptive_phi(0.5, 0.5, 1.0, 1.0);
+        assert_eq!(hot, both, "the moving side must set phi");
+        assert_eq!(
+            adaptive_phi(0.5, 0.001, 1.0, 1.0),
+            both,
+            "and it must not matter which side it is"
+        );
+        // the sound speeds are per-side too: the colder side reaches the limit at a lower velocity.
+        let cold_right = adaptive_phi(0.01, 0.01, 1.0, 0.05);
+        assert!(
+            cold_right > adaptive_phi(0.01, 0.01, 1.0, 1.0),
+            "a colder right state raises its own mach number and so raises phi"
+        );
+    }
+
+    #[test]
+    fn the_sign_of_the_velocity_does_not_matter() {
+        // the mach number is a magnitude: a face is equally in the low-mach regime whether the flow
+        // crosses it one way or the other, and a signed ratio would make the scaling asymmetric
+        // under a reflection of the grid.
+        assert_eq!(
+            adaptive_phi(0.02, -0.03, 1.0, 1.0),
+            adaptive_phi(-0.02, 0.03, 1.0, 1.0)
+        );
+        assert_eq!(local_mach(-0.05, 0.01, 1.0, 1.0), 0.05);
     }
 }

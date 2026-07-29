@@ -1291,6 +1291,17 @@ fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+fn gen_rhd_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8) {
+    let name = format!("rhd_face_flux_hllc_lm_{ndim}d_{dir}");
+    let (k, writes) = match ndim {
+        1 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<1>(dir),
+        2 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<2>(dir),
+        3 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<3>(dir),
+        _ => panic!("rhd_hllc_lm_flux_gv: unsupported ndim {ndim}"),
+    };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_rmhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     // name carries `_{dir}` for every ndim (incl 1D) to match the base flux + the dispatch
     // `rmhd_face_flux_hllc_{D}d_{dir}` (substrate_rmhd.rs flux()).
@@ -3320,6 +3331,7 @@ fn main() {
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir);
+            gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir);
         }
     }
     // RMHD HLLC + HLLD — 1D + 3D variants matching the HLLE RMHD layout
