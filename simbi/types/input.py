@@ -162,6 +162,18 @@ class CtMethod(str, ExtendedEnum):
 
 
 class SubCycleMode(str, ExtendedEnum):
+    """refinement subcycling schedule.
+
+    only the fixed-ratio schedule is implemented: level `l` advances `2^l` times per root step,
+    and the root step is the minimum over levels of that level's own cfl limit times `2^l`, so
+    every level lands inside its own cfl. `STANDARD` and `NONE` both name it and are equivalent.
+
+    `ADAPTIVE` (a per-level substep count derived from each level's own cfl, freeing the root from
+    the finest level's requirement) and `MANUAL` (a hand-specified count) are REFUSED at
+    validation — neither reaches the backend, and accepting them would let a configuration reason
+    about a schedule it is not getting.
+    """
+
     STANDARD = "standard"
     ADAPTIVE = "adaptive"
     MANUAL = "manual"

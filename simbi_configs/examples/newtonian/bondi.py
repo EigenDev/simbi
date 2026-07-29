@@ -268,7 +268,11 @@ class SphericalBondiTest(SimbiProblem):
     ]
     refinement_subcycling_mode: Annotated[
         SubCycleMode,
-        ProblemParam(SubCycleMode.ADAPTIVE, description="fmr subcycling mode"),
+        ProblemParam(
+            SubCycleMode.STANDARD,
+            description="fmr subcycling: level l advances 2^l times per root step, the only "
+            "implemented schedule (an adaptive per-level substep count is not)",
+        ),
     ]
 
     # =========================================================================
