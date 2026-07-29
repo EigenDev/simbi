@@ -2,8 +2,8 @@
 // dissipation_carrier_oracle.rs
 //
 // unit + carrier-equivalence coverage for the adaptive-dissipation detectors in
-// `symbi_hydro::dissipation` (quirk_strong_shock, detect_shock, detect_interface,
-// detect_alignment, adaptive_phi, local_mach). these are carrier-generic over
+// `symbi_hydro::dissipation` (quirk_strong_shock, adaptive_phi, local_mach).
+// these are carrier-generic over
 // `S: Scalar`, used in the HLLC riemann path, and the carrier gate (CLAUDE.md
 // 4.3) demands a Gv-equivalence test that ALSO renders.
 //
@@ -23,7 +23,7 @@
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
 use symbi_hydro::dissipation::{
-    QUIRK_THRESHOLD, adaptive_phi, detect_alignment, detect_interface, detect_shock, local_mach,
+    QUIRK_THRESHOLD, adaptive_phi, local_mach,
     quirk_strong_shock,
 };
 use symbi_hydro::state::Prim;
@@ -142,6 +142,21 @@ fn names_with_gamma() -> Vec<&'static str> {
     PARAM_NAMES.iter().copied().chain(["gamma"]).collect()
 }
 
+/// the solver's OWN call shape for the scaling: project both velocities onto the face normal and
+/// take each side's sound speed from its regime. kept here so the tests below read in terms of
+/// states while exercising the same scalar interface the riemann solvers call.
+fn phi_of(l: &Prim<f64, D>, r: &Prim<f64, D>, n: &Tensor<f64, D>) -> f64 {
+    let cs = |p: &Prim<f64, D>| (GAMMA * p.pre / p.rho).sqrt();
+    adaptive_phi(l.vel.dot(n), r.vel.dot(n), cs(l), cs(r))
+}
+
+/// the same shape, carrier-generic, for the Gv lowering checks.
+fn phi_of_gv<S: symbi_hydro::Scalar>(p: &[S]) -> S {
+    let (pl, pr, nh) = (prim_l(p), prim_r(p), nhat(p));
+    let cs = |q: &Prim<S, D>| (p[10] * q.pre / q.rho).sqrt();
+    adaptive_phi(pl.vel.dot(&nh), pr.vel.dot(&nh), cs(&pl), cs(&pr))
+}
+
 fn close(a: f64, b: f64, what: &str) {
     let rel = (a - b).abs() / a.abs().max(b.abs()).max(1.0);
     assert!(
@@ -222,10 +237,11 @@ fn local_mach_f64_picks_max_side() {
         vel: Tensor::new([0.1 * cs, 0.0]),
         pre: 1.0,
     };
-    let ma = local_mach(&fast, &slow, GAMMA);
+    let cs = |p: &Prim<f64, D>| (GAMMA * p.pre / p.rho).sqrt();
+    let ma = local_mach(fast.vel[0], slow.vel[0], cs(&fast), cs(&slow));
     assert!((ma - 3.0).abs() < 1e-12, "expected mach ~3, got {ma}");
     // symmetric: swapping sides keeps the max.
-    assert!((local_mach(&slow, &fast, GAMMA) - 3.0).abs() < 1e-12);
+    assert!((local_mach(slow.vel[0], fast.vel[0], cs(&slow), cs(&fast)) - 3.0).abs() < 1e-12);
 }
 
 #[test]
@@ -241,10 +257,18 @@ fn local_mach_carrier_equivalence() {
         pre: 0.4,
     };
     let n = Tensor::<f64, D>::unit(0);
-    let want = local_mach(&l, &r, GAMMA);
+    // the solver projects the velocity onto the face normal and takes each side's own sound speed
+    // from its regime before calling in; the carrier check follows the same shape.
+    let cs = |p: &Prim<f64, D>| (GAMMA * p.pre / p.rho).sqrt();
+    let vn = |p: &Prim<f64, D>| p.vel.dot(&n);
+    let want = local_mach(vn(&l), vn(&r), cs(&l), cs(&r));
     let inputs = [pack(&l, &r, &n).to_vec(), vec![GAMMA]].concat();
     let got = gv_eval(
-        |p| local_mach(&prim_l(p), &prim_r(p), p[10]),
+        |p| {
+            let (pl, pr, nh) = (prim_l(p), prim_r(p), nhat(p));
+            let csg = |q: &Prim<_, D>| (p[10] * q.pre / q.rho).sqrt();
+            local_mach(pl.vel.dot(&nh), pr.vel.dot(&nh), csg(&pl), csg(&pr))
+        },
         &names_with_gamma(),
         &inputs,
     );
@@ -252,314 +276,8 @@ fn local_mach_carrier_equivalence() {
 }
 
 // =============================================================================
-// detect_shock — AND of (entropy_production > 0.01) and (vn_l - vn_r > 0). returns
-// 1.0 iff both hold, else 0.0. four corners of the 2x2 truth table, plus both
-// threshold boundaries (the codim-1 select-flip surfaces).
-// =============================================================================
-
-// build (L, R) with prescribed entropy production and normal-velocity convergence
-// along +x. entropy s = ln(pre) - gamma*ln(rho); fix rho = 1 so s = ln(pre). pick
-// pre_l = 1 (s_l = 0), pre_r = exp(ds) (s_r = ds) -> entropy_production = ds.
-// vn = vx along +x; vn_l - vn_r = dvx.
-fn shock_state(ds: f64, dvx: f64) -> (Prim<f64, D>, Prim<f64, D>, Tensor<f64, D>) {
-    let l = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([dvx, 0.0]),
-        pre: 1.0,
-    };
-    let r = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: ds.exp(),
-    };
-    (l, r, Tensor::unit(0))
-}
-
-#[test]
-fn detect_shock_f64_truth_table() {
-    // both conditions true: ds = 0.5 (> 0.01), dvx = 0.3 (> 0) -> 1.0
-    let (l, r, n) = shock_state(0.5, 0.3);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 1.0);
-
-    // entropy false (ds below 0.01), convergence true -> 0.0
-    let (l, r, n) = shock_state(0.005, 0.3);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 0.0);
-
-    // entropy true, convergence false (dvx <= 0, diverging) -> 0.0
-    let (l, r, n) = shock_state(0.5, -0.2);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 0.0);
-
-    // both false -> 0.0
-    let (l, r, n) = shock_state(0.0, -0.2);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 0.0);
-}
-
-#[test]
-fn detect_shock_f64_threshold_boundaries() {
-    // entropy boundary is strict-greater at 0.01: ds just above fires, just below not.
-    let (l, r, n) = shock_state(0.0101, 0.3);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 1.0);
-    let (l, r, n) = shock_state(0.0099, 0.3);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 0.0);
-
-    // convergence boundary is strict-greater at 0: tiny positive fires, zero does not.
-    let (l, r, n) = shock_state(0.5, 1e-9);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 1.0);
-    let (l, r, n) = shock_state(0.5, 0.0);
-    assert_eq!(detect_shock(&l, &r, &n, GAMMA), 0.0);
-}
-
-#[test]
-fn detect_shock_carrier_equivalence() {
-    // sample all four corners so BOTH select arms of each condition are traced+driven.
-    for &(ds, dvx) in &[(0.5, 0.3), (0.005, 0.3), (0.5, -0.2), (0.0, -0.2)] {
-        let (l, r, n) = shock_state(ds, dvx);
-        let want = detect_shock(&l, &r, &n, GAMMA);
-        let inputs = [pack(&l, &r, &n).to_vec(), vec![GAMMA]].concat();
-        let got = gv_eval(
-            |p| detect_shock(&prim_l(p), &prim_r(p), &nhat(p), p[10]),
-            &names_with_gamma(),
-            &inputs,
-        );
-        close(want, got, &format!("detect_shock(ds={ds}, dvx={dvx})"));
-    }
-}
-
-#[test]
-fn detect_shock_lowers() {
-    assert_lowers(
-        |p| detect_shock(&prim_l(p), &prim_r(p), &nhat(p), p[10]),
-        &names_with_gamma(),
-    );
-}
-
-// =============================================================================
-// detect_interface — 0.4 iff (rho_jump > 0.1) AND (pre_jump < 0.05), else 0.0.
-// rho_jump = |rho_l - rho_r| / avg, pre_jump = |pre_l - pre_r| / avg. contact-
-// discontinuity signature: large density contrast, near-uniform pressure.
-// =============================================================================
-
-#[test]
-fn detect_interface_f64_truth_table() {
-    let l = |rho: f64, pre: f64| Prim::<f64, D> {
-        rho,
-        vel: Tensor::zeros(),
-        pre,
-    };
-
-    // contact: big rho jump (1 vs 2 -> jump 0.667 > 0.1), tiny pre jump (1 vs 1.01 -> ~0.01 < 0.05)
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(2.0, 1.01)), 0.4);
-
-    // smooth density (rho jump 0 < 0.1), small pre jump -> 0.0
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(1.0, 1.01)), 0.0);
-
-    // big rho jump but big pre jump too (pre_jump > 0.05 marks a shock, so no contact) -> 0.0
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(2.0, 2.0)), 0.0);
-
-    // neither -> 0.0
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(1.01, 2.0)), 0.0);
-}
-
-#[test]
-fn detect_interface_f64_threshold_boundaries() {
-    let l = |rho: f64, pre: f64| Prim::<f64, D> {
-        rho,
-        vel: Tensor::zeros(),
-        pre,
-    };
-
-    // rho_jump boundary at 0.1 (strict-greater). avg-normalized; pressure kept identical
-    // (pre_jump = 0 < 0.05 so the pre condition always holds here, isolating the rho flip).
-    // rho_r = 1.2 -> jump = 0.2 / 1.1 = 0.1818 > 0.1 -> fires.
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(1.2, 1.0)), 0.4);
-    // rho_r = 1.05 -> jump = 0.05 / 1.025 = 0.0488 < 0.1 -> does NOT fire.
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(1.05, 1.0)), 0.0);
-
-    // pre_jump boundary at 0.05 (strict-less). big rho jump fixed. pre_l = 1.
-    // pre_r = 1.02 -> jump = 0.02 / 1.01 = 0.0198 < 0.05 -> fires.
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(2.0, 1.02)), 0.4);
-    // pre_r = 1.1 -> jump = 0.1 / 1.05 = 0.0952 > 0.05 -> does NOT fire.
-    assert_eq!(detect_interface(&l(1.0, 1.0), &l(2.0, 1.1)), 0.0);
-}
-
-#[test]
-fn detect_interface_carrier_equivalence() {
-    let cases: &[((f64, f64), (f64, f64))] = &[
-        ((1.0, 1.0), (2.0, 1.01)), // contact -> 0.4
-        ((1.0, 1.0), (1.0, 1.01)), // smooth -> 0.0
-        ((1.0, 1.0), (2.0, 2.0)),  // shock -> 0.0
-        ((1.0, 1.0), (1.01, 2.0)), // neither -> 0.0
-    ];
-    for &((rl, pl), (rr, pr)) in cases {
-        let l = Prim::<f64, D> {
-            rho: rl,
-            vel: Tensor::zeros(),
-            pre: pl,
-        };
-        let r = Prim::<f64, D> {
-            rho: rr,
-            vel: Tensor::zeros(),
-            pre: pr,
-        };
-        let n = Tensor::<f64, D>::zeros();
-        let want = detect_interface(&l, &r);
-        let inputs = pack(&l, &r, &n).to_vec();
-        let got = gv_eval(
-            |p| detect_interface(&prim_l(p), &prim_r(p)),
-            &PARAM_NAMES,
-            &inputs,
-        );
-        close(
-            want,
-            got,
-            &format!("detect_interface(rho {rl}->{rr}, pre {pl}->{pr})"),
-        );
-    }
-}
-
-#[test]
-fn detect_interface_lowers() {
-    assert_lowers(|p| detect_interface(&prim_l(p), &prim_r(p)), &PARAM_NAMES);
-}
-
-// =============================================================================
-// detect_alignment — 1.0 iff |v_l| > eps AND |v_r| > eps AND max_align > 0.8 AND
-// avg_mach > 0.5, else 0.0. max_align = max(|vn_l|/|v_l|, |vn_r|/|v_r|). exercises
-// the zero-velocity division guard (the safe_v select) AND all four ANDed conds.
-// =============================================================================
-
-#[test]
-fn detect_alignment_f64_truth_table() {
-    let n = Tensor::<f64, D>::unit(0);
-    let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    // aligned + fast: v along +x at mach ~1 -> align = 1 > 0.8, mach ~1 > 0.5 -> 1.0
-    let fast_aligned = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([1.0 * cs, 0.0]),
-        pre: 1.0,
-    };
-    assert_eq!(
-        detect_alignment(&fast_aligned, &fast_aligned, &n, GAMMA),
-        1.0
-    );
-
-    // misaligned: v purely transverse (+y) -> align = 0 < 0.8 -> 0.0 (even if fast)
-    let fast_transverse = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 1.0 * cs]),
-        pre: 1.0,
-    };
-    assert_eq!(
-        detect_alignment(&fast_transverse, &fast_transverse, &n, GAMMA),
-        0.0
-    );
-
-    // aligned but slow: mach ~0.1 < 0.5 -> 0.0
-    let slow_aligned = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([0.1 * cs, 0.0]),
-        pre: 1.0,
-    };
-    assert_eq!(
-        detect_alignment(&slow_aligned, &slow_aligned, &n, GAMMA),
-        0.0
-    );
-}
-
-#[test]
-fn detect_alignment_f64_zero_velocity_guard() {
-    // |v| = 0 on both sides: the safe_v select replaces |v| with 1, but c_vl/c_vr gate
-    // to 0 -> result MUST be 0.0 (no NaN, no spurious fire). this is the division-guard
-    // failure mode the branchless guard exists to prevent.
-    let n = Tensor::<f64, D>::unit(0);
-    let still = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([0.0, 0.0]),
-        pre: 1.0,
-    };
-    let out = detect_alignment(&still, &still, &n, GAMMA);
-    assert_eq!(out, 0.0);
-    assert!(out.is_finite(), "zero-velocity must not produce NaN/Inf");
-
-    // one side still, the other fast+aligned: c_vl (still side) gates to 0 -> 0.0.
-    let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let fast = Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([cs, 0.0]),
-        pre: 1.0,
-    };
-    assert_eq!(detect_alignment(&still, &fast, &n, GAMMA), 0.0);
-}
-
-#[test]
-fn detect_alignment_f64_align_boundary() {
-    // max_align boundary at 0.8 (strict-greater). build v with a known cos to nhat:
-    // v = (cos*|v|, sin*|v|). align = |cos|. choose |v| = 1.5*cs so mach (~1.5) > 0.5.
-    let n = Tensor::<f64, D>::unit(0);
-    let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let vmag = 1.5 * cs;
-    let with_cos = |c: f64| {
-        let s = (1.0 - c * c).sqrt();
-        Prim::<f64, D> {
-            rho: 1.0,
-            vel: Tensor::new([c * vmag, s * vmag]),
-            pre: 1.0,
-        }
-    };
-    // cos = 0.85 > 0.8 -> aligned -> 1.0
-    let p = with_cos(0.85);
-    assert_eq!(detect_alignment(&p, &p, &n, GAMMA), 1.0);
-    // cos = 0.75 < 0.8 -> not aligned -> 0.0
-    let p = with_cos(0.75);
-    assert_eq!(detect_alignment(&p, &p, &n, GAMMA), 0.0);
-}
-
-#[test]
-fn detect_alignment_carrier_equivalence() {
-    let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
-    let n = Tensor::<f64, D>::unit(0);
-    let mk = |vx: f64, vy: f64| Prim::<f64, D> {
-        rho: 1.0,
-        vel: Tensor::new([vx, vy]),
-        pre: 1.0,
-    };
-    // drive: aligned-fast (fires), transverse-fast (align gate), slow-aligned (mach gate),
-    // zero-velocity (the safe_v division guard + c_vl/c_vr gates), mixed still/fast.
-    let cases: &[(Prim<f64, D>, Prim<f64, D>)] = &[
-        (mk(cs, 0.0), mk(cs, 0.0)),
-        (mk(0.0, cs), mk(0.0, cs)),
-        (mk(0.1 * cs, 0.0), mk(0.1 * cs, 0.0)),
-        (mk(0.0, 0.0), mk(0.0, 0.0)),
-        (mk(0.0, 0.0), mk(cs, 0.0)),
-    ];
-    for (l, r) in cases {
-        let want = detect_alignment(l, r, &n, GAMMA);
-        let inputs = [pack(l, r, &n).to_vec(), vec![GAMMA]].concat();
-        let got = gv_eval(
-            |p| detect_alignment(&prim_l(p), &prim_r(p), &nhat(p), p[10]),
-            &names_with_gamma(),
-            &inputs,
-        );
-        close(
-            want,
-            got,
-            &format!("detect_alignment(vl={:?}, vr={:?})", l.vel, r.vel),
-        );
-    }
-}
-
-#[test]
-fn detect_alignment_lowers() {
-    assert_lowers(
-        |p| detect_alignment(&prim_l(p), &prim_r(p), &nhat(p), p[10]),
-        &names_with_gamma(),
-    );
-}
-
-// =============================================================================
-// adaptive_phi — the composite: phi = max(sin(min(ma/0.1, 1) * pi/2), shock,
-// interface, alignment), clamped to [0, 1]. exercises the low-mach ramp AND the
-// detector-driven floors.
+// adaptive_phi — the acoustic-dissipation scaling, and nothing else:
+// phi = sin(min(Ma_local / 0.1, 1) * pi/2), with Ma_local the FACE-NORMAL mach number.
 // =============================================================================
 
 #[test]
@@ -572,7 +290,7 @@ fn adaptive_phi_f64_low_mach_ramp() {
         vel: Tensor::new([0.02 * cs, 0.0]),
         pre: 1.0,
     };
-    let phi = adaptive_phi(&slow, &slow, &n, GAMMA);
+    let phi = phi_of(&slow, &slow, &n);
     assert!(
         phi > 0.0 && phi < 1.0,
         "low-mach phi must be in (0,1), got {phi}"
@@ -592,7 +310,7 @@ fn adaptive_phi_f64_clamped_high_mach() {
         vel: Tensor::new([5.0 * cs, 0.0]),
         pre: 1.0,
     };
-    let phi = adaptive_phi(&fast, &fast, &n, GAMMA);
+    let phi = phi_of(&fast, &fast, &n);
     assert!(
         (phi - 1.0).abs() < 1e-12,
         "high-mach phi must clamp to 1, got {phi}"
@@ -600,10 +318,38 @@ fn adaptive_phi_f64_clamped_high_mach() {
 }
 
 #[test]
-fn adaptive_phi_f64_detector_floor_dominates_ramp() {
-    // a smooth LOW-mach flow whose interface detector fires: phi must be floored at 0.4
-    // (the interface weight), ABOVE the tiny low-mach ramp value. proves the max() wiring.
+fn adaptive_phi_is_the_sine_ramp_and_nothing_else() {
+    // `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)` — Fleischmann, Adami & Adams 2020 eq 24 — for
+    // its own sake, against the closed form at several mach numbers.
+    //
+    // the value of pinning it this tightly is that the scaling is the ONLY modulation of the
+    // acoustic dissipation. anything that raised phi back toward one — at a shock, at a contact
+    // discontinuity, in grid-aligned flow — would be adding dissipation, and the scheme exists to
+    // remove it. such a term would leave every other assertion in this file intact while quietly
+    // turning the solver back into classical HLLC.
     let n = Tensor::<f64, D>::unit(0);
+    let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
+    let at = |ma: f64| {
+        let s = Prim::<f64, D> {
+            rho: 1.0,
+            vel: Tensor::new([ma * cs, 0.0]),
+            pre: 1.0,
+        };
+        phi_of(&s, &s, &n)
+    };
+    let want = |ma: f64| ((ma / 0.1).min(1.0) * std::f64::consts::FRAC_PI_2).sin();
+    for ma in [0.0, 1e-4, 0.01, 0.05, 0.099, 0.1, 0.5, 3.0] {
+        let (got, expect) = (at(ma), want(ma));
+        assert!(
+            (got - expect).abs() < 1e-12,
+            "Ma = {ma}: phi = {got}, eq 24 gives {expect}"
+        );
+    }
+
+    // a density jump at fixed pressure and fixed low mach — a contact discontinuity — must NOT
+    // raise phi. this is the configuration a "detect the interface and restore dissipation" term
+    // fires on, and it is precisely where the scheme's low dissipation at the contact is the
+    // benefit being sought.
     let l = Prim::<f64, D> {
         rho: 1.0,
         vel: Tensor::new([1e-3, 0.0]),
@@ -614,10 +360,65 @@ fn adaptive_phi_f64_detector_floor_dominates_ramp() {
         vel: Tensor::new([1e-3, 0.0]),
         pre: 1.005,
     };
-    let phi = adaptive_phi(&l, &r, &n, GAMMA);
+    let phi = phi_of(&l, &r, &n);
+    // eq 25 takes the max over the two sides, each with its OWN sound speed — the denser side here
+    // is the colder one, so it sets the mach number.
+    let ma = (1e-3 / (GAMMA * l.pre / l.rho).sqrt()).max(1e-3 / (GAMMA * r.pre / r.rho).sqrt());
+    let expect = want(ma);
     assert!(
-        (phi - 0.4).abs() < 1e-12,
-        "interface floor must give phi=0.4, got {phi}"
+        (phi - expect).abs() < 1e-12,
+        "a contact discontinuity at Ma = {ma:.4e} gave phi = {phi}; eq 24 alone gives {expect}"
+    );
+}
+
+#[test]
+fn the_mach_number_is_the_face_normal_component_not_the_speed() {
+    // eq 25 is `Ma_local = max(|u_L/c_L|, |u_R/c_R|)`, where the paper states that `u` is "the
+    // velocity component dependent on the direction of the cell-face Riemann problem".
+    //
+    // this is the whole mechanism. a grid-aligned shock (their fig 1) carries a large velocity along
+    // its propagation direction and a vanishing component transverse to it, so the TRANSVERSE faces
+    // run at a local mach number near zero — and it is the acoustic dissipation there that scales
+    // wrongly and drives the instability. keyed on the SPEED instead, those faces read as
+    // supersonic, phi = 1, and the correction does nothing on the only faces it was built for.
+    let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
+    let l = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([6.0 * cs, 1.0e-6]),
+        pre: 1.0,
+    };
+    let r = Prim::<f64, D> {
+        rho: 1.0,
+        vel: Tensor::new([6.0 * cs, -1.0e-6]),
+        pre: 1.0,
+    };
+
+    let along = Tensor::<f64, D>::unit(0);
+    let across = Tensor::<f64, D>::unit(1);
+
+    // along the shock normal the flow is supersonic: classical HLLC, exactly.
+    let phi_along = phi_of(&l, &r, &along);
+    assert!(
+        (phi_along - 1.0).abs() < 1e-12,
+        "the shock-normal face is at Ma = 6 and must recover classical HLLC, got phi = {phi_along}"
+    );
+
+    // across it the flow is nearly at rest, and the acoustic dissipation must collapse.
+    let phi_across = phi_of(&l, &r, &across);
+    assert!(
+        phi_across < 1.0e-4,
+        "the transverse face is at Ma ~ {:.1e} yet phi = {phi_across}; the mach number is being \
+         taken from the SPEED rather than the face-normal component, so the low-mach correction is \
+         inert on exactly the faces the scheme targets",
+        1.0e-6 / cs
+    );
+
+    // and the two faces must genuinely disagree — a scaling that returned the same value in both
+    // directions would satisfy neither the mechanism nor this test's intent.
+    assert!(
+        phi_along / phi_across > 1.0e3,
+        "the two directions give nearly the same phi ({phi_along} vs {phi_across}); the scaling is \
+         not direction-dependent at all"
     );
 }
 
@@ -639,10 +440,10 @@ fn adaptive_phi_carrier_equivalence() {
         (mk(1.0, 0.5 * cs, 1.0), mk(1.0, 0.0, 3.0)),        // shock-ish (entropy + converge)
     ];
     for (l, r) in cases {
-        let want = adaptive_phi(l, r, &n, GAMMA);
+        let want = phi_of(&l, &r, &n);
         let inputs = [pack(l, r, &n).to_vec(), vec![GAMMA]].concat();
         let got = gv_eval(
-            |p| adaptive_phi(&prim_l(p), &prim_r(p), &nhat(p), p[10]),
+            |p| phi_of_gv(p),
             &names_with_gamma(),
             &inputs,
         );
@@ -657,7 +458,7 @@ fn adaptive_phi_carrier_equivalence() {
 #[test]
 fn adaptive_phi_lowers() {
     assert_lowers(
-        |p| adaptive_phi(&prim_l(p), &prim_r(p), &nhat(p), p[10]),
+        |p| phi_of_gv(p),
         &names_with_gamma(),
     );
 }

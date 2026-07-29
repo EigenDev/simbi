@@ -366,3 +366,66 @@ fn the_projection_name_is_built_once_for_both_sides() {
         "the chart segment must change the name, else the dispatch cannot select a chart"
     );
 }
+
+// =============================================================================
+// the SOLVER matrix. `Solver::valid_for(regime)` is what a config is checked against, so every pair
+// it accepts is a pair a user can select — and selecting one whose face-flux kernel was never baked
+// panics at `expect_kernel` on the first step, after the queue slot is spent.
+//
+// nothing else covers this. the families above enumerate (regime x dimension x geometry) at the
+// DEFAULT solver; widening the matrix to admit a new (solver, regime) pair leaves them all green.
+// =============================================================================
+
+#[test]
+fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
+    use symbi_sim::substrate_seam::{RegimeKind, Solver};
+
+    // the flux-name prefix each regime family uses, and the dimensions its dispatch is built for.
+    // cartesian only: the HLLC family is unbaked on curvilinear charts by design, and the matrix is
+    // not what gates that (the substrate's own dispatch arm is).
+    let regimes = [
+        (RegimeKind::Newtonian, "adiabatic", &[1u8, 2, 3][..]),
+        (RegimeKind::IsoNewtonian, "iso", &[1, 2, 3][..]),
+        (RegimeKind::Rhd, "rhd", &[1, 2, 3][..]),
+        (RegimeKind::Rmhd, "rmhd", &[1, 3][..]),
+        (RegimeKind::NewtonianMhd, "nmhd", &[1, 3][..]),
+    ];
+    let solvers = [Solver::Hlle, Solver::Hllc, Solver::HllcLm, Solver::Hlld];
+
+    let mut missing = Vec::new();
+    let mut checked = 0usize;
+    for (regime, prefix, dims) in regimes {
+        for solver in solvers {
+            if !solver.valid_for(regime) {
+                continue;
+            }
+            for &ndim in dims {
+                for dir in 0..ndim {
+                    checked += 1;
+                    let name = format!(
+                        "{prefix}_face_flux{}_{ndim}d_{dir}",
+                        solver.kernel_suffix()
+                    );
+                    if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
+                        missing.push(format!("{solver:?} on {regime:?}: {name}"));
+                    }
+                }
+            }
+        }
+    }
+
+    // the premise: the enumeration must actually reach the interesting pairs. a `valid_for` that
+    // rejected everything, or a name protocol that drifted, would leave `missing` empty and this
+    // gate silently vacuous.
+    assert!(
+        checked >= 20,
+        "only {checked} (solver, regime, dim, dir) combination(s) were checked; the matrix or the          name protocol has drifted and this gate is not covering anything"
+    );
+    assert!(
+        missing.is_empty(),
+        "the solver matrix accepts {} pair(s) whose face-flux kernel is not baked. selecting one          panics at dispatch on the first step:\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
+}
+

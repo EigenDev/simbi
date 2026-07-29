@@ -261,27 +261,55 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                 )
             },
         ),
-        // fleischmann et al. (2020) eq 11: symmetric central+star flux with an
-        // adaptive dissipation factor `phi`. recovers standard HLLC at phi=1
-        // (supersonic) and central differencing at phi=0 (zero-mach).
-        ShockwaveLimiter::Fleischmann => {
-            let u_star_l = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
-            let u_star_r = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
+        // fleischmann et al. (2020) HLLC-LM: the CENTRAL formulation of the intermediate flux
+        // (their eq 19) with the acoustic signal speeds scaled by an adaptive factor `phi`.
+        //
+        // the central form averages the two Rankine-Hugoniot derivations of `F_*` — from the left
+        // and from the right — which separates the flux into a central part and a dissipation part
+        // the way the Roe flux does. that separation is what makes a targeted reduction of the
+        // ACOUSTIC dissipation possible: `S_L` and `S_R` carry it, while the contact speed `S_*`
+        // carries the advective dissipation and is left alone.
+        //
+        // `phi` scales ONLY this final sum. the wave speeds, the contact speed and both star states
+        // are built from the unscaled `s_l` / `s_r` above — the paper is explicit that every
+        // preceding step uses the original values, and scaling them earlier would change the star
+        // states themselves rather than the dissipation they generate.
+        //
+        // the supersonic branches are the same as standard HLLC: the central form equals the
+        // subsonic intermediate flux, and where the whole fan travels one way the physical flux is
+        // the upwind one. dropping those branches leaves a supersonic face carrying `F_* != F_L`,
+        // an error of several percent that no amount of dissipation tuning removes.
+        ShockwaveLimiter::Fleischmann => S::branch(
+            s_l.cmp_ge(vface),
+            || f_l - u_l * vface,
+            || {
+                S::branch(
+                    s_r.cmp_le(vface),
+                    || f_r - u_r * vface,
+                    || {
+                        let u_star_l = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
+                        let u_star_r = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
 
-            let phi = adaptive_phi(prim_l, prim_r, nhat, gamma);
-            let s_l_lm = phi * s_l;
-            let s_r_lm = phi * s_r;
+                        let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r);
+                        let s_l_lm = phi * s_l;
+                        let s_r_lm = phi * s_r;
 
-            let face_star =
-                <Cons<S, D> as Selectable<S>>::select(s_star.cmp_ge(vface), u_star_l, u_star_r);
-            let half = S::from_f64(0.5);
-            (f_l + f_r) * half
-                + ((u_star_l - u_l) * s_l_lm
-                    + (u_star_l - u_star_r) * s_star.abs()
-                    + (u_star_r - u_r) * s_r_lm)
-                    * half
-                - face_star * vface
-        }
+                        let face_star = <Cons<S, D> as Selectable<S>>::select(
+                            s_star.cmp_ge(vface),
+                            u_star_l,
+                            u_star_r,
+                        );
+                        let half = S::from_f64(0.5);
+                        (f_l + f_r) * half
+                            + ((u_star_l - u_l) * s_l_lm
+                                + (u_star_l - u_star_r) * s_star.abs()
+                                + (u_star_r - u_r) * s_r_lm)
+                                * half
+                            - face_star * vface
+                    },
+                )
+            },
+        ),
     }
 }
 
@@ -361,10 +389,8 @@ fn rhd_star_state<S: Scalar, const D: usize>(
 }
 
 /// HLLC for special-relativistic hydrodynamics (mignone-bodo 2005). ONE
-/// function for all dimensions and directions. honors the `Quirk` fallback
-/// in `D > 1`; the Fleischmann
-/// LM correction does NOT apply to relativistic regimes (treated as
-/// Standard if requested).
+/// function for all dimensions and directions. honors the `Quirk` fallback in `D > 1` and the
+/// `Fleischmann` low-mach acoustic-dissipation scaling.
 pub fn hllc_rhd<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
@@ -382,11 +408,11 @@ pub fn hllc_rhd<S: Scalar, const D: usize>(
         return S::branch(
             mask,
             || hlle(&regime, eos, prim_l, prim_r, nhat, vface),
-            || hllc_rhd_body(eos, prim_l, prim_r, nhat, vface),
+            || hllc_rhd_body(eos, prim_l, prim_r, nhat, vface, shock_smoother),
         );
     }
 
-    hllc_rhd_body(eos, prim_l, prim_r, nhat, vface)
+    hllc_rhd_body(eos, prim_l, prim_r, nhat, vface, shock_smoother)
 }
 
 /// the RHD HLLC body (no Quirk gate). split out so the outer function can
@@ -398,6 +424,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
     prim_r: &Prim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
+    shock_smoother: ShockwaveLimiter,
 ) -> Cons<S, D> {
     let regime = crate::rhd::Rhd;
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
@@ -419,19 +446,73 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                 || {
                     let (a_star, p_star) =
                         rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
-                    S::branch(
-                        a_star.cmp_ge(vface),
-                        || {
-                            let us =
+                    match shock_smoother {
+                        ShockwaveLimiter::Standard | ShockwaveLimiter::Quirk => S::branch(
+                            a_star.cmp_ge(vface),
+                            || {
+                                let us =
+                                    rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
+                                f_l + (us - u_l) * a_l - us * vface
+                            },
+                            || {
+                                let us =
+                                    rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
+                                f_r + (us - u_r) * a_r - us * vface
+                            },
+                        ),
+                        // HLLC-LM in the relativistic regime: the same central formulation and the
+                        // same acoustic-dissipation scaling as the newtonian case, on the
+                        // Mignone-Bodo star states.
+                        //
+                        // the reformulation carries over because it rests on one property, not on
+                        // the newtonian flux algebra: the star states must satisfy the
+                        // Rankine-Hugoniot conditions across both outer waves AND the contact, so
+                        // that deriving the intermediate flux from the left and from the right give
+                        // the same answer and their average is an identity. the Mignone-Bodo
+                        // construction does — its contact speed and pressure are fixed by exactly
+                        // that consistency — and `the_central_formulation_is_an_identity_for_the_
+                        // relativistic_star_states` pins it.
+                        //
+                        // what does NOT carry over untouched is the sound speed. the relativistic
+                        // value carries the specific enthalpy, `cs^2 = gamma p / (rho h)`, and the
+                        // newtonian expression evaluated on a relativistic gas exceeds the speed of
+                        // light — at gamma = 4/3, p = rho = 1 it gives 1.15 against the true 0.516.
+                        // a mach number built on it would be low by that factor and would move faces
+                        // onto the ramp that belong at phi = 1.
+                        //
+                        // the mach number stays a ratio of COORDINATE speeds, with no lorentz
+                        // factors. the imbalance being corrected is between the acoustic
+                        // dissipation carried by `a_l`, `a_r` and the advective dissipation carried
+                        // by `a_star`, and those are coordinate wave speeds multiplying differences
+                        // of conserved states. a proper-velocity mach number would carry the FULL
+                        // lorentz factor, which at a grid-aligned shock is dominated by the
+                        // TRANSVERSE motion — reintroducing exactly the contamination that keying on
+                        // the face-normal component removes.
+                        ShockwaveLimiter::Fleischmann => {
+                            let cs_l = crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
+                            let cs_r = crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
+                            let vn_l = prim_l.vel.dot(nhat);
+                            let vn_r = prim_r.vel.dot(nhat);
+                            let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r);
+
+                            let usl =
                                 rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
-                            f_l + (us - u_l) * a_l - us * vface
-                        },
-                        || {
-                            let us =
+                            let usr =
                                 rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
-                            f_r + (us - u_r) * a_r - us * vface
-                        },
-                    )
+                            let face_star = <Cons<S, D> as Selectable<S>>::select(
+                                a_star.cmp_ge(vface),
+                                usl,
+                                usr,
+                            );
+                            let half = S::from_f64(0.5);
+                            (f_l + f_r) * half
+                                + ((usl - u_l) * (phi * a_l)
+                                    + (usl - usr) * a_star.abs()
+                                    + (usr - u_r) * (phi * a_r))
+                                    * half
+                                - face_star * vface
+                        }
+                    }
                 },
             )
         },
@@ -901,6 +982,76 @@ mod tests {
     }
 
     #[test]
+    fn hllc_fleischmann_equals_standard_on_a_supersonic_face() {
+        // eq 18: where the whole wave fan travels one way the flux is the upwind one, `F_L` if
+        // `S_L >= 0` and `F_R` if `S_R <= 0`. the central formulation of the intermediate flux is
+        // an identity for the SUBSONIC fan only — evaluated on a supersonic face it returns
+        // `F_L + S_L (U_*L - U_L)`, which differs from `F_L` by several percent whenever the star
+        // state differs from the upwind state.
+        //
+        // low mach and supersonic are exclusive, so the scaling cannot mask this: a supersonic face
+        // has phi = 1 and the two solvers must agree exactly.
+        let eos = IdealGas { gamma: 1.4f64 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        let cases = [
+            // left-supersonic (S_L >= 0) and right-supersonic (S_R <= 0), each with a genuine
+            // jump so the star state is NOT the upwind state.
+            (5.0, 1.0, 1.0, 5.0, 1.3, 1.2),
+            (-5.0, 1.3, 1.2, -5.0, 1.0, 1.0),
+        ];
+        for (vl, pl, rl, vr, pr, rr) in cases {
+            let l = Prim {
+                rho: rl,
+                vel: Tensor::new([vl, 0.0]),
+                pre: pl,
+            };
+            let r = Prim {
+                rho: rr,
+                vel: Tensor::new([vr, 0.0]),
+                pre: pr,
+            };
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard);
+            let lm = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Fleischmann);
+            let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0e-30);
+            assert!(
+                rel(std.den, lm.den) < 1.0e-14 && rel(std.nrg, lm.nrg) < 1.0e-14,
+                "supersonic face (v = {vl} -> {vr}): standard gives den {} nrg {}, HLLC-LM gives \
+                 den {} nrg {}. the upwind branches are missing, so the intermediate flux is being \
+                 returned where the fan is entirely one-sided",
+                std.den,
+                std.nrg,
+                lm.den,
+                lm.nrg
+            );
+        }
+
+        // the premise: the star state must actually differ from the upwind state, or the two
+        // formulations agree for reasons unrelated to the branch.
+        let l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([5.0, 0.0]),
+            pre: 1.0,
+        };
+        let r = Prim {
+            rho: 1.2,
+            vel: Tensor::new([5.0, 0.0]),
+            pre: 1.3,
+        };
+        let u_l = l.to_conserved(&eos);
+        let cs_l = eos.sound_speed(l.rho, l.pre);
+        let cs_r = eos.sound_speed(r.rho, r.pre);
+        let (s_l, s_r, s_star) =
+            wave_properties(l.rho, r.rho, l.pre, r.pre, 5.0, 5.0, cs_l, cs_r, 1.4);
+        assert!(s_l >= 0.0, "the left state must be supersonic, got S_L = {s_l}");
+        let us = star_state(&l, &u_l, s_l, s_star, l.rho * (s_l - 5.0), &nhat);
+        assert!(
+            (us.den - u_l.den).abs() > 1.0e-3,
+            "the star state equals the upwind state here, so returning either would pass"
+        );
+        let _ = s_r;
+    }
+
+    #[test]
     fn hllc_fleischmann_uniform_matches_standard() {
         // a uniform state has zero LM correction — Fleischmann reduces to the
         // exact regime flux just like Standard.
@@ -1329,5 +1480,270 @@ mod tests {
                 got[kk]
             );
         }
+    }
+
+
+    // =========================================================================
+    // the relativistic extension of HLLC-LM
+    // =========================================================================
+
+    #[test]
+    fn the_central_formulation_is_an_identity_for_the_relativistic_star_states() {
+        // the ENTIRE prerequisite for HLLC-LM in any regime. the intermediate flux has two
+        // derivations — from the left wave, and from the right wave plus the contact:
+        //
+        //   F_*L = F_L + a_L (U_*L - U_L)
+        //   F_*L = F_R + a_R (U_*R - U_R) + a_* (U_*L - U_*R)
+        //
+        // the central formulation is their average, so it equals the classical intermediate flux
+        // only if BOTH hold — which requires the star states to satisfy the Rankine-Hugoniot
+        // conditions across the two outer waves and the contact simultaneously. that is a property
+        // of the star-state construction, not of the flux algebra, and it is what makes the
+        // reformulation available to scale.
+        //
+        // if it failed, the reduced-dissipation flux would not be a modification of HLLC at all: it
+        // would be a different, inconsistent solver whose error would look like ordinary numerical
+        // dissipation.
+        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let n = Tensor::new([1.0, 0.0]);
+        let regime = crate::rhd::Rhd;
+        let metric = SpatialMetric::flat();
+        let cases = [
+            (
+                "mildly relativistic",
+                Prim { rho: 1.0, vel: Tensor::new([0.2, 0.0]), pre: 1.0 },
+                Prim { rho: 0.5, vel: Tensor::new([-0.1, 0.0]), pre: 0.4 },
+            ),
+            (
+                // the grid-aligned shock: vanishing NORMAL velocity, relativistic transverse motion.
+                "vanishing normal velocity, relativistic transverse",
+                Prim { rho: 1.0, vel: Tensor::new([1.0e-6, 0.99]), pre: 1.0 },
+                Prim { rho: 1.2, vel: Tensor::new([-1.0e-6, 0.99]), pre: 1.1 },
+            ),
+            (
+                "strong jump",
+                Prim { rho: 10.0, vel: Tensor::new([0.4, 0.3]), pre: 20.0 },
+                Prim { rho: 0.1, vel: Tensor::new([-0.3, 0.1]), pre: 0.05 },
+            ),
+        ];
+        for (name, l, r) in cases {
+            let u_l = regime.to_conserved(&eos, &l);
+            let u_r = regime.to_conserved(&eos, &r);
+            let f_l = regime.to_flux(&l, &n, &eos);
+            let f_r = regime.to_flux(&r, &n, &eos);
+            let (a_l, a_r) = regime.extremal_speeds(&eos, &l, &r, &n);
+            assert!(
+                a_l < 0.0 && a_r > 0.0,
+                "{name}: the fan must straddle the face for the intermediate flux to be the answer \
+                 at all (a_L = {a_l}, a_R = {a_r})"
+            );
+            let (a_star, p_star) = rhd_contact_props(&u_l, &u_r, &f_l, &f_r, &n, a_l, a_r);
+            let usl = rhd_star_state(&l, &u_l, a_l, a_star, p_star, &n, &metric);
+            let usr = rhd_star_state(&r, &u_r, a_r, a_star, p_star, &n, &metric);
+
+            let from_left = f_l + (usl - u_l) * a_l;
+            let from_right = f_r + (usr - u_r) * a_r + (usl - usr) * a_star;
+
+            // scaled by the size of the terms being differenced, not by the result: the
+            // near-degenerate case has a result close to zero built from O(1) pieces, so a
+            // result-relative bound would demand cancellation the arithmetic cannot deliver.
+            let scale = f_l
+                .den
+                .abs()
+                .max(f_r.den.abs())
+                .max(f_l.nrg.abs())
+                .max(f_r.nrg.abs())
+                .max(1.0);
+            for (what, a, b) in [
+                ("den", from_left.den, from_right.den),
+                ("mom_n", from_left.mom[0], from_right.mom[0]),
+                ("mom_t", from_left.mom[1], from_right.mom[1]),
+                ("nrg", from_left.nrg, from_right.nrg),
+            ] {
+                assert!(
+                    (a - b).abs() <= 1.0e-12 * scale,
+                    "{name}/{what}: the two derivations of the intermediate flux disagree \
+                     ({a:e} vs {b:e}, scale {scale:e}). the Mignone-Bodo star states do not satisfy \
+                     the contact jump condition, so the central formulation is not an identity and \
+                     scaling it does not yield a modified HLLC"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn relativistic_hllc_lm_equals_relativistic_hllc_wherever_the_scaling_is_inactive() {
+        // above the mach limit `phi = 1` and the two must agree exactly — the reformulation is an
+        // identity, so any disagreement is a defect in the central form rather than the intended
+        // reduction. covers both the subsonic fan (where the star flux applies) and the supersonic
+        // fans (where the upwind flux does).
+        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let n = Tensor::new([1.0, 0.0]);
+        let cases = [
+            // subsonic fan, normal mach well above the limit
+            (
+                Prim { rho: 1.0, vel: Tensor::new([0.3, 0.1]), pre: 1.0 },
+                Prim { rho: 0.6, vel: Tensor::new([0.2, -0.1]), pre: 0.5 },
+            ),
+            // left-supersonic and right-supersonic
+            (
+                Prim { rho: 1.0, vel: Tensor::new([0.99, 0.0]), pre: 0.01 },
+                Prim { rho: 1.2, vel: Tensor::new([0.99, 0.0]), pre: 0.02 },
+            ),
+            (
+                Prim { rho: 1.0, vel: Tensor::new([-0.99, 0.0]), pre: 0.01 },
+                Prim { rho: 1.2, vel: Tensor::new([-0.99, 0.0]), pre: 0.02 },
+            ),
+        ];
+        for (l, r) in cases {
+            let cs = |p: &Prim<f64, 2>| crate::rhd::sound_speed_sq(&eos, p.rho, p.pre).sqrt();
+            let ma = (l.vel[0] / cs(&l)).abs().max((r.vel[0] / cs(&r)).abs());
+            assert!(
+                ma > crate::dissipation::MACH_LIMIT,
+                "this case sits ON the ramp (Ma = {ma}); it cannot test the phi = 1 equivalence"
+            );
+            let std = hllc_rhd(&eos, &l, &r, &n, 0.0, ShockwaveLimiter::Standard);
+            let lm = hllc_rhd(&eos, &l, &r, &n, 0.0, ShockwaveLimiter::Fleischmann);
+            let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(b.abs()).max(1.0e-30);
+            assert!(
+                rel(std.den, lm.den) < 1.0e-13
+                    && rel(std.mom[0], lm.mom[0]) < 1.0e-13
+                    && rel(std.nrg, lm.nrg) < 1.0e-13,
+                "at Ma = {ma:.3} (phi = 1) the two solvers differ: den {} vs {}, nrg {} vs {}",
+                std.den,
+                lm.den,
+                std.nrg,
+                lm.nrg
+            );
+        }
+    }
+
+    #[test]
+    fn the_relativistic_scaling_collapses_the_transverse_acoustic_dissipation() {
+        // the mechanism, in the relativistic regime. a grid-aligned shock has a large velocity along
+        // its propagation and a vanishing component across it, so the transverse-face Riemann
+        // problem is at Ma ~ 0 while its acoustic wave speeds stay at O(c_s). classical HLLC then
+        // applies dissipation proportional to c_s to a face whose flow is nearly at rest — the
+        // scaling failure that drives the carbuncle.
+        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let l = Prim { rho: 1.0, vel: Tensor::new([1.0e-6, 0.99]), pre: 1.0 };
+        let r = Prim { rho: 1.2, vel: Tensor::new([-1.0e-6, 0.99]), pre: 1.1 };
+        let across = Tensor::new([1.0, 0.0]);
+        let along = Tensor::new([0.0, 1.0]);
+
+        // the premise: this really is the degenerate configuration — the outer speeds are O(c_s)
+        // while the normal velocity is negligible.
+        let regime = crate::rhd::Rhd;
+        let (a_l, a_r) = regime.extremal_speeds(&eos, &l, &r, &across);
+        assert!(
+            a_l < -0.1 && a_r > 0.1,
+            "the transverse face must carry O(c_s) acoustic speeds, got ({a_l}, {a_r})"
+        );
+
+        let std = hllc_rhd(&eos, &l, &r, &across, 0.0, ShockwaveLimiter::Standard);
+        let lm = hllc_rhd(&eos, &l, &r, &across, 0.0, ShockwaveLimiter::Fleischmann);
+
+        // the density flux across a face whose normal velocity is ~1e-6 should be ~1e-6. classical
+        // HLLC produces far more than that, entirely from acoustic dissipation; the scaling must
+        // remove most of it.
+        assert!(
+            lm.den.abs() < 0.1 * std.den.abs(),
+            "the transverse density flux is {} under HLLC-LM against {} under HLLC; the acoustic \
+             dissipation has not been reduced",
+            lm.den,
+            std.den
+        );
+
+        // and the shock-normal face must be untouched: there the flow is supersonic and the scheme
+        // is classical HLLC exactly. a scaling that fired in both directions would be smoothing the
+        // shock itself.
+        let std_along = hllc_rhd(&eos, &l, &r, &along, 0.0, ShockwaveLimiter::Standard);
+        let lm_along = hllc_rhd(&eos, &l, &r, &along, 0.0, ShockwaveLimiter::Fleischmann);
+        let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(b.abs()).max(1.0e-30);
+        assert!(
+            rel(std_along.den, lm_along.den) < 1.0e-13,
+            "the shock-normal face changed ({} vs {}); the flow there is supersonic and must get \
+             classical HLLC untouched",
+            std_along.den,
+            lm_along.den
+        );
+    }
+
+    #[test]
+    fn a_hot_gas_above_the_mach_limit_is_not_put_on_the_ramp_by_the_wrong_sound_speed() {
+        // the discriminating case for WHICH sound speed the scaling uses. the two differ by the
+        // square root of the specific enthalpy, `cs_newt / cs_rel = sqrt(h)`, so on a hot gas they
+        // straddle the mach limit: a face genuinely above it — where the scheme must be classical
+        // HLLC — reads as low-mach under the newtonian expression and has its acoustic dissipation
+        // cut by more than half.
+        //
+        // the earlier gates cannot see this. they sit either far below the limit (where both
+        // definitions give a tiny phi) or far above it (where both give one). only a state placed
+        // BETWEEN the two thresholds separates them.
+        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let n = Tensor::new([1.0, 0.0]);
+        let (rho, pre) = (1.0f64, 10.0f64);
+        let cs_rel = crate::rhd::sound_speed_sq(&eos, rho, pre).sqrt();
+        let cs_newt = (4.0 / 3.0 * pre / rho).sqrt();
+        // 1.5x the limit on the relativistic sound speed.
+        let vn = 1.5 * crate::dissipation::MACH_LIMIT * cs_rel;
+
+        // the premise: the two definitions must genuinely straddle the limit here, or the case
+        // proves nothing about which one is in use.
+        assert!(
+            vn / cs_rel > crate::dissipation::MACH_LIMIT
+                && vn / cs_newt < crate::dissipation::MACH_LIMIT,
+            "the mach numbers do not straddle the limit: relativistic {:.4}, newtonian {:.4}",
+            vn / cs_rel,
+            vn / cs_newt
+        );
+
+        let l = Prim { rho, vel: Tensor::new([vn, 0.0]), pre };
+        let r = Prim { rho: rho * 1.05, vel: Tensor::new([vn, 0.0]), pre: pre * 1.05 };
+        let std = hllc_rhd(&eos, &l, &r, &n, 0.0, ShockwaveLimiter::Standard);
+        let lm = hllc_rhd(&eos, &l, &r, &n, 0.0, ShockwaveLimiter::Fleischmann);
+        let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(b.abs()).max(1.0e-30);
+        assert!(
+            rel(std.den, lm.den) < 1.0e-13 && rel(std.nrg, lm.nrg) < 1.0e-13,
+            "this face is at Ma = {:.3} on the relativistic sound speed, above the limit, so \
+             HLLC-LM must reduce nothing — yet it differs from HLLC (den {} vs {}, nrg {} vs {}). \
+             the scaling is using the newtonian sound speed, which is larger by sqrt(h) = {:.2} and \
+             puts this face on the ramp",
+            vn / cs_rel,
+            std.den,
+            lm.den,
+            std.nrg,
+            lm.nrg,
+            cs_newt / cs_rel
+        );
+    }
+
+    #[test]
+    fn the_relativistic_sound_speed_is_not_the_newtonian_one() {
+        // the trap in porting the scaling. the newtonian sound speed omits the specific enthalpy,
+        // and on a relativistic gas it exceeds the speed of light — so a mach number built on it is
+        // low by that factor and pushes faces onto the ramp that belong at phi = 1.
+        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let (rho, pre) = (1.0f64, 1.0f64);
+        let newtonian = (4.0 / 3.0 * pre / rho).sqrt();
+        let relativistic = crate::rhd::sound_speed_sq(&eos, rho, pre).sqrt();
+        assert!(
+            newtonian > 1.0,
+            "this state must be one where the newtonian expression is superluminal, got {newtonian}"
+        );
+        assert!(
+            relativistic < 1.0,
+            "the relativistic sound speed must be subluminal, got {relativistic}"
+        );
+        // the acoustic wave speeds of a state at rest ARE +/- cs, which pins which of the two the
+        // solver actually uses.
+        let at_rest = Prim { rho, vel: Tensor::new([0.0, 0.0]), pre };
+        let (a_l, a_r) =
+            crate::rhd::Rhd.extremal_speeds(&eos, &at_rest, &at_rest, &Tensor::new([1.0, 0.0]));
+        assert!(
+            (a_r - relativistic).abs() < 1.0e-12 && (a_l + relativistic).abs() < 1.0e-12,
+            "a state at rest must have acoustic speeds +/- cs_rel = +/-{relativistic}, got \
+             ({a_l}, {a_r})"
+        );
     }
 }

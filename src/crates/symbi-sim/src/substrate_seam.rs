@@ -280,13 +280,29 @@ impl Solver {
             // regimes NMHD and RMHD (the UCT edge EMF reduces to the HLL EMF for B_x != 0 — the
             // contact carries no transverse field, M&DZ p.11 — so HLLC-MHD = HLLC flux + HLL EMF).
             // EXCLUDED: isothermal MHD (no thermal contact, no HLLC flux kernel built).
-            Solver::Hllc => {
-                !regime.is_mhd() || matches!(regime, RegimeKind::NewtonianMhd | RegimeKind::Rmhd)
-            }
-            // HLLC-LM: the Fleischmann (2020) low-mach / low-dissipation HLLC. emitted for the
-            // adiabatic (newtonian euler) flux only -- the LM correction is a non-relativistic gas
-            // closure; iso has no contact wave, and the relativistic / mhd HLLC bodies ignore it.
-            Solver::HllcLm => matches!(regime, RegimeKind::Newtonian),
+            // an ISOTHERMAL regime carries no thermal contact wave, so there is no third wave for
+            // HLLC to resolve and no HLLC flux kernel is built for it — stated positively here
+            // rather than as "not mhd", which admitted isothermal HYDRO and left a selectable
+            // solver whose kernel panics at the first dispatch.
+            Solver::Hllc => matches!(
+                regime,
+                RegimeKind::Newtonian
+                    | RegimeKind::Rhd
+                    | RegimeKind::NewtonianMhd
+                    | RegimeKind::Rmhd
+            ),
+            // HLLC-LM: HLLC with the acoustic dissipation scaled down at low local mach number
+            // (Fleischmann, Adami & Adams 2020). available wherever a contact-resolving HLLC flux
+            // exists AND the central reformulation its scaling acts on is an identity — which needs
+            // the star states to satisfy the jump conditions across both outer waves and the
+            // contact. that holds for newtonian euler and for the Mignone-Bodo relativistic star
+            // states (both pinned by per-face gates).
+            //
+            // EXCLUDED: isothermal (no contact wave to resolve, hence no HLLC flux kernel), and the
+            // MHD regimes, whose star states carry the null vs non-null normal-field branches — the
+            // reformulation has not been shown to be an identity there, and a scaling applied to a
+            // non-identity is a different solver rather than a modified one.
+            Solver::HllcLm => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
             Solver::Hlld => regime.is_mhd(),
         }
     }
@@ -330,42 +346,84 @@ impl RegimeKind {
 mod solver_matrix_tests {
     use super::{RegimeKind, Solver};
 
-    // the (solver, regime) validity matrix MUST mirror the dispatch_flux runtime assert:
-    // hydro/RHD => HLLE + HLLC valid, HLLD invalid; MHD => HLLE + HLLD valid, HLLC invalid.
+    // the (solver, regime) validity matrix is what a config is checked against, so it must admit
+    // exactly the pairs that have a baked face-flux kernel — no more. a pair it admits without one
+    // panics at the first dispatch, after the queue slot is spent;
+    // `every_solver_the_matrix_accepts_has_its_face_flux_baked` is the other half of this contract.
     #[test]
     fn valid_for_matrix() {
-        let hydro = [
+        // HLLE is universal: two waves, every regime has them.
+        for r in [
             RegimeKind::Newtonian,
             RegimeKind::IsoNewtonian,
             RegimeKind::Rhd,
-        ];
-        let mhd = [
             RegimeKind::Rmhd,
             RegimeKind::NewtonianMhd,
             RegimeKind::IsoMhd,
-        ];
-        for r in hydro {
+        ] {
             assert!(Solver::Hlle.valid_for(r), "hlle universal: {r:?}");
-            assert!(Solver::Hllc.valid_for(r), "hllc valid for hydro: {r:?}");
-            assert!(!Solver::Hlld.valid_for(r), "hlld is MHD-only: {r:?}");
         }
-        for r in mhd {
-            assert!(Solver::Hlle.valid_for(r), "hlle universal: {r:?}");
+
+        // HLLD is the five-wave MHD solver.
+        for r in [
+            RegimeKind::Rmhd,
+            RegimeKind::NewtonianMhd,
+            RegimeKind::IsoMhd,
+        ] {
             assert!(Solver::Hlld.valid_for(r), "hlld valid for MHD: {r:?}");
         }
-        // HLLC is valid for the energy-carrying MHD regimes (contact-resolving flux + HLL EMF)
-        // but NOT isothermal MHD (no thermal contact / no HLLC kernel).
-        assert!(
-            Solver::Hllc.valid_for(RegimeKind::NewtonianMhd),
-            "hllc valid for nmhd"
-        );
-        assert!(
-            Solver::Hllc.valid_for(RegimeKind::Rmhd),
-            "hllc valid for rmhd"
-        );
-        assert!(
-            !Solver::Hllc.valid_for(RegimeKind::IsoMhd),
-            "hllc invalid for iso-mhd (no contact)"
-        );
+        for r in [
+            RegimeKind::Newtonian,
+            RegimeKind::IsoNewtonian,
+            RegimeKind::Rhd,
+        ] {
+            assert!(!Solver::Hlld.valid_for(r), "hlld is MHD-only: {r:?}");
+        }
+
+        // HLLC resolves a CONTACT wave, so it needs one to exist. an isothermal closure
+        // `p = c^2 rho` leaves no independent thermodynamic degree of freedom and hence no entropy
+        // wave — the characteristic families are `u +/- c` alone and HLLC degenerates to HLL. that
+        // is a property of the closure, not of the magnetic field, so it rules out isothermal HYDRO
+        // exactly as it rules out isothermal MHD; no HLLC kernel is baked for either.
+        for r in [
+            RegimeKind::Newtonian,
+            RegimeKind::Rhd,
+            RegimeKind::NewtonianMhd,
+            RegimeKind::Rmhd,
+        ] {
+            assert!(Solver::Hllc.valid_for(r), "hllc valid for {r:?}");
+        }
+        for r in [RegimeKind::IsoNewtonian, RegimeKind::IsoMhd] {
+            assert!(
+                !Solver::Hllc.valid_for(r),
+                "hllc must be refused for {r:?}: an isothermal closure carries no contact wave, and \
+                 no isothermal HLLC flux kernel is baked, so admitting it panics at dispatch"
+            );
+        }
+
+        // HLLC-LM is HLLC plus the low-mach acoustic-dissipation scaling, so it is admissible
+        // wherever HLLC is AND the central reformulation the scaling acts on is an identity — which
+        // requires the star states to satisfy the jump conditions across both outer waves and the
+        // contact. verified for newtonian euler and for the Mignone-Bodo relativistic star states;
+        // NOT established for the MHD star states, whose null vs non-null normal-field branches make
+        // the reformulation a separate question.
+        for r in [RegimeKind::Newtonian, RegimeKind::Rhd] {
+            assert!(Solver::HllcLm.valid_for(r), "hllc-lm valid for {r:?}");
+            assert!(
+                Solver::Hllc.valid_for(r),
+                "hllc-lm cannot be admissible where plain hllc is not: {r:?}"
+            );
+        }
+        for r in [
+            RegimeKind::IsoNewtonian,
+            RegimeKind::IsoMhd,
+            RegimeKind::NewtonianMhd,
+            RegimeKind::Rmhd,
+        ] {
+            assert!(
+                !Solver::HllcLm.valid_for(r),
+                "hllc-lm must be refused for {r:?}"
+            );
+        }
     }
 }
