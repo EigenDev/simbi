@@ -1418,6 +1418,105 @@ where
     load_checkpoint_level(sim, path, 0)
 }
 
+/// how many refinement levels a checkpoint carries.
+///
+/// a restart may run DEEPER than the file it resumes from — that is the whole point of a
+/// bootstrap ladder, where each rung converges at its own resolution and the next adds one. the
+/// levels the file has are loaded; the rest are initialized from their parents. counting them is
+/// what tells the two apart, and the count comes from the file rather than from the config so a
+/// hand-edited or truncated checkpoint cannot make a level silently start from zeros.
+pub fn checkpoint_level_count(path: &str) -> Result<usize> {
+    let tree = Hdf5Backend.read(Path::new(path))?;
+    let mut n = 0usize;
+    while tree.find_group(&format!("level_{n}")).is_some() {
+        n += 1;
+    }
+    if n == 0 {
+        return Err(IoError::MissingPath("level_0".into()));
+    }
+    Ok(n)
+}
+
+/// check that a checkpoint's level `level_index` describes the SAME grid this run built for it.
+///
+/// a deeper restart only works because level `i` occupies the same region at every depth — true
+/// when a config's refinement regions are fixed geometry, FALSE for any schedule that derives them
+/// from the level count. in the second case the loaded data would be laid over a different region
+/// and produce a field that is smooth, finite and wrong everywhere, with the error appearing as an
+/// unexplained profile rather than as a failure.
+///
+/// so the property is verified rather than assumed: cell counts and physical bounds per axis, from
+/// the file's own mesh description.
+pub fn verify_checkpoint_level_geometry<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: symbi_xpu::ExecutionSpace,
+    Mem: symbi_xpu::MemorySpace,
+{
+    let tree = Hdf5Backend.read(Path::new(path))?;
+    let name = format!("level_{level_index}");
+    let mesh = tree
+        .find_group(&name)
+        .and_then(|level| level.find_group("mesh"))
+        .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh")))?;
+
+    let cells = match mesh.find_dataset("global_cells").map(|d| &d.data) {
+        Some(symbi_io::DataBuf::U64(v)) => v.clone(),
+        _ => return Err(IoError::MissingPath(format!("{name}/mesh/global_cells"))),
+    };
+    for ax in 0..D {
+        let want = sim.geom.interior.spaces[ax].size();
+        let got = *cells.get(ax).unwrap_or(&0) as usize;
+        if got != want {
+            return Err(IoError::Backend(format!(
+                "{path}: level {level_index} was written with {got} cell(s) on axis {ax} but this \
+                 run builds {want}. a deeper restart requires level {level_index} to occupy the \
+                 same grid it did in the checkpoint; a refinement schedule whose regions depend on \
+                 the level count does not satisfy that, and loading across the mismatch would \
+                 place the data on the wrong region."
+            )));
+        }
+    }
+
+    let geometry = mesh
+        .find_group("geometry")
+        .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry")))?;
+    for ax in 0..D {
+        let slot = sim.geom.axes[ax];
+        let dim = geometry
+            .find_group(&format!("dim_{slot}"))
+            .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry/dim_{slot}")))?;
+        let bound = |key: &str| match dim.find_attr(key) {
+            Some(Attr::F64(v)) => Some(*v),
+            _ => None,
+        };
+        let (Some(start), Some(end)) = (bound("start"), bound("end")) else {
+            return Err(IoError::MissingPath(format!(
+                "{name}/mesh/geometry/dim_{slot}/start|end"
+            )));
+        };
+        let lo = sim.geom.x_lo[ax] + sim.geom.interior.spaces[ax].lo as f64 * sim.geom.dx[ax];
+        let hi = lo + sim.geom.dx[ax] * sim.geom.interior.spaces[ax].size() as f64;
+        // relative to the level's own extent: an absolute tolerance would be meaningless across a
+        // ladder whose finest level is orders of magnitude smaller than its root.
+        let scale = (hi - lo).abs().max(1.0e-300);
+        if (start - lo).abs() / scale > 1.0e-9 || (end - hi).abs() / scale > 1.0e-9 {
+            return Err(IoError::Backend(format!(
+                "{path}: level {level_index} axis {ax} spans [{start:e}, {end:e}] in the checkpoint \
+                 but [{lo:e}, {hi:e}] in this run. level {level_index} must occupy the same region \
+                 at every depth for a deeper restart to be meaningful."
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub fn load_checkpoint_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     path: &str,
