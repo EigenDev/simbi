@@ -63,7 +63,7 @@ quite a while.
 |:---:|:---:|:---:|
 | [Animation](https://user-images.githubusercontent.com/29236993/145315802-c8d7e8c5-7beb-488c-b496-b9edf404be2e.mp4) | [Animation](https://user-images.githubusercontent.com/29236993/212521070-0e2a7ced-cd5f-4006-9039-be67f174fb07.mp4) | [Animation](https://github.com/EigenDev/simbi/assets/29236993/818d930d-d993-4e5d-8ed4-47a9bae11a7f) |
 
-| Moving Mesh Techniques | Magnetic Turbulence |
+| Moving Mesh Techniques | SRMHD Turbulence |
 |:---:|:---:|
 | [Animation](https://user-images.githubusercontent.com/29236993/205418982-943af187-8ae3-4401-92d5-e09a4ea821e2.mp4) | [Animation](https://github.com/user-attachments/assets/c3c636f9-60ca-4331-9600-3442970a6325)
 
