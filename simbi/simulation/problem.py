@@ -545,7 +545,13 @@ class SimbiProblem(BaseModel):
     ]
     refinement_subcycling_mode: Annotated[
         SubCycleMode,
-        ProblemParam(SubCycleMode.NONE, description="subcycling mode"),
+        ProblemParam(
+            SubCycleMode.NONE,
+            description="refinement subcycling schedule. only the implemented fixed-ratio "
+            "schedule is selectable: level l advances 2^l times per root step, with the root "
+            "step limited by every level's own cfl. NONE and STANDARD both select it and are "
+            "equivalent; ADAPTIVE and MANUAL are refused",
+        ),
     ]
     refinement_mode: Annotated[
         RefinementMode,
@@ -1116,16 +1122,28 @@ class SimbiProblem(BaseModel):
                     f"refinement_region[{ii}] has {len(region)} coords, expected {expected_coords}"
                 )
 
-        if self.refinement_subcycling_mode == SubCycleMode.MANUAL:
-            if len(self.refinement_substeps) != expected_levels:
-                raise ValueError(
-                    "refinement_substeps must match refinement_max_levels - 1 for manual mode"
-                )
-            # insert a single substep for the base level
-            object.__setattr__(
-                self,
-                "refinement_substeps",
-                [np.uint64(1)] + self.refinement_substeps,
+        # the backend subcycles at a FIXED refinement ratio: level l advances 2^l times per root
+        # step, and the root step is min over levels of (that level's own cfl limit) * 2^l, so every
+        # level lands inside its own cfl. neither an adaptive substep count nor a hand-specified one
+        # is implemented — `refinement_subcycling_mode` and `refinement_substeps` reach no backend
+        # code at all.
+        #
+        # refused rather than ignored. a config that declares ADAPTIVE and silently receives the
+        # fixed schedule invites reasoning built on a knob that does nothing, and the two are not
+        # equivalent: under the fixed schedule the ROOT is throttled by the finest level's
+        # requirement, taking around twenty times more steps than its own cfl would need on a deep
+        # gravitational ladder. that is a bounded cost (the finest level dominates the work either
+        # way, so an ideal schedule saves order twenty percent) but it is not nothing, and it is not
+        # what the declaration says.
+        if self.refinement_subcycling_mode in (
+            SubCycleMode.ADAPTIVE,
+            SubCycleMode.MANUAL,
+        ):
+            raise NotImplementedError(
+                f"refinement_subcycling_mode={self.refinement_subcycling_mode.value!r} is not "
+                "implemented: the backend subcycles level l exactly 2^l times per root step, and "
+                "the mode reaches no backend code. use SubCycleMode.STANDARD (or NONE) to select "
+                "the implemented fixed-ratio schedule."
             )
 
         if self.refinement_mode == RefinementMode.ADAPTIVE:
