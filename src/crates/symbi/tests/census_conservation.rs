@@ -94,8 +94,8 @@ fn weighted_values(sim: &SimSph) -> (Field<f64, 1, HostMemory>, Field<f64, 1, Ho
 }
 
 /// every interior cell into bucket zero — the zero-axis census.
-fn one_bucket(sim: &SimSph) -> Field<u32, 1, HostMemory> {
-    Field::<u32, 1, HostMemory>::zeros(&sim.geom.allocated).expect("segment field")
+fn one_bucket(sim: &SimSph) -> Field<f64, 1, HostMemory> {
+    Field::<f64, 1, HostMemory>::zeros(&sim.geom.allocated).expect("segment field")
 }
 
 #[test]
@@ -188,10 +188,10 @@ fn shell_bins_sum_back_to_the_global_total() {
     assert_eq!(spec.n_segments(), n_shells);
 
     let (mass, _) = weighted_values(&sim);
-    let segment = Field::<u32, 1, HostMemory>::zeros(&sim.geom.allocated).expect("segment field");
+    let segment = Field::<f64, 1, HostMemory>::zeros(&sim.geom.allocated).expect("segment field");
     for c in sim.geom.interior.iter() {
         let r = R_LO + (c[0] as f64 + 0.5) * DR;
-        segment.view_mut().set(c, spec.segment_marker(&[r]));
+        segment.view_mut().set(c, spec.segment_marker(&[r]) as f64);
     }
 
     let census = field_segmented_reduce(
@@ -241,12 +241,12 @@ fn cells_outside_the_shell_edges_are_reported_not_absorbed() {
     .expect("valid census");
 
     let (mass, _) = weighted_values(&sim);
-    let segment = Field::<u32, 1, HostMemory>::zeros(&sim.geom.allocated).expect("segment field");
+    let segment = Field::<f64, 1, HostMemory>::zeros(&sim.geom.allocated).expect("segment field");
     let mut expect_dropped = 0u64;
     let mut expect_inside = 0.0f64;
     for c in sim.geom.interior.iter() {
         let r = R_LO + (c[0] as f64 + 0.5) * DR;
-        segment.view_mut().set(c, spec.segment_marker(&[r]));
+        segment.view_mut().set(c, spec.segment_marker(&[r]) as f64);
         if r > r_cut {
             expect_dropped += 1;
         } else {

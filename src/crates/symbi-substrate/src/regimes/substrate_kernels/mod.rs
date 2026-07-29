@@ -44,6 +44,7 @@ pub(crate) use binding::kernel_field_binds;
 // caller deciding whether to run a PRODUCER can ask the consumer instead of re-deriving which
 // solver arm consumes what.
 pub use binding::kernel_bindings;
+pub mod census_compiled;
 pub use boundary::*;
 pub use dispatch::*;
 pub use params::*;

@@ -1497,13 +1497,24 @@ where
                 .iter()
                 .map(|r| r.evaluator.spec().op())
                 .collect();
+            // the registrations live on the ROOT, which owns the history; every level is reduced
+            // against that one list. a level carrying its own (empty) list would contribute
+            // nothing while its volume stayed excluded from the parent.
+            let registrations = &self.levels[0].state.store.censuses;
+            let root_step = Some(symbi_sim::census::Cadence::RootStep);
             let mut totals = symbi_substrate::census_sample::level_partials(
                 &self.levels[0].state,
+                registrations,
+                0,
+                root_step,
                 self.levels[0].coverage.as_ref(),
             );
             for level in 1..self.levels.len() {
                 let partial = symbi_substrate::census_sample::level_partials(
                     &self.levels[level].state,
+                    registrations,
+                    0,
+                    root_step,
                     self.levels[level].coverage.as_ref(),
                 );
                 symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
@@ -1938,8 +1949,40 @@ where
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
         }
+        self.sample_per_level_censuses(level);
         self.level_clock(level, dt);
         false
+    }
+
+    /// record a PER-LEVEL census sample from this level's own accepted subcycle step.
+    ///
+    /// levels are time-aligned only at root-step boundaries, so this row is this level's alone: it
+    /// covers this level's leaf cells at this level's clock, and carries the level index so a
+    /// consumer can tell it from a root row or from another level's. summing rows across levels is
+    /// therefore the consumer's decision, not one baked into the file.
+    ///
+    /// the registrations live on the ROOT, which owns the history; a finer level carries none.
+    fn sample_per_level_censuses(&mut self, level: usize) {
+        if self.levels[0].state.store.censuses.is_empty() {
+            return;
+        }
+        let time = self.levels[level].state.time;
+        let partial = symbi_substrate::census_sample::level_partials(
+            &self.levels[level].state,
+            &self.levels[0].state.store.censuses,
+            level,
+            Some(symbi_sim::census::Cadence::PerLevelStep),
+            self.levels[level].coverage.as_ref(),
+        );
+        if partial.iter().all(|(values, _)| values.is_empty()) {
+            return;
+        }
+        symbi_substrate::census_sample::record_samples_at_level(
+            &mut self.levels[0].state,
+            time,
+            level,
+            partial,
+        );
     }
 
     /// derive one level's accepted-step coefficients before its finer level

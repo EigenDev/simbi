@@ -54,6 +54,7 @@ use super::coords::{Coords, Spacetime, Spacing};
 mod c2p;
 mod ct_emf;
 mod flux;
+pub mod census_map;
 pub(crate) mod geometry;
 mod ghost;
 mod godunov;

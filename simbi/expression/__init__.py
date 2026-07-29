@@ -1,4 +1,4 @@
-from .census import BinAxis, Census, linear_edges, log_edges
+from .census import BinAxis, Cadence, Census, linear_edges, log_edges
 from .dag_expression import (
     ConservedField,
     Expr,
@@ -56,6 +56,7 @@ __all__ = [
     "ReductionOp",
     "Census",
     "BinAxis",
+    "Cadence",
     "log_edges",
     "linear_edges",
     "ConservedField",

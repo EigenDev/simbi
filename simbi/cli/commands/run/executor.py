@@ -121,6 +121,7 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
                         )
                         desc = info.description or ""
                         print(f"  {name}: {default}  # {desc}")
+            _peek_censuses(problem_class, argv, args)
             continue
 
         # create instance from cli args
@@ -159,3 +160,27 @@ def _configure_environment(args: Namespace) -> None:
         os.environ["USE_OMP"] = "1"
 
     # gpu block dims are set by RegisterGPUBlockDimensions action
+
+
+def _peek_censuses(problem_class: type, argv: Optional[Sequence[str]], args: Namespace) -> None:
+    """report the registered binned reductions alongside the config's flags.
+
+    every number in the report is fixed at registration — the bin count, the graph size, the
+    cadence — and each one decides a cost paid for the whole job. a hundred-thousand-bin histogram
+    sampled every step is a legitimate thing to ask for; discovering it from a queue slot is not.
+
+    the registrations live on an INSTANCE, so this builds one from the defaults. a problem whose
+    construction needs arguments that were not supplied simply has nothing to report here, which is
+    not an error: showing the flags is what was asked for.
+    """
+    from simbi.expression.census import describe
+
+    try:
+        problem = problem_class.from_cli(argv, args)
+        payloads = problem.census_expressions
+    except Exception:
+        return
+    if payloads:
+        print()
+        print(describe(payloads))
+

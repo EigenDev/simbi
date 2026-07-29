@@ -951,6 +951,14 @@ pub struct RkWorkspaceGeneric<
     /// stage and its writes never reach this ledger.
     #[cfg(debug_assertions)]
     pub stage_writes: std::sync::Mutex<Option<std::collections::HashSet<usize>>>,
+    /// per-registration census scratch, allocated on the first sample and REUSED after.
+    ///
+    /// one full-grid field per accumulator plus the segment — order 384 MB for sixteen
+    /// accumulators over three million cells — so allocating and freeing it per sample churns
+    /// that much memory for artifacts whose shape never changes. the exclusion default is written
+    /// once with it: ghosts do not move, and the sweep overwrites every interior cell each sample,
+    /// so nothing carries over that is not immediately replaced.
+    pub census_scratch: std::sync::OnceLock<Vec<crate::census::CensusFields<NDIM, M>>>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -1542,10 +1550,13 @@ impl<const D: usize> PartitionGeometry<D> {
         &self,
         metric: M,
     ) -> symbi_geometry::BlockGeometry<M, f64, D> {
+        // the grid's real coordinate roles, so the cell volume knows which coordinates are
+        // unresolved: a cylindrical (R, z) plane leaves phi ungridded, an (R, phi) disk leaves z.
+        let axes: [usize; D] = std::array::from_fn(|d| self.axes[d]);
         if let Some(maps) = self.maps {
-            symbi_geometry::BlockGeometry::with_maps(metric, maps)
+            symbi_geometry::BlockGeometry::with_maps(metric, maps, axes)
         } else {
-            symbi_geometry::BlockGeometry::uniform(metric, self.x_lo, self.dx)
+            symbi_geometry::BlockGeometry::uniform(metric, self.x_lo, self.dx, axes)
         }
     }
 }
@@ -2426,6 +2437,7 @@ where
             body_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),
+            census_scratch: std::sync::OnceLock::new(),
         };
 
         let exec = Executor::<S>::new(device_id)?;

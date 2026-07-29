@@ -26,6 +26,9 @@ def _write(
     times=(0.0, 1.0),
     dropped=(0, 0),
     op="add",
+    accumulated=None,
+    n_samples=None,
+    level=None,
 ):
     n_seg = int(np.prod([len(e) - 1 for e in edges])) if edges else 1
     n_val = len(value_names)
@@ -40,6 +43,23 @@ def _write(
         g.attrs["value_names"] = ",".join(value_names)
         g.attrs["op"] = op
         g.attrs["node_count"] = 42
+        # written only when asked for, so the reader's handling of a file predating
+        # accumulation stays exercised by every other case here.
+        if accumulated is not None:
+            g.attrs["accumulated"] = int(accumulated)
+        if n_samples is not None:
+            counts = (
+                [int(n_samples)] * len(times)
+                if isinstance(n_samples, int)
+                else [int(v) for v in n_samples]
+            )
+            g.create_dataset("n_samples", data=np.asarray(counts, dtype=np.uint64))
+            g.create_dataset(
+                "t_start", data=np.full(len(times), float(times[0]), dtype=float)
+            )
+        if level is not None:
+            g.create_dataset("level", data=np.asarray(level, dtype=np.uint64))
+            g.attrs["cadence"] = "per_level_step"
         g.create_dataset("time", data=np.asarray(times, dtype=float))
         g.create_dataset("values", data=np.asarray(values, dtype=float))
         g.create_dataset("dropped", data=np.asarray(dropped, dtype=np.uint64))
@@ -54,12 +74,12 @@ def test_reads_names_shape_and_edges(tmp_path):
     assert census_names(p) == ("shells",)
     c = read_census(p, "shells")
     assert isinstance(c, Census)
-    assert c.n_samples == 2
+    assert c.n_rows == 2
     assert c.bin_shape == (3,)
     assert c.value_names == ("mass", "mass_v", "mass_v2")
     assert c.axis_names == ("r",)
     np.testing.assert_allclose(c.bin_centers(0), [0.5, 1.5, 2.5])
-    # (n_samples, *bin_shape, n_values)
+    # (n_rows, *bin_shape, n_values)
     assert c.values.shape == (2, 3, 3)
     assert c.value("mass").shape == (2, 3)
 
@@ -177,3 +197,96 @@ def test_total_sums_over_bins_only(tmp_path):
     p = _write(tmp_path / "c.h5", values=values, times=(0.0,), dropped=(0,))
     c = read_census(p, "shells")
     np.testing.assert_allclose(c.total("mass"), [6.0])
+
+
+def test_a_file_predating_accumulation_reads_as_a_per_sample_history(tmp_path):
+    # the compatibility case: a checkpoint written before the mode existed carries none of its
+    # metadata, and by definition it is not accumulated. defaulting is right here — the sample
+    # count of a per-sample history IS its row count — but it must not be defaulted the other way,
+    # which would make every old file claim to be one folded row.
+    c = read_census(_write(tmp_path / "c.h5", times=(0.0, 1.0, 2.0), dropped=(0, 0, 0)), "shells")
+    assert c.accumulated is False
+    assert c.n_rows == 3
+    assert c.n_samples is None and c.level is None
+    assert c.levels == (0,)
+
+
+def test_an_accumulated_row_averages_back_by_its_sample_count(tmp_path):
+    # the whole point of the mode: the samples are gone, so the count is the only thing that can
+    # turn the stored running sum back into a mean. an average taken over the ROWS instead would
+    # divide by one and report the sum as though it were the average.
+    values = np.array([[[10.0], [20.0], [30.0]]])  # one row, three bins, one accumulator
+    p = _write(
+        tmp_path / "acc.h5",
+        value_names=("mass",),
+        values=values,
+        times=(4.0,),
+        dropped=(0,),
+        accumulated=True,
+        n_samples=5,
+    )
+    c = read_census(p, "shells")
+    assert c.accumulated is True
+    assert c.n_rows == 1
+    np.testing.assert_array_equal(c.n_samples, [5])
+    np.testing.assert_allclose(c.time_average("mass"), [2.0, 4.0, 6.0])
+    # and the per-sample form of the same call is the mean over rows, so one name means one thing.
+    plain = read_census(
+        _write(
+            tmp_path / "plain.h5",
+            value_names=("mass",),
+            values=np.array([[[1.0], [2.0], [3.0]], [[3.0], [4.0], [5.0]]]),
+            times=(0.0, 1.0),
+        ),
+        "shells",
+    )
+    np.testing.assert_allclose(plain.time_average("mass"), [2.0, 3.0, 4.0])
+
+
+def test_a_file_claiming_accumulation_with_many_rows_is_refused(tmp_path):
+    # the metadata and the data must agree. an accumulating history folds every sample into one
+    # row, so a file marked accumulated that stores several is describing something the writer
+    # cannot produce — and `time_average` would silently read row zero as though it were the whole
+    # segment.
+    p = _write(tmp_path / "bad.h5", accumulated=True, n_samples=9, times=(0.0, 1.0))
+    with pytest.raises(CensusError, match="accumulating"):
+        read_census(p, "shells")
+
+
+def test_a_time_average_of_an_extremal_census_is_refused(tmp_path):
+    # a running max over a segment is already the answer for that segment; dividing it by a sample
+    # count is not an average of anything, and the result would look like a perfectly ordinary
+    # profile.
+    p = _write(tmp_path / "mx.h5", op="max", accumulated=True, n_samples=4,
+               value_names=("peak",),
+               values=np.array([[[1.0], [2.0], [3.0]]]), times=(1.0,), dropped=(0,))
+    c = read_census(p, "shells")
+    with pytest.raises(CensusError):
+        c.time_average("peak")
+
+
+def test_per_level_rows_are_selected_before_any_time_series_analysis(tmp_path):
+    # rows from different levels are not interchangeable: a level subcycles, so it contributes
+    # several rows per root step, each covering only the volume that level resolves. averaging them
+    # together weights the answer by the subcycle ratio — a number that is smooth and plausible and
+    # is a property of the timestepper rather than the flow.
+    p = _write(
+        tmp_path / "lv.h5",
+        value_names=("mass",),
+        values=np.array([[[1.0], [1.0], [1.0]], [[9.0], [9.0], [9.0]], [[9.0], [9.0], [9.0]]]),
+        times=(1.0, 0.5, 1.0),
+        dropped=(0, 0, 0),
+        level=(0, 1, 1),
+    )
+    c = read_census(p, "shells")
+    assert c.cadence == "per_level_step"
+    assert c.levels == (0, 1)
+    with pytest.raises(CensusError, match="for_level"):
+        c.time_average("mass")
+
+    fine = c.for_level(1)
+    assert fine.n_rows == 2
+    np.testing.assert_allclose(fine.time_average("mass"), [9.0, 9.0, 9.0])
+    np.testing.assert_allclose(c.for_level(0).time_average("mass"), [1.0, 1.0, 1.0])
+    with pytest.raises(CensusError, match="no rows from level 2"):
+        c.for_level(2)

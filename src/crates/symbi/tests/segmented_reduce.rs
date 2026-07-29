@@ -61,7 +61,7 @@ fn value(c: [isize; 2], channel: isize) -> f64 {
     if (c[0] * 3 + c[1]) % 11 == 0 { -v } else { v }
 }
 
-fn build(n_values: usize) -> (Vec<Field<f64, 2, HostMemory>>, Field<u32, 2, HostMemory>) {
+fn build(n_values: usize) -> (Vec<Field<f64, 2, HostMemory>>, Field<f64, 2, HostMemory>) {
     let dom = domain();
     let values: Vec<Field<f64, 2, HostMemory>> = (0..n_values)
         .map(|v| {
@@ -72,9 +72,9 @@ fn build(n_values: usize) -> (Vec<Field<f64, 2, HostMemory>>, Field<u32, 2, Host
             f
         })
         .collect();
-    let segment = Field::<u32, 2, HostMemory>::zeros(&dom).expect("segment field");
+    let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
     for c in dom.iter() {
-        segment.view_mut().set(c, bucket(c));
+        segment.view_mut().set(c, bucket(c) as f64);
     }
     (values, segment)
 }
@@ -117,7 +117,7 @@ fn one_bucket_reproduces_the_whole_field_reduction() {
         field.view_mut().set(c, value(c, 1));
     }
     // every cell into bucket zero.
-    let segment = Field::<u32, 2, HostMemory>::zeros(&dom).expect("segment field");
+    let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
 
     for op in [ReductionOp::Add, ReductionOp::Min, ReductionOp::Max] {
         let census = field_segmented_reduce(&[&field], &segment, &dom, 1, op);
@@ -140,17 +140,17 @@ fn cells_outside_the_binning_are_dropped_and_counted() {
     // a silently under-covering binning reads exactly like a physics result.
     let dom = domain();
     let field = Field::<f64, 2, HostMemory>::zeros(&dom).expect("value field");
-    let segment = Field::<u32, 2, HostMemory>::zeros(&dom).expect("segment field");
+    let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
     let mut expect_dropped = 0u64;
     let mut expect_kept = 0.0f64;
     for c in dom.iter() {
         field.view_mut().set(c, 1.0);
         // a third of the domain is placed beyond the last bucket.
         if c[0] % 3 == 0 {
-            segment.view_mut().set(c, N_SEGMENTS as u32);
+            segment.view_mut().set(c, N_SEGMENTS as f64);
             expect_dropped += 1;
         } else {
-            segment.view_mut().set(c, bucket(c));
+            segment.view_mut().set(c, bucket(c) as f64);
             expect_kept += 1.0;
         }
     }
@@ -227,13 +227,13 @@ fn a_poisoned_cell_survives_its_bucket() {
     // pass a census unnoticed, and only the bucket that contains it may be poisoned.
     let dom = domain();
     let field = Field::<f64, 2, HostMemory>::zeros(&dom).expect("value field");
-    let segment = Field::<u32, 2, HostMemory>::zeros(&dom).expect("segment field");
+    let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
     let poisoned = [1isize, 1isize];
     for c in dom.iter() {
         field
             .view_mut()
             .set(c, if c == poisoned { f64::NAN } else { 1.0 });
-        segment.view_mut().set(c, bucket(c));
+        segment.view_mut().set(c, bucket(c) as f64);
     }
     let hot = bucket(poisoned) as usize;
 
@@ -260,3 +260,54 @@ fn a_product_over_a_bucket_is_refused() {
     let dom = domain();
     field_segmented_reduce(&[&values[0]], &segment, &dom, N_SEGMENTS, ReductionOp::Mul);
 }
+
+#[test]
+fn the_host_accumulator_is_double_precision_whatever_the_field_carrier_is() {
+    // the accumulator width is a property of the REDUCTION, not of the fields it reads. that
+    // separation is what lets a single-precision run — which is what a device without double
+    // support forces — still produce a total that means something: a bin over three million cells
+    // summed in f32 loses the low bits of every term once the running sum outgrows them, and the
+    // result is a smooth, positive, entirely plausible number that is wrong in its third digit.
+    //
+    // the discrimination here is absorption. one large term followed by many small ones: in f64
+    // every small term lands, in f32 none of them do, and the two answers differ by the whole tail.
+    const BIG: f32 = 1.0e8;
+    const N_SMALL: isize = 1000;
+
+    let dom = Domain::new([Space {
+        name: "x",
+        lo: 0,
+        hi: N_SMALL + 1,
+    }]);
+    let value = Field::<f32, 1, HostMemory>::zeros(&dom).expect("value field");
+    let segment = Field::<f32, 1, HostMemory>::zeros(&dom).expect("segment field");
+    for c in dom.iter() {
+        // the large term FIRST in traversal order, so the running sum is already too coarse to
+        // resolve the ones that follow.
+        value.view_mut().set(c, if c[0] == 0 { BIG } else { 1.0 });
+        segment.view_mut().set(c, 0.0);
+    }
+
+    let got = field_segmented_reduce(&[&value], &segment, &dom, 1, ReductionOp::Add);
+    let want = BIG as f64 + N_SMALL as f64;
+    assert_eq!(
+        got.values[0], want,
+        "the reduction of {N_SMALL} unit terms after one of {BIG} gave {}, not {want}. the \
+         accumulator has narrowed to the field's carrier, so the tail of every bin is being \
+         absorbed into its running sum.",
+        got.values[0]
+    );
+
+    // the premise: an f32 accumulator must genuinely lose this tail, or the comparison above
+    // holds for reasons unrelated to precision.
+    let mut narrow = BIG;
+    for _ in 0..N_SMALL {
+        narrow += 1.0f32;
+    }
+    assert_eq!(
+        narrow, BIG,
+        "single precision did not absorb the tail here ({narrow} vs {BIG}); the magnitudes no \
+         longer discriminate between the two accumulator widths"
+    );
+}
+

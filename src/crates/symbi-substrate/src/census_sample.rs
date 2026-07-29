@@ -27,8 +27,18 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 ///
 /// `covered` is the region a finer level resolves; those cells are not this level's to count.
 /// returns one `(values, dropped)` per registration, in registration order.
+///
+/// the registrations are supplied rather than read from `sim`, because a census is registered ONCE
+/// — on the root, which owns the history — while every level of a hierarchy must be reduced
+/// against it. reading them from each level instead makes a refined run silently omit its refined
+/// volume: the covered coarse cells are excluded from the parent, and a fine level holding no
+/// registrations contributes nothing in their place, so the total is short by exactly the refined
+/// region and is otherwise smooth, positive and of the right order.
 pub fn level_partials<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    censuses: &[symbi_sim::census::RegisteredCensus],
+    level: usize,
+    cadence: Option<symbi_sim::census::Cadence>,
     covered: Option<&symbi_algebra::Domain<D>>,
 ) -> Vec<(Vec<f64>, u64)>
 where
@@ -38,20 +48,37 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    sim.censuses
+    symbi_sim::driver::prof("census", || {
+    let now = sim.time;
+    censuses
         .iter()
-        .map(|registered| {
+        .enumerate()
+        .map(|(index, registered)| {
+            // NOT DUE: an empty partial, which `combine_partials` folds as a no-op and
+            // `record_samples` skips. the alternative — dropping the entry — would misalign every
+            // registration after it, since partials are matched to registrations by position.
+            // and a registration whose declared cadence is not the one being driven here: a
+            // root-step census must not also sample inside a subcycle, and a per-level one must
+            // not also be folded into the composite root sample, or the same physical state would
+            // enter the history twice under two different tags. `None` is a driver with a single
+            // level, where the two cadences are the same instant.
+            let spec_cadence = registered.evaluator.spec().cadence();
+            if cadence.is_some_and(|c| c != spec_cadence) || !registered.is_due_at_level(now, level)
+            {
+                return (Vec::new(), 0u64);
+            }
             let spec = registered.evaluator.spec();
-            let fields = sim
-                .census_fields(&registered.evaluator, covered)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "census '{}' cannot be evaluated on device-resident fields; the binned \
-                         reduction's per-cell map is host-only, so run this configuration on the \
-                         cpu or drop the registration",
-                        spec.name()
-                    )
-                });
+            // the COMPILED map first — the same traced kernel a device runs — falling back to the
+            // per-cell interpreter when it does not apply. both write into the same scratch, whose
+            // every cell starts EXCLUDED, so whichever runs leaves untouched cells out of the
+            // reduction rather than in bucket zero.
+            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered).unwrap_or_else(|| {
+                panic!(
+                    "census '{}' cannot be evaluated on this store: neither the compiled map nor \
+                     the per-cell interpreter applies here",
+                    spec.name()
+                )
+            });
             let values: Vec<_> = fields.values.iter().collect();
             let reduced = crate::regimes::substrate_gpu::field_segmented_reduce(
                 &values,
@@ -63,6 +90,7 @@ where
             (reduced.values, reduced.dropped)
         })
         .collect()
+    })
 }
 
 /// fold one level's partial into a running total, per registration.
@@ -79,13 +107,13 @@ pub fn combine_partials(
         .iter_mut()
         .zip(from.into_iter().zip(ops.iter().copied()))
     {
+        // a level that was not due contributes nothing; folding it would be a no-op anyway, but
+        // the lengths would not line up.
+        if add.is_empty() || acc.is_empty() {
+            continue;
+        }
         for (a, b) in acc.iter_mut().zip(add) {
-            *a = match op {
-                symbi_ir::emit::ReductionOp::Add => *a + b,
-                symbi_ir::emit::ReductionOp::Min => a.min(b),
-                symbi_ir::emit::ReductionOp::Max => a.max(b),
-                symbi_ir::emit::ReductionOp::Mul => *a * b,
-            };
+            *a = symbi_sim::census::combine(op, *a, b);
         }
         *dropped += d;
     }
@@ -111,7 +139,7 @@ pub fn sample_censuses<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         return;
     }
     let time = sim.time;
-    let samples = level_partials(sim, None);
+    let samples = level_partials(sim, &sim.store.censuses, 0, None, None);
     record_samples(sim, time, samples);
 }
 
@@ -127,7 +155,66 @@ pub fn record_samples<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
+    record_samples_at_level(sim, time, 0, samples);
+}
+
+/// commit one already-reduced sample per registration, tagged with the level that produced it.
+pub fn record_samples_at_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    time: f64,
+    level: usize,
+    samples: Vec<(Vec<f64>, u64)>,
+) where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
     for (registered, (values, dropped)) in sim.store.censuses.iter_mut().zip(samples) {
-        registered.history.push(time, &values, dropped);
+        // an empty partial is a registration that was not due this step.
+        if values.is_empty() {
+            continue;
+        }
+        registered
+            .history
+            .push_at_level(time, level as u64, &values, dropped);
+        registered.mark_sampled(level, time);
     }
+}
+
+/// the per-cell artifacts of registration `index`, by whichever path applies.
+///
+/// neither fill honours a finer level's coverage — both sweep the whole interior — so the covered
+/// cells are marked excluded afterwards, uniformly. that ordering is what makes the scratch
+/// reusable: a fill that SKIPPED covered cells would leave the previous sample's bucket standing in
+/// a cell that is no longer this level's to count.
+pub fn census_map_fields<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    censuses: &[symbi_sim::census::RegisteredCensus],
+    index: usize,
+    ev: &symbi_sim::census::CensusEvaluator,
+    covered: Option<&symbi_algebra::Domain<D>>,
+) -> Option<&'a symbi_sim::census::CensusFields<D, Mem>>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    let scratch = sim.census_scratch_pooled(censuses, index)?;
+    let compiled = crate::regimes::substrate_kernels::census_compiled::census_map_compiled(
+        &sim.store,
+        ev,
+        &scratch.values,
+        &scratch.segment,
+    );
+    if !compiled {
+        sim.census_fill_interpreted(ev, scratch)?;
+    }
+    if let Some(region) = covered {
+        sim.census_exclude_covered(ev, scratch, region);
+    }
+    Some(scratch)
 }

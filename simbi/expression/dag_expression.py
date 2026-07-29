@@ -1574,6 +1574,9 @@ class CompiledExpr:
         value_names: "Sequence[str]",
         op: "ReductionOp | str" = "add",
         params: "Sequence[float] | None" = None,
+        sample_interval: "float | None" = None,
+        accumulate: bool = False,
+        cadence: object = "root_step",
     ) -> dict[str, object]:
         """serialize to the rust `CensusConfig` wire format consumed by symbi-expr and
         lowered by symbi-hydro's `build_census_expressions`.
@@ -1603,6 +1606,9 @@ class CompiledExpr:
             "value_names": [str(v) for v in value_names],
             "op": op_str,
             "params": [float(p) for p in (params or [])],
+            "sample_interval": None if sample_interval is None else float(sample_interval),
+            "accumulate": bool(accumulate),
+            "cadence": getattr(cadence, "value", cadence),
             "nodes": base["expressions"],
         }
 

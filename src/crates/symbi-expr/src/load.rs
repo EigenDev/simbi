@@ -395,8 +395,39 @@ pub struct CensusConfig {
     /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
     #[serde(default)]
     pub params: Vec<f64>,
+    /// the shortest SIMULATION-TIME interval between samples. `None` samples every step, which is
+    /// the finest a run can offer and also the most expensive: a sample is a full extra sweep of
+    /// the grid plus its reduction, measured at roughly a third of a hydro step on a small 1d
+    /// problem, so sampling every step means paying that on every step.
+    ///
+    /// an interval in TIME rather than a step count because it is the time series that is being
+    /// recorded: dt varies over a run — with the cfl, with refinement, with the state — so a
+    /// fixed step stride produces a non-uniform sampling of the physics, and the spacing of the
+    /// resulting series would be an artifact of the timestepper rather than a choice.
+    #[serde(default)]
+    pub sample_interval: Option<f64>,
+    /// fold every sample into ONE running row rather than storing a row apiece, combining them
+    /// with the census's own reduce op.
+    ///
+    /// what this trades away is the time series; what it buys is that a two-dimensional histogram
+    /// costs one row for a whole run segment instead of order a hundred kilobytes per sample. the
+    /// row travels with the number of samples folded into it and the times of the first and last,
+    /// so a reader forms the time average, and two run segments combine as a sample-count-weighted
+    /// sum without either having stored its samples.
+    #[serde(default)]
+    pub accumulate: bool,
+    /// when a refinement hierarchy samples: `"root_step"` (every level reduced into one row at the
+    /// boundary where their clocks meet) or `"per_level_step"` (each level on its own subcycle,
+    /// tagged with its own time). ignored by a single-level run, where the two are the same
+    /// instant.
+    #[serde(default = "default_cadence")]
+    pub cadence: String,
     /// the flat, topologically-ordered DAG shared by every axis and value expression.
     pub nodes: Vec<NodeDesc>,
+}
+
+fn default_cadence() -> String {
+    "root_step".to_string()
 }
 
 impl CensusConfig {

@@ -283,7 +283,7 @@ mod tests {
         let flux = [ConsFieldsGeneric::<1, 1, HostMemory>::zeros(&domain).unwrap()];
         flux[0].den.view_mut().set(faces[0].fine_face, 2.0);
         flux[0].den.view_mut().set(faces[1].fine_face, 3.0);
-        let geometry = BlockGeometry::uniform(Cartesian, [0.0], [0.5]);
+        let geometry = BlockGeometry::uniform(Cartesian, [0.0], [0.5], std::array::from_fn(|d| d));
 
         let transfers = interface_mass_transfers(&faces, &flux, &geometry, 0.25);
 

@@ -101,7 +101,7 @@ pub use backends::cpu::emit_cpu;
 pub use backends::cuda::emit_cuda;
 pub use backends::interp::{Backend, Cpu, CpuField, CpuFieldMut};
 pub use backends::kernel::{
-    KernelEmitInputs, REDUCTION_BLOCK_SIZE, SEGMENT_EXCLUDED, SEGMENTED_LDS_BUDGET_BYTES,
+    KernelEmitInputs, REDUCTION_BLOCK_SIZE, SEGMENT_EXCLUDED_OFFSET, SEGMENTED_LDS_BUDGET_BYTES,
     SEGMENTED_MAX_BLOCKS, emit_kernel_from_lowering, prepared_from_ir, prepared_to_ir,
     render_field_reduction, render_field_segmented_reduction, render_from_ir, segmented_privatizes,
 };

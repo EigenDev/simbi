@@ -203,6 +203,11 @@ pub struct BlockGeometry<M, S: Scalar, const D: usize> {
     pub x_lo: [S; D],
     /// per-axis coordinate maps. when Some, overrides dx/x_lo.
     pub maps: Option<[AxisMap; D]>,
+    /// which COORDINATE slot each grid axis resolves — `[0, 2]` for a cylindrical (R, z) plane,
+    /// identity otherwise. carried because the cell volume needs to know which coordinates the
+    /// grid does NOT resolve, and a chart alone does not say: cylindrical (R, phi) and (R, z) are
+    /// both 2d cylindrical and leave different coordinates ungridded.
+    pub axes: [usize; D],
 }
 
 impl<M, S: Scalar, const D: usize> BlockGeometry<M, S, D>
@@ -210,8 +215,9 @@ where
     M: Metric<S, D> + Copy,
 {
     /// create a block geometry from a metric and uniform grid spacing.
-    pub fn uniform(metric: M, x_lo: [S; D], dx: [S; D]) -> Self {
+    pub fn uniform(metric: M, x_lo: [S; D], dx: [S; D], axes: [usize; D]) -> Self {
         BlockGeometry {
+            axes,
             metric,
             dx,
             x_lo,
@@ -220,7 +226,7 @@ where
     }
 
     /// create a block geometry from a metric and per-axis coordinate maps.
-    pub fn with_maps(metric: M, maps: [AxisMap; D]) -> Self {
+    pub fn with_maps(metric: M, maps: [AxisMap; D], axes: [usize; D]) -> Self {
         // derive dx and x_lo from maps (for backward compatibility)
         let dx = std::array::from_fn(|ax| S::from_f64(maps[ax].width(0)));
         let x_lo = std::array::from_fn(|ax| S::from_f64(maps[ax].face(0)));
@@ -229,7 +235,44 @@ where
             dx,
             x_lo,
             maps: Some(maps),
+            axes,
         }
+    }
+
+    /// the measure of the coordinates the grid does NOT resolve.
+    ///
+    /// an ungridded axis contributes its full physical extent exactly when that extent is fixed by
+    /// the symmetry the reduction assumes — which is true iff the coordinate is an ANGLE, and false
+    /// iff it is a LENGTH. an angle has a compact range the symmetry pins down; a length does not,
+    /// since there is no such thing as "the" transverse extent of a slab.
+    ///
+    ///   spherical theta   int sin(theta) dtheta over [0, pi] = 2
+    ///   spherical phi     2 pi
+    ///   cylindrical phi   2 pi
+    ///   cartesian x/y/z   1     (the result is per unit length / area)
+    ///   cylindrical z     1     (per unit length)
+    ///
+    /// so a 1d radial spherical cell is the whole SHELL (2 * 2 pi = 4 pi), a 2d (r, theta) cell is
+    /// the revolved annulus (2 pi), a 2d cylindrical (R, z) cell is the revolved ring (2 pi) — all
+    /// exact physical volumes — while cylindrical (R, phi) and every reduced cartesian grid stay
+    /// per-unit-length, because nothing in the problem says how thick they are.
+    pub fn ungridded_measure(&self) -> S {
+        use crate::metric::Geometry;
+        let two_pi = S::from_f64(std::f64::consts::TAU);
+        let mut measure = S::ONE;
+        for slot in 0..3usize {
+            if self.axes.contains(&slot) {
+                continue;
+            }
+            measure = measure
+                * match (self.metric.geometry(), slot) {
+                    (Geometry::Spherical, 1) => S::from_f64(2.0),
+                    (Geometry::Spherical, 2) => two_pi,
+                    (Geometry::Cylindrical, 1) => two_pi,
+                    _ => S::ONE,
+                };
+        }
+        measure
     }
 
     /// cell width along axis ax at grid index.
@@ -321,6 +364,10 @@ where
         }
         // average over 2^D points, multiply by cell coordinate volume
         vol = vol / S::from_f64(n_quad as f64);
+        // the coordinates the grid does not resolve: an angular one contributes its full range, so
+        // a reduced-dimension curvilinear cell carries its true physical volume rather than a
+        // per-steradian one.
+        vol = vol * self.ungridded_measure();
         for ax in 0..D {
             vol = vol * self.cell_width(idx, ax);
         }
@@ -446,28 +493,28 @@ mod tests {
 
     #[test]
     fn cartesian_volume_1d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0], [0.1]);
+        let geo = BlockGeometry::uniform(Cartesian, [0.0], [0.1], std::array::from_fn(|d| d));
         let vol = geo.volume([5]);
         assert!(approx(vol, 0.1));
     }
 
     #[test]
     fn cartesian_volume_2d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.2]);
+        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.2], std::array::from_fn(|d| d));
         let vol = geo.volume([5, 3]);
         assert!(approx(vol, 0.1 * 0.2));
     }
 
     #[test]
     fn cartesian_volume_3d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0, 0.0], [0.1, 0.2, 0.3]);
+        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0, 0.0], [0.1, 0.2, 0.3], std::array::from_fn(|d| d));
         let vol = geo.volume([0, 0, 0]);
         assert!(approx(vol, 0.1 * 0.2 * 0.3));
     }
 
     #[test]
     fn cartesian_face_area_2d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.2]);
+        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.2], std::array::from_fn(|d| d));
         // face in x-direction: area = dy
         let ax = geo.face_area([5, 3], 0);
         assert!(approx(ax, 0.2));
@@ -478,7 +525,7 @@ mod tests {
 
     #[test]
     fn cartesian_centroid_2d() {
-        let geo = BlockGeometry::uniform(Cartesian, [1.0, 2.0], [0.5, 0.5]);
+        let geo = BlockGeometry::uniform(Cartesian, [1.0, 2.0], [0.5, 0.5], std::array::from_fn(|d| d));
         let c = geo.centroid([0, 0]);
         assert!(approx(c[0], 1.25));
         assert!(approx(c[1], 2.25));
@@ -486,25 +533,29 @@ mod tests {
 
     #[test]
     fn cartesian_source_is_zero() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.1]);
+        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.1], std::array::from_fn(|d| d));
         let src = geo.momentum_source([5, 5], 1.0, Tensor::new([0.5, -0.3]), 2.5);
         assert!(approx(src[0], 0.0));
         assert!(approx(src[1], 0.0));
     }
 
     #[test]
-    fn spherical_volume_1d() {
-        // 1D spherical: exact integral (r_R^3 - r_L^3)/3
-        let geo = BlockGeometry::uniform(Spherical, [1.0], [0.1]);
+    fn spherical_volume_1d_is_the_whole_shell() {
+        // a 1d radial grid resolves neither angle, and BOTH are angles whose full range the
+        // spherical symmetry fixes — so the cell is the whole SHELL, 4 pi (r_R^3 - r_L^3)/3, not a
+        // per-steradian slice of one. this number is the physical volume of the region the run
+        // represents, which is what makes an extensive total over it the actual mass.
+        let geo = BlockGeometry::uniform(Spherical, [1.0], [0.1], std::array::from_fn(|d| d));
         let vol = geo.volume([0]); // r in [1.0, 1.1]
-        let expected = (1.1_f64.powi(3) - 1.0_f64.powi(3)) / 3.0;
-        assert!(approx(vol, expected));
+        let expected =
+            std::f64::consts::TAU * 2.0 * (1.1_f64.powi(3) - 1.0_f64.powi(3)) / 3.0;
+        assert!(approx(vol, expected), "got {vol}, want {expected}");
     }
 
     #[test]
     fn spherical_source_1d() {
         // 1D spherical: S_r = 2p/r
-        let geo = BlockGeometry::uniform(Spherical, [1.0], [0.1]);
+        let geo = BlockGeometry::uniform(Spherical, [1.0], [0.1], std::array::from_fn(|d| d));
         let src = geo.momentum_source([0], 1.0, Tensor::new([0.0]), 2.5);
         let r = 1.05;
         let expected = 2.0 * 2.5 / r;
@@ -512,18 +563,78 @@ mod tests {
     }
 
     #[test]
-    fn cylindrical_volume_1d() {
-        // 1D cylindrical: exact integral (r_R^2 - r_L^2)/2
-        let geo = BlockGeometry::uniform(Cylindrical, [1.0], [0.1]);
+    fn cylindrical_volume_1d_revolves_but_stays_per_unit_height() {
+        // a 1d radial cylindrical grid leaves phi AND z unresolved, and they are not alike: phi is
+        // an angle whose full 2 pi the axisymmetry fixes, z is a length nothing bounds. so the cell
+        // revolves (x 2 pi) but stays PER UNIT HEIGHT — the honest answer, since the problem does
+        // not say how tall the column is.
+        let geo = BlockGeometry::uniform(Cylindrical, [1.0], [0.1], std::array::from_fn(|d| d));
         let vol = geo.volume([0]); // r in [1.0, 1.1]
-        let expected = (1.1_f64.powi(2) - 1.0_f64.powi(2)) / 2.0;
-        assert!(approx(vol, expected));
+        let expected = std::f64::consts::TAU * (1.1_f64.powi(2) - 1.0_f64.powi(2)) / 2.0;
+        assert!(approx(vol, expected), "got {vol}, want {expected}");
+    }
+
+    /// the RULE, per chart and dimension, so the convention cannot drift back one call site at a
+    /// time. an ungridded coordinate contributes its full extent iff it is an ANGLE.
+    #[test]
+    fn the_ungridded_measure_follows_the_angle_length_rule() {
+        let tau = std::f64::consts::TAU;
+        let id1: [usize; 1] = [0];
+        let id2: [usize; 2] = [0, 1];
+        let id3: [usize; 3] = [0, 1, 2];
+
+        // 3d resolves everything: nothing is missing, so nothing is assumed.
+        assert_eq!(
+            BlockGeometry::<_, f64, 3>::uniform(Spherical, [1.0; 3], [0.1; 3], id3)
+                .ungridded_measure(),
+            1.0
+        );
+        assert_eq!(
+            BlockGeometry::<_, f64, 3>::uniform(Cartesian, [0.0; 3], [0.1; 3], id3)
+                .ungridded_measure(),
+            1.0
+        );
+
+        // spherical: theta contributes int sin = 2 over its full range, phi contributes 2 pi.
+        assert_eq!(
+            BlockGeometry::<_, f64, 2>::uniform(Spherical, [1.0; 2], [0.1; 2], id2)
+                .ungridded_measure(),
+            tau
+        );
+        assert_eq!(
+            BlockGeometry::<_, f64, 1>::uniform(Spherical, [1.0], [0.1], id1)
+                .ungridded_measure(),
+            2.0 * tau
+        );
+
+        // cylindrical: the (R, z) plane leaves the ANGLE unresolved and revolves; the (R, phi)
+        // disk leaves a LENGTH unresolved and does not. same chart, same dimension, different
+        // answer — which is why the axis roles have to be carried rather than inferred.
+        assert_eq!(
+            BlockGeometry::<_, f64, 2>::uniform(Cylindrical, [1.0; 2], [0.1; 2], [0, 2])
+                .ungridded_measure(),
+            tau
+        );
+        assert_eq!(
+            BlockGeometry::<_, f64, 2>::uniform(Cylindrical, [1.0; 2], [0.1; 2], [0, 1])
+                .ungridded_measure(),
+            1.0
+        );
+
+        // cartesian never assumes an extent: every missing coordinate is a length.
+        for m in [
+            BlockGeometry::<_, f64, 1>::uniform(Cartesian, [0.0], [0.1], id1).ungridded_measure(),
+            BlockGeometry::<_, f64, 2>::uniform(Cartesian, [0.0; 2], [0.1; 2], id2)
+                .ungridded_measure(),
+        ] {
+            assert_eq!(m, 1.0);
+        }
     }
 
     #[test]
     fn cylindrical_source_1d() {
         // 1D cylindrical: S_r = p/r
-        let geo = BlockGeometry::uniform(Cylindrical, [1.0], [0.1]);
+        let geo = BlockGeometry::uniform(Cylindrical, [1.0], [0.1], std::array::from_fn(|d| d));
         let src = geo.momentum_source([0], 1.0, Tensor::new([0.0]), 2.5);
         let r = 1.05;
         assert!(approx(src[0], 2.5 / r));
@@ -546,7 +657,7 @@ mod tests {
             dx: 0.15,
         };
         let geo: BlockGeometry<Spherical, f64, 2> =
-            BlockGeometry::with_maps(Spherical, [rmap, tmap]);
+            BlockGeometry::with_maps(Spherical, [rmap, tmap], [0, 1]);
         let (nr, nth) = (8isize, 6isize);
 
         // flat-spherical volume factor r^2 sin(theta) at the metric-evaluation point.
@@ -596,7 +707,7 @@ mod tests {
     #[test]
     fn geometry_composes_with_flux_divergence() {
         // conceptual test: show that geometry integrates with the RHS pattern
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.1]);
+        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.1], std::array::from_fn(|d| d));
 
         // the RHS pattern: for each cell, compute flux_div + source
         let idx = [5, 5];

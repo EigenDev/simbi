@@ -26,7 +26,7 @@ use symbi_hydro::CensusConfig;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_sim::census::{CensusEvaluator, SEGMENT_EXCLUDED};
+use symbi_sim::census::{CensusEvaluator, SEGMENT_EXCLUDED_OFFSET};
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -275,12 +275,20 @@ fn ghost_cells_are_excluded_rather_than_binned() {
         let seg = *fields.segment.view().at(c);
         if interior.contains(&c) {
             assert_eq!(
-                seg, 0,
+                seg, 0.0,
                 "an interior cell bins into the single bucket at {c:?}"
             );
         } else {
             n_ghost += 1;
-            assert_eq!(seg, SEGMENT_EXCLUDED, "ghost cell {c:?} must be excluded");
+            // EXCLUDED sits past the last bucket, and past the outside-the-edges marker: a
+            // ghost is not gas that failed to bin, it is not part of the reduction at all.
+            let excluded = (ev.spec().n_segments() + SEGMENT_EXCLUDED_OFFSET as usize) as f64;
+            assert_eq!(seg, excluded, "ghost cell {c:?} must be excluded");
+            assert!(
+                seg > ev.spec().n_segments() as f64,
+                "the excluded marker must sit strictly above the dropped marker, else a ghost \
+                 would be counted as a cell that fell outside the bin edges"
+            );
         }
     }
     assert!(
