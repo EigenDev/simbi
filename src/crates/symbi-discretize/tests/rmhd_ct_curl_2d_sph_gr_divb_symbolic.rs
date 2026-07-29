@@ -141,19 +141,8 @@ fn div(spacetime: Spacetime, lapse_in_numerator: bool) -> LinFormR {
 }
 
 #[test]
-fn divb_2d_sph_schwarzschild_symbolic_telescoping() {
-    // Schwarzschild: sqrt(gamma) = r^2 sin / sqrt(f) -> the lapse is in the DENOMINATOR.
-    let d = div(Spacetime::Schwarzschild, false);
-    assert!(
-        d.is_zero(),
-        "2d sph Schwarzschild div(curl B) != 0 symbolically — residual:\n{:#?}",
-        d.residual()
-    );
-}
-
-#[test]
 fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
-    // Kerr-Schild: sqrt(gamma) = r^2 sin * sqrt(h) -> the lapse is in the NUMERATOR.
+    // the evolved chart: sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r) -> lapse in the NUMERATOR.
     let d = div(Spacetime::SchwarzschildKS, true);
     assert!(
         d.is_zero(),
@@ -167,8 +156,8 @@ fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
 // (Schwarzschild chart; the Kerr-Schild control is identical up to the numerator/denominator side).
 #[test]
 fn divb_2d_sph_gr_symbolic_detects_wrong_lapse_offset() {
-    let curl_r = curl(0, Spacetime::Schwarzschild);
-    let curl_th = curl(1, Spacetime::Schwarzschild);
+    let curl_r = curl(0, Spacetime::SchwarzschildKS);
+    let curl_th = curl(1, Spacetime::SchwarzschildKS);
 
     let w_r_hi = RatFun::new(
         r_at(1).times(&r_at(1)).times(&sin_center()).times(&dx(1)),

@@ -1013,16 +1013,14 @@ where
     if r_exc <= 0.0 {
         return 0;
     }
-    let spin = sim
-        .geom
-        .spacetime_scalars
-        .iter()
-        .find(|(n, _)| n == "kerr_spin")
-        .map(|(_, v)| *v)
-        .unwrap_or(0.0);
-    let semi_xy = (r_exc * r_exc + spin * spin).sqrt();
-    let min_dx = sim.geom.dx.iter().cloned().fold(f64::INFINITY, f64::min);
-    symbi_ib::excise::onion_pass_count(semi_xy, min_dx)
+    // ONE sweep. the fill is POINTWISE: every excised cell is set to the vacuum floor from its own
+    // state, reading no neighbour, so the sweep is idempotent and repeating it reproduces the same
+    // field exactly (gated by `excision_freezes_the_vacuum_floor_and_is_idempotent`). the count
+    // was a requirement of the ONION fill this replaced, which propagated donor values one
+    // diagonal cell inward per sweep and so needed as many sweeps as the region is cells deep —
+    // and, on the decomposed driver, a halo exchange between each of them.
+    let _ = sim;
+    1
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1043,14 +1041,16 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
+    let spherical = geom.coords == symbi_geometry::Geometry::Spherical;
     assert!(
-        D == 2 || D == 3,
-        "excision is baked for the 2d and 3d cartesian kerr-schild charts"
-    );
-    assert_eq!(
-        geom.coords,
-        symbi_geometry::Geometry::Cartesian,
-        "excision is a cartesian-chart operation (spherical charts hide the horizon behind r_min)"
+        match geom.coords {
+            symbi_geometry::Geometry::Cartesian => D == 2 || D == 3,
+            symbi_geometry::Geometry::Spherical => D == 1 || D == 2,
+            _ => false,
+        },
+        "excision is baked for the 2d/3d cartesian and 1d/2d spherical kerr-schild charts, \
+         not {:?} at {D}d",
+        geom.coords
     );
     assert!(
         matches!(
@@ -1069,12 +1069,42 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
         .unwrap_or(0.0);
     let semi_xy = (r_exc * r_exc + spin * spin).sqrt();
 
-    // the region's index bbox about the chart origin, one cell of margin so every
-    // cell whose centroid is inside is covered, clamped to the interior. the polar
-    // (z) semi-axis is r_exc; the equatorial axes carry the spin widening (a 2d grid
-    // is the equatorial slice, so both its axes are equatorial).
+    // the region's index bbox, one cell of margin so every cell whose sampling point is inside is
+    // covered, clamped to the interior.
+    //
+    // a SPHERICAL chart's excised region is an exact slab of innermost radial cells — r is a
+    // coordinate, so the region is axis-aligned and every transverse axis is covered in full. the
+    // radial extent is found by scanning cell faces rather than inverting the index map, because
+    // the radial axis may be log-spaced and `x_lo + i dx` is then an index coordinate, not a
+    // radius. the spin does not widen it: the cartesian chart's oblate spheroid IS this chart's
+    // r = const surface.
+    //
+    // a CARTESIAN chart's region is a sphere (a = 0) or an oblate spheroid staircased across the
+    // lattice: the polar (z) semi-axis is r_exc and the equatorial axes carry the spin widening
+    // sqrt(r_exc^2 + a^2), a 2d grid being the equatorial slice.
     let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
         let s = &geom.interior.spaces[a];
+        if spherical {
+            if a > 0 {
+                return s.clone();
+            }
+            // the axis map when the radial axis is non-uniform (log / geometric); the plain
+            // affine face otherwise. inverting `x_lo + i dx` would read an INDEX coordinate as a
+            // radius on a log grid.
+            let face = |i: isize| match &geom.maps {
+                Some(m) => m[0].face(i),
+                None => geom.x_lo[0] + i as f64 * geom.dx[0],
+            };
+            let mut hi = s.lo;
+            while hi < s.hi && face(hi) < r_exc {
+                hi += 1;
+            }
+            return symbi_algebra::Space {
+                name: s.name,
+                lo: s.lo,
+                hi: (hi + 1).min(s.hi),
+            };
+        }
         let ext = if D == 3 && a == 2 { r_exc } else { semi_xy };
         let lo_x = (-ext - geom.x_lo[a]) / geom.dx[a];
         let hi_x = (ext - geom.x_lo[a]) / geom.dx[a];
@@ -1091,6 +1121,13 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     }
     let bbox = Domain::new(spaces);
 
+    // the KERNEL-space geometry pair. the kernel's face map is `x_lo + i dx` on a uniform axis and
+    // `x_lo * 10^(i dx)` on a log one, so `dx` must carry the axis map's own PARAMETER — the log
+    // slope, not a linear width. passing the raw `geom.dx` fed the log map a linear width, which
+    // put every cell centre far outside the excision surface and silently masked nothing. every
+    // other dispatch converts through here; cartesian charts never saw it because the conversion
+    // is the identity on a uniform axis.
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
     let resolve = |bind: &ScalarBind| -> Sc {
         Sc::from_f64(match bind {
             ScalarBind::Ref(ScalarRef::Gamma) => gamma,
@@ -1104,7 +1141,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Spec(s) if &**s == "excision_radius" => r_exc,
             ScalarBind::Spec(s) if &**s == "excision_rho" => rho_atmosphere,
             ScalarBind::Spec(s) if &**s == "excision_pre" => pre_atmosphere,
-            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo_k, &dx_k, &geom.maps, *sref)
                 .unwrap_or_else(|| panic!("excise: unexpected scalar {sref:?}")),
             other => panic!("excise: unexpected scalar {other:?}"),
         })
@@ -1119,20 +1156,30 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     if !mhd {
         assert_eq!(DOF, D, "hydro excision needs the full velocity DOF");
     }
-    let fill_name = if mhd && D == 2 {
-        "excise_fill_dof3_2d".to_string()
+    let (fill_name, wb_name, p2c_name) = if spherical {
+        (
+            format!("excise_fill_sph_{D}d"),
+            format!("excise_writeback_sph_{D}d"),
+            format!("excise_p2c_sph_ks_{D}d"),
+        )
     } else {
-        format!("excise_fill_{D}d")
-    };
-    let wb_name = if mhd && D == 2 {
-        "excise_writeback_dof3_2d".to_string()
-    } else {
-        format!("excise_writeback_{D}d")
-    };
-    let p2c_name = if mhd {
-        format!("excise_p2c_mhd_cart_ks_{D}d")
-    } else {
-        format!("excise_p2c_cart_ks_{D}d")
+        (
+            if mhd && D == 2 {
+                "excise_fill_dof3_2d".to_string()
+            } else {
+                format!("excise_fill_{D}d")
+            },
+            if mhd && D == 2 {
+                "excise_writeback_dof3_2d".to_string()
+            } else {
+                format!("excise_writeback_{D}d")
+            },
+            if mhd {
+                format!("excise_p2c_mhd_cart_ks_{D}d")
+            } else {
+                format!("excise_p2c_cart_ks_{D}d")
+            },
+        )
     };
     let fill_scalars = scalars_for(&fill_name, &resolve);
     let wb_scalars = scalars_for(&wb_name, &resolve);

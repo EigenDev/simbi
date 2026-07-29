@@ -39,7 +39,7 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
-use symbi_geometry::{KerrKSCartesian, Metric};
+use symbi_geometry::{KerrKS, KerrKSCartesian, Metric};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -52,6 +52,7 @@ use symbi_ir::{FieldRef, Gv, GvKernel, begin_trace, end_trace};
 
 use crate::coords::{Coords, Spacetime, Spacing};
 use crate::gv::cell_geometry_gv;
+use crate::gv::geometry::{gv_cell_midpoints, gv_ungridded_slot};
 
 /// the vacuum-floor primitive at storage slot `kk` of a `[rho, vel_0.., pre]` set of arity `nf`:
 /// `rho_floor` at the density slot, `p_floor` at the pressure slot, zero velocity between.
@@ -177,6 +178,12 @@ pub fn excise_writeback_dof3_gv() -> (GvKernel, Writes) {
     excise_writeback_dof_gv(3)
 }
 
+/// the 1d radial commit (dof = 1): rho, vel_0, pre. the writeback is a chart-free scratch copy,
+/// so this one serves the spherical row without a spacetime or geometry variant.
+pub fn excise_writeback_dof1_gv() -> (GvKernel, Writes) {
+    excise_writeback_dof_gv(1)
+}
+
 /// rebuild the conserved state of every excised cell from its (just-filled)
 /// primitives: the valencia `to_conserved` (covariant S_i = rho h W^2 gamma_ij v^j)
 /// with the cartesian kerr-schild spatial metric at the cell's own centroid — a
@@ -243,6 +250,151 @@ pub fn excise_p2c_gv() -> (GvKernel, Writes) {
         Gv::select(excised, cons.nrg, nrg).node(),
     ));
     (end_trace(), writes)
+}
+
+/// the traced metric-sampling position of a spherical cell: the per-axis MIDPOINT on every
+/// gridded axis, the symmetry value on every ungridded one (the polar slot of a 1d radial row is
+/// pi/2 — suppressing it to zero would zero sin(theta) and make gamma_{phi phi} singular).
+///
+/// the midpoint, not the chart's volume-weighted centroid: the excised state is stored
+/// DENSITIZED, and a densitized cell average is taken over the plain coordinate volume, whose
+/// second-order sampling point is the midpoint. the two differ by dr^2/(6r) on a radial axis, and
+/// the recovery inverts at the midpoint — sampling the rebuild anywhere else leaves an excised
+/// cell whose recovered primitives are not the floor it was frozen at.
+///
+/// the face positions this is built from are selected at RUNTIME by `map_kind_{ax}`, so one
+/// traced kernel serves a uniform and a log-radial grid alike.
+fn sample_position_sph<const D: usize>(ndim: usize) -> Tensor<Gv, D> {
+    let spacing = vec![Spacing::Uniform; ndim];
+    let mid = gv_cell_midpoints(&spacing, ndim);
+    Tensor::<Gv, D>::new(std::array::from_fn(|c| {
+        if c < ndim {
+            mid[c]
+        } else {
+            gv_ungridded_slot(Coords::Spherical, c)
+        }
+    }))
+}
+
+/// the excision mask on a spherical chart: `r < r_exc` on the grid's OWN radial coordinate.
+///
+/// no quartic and no staircase. the cartesian mask solves `r_ks(x; a)` because a sphere cut out of
+/// a cartesian lattice is not aligned with any axis; here `r` IS a coordinate, so the excised
+/// region is an exact slab of the innermost radial cells and its surface is a coordinate surface.
+/// the spin does not widen it: the oblate spheroid of the cartesian chart is the `r = const`
+/// surface of this one.
+fn excised_mask_sph(x_r: Gv) -> <Gv as Scalar>::Mask {
+    x_r.cmp_lt(Gv::scalar("excision_radius"))
+}
+
+/// the spherical-chart gas fill: every cell inside the horizon is frozen at the cold vacuum floor,
+/// live cells keep their own state. the same absorbing boundary the cartesian charts use — the
+/// exterior rarefies INTO the vacuum at the excision faces and nothing returns, which is the
+/// physical content of a horizon: no characteristic leaves it.
+fn excise_fill_sph_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
+    begin_trace();
+    let names = prim_names(dof);
+    let refs = prim_refs(dof);
+    let nf = refs.len();
+    let own: Vec<Gv> = (0..nf).map(|kk| Gv::field(&names[kk], refs[kk])).collect();
+
+    let x = sample_position_sph::<3>(ndim);
+    let excised = excised_mask_sph(x[0]);
+    let filled: Vec<Gv> = (0..nf)
+        .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
+        .collect();
+
+    let mut writes: Writes = Vec::new();
+    for (kk, val) in filled.iter().enumerate() {
+        writes.push((
+            format!("exc_out_{kk}"),
+            format!("exc_{kk}").into(),
+            val.node(),
+        ));
+    }
+    (end_trace(), writes)
+}
+
+/// the 1d radial gas fill (dof = 1): the michel / bondi row.
+pub fn excise_fill_sph_1d_gv() -> (GvKernel, Writes) {
+    excise_fill_sph_dof_gv(1, 1)
+}
+
+/// the 2d (r, theta) gas fill with the azimuthal swirl momentum (dof = 3): the rotating GR flows.
+pub fn excise_fill_sph_2d_gv() -> (GvKernel, Writes) {
+    excise_fill_sph_dof_gv(2, 3)
+}
+
+/// rebuild the conserved state of every excised spherical cell from its frozen primitives, with
+/// the ingoing kerr-schild metric at the cell's own sampling position; live cells pass their
+/// conserved state through untouched. the spinning form serves both charts — at `a = 0` it is the
+/// schwarzschild kerr-schild metric, so one kernel covers the whole horizon-penetrating family.
+fn excise_p2c_sph_ks_dof_gv(ndim: usize, dof: usize) -> (GvKernel, Writes) {
+    begin_trace();
+    let gamma = Gv::scalar("gamma");
+    let mass = Gv::scalar("schwarzschild_mass");
+    let spin = Gv::scalar("kerr_spin");
+
+    let rho = Gv::field("rho", FieldRef::PrimRho);
+    let vel: Vec<Gv> = (0..dof)
+        .map(|kk| Gv::field(&format!("vel_{kk}"), FieldRef::PrimVel(kk as u8)))
+        .collect();
+    let pre = Gv::field("pre", FieldRef::PrimPre);
+    let den = Gv::field("den", FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..dof)
+        .map(|kk| Gv::field(&format!("mom_{kk}"), FieldRef::cons_mom(kk as u8)))
+        .collect();
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+
+    let x = sample_position_sph::<3>(ndim);
+    let excised = excised_mask_sph(x[0]);
+
+    let m = KerrKS { mass, spin };
+    let metric = SpatialMetric::<Gv, 3>::new(
+        Gamma::new(m.spatial_metric(x)),
+        GammaInv::new(m.spatial_metric_inv(x)),
+    );
+    let regime = RhdGr {
+        metric,
+        alpha: m.lapse(x),
+        shift: m.shift(x),
+        sqrt_gamma: m.volume_factor(x),
+    };
+    let prim = Prim::<Gv, 3> {
+        rho,
+        vel: Tensor::new(std::array::from_fn(|kk| {
+            vel.get(kk).copied().unwrap_or(Gv::ZERO)
+        })),
+        pre,
+    };
+    let cons = regime.to_conserved(&IdealGas { gamma }, &prim);
+
+    let mut writes: Writes = vec![(
+        "den_out".to_string(),
+        FieldRef::cons_den().into(),
+        Gv::select(excised, cons.den, den).node(),
+    )];
+    for kk in 0..dof {
+        writes.push((
+            format!("mom_out_{kk}"),
+            FieldRef::cons_mom(kk as u8).into(),
+            Gv::select(excised, cons.mom[kk], mom[kk]).node(),
+        ));
+    }
+    writes.push((
+        "nrg_out".to_string(),
+        FieldRef::cons_nrg().into(),
+        Gv::select(excised, cons.nrg, nrg).node(),
+    ));
+    (end_trace(), writes)
+}
+
+pub fn excise_p2c_sph_ks_1d_gv() -> (GvKernel, Writes) {
+    excise_p2c_sph_ks_dof_gv(1, 1)
+}
+
+pub fn excise_p2c_sph_ks_2d_gv() -> (GvKernel, Writes) {
+    excise_p2c_sph_ks_dof_gv(2, 3)
 }
 
 /// the 3d gas fill: every excised cell takes the primitive state of its outward

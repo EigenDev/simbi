@@ -387,7 +387,6 @@ fn coord_name(g: symbi_geometry::Geometry) -> &'static str {
 fn spacetime_name(s: symbi_geometry::Spacetime) -> &'static str {
     match s {
         symbi_geometry::Spacetime::Minkowski => "minkowski",
-        symbi_geometry::Spacetime::Schwarzschild => "schwarzschild",
         symbi_geometry::Spacetime::SchwarzschildKS => "schwarzschild_ks",
         symbi_geometry::Spacetime::KerrKS => "kerr_ks",
     }

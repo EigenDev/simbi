@@ -186,7 +186,6 @@ pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
 pub fn spacetime_slug(spacetime: Spacetime) -> &'static str {
     match spacetime {
         Spacetime::Minkowski => "",
-        Spacetime::Schwarzschild => "_schw",
         Spacetime::SchwarzschildKS => "_ks",
         Spacetime::KerrKS => "_kerr",
     }

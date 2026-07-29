@@ -41,13 +41,23 @@ needs_backend = pytest.mark.skipif(
 )
 
 # measured one-step residual L1 (|dU/dt| / (tau + D)) at 96x32 — tolerances carry
-# ~3x margin. a = 0: den 2.1e-4, m1 2.9e-4, m2 9.5e-5, m3 7.3e-4, nrg 1.3e-4 (the
-# broken angular weights put m2 at 1.2e-2 with ratio 1.0). a = 0.9: den 4.5e-5,
-# m1 2.3e-5, m2 8.2e-5, m3 1.7e-4, nrg 1.8e-5 (the dropped shift advection put
+# ~3x margin. a = 0: den 5.4e-4, m1 1.3e-3, m2 1.3e-4, m3 1.8e-3, nrg 1.9e-5 (the
+# broken angular weights put m2 at 1.2e-2 with ratio 1.0). a = 0.9: den 7.3e-5,
+# m1 3.5e-5, m2 1.1e-4, m3 2.5e-4, nrg 7.0e-6 (the dropped shift advection put
 # den/m1/m3/nrg at 4e-3 .. 2e-1 with ratio 1.0-2.0).
+#
+# the a = 0 transport residuals sit a few times above what the SINGULAR chart gave, and the energy
+# residual an order below, because the two charts hold this state through different terms. against
+# static observers the equilibrium has v^r identically zero, so its transported components cancel
+# analytically and only the angular truncation survives; against the INFALLING observers of a
+# horizon-penetrating chart the same state carries the drift v^r = beta^r/alpha, so the radial
+# transport terms are genuinely nonzero and their truncation appears in den/m1/m3. the killing
+# energy improves for the complementary reason — the chart has no coordinate singularity stretching
+# the innermost cells. both are truncation, not a wrong term: every component converges at ratio
+# 3.9-6.5 under refinement, and no limiter fires at either resolution.
 _RESID_TOL = {
-    0.0: {"den": 7e-4, "m1": 1e-3, "m2": 3e-4, "m3": 2.2e-3, "nrg": 4e-4},
-    0.9: {"den": 1.5e-4, "m1": 7e-5, "m2": 3e-4, "m3": 5e-4, "nrg": 6e-5},
+    0.0: {"den": 1.6e-3, "m1": 4e-3, "m2": 4e-4, "m3": 5.4e-3, "nrg": 6e-5},
+    0.9: {"den": 2.2e-4, "m1": 1.1e-4, "m2": 3.4e-4, "m3": 7.4e-4, "nrg": 2.1e-5},
 }
 # measured 96->192 L1 ratios 3.9-7.1 (a = 0) and 3.6-3.9 (a = 0.9); 2.5 separates
 # a converging truncation residual from a wrong term (ratio ~1) with margin.

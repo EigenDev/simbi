@@ -84,12 +84,13 @@ def test_uct_holds_the_michel_monopole_like_contact() -> None:
 
 
 def _w_div_max(p, B1, B2) -> tuple[float, float]:
-    mm = p.schwarzschild_mass
     nr, npolar = p.nr, p.npolar
     rf = np.array(p.radial_faces())
     tf = np.array(p.theta_faces())
     dr, dth = rf[1] - rf[0], tf[1] - tf[0]
-    sg = lambda r, th: r * r * math.sin(th) / math.sqrt(1.0 - 2.0 * mm / r)
+    # the measure comes from the PROBLEM, not a second spelling here: the seed is built against
+    # it and the divergence is measured with it, so a chart change must move both together.
+    sg = p.sqrt_gamma
     rc = 0.5 * (rf[:-1] + rf[1:])
     tc = 0.5 * (tf[:-1] + tf[1:])
     md, sc = 0.0, 0.0

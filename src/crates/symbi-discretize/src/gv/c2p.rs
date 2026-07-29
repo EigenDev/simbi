@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
 };
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -208,7 +208,6 @@ pub fn rhd_c2p_gr_gv<const D: usize>(
     max_iters: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
 where
-    Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
     KerrKSCartesian<Gv>: Metric<Gv, D>,
@@ -245,16 +244,6 @@ where
     // by the known sqrt(det gamma)(x), then invert the killing energy back to the Valencia tau the
     // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
     let (gm, gm_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (
@@ -460,15 +449,6 @@ pub fn rmhd_c2p_gr_gv(
     // so the recovery harvests the cell lapse + shift to invert it back to the Valencia tau the KKC
     // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
     let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            let m = Schwarzschild { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
             (

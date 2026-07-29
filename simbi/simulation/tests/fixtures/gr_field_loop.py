@@ -54,7 +54,7 @@ class GrFieldLoop(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(Spacetime.KERR_KS, description="background spacetime"),
     ]
     schwarzschild_mass: Annotated[
         float, ProblemParam(1.0, cli=True, description="black-hole mass M")
@@ -127,9 +127,21 @@ class GrFieldLoop(SimbiProblem):
         ]
         return self
 
-    def _sqrtg(self, r: float, th: float) -> float:
+    def sqrt_gamma(self, r: float, th: float) -> float:
+        """the spatial volume measure sqrt(det gamma) of the ingoing kerr-schild chart at zero spin:
+        gamma = diag(1 + 2M/r, r^2, r^2 sin^2 theta), so sqrt(gamma) = r^2 sin(theta) sqrt(1 + 2M/r).
+
+        this is the weight the discretely divergence-free seed is built against AND the weight the
+        divergence is measured with, so BOTH must read it here. it is CHART DEPENDENT — the static
+        chart's measure is r^2 sin(theta)/sqrt(1 - 2M/r) — and seeding a loop under one measure on a
+        metric that carries the other leaves it with a real divergence: not a visible failure, just
+        a spurious monopole current exerting a force the loop should never feel.
+        """
         mm = self.schwarzschild_mass
-        return r * r * math.sin(th) / math.sqrt(1.0 - 2.0 * mm / r)
+        return r * r * math.sin(th) * math.sqrt(1.0 + 2.0 * mm / r)
+
+    def _sqrtg(self, r: float, th: float) -> float:
+        return self.sqrt_gamma(r, th)
 
     def _azimuthal_potential(self, r: float, th: float) -> float:
         """A_phi as a function of the corner (r, theta): a compact conical bump so

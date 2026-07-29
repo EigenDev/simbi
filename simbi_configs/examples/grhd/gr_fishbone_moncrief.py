@@ -64,7 +64,7 @@ class GrFishboneMoncrief(SimbiProblem):
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(Spacetime.KERR_KS, description="background spacetime"),
     ]
     schwarzschild_mass: Annotated[
         float,
@@ -164,16 +164,12 @@ class GrFishboneMoncrief(SimbiProblem):
         if not 0.0 < self.theta_cut < math.pi / 2.0:
             raise ValueError("theta_cut must lie strictly between 0 and pi/2")
         self.resolution = (self.nr, self.npolar)
-        if self.kerr_spin != 0.0:
-            # spinning: the kerr spacetime on the horizon-penetrating chart, inner
-            # boundary below r_plus = M + sqrt(M^2 - a^2) (supersonic through-horizon
-            # inflow decouples the inner ghosts).
-            self.spacetime = Spacetime.KERR_KS
-            mm = self.schwarzschild_mass
-            r_plus = mm + math.sqrt(max(mm * mm - self.kerr_spin**2, 0.0))
-            r_lo = 0.85 * r_plus
-        else:
-            r_lo = 3.0
+        # the horizon-penetrating chart at every spin (a = 0 is the schwarzschild kerr-schild
+        # metric), with the inner boundary below r_+ = M + sqrt(M^2 - a^2): the through-horizon
+        # inflow is supersonic there, so the inner ghosts are causally decoupled from the torus.
+        mm = self.schwarzschild_mass
+        r_plus = mm + math.sqrt(max(mm * mm - self.kerr_spin**2, 0.0))
+        r_lo = 0.85 * r_plus
         self.bounds = [
             (r_lo, 100.0),
             (self.theta_cut, math.pi - self.theta_cut),
@@ -188,7 +184,7 @@ class GrFishboneMoncrief(SimbiProblem):
             rho_max=self.rho_torus_max,
             kappa=self.kappa,
             spin=self.kerr_spin,
-            chart="ks" if self.kerr_spin != 0.0 else "bl",
+            chart="ks",
         )
 
     def atmosphere(self, r: float, r_ref: float) -> tuple[float, float]:

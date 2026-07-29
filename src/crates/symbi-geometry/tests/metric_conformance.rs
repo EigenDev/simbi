@@ -21,7 +21,7 @@
 
 use symbi_algebra::Tensor;
 use symbi_geometry::{
-    Cartesian, Cylindrical, CylindricalRPhi, KerrKS, Metric, Schwarzschild, SchwarzschildKS,
+    Cartesian, Cylindrical, CylindricalRPhi, KerrKS, Metric, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical, Spacetime, Spherical,
 };
 
@@ -116,17 +116,6 @@ fn flat_metrics_report_flat_background() {
 
 #[test]
 fn curved_metrics_have_consistent_background() {
-    // Schwarzschild (standard coords): STATIC, so zero shift; lapse = sqrt(1 - 2M/r).
-    let schw = Schwarzschild { mass: MASS };
-    assert_curved(&schw, Tensor::new([5.0]), "Schwarzschild 1D", true);
-    assert_curved(&schw, Tensor::new([5.0, 1.0]), "Schwarzschild 2D", true);
-    assert_curved(
-        &schw,
-        Tensor::new([5.0, 1.0, 0.5]),
-        "Schwarzschild 3D",
-        true,
-    );
-
     // Schwarzschild-KS (ingoing, horizon-penetrating): nonzero radial shift.
     let ks = SchwarzschildKS { mass: MASS };
     assert_curved(&ks, Tensor::new([5.0]), "SchwarzschildKS 1D", false);

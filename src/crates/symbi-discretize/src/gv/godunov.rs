@@ -8,7 +8,7 @@ use super::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Schwarzschild, SchwarzschildKS,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS,
     SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
 };
 use symbi_ir::dual::Dual;
@@ -1009,9 +1009,6 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                     }
                 }));
                 let src_at = |pp: Gv| match spacetime {
-                    Spacetime::Schwarzschild => {
-                        grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pp, b)
-                    }
                     Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
                         grmhd_covariant_source(
                             &SchwarzschildKSCartesian { mass },
@@ -1068,9 +1065,6 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
                 Some((s_mom, s_tau))
             } else {
                 let src_at = |pp: Gv| match spacetime {
-                    Spacetime::Schwarzschild => {
-                        grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp)
-                    }
                     Spacetime::SchwarzschildKS if coords == Coords::Cartesian => {
                         grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pp)
                     }
