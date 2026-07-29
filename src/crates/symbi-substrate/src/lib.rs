@@ -19,6 +19,7 @@
 
 // the live substrate KernelSets (iso / adiabatic / rhd / rmhd) + the shared
 // dispatch + the NVRTC GPU runtime path. see regimes/mod.rs.
+pub mod census_sample;
 pub mod regimes;
 
 // shared kernel-set support (cfl_from_lambda, GhostFillDriver, ...) — the

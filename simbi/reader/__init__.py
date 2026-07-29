@@ -14,6 +14,7 @@
 
 from ..functional import Err, Ok, Result
 from .adapter import SimData
+from .census import Census, CensusError, census_names, read_census
 from .io import (
     Checkpoint,
     Domain,
@@ -55,6 +56,10 @@ def read_simulation(filename: str, unpad: bool = True) -> SimData:
 __all__ = [
     # main api
     "read_checkpoint",
+    "read_census",
+    "census_names",
+    "Census",
+    "CensusError",
     "read_simulation",
     "get_base_fields",
     # types
