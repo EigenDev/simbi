@@ -40,7 +40,6 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
-use symbi::regimes::substrate_kernels::FusedSourceBinding;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
