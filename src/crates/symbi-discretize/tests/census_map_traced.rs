@@ -98,7 +98,12 @@ fn the_traced_map_reproduces_the_host_evaluation_cell_for_cell() {
     .field_with("rho", |c| rho_at(c[0]))
     .field_with("pre", |c| pre_at(c[0]))
     .field_with("vel_0", |_| 0.0)
-    .scalars(&[("t", 0.0), ("x_lo_0", R_LO), ("dx_0", DR), ("map_kind_0", 0.0)])
+    .scalars(&[
+        ("t", 0.0),
+        ("x_lo_0", R_LO),
+        ("dx_0", DR),
+        ("map_kind_0", 0.0),
+    ])
     .run();
 
     let mut binned = 0usize;

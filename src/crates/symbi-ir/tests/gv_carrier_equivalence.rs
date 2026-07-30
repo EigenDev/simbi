@@ -1,5 +1,5 @@
 // =============================================================================
-// carrier_oracle_new.rs
+// gv_carrier_equivalence.rs
 //
 // CARRIER-EQUIVALENCE ACCEPTANCE for the `symbi_ir::algebra::Scalar` impl on
 // `Gv`. proves the homomorphism law end-to-end, against the same physics
@@ -13,17 +13,25 @@
 // `iterate` with the FREEZE LAW (kepler c2p regression class).
 //
 // pattern: physics fn is generic over `S: Scalar` and gets instantiated at
-// both carriers. for Gv, the trace is scalarized (single `LoweredFn` root)
-// and evaluated via the CPU interpreter at f64. tight tolerance (~1e-12)
-// because every op is f64 in both paths.
+// both carriers. for Gv, the trace is scalarized in KERNEL mode -- the only path
+// that partitions an `IterateInline` acc-dependent cone into the loop body -- and
+// evaluated via the CPU interpreter at f64. tight tolerance (~1e-12) because
+// every op is f64 in both paths.
 // =============================================================================
 
 use symbi_ir::algebra::Scalar;
-use symbi_ir::passes::scalarize::scalarize;
+use symbi_ir::passes::scalarize::{LoweredFn, scalarize_kernel};
 use symbi_ir::{Backend, Cpu, Gv, begin_trace, end_trace};
 
 /// run a Scalar-generic physics function at S = Gv, scalarize the resulting
 /// graph, and evaluate the LoweredFn at the given f64 inputs.
+///
+/// KERNEL-MODE scalarization, because `Op::IterateInline` partitions its
+/// acc-dependent cone into the loop body and only this path establishes that
+/// context. the single-output path lowers `IterAcc` outside any loop, so it
+/// cannot represent an iterate at all — which would leave the freeze law, the
+/// subtlest surface of the trait, unreachable from this oracle. every probe here
+/// returns one rank-0 scalar, which is exactly what kernel mode requires.
 fn gv_eval<F>(physics: F, param_names: &[&str], inputs: &[f64]) -> f64
 where
     F: FnOnce(&[Gv]) -> Gv,
@@ -32,7 +40,16 @@ where
     let params: Vec<Gv> = param_names.iter().map(|n| Gv::param(n)).collect();
     let root = physics(&params).node();
     let kernel = end_trace();
-    let lowered = scalarize(&kernel.graph, root, "oracle_probe");
+    let scalarized = scalarize_kernel(&kernel.graph, &[root]);
+    let ty = kernel.graph.ty(root).clone();
+    let lowered = LoweredFn {
+        name: "oracle_probe".to_string(),
+        params: scalarized.params,
+        body: scalarized.body,
+        results: scalarized.outputs,
+        result_element: ty.element,
+        result_shape: ty.shape,
+    };
     let out = Cpu.eval_elemental(&lowered, inputs);
     out[0]
 }
@@ -169,47 +186,79 @@ fn cubic_resolvent_real_matches_f64() {
 // iterate — the FREEZE LAW
 // =============================================================================
 
-fn newton_sqrt<S: Scalar>(a: S, x0: S) -> S {
+fn newton_sqrt<S: Scalar>(a: S, x0: S, conv_tol: f64) -> S {
     // Newton sqrt: x_{n+1} = 0.5 * (x_n + a / x_n). converges quadratically.
     // FREEZE LAW: the returned acc is BEFORE the converging step. on Gv this
     // becomes a fixed-count IterateInline with `select(converged, acc, body(acc))`,
     // so the returned value matches the host's early-break value.
+    //
+    // `conv_tol` is a parameter because the freeze is only OBSERVABLE while the
+    // iteration still has distance to travel. at a tight tolerance newton has already
+    // reached its fixed point, every remaining step is a no-op, and a frozen accumulator
+    // is bit-identical to an unfrozen one.
     let half = S::ONE / (S::ONE + S::ONE);
     x0.iterate(
         20,
         |x| half * (x + a / x),
-        |prev, cur| (cur - prev).abs().cmp_lt(S::from_f64(1e-14)),
+        move |prev, cur| (cur - prev).abs().cmp_lt(S::from_f64(conv_tol)),
     )
 }
 
-// `Op::IterateInline` is `scalarize_kernel`-only by design
-// (see scalarize.rs comment near the IterateInline unreachable: "cone-partitioned;
-// scalarize_kernel handles it directly"). this acceptance file uses the simpler
-// `scalarize(graph, output, name)` path which doesn't set up the iterate body
-// context — IterAcc lowers outside an IterateInline loop body and panics.
+// the FREEZE LAW under carrier equivalence, which no other gate reaches.
 //
-// the iterate impl is structurally identical to the Gv impl (same graph
-// ops, same FREEZE LAW). f64-side iterate freeze is pinned by the
-// `f64_iterate_freeze_holds_pre_convergence_value` test. the carrier-equivalence
-// (Gv trace + interp) for iterate is covered by the symbi-discretize
-// carrier_oracle.rs harness — that harness drives
-// `scalarize_kernel` + the production interp and validates iterate via real
-// rhd/rmhd c2p round-trips.
+// the f64 side is pinned independently (`f64_iterate_freeze_holds_pre_convergence_value`
+// in algebra.rs). the Gv side is exercised by rhd/rmhd c2p round-trips elsewhere, but a
+// round-trip cannot see the freeze: the recovery converges far below the 1e-9 round-trip
+// tolerance, so returning the accumulator one step LATE reproduces the input just as
+// well. only comparing the two carriers on a function whose answer depends on WHICH
+// iterate the accumulator is read from can distinguish them, which is what this does.
+//
 #[test]
-#[ignore = "iterate requires scalarize_kernel; covered by the discretize carrier_oracle harness"]
-fn newton_sqrt_iterate_matches_with_freeze() {
-    // converging case: a = 4, x0 = 2.0 should converge to ~2.0 (already there).
-    // Newton at a fixed point converges in 1 step; freeze keeps acc=2.0.
-    let (a, x0) = (4.0_f64, 2.0);
-    let want = newton_sqrt::<f64>(a, x0);
-    let got = gv_eval(|p| newton_sqrt(p[0], p[1]), &["a", "x0"], &[a, x0]);
-    close(want, got, "newton_sqrt converging");
+fn iterate_matches_f64_at_a_converged_fixed_point() {
+    // iterate lowers and evaluates end-to-end: `IterateInline` with its acc-dependent cone
+    // in the loop body, against the host's loop. a tight predicate on newton sqrt reaches
+    // the exact fixed point, so this case says nothing about the freeze -- the remaining
+    // steps are no-ops and a frozen accumulator is bit-identical to an unfrozen one. the
+    // freeze law is gated separately below.
+    for (a, x0) in [(4.0_f64, 2.0), (9.0, 4.0)] {
+        let want = newton_sqrt::<f64>(a, x0, 1e-14);
+        let got = gv_eval(|p| newton_sqrt(p[0], p[1], 1e-14), &["a", "x0"], &[a, x0]);
+        close(want, got, "newton_sqrt at a converged fixed point");
+    }
+}
 
-    // approaching case: a = 9, x0 = 4 — converges from above in ~5 steps.
-    let (a, x0) = (9.0_f64, 4.0);
-    let want = newton_sqrt::<f64>(a, x0);
-    let got = gv_eval(|p| newton_sqrt(p[0], p[1]), &["a", "x0"], &[a, x0]);
-    close(want, got, "newton_sqrt approaching");
+#[test]
+fn iterate_freezes_the_accumulator_at_the_same_step_on_both_carriers() {
+    // THE FREEZE LAW under carrier equivalence. the host breaks out of its loop; the Gv
+    // trace runs a FIXED count and emits `select(converged, acc, body(acc))`, so the two
+    // agree only if the select holds the accumulator from the same iterate onward.
+    //
+    // a loose predicate is what makes the law observable: it fires while newton still has
+    // distance to travel, so the frozen iterate and the fully-converged root differ. under
+    // a tight predicate both carriers land on the exact fixed point and a broken freeze
+    // reproduces the right answer anyway -- which is also why the rhd/rmhd c2p round-trips
+    // cannot serve as this gate, converging as they do far below their own tolerance.
+    let (a, x0, conv_tol) = (9.0_f64, 4.0, 1e-2);
+
+    // NON-VACUITY: a predicate that never fires runs all 20 steps to the root. the frozen
+    // answer must differ from that by more than the comparison tolerance, or the
+    // equivalence below holds for a scheme with no freeze at all. tightening conv_tol
+    // trips this assertion instead of silently retiring the law.
+    let frozen = newton_sqrt::<f64>(a, x0, conv_tol);
+    let unfrozen = newton_sqrt::<f64>(a, x0, 0.0);
+    let gap = (frozen - unfrozen).abs() / unfrozen.abs();
+    assert!(
+        gap > 1e-6,
+        "the freeze is unobservable at conv_tol {conv_tol}: frozen {frozen} vs unfrozen \
+         {unfrozen} (gap {gap:e}), so carrier agreement would not test the freeze law"
+    );
+
+    let got = gv_eval(
+        |p| newton_sqrt(p[0], p[1], conv_tol),
+        &["a", "x0"],
+        &[a, x0],
+    );
+    close(frozen, got, "newton_sqrt freeze law");
 }
 
 // =============================================================================

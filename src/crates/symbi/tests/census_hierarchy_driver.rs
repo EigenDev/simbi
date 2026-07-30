@@ -74,13 +74,12 @@ fn build() -> Sim {
 #[test]
 fn the_hierarchy_driver_records_a_census_sample_per_step() {
     let mut sim = build();
-    sim.store
-        .censuses
-        .push(RegisteredCensus::new(
-            CensusEvaluator::new(&mass_census()).expect("census compiles"),
-        ));
+    sim.store.censuses.push(RegisteredCensus::new(
+        CensusEvaluator::new(&mass_census()).expect("census compiles"),
+    ));
 
-    let kset = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let kset =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     let mut hier = Hierarchy::single(sim, kset);
     hier.evolve(0.05).expect("hierarchy evolve");
 
@@ -104,7 +103,11 @@ fn the_hierarchy_driver_records_a_census_sample_per_step() {
         mass.is_finite() && mass > 0.0,
         "the recorded mass is not a physical total: {mass}"
     );
-    assert_eq!(recorded.dropped()[0], 0, "an axis-free census drops nothing");
+    assert_eq!(
+        recorded.dropped()[0],
+        0,
+        "an axis-free census drops nothing"
+    );
 }
 
 #[test]
@@ -112,12 +115,11 @@ fn a_hierarchy_checkpoint_carries_the_census_group() {
     // sampling into a history that no writer emits is indistinguishable, from the outside, from
     // never sampling at all.
     let mut sim = build();
-    sim.store
-        .censuses
-        .push(RegisteredCensus::new(
-            CensusEvaluator::new(&mass_census()).expect("census compiles"),
-        ));
-    let kset = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    sim.store.censuses.push(RegisteredCensus::new(
+        CensusEvaluator::new(&mass_census()).expect("census compiles"),
+    ));
+    let kset =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     let mut hier = Hierarchy::single(sim, kset);
     hier.evolve(0.05).expect("hierarchy evolve");
 

@@ -699,7 +699,6 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 //   the trait default (zero) here — only the metric geometry + lapse are provided.
 // ============================================================
 
-
 // ============================================================
 // schwarzschild in ingoing kerr-schild (eddington-finkelstein) coords: x = (r, theta, phi)
 //   the SAME physical vacuum as `Schwarzschild`, in a HORIZON-PENETRATING chart. ingoing EF line

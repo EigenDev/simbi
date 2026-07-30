@@ -71,7 +71,9 @@ fn prim_at(x: [f64; 1]) -> Prim<f64, 1> {
 }
 
 /// a hierarchy of `levels` levels, each covering the inner half of its parent about the origin.
-fn ladder(levels: usize) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+fn ladder(
+    levels: usize,
+) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
         .origin([-L0])
@@ -130,7 +132,10 @@ fn ladder_rungs(
 
 /// the innermost radius a level resolves: half its own cell width, since the accretor sits on a
 /// cell boundary at the box center.
-fn inner_radius(hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>, ll: usize) -> f64 {
+fn inner_radius(
+    hier: &Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>,
+    ll: usize,
+) -> f64 {
     0.5 * hier.levels[ll].state.geom.dx[0]
 }
 
@@ -157,9 +162,7 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
     );
 
     // the ladder itself, reported: a cost estimate for a deep run is built on these numbers.
-    println!(
-        "[{LEVELS} levels, R_B = {R_B}] level : r_inner/R_B : own dt : dt * 2^l : rung ratio"
-    );
+    println!("[{LEVELS} levels, R_B = {R_B}] level : r_inner/R_B : own dt : dt * 2^l : rung ratio");
     for ll in 0..LEVELS {
         let ratio = if ll == 0 {
             f64::NAN
@@ -346,4 +349,3 @@ fn the_step_the_driver_takes_is_the_step_it_reports() {
          advance on different timesteps"
     );
 }
-

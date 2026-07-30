@@ -2624,7 +2624,6 @@ mod tests {
     }
 }
 
-
 /// the recorded census groups of a store, one per registration carrying at least one sample.
 ///
 /// EXTRACTED so BOTH checkpoint writers emit them. the uni-grid writer and the hierarchy writer
@@ -2690,7 +2689,11 @@ where
             // from a running sum, and without the level a per-level row is indistinguishable from a
             // composite one. all ones and all zeros respectively in the ordinary case, which costs
             // sixteen bytes a row and makes every row self-describing.
-            .with_dataset(Dataset::new("level", vec![n], DataRef::U64(history.level())))
+            .with_dataset(Dataset::new(
+                "level",
+                vec![n],
+                DataRef::U64(history.level()),
+            ))
             .with_dataset(Dataset::new(
                 "n_samples",
                 vec![n],

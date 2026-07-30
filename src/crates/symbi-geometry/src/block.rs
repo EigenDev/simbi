@@ -500,21 +500,36 @@ mod tests {
 
     #[test]
     fn cartesian_volume_2d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.2], std::array::from_fn(|d| d));
+        let geo = BlockGeometry::uniform(
+            Cartesian,
+            [0.0, 0.0],
+            [0.1, 0.2],
+            std::array::from_fn(|d| d),
+        );
         let vol = geo.volume([5, 3]);
         assert!(approx(vol, 0.1 * 0.2));
     }
 
     #[test]
     fn cartesian_volume_3d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0, 0.0], [0.1, 0.2, 0.3], std::array::from_fn(|d| d));
+        let geo = BlockGeometry::uniform(
+            Cartesian,
+            [0.0, 0.0, 0.0],
+            [0.1, 0.2, 0.3],
+            std::array::from_fn(|d| d),
+        );
         let vol = geo.volume([0, 0, 0]);
         assert!(approx(vol, 0.1 * 0.2 * 0.3));
     }
 
     #[test]
     fn cartesian_face_area_2d() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.2], std::array::from_fn(|d| d));
+        let geo = BlockGeometry::uniform(
+            Cartesian,
+            [0.0, 0.0],
+            [0.1, 0.2],
+            std::array::from_fn(|d| d),
+        );
         // face in x-direction: area = dy
         let ax = geo.face_area([5, 3], 0);
         assert!(approx(ax, 0.2));
@@ -525,7 +540,12 @@ mod tests {
 
     #[test]
     fn cartesian_centroid_2d() {
-        let geo = BlockGeometry::uniform(Cartesian, [1.0, 2.0], [0.5, 0.5], std::array::from_fn(|d| d));
+        let geo = BlockGeometry::uniform(
+            Cartesian,
+            [1.0, 2.0],
+            [0.5, 0.5],
+            std::array::from_fn(|d| d),
+        );
         let c = geo.centroid([0, 0]);
         assert!(approx(c[0], 1.25));
         assert!(approx(c[1], 2.25));
@@ -533,7 +553,12 @@ mod tests {
 
     #[test]
     fn cartesian_source_is_zero() {
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.1], std::array::from_fn(|d| d));
+        let geo = BlockGeometry::uniform(
+            Cartesian,
+            [0.0, 0.0],
+            [0.1, 0.1],
+            std::array::from_fn(|d| d),
+        );
         let src = geo.momentum_source([5, 5], 1.0, Tensor::new([0.5, -0.3]), 2.5);
         assert!(approx(src[0], 0.0));
         assert!(approx(src[1], 0.0));
@@ -547,8 +572,7 @@ mod tests {
         // represents, which is what makes an extensive total over it the actual mass.
         let geo = BlockGeometry::uniform(Spherical, [1.0], [0.1], std::array::from_fn(|d| d));
         let vol = geo.volume([0]); // r in [1.0, 1.1]
-        let expected =
-            std::f64::consts::TAU * 2.0 * (1.1_f64.powi(3) - 1.0_f64.powi(3)) / 3.0;
+        let expected = std::f64::consts::TAU * 2.0 * (1.1_f64.powi(3) - 1.0_f64.powi(3)) / 3.0;
         assert!(approx(vol, expected), "got {vol}, want {expected}");
     }
 
@@ -602,8 +626,7 @@ mod tests {
             tau
         );
         assert_eq!(
-            BlockGeometry::<_, f64, 1>::uniform(Spherical, [1.0], [0.1], id1)
-                .ungridded_measure(),
+            BlockGeometry::<_, f64, 1>::uniform(Spherical, [1.0], [0.1], id1).ungridded_measure(),
             2.0 * tau
         );
 
@@ -708,7 +731,12 @@ mod tests {
     #[test]
     fn geometry_composes_with_flux_divergence() {
         // conceptual test: show that geometry integrates with the RHS pattern
-        let geo = BlockGeometry::uniform(Cartesian, [0.0, 0.0], [0.1, 0.1], std::array::from_fn(|d| d));
+        let geo = BlockGeometry::uniform(
+            Cartesian,
+            [0.0, 0.0],
+            [0.1, 0.1],
+            std::array::from_fn(|d| d),
+        );
 
         // the RHS pattern: for each cell, compute flux_div + source
         let idx = [5, 5];

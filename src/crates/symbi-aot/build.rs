@@ -539,7 +539,6 @@ impl Geom {
         }
     }
 
-
     // select the ingoing Kerr-Schild spacetime (horizon-penetrating: lapse 1/sqrt(1+2M/r), radial
     // shift beta^r = 2M/(r+2M), gamma_rr = 1+2M/r); the spatial `coords` stay Spherical. selects the
     // shift-advection-flux + KS densitization/wavespeed kernel branch + a `_ks` slug tag. relativistic
@@ -1620,12 +1619,8 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
         mhd_geom_slug(&geom),
         geom.spacetime_suffix()
     );
-    let (exterior, exterior_writes) = fofc_exterior_flag_gv(
-        geom.coords,
-        geom.spacetime,
-        &geom.spacing,
-        &geom.axes,
-    );
+    let (exterior, exterior_writes) =
+        fofc_exterior_flag_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes);
     emit_gv(out_dir, &exterior_name, ndim, &exterior, &exterior_writes);
 }
 

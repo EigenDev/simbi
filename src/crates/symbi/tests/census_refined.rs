@@ -121,7 +121,11 @@ fn leaf_mass(hier: &Hier) -> f64 {
         let sim = &level.state;
         let bg = sim.geom.block_geometry(sim.physics.metric);
         for c in sim.geom.interior.iter() {
-            if level.coverage.as_ref().is_some_and(|r: &symbi_algebra::Domain<1>| r.contains(c)) {
+            if level
+                .coverage
+                .as_ref()
+                .is_some_and(|r: &symbi_algebra::Domain<1>| r.contains(c))
+            {
                 continue;
             }
             total += *sim.fields.cons.den.view().at(c) * bg.labframe_volume(c, sim.motion.a);
@@ -198,10 +202,7 @@ fn a_refined_hierarchy_censuses_the_whole_composite_domain() {
 
 /// the mass at the time of the FIRST sample. on a periodic domain with no sources the leaf mass is
 /// conserved, so the initial value is the reference throughout — asserted rather than assumed.
-fn leaf_mass_at_first_sample(
-    hier: &Hier,
-    initial: f64,
-) -> f64 {
+fn leaf_mass_at_first_sample(hier: &Hier, initial: f64) -> f64 {
     let now = leaf_mass(hier);
     assert!(
         (now / initial - 1.0).abs() < 1.0e-10,
@@ -300,4 +301,3 @@ fn a_root_step_census_is_not_also_sampled_per_level() {
         "a root-step census must record exactly one row per accepted root step"
     );
 }
-

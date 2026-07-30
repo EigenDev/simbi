@@ -21,10 +21,7 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
-use symbi_hydro::dissipation::{
-    QUIRK_THRESHOLD, adaptive_phi, local_mach,
-    quirk_strong_shock,
-};
+use symbi_hydro::dissipation::{QUIRK_THRESHOLD, adaptive_phi, local_mach, quirk_strong_shock};
 use symbi_hydro::state::Prim;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -441,11 +438,7 @@ fn adaptive_phi_carrier_equivalence() {
     for (l, r) in cases {
         let want = phi_of(&l, &r, &n);
         let inputs = [pack(l, r, &n).to_vec(), vec![GAMMA]].concat();
-        let got = gv_eval(
-            |p| phi_of_gv(p),
-            &names_with_gamma(),
-            &inputs,
-        );
+        let got = gv_eval(|p| phi_of_gv(p), &names_with_gamma(), &inputs);
         close(
             want,
             got,
@@ -456,8 +449,5 @@ fn adaptive_phi_carrier_equivalence() {
 
 #[test]
 fn adaptive_phi_lowers() {
-    assert_lowers(
-        |p| phi_of_gv(p),
-        &names_with_gamma(),
-    );
+    assert_lowers(|p| phi_of_gv(p), &names_with_gamma());
 }

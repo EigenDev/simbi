@@ -321,9 +321,10 @@ fn a_census_sampled_before_the_recovery_fails_loudly() {
     );
 
     let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
-    let panicked =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev, None)))
-            .is_err();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sim.census_fields(&ev, None)
+    }))
+    .is_err();
     assert!(
         panicked,
         "sampling before the recovery must fail loudly, not report zeros"
@@ -404,8 +405,10 @@ fn a_census_reading_pressure_is_refused_on_a_regime_without_one() {
     let ev = CensusEvaluator::new(&cfg).expect("census compiles");
     assert!(ev.reads_pressure());
 
-    let panicked =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sim.census_fields(&ev, None))).is_err();
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sim.census_fields(&ev, None)
+    }))
+    .is_err();
     assert!(
         panicked,
         "a census reading pressure on an isothermal regime must fail loudly, not read zeros"
@@ -425,9 +428,7 @@ fn a_covered_region_is_excluded_so_a_refined_grid_counts_it_once() {
     let ev = CensusEvaluator::new(&mass_census()).expect("census compiles");
 
     let total = |covered: Option<&symbi_algebra::Domain<1>>| {
-        let fields = sim
-            .census_fields(&ev, covered)
-            .expect("host-resident sim");
+        let fields = sim.census_fields(&ev, covered).expect("host-resident sim");
         let refs: Vec<_> = fields.values.iter().collect();
         field_segmented_reduce(
             &refs,

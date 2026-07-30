@@ -288,13 +288,8 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     // gets to type it wrong, and both of them did. the caller now states only WHICH grid
     // property its family keys on, which is a two-valued choice the type system carries.
     // the name itself is built by the same function the bake calls.
-    let chart = symbi_discretize::kernel_slug::fofc_project_chart(
-        keying,
-        geom.coords,
-        &geom.axes,
-        DOF,
-        D,
-    );
+    let chart =
+        symbi_discretize::kernel_slug::fofc_project_chart(keying, geom.coords, &geom.axes, DOF, D);
     let name = symbi_discretize::kernel_slug::fofc_project_name(prefix, chart, geom.spacetime, D);
     // x_* -> live cons (read + write in place), us_* -> stage input (read), bc_* -> cell-centered B
     // (read ONLY: the magnetized residual needs the field, but constrained transport owns the
@@ -555,9 +550,7 @@ pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Ref(sref) => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, *sref)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
-                    .unwrap_or_else(|| {
-                        panic!("constraint_projection: unexpected scalar {sref:?}")
-                    }),
+                    .unwrap_or_else(|| panic!("constraint_projection: unexpected scalar {sref:?}")),
             ),
             other => panic!("constraint_projection: unexpected scalar {other:?}"),
         }

@@ -159,7 +159,9 @@ where
          or the caller bound the same field twice as an output."
     );
     assert!(
-        inputs.iter().all(|f| !written.contains(&(f.as_ptr() as usize))),
+        inputs
+            .iter()
+            .all(|f| !written.contains(&(f.as_ptr() as usize))),
         "disjoint_host_buffers('{name}'): a binding is both an input and an output — the resulting \
          `&` + `&mut` to one buffer is UB, and on release it is a silent garbled-physics bug rather \
          than a fault. either the kernel's IR manifest repeats a path across the two roles, or the \
@@ -336,7 +338,9 @@ static DISP_EXEC_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 fn dispatch_profiling() -> bool {
     *DISP_ON.get_or_init(|| std::env::var("SYMBI_DISPATCH_PROF").is_ok())
 }
-/// (calls, total ns in registry lookup, total ns in kernel execution).
+/// (calls, total ns in registry lookup, total ns in kernel execution). the counters are
+/// written only while `SYMBI_DISPATCH_PROF` is set, so a zero call count means the
+/// profiler was off and there is nothing to report. totals cover the whole process.
 pub fn report_dispatch_profile() -> (u64, u64, u64) {
     use std::sync::atomic::Ordering::Relaxed;
     (
@@ -344,13 +348,6 @@ pub fn report_dispatch_profile() -> (u64, u64, u64) {
         DISP_LOOKUP_NS.load(Relaxed),
         DISP_EXEC_NS.load(Relaxed),
     )
-}
-/// clear the dispatch-profile accumulators (call after warmup).
-pub fn reset_dispatch_profile() {
-    use std::sync::atomic::Ordering::Relaxed;
-    DISP_COUNT.store(0, Relaxed);
-    DISP_LOOKUP_NS.store(0, Relaxed);
-    DISP_EXEC_NS.store(0, Relaxed);
 }
 
 /// `dispatch_fields` for buffers that do NOT share one allocated layout: each
@@ -665,4 +662,3 @@ mod alias_tests {
         assert_eq!(bufs.len(), 3);
     }
 }
-

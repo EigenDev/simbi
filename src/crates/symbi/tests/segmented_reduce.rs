@@ -310,4 +310,3 @@ fn the_host_accumulator_is_double_precision_whatever_the_field_carrier_is() {
          longer discriminate between the two accumulator widths"
     );
 }
-

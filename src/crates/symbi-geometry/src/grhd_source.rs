@@ -785,10 +785,7 @@ mod tests {
                     "S_phi must vanish (axisymmetry): {}",
                     s[2]
                 );
-                assert!(
-                    approx(s_tau, tau_cf),
-                    "S_tau r={r}: {s_tau} != {tau_cf}"
-                );
+                assert!(approx(s_tau, tau_cf), "S_tau r={r}: {s_tau} != {tau_cf}");
             }
         }
     }

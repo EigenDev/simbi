@@ -32,8 +32,7 @@ use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kset = AdiabaticSubstrateKernelSet<HostMemory, f64, 1>;
-type Hier =
-    Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>;
+type Hier = Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset>;
 
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.4;
@@ -91,7 +90,11 @@ fn ladder(levels: usize, seed: bool) -> Hier {
 /// integral injection must preserve.
 fn mass_energy_over(sim: &Sim, lo: f64, hi: f64) -> (f64, f64) {
     let bg = sim.geom.block_geometry(sim.physics.metric);
-    let nrg = sim.fields.cons.nrg_field().expect("adiabatic carries energy");
+    let nrg = sim
+        .fields
+        .cons
+        .nrg_field()
+        .expect("adiabatic carries energy");
     let (mut m, mut e) = (0.0, 0.0);
     for c in sim.geom.interior.iter() {
         let x = sim.geom.centroid(c)[0];
@@ -228,7 +231,9 @@ fn a_level_whose_region_moved_between_runs_is_refused() {
     let same = ladder(3, true);
     for ll in 0..3 {
         symbi_sim::checkpoint::verify_checkpoint_level_geometry(&same.levels[ll].state, p, ll)
-            .unwrap_or_else(|e| panic!("an identical hierarchy failed verification at level {ll}: {e}"));
+            .unwrap_or_else(|e| {
+                panic!("an identical hierarchy failed verification at level {ll}: {e}")
+            });
     }
 
     // a schedule that placed level 1 somewhere else — the shape a level-count-dependent region
@@ -274,7 +279,11 @@ fn fingerprint(hier: &Hier) -> Vec<u64> {
     let mut out = Vec::new();
     for level in hier.levels.iter() {
         let sim = &level.state;
-        let nrg = sim.fields.cons.nrg_field().expect("adiabatic carries energy");
+        let nrg = sim
+            .fields
+            .cons
+            .nrg_field()
+            .expect("adiabatic carries energy");
         for c in sim.geom.interior.iter() {
             out.push(sim.fields.cons.den.view().at(c).to_bits());
             out.push(sim.fields.cons.mom[0].view().at(c).to_bits());
@@ -363,7 +372,10 @@ fn a_deeper_restart_loads_what_exists_and_injects_only_the_rest() {
 
     // the loaded levels, bitwise. `fingerprint` walks every level, so the deeper hierarchy's
     // fingerprint is compared over its first three levels only.
-    let got: Vec<u64> = fingerprint(&deeper).into_iter().take(before.len()).collect();
+    let got: Vec<u64> = fingerprint(&deeper)
+        .into_iter()
+        .take(before.len())
+        .collect();
     assert_eq!(
         got, before,
         "the levels the checkpoint carries did not come back bitwise on a deeper restart. \
@@ -539,4 +551,3 @@ fn an_anisotropic_grid_verifies_against_its_own_axes() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
-

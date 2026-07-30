@@ -122,7 +122,6 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
     pub fn runtime(&self) -> &R {
         &self.runtime
     }
-
 }
 
 /// the content-addressed cache key the dispatcher uses INTERNALLY for

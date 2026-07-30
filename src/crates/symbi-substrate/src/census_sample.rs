@@ -49,8 +49,8 @@ where
     Mem: MemorySpace,
 {
     symbi_sim::driver::prof("census", || {
-    let now = sim.time;
-    censuses
+        let now = sim.time;
+        censuses
         .iter()
         .enumerate()
         .map(|(index, registered)| {
@@ -243,4 +243,3 @@ fn exclude_covered<const D: usize, Mem: MemorySpace>(
         &[excluded],
     );
 }
-

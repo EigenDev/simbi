@@ -602,12 +602,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             || {}, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
-            || {},             // hydro: no induction flux
-            || {},             // hydro: no cell B to restore
-            || {},             // hydro: no induction flux
+            || {},                                                // hydro: no induction flux
+            || {},                                                // hydro: no cell B to restore
+            || {},                                                // hydro: no induction flux
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
-            || {},             // hydro: no CT re-sync
-            false,             // no projection tier below the freeze; keep the parachute
+            || {},                                                // hydro: no CT re-sync
+            false, // no projection tier below the freeze; keep the parachute
         )
     }
 
