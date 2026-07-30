@@ -29,7 +29,7 @@ def _grav() -> GravitationalProperties:
 
 
 def _accretion() -> AccretionProperties:
-    return AccretionProperties(accretion_radius=0.5, sink_rate=1.0)
+    return AccretionProperties(accretion_radius=0.5)
 
 
 # -- AccretionProperties bounds -------------------------------------------------
@@ -40,9 +40,24 @@ def test_zero_accretion_radius_rejected() -> None:
         AccretionProperties(accretion_radius=0.0)
 
 
-def test_negative_sink_rate_rejected() -> None:
+@pytest.mark.parametrize("rate", [-1.0, 1.0e-30, 0.5, 1.0e6])
+def test_any_nonzero_sink_rate_rejected(rate: float) -> None:
+    # the drain rate is not a parameter. every immersed-boundary surface drains at the local
+    # sound-crossing rate `c_s / (c_drain * dx)`, and the sink scalar is bound to zero wherever a
+    # surface exists — which `penalize_owns_accretion` makes unconditional.
+    #
+    # ANY nonzero value is refused, not merely a negative one. a positive value is the dangerous
+    # case: it is silently ignored, so a run asserts control over its accretion rate that it does not
+    # have, and the resulting Mdot is entirely reasonable-looking — it is simply the sound-crossing
+    # drain, whatever the dial said. three shipped configs built scientific arguments on this dial,
+    # including a proposed comparison against Xu (2023)'s smooth sink that was never reachable.
     with pytest.raises(ConfigError, match="sink_rate"):
-        AccretionProperties(accretion_radius=0.5, sink_rate=-1.0)
+        AccretionProperties(accretion_radius=0.5, sink_rate=rate)
+
+
+def test_the_default_omits_the_drain_dial() -> None:
+    # and the default must be the accepted one, or every accreting config fails out of the box.
+    assert AccretionProperties(accretion_radius=0.5).sink_rate == 0.0
 
 
 @pytest.mark.parametrize("porosity", [-0.1, 1.5, 3.7])

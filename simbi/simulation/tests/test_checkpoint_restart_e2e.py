@@ -73,7 +73,6 @@ class AccretionRestartProbe(RestartProbe):
                 ),
                 accretion=AccretionProperties(
                     accretion_radius=0.08,
-                    sink_rate=10.0,
                 ),
             )
         ]
@@ -101,7 +100,6 @@ class TwoAccretorRestartProbe(AccretionRestartProbe):
                 ),
                 accretion=AccretionProperties(
                     accretion_radius=0.08,
-                    sink_rate=10.0,
                 ),
             )
             for position in (0.35, 0.65)

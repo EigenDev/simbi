@@ -54,11 +54,9 @@ from simbi.types.typing import (
     StaggeredBFieldGenerator,
 )
 
-# the drain rate is pinned to the saturated regime: any value large enough that the
-# backend's sound-crossing cap min(rate, cs/dx) selects cs/dx. there, the removed mass
-# is set by the flow reaching the sink -- the physical plateau. it is
-# a fixed numerical boundary condition, deliberately kept out of the config surface.
-_SATURATED_DRAIN = 1.0e6
+# the drain rate is not a parameter: the immersed-boundary penalization surface drains at the local
+# sound-crossing rate c_s/(c_drain*dx), with the convergence coefficient fixed at 1. there the
+# removed mass is set by the flow reaching the sink -- the physical plateau -- rather than by a dial.
 
 
 class MagnetizedBondiSink(SimbiProblem):
@@ -242,7 +240,7 @@ class MagnetizedBondiSink(SimbiProblem):
             velocity=(0.0, 0.0, 0.0),
             gravitational=GravitationalProperties(softening_length=softening),
             accretion=AccretionProperties(
-                accretion_radius=r_acc, sink_rate=_SATURATED_DRAIN
+                accretion_radius=r_acc
             ),
         )
         # the localized ohmic coupling that annihilates the field threading the sink.
