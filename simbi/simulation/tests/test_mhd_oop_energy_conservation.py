@@ -1,7 +1,7 @@
 # =============================================================================
 # test_mhd_oop_energy_conservation.py
 #
-# the reduced-dimension OUT-OF-PLANE energy-conservation gate (spec §6 / oop_predictor_spec.md).
+# the reduced-dimension OUT-OF-PLANE energy-conservation gate.
 # on a smooth periodic 1.5D relativistic-MHD flow whose transverse By is a cell-centered
 # conserved variable (flux-evolved by the out-of-plane predictor), the
 # total energy tau must hold to machine roundoff at EVERY resolution. this is the companion to

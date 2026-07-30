@@ -148,7 +148,7 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
                     q_max = q_max.max(q);
                 }
                 // strictly inside, out_sq is identically zero in a
-                // neighbourhood — the true derivative of the sqrt term is 0,
+                // neighborhood — the true derivative of the sqrt term is 0,
                 // but the dual chain rule at sqrt(0) evaluates 0 * inf = nan.
                 // the subnormal floor keeps the tangent finite (and zero) at a
                 // distance bias of sqrt(min_positive) ~ 1e-154.
@@ -282,7 +282,7 @@ impl SdfExpr<f64, 3> {
     }
 
     /// serialize the CSG tree to its json wire form (the inverse of `from_json`): the string a
-    /// checkpoint persists so a reader can reconstruct + draw the body silhouette.
+    /// checkpoint persists so the body silhouette is reconstructible from the file alone.
     pub fn to_json(&self) -> String {
         self.to_value().to_string()
     }

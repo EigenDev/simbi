@@ -1,7 +1,7 @@
 // =============================================================================
 // jit_godunov_kernel_oracle.rs
 //
-// the MISSING carrier-gate oracle for the fused-runtime host path: the actual
+// the carrier-gate oracle for the fused-runtime host path: the actual
 // fused godunov+source `GvKernel` (multi-output, F64 CSE lets, per-output stencil
 // reads), JIT-compiled via `compile_gv_kernel`, must compute BIT-FOR-BIT the same
 // outputs as the interpreter `Cpu::run_kernel` over random buffers. the simple

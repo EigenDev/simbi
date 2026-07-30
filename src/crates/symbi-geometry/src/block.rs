@@ -334,8 +334,8 @@ where
     ///
     /// uses 2-point Gauss-Legendre per axis (exact for polynomials up to degree 3).
     /// for flat spherical (volume_factor = r^2 sin(theta)):
-    ///   - r^2 is degree 2 → exact with 2-point Gauss in r
-    ///   - sin(theta) is transcendental → O(dx^4) accurate (excellent)
+    ///   - r^2 is degree 2 -> exact with 2-point Gauss in r
+    ///   - sin(theta) is transcendental -> O(dx^4) accurate (excellent)
     /// for Kerr-Schild (volume_factor includes sqrt(1+2M/r)):
     ///   - O(dx^4) accurate, consistent with the second-order PDE solver
     ///
@@ -425,9 +425,9 @@ where
         match self.metric.geometry() {
             Geometry::Spherical => area * a * a,
             Geometry::Cylindrical => {
-                // dir=0 (r): face area ~ r → scale by a
-                // dir=1 (phi): no radial dependence → no scaling
-                // dir=2 (z): face area ~ r → scale by a
+                // dir=0 (r): face area ~ r -> scale by a
+                // dir=1 (phi): no radial dependence -> no scaling
+                // dir=2 (z): face area ~ r -> scale by a
                 if dir == 1 { area } else { area * a }
             }
             Geometry::Cartesian => {
@@ -679,7 +679,8 @@ mod tests {
             -(aphi(i + 1, j) - aphi(i, j)) / (vf(rc(i), tmap.face(j)) * rmap.width(i))
         };
 
-        // the arithmetic vs geometric radial center genuinely differ on this log grid — the bug window.
+        // on a log-spaced radial grid the arithmetic and geometric cell centers differ at O(1e-3), so a
+        // center-choice error in the curl is observable rather than degenerate.
         let r_arith = rc(3);
         let r_geom = (rmap.face(3) * rmap.face(4)).sqrt();
         assert!(

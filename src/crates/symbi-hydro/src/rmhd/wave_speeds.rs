@@ -134,14 +134,14 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
 /// (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, all of which trace into the kernel
 /// because `S::select` evaluates every arm). it stays CFL-safe because it never UNDER-
 /// estimates the true signal speed. do NOT route the Riemann/flux path (`extremal_speeds`)
-/// here — HLLE diffusion needs the tight quartic. see docs/c9fbdcb_perf_study/02.
+/// here — HLLE diffusion needs the tight quartic.
 ///
 /// returns `(sl, sr)` along `nhat` via the SR relativistic velocity-addition. NaN-PRESERVING:
 /// `cf_sq` uses the product form `1 - (1-cs^2)(1-cA^2)` (manifestly < 1 for physical inputs,
 /// so `denom = 1 - vsq*cf_sq > 0` with NO clamp) and the outputs are UNCLAMPED — a NaN prim
-/// from an unphysical c2p propagates straight to the CFL max-reduction + dt guard
-/// ([[feedback_no_silent_floors]]); a light-cone `.min`/`.max` would mask it by
-/// dropping the NaN. over-estimating a speed only shrinks dt, which is safe.
+/// from an unphysical c2p propagates straight to the CFL max-reduction + dt guard, where it
+/// halts the run; a light-cone `.min`/`.max` would mask it by dropping the NaN.
+/// over-estimating a speed only shrinks dt, which is safe.
 pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim: &MhdPrim<S, D>,
@@ -404,7 +404,7 @@ mod tests {
 
     // trace rmhd_wave_speeds at S=Gv (axis 0), scalarize through the same
     // pipeline the real kernel emit takes, run CSE, and return the peak
-    // register-pressure report used to measure the scoping win.
+    // register-pressure report for the resulting kernel.
     fn trace_and_measure_pressure() -> pressure::PressureReport {
         begin_trace();
         let rho = Gv::field("prim_rho", "prim.rho");
@@ -432,46 +432,21 @@ mod tests {
         pressure::peak_pressure_kernel(&k)
     }
 
-    /// regression bound. pins the
-    /// `peak_pressure` metric on rmhd_wave_speeds at its measured
-    /// value (87, post cost-model CSE, no `S::scope` in the kernel).
+    /// a loose blow-up guard (250) on the static `peak_pressure` estimate for the traced
+    /// rmhd_wave_speeds kernel.
     ///
-    /// the bound exists to catch FUTURE REGRESSIONS — if a future edit
-    /// pushes the metric above 87, the reviewer must either lower it back
-    /// or justify the new ceiling.
+    /// the estimate counts every ancestor-scope `Let` as live and ignores true liveness, so it is a
+    /// conservative UPPER bound and NOT the SASS register count a device compiler picks. the full
+    /// Mignone & Del Zanna quartic (~200 ops) sits inside the lazily-selected branch taken only when
+    /// the flow is neither near-static (`vsq ~ 0`) nor field-aligned-degenerate (`bn ~ 0`); the
+    /// estimate sums that whole branch body as simultaneously live at the deepest scope, with no
+    /// cross-path CSE to compact it, which is why it reads ~239 while a liveness-aware count reads
+    /// near ~90. branch-local temps have short live ranges and cost the same whether they sit at
+    /// function scope or inside an arm, and the lazy branch only DELETES work on the degenerate
+    /// paths, so a value in that range carries no register regression.
     ///
-    /// the metric is a conservative UPPER bound (it counts every ancestor-
-    /// scope Let as live, ignoring true liveness), so 87 is not the SASS
-    /// register count nvcc will pick — that depends on the structural
-    /// scope info provided. the infrastructure supplies
-    /// (`assert_peak_pressure!` macro, scope_owner eviction so hash-consed
-    /// inner-and-outer-used NodeIds get lowered at the LCA scope rather
-    /// than breaking inner-scope references); the kernel-side migration
-    /// needs a multi-output scope combinator
-    /// (`S::scope` returns one S, so a 2-output path like the path-2
-    /// quadratic or the (sl_3, sr_3) pair can't be wrapped without
-    /// duplicating the prep+quartic-solve — measured 87 → 172 in that
-    /// shape, a net loss).
-    /// **the conservative peak-pressure metric is no longer a meaningful
-    /// register estimate for this kernel** — the bound is now a loose blow-up
-    /// guard only (250). history: 87 (pre-cond, nested `S::select`) -> 98
-    /// (cubic resolvent -> nested `S::cond`) -> 239 (Eq.57/58/quartic path
-    /// selection -> nested `S::cond_vec`, this change).
-    ///
-    /// the jump is a STATIC over-count; no real register regression occurs. the
-    /// walker "counts every ancestor-scope Let as live, ignoring true
-    /// liveness" (see its own doc) — so when the FULL quartic (~200 ops) moved
-    /// INTO path 3's `if/else` arm (skipped entirely when `vsq~0` / `bn~0`),
-    /// the metric now sums the whole quartic body as simultaneously live at the
-    /// deepest branch, with no cross-path CSE to compact it. nvcc does real
-    /// liveness + register reuse, so the quartic's branch-local temps (short
-    /// live ranges) cost what they cost whether at function scope or in a
-    /// branch; the lazy branch only DELETES work on the fast paths. the REAL
-    /// evidence of the win is the emitted kernel (quartic inside the else arm)
-    /// + the `cubic_resolvent_select_tax_wallclock` bench (2.16x -> 0.97x);
-    /// this number carries none of it. a liveness-aware metric would
-    /// report a value near the old ~90; the bound just catches a
-    /// gross >2x blow-up.
+    /// the guard therefore catches a gross (>2x) structural blow-up only. the load-bearing evidence
+    /// for the branch structure is the emitted kernel shape and wallclock, not this number.
     #[test]
     fn rmhd_wave_speeds_under_pressure_bound() {
         let report = trace_and_measure_pressure();
@@ -485,7 +460,7 @@ mod tests {
         );
     }
 
-    // item 4 (CFL safety): the magnetosonic upper bound must NEVER under-estimate the exact
+    // CFL safety: the magnetosonic upper bound must NEVER under-estimate the exact
     // Mignone & Del Zanna quartic signal speed — otherwise the CFL dt would be unsafe. sweep a
     // battery of physical RMHD states (varying density, velocity direction/magnitude, pressure,
     // field strength/orientation) and assert max|s_ub| >= max|s_quartic| per axis.
@@ -580,9 +555,9 @@ mod tests {
         }
     }
 
-    // item 4: the CFL upper bound must PRESERVE NaN — an unphysical prim (NaN from a failed
-    // c2p) must yield NaN speeds so it reaches the NaN-propagating CFL reduction + dt guard,
-    // a clamped finite speed would silently mask it ([[feedback_no_silent_floors]]).
+    // the CFL upper bound must PRESERVE NaN — an unphysical prim (NaN from a failed c2p) must
+    // yield NaN speeds so it reaches the NaN-propagating CFL reduction + dt guard, which halts
+    // the run; a clamped finite speed would silently mask it.
     #[test]
     fn magnetosonic_bound_propagates_nan() {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
@@ -913,7 +888,7 @@ mod tests {
         use std::hint::black_box;
         use std::time::Instant;
 
-        // deterministic LCG → representative (b,c,d) coefficient triples spanning
+        // deterministic LCG giving representative (b,c,d) coefficient triples spanning
         // all four resolvent cases (p>0, three-real, q-sign). no rand dep.
         let n = 5_000_000usize;
         let mut inputs = Vec::with_capacity(n);

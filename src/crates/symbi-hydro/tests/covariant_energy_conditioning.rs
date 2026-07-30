@@ -82,17 +82,17 @@ fn the_round_trip_degrades_as_the_gas_gets_cold() {
             worst_cold = worst_cold.max(err);
         }
     }
-    // the conditioning claim, stated as a bound rather than a vibe: by p/rho = 1e-8
-    // the variable has surrendered enough digits that the recovered pressure is no
-    // longer trustworthy at single-precision level.
+    // the conditioning limit as a measured bound: by p/rho = 1e-8 the killing-energy variable has
+    // surrendered enough significant digits that the recovered pressure carries less than
+    // single-precision accuracy.
     println!("  worst error for p/rho <= 1e-8: {worst_cold:.3e}\n");
 }
 
 #[test]
 fn warm_gas_round_trips_to_roundoff_on_every_chart_depth() {
-    // the discriminator: at the pressures the failing runs actually carry, the
-    // conversion pair must be exact to roundoff. if it is, a run-level error is a
-    // DISCRETIZATION defect, not a conditioning limit of the energy variable.
+    // at the pressures a warm torus actually carries, the tau <-> E_hat conversion pair is exact
+    // to roundoff, which separates a DISCRETIZATION defect from a conditioning limit of the
+    // energy variable.
     for &r in &[3.0_f64, 4.0, 6.0, 10.0, 30.0] {
         for &pre in &[1.0e-1_f64, 1.0e-2, 1.0e-3] {
             for &vel in &[0.0_f64, 0.2, -0.4] {

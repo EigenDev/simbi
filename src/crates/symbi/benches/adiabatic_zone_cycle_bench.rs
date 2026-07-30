@@ -120,7 +120,7 @@ fn main() {
         // SYMBI_POLLUTE=1: run snapshot_stage (the ~2.6 MB full-cons copy the AMR level_stage runs
         // before flux every substage) UNTIMED before each timed phase call — same timed kernel, but
         // cold cache. if the timed flux jumps to the driver's ~40 ns/zc, the level_stage snapshot copy
-        // is the cache polluter inflating flux, confirming the non-destructive-godunov fix.
+        // is the cache polluter inflating flux.
         let pollute = std::env::var("SYMBI_POLLUTE").is_ok();
         for _ in 0..5 {
             call();

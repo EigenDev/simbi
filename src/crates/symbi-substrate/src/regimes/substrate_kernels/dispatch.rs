@@ -606,8 +606,8 @@ impl Default for ConstraintParams {
 }
 
 /// drop the causally disconnected cells from an anchor-failure mask: nothing inside the outer
-/// horizon reaches the exterior, and an excised cell's state is donor-filled padding the horizon
-/// fill overwrites, so neither says anything about whether the TIMESTEP was admissible. the
+/// horizon reaches the exterior, and an excised cell is frozen at the vacuum floor the horizon
+/// fill writes, so neither says anything about whether the TIMESTEP was admissible. the
 /// threshold is `max(r_+, r_exc)` on the kerr-schild radius — the same surface the
 /// source-admissibility CFL masks on, so the veto and the timestep bound agree cell for cell.
 pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
@@ -911,13 +911,12 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
 /// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
 /// post-c2p) at the halo-1 3x3 stencil and writes `cons.mom` at the center cell —
 /// hazard-free in place because the stencil is on the read-only primitives.
-/// horizon excision (cartesian kerr-schild 2d): overwrite every cell inside the
-/// excision sphere |x| < r_exc about the chart origin with a zero-gradient copy of
-/// its outward neighbor's primitives, then rebuild the conserved state with the
-/// cell's own metric. runs as onion_pass_count sweeps of the fill/writeback pair
-/// (values propagate one diagonal cell inward per sweep) + one conserved rebuild,
-/// dispatched over the sphere's index bbox. inside the horizon every characteristic
-/// points inward, so the filled cells are numerical padding the exterior never sees.
+/// horizon excision (cartesian kerr-schild 2d): freeze every cell inside the
+/// excision sphere |x| < r_exc about the chart origin at a cold vacuum floor, then
+/// rebuild the conserved state with the cell's own metric. runs as the store's fill
+/// pass count of the fill/writeback pair + one conserved rebuild, dispatched over
+/// the sphere's index bbox. inside the horizon every characteristic points inward,
+/// so the frozen cells are numerical padding the exterior never sees.
 pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
@@ -950,10 +949,9 @@ pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// ONE onion sweep (fill + writeback) — the decomposed loop drives sweeps itself
-/// with a halo exchange between them, so a donor chain crossing a tile cut
-/// advances one cell per sweep through the exchanged halo and the tiled sweep
-/// sequence stays bit-identical to the monolithic one.
+/// ONE fill pass (fill + writeback) — the decomposed loop drives the passes itself
+/// and exchanges halos around them, so both drivers run the pass count the store
+/// reports and the tiled sequence stays bit-identical to the monolithic one.
 pub fn dispatch_excise_sweep<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
@@ -999,9 +997,9 @@ pub fn dispatch_excise_finalize<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// the sweep count a full fill needs on this grid: the spin-widened equatorial
-/// extent over the smallest cell width. identical across tiles of one run (the
-/// spacing and radius are global), so the decomposed loop can take any tile's.
+/// the number of fill passes the excision region needs. identical across tiles of
+/// one run (the spacing and radius are global), so the decomposed loop can take
+/// any tile's.
 pub fn excise_pass_count_for<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     r_exc: f64,
@@ -1013,12 +1011,12 @@ where
     if r_exc <= 0.0 {
         return 0;
     }
-    // ONE sweep. the fill is POINTWISE: every excised cell is set to the vacuum floor from its own
-    // state, reading no neighbour, so the sweep is idempotent and repeating it reproduces the same
-    // field exactly (gated by `excision_freezes_the_vacuum_floor_and_is_idempotent`). the count
-    // was a requirement of the ONION fill this replaced, which propagated donor values one
-    // diagonal cell inward per sweep and so needed as many sweeps as the region is cells deep —
-    // and, on the decomposed driver, a halo exchange between each of them.
+    // ONE pass. the fill is POINTWISE: every excised cell is set to the vacuum floor from its own
+    // state, reading no neighbor, so the pass is idempotent and repeating it reproduces the same
+    // field exactly (gated by `excision_freezes_the_vacuum_floor_and_is_idempotent`). the count is
+    // a function of the store because a fill that propagated values inward would need as many
+    // passes as the region is cells deep, and a halo exchange between each of them on the
+    // decomposed driver.
     let _ = sim;
     1
 }
@@ -1124,7 +1122,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // the KERNEL-space geometry pair. the kernel's face map is `x_lo + i dx` on a uniform axis and
     // `x_lo * 10^(i dx)` on a log one, so `dx` must carry the axis map's own PARAMETER — the log
     // slope, not a linear width. passing the raw `geom.dx` fed the log map a linear width, which
-    // put every cell centre far outside the excision surface and silently masked nothing. every
+    // put every cell center far outside the excision surface and silently masked nothing. every
     // other dispatch converts through here; cartesian charts never saw it because the conversion
     // is the identity on a uniform axis.
     let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
@@ -2802,8 +2800,8 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 ///
 /// `weight` is the SSP stage weight `ac*dt` (the kernel's `dt` scalar). this is
 /// bit-for-bit `ac*dt` identical to the term the fused stage adds, so a sim run
-/// `plain-godunov + this pass` reproduces the fused run exactly (S2 proof, lifted
-/// to the evolve loop by `additive_source_matches_fused_trajectory`). the binding's
+/// `plain-godunov + this pass` reproduces the fused run exactly, stage by stage and
+/// over a whole trajectory. the binding's
 /// scalars (`gm`, `xm_k`, `g_ext_k`, ...) + the lazily-declared centroid scalars
 /// (`x_lo_k`, `dx_k`) cover every spec param — anything missing panics, never
 /// silent zero-fill.

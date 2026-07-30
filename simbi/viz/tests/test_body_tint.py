@@ -6,8 +6,6 @@
 # tests pin the region masking (only cells within `radius`, or a caller's custom
 # region, are tinted) and the one-artist-per-body contract.
 # =============================================================================
-import json
-
 import h5py
 import matplotlib
 

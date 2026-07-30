@@ -434,8 +434,8 @@ fn prescribed_binary_positions_stay_synced_across_levels() {
 
 // the ISOTHERMAL twin of the finest-owns-bodies gate: the iso kernel set's
 // body source / feedback / penalize run on a refined hierarchy, accretion is
-// recorded on the finest level, and the gravitating mass stays fixed — the
-// certificate for un-gating iso + refinement + bodies in the binding.
+// recorded on the finest level, and the gravitating mass stays fixed. iso,
+// refinement, and immersed bodies therefore compose in one run.
 #[test]
 fn central_bh_accretes_on_the_finest_level_iso() {
     use symbi::regimes::substrate::IsoSubstrateKernelSet;

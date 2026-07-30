@@ -7,16 +7,16 @@
 // stage covers `div(F) + spec source + integrator`, fully driven from the
 // kernel-set's declarative state.
 //
-// **what this validates** at the integration layer (NOT a kernel unit test):
-//   1. `AdiabaticSubstrateKernelSet::new(..).with_fused_source(b)` produces a
-//      kernel-set whose `godunov_euler` / `godunov_rk2` route to the AOT
-//      fused kernel — proven by exercising the full `evolve()` loop and
-//      checking that gas under `uniform_acceleration` actually accelerates;
-//   2. backwards-compat — a kernel-set with `fused_source = None` (the
-//      default) runs the identical-to-prior-behavior unfused path (the
-//      existing Sod tests, all 25+ passing, are the regression suite);
-//   3. the iso variant routes the same way (`IsoSubstrateKernelSet::
-//      with_fused_source(..)`).
+// what this validates at the integration layer (a routing check, not a kernel
+// unit test):
+//   - `AdiabaticSubstrateKernelSet::new(..).with_fused_source(b)` produces a
+//     kernel-set whose `godunov_euler` / `godunov_rk2` route to the AOT
+//     fused kernel — proven by exercising the full `evolve()` loop and
+//     checking that gas under `uniform_acceleration` actually accelerates;
+//   - a kernel-set with `fused_source = None` (the default) runs the unfused
+//     path, leaving the gas at rest;
+//   - the iso variant routes the same way (`IsoSubstrateKernelSet::
+//     with_fused_source(..)`).
 //
 // the physics claim is modest by design: the test only proves the binding
 // REACHES the kernel and the spec contribution actually applies (the gas
@@ -110,7 +110,7 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
     // outflow boundary + finite-volume diffusion drag the mean slightly):
     assert!(
         (mean_v - analytical_v).abs() < 0.5 * analytical_v.abs(),
-        "mean v = {mean_v} too far from analytical g_ext·t = {analytical_v} (Δ = {})",
+        "mean v = {mean_v} too far from analytical g_ext*t = {analytical_v} (delta = {})",
         (mean_v - analytical_v).abs(),
     );
     // density should stay close to 1 — the mom overlay alone (energy side
@@ -131,10 +131,10 @@ fn adiabatic_evolve_with_fused_uniform_accel_actually_accelerates_gas() {
 
 #[test]
 fn adiabatic_evolve_without_binding_stays_at_rest() {
-    // **negative control + backwards-compat**: the SAME setup but with NO
-    // `with_fused_source` binding. evolve() runs the unfused path; gas stays
-    // at rest (mean v = 0 to floating-point noise). proves the binding is
-    // what causes the acceleration.
+    // the negative control: the SAME setup but with NO `with_fused_source`
+    // binding. evolve() runs the unfused path; gas stays at rest (mean v = 0
+    // to floating-point noise). proves the binding is what causes the
+    // acceleration.
     let n = 32usize;
     let dx = 1.0 / n as f64;
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
@@ -151,9 +151,8 @@ fn adiabatic_evolve_without_binding_stays_at_rest() {
         })
         .build();
 
-    // no `with_fused_source` — the kernel-set has `fused_source: None`,
-    // godunov_euler routes through the UNFUSED `dispatch_godunov`. this is
-    // the prior (pre-Phase-4b) behavior, preserved by the routing default.
+    // no `with_fused_source` — the kernel-set has `fused_source: None`, so
+    // godunov_euler routes through the UNFUSED `dispatch_godunov`.
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     evolve(&mut sim, &sub, 0.05).expect("unfused evolve failed");

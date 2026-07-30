@@ -36,8 +36,8 @@ use crate::passes::scalarize::{LoweredFn, ScalarStmt};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PressureReport {
     /// peak number of simultaneously-live `Let` / `LetMut` / Scope-result
-    /// bindings across the function body. the design's invariant
-    /// `#[kernel(peak_pressure ≤ N)]` asserts `peak ≤ N`.
+    /// bindings across the function body. `#[kernel(peak_pressure <= N)]`
+    /// asserts `peak <= N`.
     pub peak: usize,
     /// the scope path where the peak was observed. empty = function root
     /// (top-level body). a single entry like `["phase"]` = inside the `phase`
@@ -122,7 +122,7 @@ fn walk(body: &[ScalarStmt], live_in: usize, state: &mut PressureState) {
                 body: scope_body,
                 ..
             } => {
-                // *** the load-bearing case for the design. ***
+                // *** the load-bearing case: a scope closes its own bindings. ***
                 //
                 // inside the scope BODY, peak = max(scope_internal_peak)
                 //   — the body inherits `live` (outer bindings still visible)
@@ -234,8 +234,8 @@ mod tests {
         assert!(r.at_scope_path.is_empty());
     }
 
-    /// N flat lets in a row: peak = N. THIS IS THE FLAT-KERNEL PATHOLOGY
-    /// the design exists to fix.
+    /// N flat lets in a row: peak = N. this is the flat-kernel pathology
+    /// scoping exists to fix.
     #[test]
     fn flat_lets_count_linearly() {
         let body: Vec<ScalarStmt> = (0..10)
@@ -267,7 +267,7 @@ mod tests {
     }
 
     /// **the scope law: `peak(scope(K)) = peak(K)`**. the internals die at the
-    /// brace — only the result (`+1`) leaks. THIS is the design property.
+    /// brace — only the result (`+1`) leaks.
     #[test]
     fn scope_drops_internals_on_close() {
         // outer: { scope phase { 5 lets, result }; 0 more outer lets }
@@ -307,7 +307,7 @@ mod tests {
         ];
         let r = peak_pressure(&body);
         // v alive throughout, k1.result alive across k2, k2's body adds 3
-        // → 1 + 1 + 3 = 5
+        // -> 1 + 1 + 3 = 5
         assert_eq!(r.peak, 5);
         assert_eq!(r.at_scope_path, vec!["k2".to_string()]);
     }
@@ -348,9 +348,8 @@ mod tests {
         );
     }
 
-    /// the design pathology: **flat = 200 lets peaks at 200, scoped = same
-    /// physics peaks at 30**. this is the wave_speed_map projection in
-    /// miniature.
+    /// **flat = 200 lets peaks at 200; the same physics phrased in scopes peaks
+    /// at the phase size**.
     #[test]
     fn flat_200_temps_peaks_at_200() {
         let body: Vec<ScalarStmt> = (0..200)
@@ -361,7 +360,7 @@ mod tests {
     }
 
     /// SAME computation phrased as 4 scopes of 50 lets each peaks at 50
-    /// internal + 4 surviving phase results = 52 → still under 60. THE WIN.
+    /// internal + 4 surviving phase results = 52 -> still under 60. THE WIN.
     #[test]
     fn scoped_200_temps_peaks_at_phase_size() {
         let phase = |prefix: &str| -> Vec<ScalarStmt> {

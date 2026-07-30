@@ -13,7 +13,7 @@
 // remaining keys over that mode. no crossterm raw mode is enabled anywhere.
 //
 // run:  cargo run -p symbi-display --example dashboard_skeleton
-// keys: tab / shift-tab / arrows switch · space pause · s step · q/esc quit
+// keys: tab / shift-tab / arrows switch * space pause * s step * q/esc quit
 // =============================================================================
 
 use std::collections::VecDeque;

@@ -383,11 +383,6 @@ impl GvKernel {
         )
     }
 
-    /// shorthand for `noop(LaunchGrade::from_domain(d))`.
-    pub fn noop_for_domain<const R: usize>(d: &Domain<R>) -> (GvKernel, Writes) {
-        Self::noop(LaunchGrade::from_domain(d))
-    }
-
     /// builder-style: attach a smem tile spec. validates that every tiled key
     /// is present in this kernel's `field_inputs` manifest — fields not in the
     /// manifest can't be tiled because the dispatch has no way to bind a
@@ -473,16 +468,16 @@ fn collect_support_params(e: &crate::support::ParamExpr, f: &mut impl FnMut(&str
 /// over the same grade, returning the merged kernel + the concatenated writes
 /// manifest. fails if any of the three structural preconditions are violated:
 ///
-/// 1. grade equality: both `index_space` must match (and neither be
-///    `Untagged`). fusing different domains would launch at least one half
-///    over the wrong index set.
+/// - grade equality: both `index_space` must match (and neither be
+///   `Untagged`). fusing different domains would launch at least one half
+///   over the wrong index set.
 ///
-/// 2. disjoint writes: no runtime_path appears in both writes lists. shared
-///    writes would race.
+/// - disjoint writes: no runtime_path appears in both writes lists. shared
+///   writes would race.
 ///
-/// 3. no inter-dependency: for each runtime_path one kernel writes, the
-///    other must not read it. (in-place reads from one's own writes do not
-///    count — that's intra-kernel.) inter-dep violates the sequential
+/// - no inter-dependency: for each runtime_path one kernel writes, the
+///   other must not read it. (in-place reads from one's own writes do not
+///   count — that's intra-kernel.) inter-dep violates the sequential
 ///    semantics: in the two-launch baseline the second launch sees the first
 ///    launch's updates globally; in a fused launch a stencil read in the
 ///    second body would see the first body's writes only at the SAME thread
@@ -531,7 +526,7 @@ pub fn try_fuse(
         });
     }
 
-    // law: no inter-dependency. one's write ∩ the other's read set — a TRUE pipeline hazard
+    // no inter-dependency: a field one kernel writes and the other reads is a TRUE pipeline hazard
     // where the reader would need the writer's fresh OUTPUT. EXCEPTION: a field the writer holds
     // IN-PLACE (it reads AND writes it) is a shared PRE-STATE — both kernels
     // read the same old value as a leaf, and the fused dataflow writes the new value as a root
@@ -756,7 +751,7 @@ impl Gv {
     /// is the direct cell read (`Gv::field`); nonzero builds the integer coord arithmetic
     /// (`_coord_axis + offset`) + a `LoadAt`, registering the field AND the coord axes in
     /// the manifest. codegen-only — a stencil is not a pointwise `Scalar` op, so this is a
-    /// Gv method (the host runtime reads neighbours from the
+    /// Gv method (the host runtime reads neighbors from the
     /// Field buffer; only the traced kernel needs the explicit `load_at`).
     pub fn field_shifted(
         key: &str,
@@ -1435,35 +1430,35 @@ mod fusion_laws {
         (inputs, scalars, writes)
     }
 
-    // law 1: identity. fusing with `noop(g)` is a no-op on the manifest sets.
+    // identity. fusing with `noop(g)` is a no-op on the manifest sets.
     #[test]
     fn law_identity_left_and_right() {
         let g = interior_grade();
         let (k, w) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let baseline = manifest_sets(&k, &w);
 
-        // left identity: noop(g) ∘ k == k
+        // left identity: fuse(noop(g), k) == k
         let (noop_k, noop_w) = GvKernel::noop(g.clone());
         let (left, left_w) =
-            try_fuse(noop_k, noop_w, k.clone(), w.clone()).expect("noop ∘ k must succeed");
+            try_fuse(noop_k, noop_w, k.clone(), w.clone()).expect("fuse(noop, k) must succeed");
         assert_eq!(
             baseline,
             manifest_sets(&left, &left_w),
-            "left-identity violated: noop(g) ∘ k changed the manifest"
+            "left-identity violated: fuse(noop(g), k) changed the manifest"
         );
 
-        // right identity: k ∘ noop(g) == k
+        // right identity: fuse(k, noop(g)) == k
         let (noop_k2, noop_w2) = GvKernel::noop(g);
         let (right, right_w) =
-            try_fuse(k.clone(), w.clone(), noop_k2, noop_w2).expect("k ∘ noop must succeed");
+            try_fuse(k.clone(), w.clone(), noop_k2, noop_w2).expect("fuse(k, noop) must succeed");
         assert_eq!(
             baseline,
             manifest_sets(&right, &right_w),
-            "right-identity violated: k ∘ noop(g) changed the manifest"
+            "right-identity violated: fuse(k, noop(g)) changed the manifest"
         );
     }
 
-    // law 2: associativity. fuse(fuse(a,b),c) and fuse(a,fuse(b,c)) produce
+    // associativity. fuse(fuse(a,b),c) and fuse(a,fuse(b,c)) produce
     // the same manifest sets. nodes may differ because of CSE order, but the
     // observable ABI is the same.
     #[test]
@@ -1473,11 +1468,11 @@ mod fusion_laws {
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g.clone());
         let (c, cw) = doubler("c_in", "p.c_in", "c_out", "p.c_out", g);
 
-        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("a ∘ b");
-        let (ab_c, ab_cw) = try_fuse(ab, abw, c.clone(), cw.clone()).expect("(a ∘ b) ∘ c");
+        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("fuse(a, b)");
+        let (ab_c, ab_cw) = try_fuse(ab, abw, c.clone(), cw.clone()).expect("fuse(fuse(a, b), c)");
 
-        let (bc, bcw) = try_fuse(b, bw, c, cw).expect("b ∘ c");
-        let (a_bc, a_bcw) = try_fuse(a, aw, bc, bcw).expect("a ∘ (b ∘ c)");
+        let (bc, bcw) = try_fuse(b, bw, c, cw).expect("fuse(b, c)");
+        let (a_bc, a_bcw) = try_fuse(a, aw, bc, bcw).expect("fuse(a, fuse(b, c))");
 
         assert_eq!(
             manifest_sets(&ab_c, &ab_cw),
@@ -1486,7 +1481,7 @@ mod fusion_laws {
         );
     }
 
-    // law 3: commutativity-mod-disjoint. when writes are disjoint and there is
+    // commutativity-mod-disjoint. when writes are disjoint and there is
     // no inter-dep, fuse(a,b) and fuse(b,a) have the same manifest sets.
     // first-seen ordering of the input list differs, but the SET is invariant.
     #[test]
@@ -1495,8 +1490,8 @@ mod fusion_laws {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
 
-        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("a ∘ b");
-        let (ba, baw) = try_fuse(b, bw, a, aw).expect("b ∘ a");
+        let (ab, abw) = try_fuse(a.clone(), aw.clone(), b.clone(), bw.clone()).expect("fuse(a, b)");
+        let (ba, baw) = try_fuse(b, bw, a, aw).expect("fuse(b, a)");
 
         assert_eq!(
             manifest_sets(&ab, &abw),
@@ -1505,7 +1500,7 @@ mod fusion_laws {
         );
     }
 
-    // law 4: equivalence. fusing a + b preserves a's write roots verbatim
+    // equivalence. fusing a + b preserves a's write roots verbatim
     // (the target graph started as a clone of a's graph), and produces valid
     // node ids in the fused graph for b's writes (so b's roots survived the
     // splice and are addressable). this is the structural surrogate for "the
@@ -1517,7 +1512,7 @@ mod fusion_laws {
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
         let a_roots: Vec<NodeId> = aw.iter().map(|(_, _, n)| *n).collect();
 
-        let (fused, fused_w) = try_fuse(a, aw, b, bw).expect("a ∘ b");
+        let (fused, fused_w) = try_fuse(a, aw, b, bw).expect("fuse(a, b)");
 
         // a's writes preserved verbatim at the head of the writes manifest.
         for (i, &a_root) in a_roots.iter().enumerate() {
@@ -1539,7 +1534,7 @@ mod fusion_laws {
         }
     }
 
-    // law 5: grade rejection. two kernels of different grades cannot fuse.
+    // grade rejection. two kernels of different grades cannot fuse.
     #[test]
     fn law_grade_rejection() {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", interior_grade());
@@ -1551,7 +1546,7 @@ mod fusion_laws {
         }
     }
 
-    // law 5b: untagged is not fusable, even with itself. tagging is opt-in
+    // untagged is not fusable, even with itself. tagging is opt-in
     // — the algebra refuses to assume a default.
     #[test]
     fn law_untagged_rejection() {
@@ -1574,7 +1569,7 @@ mod fusion_laws {
         }
     }
 
-    // law 6: write-conflict rejection. two kernels writing the same runtime
+    // write-conflict rejection. two kernels writing the same runtime
     // path race in a fused launch. reject syntactically.
     #[test]
     fn law_write_conflict_rejection() {
@@ -1590,9 +1585,9 @@ mod fusion_laws {
         }
     }
 
-    // law 7: inter-dep rejection. a writes X, b reads X — fusing would let
+    // inter-dep rejection. a writes X, b reads X — fusing would let
     // b's stencil reads observe a's just-written values at non-local
-    // neighbour indices without a grid-wide barrier. reject.
+    // neighbor indices without a grid-wide barrier. reject.
     #[test]
     fn law_inter_dep_rejection_forward() {
         let g = interior_grade();
@@ -1609,7 +1604,7 @@ mod fusion_laws {
         }
     }
 
-    // law 7b: inter-dep rejection is symmetric. b writes Y, a reads Y — same
+    // inter-dep rejection is symmetric. b writes Y, a reads Y — same
     // hazard with arguments reversed.
     #[test]
     fn law_inter_dep_rejection_reverse() {
@@ -1627,7 +1622,7 @@ mod fusion_laws {
         }
     }
 
-    // law 8: grade derives from Domain<R>. two grades built from the same
+    // grade derives from Domain<R>. two grades built from the same
     // Domain (same R, same Space[s]) compare equal even when the Domain
     // values were constructed by separate calls — the algebra is STRUCTURAL,
     // not identity-based. (DomainId differs across constructions.)
@@ -1799,7 +1794,7 @@ mod fusion_laws {
         let (a, aw) = doubler("a_in", "p.a_in", "a_out", "p.a_out", g.clone());
         let (b, bw) = doubler("b_in", "p.b_in", "b_out", "p.b_out", g);
         let (fused, _w) = try_fuse(a, aw, b, bw).expect("legacy untiled fusion must still work");
-        assert!(fused.tile_spec.is_none(), "untiled+untiled → untiled");
+        assert!(fused.tile_spec.is_none(), "untiled+untiled -> untiled");
     }
 }
 
@@ -1819,11 +1814,11 @@ mod fusion_laws {
 //     under graph.iter() is preserved (nested scopes appear as inner
 //     Op::Scope nodes pushed BEFORE the outer one).
 //
-// these tests pin the new contract.
+// these tests pin that contract.
 // =============================================================================
 
 #[cfg(test)]
-mod scope_step_3b {
+mod scope_op_contract {
     use super::*;
     use crate::graph::Op;
     use symbi_algebra::Numeric;
@@ -1857,7 +1852,7 @@ mod scope_step_3b {
         assert_eq!(
             scope_graph.len(),
             inline_graph.len() + 1,
-            "step 3b: scope-form must add exactly one Op::Scope node over inline-form"
+            "scope-form must add exactly one Op::Scope node over inline-form"
         );
         // root of scope-form is the Op::Scope (last pushed); root of
         // inline-form is the trailing Mul.

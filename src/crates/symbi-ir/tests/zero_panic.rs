@@ -1,11 +1,10 @@
 // =============================================================================
-// zero_panic.rs — CI gate (task #5).
+// zero_panic.rs
 //
 // the algebraic / primitives core files MUST contain NO `panic!`, `.unwrap()`, or
 // `.expect(` in production code. admitted panics live only at I/O / driver boundaries
 // (config parse, NVRTC compile, HDF5 write) — those happen in other files. these are the
-// substrate constitution and they are zero-panic by invariant. (the former `lowering.rs`
-// member was deleted with the dead lowering taxonomy, 2026-06-16.)
+// substrate constitution and they are zero-panic by invariant.
 //
 // the files themselves carry `#![deny(clippy::panic, clippy::unwrap_used,
 // clippy::expect_used)]`, so `cargo clippy` will catch violations during
@@ -18,9 +17,6 @@
 fn zero_panic_in_constitution_files() {
     let files = [
         ("src/algebra.rs", "algebra"),
-        // src/lowering.rs removed — the dead lowering taxonomy was deleted (2026-06-16,
-        // adversarial-review CUDA handoff); the primary graph::Op + scalarize path is the
-        // sole emitter now.
         ("src/primitives.rs", "primitives"),
     ];
 

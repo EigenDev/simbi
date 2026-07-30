@@ -6,10 +6,10 @@
 // is FUSED (one Cranelift-JIT'd godunov that folds the user source AND the body wrap) or run as the
 // TWO-PASS (plain AOT godunov -> `apply_runtime_source` -> `body_source`, three separate CONS sweeps).
 //
-// this is the generality gate for `resolve the RHS once`: it proves the body is not a special case —
-// geometric source, active user source, and immersed body all ride the single update sweep and match
-// the standalone chain to the bit. the existing `jit_fused_equals_two_pass` covers the source-only
-// case; this adds the body fold + the `body_source`-skip that the fused path relies on.
+// resolving the RHS once must generalize over every contribution: geometric source, active user
+// source, and immersed body all ride the single update sweep and match the standalone chain to the
+// bit. `jit_fused_equals_two_pass` covers the source-only case; this adds the body fold + the
+// `body_source`-skip the fused path relies on.
 //
 // run: cargo test -p symbi --test jit_fused_body_equals_two_pass
 // =============================================================================
@@ -39,7 +39,7 @@ fn assert_cons_bit_identical<const D: usize>(
     }
 }
 
-// a central accreting mass at the domain centre: gravity (softened) + a Bondi-Hoyle sink, so BOTH
+// a central accreting mass at the domain center: gravity (softened) + a Bondi-Hoyle sink, so BOTH
 // body operators — the additive gravity force and the multiplicative accretion drain — are live.
 fn central_black_hole() -> BodyCollection<f64, 2> {
     BodyCollection::new().add(Body::black_hole(

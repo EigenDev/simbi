@@ -8,7 +8,7 @@
 # regimes (isothermal's optional pressure, curvilinear/relativistic velocity
 # dof) are left to a lower-bound check so a legitimate config is never rejected.
 #
-# the reproduced defect: a 2d cartesian newtonian config that yields the mhd
+# the defect they pin: a 2d cartesian newtonian config that yields the mhd
 # 5-tuple (rho, vx, vy, vz, p) where the hydro 4-tuple (rho, vx, vy, p) is expected —
 # the reader takes p from the vz slot and drops the real pressure, so the gas
 # runs pressureless (cold, wildly supersonic) with no error.

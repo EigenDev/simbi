@@ -15,8 +15,7 @@
 // `ScalarRef` mints each CLOSED-vocabulary wire name in EXACTLY one place
 // (`name()`), and `parse()` recovers the typed ref. a dispatch resolver parses
 // once at manifest load (off the per-dispatch hot path) and then matches
-// EXHAUSTIVELY — adding a scalar is a compile error until every match covers it,
-// and the name can no longer be wrong.
+// EXHAUSTIVELY — adding a scalar is a compile error until every match covers it.
 //
 // the vocabulary is NOT total over every kernel scalar: spec-source kernels
 // declare arbitrary user-named knobs (`gm`, `g_ext_0`, `xm_1`, ...) that are not
@@ -240,10 +239,11 @@ impl ScalarRef {
 
         // user-source knob `p{i}` (tried last — a bare `p` followed by digits, NOT
         // a prefix, so it does not shadow `pre`/`pos` which never reach here).
-        if let Some(i) = name.strip_prefix('p') {
-            if !i.is_empty() && i.bytes().all(|b| b.is_ascii_digit()) {
-                return i.parse().ok().map(ScalarRef::UserParam);
-            }
+        if let Some(i) = name.strip_prefix('p')
+            && !i.is_empty()
+            && i.bytes().all(|b| b.is_ascii_digit())
+        {
+            return i.parse().ok().map(ScalarRef::UserParam);
         }
 
         None

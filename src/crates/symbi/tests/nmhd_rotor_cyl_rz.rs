@@ -41,7 +41,7 @@ const R_LO: f64 = 1.0;
 const R_HI: f64 = 2.0;
 const Z_LO: f64 = 0.0;
 const Z_HI: f64 = 1.0;
-// rotor centre + radii (meridional-plane spin), in physical (r, z) coordinates.
+// rotor center + radii (meridional-plane spin), in physical (r, z) coordinates.
 const RC: f64 = 1.5;
 const ZC: f64 = 0.5;
 const R0: f64 = 0.15;

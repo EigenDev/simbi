@@ -42,9 +42,8 @@ import numpy as np
 # a dt this far below the light-crossing step is not a cost, it is a breakdown.
 # the separation is deliberately wide: healthy relativistic runs with a stiff source
 # term sit within a few orders of dt_light, while an actual collapse runs to 1e-15 of
-# it. the bound sits between those populations rather than encoding today's
-# efficiency, and it needs no recalibration when the resolution, domain or cfl
-# change, because dt_light scales with all three.
+# it. the bound sits between those two populations, and it needs no recalibration
+# when the resolution, domain or cfl change, because dt_light scales with all three.
 DEFAULT_MIN_DT_FRACTION = 1.0e-8
 
 
@@ -248,5 +247,5 @@ def assert_field_survived(health: RunHealth, *, label: str = "") -> None:
     assert health.bsq is not None, f"{tag}the run carries no magnetic field at all"
     assert health.bsq.max() > 0.0, (
         f"{tag}the evolved state carries NO magnetic field; every magnetized "
-        "assertion below degenerates to its hydrodynamic case and tests nothing"
+        "assertion degenerates to its hydrodynamic case and tests nothing"
     )

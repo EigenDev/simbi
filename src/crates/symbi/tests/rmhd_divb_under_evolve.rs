@@ -1,7 +1,7 @@
 // =============================================================================
 // rmhd_divb_under_evolve.rs
 //
-// the FULL-EVOLVE divergence-cleaning gate (T3). rmhd_ct_curl_divb (in
+// the FULL-EVOLVE divergence-cleaning gate. rmhd_ct_curl_divb (in
 // symbi-discretize) covers the CT operator in ISOLATION — one step, one EMF.
 // this test runs the entire production RMHD substrate (c2p -> ghost_fill -> flux
 // per dir -> cfl -> snapshot -> godunov_euler -> post_godunov[CT] -> rk2) for

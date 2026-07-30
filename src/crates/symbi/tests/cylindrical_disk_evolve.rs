@@ -13,15 +13,15 @@
 // instances. this is the disk-evolve hydro the immersed bodies ride.
 //
 // three checks, increasing in what they exercise:
-//   1. the r-phi GEOMETRIC SOURCE (no body): a uniform swirl develops the 1/r
-//      centrifugal radial velocity — proves the godunov's curvature source is active
-//      on the r-phi plane (mirrors the r-z swirl test, but phi is now gridded).
-//   2. a KEPLERIAN DISK HOLDS around a central point mass (the kepler core): with
-//      v_phi balanced against the softened gravity, the disk stays radially steady
-//      (v_r small, rho/v_phi bounded) over a fraction of an orbit.
-//   3. an ORBITING OVERDENSITY advects in phi at the local Omega(r) without radial
-//      drift — exercises the phi-flux + area-weighted phi-divergence (real azimuthal
-//      transport, the thing a disk does).
+//   - the r-phi GEOMETRIC SOURCE (no body): a uniform swirl develops the 1/r
+//     centrifugal radial velocity — proves the godunov's curvature source is active
+//     on the r-phi plane (the r-z swirl test is the same check with phi ungridded).
+//   - a KEPLERIAN DISK HOLDS around a central point mass (the kepler core): with
+//     v_phi balanced against the softened gravity, the disk stays radially steady
+//     (v_r small, rho/v_phi bounded) over a fraction of an orbit.
+//   - an ORBITING OVERDENSITY advects in phi at the local Omega(r) without radial
+//     drift — exercises the phi-flux + area-weighted phi-divergence (real azimuthal
+//     transport, the thing a disk does).
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -126,14 +126,14 @@ fn rphi_centrifugal_source_holds_1_over_r() {
         .fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
     assert!(
         (hi - lo) / mean < 0.15,
-        "v_r·r not radius-constant (1/r centrifugal signature): spread {:.1}% (lo={lo:.4e} hi={hi:.4e})",
+        "v_r*r not radius-constant (1/r centrifugal signature): spread {:.1}% (lo={lo:.4e} hi={hi:.4e})",
         100.0 * (hi - lo) / mean
     );
     // magnitude v_r\cdot r ~ v0^2\cdot t.
     let expected = v0 * v0 * t_final;
     assert!(
         mean > 0.5 * expected && mean < 1.4 * expected,
-        "centrifugal magnitude off: v_r·r mean = {mean:.4e}, expected ~ v0²·t = {expected:.4e}"
+        "centrifugal magnitude off: v_r*r mean = {mean:.4e}, expected ~ v0^2*t = {expected:.4e}"
     );
 }
 
@@ -242,7 +242,7 @@ fn orbiting_overdensity_advects_in_phi() {
         let r = r_lo + (c[0] as f64 + 0.5) * dr;
         let phi = (c[1] as f64 + 0.5) * dphi;
         let vphi = v_kepler(r, mass, soft);
-        // gaussian overdensity centred at (r_blob, phi_blob); base density 1.
+        // gaussian overdensity centered at (r_blob, phi_blob); base density 1.
         let dr_b = (r - r_blob) / sig_r;
         let dphi_b = (phi - phi_blob) / sig_phi;
         let den = 1.0 + 1.5 * (-0.5 * (dr_b * dr_b + dphi_b * dphi_b)).exp();

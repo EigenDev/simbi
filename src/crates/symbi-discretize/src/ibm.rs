@@ -11,9 +11,9 @@
 // property a proof establishes on the f64/Dual carrier is a property of the traced kernel too.
 //
 // the physics:
-//   - softened Newtonian gravity  g = -M r / (r^2 + eps^2)^{3/2}, the negative gradient of the
+//   - softened newtonian gravity  g = -M r / (r^2 + eps^2)^{3/2}, the negative gradient of the
 //     softened potential  phi = -M / sqrt(r^2 + eps^2). the softening eps regularizes the bare
-//     1/r^2 singularity, making g bounded and Lipschitz.
+//     1/r^2 singularity, making g bounded and lipschitz.
 //   - the well-posed accretion drain: an exact-exponential relaxation  U -> U exp(-rate dt), with
 //     rate = chi min(sink, cs/dx) and the mollified sink mask  chi = (1 - tanh((r - r_mask)/w))/2.
 //     f = exp(-rate dt) in (0, 1] for any dt, so the drain is positivity-preserving and
@@ -31,7 +31,7 @@ fn cube<S: Scalar>(a: S) -> S {
     a * a * a
 }
 
-/// softened Newtonian gravity at a cell whose CARTESIAN displacement from the body is `rvec`:
+/// softened newtonian gravity at a cell whose CARTESIAN displacement from the body is `rvec`:
 /// `g = -mass * rvec / r_eff^3`, `r_eff = sqrt(|rvec|^2 + soft^2)`. this is exactly `-grad` of
 /// [`softened_potential`] (the conservative-field proof differentiates that potential and recovers
 /// this), so the immersed-body force does no spurious work around a closed loop. the ops match the

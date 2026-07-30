@@ -400,7 +400,7 @@ class SphericalBondiTest(SimbiProblem):
     # =========================================================================
     @property
     def bondi_radius(self) -> float:
-        """bondi radius: R_B = GM/cs²"""
+        """bondi radius: R_B = GM/cs^2"""
         return self.central_mass / self.ambient_sound_speed**2
 
     @property
@@ -414,7 +414,7 @@ class SphericalBondiTest(SimbiProblem):
         return 1.0
 
     def accretion_coefficient(self) -> float:
-        """accretion coefficient λ based on adiabatic index."""
+        """accretion coefficient lambda based on adiabatic index."""
         if self.adiabatic_index == 1.0:
             return 1.12
         elif self.adiabatic_index == 5.0 / 3.0:
@@ -429,7 +429,7 @@ class SphericalBondiTest(SimbiProblem):
 
     @property
     def bondi_accretion_rate(self) -> float:
-        """classical bondi accretion rate: λ * 4π * ρ_∞ * R_B² * cs"""
+        """classical bondi accretion rate: lambda * 4 pi * rho_inf * R_B^2 * cs"""
         lambda_bondi = self.accretion_coefficient()
         return (
             lambda_bondi

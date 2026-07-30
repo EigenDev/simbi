@@ -1,14 +1,14 @@
 // =============================================================================
 // ghost_neumann_robin.rs
 //
-// numeric checks for the prescribed-gradient (Neumann) and mixed (Robin) lattice-map ghost
+// numeric checks for the prescribed-gradient (neumann) and mixed (robin) lattice-map ghost
 // fills. both reuse the outflow EDGE source coord (map_type = 3 -> arg = the boundary-adjacent
 // interior cell) and apply the `symbi_hydro::boundary_term` lift per primitive variable, using
 // the outward edge->ghost centroid separation `dist` computed in-kernel from the geometry.
 //
 // setup: a 1D grid, lo-side ghosts filled from the edge cell at index `EDGE`. the interior state
 // is uniform, so the edge value is known; each ghost at index i sits `|i - EDGE| * dx` inward-
-// distance out, and the fill must reproduce u_edge + q*dist (Neumann) / the Robin solve.
+// distance out, and the fill must reproduce u_edge + q*dist (neumann) / the robin solve.
 // =============================================================================
 
 mod harness;
@@ -98,7 +98,7 @@ fn neumann_ghost_extrapolates_the_prescribed_gradient() {
 
 #[test]
 fn robin_ghost_solves_the_mixed_relation() {
-    // rho: a=2, b=0 -> Dirichlet U_face = c/a. vel: a=0, b=1 -> Neumann dU/dn = c/b. pre: general.
+    // rho: a=2, b=0 -> dirichlet U_face = c/a. vel: a=0, b=1 -> neumann dU/dn = c/b. pre: general.
     let out = KernelRun::new(robin_ghost_fill_gv(1, 1, true, &[Spacing::Uniform]))
         .grid([NX])
         .compute_window([0], [2])
@@ -122,14 +122,14 @@ fn robin_ghost_solves_the_mixed_relation() {
 
     for i in 0..2 {
         let h = dist(i);
-        // rho: Dirichlet -> U_face = (u_edge + U_ghost)/2 = c/a = 3.
+        // rho: dirichlet -> U_face = (u_edge + U_ghost)/2 = c/a = 3.
         let rho_g = out.get([i], "prim_rho");
         close(
             (RHO + rho_g) / 2.0,
             3.0,
             &format!("robin->dirichlet rho face {i}"),
         );
-        // vel: Neumann -> (U_ghost - u_edge)/h = c/b = 0.4.
+        // vel: neumann -> (U_ghost - u_edge)/h = c/b = 0.4.
         let vel_g = out.get([i], "prim_v0");
         close(
             (vel_g - VEL) / h,

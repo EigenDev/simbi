@@ -59,8 +59,8 @@ const F_MIN: f64 = 0.1;
 const SIGMA_MAX: f64 = 4.0;
 const DEN_MIN: f64 = 0.05;
 
-/// the family indices, in the order `constraint_projection_gv` declares them. the oracle asserts
-/// against these, so a reordering in the kernel that silently remapped the ledger would fail here.
+/// the family indices, in the order `constraint_projection_gv` declares them. the checks below
+/// assert against these, so a reordering in the kernel that silently remapped the ledger fails.
 const IDX_ADMISSIBILITY: f64 = 0.0;
 const IDX_TEMPERATURE: f64 = 1.0;
 const IDX_MAGNETIZATION: f64 = 2.0;
@@ -261,7 +261,7 @@ fn the_traced_projection_matches_the_host_family_in_magnitude_and_attribution() 
 
 #[test]
 fn each_case_binds_the_member_it_was_built_to_bind() {
-    // PREMISE: without this the oracle above could pass with every case slack — comparing two
+    // PREMISE: without this, the traced-vs-host comparison could pass with every case slack — two
     // implementations that both correctly do nothing. it also pins the family's DECLARATION ORDER,
     // so a reordering in the kernel that silently remapped the ledger's keys fails here.
     let cases = cases();

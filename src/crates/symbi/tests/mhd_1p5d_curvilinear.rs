@@ -12,8 +12,8 @@
 //   - the out-of-plane toroidal B_phi rides the induction-flux divergence (the bcell predictor)
 //     and must actually EVOLVE as the radial pressure bump drives a radial flow,
 //   - the gas (rho, v, p) stays physical (positive, finite) on the curvilinear shell.
-// this gates the new-chart kernels' wiring + stability; it is not an exact-solution convergence
-// test (no closed-form curvilinear MHD reference).
+// this gates the curvilinear-chart kernels' wiring + stability. it asserts structure and
+// physicality, the only checkable properties absent a closed-form curvilinear MHD reference.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;

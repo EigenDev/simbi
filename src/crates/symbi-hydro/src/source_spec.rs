@@ -2,20 +2,20 @@
 // source_spec.rs
 //
 // `SourceSpec` — additive RHS contributions as DATA. mirrors `LawSpec` but for
-// the `+ Σ S(U)` half of the conservation form `∂U/∂t = -div(F(U)) + Σ S(U)`.
+// the `+ sum S(U)` half of the conservation form `partial_t U = -div(F(U)) + sum S(U)`.
 //
 // **the discipline (5 strictness clauses):**
-//   1. carrier-uniform — every source MUST be an `algebra::Op` graph. no host
+//   - carrier-uniform — every source MUST be an `algebra::Op` graph. no host
 //      escape, no native `if`. the totality lint gates this.
-//   2. typed `target_field` — a source can only contribute to a field the
+//   - typed `target_field` — a source can only contribute to a field the
 //      parent regime declares in `RegimeSpec.fields`. the runtime cross-checks.
-//   3. branchless conditionals — region-localized sources use `S::select` /
+//   - branchless conditionals — region-localized sources use `S::select` /
 //      `S::branch` on a carrier-generic mask. the type system compile-enforces
 //      this because `Numeric` and `OrderedNumeric` are distinct bounds.
-//   4. provenance preserved through composition — each `SourceSpec` carries a
+//   - provenance preserved through composition — each `SourceSpec` carries a
 //      `NodeAnnotation`; the homomorphism (A7) requires every target preserve
 //      it under `RenderPolicy::Audit`.
-//   5. geometric sources are DERIVED from the metric — `Spherical` produces its
+//   - geometric sources are DERIVED from the metric — `Spherical` produces its
 //      momentum source automatically from its scale factors / Christoffels;
 //      a regime that "forgot" its centrifugal term cannot exist.
 //
@@ -121,19 +121,19 @@ pub mod source_params {
 // source contribution share registers, share CSE, share one launch.
 //
 // the splice mechanism:
-//   1. caller has an active graph `dest` (in the godunov case, the Gv trace's
+//   - caller has an active graph `dest` (in the godunov case, the Gv trace's
 //      graph) and a map of `param_name -> NodeId` for the leaves they want
 //      the source to read FROM (e.g., `"rho" -> cons.den/W` for relativistic,
 //      `"vel_0" -> primitive vel etc.).
-//   2. caller invokes `splice_built_source_into(&built, dest, name_to_node)`.
-//   3. the function walks `built.graph` topologically:
+//   - caller invokes `splice_built_source_into(&built, dest, name_to_node)`.
+//   - the function walks `built.graph` topologically:
 //        - Param("name") leaves are REPLACED by `name_to_node["name"]`
 //          (the caller's pre-existing node);
 //        - Const leaves are re-added to `dest` (fresh NodeId);
 //        - every other Op node is re-created in `dest` via the standard
 //          builder methods, with operand NodeIds translated through the
 //          built-node-id -> dest-node-id map.
-//   4. returns `Vec<NodeId>` — the dest NodeIds corresponding to
+//   - returns `Vec<NodeId>` — the dest NodeIds corresponding to
 //      `built.outputs[k]`. callers wrap these as `Gv::of(node)` when working
 //      in a Gv trace.
 //
@@ -475,13 +475,13 @@ pub fn cartesian_geometric_sources(_d: usize) -> Vec<SourceSpec> {
 // the coordinate system, just the gravitating mass and its position.
 //
 // the physics:
-//   gravitational potential:  Φ(x) = -G*M / |x - xm|
-//   acceleration:             g = -∇Φ = -G*M * (x - xm) / |x - xm|^3
-//   momentum source:          S_mom = ρ * g = -ρ * G*M * (x-xm) / |x-xm|^3
-//   energy source:            S_nrg = ρ * v · g
-//                                   = -ρ * G*M * (v · (x-xm)) / |x-xm|^3
+//   gravitational potential:  Phi(x) = -G*M / |x - xm|
+//   acceleration:             g = -grad Phi = -G*M * (x - xm) / |x - xm|^3
+//   momentum source:          S_mom = rho * g = -rho * G*M * (x-xm) / |x-xm|^3
+//   energy source:            S_nrg = rho * v . g
+//                                   = -rho * G*M * (v . (x-xm)) / |x-xm|^3
 //
-// (the minus signs match the convention `Φ = -GM/r` — gravity pulls toward
+// (the minus signs match the convention `Phi = -GM/r` — gravity pulls toward
 // the mass. for repulsive central forces flip the sign of `gm` at the
 // runtime parameter slot.)
 //
@@ -580,7 +580,7 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 //
 // the mask discipline:
 //   dx_k = x_k - body_xm_k
-//   d^2  = Σ dx_k^2
+//   d^2  = sum dx_k^2
 //   R^2  = body_radius^2
 //   inside = (d^2 < R^2)                — carrier-generic `Op::CmpLt` -> Mask
 //   S = select(inside, full_source, 0)  — `Op::Select` (the algebra primitive)
@@ -1087,8 +1087,8 @@ pub fn user_inject_slot_source(
 
 // ---- example user source: uniform external acceleration ---------------------
 //
-//   S_mom_k = ρ * g_ext_k                  (D outputs)
-//   S_nrg   = ρ * (vel · g_ext)             (1 output, has_energy only)
+//   S_mom_k = rho * g_ext_k                  (D outputs)
+//   S_nrg   = rho * (vel . g_ext)             (1 output, has_energy only)
 //
 // the simplest user source that exercises both vector and scalar
 // targets. used in tests as the "known analytical form" cross-check.
@@ -1633,7 +1633,7 @@ mod tests {
         ];
 
         let g_analytical = analytical_gravity_acceleration(&x, &xm, gm);
-        // S_mom = ρ * g — same formula, just multiplied by rho.
+        // S_mom = rho * g — same formula, just multiplied by rho.
         for k in 0..3 {
             let s_data = eval_source(&built, built.outputs[k], &values_ref);
             let s_expected = rho * g_analytical[k];
@@ -1684,7 +1684,7 @@ mod tests {
             ],
         );
 
-        // S_nrg = ρ * v · g.
+        // S_nrg = rho * v . g.
         let g_a = analytical_gravity_acceleration(&x, &xm, gm);
         let v_dot_g: f64 = (0..3).map(|k| vel[k] * g_a[k]).sum();
         let s_expected = rho * v_dot_g;
@@ -1732,7 +1732,7 @@ mod tests {
             (gravity_params::EPS, 0.0),
         ];
 
-        // S_mom_x = -ρ * GM * 2 / 2^3 = -2/8 = -0.25.
+        // S_mom_x = -rho * GM * 2 / 2^3 = -2/8 = -0.25.
         let s_x = eval_source(&built, built.outputs[0], &vals);
         let s_y = eval_source(&built, built.outputs[1], &vals);
         let s_z = eval_source(&built, built.outputs[2], &vals);
@@ -2004,9 +2004,9 @@ mod tests {
     // the openness proof. a user-supplied builder slots into the abstraction
     // with exactly the same discipline + diagnostics as the framework's own
     // overlays. these tests assert:
-    //   1. the constructor produces a well-formed SourceSpec;
-    //   2. the example uniform-acceleration source matches its analytical form;
-    //   3. SourceKind::UserDefined is distinct from every other kind.
+    //   - the constructor produces a well-formed SourceSpec;
+    //   - the example uniform-acceleration source matches its analytical form;
+    //   - SourceKind::UserDefined is distinct from every other kind.
 
     #[test]
     fn user_defined_source_constructor_produces_correct_spec() {
@@ -2047,7 +2047,7 @@ mod tests {
 
     #[test]
     fn uniform_acceleration_energy_matches_analytical_3d() {
-        // S_nrg = rho * (vel · g_ext)
+        // S_nrg = rho * (vel . g_ext)
         let rho = 1.2_f64;
         let vel = [0.5_f64, -0.3, 0.7];
         let g_ext = [0.0_f64, 0.0, -9.81];

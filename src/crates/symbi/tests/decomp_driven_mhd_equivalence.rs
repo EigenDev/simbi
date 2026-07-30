@@ -257,7 +257,7 @@ fn driven_mhd_inflow_four_tiles() {
 fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
     // the ISOTHERMAL-MHD instance of the same contract: prescription [rho, v.., B..] (no
     // pressure slot; p = cs^2 rho), the cut along the driven face (both tiles own a piece),
-    // mono == decomposed to round-off. pins the newly enabled imhd decomposed registration.
+    // mono == decomposed to round-off. pins the imhd decomposed registration.
     use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
     use symbi_hydro::ISO_MHD_SPEC;
     use symbi_hydro::eos::Isothermal;

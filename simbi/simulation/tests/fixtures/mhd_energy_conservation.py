@@ -7,12 +7,12 @@
 # of the conserved buffer over the periodic interior; a conservative scheme holds it to
 # machine roundoff at EVERY resolution.
 #
-# this is the base-scheme energy-conservation instrument (spec §6). before the canonical
-# fix, the magnetic-energy PATCH (`nrg += 1/2 d|bcell|^2`, applied outside the flux)
-# made tau drift ~2e-4 at nx=256 and GROW with resolution (6e-4 at nx=512) — a genuine
-# non-conservation; truncation error would shrink with resolution. after the fix (cell B is derived from the CT face
-# field, no patch; tau is conserved by the Poynting-carrying Godunov flux), the drift is
-# roundoff and does NOT grow with resolution.
+# this is the base-scheme energy-conservation instrument. a magnetic-energy PATCH
+# (`nrg += 1/2 d|bcell|^2`, applied outside the flux) makes tau drift ~2e-4 at nx=256
+# and GROW with resolution (6e-4 at nx=512) — the signature of genuine
+# non-conservation, since truncation error would shrink with resolution. deriving cell B
+# from the CT face field with no patch leaves tau conserved by the Poynting-carrying
+# Godunov flux, at roundoff drift that does NOT grow with resolution.
 # =============================================================================
 
 from functools import partial

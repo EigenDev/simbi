@@ -80,15 +80,7 @@ class StreamPlotComponent(Component):
         x, y = u_field.domain
         u_values, v_values = u_field.values, v_field.values
 
-        # plotted on cell *centers*.
-        # x_centers = (x_edges[:-1] + x_edges[1:]) / 2
-        # y_centers = (y_edges[:-1] + y_edges[1:]) / 2
-
-        # streamplot expects U, V to be (N, M)
-        # and x, y to be (M,) and (N,)
-        # the data is (N, M) and the centers are (M,) and (N,)
-        # this matches the matplotlib convention.
-
+        # matplotlib convention: U and V are (N, M) with x of length M and y of length N
         return x, y, u_values, v_values
 
     def render(

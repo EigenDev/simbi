@@ -99,7 +99,7 @@ impl<const R: usize> Domain<R> {
         // axis 0 to the physical fast axis (= simbi convention: x at axis 0).
         //
         // a kernel reading `field[coord[0]*stride[0] + ...]` with this layout
-        // is GPU-coalesced: CUDA's standard `threadIdx.x → axis 0` mapping
+        // is GPU-coalesced: CUDA's standard `threadIdx.x -> axis 0` mapping
         // means consecutive warp threads access consecutive bytes. **prior**
         // convention (axis R-1 fastest) had x at the slowest axis, so warp
         // threads accessed addresses `Ny*Nz` apart — uncoalesced reads cost
@@ -302,7 +302,7 @@ impl<const R: usize> Domain<R> {
         if !self.overlaps(other) {
             return vec![self.clone()];
         }
-        // the clamped overlap self ∩ other (per axis).
+        // the clamped overlap of self and other (per axis).
         let ov: [(isize, isize); R] = std::array::from_fn(|a| {
             (
                 self.spaces[a].lo.max(other.spaces[a].lo),
@@ -438,7 +438,7 @@ impl<const R: usize> Domain<R> {
     /// processes axes in DECREASING-stride order (highest axis first) so the
     /// divmod chain peels the slowest-varying axis off first. with the
     /// physical-x-fastest convention (`strides[0] == 1`, `strides[R-1]` =
-    /// product of lower extents), that means iterating `R-1 → 0`.
+    /// product of lower extents), that means iterating `R-1 -> 0`.
     pub fn unflatten(&self, flat_idx: usize) -> [isize; R] {
         let mut point = [0isize; R];
         let mut remaining = flat_idx;
@@ -738,8 +738,8 @@ mod tests {
         // shape [3, 4], strides [1, 3]: flat = i*1 + j*3.
         let d = domain([index("i").over(3), index("j").over(4)]);
         assert_eq!(d.flat_index([0, 0]), 0);
-        assert_eq!(d.flat_index([1, 0]), 1); // step in axis 0 → +1 (fastest)
-        assert_eq!(d.flat_index([0, 1]), 3); // step in axis 1 → +3
+        assert_eq!(d.flat_index([1, 0]), 1); // step in axis 0 -> +1 (fastest)
+        assert_eq!(d.flat_index([0, 1]), 3); // step in axis 1 -> +3
         assert_eq!(d.flat_index([2, 3]), 11);
     }
 
@@ -806,7 +806,7 @@ mod tests {
     fn test_contract_preserves_strides() {
         let d = domain([index("i").over(100), index("j").over(200)]);
         let c = d.contract(2);
-        // contracted shape [96, 196]: physical-x-fastest → strides [1, 96].
+        // contracted shape [96, 196]: physical-x-fastest -> strides [1, 96].
         assert_eq!(c.strides(), &[1, 96]);
     }
 
@@ -1169,7 +1169,7 @@ mod laws {
                 assert_eq!(cells(&m), &cells(&a) & &cells(&b), "intersect != set meet");
                 // commutative.
                 assert_eq!(cells(&m), cells(&b.intersect(&a)));
-                // meet is a lower bound: m ⊆ a and m ⊆ b.
+                // meet is a lower bound: m is contained in a and in b.
                 assert!(cells(&m).is_subset(&cells(&a)));
                 assert!(cells(&m).is_subset(&cells(&b)));
             } else {
@@ -1235,12 +1235,13 @@ mod laws {
             let expected: HashSet<[isize; 3]> = &cells(&a) - &cells(&b);
             assert_eq!(union, expected, "difference != set difference");
 
-            // RECONSTRUCTION: (A \ B) ⊎ (A ∩ B) == A.
+            // RECONSTRUCTION: the guillotine difference A\B, disjointly unioned with the
+            // overlap of A and B, is exactly A.
             let inter = &cells(&a) & &cells(&b);
             assert_eq!(
                 &union | &inter,
                 cells(&a),
-                "A\\B and A∩B do not reconstruct A"
+                "A\\B and the A-B overlap do not reconstruct A"
             );
         }
     }
@@ -1297,7 +1298,7 @@ mod laws {
                     assert_eq!(
                         cells(&round),
                         cells(&d),
-                        "expand∘contract != id (axis {ax}, n {n})"
+                        "expand(contract(d)) != d (axis {ax}, n {n})"
                     );
                 }
             }
@@ -1332,7 +1333,7 @@ mod laws {
                 let f = d.flat_index(p);
                 assert!(f < d.volume(), "flat index out of range");
                 assert!(seen.insert(f), "flat_index not injective at {p:?}");
-                assert_eq!(d.unflatten(f), p, "unflatten∘flat_index != id");
+                assert_eq!(d.unflatten(f), p, "unflatten(flat_index(p)) != p");
             }
             assert_eq!(seen.len(), d.volume(), "flat_index not onto [0, volume)");
         }

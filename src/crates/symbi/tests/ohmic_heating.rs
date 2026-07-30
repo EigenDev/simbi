@@ -6,7 +6,7 @@
 // the resistively-dissipated magnetic energy 1/2 B^2 into the gas internal energy -- no separate Joule
 // source term. a decaying sheared field B_x = B0 sin(k y) in a periodic box loses magnetic energy to
 // resistivity; that energy reappears as gas heat and the total energy is invariant to round-off.
-// (this pins the property; there is no leak, so no Joule-heating term is added.)
+// the conservative total-energy form is what makes an explicit Joule-heating term unnecessary.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;

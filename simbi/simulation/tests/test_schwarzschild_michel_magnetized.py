@@ -21,8 +21,7 @@
 # every consistency assertion is stated WITHOUT a grid in it -- a measured order and
 # an extrapolated error constant (see convergence.py) rather than an absolute
 # tolerance at one resolution. an absolute bound encodes the resolution AND the
-# scheme's dissipation, so a sharper wave-speed estimate reads as a physics failure;
-# that is exactly what happened to the previous form of this file.
+# scheme's dissipation, so a sharper wave-speed estimate reads as a physics failure.
 #
 # requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
@@ -65,7 +64,7 @@ _HOLD_TIME = 0.5
 # the bounds are stated grid-free (see convergence.py): MIN_ORDER separates convergence
 # from a resolution-independent floor with ~1.7x margin on the measurement, and
 # MAX_CONSTANT carries ~3x, making it a smoke alarm for a uniformly more diffusive
-# scheme rather than a pin on today's dissipation.
+# scheme.
 _HOLD_MIN_ORDER = 1.0
 _HOLD_MAX_CONSTANT = 1.2e-1
 # a smooth stationary solution needs no limiter, and its step must stay within reach of
@@ -75,9 +74,9 @@ _HOLD_MIN_DT_FRACTION = 0.05
 #
 # an absolute tolerance on |dU/dt| pins the resolution into the number, so it reports a
 # physics failure whenever the discretization's error CONSTANT moves for a legitimate
-# reason. it did: a sharper wave-speed estimate changed the HLLE dissipation and lifted
-# every row by about a factor of three, at unchanged convergence order, and the fixed
-# bounds called that a wrong magnetic term.
+# reason: a sharper wave-speed estimate changes the HLLE dissipation and lifts every row
+# by about a factor of three at unchanged convergence order, which a fixed absolute bound
+# reports as a wrong magnetic term.
 #
 # what is asserted instead is the pair that does not mention a grid (see
 # convergence.py): the measured order p, and the extrapolated constant C = E N^p.
@@ -86,8 +85,7 @@ _HOLD_MIN_DT_FRACTION = 0.05
 # MIN_ORDER separates convergence from a floor: a wrong term does not fall under
 # refinement at all (p -> 0), so 0.5 sits well below every measured order and well above
 # the failure it detects. MAX_CONSTANT carries ~3x margin over the measurement, making it
-# a smoke alarm for a uniformly more diffusive scheme rather than a pin on today's
-# dissipation.
+# a smoke alarm for a uniformly more diffusive scheme.
 _RESID_MIN_ORDER = 0.5
 _RESID_MAX_CONSTANT = {"den": 2.5, "m1": 5.0e-1, "nrg": 3.0e-1}
 _SILENT_ROWS_TOL = 1e-12
@@ -154,8 +152,8 @@ def test_magnetized_michel_holds_and_field_is_bitwise_static() -> None:
     assert db_hi == 0.0, f"staggered B^r moved at 256: {db_hi:.3e}"
     # the discretization is healthy where the hold is read: no limiter fires on a smooth
     # stationary solution, and the step stays within reach of the light-crossing step.
-    # these fail FIRST if the timestep collapse ever migrates earlier in time, so the
-    # convergence assertion below can never silently invert instead.
+    # these fail FIRST if the timestep collapse ever migrates earlier in the evolution, so
+    # the convergence assertion can never silently invert instead.
     for n, frac, (fb, fz) in ((128, frac_lo, guards_lo), (256, frac_hi, guards_hi)):
         assert (fb, fz) == (0, 0), (
             f"a limiter fired on the stationary michel solution at N={n}: "

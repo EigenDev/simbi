@@ -13,8 +13,7 @@
 // these types mint each wire name in EXACTLY one place. `name()` is the only
 // `format!`; `parse()` is its inverse; the round-trip is property-tested. a
 // producer and a consumer that both go through `MeshScalar` cannot disagree on
-// a name, and adding a variant is a COMPILE error until every `match` covers it
-// — the string can no longer be wrong.
+// a name, and adding a variant is a COMPILE error until every `match` covers it.
 //
 // usage:
 //  // producer (trace): Gv::scalar(&MeshScalar::Adot(dir).name())

@@ -4,8 +4,6 @@
 // `IoBackend` — the abstract sink/source. one trait, many implementations:
 //   - `Hdf5Backend` (production checkpoints)
 //   - `JsonBackend` (introspection — dump the tree as JSON, no field data)
-//   - `DisplayBackend` (ASCII / symbi-display table renderer)
-//   - future: `ZarrBackend`, `VtkBackend`
 //
 // the contract: `write(path, tree)` walks the borrowed Tree and emits;
 // `read(path)` materializes a TreeBuf. by design, every backend uses the

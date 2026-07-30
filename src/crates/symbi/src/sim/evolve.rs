@@ -87,11 +87,11 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
 {
-    // mesh motion is single-grid uniform-spacing hydro only in this pass:
+    // mesh motion is supported for single-grid uniform-spacing hydro:
     // homologous expansion on any geometry (curvilinear scales the radial
-    // axis), uniform translation on cartesian axis 0 (`a` is unused there and
-    // must stay 1). non-uniform maps, immersed bodies, and the mhd substrates
-    // (comoving-field convention pending) are not wired.
+    // axis), and uniform translation on cartesian axis 0 (`a` is unused there
+    // and must stay 1). non-uniform maps, immersed bodies, and the mhd
+    // substrates require a comoving-field convention the kernels do not carry.
     if sim.motion.a_dot != 0.0 || sim.motion.a != 1.0 {
         assert!(sim.geom.maps.is_none(), "mesh motion: uniform spacing only");
         if !sim.motion.homologous {
@@ -200,9 +200,9 @@ where
 
         // no per-step host-side scans: the `if !dt.is_finite()` check
         // above catches NaN/Inf cascades on the very next iteration
-        // (NaN cons -> NaN wave speeds -> NaN dt -> panic). previous
-        // per-cell scans of c2p_error + cons.den cost ~1.3 ms/step on
-        // unified memory via page-faults, which dominated step time.
+        // (NaN cons -> NaN wave speeds -> NaN dt -> panic). a per-cell host
+        // scan of c2p_error + cons.den costs ~1.3 ms/step on unified memory
+        // via page-faults, which dominates step time.
         //
         // the cfl scalar readback is the ONLY GPU->CPU roundtrip during
         // computation. all per-cell validation runs on device, or doesn't
@@ -441,8 +441,8 @@ where
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
     // scalars from sim.motion, so a stage must see a(t) at its shu-osher ENTRY time
     // (the time of its input state — the same clock the amr cf ghosts use). a is
-    // restored afterward; the canonical step advance lives in the caller. static
-    // meshes assign a_n back to itself — no behavioral change.
+    // restored afterward; the canonical step advance lives in the caller. on a
+    // static mesh the restore assigns a_n back to itself, a no-op.
     let motion_n = sim.motion;
     let a_n = motion_n.a;
     let mut injection_ledger = std::collections::BTreeMap::new();

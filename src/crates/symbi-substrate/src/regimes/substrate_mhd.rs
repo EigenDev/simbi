@@ -441,7 +441,7 @@ where
     }
 
     /// FIRST-ORDER FLUX CORRECTION for the MHD regimes: the shared face-based gas redo (first-order
-    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) PLUS the C2 constrained-transport re-sync.
+    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) PLUS the constrained-transport re-sync.
     /// the induction/CT subsystem is INVARIANT under a gas FOFC — B evolves by curl-of-EMF,
     /// independent of the gas c2p — so the face field, EMF, and curl stay HIGH-ORDER; the redo only
     /// (a) restores the HO induction flux for the cell-B predictor so its magnetic-energy patch is
@@ -516,7 +516,7 @@ where
             || {
                 // TIER 2, below the conservative source limiter: the limiter SCALES a source and
                 // therefore cannot act on a cell that is already outside G with no source left to
-                // scale. this projects such a cell onto the boundary of `G ∩ C` — the admissible
+                // scale. this projects such a cell onto the boundary of `G \cap C` — the admissible
                 // set intersected with the run's DECLARED constraint family — along the segment to
                 // the admissible stage-input anchor. admissibility is simply the always-present
                 // member, so floors and the sufficient condition are enforced in ONE operation
@@ -534,16 +534,14 @@ where
                         .mhd
                         .as_ref()
                         .expect("the GRMHD projection requires magnetic fields");
-                    // NOTE: the state-constraint family projection (`constraint_projection`) is
-                    // landed and gated but NOT hooked up here yet. it currently takes the
-                    // stage-input CONSERVED state as its anchor, which is wrong: constrained
-                    // transport has already advanced B, so `u_stage` paired with the CANDIDATE's
-                    // cell B is a hybrid with no admissibility guarantee, and the projection then
-                    // cannot recover the cell at any blend. the anchor must instead be rebuilt by
-                    // p2c from the stage-input PRIMITIVES with the candidate's B (and raised to the
-                    // margin), exactly as this kernel does — measured: substituting the family
-                    // without that reconstruction collapses the torus from t = 4.02 to a dt
-                    // underflow at t = 2.286.
+                    // the state-constraint family projection (`constraint_projection`) anchors on
+                    // the stage-input CONSERVED state, which is wrong here: constrained transport
+                    // has already advanced B, so `u_stage` paired with the CANDIDATE's cell B is a
+                    // hybrid with no admissibility guarantee, and the projection cannot recover the
+                    // cell at any blend. a sound anchor is rebuilt by p2c from the stage-input
+                    // PRIMITIVES with the candidate's B (and raised to the margin), exactly as this
+                    // kernel does — substituting the family without that reconstruction collapses
+                    // the magnetized torus from t = 4.02 to a dt underflow at t = 2.286.
                     crate::regimes::substrate_kernels::fofc_project(
                         sim,
                         "rmhd",
@@ -999,7 +997,7 @@ where
     }
 
     // horizon excision as the sweep/finalize pieces (see the RHD set): the gas
-    // primitives fill by onion sweep; the magnetized p2c folds the cell B into
+    // primitives freeze at the vacuum floor; the magnetized p2c folds the cell B into
     // the conserved rebuild; the staggered faces are never written. inert at
     // zero radius; the dispatch asserts the baked combination fail-loud.
     fn excise_pass_count(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> usize {

@@ -71,7 +71,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// convert primitive to conservative on a curved spacetime. the DEFAULT ignores the metric and
     /// delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
     /// regime and every flat run are unchanged; the relativistic regimes OVERRIDE it so the
-    /// initial-condition conserved state matches the metric-aware c2p (the storage↔recovery
+    /// initial-condition conserved state matches the metric-aware c2p (the storage<->recovery
     /// bijection is per-cell at the same metric point). `gamma`/`alpha`/`shift` are the spatial
     /// metric, lapse and contravariant shift `beta^i` at the cell; `sqrt_gamma` is sqrt(det gamma)
     /// of the FULL chart, so `alpha sqrt_gamma` is the four-volume measure the densitized

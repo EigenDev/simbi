@@ -1,10 +1,10 @@
 // =============================================================================
 // order_convergence.rs
 //
-// M11: a MEASURED spatial order-of-accuracy gate. every other order-sensitive check in the suite
+// a MEASURED spatial order-of-accuracy gate. every other order-sensitive check in the suite
 // passes at first order (positivity / finiteness / edge smoke), so a silent drop to first order —
-// e.g. the reconstruction slope limiter never being applied (history: plm_theta once was NEVER
-// wired) — sails through unnoticed while quietly halving the convergence rate.
+// an unapplied reconstruction slope limiter, say — sails through unnoticed while quietly halving
+// the convergence rate.
 //
 // vehicle: a smooth uniform-pressure, uniform-velocity ENTROPY WAVE. `rho = 1 + A sin(2 pi x)`,
 // `v = V`, `p = P` (both constant) is an EXACT solution of the Euler equations — with no pressure

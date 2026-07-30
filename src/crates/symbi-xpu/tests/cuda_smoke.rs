@@ -1,7 +1,7 @@
 // =============================================================================
 // cuda_smoke.rs
 //
-// smoke test for the new xpu API on CUDA.
+// smoke test for the xpu API on CUDA.
 // exercises: executor, memory block, kernel launch, tokens.
 //
 // usage:

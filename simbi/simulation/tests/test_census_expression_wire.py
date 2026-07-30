@@ -121,7 +121,6 @@ def test_edges_must_strictly_increase_and_be_finite() -> None:
 
 
 def test_a_census_must_register_at_least_one_value() -> None:
-    g = expr.ExprGraph()
     with pytest.raises(ValueError, match="registers no values"):
         expr.Census(name="empty", values={})
 

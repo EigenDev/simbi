@@ -1,7 +1,7 @@
 // =============================================================================
 // history.rs
 //
-// the per-step body diagnostic time series (docs/ideas/accretor.md §5): what
+// the per-step body diagnostic time series: what
 // each body exchanged with the gas on every step — the record the steady-state
 // detector and the emergent-rate validation consume. Mdot(t) is
 // mass_delta/dt, the accretion drag F_acc(t) is force; both are FUNCTIONALS of

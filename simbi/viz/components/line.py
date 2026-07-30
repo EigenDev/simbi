@@ -137,12 +137,12 @@ class LinePlotComponent(Component):
                 level_label = get_field_str(level_label)
 
         if self._line is None:
-            # First render: create the line
+            # first render: create the line
             self._line = ax.plot(
                 x_data, y_data, label=level_label, **line_style
             )[0]
         else:
-            # Animation update: set new data and style
+            # animation update: set new data and style
             _update_line_data(self._line, x_data, y_data)
             _update_line_style(self._line, line_style, level_label)
 

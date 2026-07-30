@@ -9,10 +9,9 @@
 // drivers execute the identical phase sequence at the identical dt, so their
 // ledgers must agree bitwise.
 //
-// the ledger booking once existed only in the uni-grid driver: every python
-// GR-excised run wrote permanently-zero mdot/edot while the reducer itself
-// validated perfectly against Michel. this gate pins the booking to both
-// drivers forever.
+// the booking is per-driver, and a correct reducer is not enough: a driver that
+// never books writes permanently-zero mdot/edot while the shell-flux reduction
+// itself is exact. hence both drivers are gated here.
 //
 // run: cargo test -p symbi --test horizon_ledger
 // =============================================================================

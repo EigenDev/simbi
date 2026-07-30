@@ -5,15 +5,15 @@
 // SINGLE kernel that combines the flux-divergence integrator + a spec-driven
 // user momentum source (e.g., `uniform_acceleration_sources`). validates:
 //
-//   1. **structural** — when `user_source = None`, the fused builder is a
-//      backwards-compat overlay of `godunov_euler_gv`; same Writes shape;
-//   2. **semantic** — for a UNIFORM state (zero flux divergence), running the
-//      fused kernel with `uniform_acceleration` as the user source produces
-//      `mom_k_new = mom_k + dt * rho * g_ext_k`, EXACTLY the analytical
-//      Newtonian under uniform external force. proves the spliced spec
-//      contribution is wired at the right register-resident state.
+//   - structural — with `user_source = None` the fused builder reproduces
+//     `godunov_euler_gv` exactly; same Writes shape;
+//   - semantic — for a UNIFORM state (zero flux divergence), running the
+//     fused kernel with `uniform_acceleration` as the user source produces
+//     `mom_k_new = mom_k + dt * rho * g_ext_k`, EXACTLY the analytical
+//     newtonian response to a uniform external force, so the spliced spec
+//     contribution reads the register-resident state at the right point.
 //
-// PERF motivation: a Newtonian + external-acceleration
+// PERF motivation: a newtonian + external-acceleration
 // problem runs TWO kernels per RK stage (godunov + body_source). the spec
 // source can instead ride INSIDE godunov — one launch, one set of
 // register-resident `cons` reads, one fused CSE pass over the divergence +
@@ -31,11 +31,11 @@ use symbi_discretize::gv::{
 };
 
 // the godunov-stage kernel reads the u_n snapshot + the (a0, ac) SSP coefficients. these tests
-// exercise the source fusion + the analytical forward-Euler update, so they run at the euler
+// exercise the source fusion + the analytical forward-euler update, so they run at the euler
 // stage (a0=0, ac=1): the `a0*u_n` term drops out, so the bound u_n values are immaterial.
 const EULER_AC: [(&str, f64); 2] = [("a0", 0.0), ("ac", 1.0)];
 
-// u_n snapshot field bindings for a Newtonian 3D (ncomp=3 + energy) state — at the euler stage
+// u_n snapshot field bindings for a newtonian 3D (ncomp=3 + energy) state — at the euler stage
 // these are multiplied by a0=0, but the kernel still binds them, so the harness must supply them.
 fn u_n_fields(rho: f64, mom: [f64; 3], nrg: f64) -> Vec<(&'static str, f64)> {
     vec![
@@ -50,11 +50,10 @@ use symbi_hydro::source_spec::uniform_acceleration_sources;
 
 #[test]
 fn user_source_none_matches_writes_of_plain_godunov() {
-    // **structural backwards-compat**: passing `None` for `user_source`
-    // produces a kernel with the SAME Writes shape as the plain godunov
-    // builder. callers that don't use spec sources see no behavior
-    // change. (NodeId identity is NOT checked — the trace IDs differ
-    // between two `begin_trace` sessions — but Writes-shape equivalence is
+    // structural equivalence: passing `None` for `user_source` produces a kernel with
+    // the SAME Writes shape as the plain godunov builder, so a caller with no spec
+    // source binds exactly the same ABI. (NodeId identity is NOT checked — the trace
+    // IDs differ between two `begin_trace` sessions — but Writes-shape equivalence is
     // the contract the runtime binds against.)
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; 3];
@@ -98,7 +97,7 @@ fn user_source_none_matches_writes_of_plain_godunov() {
 #[test]
 fn uniform_state_picks_up_only_the_user_source_contribution() {
     // **load-bearing semantic check**: build the fused-source godunov for
-    // Newtonian 3D cartesian + uniform-acceleration user source. configure
+    // newtonian 3D cartesian + uniform-acceleration user source. configure
     // a UNIFORM state — zero flux divergence — and verify the momentum
     // update IS the analytical user-source contribution:
     //
@@ -125,7 +124,7 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
         "expecting momentum-targeting overlay"
     );
 
-    // build the fused-source kernel: Newtonian 3D + user momentum overlay.
+    // build the fused-source kernel: newtonian 3D + user momentum overlay.
     let kernel = godunov_stage_gv_with_fused_sources(
         coords,
         Spacetime::Minkowski,
@@ -461,7 +460,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
 fn ssp_combine_applies_runtime_coefficients() {
     // **carrier-oracle for the runtime (a0, ac) combine** — the load-bearing claim of the
     // integrator collapse. a UNIFORM state (constant fluxes => zero divergence, no source)
-    // isolates the SSP Shu-Osher convex combine `cons = a0*u_n + ac*cons` from the stencil. with
+    // isolates the SSP shu-osher convex combine `cons = a0*u_n + ac*cons` from the stencil. with
     // u_n != cons and the SSP-RK2 corrector coefficients (1/2, 1/2), the kernel evaluated on the
     // CPU interpreter MUST produce the analytical convex combination — proving a SINGLE compiled
     // kernel realizes any explicit SSP stage from its runtime scalars. 1D cartesian, ncomp=1, no

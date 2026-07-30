@@ -11,7 +11,7 @@ use symbi_hydro::spatial_metric::SpatialMetric;
 // =============================================================================
 // the conserved-update GODUNOV family in Gv — the finite-volume divergence (the Gv stencil
 // `field_shifted(F_i, +e_i) - field(F_i)`, no `MorphismKind::Diff`) composed with the
-// forward-Euler / RK2 time update over the conserved set (mass + one scalar law per momentum
+// forward-euler / RK2 time update over the conserved set (mass + one scalar law per momentum
 // component + optional energy), and the snapshot copy. EOS- AND geometry-generic: snapshot is
 // a pure copy (every coord); the CARTESIAN-uniform divergence is `(F_hi - F_lo)/dx_i`, the
 // CURVILINEAR is the analytic area-weighted `(1/V)(F_hi*A_hi - F_lo*A_lo)` from the in-kernel
@@ -25,12 +25,12 @@ use symbi_hydro::spatial_metric::SpatialMetric;
 #[derive(Clone, Copy)]
 pub enum GeoSource {
     /// hydro / RHD: well-balanced pressure + (ndim>=2) velocity-quadratic centrifugal/coriolis,
-    /// regime-agnostic via the CONSERVED momentum (Newtonian `mom=rho v`, RHD `mom=rho h W^2 v`).
+    /// regime-agnostic via the CONSERVED momentum (newtonian `mom=rho v`, RHD `mom=rho h W^2 v`).
     Hydro { inertial: bool },
     /// RMHD: pressure + inertial + magnetic tension, from `rmhd_source_quantities` (cons.mom
     /// carries B-momentum so it can't serve the source).
     Rmhd,
-    /// newtonian MHD: pressure (p + 1/2|B|^2) + gas inertial (cons.mom IS rho v — the Maxwell
+    /// newtonian MHD: pressure (p + 1/2|B|^2) + gas inertial (cons.mom IS rho v — the maxwell
     /// stress lives in the flux) + magnetic tension from the LAB-FRAME B (no
     /// relativistic four-vector). simpler than RMHD: cons.mom serves the inertial directly.
     NewtonianMhd,
@@ -42,9 +42,9 @@ pub enum GeoSource {
 /// the centrifugal/coriolis INERTIAL momentum source per component `S^i = -Gamma^i_jk mom^j
 /// v^k` (the velocity-quadratic geometric terms), in Gv. delegates to the SINGLE-SOURCE
 /// carrier-generic `Metric<Gv, D>::momentum_source_inertial` (symbi-geometry) instead of
-/// re-deriving the Christoffel by hand — one geometry source for the whole codebase (B1).
+/// re-deriving the christoffel by hand — one geometry source for the whole codebase.
 ///
-/// REGIME-AGNOSTIC via the conserved `mom` (Newtonian rho v; relativistic rho h W^2 v): the
+/// REGIME-AGNOSTIC via the conserved `mom` (newtonian rho v; relativistic rho h W^2 v): the
 /// source is the bilinear `-Gamma(mom, v)`, so this same call ALSO serves the magnetic tension
 /// `-Gamma(b, b)` (caller passes `mom = vel = b`). `centroid` is COORDINATE-indexed (r at [0],
 /// theta/phi at [1]). dispatch is on the number of PROVIDED momentum components `mom.len()` (the
@@ -106,7 +106,7 @@ fn geometric_momentum_sources_gv(
 ) -> Vec<Gv> {
     // COORDINATE-indexed centroid (r at [0], theta at [1]). ungridded slots take the chart symmetry
     // default (spherical polar -> pi/2): a reduced-dimension spherical grid (a 1.5D radial
-    // chart with ungridded theta, or a 2.5D r-phi chart) still evaluates the angular Christoffels
+    // chart with ungridded theta, or a 2.5D r-phi chart) still evaluates the angular christoffels
     // cot(theta)/sin(theta) in the inertial source, and theta = 0 diverges cot(theta) and NaNs the
     // state. `gv_ungridded_slot` is the single chart authority for these fills (spherical theta ->
     // pi/2, every other suppressed axis -> 0, so cartesian / cylindrical are unchanged).
@@ -226,7 +226,7 @@ pub(crate) fn gv_geometric_source(
         }
         GeoSource::NewtonianMhd => {
             // newtonian MHD stress: ptot = p + 1/2|B|^2; gas inertial via cons.mom (= rho v,
-            // pure gas); magnetic tension via the lab-frame B (the Maxwell stress -B_i B_j has
+            // pure gas); magnetic tension via the lab-frame B (the maxwell stress -B_i B_j has
             // the SAME christoffel form as the inertial, so it reuses the inertial builder, then
             // is subtracted by geometric_momentum_sources_gv). no wgam2 / four-vector.
             // ALL `ncomp` (DOF) components: a 2.5D spherical grid (DOF=3 > ndim=2) needs the

@@ -117,9 +117,9 @@ fn fofc_redo_preserves_body_gravity() {
 
     // the body pulls toward the origin: the impulse D = mom_B - mom_A must point INWARD
     // (D . (-r_hat) > 0). the flux is identical in A and B over one step, so D is purely the body
-    // source. WITHOUT the fix, the redo restores u_stage + re-runs the godunov and never re-applies
-    // the body source, so EVERY cell has D == 0 exactly; a single cell with an inward kick is
-    // therefore impossible without the fix. the majority bound (not all) tolerates the far cells
+    // source. a redo that restores u_stage and re-runs only the godunov leaves EVERY cell at
+    // D == 0 exactly, so a single cell with an inward kick is impossible unless the redo
+    // re-applies the body source. the majority bound (not all) tolerates the far cells
     // whose softened kick falls below the 1e-6 test floor; the freeze tier is covered by the
     // dedicated `fofc_freeze_preserves_body_gravity` gate below. no cell may get a spurious OUTWARD
     // kick.

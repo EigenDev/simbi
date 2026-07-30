@@ -135,7 +135,7 @@ fn body_source_accretion_matches_spec() {
     let (den_in, m0_in, m1_in, nrg_in) = (1.5, 0.4, -0.3, 6.0);
     let out = run(SINK0, den_in, m0_in, m1_in, nrg_in);
 
-    // independent inline implementation of the same spec (gravity + Bondi-Hoyle sink).
+    // independent inline implementation of the same spec (gravity + bondi-hoyle sink).
     let v = [m0_in / den_in, m1_in / den_in];
     let ke = 0.5 * (m0_in * v[0] + m1_in * v[1]);
     let p = (GAMMA - 1.0) * (nrg_in - ke);

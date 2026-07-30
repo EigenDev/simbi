@@ -7,14 +7,14 @@
 // f64 oracle runs, and accumulate `dt div(tau)` into `cons.mom`. 2D cartesian.
 //
 //   viscous_iso_gv        constant nu (a uniform viscosity stencil).
-//   viscous_iso_alpha_gv  Shakura-Sunyaev alpha: nu(x) = alpha c_s^2 / Omega_k(r),
+//   viscous_iso_alpha_gv  shakura-sunyaev alpha: nu(x) = alpha c_s^2 / Omega_k(r),
 //                         Omega_k = sqrt(GM/r^3) about the central body — a
 //                         SPATIALLY VARYING viscosity, face-averaged so the flux
 //                         divergence stays conservative.
 //
 // hazard-free in place: the stencil reads are on PRIMITIVE fields (read-only in
 // this pass); the only write is `cons.mom` at the CENTER cell (pointwise), so no
-// cell reads a neighbour's half-updated momentum. runs post-c2p (prim current).
+// cell reads a neighbor's half-updated momentum. runs post-c2p (prim current).
 // no support ball — the viscous operator acts over the whole interior.
 // =============================================================================
 
@@ -62,7 +62,7 @@ fn prim_stencil() -> ([[Tensor<Gv, 2>; 3]; 3], [[Gv; 3]; 3]) {
 // metric h (reading the storage as coordinate-contravariant v^i) shifts the
 // shear null from v_phi = Omega r (rigid rotation) to v_phi = const (a sheared
 // profile) — an O(1) spurious torque on every rotating disk. (the contravariant
-// storage law belongs to the GR Valencia path only.)
+// storage law belongs to the GR valencia path only.)
 
 fn accumulate_mom(dmom: Tensor<Gv, 2>) -> Writes {
     let mom0_c = Gv::field("mom0", FieldRef::cons_mom(0));
@@ -227,10 +227,10 @@ fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// the scale factors `(h1, h2)` at a coordinate point, per chart (Cartesian -> 1;
+/// the scale factors `(h1, h2)` at a coordinate point, per chart (cartesian -> 1;
 /// cylindrical (R, phi) -> (1, R); spherical (r, theta) -> (1, r)). the const-D
 /// metric bridge mirrors the geometric-source dispatch — one metric family. shared with the covariant
-/// resistive EMF (the DEC codifferential is the same Lamé-coefficient machinery as the viscous stress).
+/// resistive EMF (the DEC codifferential is the same lame-coefficient machinery as the viscous stress).
 pub(crate) fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv> {
     fn run<M, const D: usize>(m: M, x: &[Gv]) -> Vec<Gv>
     where
@@ -363,7 +363,7 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
-/// trace the Shakura-Sunyaev ALPHA operator on a GENERAL 2D orthogonal chart: the
+/// trace the shakura-sunyaev ALPHA operator on a GENERAL 2D orthogonal chart: the
 /// same scale-factor operator as `viscous_iso_ortho_gv` but with a spatially
 /// varying `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)`, `R` the
 /// RADIAL coordinate `x0` (the orbital radius on both cylindrical and spherical,
@@ -574,7 +574,7 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
 }
 
 /// trace the alpha-viscosity isothermal operator, 3D cartesian. the disk lies in
-/// the x-y plane with rotation axis z, so the Keplerian frequency is set by the
+/// the x-y plane with rotation axis z, so the keplerian frequency is set by the
 /// CYLINDRICAL radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` — the vertical
 /// z-offset from the body does NOT enter `Omega_k = sqrt(GM/R^3)`. hence `nu(x,y)
 /// = alpha c_s^2 / Omega_k(R)` is z-invariant (a cylinder of constant nu about the
@@ -626,8 +626,7 @@ pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, Writes) {
 /// trace the alpha-viscosity isothermal operator, 2D cartesian: `nu(x) =
 /// alpha c_s^2 / Omega_k(r)`, `Omega_k = sqrt(GM/r^3)`, `r = |x - x_body|`
 /// (G = 1, so GM is the central body mass). the sound speed is the constant
-/// `cs` param (globally isothermal); a locally-isothermal `cs2(x)` field is a
-/// later refinement. nu vanishes toward the sink (Omega_k -> inf) — the
+/// `cs` param (globally isothermal). nu vanishes toward the sink (Omega_k -> inf) — the
 /// physical alpha-disk `nu ~ r^{3/2}`.
 pub fn viscous_iso_alpha_gv() -> (GvKernel, Writes) {
     const NDIM: u8 = 2;

@@ -22,7 +22,7 @@ use super::binding::kernel_scalar_kinds;
 
 /// resolve a kernel's scalar parameters BY TYPED REF, routed BY SORT — the type-sorted analog of
 /// `resolve_path` for buffers, and the unified scalar half of the metadata-driven ABI. reads the
-/// kernel's declared `IntNames ⊔ FloatNames` family and maps each `ScalarBind` through the matching
+/// kernel's declared `IntNames \sqcup FloatNames` family and maps each `ScalarBind` through the matching
 /// resolver into its ABI lane: int params -> the `ints` tail, float params -> the `scalars` tail,
 /// each in the kernel's declared order. so a MIXED kernel (ghost-fill: int `map_type`/`arg` + float
 /// `vel_sign`) resolves fully — the KERNEL dictates order + lane, never the caller. the resolver

@@ -1,9 +1,9 @@
 // =============================================================================
 // nmhd_rotor_2p5d.rs
 //
-// the magnetized ROTOR (Tóth 2000 test 1) as a 2.5D NMHD gate — a strong-field
+// the magnetized ROTOR (Toth 2000 test 1) as a 2.5D NMHD gate — a strong-field
 // robustness + div(B) stress test distinct from Orszag-Tang: a dense disk spins in
-// a uniform Bx, winding the field into torsional Alfvén waves. asserts:
+// a uniform Bx, winding the field into torsional Alfven waves. asserts:
 //   (a) the in-plane staggered div(B) = dBx/dx + dBy/dy stays at machine zero,
 //   (b) the state stays physical (rho>0, p>0, finite) through the low-beta core,
 //   (c) the field actually WINDS — By (zero in the IC) develops from the rotation,

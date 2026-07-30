@@ -180,7 +180,7 @@ fn cyl_stress<S: Scalar>(
 /// force uses the ANGULAR-MOMENTUM-conserving `(1/R^2) d_R(R^2 tau_Rphi)` flux, so
 /// `R * mom_phi` (the angular momentum) is transported, never created — the r-phi
 /// shear of a differentially rotating disk drives `v_R = -3 nu / (2 R)`. `r_c` is
-/// the cell R centroid; neighbours sit at `r_c +- dr`, faces at `r_c +- dr/2`.
+/// the cell R centroid; neighbors sit at `r_c +- dr`, faces at `r_c +- dr/2`.
 pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     v: &[[Tensor<S, 2>; 3]; 3],
     rho: &[[S; 3]; 3],
@@ -709,7 +709,7 @@ mod tests {
     // v_phi = sqrt(GM/r) (constant rho, div v = 0) has a PURELY AZIMUTHAL analytic
     // viscous force F = rho nu laplacian(v), F_phi = -3/4 rho nu sqrt(GM) r^{-5/2},
     // F_r = 0. a consistent operator reproduces it with O(dx^2) error and NO angular
-    // (grid-aligned m=4) variation. this prints the operator's actual behavior.
+    // (grid-aligned m=4) variation.
     #[test]
     fn keplerian_disk_viscous_force_probe() {
         let (gm, nu) = (1.0_f64, 1.0_f64);
@@ -919,7 +919,7 @@ mod tests {
 
     // -- cylindrical (R, phi) operator ---------------------------------------
     // build a 3x3 (v_R, v_phi) + rho stencil about a cell at radius r_c; the
-    // neighbours sit at r_c + (i-1) dr, and phi is measured relative to the cell.
+    // neighbors sit at r_c + (i-1) dr, and phi is measured relative to the cell.
     fn cyl_stencil(
         r_c: f64,
         dr: f64,
@@ -1115,7 +1115,7 @@ mod tests {
         // a healthy disk stencil: rho ~ 1, a smooth shear.
         let (vh, rh) = stencil(0.5, 0.5, dx, dy, |x, y| [x + 0.5 * y, -0.3 * x], |_, _| 1.0);
 
-        // the left neighbour is an evacuated mask cell: rho = 1e-4, momentum
+        // the left neighbor is an evacuated mask cell: rho = 1e-4, momentum
         // retained ~ (1, 0.5) -> v = mom/rho ~ (1e4, 5e3).
         let (mut v, mut r) = (vh, rh);
         let mom_mask = [1.0f64, 0.5];

@@ -89,8 +89,8 @@ fn main() {
     evolve_with_callback(&mut sim, &sub, 0.02, 1, |_| {}).expect("warmup failed");
     let warm_iter = sim.iteration;
 
-    // Step-1.0 diagnostic: time ONE kernel phase in isolation over the whole grid
-    // at the current RAYON_NUM_THREADS, to separate memory-bound (poor isolated
+    // per-phase diagnostic: time ONE kernel phase in isolation over the whole grid
+    // at the RAYON_NUM_THREADS in force, to separate memory-bound (poor isolated
     // scaling) from step-context/barrier effects (good isolated scaling).
     // SYMBI_PHASE=flux|godunov|c2p|ghost. min-of-reps ns per cell-sweep.
     if let Ok(phase) = std::env::var("SYMBI_PHASE") {

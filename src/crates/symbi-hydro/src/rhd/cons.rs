@@ -44,7 +44,7 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     let s_mag = metric.norm_sq_cov(&cons.mom).sqrt();
     // the rescaled conserved-momentum norm r^2 = |S|^2 / D^2 and the shared c2p velocity ceiling
     // v_limit^2 = r^2/(1+r^2) (KKC h0 = 1). clamping every recovered v^2 to this keeps the Lorentz
-    // factor finite for an OUT-of-cone input (no NaN to poison a neighbour) while leaving an
+    // factor finite for an OUT-of-cone input (no NaN to poison a neighbor) while leaving an
     // in-cone recovery bit-identical (its true v is strictly below the ceiling). the cone test at
     // the end drives the pressure non-positive to signal the out-of-cone case. same contract as
     // rmhd_recover — see c2p_result::relativistic_velocity_ceiling_sq / relativistic_cone_residual.
@@ -105,7 +105,7 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
 
 /// the host RHD cons->prim: the branch-free `rhd_recover` plus post-hoc C2pResult
 /// diagnostics. no silent floor — the value is the raw recovered state, the ErrorCode
-/// is the explicit signal (matches `Newtonian::to_primitive`; feedback_no_silent_floors).
+/// is the explicit signal, never a silent floor (matches `Newtonian::to_primitive`).
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
 /// native `<` / `<=` / `==` on a host scalar. the kernel path is `rhd_recover` above
@@ -285,13 +285,12 @@ mod tests {
     // the unified relativistic-c2p contract (shared with rmhd_recover): the branch-free kernel body
     // recovers a FINITE state for an out-of-cone conserved input — density from the ceiling-clamped
     // Lorentz factor, pressure driven to the shared density-scaled non-positive sentinel
-    // by the Wu-2017 cone test — a finite sentinel. rationale for the change from the old NaN convention:
-    // the FOFC probe's `finite_pos(pre)` rejects the non-positive sentinel IDENTICALLY to a NaN (so
-    // the fail-loud is preserved), while a finite sentinel cannot poison a neighbour's
-    // reconstruction the way an absorbing NaN does (the demonstrated FM-torus / RMHD failure mode).
-    // where FOFC is inactive, the sentinel still fails loud: a sound speed `sqrt(gamma p / rho h)`
-    // on p < 0 goes non-finite and trips the CFL check. feedback_no_silent_floors holds — the state
-    // is FLAGGED (non-positive pressure), never floored to a spurious-physical value.
+    // by the Wu-2017 cone test. the sentinel is FINITE and non-positive rather than NaN: the FOFC
+    // probe's `finite_pos(pre)` rejects it IDENTICALLY to a NaN (so the fail-loud is preserved),
+    // while a finite value cannot poison a neighbor's reconstruction the way an absorbing NaN
+    // does. where FOFC is inactive, the sentinel still fails loud: a sound speed
+    // `sqrt(gamma p / rho h)` on p < 0 goes non-finite and trips the CFL check. the state is always
+    // FLAGGED (non-positive pressure), never floored to a spurious-physical value.
     #[test]
     fn kernel_path_unphysical_cons_recovers_finite_and_flagged() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };

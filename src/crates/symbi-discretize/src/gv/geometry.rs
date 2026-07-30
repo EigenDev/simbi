@@ -84,13 +84,13 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
     }
 }
 
-/// the GR LAPSE WEIGHT `alpha(x)` for the spatial-RHS densitization (Valencia 3+1). the conserved
+/// the GR LAPSE WEIGHT `alpha(x)` for the spatial-RHS densitization (valencia 3+1). the conserved
 /// update `d_t(sqrt(gamma) U) + d_i(sqrt(-g) F) = sqrt(-g) S` reduces, on a STATIC DIAGONAL
 /// background, to weighting the flux divergence + the geometric momentum source by the lapse
-/// (`sqrt(-g) = alpha sqrt(gamma)`; the Schwarzschild coordinate gift `sqrt(-g) = sqrt(gamma_flat)`
-/// leaves the face areas flat and folds `1/sqrt(gamma) = alpha/sqrt(gamma_flat)` into a single
-/// `alpha` on the RHS). flat spacetimes (EVERY realized metric today) have `alpha = 1` -> `None`,
-/// so the RHS is untouched and BIT-IDENTICAL on a flat metric. a GR metric (Schwarzschild)
+/// (`sqrt(-g) = alpha sqrt(gamma)`; in schwarzschild coordinates `sqrt(-g) = sqrt(gamma_flat)`,
+/// which leaves the face areas flat and folds `1/sqrt(gamma) = alpha/sqrt(gamma_flat)` into a single
+/// `alpha` on the RHS). a flat spacetime has `alpha = 1` -> `None`,
+/// so the RHS is untouched and BIT-IDENTICAL on a flat metric. a GR metric (schwarzschild)
 /// returns `Some(alpha)` dispatched `Coords -> concrete Metric -> metric.lapse(centroid)` as a
 /// traced Gv expression in the cell coordinate (the coordinate-dispatch pattern).
 pub(crate) fn gv_lapse_weight(
@@ -99,7 +99,7 @@ pub(crate) fn gv_lapse_weight(
     coord_centroid: &[Gv],
 ) -> Option<Gv> {
     match (spacetime, coords) {
-        // flat (Minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph
+        // flat (minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph
         // (no unity multiply) -> bit-identical.
         (Spacetime::Minkowski, _) => None,
         // cartesian kerr-schild has NO radial axis: alpha = 1/sqrt(1 + 2M/|x|) is evaluated at the
@@ -257,7 +257,7 @@ pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv, theta: Option<G
 }
 
 /// the analytic radial shift beta^r(r) from `Metric::shift` — nonzero ONLY for a shifted background
-/// (kerr-schild beta^r = 2M/(r + 2M)); the static diagonal cases (Minkowski, Schwarzschild) have
+/// (kerr-schild beta^r = 2M/(r + 2M)); the static diagonal cases (minkowski, schwarzschild) have
 /// beta = 0 -> None so the caller elides the shift term (bit-identical, no `- 0`).
 pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Option<Gv> {
     match spacetime {
@@ -346,8 +346,8 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     )
 }
 
-/// the diagonal scale factor `h_dir(pos)` — the metric Lame coefficient. Cartesian: 1;
-/// Spherical: (1, r, r*sin(theta)); Cylindrical: (1, r, 1). `pos` is coordinate-indexed
+/// the diagonal scale factor `h_dir(pos)` — the metric lame coefficient. cartesian: 1;
+/// spherical: (1, r, r*sin(theta)); cylindrical: (1, r, 1). `pos` is coordinate-indexed
 /// (pos[0]=r, pos[1]=theta). the `match` is build-time (Coords is the codegen geometry).
 pub(crate) fn gv_scale_factor(coords: Coords, dir: usize, pos: &[Gv]) -> Gv {
     match (coords, dir) {

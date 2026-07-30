@@ -3,7 +3,7 @@
 //
 // CUDA backend for the tensor IR: LoweredFn -> CUDA C++ source string.
 //
-// emission shape (V1, elemental-style):
+// emission shape (elemental-style):
 //
 //   // (struct decl only when rank > 0)
 //   struct <name>_out { <element> _0; <element> _1; ... };

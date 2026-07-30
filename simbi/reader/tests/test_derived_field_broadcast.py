@@ -11,7 +11,6 @@
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 from simbi.reader.computation import _broadcast_cell_centers
 

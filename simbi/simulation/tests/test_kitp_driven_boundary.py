@@ -4,8 +4,8 @@
 # the kitp thin-disk config (Duffell+2024 comparison) runs with DYNAMIC
 # (dirichlet-to-equilibrium) boundaries on all four faces plus the buffer
 # sponge, under the locally isothermal closure. this gate drives the full
-# stack a few steps at reduced resolution and pins the three failure modes the
-# combination exposed:
+# stack a few steps at reduced resolution and pins the three failure modes this
+# combination admits:
 # - the driven prescription must lower against the isothermal regime spec
 #   ([rho, vx, vy], no pressure slot) and fill EVERY ghost cell, corners
 #   included (an interior-clamped driven band left corner ghosts at rho = 0,
@@ -45,7 +45,7 @@ def test_kitp_disk_steps_with_driven_boundaries() -> None:
         rho = prim["rho"][:]
         assert np.isfinite(rho).all(), "non-finite density"
         # the checkpoint includes the ghost halo: a zero anywhere means an
-        # unwritten ghost (the corner blocks are the regression target).
+        # unwritten ghost; the corner blocks are where an interior-clamped fill leaves zeros.
         assert float(rho.min()) > 0.0, (
             f"density non-positive (min {rho.min():.3e}) — unwritten ghost cells?"
         )

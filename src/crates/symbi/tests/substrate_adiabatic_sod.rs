@@ -1,7 +1,7 @@
 // =============================================================================
 // substrate_adiabatic_sod.rs
 //
-// the CAPSTONE of the iso/adiabatic split (#3): a full ADIABATIC (ideal-gas)
+// the end-to-end gate for the adiabatic substrate: a full ADIABATIC (ideal-gas)
 // Euler Sod shock-tube evolution where EVERY operator in the RK2 step — c2p,
 // ghost_fill, cfl, flux, godunov_euler, godunov_rk2, snapshot — is the
 // substrate-generated kernel (AdiabaticSubstrateKernelSet), run through the real

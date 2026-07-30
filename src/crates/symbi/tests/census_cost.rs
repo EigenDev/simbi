@@ -3,21 +3,18 @@
 //
 // what a census actually costs, as a fraction of the step it rides on.
 //
-// the design that specified this feature estimated "order a few percent of a hydro step" and said
-// plainly that it was the one number in the document with no measurement behind it. this is the
-// measurement. it is a REPORT rather than a threshold: a bound would either be so loose it never
-// fires or so tight it fails on someone else's machine, and neither tells you what to plan around.
+// the cost is REPORTED, not bounded: a wall-clock threshold would either be so loose it never
+// fires or so tight it fails on another machine, and neither figure is something a run can be
+// planned around.
 //
-// what IS asserted is the design's own claim about where the cost lives — that it scales with the
-// size of the per-cell graph and not with the number of registered accumulators. that is the
-// property a user needs in order to reason about a registration before submitting a job, and it is
-// checkable without pinning a wall-clock number.
+// what IS asserted is where the cost lives — it scales with the size of the per-cell graph, not
+// with the number of registered accumulators. that is the property needed to reason about a
+// registration before submitting a job, and it is checkable without pinning a wall-clock number.
 //
-// this measurement has already earned itself twice: it caught the compiled map re-running the jit
-// on EVERY sample (4.3 ms per sample over 4096 cells, more than the step it observes), and then
-// caught the fix caching that kernel under the census NAME — which is unique within a run but is
-// naturally reused across a parameter sweep in one process, so the second run would have been
-// handed the first one's kernel.
+// two failure modes this measurement discriminates: a compiled map that re-runs the jit on EVERY
+// sample (4.3 ms per sample over 4096 cells, more than the step it observes), and a kernel cache
+// keyed on the census NAME — unique within a run, but naturally reused across a parameter sweep in
+// one process, so the second run is handed the first one's kernel.
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -39,7 +36,7 @@ const GAMMA: f64 = 5.0 / 3.0;
 
 /// `n_values` accumulators over ONE shared graph: each is the same `rho * dv` product re-emitted,
 /// so the dag is a constant size and only the output count grows. that is the discrimination the
-/// design's cost claim rests on.
+/// cost claim rests on.
 fn census_with(n_values: usize) -> CensusConfig {
     let names: Vec<String> = (0..n_values).map(|k| format!("\"m{k}\"")).collect();
     let outs: Vec<String> = (0..n_values).map(|_| "2".to_string()).collect();
@@ -117,9 +114,8 @@ fn hydro_step_ms(window: f64) -> f64 {
 
 #[test]
 fn a_census_sample_is_a_fraction_of_the_step_it_rides_on() {
-    // the design estimated "order a few percent of a hydro step" and said outright that it was the
-    // one number in the document with no measurement behind it. this is the comparison, on one
-    // grid, in one profile, through the production driver — so the two sides are commensurable.
+    // the census sample and the hydro step measured on one grid, in one profile, through the
+    // production driver — so the two sides are commensurable.
     let census = sample_ms(1, 20);
     let step = hydro_step_ms(2.0e-3);
     let pct = 100.0 * census / step;

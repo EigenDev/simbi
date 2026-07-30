@@ -68,7 +68,7 @@ struct FieldKernel {
 impl FieldKernel {
     /// build a field kernel from its per-component lowered fns, JIT-compiling each
     /// (the interpreter `components` stay as oracle/fallback). compilation happens
-    /// ONCE here at construction; the string→register resolution it does is what
+    /// ONCE here at construction; the string->register resolution it does is what
     /// deletes the interpreter's per-cell `HashMap`.
     fn build(params: Vec<String>, components: Vec<LoweredFn>) -> Self {
         let jit: Option<Vec<symbi_jit::CompiledFn>> = components
@@ -275,7 +275,7 @@ mod tests {
         let evaluator = SourceEvaluator::new(&sim, 3).expect("gravity validates");
 
         // single body at origin; cell at (1, 2, 3); gm = 1, rho = 1.5.
-        // S_mom_k = -ρ * GM * x_k / |x|^3.
+        // S_mom_k = -rho * GM * x_k / |x|^3.
         let x = [1.0_f64, 2.0, 3.0];
         let rho = 1.5;
         let gm = 1.0;
@@ -376,8 +376,8 @@ mod tests {
             )
             .expect("mom has overlays");
 
-        // analytical sum: cylindrical S_r = (ρ*vp² + p)/r,  S_p = -ρ*vr*vp/r,  S_z = 0
-        // gravity:        -ρ*GM*x_k/|x|³ (note: x here is the (r, phi, z) tuple
+        // analytical sum: cylindrical S_r = (rho*vp^2 + p)/r,  S_p = -rho*vr*vp/r,  S_z = 0
+        // gravity:        -rho*GM*x_k/|x|^3 (note: x here is the (r, phi, z) tuple
         //                 but gravity uses cartesian-style distance — the
         //                 spec treats `x` as the field-point components in
         //                 the regime's coord system. the evaluator agrees

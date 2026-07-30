@@ -1,9 +1,8 @@
 // =============================================================================
 // bondi.rs
 //
-// the analytic transonic bondi solution (docs/ideas/accretor.md §8): the
-// initial-condition generator and the validation target for the emergent-rate
-// drain. code units G*M = 1, c_inf = 1, rho_inf = 1, so the bondi radius
+// the analytic transonic bondi solution: the initial-condition generator and the
+// validation target for the emergent-rate drain. code units G*M = 1, c_inf = 1, rho_inf = 1, so the bondi radius
 // r_B = 1 and every length below is in bondi radii.
 //
 // adiabatic (gamma > 1), at each r the algebraic system

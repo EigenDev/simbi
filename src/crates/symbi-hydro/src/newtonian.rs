@@ -41,7 +41,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
     where
         S: OrderedNumeric,
     {
-        // raw IEEE math; no silent floors (feedback_no_silent_floors).
+        // raw IEEE math; no silent floors.
         // the diagnostic ErrorCode is preserved (it's an explicit
         // signal that leaves the math untouched). callers can
         // detect a pathology via `result.is_err()` and react; the

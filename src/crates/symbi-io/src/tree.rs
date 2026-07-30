@@ -7,9 +7,8 @@
 // ASCII tree / symbi-display table) — write + read + display walk the
 // SAME tree, never two parallel mirror functions.
 //
-// the design follows the user's graph-theoretic principle: nodes are the
-// stable identity, edges are name-keyed lookups, leaves carry typed
-// payloads. data lives behind a borrowing `DataRef` so building the tree
+// nodes are the stable identity, edges are name-keyed lookups, leaves
+// carry typed payloads. data lives behind a borrowing `DataRef` so building the tree
 // for write is allocation-free; reads materialize into the owned `DataBuf`.
 // =============================================================================
 
@@ -17,8 +16,8 @@ use crate::attr::Attr;
 
 // ---- DType: the typed-array discriminant ----------------------------------
 
-/// the array element type a Dataset carries. supports the primitive numeric
-/// types the substrate uses today (f64 fields, u64 indices); extend on demand.
+/// the array element type a Dataset carries: the primitive numeric types the
+/// substrate stores (f64 fields, u64 indices).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DType {
     F64,
@@ -122,13 +121,6 @@ impl DataBuf {
             None
         }
     }
-    pub fn as_f32(&self) -> Option<&[f32]> {
-        if let Self::F32(v) = self {
-            Some(v)
-        } else {
-            None
-        }
-    }
 }
 
 // ---- Dataset --------------------------------------------------------------
@@ -142,7 +134,7 @@ pub struct Dataset<'a> {
 }
 
 impl<'a> Dataset<'a> {
-    /// canonical constructor; checks `shape × dtype` matches `data.len()`
+    /// canonical constructor; checks `shape x dtype` matches `data.len()`
     /// in debug builds. shape is a Vec because rank varies (1D primitive
     /// flat arrays, 2D mesh arrays, etc.).
     pub fn new(name: impl Into<String>, shape: Vec<usize>, data: DataRef<'a>) -> Self {
@@ -214,13 +206,6 @@ impl<'a> Tree<'a> {
         self.groups.push(group);
     }
 
-    /// merge a `Metadata` bag in one call.
-    pub fn extend_attrs<'b>(&mut self, md: impl IntoIterator<Item = (&'b str, &'b Attr)>) {
-        for (k, v) in md {
-            self.attrs.push((k.to_string(), v.clone()));
-        }
-    }
-
     pub fn find_group(&self, name: &str) -> Option<&Tree<'a>> {
         self.groups.iter().find(|g| g.name == name)
     }
@@ -263,9 +248,6 @@ impl TreeBuf {
 
     pub fn find_group(&self, name: &str) -> Option<&TreeBuf> {
         self.groups.iter().find(|g| g.name == name)
-    }
-    pub fn find_group_mut(&mut self, name: &str) -> Option<&mut TreeBuf> {
-        self.groups.iter_mut().find(|g| g.name == name)
     }
     pub fn find_attr(&self, name: &str) -> Option<&Attr> {
         self.attrs

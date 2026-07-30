@@ -5,15 +5,15 @@
 // ROOT level (the refinement request gate forbids a fine patch overlapping it), so a decomposed
 // refined run has to excise its root exactly as the monolithic one does.
 //
-// the failure this exists to catch is silent: the decomposed driver builds its own step and for a
-// long time ran only the emf part of the root tail, so the root excise never fired. un-excised gas
-// then evolves forever inside the horizon, and because that region is causally disconnected nothing
-// downstream ever complains -- the exterior looks fine while the interior is fiction.
+// the failure this exists to catch is silent: the decomposed driver builds its own step, and a root
+// tail that runs only the emf part never fires the root excise. un-excised gas then evolves forever
+// inside the horizon, and because that region is causally disconnected nothing downstream ever
+// complains -- the exterior looks fine while the interior is fiction.
 //
 // gates:
 //   - the decomposed refined excised composite matches the monolithic one to roundoff, for every
 //     tile topology (x-cut, y-cut, 2x2 -- the 2x2 cut point is the chart origin, so every tile owns
-//     one quadrant of the excised sphere and every donor chain crosses a cut);
+//     one quadrant of the excised sphere and the excised rim straddles all four cuts);
 //   - the excise DEMONSTRABLY fires: the excised core differs from the same run with excision off.
 //     without this the equivalence above would pass just as happily if both sides excised nothing.
 // =============================================================================
@@ -244,7 +244,7 @@ fn refined_excised_decomposed_two_tile_y_cut() {
 }
 
 // the 2x2 cut point is EXACTLY the chart origin, so every tile owns one quadrant of the excised
-// sphere and every onion-fill donor chain crosses a cut.
+// sphere and the excised rim straddles all four cuts.
 #[test]
 fn refined_excised_decomposed_quad_tile() {
     assert_matches([2, 2]);

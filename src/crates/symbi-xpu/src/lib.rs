@@ -5,17 +5,17 @@
 // answers three questions: where does data live, how does work execute,
 // how to wait for work.
 //
-// all fallible operations return Result<T, XpuError>. no panics in
-// production paths — errors propagate to the caller.
+// all fallible operations return Result<T, XpuError>; production paths
+// propagate errors to the caller.
 //
-// seven rules:
-//   1. backend-agnostic plumbing (compile-time dispatch, no dyn)
-//   2. manages memory lifetime, leaving layout to callers
-//   3. stream-ordered execution (executor owns a stream)
-//   4. does not generate code (loads pre-compiled kernels)
-//   5. explicit transfers
-//   6. stateless except for the executor
-//   7. leaf crate (no symbi dependencies)
+// the crate's rules:
+//   - backend-agnostic plumbing (compile-time dispatch, no dyn)
+//   - manages memory lifetime, leaving layout to callers
+//   - stream-ordered execution (executor owns a stream)
+//   - loads pre-compiled kernels; code generation lives elsewhere
+//   - explicit transfers
+//   - stateless except for the executor
+//   - leaf crate (no symbi dependencies)
 // =============================================================================
 
 mod args;
@@ -55,7 +55,7 @@ pub use space::ExecutionSpace;
 
 // types
 pub use args::{KernelArgs, with_pooled_args};
-pub use config::{LaunchConfig, block_dims, block_for, extent_aware_block};
+pub use config::{LaunchConfig, block_for, extent_aware_block};
 pub use error::{Result, XpuError};
 pub use executor::Executor;
 pub use handle::SharedHandle;

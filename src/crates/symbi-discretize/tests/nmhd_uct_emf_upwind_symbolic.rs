@@ -115,16 +115,15 @@ fn uct_emf_upwind_pairing_symbolic() {
 }
 
 // the negative control: feeding the master the anti-upwind (swapped by_w/by_e)
-// pairing — exactly the ct_emf.rs:577 bug — MUST violate the invariant. proves the
-// check is not vacuously green.
+// pairing MUST violate the invariant, so the check is not vacuously green.
 #[test]
 fn uct_emf_anti_upwind_pairing_is_rejected() {
     let (kernel, writes) = uct_master_emf_proof_kernel(true);
     let root = writes[0].2;
     let lf = LinForm::extract(&kernel.graph, root, FIELDS, SCALARS);
 
-    // with by_w/by_e swapped, a^L now lands on the DOWNWIND face: the upwind face
-    // by_w carries a^R. the production invariant above would fail.
+    // with by_w/by_e swapped, a^L lands on the DOWNWIND face and the upwind face
+    // by_w carries a^R, which violates the upwind-pairing invariant.
     let by_w = coeff(&lf, "by_w");
     assert_eq!(
         by_w.coefficient_of(&["vbar_x", "al_x"]),

@@ -6,27 +6,19 @@
 // recreates a `BuiltSource` graph inside the discretize crate's tracing
 // session, with param leaves replaced by Gv-trace-native NodeIds.
 //
-// motivation: the substrate's godunov kernel builders (`gv.rs`)
-// trace physics at `S = Gv` into a graph; the geometric source is
-// hand-coded inline (`gv_geometric_source` at gv.rs:664) and the body
-// source is a SEPARATE kernel pass (`body_source_gv` at gv_immersed.rs:240).
-// the perf-correct architecture is to FUSE spec-driven sources INTO godunov
-// so flux div + source contribution + integrator run in ONE launch, ONE
-// register-resident state, ONE round of CSE.
+// splicing is what lets a spec-driven source ride INSIDE the godunov stage, so
+// flux divergence + source contribution + integrator run in ONE launch, over ONE
+// register-resident state, under ONE round of CSE.
 //
-// the splice mechanism is the prerequisite for that fusion. the fused
-// godunov wires spec-driven body sources into `godunov_euler_gv`, then
-// AOT-bakes the fused kernels via `symbi-aot/build.rs`.
-//
-// **what this test asserts**:
-//   1. inside an active Gv trace, calling `splice_built_source_into` with a
-//      `BuiltSource` (from `point_mass_gravity_sources` or similar) produces
-//      Gv-trace NodeIds that are valid `Gv::of(node)` values;
-//   2. the spliced outputs evaluate to the SAME f64 values as the standalone
-//      BuiltSource at the same parameter state — proving the splice
-//      preserves semantics: the evaluated values match, beyond structural validity;
-//   3. the trace's resulting Graph is well-formed (can be ended cleanly via
-//      `end_trace`).
+// asserted here:
+//   - inside an active Gv trace, calling `splice_built_source_into` with a
+//     `BuiltSource` (from `point_mass_gravity_sources` or similar) produces
+//     Gv-trace NodeIds that are valid `Gv::of(node)` values;
+//   - the spliced outputs evaluate to the SAME f64 values as the standalone
+//     BuiltSource at the same parameter state, so the splice preserves
+//     semantics and not merely structural validity;
+//   - the trace's resulting Graph is well-formed (can be ended cleanly via
+//     `end_trace`).
 //
 // run: cargo test -p symbi-discretize --test spec_into_gv_trace
 // =============================================================================

@@ -1,10 +1,10 @@
 # =============================================================================
 # test_order_backend.py
 #
-# regression: `--order 1` must run end-to-end. the python frontend maps order=1
-# to reconstruction=PCM + timestepping=RK1; the rust backend must accept "rk1"
+# `--order 1` must run end-to-end. the python frontend maps order=1 to
+# reconstruction=PCM + timestepping=RK1, so the rust backend must accept "rk1"
 # (forward euler) and apply theta=0 (PCM has no separate kernel — it is the
-# theta-MC limiter at zero slope). before the fix the run died with
+# theta-MC limiter at zero slope). a backend missing either mapping dies with
 # `ValueError: unknown timestepping 'rk1'`. requires the built cpu_ext backend;
 # skipped in its absence.
 # =============================================================================

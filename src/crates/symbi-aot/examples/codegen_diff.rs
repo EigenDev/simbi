@@ -149,7 +149,7 @@ fn main() {
     // ---------- path B: IR-emitted via AOT registry ----------
     // the same loop, but the inner per-cell work runs through the
     // build.rs-generated `rmhd_wave_speed_map_3d` function (emitted Rust).
-    // grid is a flat n × 1 × 1 strip — equivalent work, same cell count.
+    // grid is a flat n x 1 x 1 strip — equivalent work, same cell count.
     let mut best_b = f64::INFINITY;
     let alo: [i32; 3] = [0, 0, 0];
     let aext: [u32; 3] = [n as u32, 1, 1];

@@ -57,8 +57,8 @@ def plot_skymap(skymap: skymap_t, save: Optional[str] = None) -> None:
 
     # convert to longitude/latitude for mollweide
     phi_grid, theta_grid = np.meshgrid(
-        skymap.phi - np.pi,  # shift to [-π, π]
-        skymap.theta - np.pi / 2  # shift to [-π/2, π/2]
+        skymap.phi - np.pi,  # shift to [-pi, pi]
+        skymap.theta - np.pi / 2  # shift to [-pi/2, pi/2]
     )
 
     # plot

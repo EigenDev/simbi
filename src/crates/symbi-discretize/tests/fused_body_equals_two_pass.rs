@@ -39,7 +39,7 @@ const GRID: [usize; 2] = [4, 4];
 const WLO: [i32; 2] = [1, 1];
 const WSIZE: [usize; 2] = [2, 2];
 
-// the godunov flux fields for a 2D Newtonian (ncomp = 2 + energy) state.
+// the godunov flux fields for a 2D newtonian (ncomp = 2 + energy) state.
 fn flux_names() -> Vec<String> {
     let mut v = vec!["mass_flux_0".to_string(), "mass_flux_1".to_string()];
     for k in 0..2 {
@@ -134,7 +134,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     .scalars(&stage_scalars)
     .run();
 
-    // TWO-PASS step 1: the plain godunov stage (n_bodies = 0).
+    // TWO-PASS reference, first pass: the plain godunov stage (n_bodies = 0).
     let out_god = KernelRun::new(godunov_stage_gv(
         Coords::Cartesian,
         Spacetime::Minkowski,
@@ -151,7 +151,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     .scalars(&stage_scalars)
     .run();
 
-    // TWO-PASS step 2: the standalone body pass, reading the godunov output. its `dt` scalar is the
+    // TWO-PASS reference, second pass: the standalone body pass, reading the godunov output. its `dt` scalar is the
     // SSP stage weight ac*dt — the same product the fused kernel forms internally as ac_dt.
     let den_buf: Vec<f64> = out_god.values("rho").to_vec();
     let m0_buf: Vec<f64> = out_god.values("mom_0").to_vec();

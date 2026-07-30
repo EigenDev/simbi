@@ -2,10 +2,10 @@
 // refine_transfer_oracle.rs
 //
 // gate: the gv-traced amr transfer kernels
-// (refine_restrict_gv / refine_prolong_gv) BIT-MATCH the recovered gen-1 f64
-// reference (symbi-amr prolong_nd / restrict_nd at git 3bfc5b9, vendored
-// below) on pseudo-random data, across 1d/2d/3d, all prolongation orders,
-// and time-interpolation fractions — and lower to CPU + CUDA source.
+// (refine_restrict_gv / refine_prolong_gv) BIT-MATCH an INDEPENDENT f64 reference
+// (the host axis-by-axis sweep with scratch buffers, vendored below) on
+// pseudo-random data, across 1d/2d/3d, all prolongation orders, and
+// time-interpolation fractions — and lower to CPU + CUDA source.
 //
 // the kernels run in ABSOLUTE level-global indices, including negative ghost
 // coordinates (floor-division parent maps) — the windows below deliberately
@@ -32,7 +32,7 @@ fn noise(seed: u64, c: &[i64]) -> f64 {
 }
 
 // =============================================================================
-// the vendored gen-1 f64 reference (git 3bfc5b9)
+// the vendored f64 reference: an axis-by-axis host sweep over scratch buffers
 // =============================================================================
 
 mod reference {
@@ -414,7 +414,7 @@ fn run_restrict<const D: usize>() {
         })
         .run();
 
-    // the reference: gen-1 restrict_nd over the aligned fine region [-4, 6)^D.
+    // the reference sweep: restrict_nd over the aligned fine region [-4, 6)^D.
     let fine_region = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
         name: ["i", "j", "k"][ax],
         lo: 2 * R_WIN_LO as isize,
@@ -509,7 +509,7 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
         .scalars(&[("alpha", alpha)])
         .run();
 
-    // the reference: gen-1 prolong_nd over the coarse active window, reading the
+    // the reference sweep: prolong_nd over the coarse active window, reading the
     // SAME time-interpolated coarse state.
     let coarse_active =
         symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {

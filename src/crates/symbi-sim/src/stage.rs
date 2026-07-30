@@ -5,10 +5,9 @@
 // evolve loop, the hierarchy's level stage (single and refined), and the
 // decomposed (gpus > 1) tile loop — folds this same table through the same
 // function, so a phase added here exists on every driver by construction.
-// four hand-maintained copies of this sequence previously drifted twice
-// (a frozen passive scalar and a dead GR accretion ledger, both invisible to
-// the driver the tests exercised); the sequence-equality laws detect drift,
-// this fold makes it unrepresentable.
+// a per-driver copy of the sequence drifts silently — a frozen passive scalar or a
+// dead GR accretion ledger on whichever driver the tests do not exercise — so the
+// sequence lives once and the fold makes divergence unrepresentable.
 //
 // driver-specific structure enters ONLY through `HookPoint` callbacks fired
 // between phases with no field borrow held: the hierarchy accumulates its

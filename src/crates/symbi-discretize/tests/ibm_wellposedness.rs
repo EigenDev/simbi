@@ -11,7 +11,7 @@
 // THEOREM 1 (conservative gravity).  g(x) = -grad phi(x), with
 //     phi(x)   = -M / r_eff,     r_eff = sqrt(|r|^2 + eps^2),   r = x - x_body.
 //   PROOF.  d/dx_j (1/r_eff) = -(1/2)(|r|^2+eps^2)^{-3/2} d/dx_j |r|^2, and d/dx_j |r|^2 = 2 r_j,
-//   so d/dx_j (1/r_eff) = -r_j / r_eff^3.  Hence
+//   so d/dx_j (1/r_eff) = -r_j / r_eff^3.  hence
 //     -d phi/dx_j = M d/dx_j (1/r_eff) = -M r_j / r_eff^3 = g_j.   QED.
 //   COROLLARY.  curl g = -curl(grad phi) = 0: the force does no work around any closed loop, so the
 //   immersed body cannot pump spurious energy into the gas.  (mixed partials of the smooth phi
@@ -29,11 +29,11 @@
 //   for every dt.  that is the well-posedness guarantee, and it is why the exact-exponential drain
 //   retired the KMK04 min-gate: an operator that is a contraction by construction.
 //
-// THEOREM 3 (softening regularizes the singularity — bounded, Lipschitz force).
+// THEOREM 3 (softening regularizes the singularity — bounded, lipschitz force).
 //     |g| = M |r| / (|r|^2 + eps^2)^{3/2}  <=  C M / eps^2,     C = 2 / (3 sqrt 3) ~ 0.3849,
 //   attained at |r| = eps / sqrt 2.  the bare 1/r^2 force is unbounded as r -> 0; the softened
-//   force has a finite maximum set by eps, so g is globally bounded and Lipschitz — the source is
-//   well-posed where the Newtonian point-mass force is not.
+//   force has a finite maximum set by eps, so g is globally bounded and lipschitz — the source is
+//   well-posed where the newtonian point-mass force is not.
 //   PROOF.  maximize h(s) = s/(s^2+eps^2)^{3/2}.  h'(s) = (eps^2 - 2 s^2)/(s^2+eps^2)^{5/2} = 0 at
 //   s = eps/sqrt 2, where h = (eps/sqrt2)/((3 eps^2/2)^{3/2}) = 2/(3 sqrt 3 eps^2).   QED.
 // -----------------------------------------------------------------------------
@@ -113,7 +113,7 @@ fn gravity_is_conservative_grad_of_potential() {
 }
 
 // THEOREM 1 corollary — curl g = 0, checked directly by autodiff: d g_i/d x_k = d g_k/d x_i for all
-// i, k (the symmetric Hessian of phi), so every curl component vanishes.
+// i, k (the symmetric hessian of phi), so every curl component vanishes.
 #[test]
 fn gravity_is_curl_free() {
     let bpos = [0.13_f64, -0.27, 0.41];

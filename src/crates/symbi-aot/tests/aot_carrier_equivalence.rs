@@ -4,16 +4,16 @@
 // the carrier-equivalence regression. a carrier-generic physics fn `f<S: Scalar>`
 // must compute the SAME thing at `S = f64` (the host, run here) and at `S = Gv`
 // (traced -> compiled into the build-time kernel) — for ANY input, at the SAME
-// baked iteration count. this is the property the iterate-freeze fix guarantees,
-// and the guard the round-trip suites lack: they only sample states that converge
-// well within the baked count, which is exactly how a no-freeze regression hides
-// (it only diverges on slow / non-convergent inputs).
+// baked iteration count. a compiled iterate that stops at a different count than the
+// host is invisible to the round-trip suites: they only sample states that converge
+// well within the baked count, and the divergence appears only on slow /
+// non-convergent inputs.
 //
 // so these tests deliberately include HARD inputs (ultra-relativistic, strong
 // contrast, near-vacuum) and compare the compiled kernel against the REAL host
 // source (`rhd_recover` / `rmhd_recover` at `S = f64`) — not a re-implemented
-// reference Newton — at the kernel's baked count. design/single_source_tracing
-// §0: same source, two carriers, identical result.
+// reference Newton — at the kernel's baked count: same source, two carriers,
+// identical result.
 // =============================================================================
 
 use symbi_aot::NamedKernel;
@@ -21,7 +21,7 @@ use symbi_aot::NamedKernel;
 // shims binding the emitted kernels BY FIELD NAME (NamedKernel) — order-
 // independent, loud + named on manifest drift. every buffer is 1D (lo = 0); the
 // silenced ignores absorb the scattered `buf_lo_*` zeros each call site passes.
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn rhd_c2p_1d(
     cd: &[f64],
     cm: &[f64],
@@ -52,7 +52,7 @@ fn rhd_c2p_1d(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn rmhd_c2p_1d(
     cd: &[f64],
     cm0: &[f64],
@@ -104,7 +104,7 @@ fn rmhd_c2p_1d(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn adiabatic_face_flux_1d(
     den: &[f64],
     v0: &[f64],
@@ -145,7 +145,7 @@ fn adiabatic_face_flux_1d(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn rhd_face_flux_1d(
     den: &[f64],
     v0: &[f64],
@@ -183,7 +183,7 @@ fn rhd_face_flux_1d(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn iso_wave_speed_map_1d(
     rho: &[f64],
     v0: &[f64],
@@ -218,7 +218,7 @@ fn iso_wave_speed_map_1d(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn rhd_wave_speed_map_1d(
     rho: &[f64],
     v0: &[f64],

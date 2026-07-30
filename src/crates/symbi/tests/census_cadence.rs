@@ -125,7 +125,7 @@ fn a_declared_interval_samples_far_less_often_than_every_step() {
 #[test]
 fn a_non_positive_interval_is_refused() {
     // zero already has a spelling — omitting the field — so accepting it here would give one
-    // behaviour two names, and a negative interval is a computed value nobody chose.
+    // behavior two names, and a negative interval is a computed value nobody chose.
     for bad in [0.0, -1.0] {
         let err = CensusEvaluator::new(&census(Some(bad)))
             .expect_err("a non-positive interval must be refused");

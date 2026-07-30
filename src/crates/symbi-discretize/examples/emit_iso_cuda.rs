@@ -67,7 +67,7 @@ fn main() {
     emit_gv(&out, "iso_ghost_fill_1d", 1, gk, gw);
 
     // flux: PLM reconstruction (Gv stencil) + symbi-hydro's riemann::hlle traced at S=Gv —
-    // the gv single source. iso (IsoNewtonian, no energy) + adiabatic (Newtonian, energy).
+    // the gv single source. iso (IsoNewtonian, no energy) + adiabatic (newtonian, energy).
     let (iso_f, iso_fw) = iso_flux_gv::<1>(0);
     emit_gv(&out, "iso_face_flux_1d", 1, iso_f, iso_fw);
     let (adi_f, adi_fw) = adiabatic_flux_gv::<1>(0);
@@ -85,15 +85,15 @@ fn main() {
     let (iso_ws, iso_wsw) = iso_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform], &[0], 1);
     emit_gv(&out, "iso_wave_speed_map_1d", 1, iso_ws, iso_wsw);
 
-    // rhd c2p: the FIRST ITERATIVE kernel — a 20-step Newton (Op::IterateInline, body
-    // once) + sqrt (Lorentz factor). the GPU-risky construct is the deep iterate; this is
+    // rhd c2p: the FIRST ITERATIVE kernel — a 20-step newton (Op::IterateInline, body
+    // once) + sqrt (lorentz factor). the GPU-risky construct is the deep iterate; this is
     // the on-device proof it emits compilable CUDA. the gv single-source physics
     // (symbi-hydro's `rhd_recover` at S=Gv), like iso.
     let (rhd_k, rhd_writes) = rhd_c2p_gv::<1>(20);
     emit_gv(&out, "rhd_c2p_1d", 1, rhd_k, rhd_writes);
 
-    // rhd flux: reconstruction + the canonical HLLE with RELATIVISTIC physics (Lorentz
-    // factor + relativistic enthalpy/sound speed + the Mignone-Bodo wave speeds). gv single
+    // rhd flux: reconstruction + the canonical HLLE with RELATIVISTIC physics (lorentz
+    // factor + relativistic enthalpy/sound speed + the mignone-bodo wave speeds). gv single
     // source (riemann::hlle at the Rhd regime).
     let (rhd_f, rhd_fw) = rhd_flux_gv::<1>(0);
     emit_gv(&out, "rhd_face_flux_1d", 1, rhd_f, rhd_fw);

@@ -17,12 +17,12 @@ fn cuda_libdirs() -> Vec<String> {
 
     // `nvcc` on PATH -> toolkit root is two levels up (<root>/bin/nvcc). resolves the common
     // cluster case where a `module load cuda` puts nvcc on PATH but sets a non-standard var.
-    if let Ok(out) = std::process::Command::new("which").arg("nvcc").output() {
-        if out.status.success() {
-            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if let Some(root) = std::path::Path::new(&p).parent().and_then(|b| b.parent()) {
-                roots.push(root.display().to_string());
-            }
+    if let Ok(out) = std::process::Command::new("which").arg("nvcc").output()
+        && out.status.success()
+    {
+        let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if let Some(root) = std::path::Path::new(&p).parent().and_then(|b| b.parent()) {
+            roots.push(root.display().to_string());
         }
     }
     roots.push("/opt/cuda".to_string());

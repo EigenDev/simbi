@@ -47,8 +47,3 @@ def get_props_class(name: str) -> Type[ComponentProps]:
         valid = ", ".join(sorted(PROPS_REGISTRY.keys()))
         raise KeyError(f"unknown component '{name}'. valid: {valid}")
     return PROPS_REGISTRY[key]
-
-
-def list_components() -> list[str]:
-    """Return sorted list of registered component names."""
-    return sorted(PROPS_REGISTRY.keys())

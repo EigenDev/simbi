@@ -1,18 +1,17 @@
 # =============================================================================
 # test_field_loop_flat_uct.py
 #
-# M12: the FLAT (Minkowski, cartesian) constrained-transport gate. every `ct_method=uct` test in the
-# suite was a GR fixture; the flat cartesian 2.5D UCT/contact kernels (nmhd here) had ZERO automated
-# coverage, and three known UCT bugs (anti-diffusive HLLD, advective upwind-pairing, transverse
-# reconstruction) had "regression tests" that were literally running field_loop.py by hand.
+# the FLAT (Minkowski, cartesian) constrained-transport gate, covering the flat cartesian 2.5D
+# UCT/contact kernels (nmhd here) that no GR fixture reaches. the UCT failure modes it pins are
+# anti-diffusive HLLD, advective upwind-pairing, and transverse reconstruction.
 #
 # vehicle: the Gardiner & Stone (2005) magnetic field-loop advection — a weak (passive, beta >> 1)
 # loop advected diagonally across a periodic box. two properties must hold for EVERY ct_method/solver:
-#   (1) div(B) stays at machine zero (the CT invariant), and
-#   (2) the run is STABLE — the loop advects without amplifying (a broken EMF blows the loop up:
-#       history records gas pressure 1 -> 29 with the upwind-pairing bug). the velocity is SUPERSONIC
-#       (|v| = sqrt5, the paper's v=(2,1)) BY DESIGN — the EMF-pairing bugs are invisible subsonic
-#       (Orszag-Tang) and only fire supersonically.
+#   - div(B) stays at machine zero (the CT invariant), and
+#   - the run is STABLE — the loop advects without amplifying. a broken EMF blows the loop up: the
+#     upwind-pairing failure drives gas pressure 1 -> 29. the velocity is SUPERSONIC
+#     (|v| = sqrt5, the paper's v=(2,1)) BY DESIGN — the EMF-pairing failures are invisible
+#     subsonic (Orszag-Tang) and only fire supersonically.
 # =============================================================================
 import glob
 import os
@@ -85,12 +84,12 @@ def test_flat_field_loop_preserves_divergence_and_is_stable(ct, solver) -> None:
     ib1, ib2, irho, ipre = _load(sorted(glob.glob(os.path.join(d, "*000_000*.h5")))[0])
     fb1, fb2, frho, fpre = _load(glob.glob(os.path.join(d, "*final*.h5"))[0])
 
-    # (1) CT invariant: div(B) at machine zero, both at t=0 and after the advection.
+    # CT invariant: div(B) at machine zero, both at t=0 and after the advection.
     assert _div_b_max(ib1, ib2, dx, dy) < 1e-10, f"initial div(B) nonzero at {tag}"
     assert _div_b_max(fb1, fb2, dx, dy) < 1e-10, f"div(B) broke to nonzero at {tag}"
 
-    # (2) stability: no NaN, pressure stays positive and does NOT blow up (a broken supersonic EMF
-    # amplifies the loop and heats the gas — history: pre 1 -> 29), and the field does not amplify.
+    # stability: no NaN, pressure stays positive and does NOT blow up (a broken supersonic EMF
+    # amplifies the loop and heats the gas, measured pre 1 -> 29), and the field does not amplify.
     assert not np.isnan(frho).any() and not np.isnan(fpre).any(), f"NaN at {tag}"
     assert fpre.min() > 0.0, f"pressure went non-positive at {tag}"
     assert fpre.max() < 3.0 * float(ipre.max()), (

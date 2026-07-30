@@ -8,12 +8,11 @@
 // SEMANTIC AXIS of the discretization (spatial chart, momentum DOF lift,
 // spacetime background) that must select the SAME baked kernel from both sides.
 //
-// bake and dispatch previously each re-derived these slugs on their own enum
-// family (`coords::Coords` vs `symbi_geometry::Geometry`), kept in lockstep by
-// comment only. that convention has drifted twice (log-radial dispatched
-// uniform-geometry kernels; a partial rename yielded kernel-not-found). one
-// definition here — both sides call it — removes the drift channel by
-// construction.
+// the two sides speak different enum families (`coords::Coords` at bake time vs
+// `symbi_geometry::Geometry` at runtime). a slug derived independently on each
+// side can only be held in lockstep by convention, and the failure is silent:
+// either a name that resolves to the wrong discretization, or a name no bake
+// ever emitted. ONE definition, called from both sides, removes the channel.
 //
 // every fn takes the runtime `symbi_geometry` enums; the bake projects its
 // codegen mirror via `Coords::to_geometry` / `Spacetime::to_spacetime`.
@@ -26,7 +25,7 @@
 
 use symbi_geometry::{Geometry, Spacetime};
 
-/// the plain coordinate-system suffix: Cartesian is unsuffixed; spherical /
+/// the plain coordinate-system suffix: cartesian is unsuffixed; spherical /
 /// cylindrical select the `_sph` / `_cyl` instance (area-weighted divergence +
 /// geometric source + per-cell CFL widths). used by the DOF-agnostic kernels
 /// (immersed body source / feedback), which key on the chart alone.
@@ -66,9 +65,9 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
 
 /// the immersed-boundary penalize kernel name for a chart: `{base}{chart}_{ndim}d`
 /// (e.g. `penalize_drain_iso_cyl_2d`). the drain touches only the gridded momenta
-/// (dof == ndim, no swirl slot), so the suffix is "" / "_sph" / "_cyl". Cartesian
+/// (dof == ndim, no swirl slot), so the suffix is "" / "_sph" / "_cyl". cartesian
 /// reproduces the `KernelId` name exactly, so lifting curvilinear support leaves
-/// the Cartesian bake and dispatch untouched.
+/// the cartesian bake and dispatch untouched.
 pub fn penalize_name(base: &str, coords: Geometry, ndim: usize, axes: &[usize]) -> String {
     // the two cylindrical 2d planes carry different chart maps: the (r, phi)
     // disk keeps the plain `_cyl` suffix; the (r, z) axisymmetric section
@@ -82,7 +81,7 @@ pub fn penalize_name(base: &str, coords: Geometry, ndim: usize, axes: &[usize]) 
 /// the general orthogonal viscous kernel name for a chart: `{base}{chart}_{ndim}d`
 /// (`base` = `viscous_iso_ortho` for constant nu, `viscous_iso_alpha_ortho` for the
 /// alpha law). one operator, one name per chart (cylindrical `_cyl`, spherical
-/// `_sph`); Cartesian keeps its own flat kernels.
+/// `_sph`); cartesian keeps its own flat kernels.
 pub fn viscous_ortho_name(base: &str, coords: Geometry, ndim: usize) -> String {
     format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
 }
@@ -104,12 +103,10 @@ pub enum ChartKeying {
 /// the chart segment of an admissible-boundary projection kernel name, derived from the
 /// GRID rather than typed at the call site.
 ///
-/// each call site used to spell this itself, and both got it wrong in the same way — by
-/// short-circuiting to an empty segment on the reasoning that their regime carried no DOF
-/// lift. an empty segment is correct only on cartesian, so both spelled a never-emitted
-/// name on every curvilinear chart: the MHD one panicked the first time a spherical cell
-/// needed the projection, and the hydro one is the same mistake waiting for its first
-/// spherical FOFC event. deriving it here leaves no call site with the opportunity.
+/// "the regime carries no DOF lift" does NOT imply an empty chart segment: an empty segment
+/// is correct only on cartesian, and a curvilinear chart that short-circuits to it asks for a
+/// name no bake emits — a dispatch panic on the first cell that needs the projection.
+/// deriving the segment from the grid leaves no call site the opportunity to short-circuit.
 pub fn fofc_project_chart(
     keying: ChartKeying,
     coords: Geometry,
@@ -130,11 +127,8 @@ pub fn fofc_project_chart(
 /// (`mhd_geom_suffix`, since B is always a 3-vector and the DOF lift cannot separate the
 /// two cylindrical planes). the caller supplies the chart segment its regime uses; the
 /// ORDER and the surrounding literals live here, once, so the bake and the dispatch cannot
-/// spell the same kernel two ways.
-///
-/// they did: the MHD dispatch passed an empty chart segment on the reasoning that MHD
-/// carries no DOF lift, which resolves only on cartesian (whose segment is empty anyway)
-/// and asks for a never-emitted name on every curvilinear chart.
+/// spell the same kernel two ways. an empty chart segment resolves only on cartesian, whose
+/// segment is empty anyway; on every curvilinear chart it names a kernel no bake emits.
 pub fn fofc_project_name(
     prefix: &str,
     chart_suffix: &str,
@@ -166,7 +160,7 @@ pub fn mhd_geom_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
     }
 }
 
-/// the MHD normal-direction Riemann FLUX suffix: geometry-INDEPENDENT wherever the
+/// the MHD normal-direction riemann FLUX suffix: geometry-INDEPENDENT wherever the
 /// normal component `coord_n == dir` (every IDENTITY-axis grid — cart / sph / 3D-cyl
 /// AND the r-phi disk `[0, 1]`, which is identity), so those share the suffix-free
 /// flux family. ONLY r-z (`[0, 2]`) lifts grid axis 1 onto the z component

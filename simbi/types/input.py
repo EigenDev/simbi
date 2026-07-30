@@ -63,9 +63,9 @@ class Regime(str, ExtendedEnum):
     ISOTHERMAL = "isothermal"
 
 
-# legacy regime slugs (the historical names carried "special" in the fluid regime itself). a
+# legacy regime slugs: names that carry "special" in the fluid regime itself. a
 # relativity-agnostic slug replaces each. `normalize_regime` remaps them so checkpoints and
-# config strings written under the old names still load.
+# config strings written under those names still load.
 _LEGACY_REGIME_SLUGS = {"srhd": "rhd", "srmhd": "rmhd"}
 
 

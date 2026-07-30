@@ -7,7 +7,7 @@
 // so any shape error introduced by the substitution surfaces on target's
 // error accumulator.
 //
-// enables regime-trait-method dispatch (R.6.f): a registered tensor IR
+// enables regime-trait-method dispatch: a registered tensor IR
 // fragment for `IsoNewtonian::to_primitive` is spliced into a kernel
 // graph at the call site, with the fragment's params bound to the
 // caller's gather() output members.

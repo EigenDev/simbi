@@ -101,7 +101,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     ) -> Self::Cons {
         // the covariant storage: the Valencia conserved (S_i = (rho h W^2 + B^2) v_i - (v.B) B_i),
         // then the energy slot re-split to the covariant (killing) energy ehat = alpha tau +
-        // (alpha-1) D - beta^i S_i (source-free on a stationary metric; docs/covariant_energy.md).
+        // (alpha-1) D - beta^i S_i (source-free on a stationary metric).
         // den/mom/mag are the Valencia state the KKC c2p inverts — only the energy slot changes.
         let c = RmhdGr {
             metric: *gamma,

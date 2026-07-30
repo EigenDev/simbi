@@ -3,11 +3,11 @@
 //
 // the HLLD five-wave solver for RMHD: resolves fast magnetoacoustic, alfven,
 // and contact waves via a secant pressure iteration (mignone, ugliano & bodo
-// 2009). carrier-generic: all native `<` / `>` / `if` have been replaced with
-// `S::cmp_*` / `S::select` / `S::branch`, the secant loop runs through
-// `Scalar::iterate_vec` (fixed-step body, freeze-on-converged), and the
-// HLLE fallback is computed eagerly with the final flux choice gated by a
-// success mask. ONE Riemann source, two backends (host f64 + traced Gv).
+// 2009). carrier-generic: every comparison goes through `S::cmp_*` / `S::select` /
+// `S::branch`, the secant loop runs through `Scalar::iterate_vec` (fixed-step body,
+// freeze-on-converged), and the HLLE fallback is computed eagerly with the final
+// flux choice selected by a success mask. ONE Riemann source, two backends
+// (host f64 + traced Gv).
 // =============================================================================
 
 use crate::energy::Zero;
@@ -59,7 +59,7 @@ struct VdiffOut<S: Scalar, const D: usize> {
 }
 
 /// branchless HLLD intermediate-state + f-function. carrier-generic: no
-/// native `<`/`>`/`if`. unphysical states (x ≈ 0 or any of the 8-way
+/// native `<`/`>`/`if`. unphysical states (x ~= 0 or any of the 8-way
 /// consistency checks failing) saturate the returned `f` to a value the
 /// outer divergence-guard catches.
 fn hlld_vdiff<S: Scalar, const D: usize>(
@@ -611,14 +611,14 @@ where
     MhdCons::select(supersonic_l, flux_supersonic_l, flux_choose_r)
 }
 
-/// the converged HLLD five-wave fan for the UCT-HLLD edge EMF (Mignone & Del Zanna 2020, §5.2). all
+/// the converged HLLD five-wave fan for the UCT-HLLD edge EMF (Mignone & Del Zanna 2020, sec. 5.2). all
 /// speeds + the per-side SINGLE-STAR (post-fast, Section 3.1) lab-frame B field, plus `success`.
 /// CONSUMER CONTRACT: when `success == 0` the gas flux fell back to HLLE and EVERY field here is
 /// garbage — the EMF must use the HLL coefficients there. ordering (when success): `lam[0] <= alf[0]
 /// <= lstar <= alf[1] <= lam[1]`. `bstar[s]` is lab-frame B; transverse part = `bstar[s] - n*bn`.
 pub struct HlldStates<S: Scalar, const D: usize> {
     pub lam: [S; 2],              // outermost FAST speeds [lambda^L, lambda^R]
-    pub alf: [S; 2],              // rotational/Alfvén speeds [lambda*^L, lambda*^R] (MUB09)
+    pub alf: [S; 2],              // rotational/Alfven speeds [lambda*^L, lambda*^R] (MUB09)
     pub lstar: S,                 // contact speed lambda* = vc . n
     pub bstar: [Tensor<S, D>; 2], // per-side single-star B (lab-frame): B*^{L}, B*^{R}
     pub bc: Tensor<S, D>, // CONTACT transverse field B_c (MUB09 Eq. 45) — B_t^{ss}, the EMF chi-jump target
@@ -1530,7 +1530,7 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_emf_reduces_to_by_flux() {
-        // CHECK 3 (the grid-aligned reduction gate, uct_algorithm.md Section 3.5): in the double-star
+        // the grid-aligned reduction: in the double-star
         // region (lambda*^L < 0 < lambda*^R, the interface sits between the Alfven waves) the HLLD
         // induction flux is CONSTANT and equals the contact-state value:
         //   F_x[B_y] = v_x B_y - v_y B_x  ->  lambda* B_c^y - v_c^y B^x
@@ -1597,10 +1597,10 @@ mod tests {
 
     #[test]
     fn hlld_rmhd_uct_telescopes_to_flux() {
-        // CHECK 3 COMPLETE (uct_algorithm.md Section 3.5): the M&DZ master form Eq. (30) must
+        // the Mignone & Del Zanna (2020) master form Eq. (30) must
         // reconstruct the hlld_rmhd B_y flux EXACTLY from the per-side coefficients:
         //   F^[By] = a^L F^L + a^R F^R - (d^R B_y^R - d^L B_y^L),   F^s = v_x^s B_y^s - v_y^s B^x
-        // with the BOUNDED chi-term substitution  d^s_chi · B_y^s = 1/2 (v^s-v*)(lambda*^s-lambda^s)(B_c^y - B_y^s).
+        // with the BOUNDED chi-term substitution  d^s_chi . B_y^s = 1/2 (v^s-v*)(lambda*^s-lambda^s)(B_c^y - B_y^s).
         // if this == flux.mag[1], the relativistic coefficients are PROVEN consistent (no rebuild).
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rmhd;

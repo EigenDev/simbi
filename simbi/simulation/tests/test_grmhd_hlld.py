@@ -15,8 +15,8 @@
 # mode). the same orthonormal map drives the GR-UCT-HLLD wave-sum edge EMF, whose
 # Phi telescopes to the coordinate B_t flux.
 #
-# gates: (1) HLLD flux + UCT-HLLD EMF holds the michel monopole to the 1D L1 with
-# the staggered B static (E_phi = 0 for the smooth field); (2) HLLE is unaffected.
+# gates: HLLD flux + UCT-HLLD EMF holds the michel monopole to the 1D L1 with the
+# staggered B static (E_phi = 0 for the smooth field), and HLLE is unaffected.
 # requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob

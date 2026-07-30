@@ -32,14 +32,6 @@ impl Precision {
             Precision::F64 => "double",
         }
     }
-    /// the Rust scalar type name for this precision (`f64` / `f32`). the CPU
-    /// emitter spells float buffers, reads, params, and constant suffixes with it.
-    pub fn rust_type(&self) -> &'static str {
-        match self {
-            Precision::F32 => "f32",
-            Precision::F64 => "f64",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

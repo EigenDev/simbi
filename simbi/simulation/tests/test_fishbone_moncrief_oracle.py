@@ -121,7 +121,6 @@ def test_ks_chart_primitives_are_physical() -> None:
             g_rr = 1.0 + b
             g_rp = -a * st * st * (1.0 + b)
             g_pp = st * st * (sig + a * a * st * st * (1.0 + b))
-            g_tt = sig
             v_sq = g_rr * v_r**2 + 2.0 * g_rp * v_r * v_p + g_pp * v_p**2
             assert 0.0 < v_sq < 1.0, (
                 f"superluminal disk state at r={r:.1f} th={th:.2f}: {v_sq}"

@@ -4,7 +4,7 @@
 // the lattice-map PULLBACK scheme emits correct integer code.
 // `iso_ghost_fill` reads the primitives at a per-axis lattice-map source coord
 // (periodic / reflect / outflow, branched on a runtime integer `map_type`) and
-// writes them at the cell, with the per-component `vel_sign` (the map's Jacobian).
+// writes them at the cell, with the per-component `vel_sign` (the map's jacobian).
 //
 // these are SOURCE-shape checks: the source coord is pure-integer (the select
 // branches render as `ii + arg_0`, `arg_0 - ii`, no float, no cast); the params

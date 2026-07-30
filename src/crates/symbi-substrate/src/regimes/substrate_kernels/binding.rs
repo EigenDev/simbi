@@ -38,9 +38,8 @@ use super::params::ScalarBind;
 type FieldVec<'a, Sc, const D: usize, Mem> = smallvec::SmallVec<[&'a Field<Sc, D, Mem>; 16]>;
 
 // bind a kernel's manifest paths to sim fields via `resolve`, split into (inputs, outputs).
-// replaces the prior `[Option<&Field>; 48]` + `from_raw_parts` niche transmute (duplicated at
-// both call sites) with the SAME zero-copy intent and ZERO unsafe — this binding split is a
-// per-launch step amortized over every cell, so the SmallVec collection cost is irrelevant. the resolver
+// zero unsafe: the split is a per-launch step amortized over every cell, so the SmallVec
+// collection cost is irrelevant next to the kernel body. the resolver
 // closure carries the per-site context (the pressure / scratch overrides + flux direction).
 pub(crate) fn bind_manifest<'a, Sc, const D: usize, Mem>(
     bindings: &[(FieldRef, bool)],
@@ -131,7 +130,7 @@ pub fn kernel_bindings(name: &str) -> Arc<[(FieldRef, bool)]> {
 
 /// the TYPE-SORTED scalar manifest of a kernel, cached: each scalar param as a typed `ScalarBind`
 /// paired with its int/float sort (`true` = int), in declared order. the parameter set is a
-/// disjoint union `IntNames ⊔ FloatNames`; this is the index family a dispatch resolves by ref +
+/// disjoint union `IntNames \sqcup FloatNames`; this is the index family a dispatch resolves by ref +
 /// routes by sort. the IR manifest is born typed (`ScalarBind`), so this is a straight read — no
 /// string parse at load.
 pub(crate) fn kernel_scalar_kinds(name: &str) -> Arc<[(ScalarBind, bool)]> {

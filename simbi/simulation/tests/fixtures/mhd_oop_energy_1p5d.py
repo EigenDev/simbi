@@ -8,7 +8,7 @@
 # a smooth By(x), and gas pressure p = P0 - By^2/2 so the total pressure is uniform — so By
 # advects with the flow and no shock forms.
 #
-# the point is ENERGY: with the non-conservative magnetic-energy patch removed (spec §6),
+# the point is ENERGY: with no non-conservative magnetic-energy patch outside the flux,
 # the total energy tau must be conserved to machine roundoff by the Poynting-carrying gas
 # flux ALONE, even though the out-of-plane magnetic energy By^2/2 lives on a cell-centered
 # component that is flux-evolved (not CT-interpolated). the relativistic c2p is a delicate

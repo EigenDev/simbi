@@ -2,7 +2,7 @@
 // gv_immersed.rs
 //
 // the immersed-boundary body source terms traced at S = Gv:
-//   - body_source_gv  (FORWARD, bodies -> fluid): softened gravity + Bondi-Hoyle accretion,
+//   - body_source_gv  (FORWARD, bodies -> fluid): softened gravity + bondi-hoyle accretion,
 //     cons -> cons in-place (`cons += dt * S`).
 //   - body_feedback_gv (BACKWARD, fluid -> bodies): per-cell per-body force / torque / accreted
 //     mass -> scratch fields a device reduction sums into each body's BodyDelta.
@@ -14,7 +14,7 @@
 // cartesian force/torque (matching symbi_ib's BodyDelta). the physics is a function of `cons`
 // ALONE (no c2p); the 0..n_bodies loop is BRANCH-FREE (inactive body: mass=0 / sink_rate=0).
 //
-// kept OUT of the (already large) gv.rs: this rides the PUBLIC gv API only — Gv arithmetic +
+// kept OUT of the (already large) gv module: this rides the PUBLIC gv API only — Gv arithmetic +
 // the transcendentals (exp) + `cell_geometry_gv` + begin/end_trace.
 // =============================================================================
 
@@ -573,7 +573,7 @@ pub fn body_feedback_gv(
 // =============================================================================
 // isothermal variants (no energy equation)
 //
-// the immersed-body PHYSICS is EOS-independent — softened gravity + Bondi-Hoyle
+// the immersed-body PHYSICS is EOS-independent — softened gravity + bondi-hoyle
 // accretion are functions of (den, mom, cs) only via the SHARED `body_contribution`.
 // the single difference from the adiabatic kernels is the closure for `cs` and
 // the absence of an energy update:
@@ -662,7 +662,7 @@ pub fn body_source_iso_gv(
 /// the isothermal immersed-body evolution as a PURE per-cell function (no field reads): the
 /// energy-free twin of `body_evolved_gv`. given the cell's conserved (den, mom) and its isothermal
 /// pressure `pre` (which sets the sound speed), returns the state advanced by `dt` of softened
-/// Newtonian gravity + Bondi-Hoyle accretion from `n_bodies` point masses. shared by the standalone
+/// newtonian gravity + bondi-hoyle accretion from `n_bodies` point masses. shared by the standalone
 /// iso body source and the FOFC freeze-select-with-body composition.
 pub(crate) fn body_evolved_iso_gv(
     den: Gv,

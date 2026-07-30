@@ -1,8 +1,9 @@
 // =============================================================================
 // evolve_runtime_source_gpu.rs
 //
-// **Gap B (Path B) GPU validation**: a RUNTIME-loaded user source (python -> json -> SourceConfig,
-// no recompile) must run ON THE DEVICE via NVRTC and match the CPU per-cell interpreter. proves the
+// GPU validation of the runtime user-source path: a RUNTIME-loaded user source (python -> json ->
+// SourceConfig, no recompile) must run ON THE DEVICE via NVRTC and match the CPU per-cell
+// interpreter. proves the
 // runtime DAG -> `source_apply_from_built_gv` -> neutral IR -> render(Cuda) -> NVRTC-JIT path closes
 // on-device, the device twin of the CPU `evolve_runtime_source.rs`.
 //
@@ -228,16 +229,16 @@ fn runtime_relax_gpu_2d() {
 }
 
 // =============================================================================
-// handoff #3 — the runtime-source EVOLVE oracle across the device boundary.
+// the runtime-source EVOLVE oracle across the device boundary.
 //
 // the device twin of `jit_fused_equals_two_pass.rs` (which pins the three CPU
 // engines — interp / pointwise-JIT / fused-JIT — bit-for-bit). the 4th engine is
 // GPU NVRTC (`apply_runtime_source_gpu` -> `build_runtime_source_ir` ->
-// `prepared_to_ir`); the single-`source_apply` tests above pin it at one stage,
-// but nothing exercised the runtime source INSIDE the production `evolve()` loop
+// `prepared_to_ir`); the single-`source_apply` tests pin it at one stage, and
+// this drives the runtime source INSIDE the production `evolve()` loop
 // on-device — the multi-step interaction of cfl -> flux -> godunov -> per-stage
 // runtime `source_apply` -> c2p -> ghost, driven on the GPU and tracked against
-// the CPU. this closes that hole.
+// the CPU.
 //
 // tolerance is rel < 1e-6 (NOT bit-for-bit): unlike the CPU-vs-CPU twin, this
 // crosses the device boundary, so nvcc FMA fusion in the godunov flux + the c2p

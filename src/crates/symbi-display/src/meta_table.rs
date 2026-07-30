@@ -3,10 +3,10 @@
 //
 // pretty-print `symbi_io::Metadata` and `symbi_io::TreeBuf`
 // as box-drawn terminal tables. one Schema feeds:
-//   • `symbi_io::Hdf5Backend` (production checkpoint)
-//   • `symbi_io::JsonBackend` (introspection)
-//   • `symbi_io::TreeDisplay`  (ASCII tree)
-//   • `symbi_display::render_metadata` / `render_tree_buf` (this file —
+//   - `symbi_io::Hdf5Backend` (production checkpoint)
+//   - `symbi_io::JsonBackend` (introspection)
+//   - `symbi_io::TreeDisplay`  (ASCII tree)
+//   - `symbi_display::render_metadata` / `render_tree_buf` (this file —
 //     framed, column-aligned tables suitable for the live-monitor UI).
 //
 // the tables use the existing `terminal::ansi` + box-drawing characters from

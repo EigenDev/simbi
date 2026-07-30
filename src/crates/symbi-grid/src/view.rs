@@ -212,8 +212,8 @@ mod tests {
         ]);
         let view = View::from_domain(data.as_ptr(), &dom);
         assert_eq!(*view.at([0, 0]), 0.0);
-        assert_eq!(*view.at([1, 0]), 1.0); // step axis 0 → stride 1
-        assert_eq!(*view.at([0, 3]), 9.0); // step axis 1 → 3*3 = 9
+        assert_eq!(*view.at([1, 0]), 1.0); // step axis 0 -> stride 1
+        assert_eq!(*view.at([0, 3]), 9.0); // step axis 1 -> 3*3 = 9
         assert_eq!(*view.at([2, 3]), 11.0);
     }
 
@@ -333,10 +333,7 @@ mod tests {
         let data: Vec<f64> = (0..1000).map(|ii| ii as f64).collect();
         let view = View::from_domain(data.as_ptr(), &dom);
 
-        // at center cell [5, 5, 5]
-        // let center = *view.at([5, 5, 5]);
-
-        // 6-point stencil neighbors
+        // the 6-point stencil about the center cell [5, 5, 5]
         let xm = *view.at([4, 5, 5]);
         let xp = *view.at([6, 5, 5]);
         let ym = *view.at([5, 4, 5]);
@@ -344,8 +341,8 @@ mod tests {
         let zm = *view.at([5, 5, 4]);
         let zp = *view.at([5, 5, 6]);
 
-        // axis-0-fastest: strides [1, 10, 100]. neighbour differences scale
-        // by 2 × the per-axis stride.
+        // axis-0-fastest: strides [1, 10, 100]. neighbor differences scale
+        // by 2 x the per-axis stride.
         assert_eq!(xp - xm, 2.0); // 2 * stride_i = 2
         assert_eq!(yp - ym, 20.0); // 2 * stride_j = 20
         assert_eq!(zp - zm, 200.0); // 2 * stride_k = 200

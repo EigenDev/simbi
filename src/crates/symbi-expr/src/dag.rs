@@ -59,13 +59,14 @@ impl Node {
 }
 
 /// expression DAG builder. nodes are stored in a flat vec, referenced by index.
+#[derive(Default)]
 pub struct Dag {
     nodes: Vec<Node>,
 }
 
 impl Dag {
     pub fn new() -> Self {
-        Dag { nodes: Vec::new() }
+        Self::default()
     }
 
     /// access the underlying node array.

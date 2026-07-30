@@ -88,7 +88,7 @@ def test_michel_oracle_satisfies_the_flow_invariants() -> None:
         sol.u_sonic**2, sol.mass / (2.0 * sol.r_sonic), rel_tol=1e-12
     )
 
-    # the SCHWARZSCHILD split, explicitly: the invariants below are written in the
+    # the SCHWARZSCHILD split, explicitly: these invariants are written in the
     # static frame (the bernoulli constant is h^2 (f + u^2) with f = 1 - 2M/r), so this
     # is a statement about the analytic solution itself, not about whatever chart a
     # simulation happens to evolve in.

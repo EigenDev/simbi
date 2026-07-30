@@ -238,7 +238,7 @@ fn iso_c2p_matches_native_carrier() {
 }
 
 // =============================================================================
-// rhd c2p — the ITERATIVE relativistic recovery (`rhd_recover` = a carrier-generic Newton
+// rhd c2p — the ITERATIVE relativistic recovery (`rhd_recover` = a carrier-generic newton
 // on the pressure root). round-trip ONLY (it guarantees admissibility): a KNOWN admissible
 // prim (subluminal velocity, positive pressure) -> cons via `Rhd::to_conserved::<f64>` ->
 // the Gv kernel (IterateInline, count=20 == build.rs) -> the input prim. tolerance ~1e-9
@@ -462,9 +462,9 @@ fn adiabatic_flux_matches_native_physics() {
 
 #[test]
 fn iso_flux_matches_native_physics() {
-    // the iso flux IS the Newtonian flux at gamma=1 with `pre = cs2*rho` (the locally-iso
+    // the iso flux IS the newtonian flux at gamma=1 with `pre = cs2*rho` (the locally-iso
     // closure), MINUS the energy flux (iso has no energy law). reference = the native iso
-    // physics: `IsoNewtonian` is the Newtonian regime, so `Newtonian::to_flux` at gamma=1 over
+    // physics: `IsoNewtonian` is the newtonian regime, so `Newtonian::to_flux` at gamma=1 over
     // a prim whose pre = cs2*rho gives the iso mass+momentum flux (the builder's single source).
     let iso_gamma = 1.0;
     let cs2 = 0.6;
@@ -528,7 +528,7 @@ fn rmhd_flux_matches_native_physics() {
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
     let f = Rmhd.to_flux(&prim, &Tensor::unit(0), &eos);
-    // rmhd_flux_gv reads the materialized per-cell Davis speeds (ws_l/ws_r), produced in the
+    // rmhd_flux_gv reads the materialized per-cell davis speeds (ws_l/ws_r), produced in the
     // live solver by rmhd_wave_speeds_cell_gv = `Rmhd::wave_speeds`. for a UNIFORM state HLLE
     // returns the physical flux for any s_l < 0 < s_r (the diffusive U_R - U_L term vanishes),
     // so binding the exact quartic speeds uniformly reproduces `to_flux`.
@@ -585,9 +585,9 @@ const AXES_1D: [usize; 1] = [0];
 
 #[test]
 fn iso_wave_speed_map_matches_native_physics() {
-    // gamma=1.4 here drives the adiabatic Newtonian speed |v_0| + cs; with dx=1 the map IS
+    // gamma=1.4 here drives the adiabatic newtonian speed |v_0| + cs; with dx=1 the map IS
     // `max(|sl|,|sr|)` from `Newtonian::wave_speeds_axis`. (the same builder drives the iso CFL
-    // at gamma=1; it is exercised carrier-generically against the Newtonian f64 reference.)
+    // at gamma=1; it is exercised carrier-generically against the newtonian f64 reference.)
     let (rho, v0, pre) = (1.3_f64, 0.4_f64, 0.7_f64);
     let eos = IdealGas { gamma: GAMMA };
     let prim = Prim::<f64, 3> {
@@ -624,7 +624,7 @@ fn iso_wave_speed_map_matches_native_physics() {
 
 #[test]
 fn rhd_wave_speed_map_matches_native_physics() {
-    // the relativistic Mignone-Bodo per-axis speed (`Rhd::wave_speeds_axis`); dx=1 -> the map
+    // the relativistic mignone-bodo per-axis speed (`Rhd::wave_speeds_axis`); dx=1 -> the map
     // IS `max(|sl|,|sr|)`. the SAME core the RHD flux's HLLE consumes.
     let (rho, v0, pre) = (1.0_f64, 0.3_f64, 1.0_f64);
     let eos = IdealGas { gamma: RHD_GAMMA };
@@ -661,7 +661,7 @@ fn rhd_wave_speed_map_matches_native_physics() {
 #[test]
 fn rmhd_wave_speed_map_matches_native_physics() {
     // the CFL map traces `rmhd_magnetosonic_cfl_speeds` (the cheap c_f^2 = c_s^2 + c_A^2 upper
-    // bound); the full Mignone & Del Zanna quartic stays on the Riemann/flux
+    // bound); the full mignone & del zanna quartic stays on the riemann/flux
     // path only. so the reference MUST be the same magnetosonic bound at native f64; the
     // `wave_speeds_axis` characteristic over-tightens to the exact value and disagrees by ~2%.
     // dx=1 -> the map IS `max(|sl|,|sr|)`; the bound reads the full 3-velocity + 3-B-field.
@@ -933,7 +933,7 @@ fn nmhd_hllc_hlld_flux_match_native_physics_on_uniform_state() {
 }
 
 // =============================================================================
-// ISOTHERMAL MHD carrier oracle (Mignone 2007) — the same gate as NMHD over the
+// ISOTHERMAL MHD carrier oracle (mignone 2007) — the same gate as NMHD over the
 // no-energy state: c2p writes (rho, v) only, flux writes (D, S, B) only, closure
 // scalar is `cs`. the flux reads `bface_n` (the staggered normal-B coupling).
 // =============================================================================
@@ -1064,7 +1064,7 @@ fn imhd_builders_render_to_cpu_and_cuda() {
 // 5-wave rmhd HLLD, the kernels with no algebraic f64 == Gv equivalence elsewhere. the
 // reference is the SAME riemann function run NATIVELY at S = f64 (never re-derived
 // algebra) on the SAME reconstructed L/R the kernel sees. uniform state -> the
-// PLM slope is zero so L == R == the cell value, which isolates the Riemann
+// PLM slope is zero so L == R == the cell value, which isolates the riemann
 // branch; the non-uniform limiter oracle below then drives the reconstruction
 // select-branches. theta = 1 (plain minmod), the Standard shock-smoother arm
 // (the trace-time default), and a static mesh (vface = 0) match the trace.
@@ -1102,7 +1102,7 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
 
 #[test]
 fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
-    // a grazing v^2 -> 1 state stresses the relativistic Lorentz factor + Mignone-Bodo
+    // a grazing v^2 -> 1 state stresses the relativistic lorentz factor + mignone-bodo
     // contact quadratic (the select-heavy region) at both carriers.
     let prim = Prim::<f64, 2> {
         rho: 1.0,
@@ -1267,7 +1267,7 @@ fn minmod3_f64(x: f64, y: f64, z: f64) -> f64 {
     }
 }
 
-// reconstruct (left_at_face_i, right_at_face_i) for the cell-centred series `q` at face index i,
+// reconstruct (left_at_face_i, right_at_face_i) for the cell-centered series `q` at face index i,
 // the f64 mirror of plm_theta_gv: left uses cells i-2..i, right uses cells i-1..i+1.
 fn plm_theta_f64(q: &[f64], i: usize, theta: f64) -> (f64, f64) {
     let slope = |vl: f64, vc: f64, vr: f64| {
@@ -1333,8 +1333,8 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
     );
 
     // Gv kernel: the SAME adiabatic flux on the per-cell series, evaluated on the f64
-    // interpreter. the kernel reconstructs internally (its select-branches now driven by
-    // the non-uniform input), so its output at FCELL must equal the f64 reference.
+    // interpreter. the kernel reconstructs internally (the non-uniform input drives its
+    // select-branches), so its output at FCELL must equal the f64 reference.
     let out = KernelRun::new(adiabatic_flux_gv::<2>(0))
         .grid([NSWEEP, 1])
         .compute_window([FCELL as i32, 0], [1, 1])
@@ -1448,7 +1448,7 @@ fn cartesian_ks_flux_is_x_y_symmetric() {
 
 // the cartesian kerr-schild c2p x<->y symmetry: a transpose-symmetric conserved state
 // (den/nrg symmetric, S_x[i][j] = S_y[j][i]) must recover transpose-symmetric primitives. per-cell,
-// so it isolates the metric-aware Valencia recovery from the flux/godunov.
+// so it isolates the metric-aware valencia recovery from the flux/godunov.
 #[test]
 fn cartesian_ks_c2p_is_x_y_symmetric() {
     use symbi_discretize::rhd_c2p_gr_gv;
@@ -1567,7 +1567,7 @@ fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
             ("x_lo_0", 4.0),
             ("x_lo_1", 4.0),
             // the covariant-energy godunov reconstructs the geodesic-source inertia rho h W^2 =
-            // h D^2/rho, so the stage now binds the EOS gamma.
+            // h D^2/rho, so the stage binds the EOS gamma.
             ("schwarzschild_mass", 1.0),
             ("gamma", 5.0 / 3.0),
         ])

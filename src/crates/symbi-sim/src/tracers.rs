@@ -215,7 +215,7 @@ pub fn cic_stencil<const D: usize>(
 
 /// advance continuous tracers on host-accessible storage.
 ///
-/// this is the correctness oracle for accelerator kernels: one counter value
+/// this is the reference the accelerator kernels are checked against: one counter value
 /// identifies a complete dimensional update, while the axis selects independent
 /// samples without making results depend on traversal order.
 pub fn advance_continuous_tracers_host<const D: usize, Mem: symbi_xpu::MemorySpace>(

@@ -8,14 +8,14 @@
 // first step, zeroed — buffer. the redo then rebuilds the flow from garbage:
 // an unrecoverable poison COMPLETES as a "success" with a zeroed conserved
 // buffer (density 0 is finite, so no guard fires), and a recoverable blast
-// freezes where it used to recover.
+// freezes instead of recovering.
 //
 // both gates drive the PRODUCTION hierarchy loop (the same single-level wrap
 // every python run uses — the raw evolve() pipeline has no fofc phase):
-//   1. a finite, unrecoverable energy sink must trip the persistent-freeze
-//      halt (a panic naming the freeze) — never march to t_final.
-//   2. a recoverable strong blast fires FOFC and conserves the totals with
-//      ZERO freezes — the first-order tier recovers every flagged cell.
+//   - a finite, unrecoverable energy sink must trip the persistent-freeze
+//     halt (a panic naming the freeze) — never march to t_final.
+//   - a recoverable strong blast fires FOFC and conserves the totals with
+//     ZERO freezes — the first-order tier recovers every flagged cell.
 // =============================================================================
 
 use symbi::prelude::SimSubstrate;

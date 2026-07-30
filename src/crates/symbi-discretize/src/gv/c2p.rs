@@ -132,8 +132,8 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 }
 
 /// trace the REAL RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
-/// relativistic cons->prim: a carrier-generic Newton on the pressure root, then the
-/// algebraic velocity/Lorentz/density recovery) at `S = Gv`. the Newton lowers to one
+/// relativistic cons->prim: a carrier-generic newton on the pressure root, then the
+/// algebraic velocity/lorentz/density recovery) at `S = Gv`. the newton lowers to one
 /// `Op::IterateInline` (body traced once); `max_iters` bakes the fixed loop count. this
 /// is the FIRST iterative gv kernel — replaces the hand-written `rhd_c2p` Expr builder.
 ///
@@ -194,7 +194,7 @@ pub fn rhd_c2p_gv<const D: usize>(
 /// the RHD cons->prim on a curved spacetime — the `_schw`/`_ks` GR path. it undensitizes the
 /// evolved state by the known measure `sqrt(-g)(x)` and then runs the recovery contracted with the
 /// REAL spatial metric gamma(r) at the cell (not identity): `|S|^2 = gamma^{ij} S_i S_j` and the
-/// recovered `v^i = gamma^{ij} S_j / (tau+D+p)` is the CONTRAVARIANT velocity (Valencia). the metric
+/// recovered `v^i = gamma^{ij} S_j / (tau+D+p)` is the CONTRAVARIANT velocity (valencia). the metric
 /// is evaluated at the volume-weighted centroid — the SAME point the seeding densitizes at — so the
 /// state round-trips per cell. reduces to `rhd_c2p_gv` at identity gamma. `D` is the momentum
 /// DOF (all D components contracted), the GRID dimension is `axes.len()` — they differ for the
@@ -241,7 +241,7 @@ where
     let mass = Gv::scalar("schwarzschild_mass");
     // the evolved state is the densitized sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], so the
     // recovery harvests the cell lapse, shift and full-chart measure `volume_factor`: undensitize
-    // by the known sqrt(det gamma)(x), then invert the killing energy back to the Valencia tau the
+    // by the known sqrt(det gamma)(x), then invert the killing energy back to the valencia tau the
     // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
     let (gm, gm_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
@@ -357,7 +357,7 @@ where
 
 /// trace the REAL RMHD c2p — symbi-hydro's branch-free `rmhd_recover` (the KKC
 /// false-position: a 6-state bracketed iterate over `kkc_fmu44` + `find_mu_plus`,
-/// Illinois half-damp, sticky `done`) at `S = Gv`. the LAST + hardest c2p: the
+/// illinois half-damp, sticky `done`) at `S = Gv`. the LAST + hardest c2p: the
 /// bracketed solve lowers to a multi-accumulator `Op::IterateInline` via the new
 /// `Scalar::iterate_vec`. replaces the hand-written `rmhd_c2p` Expr builder.
 ///
@@ -446,7 +446,7 @@ pub fn rmhd_c2p_gr_gv(
     }));
     let mass = Gv::scalar("schwarzschild_mass");
     // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
-    // so the recovery harvests the cell lapse + shift to invert it back to the Valencia tau the KKC
+    // so the recovery harvests the cell lapse + shift to invert it back to the valencia tau the KKC
     // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
     let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
         (Spacetime::SchwarzschildKS, Coords::Cartesian) => {

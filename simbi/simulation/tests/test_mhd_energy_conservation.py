@@ -1,12 +1,12 @@
 # =============================================================================
 # test_mhd_energy_conservation.py
 #
-# the base-scheme CT energy-conservation gate (spec §6). on a periodic magnetized
-# relativistic shock the total energy tau (conserved buffer, interior sum) must hold to
-# machine roundoff — AND not grow with resolution. before the fix the magnetic-energy
-# patch (applied outside the flux) drifted tau ~2e-4 at nx=256 and GREW to ~6e-4 at
-# nx=512. after making cell B a derived quantity (interp of the CT face field) and
-# deleting the patch, tau is conserved by the Poynting-carrying Godunov flux to roundoff.
+# the base-scheme CT energy-conservation gate. on a periodic magnetized relativistic
+# shock the total energy tau (conserved buffer, interior sum) must hold to machine
+# roundoff — AND not grow with resolution. a magnetic-energy patch applied outside the
+# flux drifts tau ~2e-4 at nx=256, growing to ~6e-4 at nx=512. with cell B a derived
+# quantity (interp of the CT face field) and no patch, tau is conserved by the
+# Poynting-carrying Godunov flux to roundoff.
 # =============================================================================
 import glob
 import os
@@ -39,7 +39,7 @@ def _tau_sum(nx: int, end_time: float) -> float:
 def test_mhd_total_energy_conserved_and_resolution_independent() -> None:
     tol = 1e-11
     drifts = {}
-    # the fix must hold at EVERY resolution (the bug GREW with nx — the discriminating signature).
+    # conservation must hold at EVERY resolution; a bookkeeping error GROWS with nx.
     for nx in (64, 128, 256):
         t0 = _tau_sum(nx, 0.0)
         t1 = _tau_sum(nx, 0.1)
@@ -49,7 +49,7 @@ def test_mhd_total_energy_conserved_and_resolution_independent() -> None:
             f"total energy drifted at nx={nx}: dtau/tau={d:.3e} (roundoff-conservation bound "
             f"{tol:.0e}) — the CT magnetic-energy patch is non-conservative"
         )
-    # and the drift must NOT grow with resolution (a conservative scheme is flat; the patch grew).
+    # a conservative scheme is flat in resolution; a bookkeeping error grows with it.
     assert drifts[256] < 10.0 * max(drifts[64], 1e-16), (
         f"energy drift grows with resolution ({drifts[64]:.2e} -> {drifts[256]:.2e}) — "
         "the hallmark of the non-conservative magnetic-energy patch, not truncation"

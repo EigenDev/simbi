@@ -18,20 +18,19 @@
 // =============================================================================
 
 // the CPU field descriptor the generated kernels take. carries the buffer
-// pointer plus its pre-multiplied row-major strides, so per-cell index arithmetic is ONE method
-// call (`at_Nd`) reading struct fields from a single descriptor. the
-// strides are computed ONCE at construction (host-side, per kernel launch).
-//
-// SINGLE SOURCE OF TRUTH for index arithmetic: `at_1d` / `at_2d` / `at_3d` are
-// the only methods that know the formula. every generated kernel calls them.
+// pointer plus its pre-multiplied row-major strides, so a kernel's per-cell index
+// arithmetic reads `lo` / `strides` off a single descriptor and indexes `data`
+// directly. the strides are computed ONCE at construction (host-side, per kernel
+// launch) from `symbi_algebra::strides_from_extent`, the single definition of the
+// stride formula.
 //
 // `lo` and `strides` are fixed `[i32; 4]` (no slice indirection, no bounds
-// checks) — supports rank ≤ 4 (more than the project's 3D ceiling). the unused
-// tail is `0` and never read by the rank-specific accessors.
+// checks) — supports rank <= 4 (more than the project's 3D ceiling). the unused
+// tail is `0` and never read.
 //
 // `extent` is intentionally absent: no emitted kernel reads it (the strides
 // already encode the only layout fact the index math needs). carrying it
-// would waste 16 bytes per buffer × ~20 buffers = ~320 bytes of stack per
+// would waste 16 bytes per buffer x ~20 buffers = ~320 bytes of stack per
 // kernel call for a field nobody reads.
 //
 // the name-keyed host/test invocation built on the registry + manifest — the
@@ -93,8 +92,8 @@ pub fn copy_lo(lo: &[i32]) -> [i32; 4] {
 }
 
 /// widen a runtime `&[u32]` per-axis extent into the fixed `[i32; 4]` view field,
-/// zero-padding unused tail axes. the Gate-3 smem cooperative load clamps each
-/// gmem read to `[lo, lo + extent - 1]`, so the device view must carry extent.
+/// zero-padding unused tail axes. the shared-memory cooperative load clamps each
+/// global-memory read to `[lo, lo + extent - 1]`, so the device view must carry extent.
 #[inline]
 pub fn copy_extent(extent: &[u32]) -> [i32; 4] {
     let mut out = [0i32; 4];
@@ -115,42 +114,6 @@ impl<'a, T> CpuField<'a, T> {
             strides: compute_strides(extent),
         }
     }
-
-    /// flat offset of `(i)` in a 1D buffer. inlined; no slice access in the body.
-    #[inline(always)]
-    pub fn flat_1d(&self, i: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0]) as usize
-    }
-
-    /// flat offset of `(i, j)` in a 2D buffer.
-    #[inline(always)]
-    pub fn flat_2d(&self, i: i32, j: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0] + (j - self.lo[1]) * self.strides[1]) as usize
-    }
-
-    /// flat offset of `(i, j, k)` in a 3D buffer. THE hot-path index — every
-    /// PLM stencil read goes through here.
-    #[inline(always)]
-    pub fn flat_3d(&self, i: i32, j: i32, k: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0]
-            + (j - self.lo[1]) * self.strides[1]
-            + (k - self.lo[2]) * self.strides[2]) as usize
-    }
-
-    /// rank-1 dereference. cheaper than going through `flat_1d` only because
-    /// the index arithmetic inlines either way.
-    #[inline(always)]
-    pub fn at_1d(&self, i: i32) -> &T {
-        &self.data[self.flat_1d(i)]
-    }
-    #[inline(always)]
-    pub fn at_2d(&self, i: i32, j: i32) -> &T {
-        &self.data[self.flat_2d(i, j)]
-    }
-    #[inline(always)]
-    pub fn at_3d(&self, i: i32, j: i32, k: i32) -> &T {
-        &self.data[self.flat_3d(i, j, k)]
-    }
 }
 
 impl<'a, T> CpuFieldMut<'a, T> {
@@ -161,50 +124,6 @@ impl<'a, T> CpuFieldMut<'a, T> {
             lo: copy_lo(lo),
             strides: compute_strides(extent),
         }
-    }
-
-    #[inline(always)]
-    pub fn flat_1d(&self, i: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0]) as usize
-    }
-    #[inline(always)]
-    pub fn flat_2d(&self, i: i32, j: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0] + (j - self.lo[1]) * self.strides[1]) as usize
-    }
-    #[inline(always)]
-    pub fn flat_3d(&self, i: i32, j: i32, k: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0]
-            + (j - self.lo[1]) * self.strides[1]
-            + (k - self.lo[2]) * self.strides[2]) as usize
-    }
-
-    #[inline(always)]
-    pub fn at_1d(&self, i: i32) -> &T {
-        &self.data[self.flat_1d(i)]
-    }
-    #[inline(always)]
-    pub fn at_2d(&self, i: i32, j: i32) -> &T {
-        &self.data[self.flat_2d(i, j)]
-    }
-    #[inline(always)]
-    pub fn at_3d(&self, i: i32, j: i32, k: i32) -> &T {
-        &self.data[self.flat_3d(i, j, k)]
-    }
-
-    #[inline(always)]
-    pub fn at_1d_mut(&mut self, i: i32) -> &mut T {
-        let idx = self.flat_1d(i);
-        &mut self.data[idx]
-    }
-    #[inline(always)]
-    pub fn at_2d_mut(&mut self, i: i32, j: i32) -> &mut T {
-        let idx = self.flat_2d(i, j);
-        &mut self.data[idx]
-    }
-    #[inline(always)]
-    pub fn at_3d_mut(&mut self, i: i32, j: i32, k: i32) -> &mut T {
-        let idx = self.flat_3d(i, j, k);
-        &mut self.data[idx]
     }
 }
 

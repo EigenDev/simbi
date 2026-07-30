@@ -1,7 +1,8 @@
 // =============================================================================
 // additive_source_equals_fused_evolve.rs
 //
-// **S3b proof — the evolve-loop lift of S2**. the kernel-level S2 proof
+// the evolve-loop lift of the kernel-level fused-vs-additive equivalence. the
+// kernel proof
 // (`symbi-discretize::godunov_with_fused_source::fused_stage_equals_plain_plus_
 // additive_pass`) asserts a SINGLE stage of fused-godunov is bit-identical to
 // plain-godunov + the standalone `source_apply` pass. this test lifts that to
@@ -11,8 +12,8 @@
 //   - ADDITIVE: `with_additive_source(b)` -> plain godunov + per-stage source_apply
 // must produce bit-for-bit identical conserved state at every interior cell,
 // every step. SSP-RK2 is used so the FP-sensitive corrector stage (a0=ac=0.5,
-// the exact reason the fused builder was restructured to add the source as a
-// separate `+ ac*dt*S` term) is exercised every step.
+// where the fused kernel adds the source as a separate `+ ac*dt*S` term) is
+// exercised every step.
 //
 // if the snapshot (u_stage), the weight (ac*dt), or the source evaluation drift
 // by a single ULP, the trajectories diverge and `assert_eq!` fails.
@@ -50,7 +51,7 @@ fn assert_cons_bit_identical<const D: usize>(
         assert_eq!(
             va.to_bits(),
             vb.to_bits(),
-            "{label} differs at {c:?}: fused={va:?} additive={vb:?} (Δ={:?})",
+            "{label} differs at {c:?}: fused={va:?} additive={vb:?} (delta={:?})",
             va - vb,
         );
     }

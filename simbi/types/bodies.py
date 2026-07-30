@@ -292,7 +292,7 @@ class RigidProperties:
 class MagneticProperties:
     """the body's magnetic coupling (MHD runs): a localized Ohmic resistivity `eta` that dissipates the
     magnetic field THREADING the body (`MagneticSpec::Resistive`). a no-op on B for a hydro run. the
-    backend reads `magnetic.resistivity`; cartesian 2.5D MHD only for now."""
+    backend reads `magnetic.resistivity`; supported for cartesian 2.5D MHD."""
 
     resistivity: float
 

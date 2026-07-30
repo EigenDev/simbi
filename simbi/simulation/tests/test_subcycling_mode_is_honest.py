@@ -43,8 +43,8 @@ def test_an_unimplemented_schedule_is_refused(mode: SubCycleMode) -> None:
 @pytest.mark.parametrize("mode", [SubCycleMode.STANDARD, SubCycleMode.NONE])
 def test_the_implemented_schedule_is_accepted(mode: SubCycleMode) -> None:
     # NONE and STANDARD both name the fixed-ratio schedule and are equivalent. the premise: the
-    # refusal above must be specific to the unimplemented modes rather than a blanket rejection of
-    # anything set explicitly.
+    # refusal must be specific to the unimplemented modes, not a blanket rejection of anything set
+    # explicitly.
     problem = _refined(refinement_subcycling_mode=mode)
     assert problem.refinement_subcycling_mode is mode
 
@@ -67,13 +67,12 @@ def test_no_shipped_config_declares_an_unimplemented_schedule() -> None:
     if not root.is_dir():
         pytest.skip("simbi_configs is not present in this checkout")
 
-    offenders = [
-        str(path.relative_to(root))
-        for path in root.rglob("*.py")
-        if "SubCycleMode.ADAPTIVE" in path.read_text()
-        or "SubCycleMode.MANUAL" in path.read_text()
-    ]
+    offenders = []
+    for path in root.rglob("*.py"):
+        source = path.read_text()
+        if "SubCycleMode.ADAPTIVE" in source or "SubCycleMode.MANUAL" in source:
+            offenders.append(str(path.relative_to(root)))
     assert not offenders, (
-        "these configs declare a subcycling schedule the backend does not implement, so they would "
-        f"now fail validation: {offenders}"
+        "these configs declare a subcycling schedule the backend does not implement, so they fail "
+        f"validation: {offenders}"
     )

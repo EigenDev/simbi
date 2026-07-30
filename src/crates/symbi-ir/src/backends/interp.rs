@@ -338,7 +338,7 @@ fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
 // evaluates the shared body, and writes the per-cell outputs. the SAME
 // `KernelEmitInputs` spec either emits CUDA (`emit_kernel_from_lowering`) or
 // runs here on CPU. buffers are separate in/out (a stencil sweep that wrote
-// in-place would corrupt neighbour reads; in-place godunov is the caller's
+// in-place would corrupt neighbor reads; in-place godunov is the caller's
 // double-buffering concern). this is the device-agnostic execution closing
 // the loop with the kernels the substrate generates.
 
@@ -362,7 +362,7 @@ pub struct CpuFieldMut<'a> {
 /// product is NOT re-spelled here — it is derived from the ONE canonical
 /// definition `symbi_algebra::strides_from_extent` (the same formula `Layout` /
 /// `Domain` / the runtime `View` and the AOT kernels all use). routing through it
-/// means the interpreter is a faithful oracle for stencil (neighbour) reads and
+/// means the interpreter is a faithful oracle for stencil (neighbor) reads and
 /// cannot drift from the real `Field` layout (axis-0-fastest / physical-x-fastest).
 fn flat_index(coord: &[i64], lo: &[i32], extent: &[u32], ndim: usize) -> usize {
     let ext_i64: [i64; 4] = std::array::from_fn(|a| if a < ndim { extent[a] as i64 } else { 1 });

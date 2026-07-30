@@ -56,7 +56,7 @@ fn resistive_cfl_uses_the_physical_cell_width() {
     .with_resistivity(ETA);
     let dt = sub.cfl(&sim);
 
-    // the COORDINATE-width resistive dt bound the old fold would have used.
+    // the resistive dt bound formed from the COORDINATE width, which the physical bound must beat.
     let dx_min = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
     let dt_coord = CFL * dx_min * dx_min / (2.0 * 3.0 * ETA);
 

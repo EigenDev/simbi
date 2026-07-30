@@ -11,7 +11,7 @@
 # magnetic tension (Bz-only field, d/dz=0), Bz advects rigidly at the flow velocity:
 #   Bz(x, y, t) = Bz(x - vx t, y - vy t, 0)
 # a working out-of-plane predictor reproduces this translation; a frozen predictor leaves
-# Bz at its IC (the regression). the domain is periodic; at a HALF period the exact solution
+# Bz at its IC. the domain is periodic; at a HALF period the exact solution
 # is the IC shifted by half the domain in each direction — far from the IC, so it separates a
 # genuinely-advected Bz from a frozen one (a full period would return to the IC either way).
 # =============================================================================

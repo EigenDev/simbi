@@ -435,7 +435,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the SHARED lattice-map pullback (iso_ghost_fill{sfx}_{D}d): rho/vel/pre, in-place,
-        // bound by manifest. (DOF>NDIM: the cyl ghost manifest is pending axis-BC work,
+        // bound by manifest. (DOF>NDIM: the cyl ghost manifest carries no per-axis BC entry,
         // but the dispatch path is regime-uniform.)
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim
@@ -454,7 +454,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             |region, p| {
                 // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes (the
                 // `ints` tail), vel_sign FLOAT (the `scalars` tail) — each routed by the kernel's
-                // declared sort. the int ⊔ float coproduct that defeated positional scalars_for.
+                // declared sort. the int \sqcup float coproduct that defeated positional scalars_for.
                 let (ints, scalars) = resolve_params(
                     &name,
                     |bind| match bind {

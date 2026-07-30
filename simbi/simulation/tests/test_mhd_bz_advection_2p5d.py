@@ -1,12 +1,12 @@
 # =============================================================================
 # test_mhd_bz_advection_2p5d.py
 #
-# the 2.5D out-of-plane predictor gate (oop_predictor_spec.md). the transverse Bz on a 2D
+# the 2.5D out-of-plane predictor gate. the transverse Bz on a 2D
 # cartesian grid has no staggered face (only Bx,By are CT) and is a cell-centered conserved
 # variable evolved SOLELY by the out-of-plane cell-B flux predictor. a force-balanced Bz(x,y)
 # advects rigidly at the flow velocity; after a HALF period the exact solution is the IC
 # shifted by half the domain in each direction. a working predictor lands on that shift; a
-# frozen predictor (the regression) leaves Bz at the IC.
+# frozen predictor leaves Bz at the IC.
 # =============================================================================
 import glob
 import os

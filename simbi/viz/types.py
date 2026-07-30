@@ -15,10 +15,10 @@
 #   on layout and additional presentation (legend, colorbar, etc).
 #
 #   rationale:
-#     - previously components returned loose dicts or lists. that forced
-#       the Figure to guess semantics and do formatting. renderresult makes
-#       component outputs explicit and testable and lets the FigureFormatter
-#       safely decide about colorbars, legends, and axis labels.
+#     - loose dicts or lists force the Figure to guess semantics and do its own
+#       formatting. renderresult makes component outputs explicit and testable
+#       and lets the FigureFormatter safely decide about colorbars, legends,
+#       and axis labels.
 #
 #   minimal expectations:
 #     - `artists` (dict[str, object]): mapping of semantic keys -> artist object
@@ -78,8 +78,7 @@
 #
 # notes:
 #   - components that create no artists may return RenderResult(artists={}, metadata={})
-#   - the figure and formatter must tolerate legacy returns (plain dict or list),
-#     but new code should use RenderResult for clarity.
+#   - the figure and formatter also tolerate legacy returns (a plain dict or list)
 # =============================================================================
 """Core type definitions for the visualization system."""
 
@@ -96,7 +95,7 @@ from simbi.types.bodies import (
     ImmersedBodyConfig,
 )
 
-# Type variables for generic functions
+# type variables for generic functions
 T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")

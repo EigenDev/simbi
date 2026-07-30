@@ -472,9 +472,9 @@ fn porous_absorption_converges_under_grid_refinement() {
 }
 
 // a RIGID (non-accreting) body reaches the penalize dispatch through the mask_radius
-// gate — the old accretion_radius gate would have skipped it. it penalizes (the wall
-// pushes back) while removing exactly zero mass, and the feedback ledger consolidates a
-// non-black-hole body without panicking.
+// gate: mask_radius is defined for every body, while accretion_radius is None for a
+// non-accreting one. it penalizes (the wall pushes back) while removing exactly zero
+// mass, and the feedback ledger consolidates a non-black-hole body without panicking.
 #[test]
 fn rigid_wall_non_accreting_penalizes_without_draining() {
     use symbi_ib::SurfaceSpec;
@@ -820,7 +820,7 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
         tau[0].abs() > 1e-6,
         "spin about x should book a torque about x: {tau:?}"
     );
-    // the reaction is about the spin axis (x) — the default axis is not hardwired.
+    // the reaction is about the spin axis (x), whichever axis the config names.
     assert!(
         tau[0].abs() > 10.0 * tau[2].abs(),
         "the x-axis spin torque must dominate the z component: {tau:?}"

@@ -3,9 +3,9 @@
 //
 // end-to-end validation of the LOG-RADIAL 2.5D cylindrical (r-z) Newtonian-MHD kernels — the
 // `_cyl_rz_logr` gas godunov, wave-speed map, out-of-plane bcell predictor, and the metric CT
-// curl `rmhd_ct_curl_2d_{dir}_cyl_rz_logr`. flat MHD previously omitted the spacing slug and
-// silently reused the uniform-geometry kernel on a log grid (wrong face radii); the runtime now
-// appends the spacing slug like the GR path, selecting the geometric-mean cell geometry. this runs
+// curl `rmhd_ct_curl_2d_{dir}_cyl_rz_logr`. the spacing slug is what selects the geometric-mean
+// cell geometry; omitting it silently resolves the uniform-geometry kernel on a log grid, which
+// reads the wrong face radii. this runs
 // the whole CT stack over a radial axis spanning nearly a decade (R in [1, 8], log-spaced) and
 // asserts:
 //   (a) the discrete area-weighted div(B) of the staggered in-plane field

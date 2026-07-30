@@ -264,7 +264,7 @@ def test_cartesian_ks_mhd_3d_stencils_are_mirror_exact_early() -> None:
     # direction on that entire face plane. UCT selects on wave speeds, which stay bounded
     # away from zero, so it is well posed here. the contact scheme's failure on exactly this
     # configuration is gated by
-    # `test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane` below.
+    # `test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane`.
     d = tempfile.mkdtemp() + "/"
     p = _CartesianKsMhd3D(data_directory=Path(d))
     p.ct_method = CtMethod.UCT
@@ -303,8 +303,8 @@ def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
     #
     # the gate is RELATIVE, comparing the two schemes on identical data rather than pinning a
     # measured number: UCT must hold the symmetry, and the contact scheme must violate it by
-    # orders of magnitude. if a future contact formulation becomes well posed here this test
-    # FAILS, which is the signal to delete it and the UCT pin in the mirror test above.
+    # orders of magnitude. a contact formulation that becomes well posed here fails this test,
+    # which is the signal to delete it along with the UCT pin in the mirror-exactness test.
     def run_with(ct: CtMethod) -> float:
         d = tempfile.mkdtemp() + "/"
         p = _CartesianKsMhd3D(data_directory=Path(d))
@@ -329,6 +329,6 @@ def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
     )
     assert contact > 100.0 * uct, (
         f"the contact CT scheme held the mirror symmetry ({contact:e} vs UCT {uct:e}) — its "
-        "upwind selector is no longer ill posed where the normal mass flux vanishes, so this "
-        "test and the UCT pin in the mirror-exactness test above are both obsolete"
+        "upwind selector is well posed where the normal mass flux vanishes, so this test and "
+        "the UCT pin in the mirror-exactness test are both obsolete"
     )

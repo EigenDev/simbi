@@ -299,9 +299,8 @@ def overlay_tracers(
       - "id":   a stable per-particle color (follow a particle across frames)
       - "none": a single color (pass `c=` / `color=` through kwargs)
     returns the scatter artist, or None when there is nothing to draw -- in which case it
-    WARNS to stderr (a checkpoint with no `tracers` group, or an empty one) rather than
-    drawing nothing silently, so `--draw-tracers` on a run that carried no tracers tells
-    you why the plot is bare."""
+    WARNS to stderr (a checkpoint with no `tracers` group, or an empty one), so
+    `--draw-tracers` on a run that carried no tracers reports why the plot is bare."""
     cloud = load_tracers(checkpoint_path)
     if cloud is None:
         print(

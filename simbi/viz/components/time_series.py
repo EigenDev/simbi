@@ -88,9 +88,9 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         return self._initialized
 
     def update(self, props: TimeSeriesPlotProps) -> None:
+        # render() recreates every line artist from the props, so storing them
+        # is the whole update
         self.props = props
-        # In a full impl, this would update styles or rebuild lines
-        pass
 
     def _get_labels(self, num_lines: int) -> list[str]:
         """Get labels for one or more lines."""

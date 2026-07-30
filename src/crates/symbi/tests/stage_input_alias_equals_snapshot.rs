@@ -85,7 +85,7 @@ fn stage0_un_alias_matches_the_snapshot_stage_copy() {
         sim
     };
 
-    // REFERENCE: force the `cons -> u_stage` copy at every stage (the pre-elision behaviour).
+    // REFERENCE: force the `cons -> u_stage` copy at every stage, eliding nothing.
     let mut sim_ref = build();
     sim_ref
         .workspace

@@ -9,8 +9,8 @@
 # nu = 0. the resistive edge EMF likewise rides each level's own CT, so a fine
 # set without eta runs the refined patch ideal. these gates pin the sharp
 # symptom: a refined run with the knob on must evolve differently from the
-# refined run with it off (they were BIT-IDENTICAL when the fine builders
-# dropped the knobs).
+# refined run with it off — a fine builder that drops the knob makes the two
+# BIT-IDENTICAL.
 # =============================================================================
 import glob
 import os

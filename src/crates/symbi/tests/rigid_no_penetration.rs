@@ -5,8 +5,7 @@
 // drain-off porous surface (porosity 0, stiff normal channel) must enforce
 // no-penetration — the wall-normal gas velocity in the surface band collapses
 // far below the free stream, while the same band in a body-free run carries
-// the full free-stream normal component. this is the validation run the
-// shaped-wall arc never executed.
+// the full free-stream normal component.
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;

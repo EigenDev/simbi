@@ -2,10 +2,10 @@
 # test_problem_class_discovery.py
 #
 # regression for the run-command loader (_discover_problem_classes): a config that
-# inherits from an IMPORTED base config must be discovered as runnable. the former
-# ast base-NAME scan resolved a base only when it was literally "SimbiProblem" or a
-# class defined in the same file, so `class Mine(ImportedBase)` surfaced no runnable
-# class ("no SimbiProblem subclasses found"). the import-based loader tests the real
+# inherits from an IMPORTED base config must be discovered as runnable. an ast
+# base-NAME scan cannot do this: it resolves a base only when the name is literally
+# "SimbiProblem" or a class defined in the same file, so `class Mine(ImportedBase)`
+# surfaces no runnable class. the import-based loader tests the real
 # subclass relationship and returns the classes DEFINED in the script, excluding the
 # imported base and any non-SimbiProblem helpers.
 # =============================================================================

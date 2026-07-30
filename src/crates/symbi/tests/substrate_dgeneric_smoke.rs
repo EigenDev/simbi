@@ -2,8 +2,8 @@
 // substrate_dgeneric_smoke.rs
 //
 // proves the D-generic AdiabaticSubstrateKernelSet<Mem, Sc, const D> actually
-// executes at D > 1 through the real `evolve()` loop — the kepler/blast
-// gap. one struct, instantiated at D=2 and D=3.
+// executes at D > 1 through the real `evolve()` loop — the multi-dimensional
+// case. one struct, instantiated at D=2 and D=3.
 //
 // the 2D test is also a CORRECTNESS proof: a centered, x<->y-symmetric pressure pulse
 // evolved by an isotropic scheme (the SAME per-dir face-flux kernel for dir 0 and 1)
@@ -339,7 +339,7 @@ fn rhd_3d_runs_and_stays_symmetric() {
 
 #[test]
 fn rhd_2d_runs_and_stays_xy_symmetric() {
-    // closes the RHD multi-D CFL gap: the D-generic wave-speed map folds the per-axis
+    // the multi-dimensional RHD CFL: the D-generic wave-speed map folds the per-axis
     // relativistic Davis speed over both axes, so RHD runs at 2D. same x<->y symmetry
     // proof as Newton — the relativistic c2p (iterative Newton) + per-axis wave speeds
     // are isotropic, so a symmetric IC stays symmetric to ~machine precision.

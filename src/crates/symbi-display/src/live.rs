@@ -56,7 +56,7 @@ const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"
 
 /// everything the tabbed dashboard renders for one frame. per-physics fields are
 /// `Option`, so the overview draws only the cards whose data exists (a newtonian
-/// run has no div·B or max W).
+/// run has no div(B) or max W).
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DiagnosticView {
     // header
@@ -1085,7 +1085,7 @@ mod tests {
         assert!(d.contains("CFL"));
     }
 
-    /// a run with no mhd / rhd data omits the div·B row and shows max W as a dash.
+    /// a run with no mhd / rhd data omits the div(B) row and shows max W as a dash.
     #[test]
     fn per_physics_fields_are_optional() {
         let mut v = sample();

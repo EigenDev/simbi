@@ -16,10 +16,9 @@
 // the minimum moves decisively onto the FINEST level, and the root is driven far below its own
 // stability limit.
 //
-// both regimes are asserted here, and so is the crossover between them. the failure this exists to
-// catch is not a crash — the scheme stays inside every level's cfl either way. it is a run whose
-// cost is set by a level nobody expected, discovered from a queue slot rather than from a test that
-// takes a second.
+// both regimes are asserted here, and so is the crossover between them. the failure mode is cost,
+// not instability: the scheme stays inside every level's cfl either way, but the root step — and
+// therefore the wall time of the whole run — is set by whichever level attains the minimum.
 //
 // usage:
 //  cargo test -p symbi --test refinement_deep_dt_ladder
@@ -157,8 +156,7 @@ fn the_root_step_is_set_by_the_finest_level_once_the_ladder_reaches_inside_the_b
          does not straddle the crossover, so the flat and gravitational regimes are not both here"
     );
 
-    // the ladder itself, reported: a cost estimate for a deep run is built on these numbers, and
-    // they are cheaper to read here than to infer from a queue slot.
+    // the ladder itself, reported: a cost estimate for a deep run is built on these numbers.
     println!(
         "[{LEVELS} levels, R_B = {R_B}] level : r_inner/R_B : own dt : dt * 2^l : rung ratio"
     );

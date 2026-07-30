@@ -4,10 +4,11 @@
 // the tiling-invariance contract for horizon excision on the decomposed path:
 // a cartesian kerr-schild box with the black hole at the origin, excised, must
 // evolve identically whether it runs as one tile or as a 2x2 grid whose cuts
-// pass THROUGH the excised sphere. the onion fill's donor chains cross the
-// cuts one cell per sweep; the decomposed loop interleaves a halo exchange
-// between sweeps, which makes the tiled sweep sequence bit-identical to the
-// monolithic one — this oracle is what proves that claim. the uniform infall
+// pass THROUGH the excised sphere. the fill is pointwise — every cell inside
+// the excision radius is frozen at the cold vacuum floor from its own state —
+// so tiling invariance rests on each tile classifying its own cells against the
+// same global level set, and on the rim gas, which rarefies INTO the vacuum,
+// reading exchange-fresh halos. the uniform infall
 // develops real dynamics (the KS chart accretes from rest), so the excised
 // rim, the fill, and the conserved rebuild are all genuinely exercised.
 // =============================================================================
@@ -59,8 +60,8 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
 }
 
 // the tile grid over the origin-centered box: the 2x2 cut point is EXACTLY the
-// chart origin, so every tile owns one quadrant of the excised sphere and every
-// deep donor chain crosses a cut.
+// chart origin, so every tile owns one quadrant of the excised sphere and the
+// excised rim straddles all four cuts.
 fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
     let m: [usize; 2] = std::array::from_fn(|a| {
         assert!(N % counts[a] == 0, "N must split evenly into counts[{a}]");
@@ -110,7 +111,7 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
         |_, _, stores| {
             // dt-collapse tripwire: the vacuum-sink rim can drive dt into the
             // floor on cold configurations; a run that can never finish must
-            // fail loud, not spin (the fofc-equivalence lesson).
+            // fail loud rather than spin.
             assert!(
                 stores[0].dt > 1.0e-9,
                 "dt collapsed to {:.3e} at t = {:.6e}",
@@ -124,7 +125,7 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
 
 // scatter every tile's interior (den, nrg) into global grids: den is the accretion
 // canary; nrg carries the excised cells' rebuilt tau, so a wrong fill or a stale
-// cross-cut donor shows up in either.
+// halo at a cut shows up in either.
 fn global_fields(tiles: &[(Sim, Kern)], counts: [usize; 2]) -> (Vec<f64>, Vec<f64>) {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let mut den = vec![f64::NAN; N * N];

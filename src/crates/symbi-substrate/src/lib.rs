@@ -22,6 +22,5 @@
 pub mod census_sample;
 pub mod regimes;
 
-// shared kernel-set support (cfl_from_lambda, GhostFillDriver, ...) — the
-// hand-written per-regime kernel sets were retired.
+// shared kernel-set support (cfl_from_lambda, GhostFillDriver, ...), regime-agnostic.
 pub mod kernels;

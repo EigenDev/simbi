@@ -124,8 +124,8 @@ fn run_compiled(g: &mut Grid) {
         match name {
             "gamma" => GAMMA,
             "schwarzschild_mass" => MASS,
-            // a = 0: the kerr-schild radius reduces to the euclidean radius,
-            // matching the f64 oracle's disk criterion.
+            // a = 0: the kerr-schild radius reduces to the euclidean radius, so the
+            // excision region is the euclidean disk the reference criterion uses.
             "kerr_spin" => 0.0,
             "excision_radius" => R_EXC,
             // the vacuum floor the fill writes into an excised cell, handed to the kernel as

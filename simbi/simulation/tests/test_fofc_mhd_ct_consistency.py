@@ -1,13 +1,12 @@
 # =============================================================================
 # test_fofc_mhd_ct_consistency.py
 #
-# the C2 gate: a gas-only FOFC redo must leave the CELL B consistent with the
-# (unchanged, high-order) staggered FACE field, bcell == interp(bface). the shared
-# face-based redo re-advances cell B from the first-order induction flux; without the
-# §3' constrained-transport re-sync (restore the high-order induction flux for the
-# cell-B predictor + re-run bcell_from_bface) that cell B diverges from interp(bface)
-# by O(1e-2) on a firing corrector. this reproduces-then-fixes: on the pre-fix code the
-# consistency assertion FAILS (measured 2.75e-2); with the fix it holds to roundoff.
+# a gas-only FOFC redo must leave the CELL B consistent with the (unchanged,
+# high-order) staggered FACE field, bcell == interp(bface). the shared face-based redo
+# re-advances cell B from the first-order induction flux; without the constrained-
+# transport re-sync (restore the high-order induction flux for the cell-B predictor +
+# re-run bcell_from_bface) that cell B diverges from interp(bface) by 2.75e-2 on a
+# firing corrector, while the re-sync holds the two together to roundoff.
 #
 # flat cartesian makes interp(bface) the trivial 0.5 face-average (no metric weight),
 # so the invariant is checked externally. the run is SHORT (deterministic; fires FOFC
@@ -36,7 +35,7 @@ def _read(fn: str):
     return b1c, b2c, den, mom, B1, B2
 
 
-def _run(end_time: float) -> str:
+def _run(end_time: float) -> tuple[FofcMhdCtConsistency, str]:
     d = tempfile.mkdtemp() + "/"
     p = FofcMhdCtConsistency.from_cli([])
     p.data_directory = d
@@ -66,15 +65,15 @@ def test_fofc_mhd_cell_face_consistency() -> None:
     tol = 1e-12
     assert incons_x < tol and incons_y < tol, (
         f"cell B inconsistent with interp(bface): max|bcell-interp|_x={incons_x:.3e}, "
-        f"_y={incons_y:.3e} (C2 re-sync bound {tol:.0e}) — the FOFC redo left cell B stale"
+        f"_y={incons_y:.3e} (CT re-sync bound {tol:.0e}) — the FOFC redo left cell B stale"
     )
 
 
 def test_fofc_mhd_divb_preserved() -> None:
-    # I2: the CT redo splices a SINGLE-VALUED edge EMF and curls it, so the discrete div(B) of the
-    # staggered face field stays at machine zero through the firing substages. (gas D/S conservation
-    # of the splice is covered by the hydro test_fofc_conservation gate — the shared gas splice; the
-    # MHD freeze tier leaks a bounded amount here, the documented waiver, so it is not asserted.)
+    # the CT redo splices a SINGLE-VALUED edge EMF and curls it, so the discrete div(B) of the
+    # staggered face field stays at machine zero through the firing substages. gas D/S conservation
+    # of the shared splice is asserted in the hydro FOFC conservation test; the MHD freeze tier
+    # leaks a bounded amount of D/S, so conservation is not asserted here.
     p, final = _run(0.03)
     ni, nj = p.resolution[0], p.resolution[1]
     _b1c, _b2c, _den, _mom, B1, B2 = _read(final)

@@ -186,7 +186,7 @@ pub struct Prepared {
     /// classified once at `prepare` (the transient `KernelEmitInputs` still carries raw write
     /// strings; the producer-mint of typed writes is the Stage-2 step).
     pub field_writes: Vec<FieldBind>,
-    /// scalar kernel args (dt, gamma, …), born typed: a `Ref` over the closed
+    /// scalar kernel args (dt, gamma, ...), born typed: a `Ref` over the closed
     /// dispatch vocabulary or a `Spec` open spec/user knob. minted in `prepare`
     /// from the producer's string names; `name()` recovers the exact original
     /// spelling for codegen, so the emitted kernel source is unchanged.
@@ -251,7 +251,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         inputs.ndim,
     );
 
-    // ---- 1. scalarize all output RHSes through one shared body ----
+    // ---- scalarize all output RHSes through one shared body ----
     let output_nodes: Vec<NodeId> = inputs.field_writes.iter().map(|(_, _, id)| *id).collect();
     let mut scalarized = scalarize_kernel(graph, &output_nodes);
     // lazy scheduling of expensive select arms (passes::lazy_select): a select
@@ -260,14 +260,14 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     // rewrite is bit-exact on every carrier and every backend inherits it.
     crate::passes::lazy_select::apply(&mut scalarized);
 
-    // ---- 2. assign buffer indices in a CANONICAL order, independent of the builder's
+    // ---- assign buffer indices in a CANONICAL order, independent of the builder's
     //          field-touch order: pure inputs first (field_inputs order), then ALL
     //          outputs in field_writes (writes) order. an in-place field (read AND
     //          written) belongs to the OUTPUT group at its writes position — it does NOT
-    //          inherit its read position. so a geometric source that reads cons.mom early
-    //          no longer shuffles cons.mom ahead of cons.den in the signature; the
-    //          KernelSet always provides outputs in the natural [den, mom.., nrg] order.
-    //          (Cartesian is a no-op: there touch order already equals writes order.)
+    //          inherit its read position. a geometric source that reads cons.mom early
+    //          therefore leaves the signature in the KernelSet's natural
+    //          [den, mom.., nrg] output order. (Cartesian is a no-op: there touch
+    //          order already equals writes order.)
     // reads AND writes are born-typed FieldBind. the buffer map
     // keys on FieldBind, so the in-place detection (a read whose buffer is also written) is
     // spelling-invariant by construction.
@@ -304,7 +304,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         buf_idx_by_runtime.insert(wf, buf_idx);
     }
 
-    // ---- 3. scalar-param element types (from the Param nodes) ----
+    // ---- scalar-param element types (from the Param nodes) ----
     let param_elem: BTreeMap<String, ElementTy> = graph
         .iter()
         .filter_map(|(_, node, ty)| match &node.op {
@@ -355,7 +355,7 @@ pub fn kernel_bindings_from_ir(ir: &str) -> Vec<(FieldBind, bool)> {
 
 /// the TYPE-SORTED scalar manifest: each scalar-param name paired with its int/float sort, in
 /// declared order (`true` = int). a kernel's scalar params are a disjoint union — INT lanes
-/// (the `ints` ABI tail) ⊔ FLOAT lanes (the `scalars` tail) — and a metadata-driven dispatch
+/// (the `ints` ABI tail) + FLOAT lanes (the `scalars` tail) — and a metadata-driven dispatch
 /// reads the sort to route each lane by name to the right tail (so a mixed kernel like
 /// ghost-fill, with int `map_type`/`arg` + float `vel_sign`, resolves fully by name, never
 /// positionally). the sort comes from the graph's param element types (`param_elem`).

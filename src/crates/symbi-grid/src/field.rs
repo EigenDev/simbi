@@ -107,8 +107,8 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     }
 
     // ---- coord-indexed access (used by #[symbi::kernel(coord)] macro) ----
-    // the macro rewrites field[coord] → field.at(coord) for reads,
-    // and field[coord] = val → field.set(coord, val) for writes.
+    // the macro rewrites field[coord] -> field.at(coord) for reads,
+    // and field[coord] = val -> field.set(coord, val) for writes.
     // uses interior mutability: &Field can both read and write.
 
     /// flat index from coordinate. delegates to `Domain::flat_index` so

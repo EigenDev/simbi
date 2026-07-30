@@ -12,7 +12,7 @@
 // a deterministic SINGLE-PASS pipeline (snapshot, c2p, ghost_fill, cfl, flux per dir,
 // godunov_euler, godunov_rk2) — every kernel run + diffed on the SAME input state, so
 // there is no cfl-clamped step-count sensitivity. GPU vs CPU agree modulo nvcc FMA
-// fusion (project_fma_discipline): ULP-bounded, rel < 1e-9.
+// fusion: ULP-bounded, rel < 1e-9.
 //
 // runs on a CUDA GPU (NVRTC needs no nvcc). in the symbi-cuda distrobox:
 //   distrobox enter symbi-cuda -- cargo test -p symbi --features cuda \

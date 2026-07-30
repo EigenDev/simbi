@@ -3,8 +3,8 @@
 //
 // the SYMBOLIC proof that the NON-AFFINE-radius GR constrained-transport curls preserve the
 // area-weighted div(B) = 0 EXACTLY — the charts whose lapse `sqrt(gamma)` cannot be keyed by a simple
-// radial offset: cartesian Kerr-Schild (r = sqrt(x^2 + y^2)), cylindrical r-z Kerr-Schild
-// (r = sqrt(R^2 + z^2)), and spinning Kerr (Sigma = r^2 + a^2 cos^2 theta). the extractor keys these
+// radial offset: cartesian kerr-schild (r = sqrt(x^2 + y^2)), cylindrical r-z kerr-schild
+// (r = sqrt(R^2 + z^2)), and spinning kerr (Sigma = r^2 + a^2 cos^2 theta). the extractor keys these
 // metric factors by their exact CANONICAL argument form (proof/extract.rs), so identical factors at
 // the same face share the atom.
 //
@@ -113,7 +113,7 @@ fn divb_cylindrical_rz_kerr_schild_symbolic() {
 
 #[test]
 fn divb_spherical_kerr_symbolic() {
-    // spinning Kerr (r, theta): sqrt(gamma) = Sigma sin(theta) sqrt(1 + b), Sigma = r^2 + a^2 cos^2,
+    // spinning kerr (r, theta): sqrt(gamma) = Sigma sin(theta) sqrt(1 + b), Sigma = r^2 + a^2 cos^2,
     // b = 2Mr/Sigma — non-affine radius AND a transcendental (cos) argument.
     let d = div(Spacetime::KerrKS, Coords::Spherical, &[0, 1]);
     assert!(

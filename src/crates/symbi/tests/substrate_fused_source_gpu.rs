@@ -13,12 +13,11 @@
 // SimStates (host = CpuSpace/HostMemory, device = CudaSpace/UnifiedMemory),
 // configure the SAME `FusedSourceBinding` on both kernel sets, run
 // godunov_euler (and godunov_rk2 for the harder integrator path), diff
-// every conserved field — relative tolerance < 1e-9 per the existing
-// FMA-fusion budget (`project_fma_discipline`).
+// every conserved field — relative tolerance < 1e-9, the FMA-fusion budget a
+// single kernel launch can spend.
 //
-// runs ONLY with --features cuda; needs a CUDA-capable GPU (RTX 2070 in the
-// canonical env). distrobox unnecessary — `NVCC_CCBIN=/usr/bin/g++-15` is
-// already in the host env per `reference_symbi_cuda_distrobox`.
+// runs ONLY with --features cuda; needs a CUDA-capable GPU. NVRTC compiles the
+// kernels, so no nvcc host compiler is required.
 //
 // run: cargo test -p symbi --features cuda --test substrate_fused_source_gpu
 // =============================================================================
@@ -47,9 +46,9 @@ const GAMMA: f64 = 1.4;
 const CS: f64 = 1.0;
 
 // per-cell GPU-vs-CPU diff in relative units. ULP-bounded modulo nvcc FMA.
-// host reads of UnifiedMemory aren't ordered against pending device
-// kernels by stream semantics alone (per-launch `ctx_sync` was removed for
-// the production pipelining win). cmp() syncs once before reading.
+// host reads of UnifiedMemory aren't ordered against pending device kernels by
+// stream semantics alone, and the dispatch does not `ctx_sync` per launch, so
+// cmp() syncs once before reading.
 fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(
     dom: &Domain<D>,
     host: &Field<f64, D, MH>,

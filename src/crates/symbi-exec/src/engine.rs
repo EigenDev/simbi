@@ -435,7 +435,7 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
 }
 
 /// cached reduction partials buffer. the CFL host-fold needs one
-/// `Sc` per block (typically ~1K-4K bytes for a 512² grid). a fresh
+/// `Sc` per block (typically ~1K-4K bytes for a 512^2 grid). a fresh
 /// `cuMemAllocManaged` for it on every step was the only per-step driver
 /// alloc cost left in the pipeline. one slot per precision (`f64` / `f32`),
 /// grow-only: when a larger grid needs more bytes the slot grows; otherwise
@@ -534,7 +534,7 @@ fn field_reduce_device<
     let num_blocks = total_cells.div_ceil(REDUCTION_BLOCK_SIZE).max(1);
     // the partials buffer is CACHED ACROSS STEPS.
     // a fresh `cuMemAllocManaged` on every reduction (every CFL step) was
-    // pure smell: ~30 µs of driver-allocator time per step × 25K steps =
+    // pure smell: ~30 us of driver-allocator time per step x 25K steps =
     // ~750 ms wasted in the alloc path of a typical Kepler run. the partials
     // shape only depends on `num_blocks` (which grows monotonically with grid
     // size) and `sizeof(Sc)` — both static across a sim. cache once per

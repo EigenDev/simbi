@@ -4,8 +4,8 @@
 // same-level domain decomposition: halo exchange between neighboring subdomains on a
 // grid, behind a transport interface.
 //
-// the exchange LOGIC (which cells move where) is fixed and proven by the in-process
-// equivalence test `symbi/tests/decomp_equivalence.rs`. the TRANSPORT (how the bytes move) varies
+// the exchange LOGIC (which cells move where) is fixed: a decomposed run reproduces the
+// monolithic one. the TRANSPORT (how the bytes move) varies
 // behind `HaloTransport`: a local memory copy, a gpu peer copy, or an mpi
 // pack/send/unpack. swapping the transport never touches the decomposition.
 //
@@ -456,7 +456,7 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     // cells); fill that halo from the neighbor exactly like the cell ghosts. the NORMAL face
     // `bface[axis]` (the shared interface face) is NOT copied: it is seeded identically and both
     // tiles apply the same CT curl -- the consistent edge emfs come from the exchanged transverse
-    // halos + prim + bcell -- so it stays bit-identical. the div-B oracle validates this.
+    // halos + prim + bcell -- so it stays bit-identical and div(B) is preserved.
     if let (Some(lo_mhd), Some(hi_mhd)) = (lo.fields.mhd.as_ref(), hi.fields.mhd.as_ref()) {
         for d in 0..D {
             // the NORMAL face (d == axis) is the shared interface, owned by both tiles. it must
@@ -708,9 +708,8 @@ pub fn drain_devices<M: MemorySpace>(devices: &[i32]) {
 pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 
 /// drive a decomposed simulation: `stores.len()` tiles evolved in LOCKSTEP at a shared dt,
-/// with a same-level halo exchange after each ssp stage. this IS the loop the
-/// decomposition-equivalence test drives (`symbi/tests/decomp_equivalence.rs::run`),
-/// lifted into production so the multi-gpu python entry and that test share ONE tested path.
+/// with a same-level halo exchange after each ssp stage. the multi-gpu python entry and the
+/// decomposition-equivalence checks drive this same loop, so there is ONE tested path.
 ///
 /// - `stores[i]` / `kernels[i]`: tile i's field store + kernel set, in flat tile order
 ///   (matching `flatten(tile_coord, counts)`).
@@ -1355,10 +1354,9 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 }
                 let sh = shared!();
                 // the stage TAG is minted canonically inside the fold
-                // (stage_tag: euler = 0, rk2 = 1 then 2). the old hand-rolled
-                // `sidx + 1` here disagreed with every other driver on
-                // forward-euler (tag 1, the rk2-predictor identity) — a latent
-                // copy divergence the shared fold retires.
+                // (stage_tag: euler = 0, rk2 = 1 then 2). a per-driver `sidx + 1`
+                // instead labels forward-euler as tag 1, which is the rk2-predictor
+                // identity — the shared fold makes that divergence unrepresentable.
                 for i in 0..n {
                     let outcome = symbi_xpu::with_device(devices[i], || {
                         // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
@@ -1571,10 +1569,10 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             }
             drain_devices::<M>(devices);
             // horizon excision, once per step after the RK combination, mirroring
-            // the monolithic loop's phase order. the onion fill's donor chains
-            // cross tile cuts one cell per sweep, so a halo exchange BETWEEN
-            // sweeps makes the tiled sweep sequence bit-identical to the
-            // monolithic K sweeps; a final exchange publishes the finalized
+            // the monolithic loop's phase order. the pass count comes from the
+            // store, so every tile runs the same number and the tiled sequence
+            // stays bit-identical to the monolithic one; a final exchange
+            // publishes the finalized
             // (rebuilt) excised state into the neighbors' halos before the next
             // step's stencils read them. inert (zero passes) when unexcised.
             let passes = (0..n)

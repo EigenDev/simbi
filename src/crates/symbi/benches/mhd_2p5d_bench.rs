@@ -157,8 +157,8 @@ fn main() {
     eprintln!("[mhd_2p5d_bench] Orszag-Tang {nx}x{nx}, HLLD, t_final={t_final}");
     let (m3, i3) = bench_3d_nz1(nx, t_final);
     eprintln!("  3D-with-nz=1 (hack): {m3:7.2} MZCS  ({i3} steps)");
-    // 2.5D is skipped by default — its GPU kernels are not yet device-validated (the
-    // tracked GPU-2.5D-execution item). set SYMBI_BENCH_2P5D=1 to include it (CPU OK).
+    // 2.5D is skipped by default: its GPU kernels have no device-validation gate.
+    // set SYMBI_BENCH_2P5D=1 to include it (CPU OK).
     if std::env::var("SYMBI_BENCH_2P5D").is_ok() {
         let (m2, i2) = bench_2p5d(nx, t_final);
         eprintln!("  genuine 2.5D       : {m2:7.2} MZCS  ({i2} steps)");

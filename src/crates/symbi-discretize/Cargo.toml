@@ -10,19 +10,18 @@ edition = "2024"
 # live and only here.
 
 [dependencies]
-# the Gv carrier + trace live alongside Op + Graph in symbi-ir (consolidated
-# 2026-05-30; symbi-core was folded in). discretize traces carrier-generic
-# physics into the tensor IR through this single dep.
+# the Gv carrier + trace live alongside Op + Graph in symbi-ir. discretize
+# traces carrier-generic physics into the tensor IR through this single dep.
 symbi-ir      = { path = "../symbi-ir" }
 # the Gv carrier impls symbi_algebra::Scalar to trace physics into the tensor IR.
 symbi-algebra = { path = "../symbi-algebra" }
-# the dep flip (design/gv_algebra_unification.md §2): discretize instantiates the
-# carrier-generic symbi-hydro physics at S=Gv to BUILD kernels — one physics source.
+# discretize instantiates the carrier-generic symbi-hydro physics at S=Gv to
+# BUILD kernels — one physics source.
 symbi-hydro   = { path = "../symbi-hydro" }
-# the property-algebra layer (docs/design/50): SdfExpr + penalize_cell traced at S=Gv.
+# the property-algebra layer: SdfExpr + penalize_cell traced at S=Gv.
 symbi-ib      = { path = "../symbi-ib" }
-# the SINGLE-SOURCE geometric Christoffel source: discretize traces `Metric<Gv, D>` at S=Gv
-# instead of re-deriving the spherical/cylindrical inertial by hand (B1). one geometry source.
+# the SINGLE-SOURCE geometric christoffel source: discretize traces `Metric<Gv, D>` at S=Gv
+# instead of re-deriving the spherical/cylindrical inertial by hand. one geometry source.
 symbi-geometry = { path = "../symbi-geometry" }
 
 [dev-dependencies]

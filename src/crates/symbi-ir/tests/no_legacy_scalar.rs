@@ -1,24 +1,19 @@
 // =============================================================================
-// no_legacy_scalar.rs — CI gate (Tier 1 chunk 8).
+// no_legacy_scalar.rs
 //
-// the legacy `symbi_algebra::Scalar` / `symbi_algebra::Selectable` traits were
-// deleted in Tier 1 chunk 5 (2026-05-30). this test PERMANENTLY BANS their
-// re-introduction by greping every `.rs` file in the workspace's `crates/`
-// tree for references and failing the build if any survive.
-//
-// the new production carrier-generic surface lives in `symbi_ir::algebra`
-// (`Scalar`, `Selectable`, `Mask`). every workspace site should `use
-// symbi_ir::algebra::{...}` going forward.
+// the carrier-generic surface has exactly ONE home: `symbi_ir::algebra`
+// (`Scalar`, `Selectable`, `Mask`). this test BANS a second source by greping
+// every `.rs` file in the workspace's `crates/` tree for
+// `symbi_algebra::Scalar` / `symbi_algebra::Selectable` and failing the build
+// if any reference survives.
 //
 // allowed exceptions:
 //   - this file itself (it contains the literal strings in its grep patterns).
 //   - comments (`//` lines, and lines inside `/* */` blocks at single-line resolution).
-//   - the symbi-algebra crate's `algebra.rs` historical-note comment.
 //
-// rationale: every "second source that silently diverges" failure this project
-// has paid for (the macro lowering, the discretize Expr DSL, the gen-2 codegen)
-// shared one root cause — a legacy surface lingering after a cutover. the gate
-// closes the door so it cannot re-open by accident.
+// two carrier-generic surfaces diverge silently: a call site bound to the
+// abandoned trait compiles and runs, and its results stop tracking the
+// production carrier's semantics without any error.
 // =============================================================================
 
 use std::path::{Path, PathBuf};
@@ -73,8 +68,7 @@ fn no_legacy_scalar_imports_in_workspace() {
         };
         for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim_start();
-            // skip comments (the historical-note comment in symbi-algebra's
-            // algebra.rs is the deliberate exclusion).
+            // a mention inside a comment binds nothing, so only code lines count.
             if trimmed.starts_with("//") || trimmed.starts_with("///") {
                 continue;
             }

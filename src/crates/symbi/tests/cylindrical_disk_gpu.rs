@@ -207,8 +207,7 @@ fn cyl_disk_gpu_matches_cpu() {
     }
 
     // godunov (adiabatic_godunov_{euler,rk2}_cyl_2d, ncomp=2): the in-place r-phi update
-    // with the area-weighted divergence + centrifugal/coriolis source + hoop p/r — the
-    // NEW disk kernels.
+    // with the area-weighted divergence + centrifugal/coriolis source + hoop p/r.
     hset.godunov_stage(&host, 0.002, 0.0, 1.0);
     dset.godunov_stage(&dev, 0.002, 0.0, 1.0);
     symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();

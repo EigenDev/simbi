@@ -1,8 +1,8 @@
 // =============================================================================
 // jit_fused_equals_two_pass.rs
 //
-// the evolve equivalence check that lets the fused runtime-source host path go
-// live. it is the runtime-user-source twin of
+// the evolve equivalence check for the fused runtime-source host path. it is the
+// runtime-user-source twin of
 // `additive_source_equals_fused_evolve` (which proves it for AOT-baked sources):
 // the SAME runtime-loaded user source (python -> json -> build_user_source DAG) is
 // run two ways through the production `evolve()` loop —

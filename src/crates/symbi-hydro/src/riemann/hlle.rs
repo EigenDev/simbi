@@ -162,10 +162,10 @@ mod tests {
         assert!(approx(flux3.nrg, f_r.nrg - vf * u_r.nrg));
     }
 
-    // the split is a pure refactor: `hlle` MUST equal `hlle_with_speeds` fed the same
-    // `extremal_speeds`, for any L/R states. this pins that the per-cell-wave-speed path
-    // (which calls hlle_with_speeds directly) is bit-identical to the inline path when the
-    // supplied speeds match. covers the subsonic fan + both supersonic branches.
+    // `hlle` MUST equal `hlle_with_speeds` fed the same `extremal_speeds`, for any L/R states:
+    // the per-cell-wave-speed path (which calls hlle_with_speeds directly) is bit-identical to the
+    // inline path when the supplied speeds match. covers the subsonic fan + both supersonic
+    // branches.
     #[test]
     fn hlle_equals_hlle_with_speeds() {
         let regime = Newtonian;

@@ -10,8 +10,9 @@
 // anywhere — the destination thread coordinate IS the level-global index, and
 // each field buffer resolves it against its own lo.
 //
-// the gen-1 reference (symbi-amr prolong_nd / restrict_nd at git 3bfc5b9) is an
-// axis-by-axis sweep with scratch buffers — host-only by construction. here the
+// the straightforward formulation of this transfer (symbi-amr prolong_nd /
+// restrict_nd) is an axis-by-axis sweep over scratch buffers — host-only by
+// construction. here the
 // sweep is INLINED per destination cell: pass order is axis 0 innermost, the
 // per-pass 1d operators (pcm / van-leer plm / monotonized ppm sub-cell average)
 // use the identical arithmetic, so the traced expression per output cell is
@@ -60,7 +61,7 @@ impl ProlongOrder {
 }
 
 // =============================================================================
-// carrier-generic stencil math (identical arithmetic to the gen-1 reference,
+// carrier-generic stencil math (identical arithmetic to the host sweep,
 // branches rewritten as cmp/select — same value at f64, traceable at Gv)
 // =============================================================================
 
@@ -83,7 +84,7 @@ fn plm_interp<S: Scalar>(vm: S, vc: S, vp: S, frac: S) -> S {
 }
 
 /// the 1d ppm prolongation sub-cell AVERAGE over [xi_lo, xi_hi] (xi in [0,1]
-/// across the parent): 4th-order interface values clamped to the neighbour
+/// across the parent): 4th-order interface values clamped to the neighbor
 /// range, monotonized (the select form preserves the reference's sequential
 /// left-then-right overshoot correction), then the exact parabola
 /// antiderivative difference times `ratio` — so the children average back to
@@ -99,7 +100,7 @@ fn ppm_interp<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S, xi_lo: S, xi_hi:
     let u_l = (seven * (vm1 + vc) - (vm2 + vp1)) * twelve_inv;
     let u_r = (seven * (vc + vp1) - (vm1 + vp2)) * twelve_inv;
 
-    // clamp interface values to the neighbour range before monotonizing — the
+    // clamp interface values to the neighbor range before monotonizing — the
     // 4th-order stencil overshoots at discontinuities.
     let u_l = u_l.max(vm1.min(vc)).min(vm1.max(vc));
     let u_r = u_r.max(vc.min(vp1)).min(vc.max(vp1));
@@ -455,11 +456,11 @@ fn restrict_face_eval(
 
 // =============================================================================
 // prolongation: thread over the fine destination region, read the coarse
-// parent neighbourhood time-interpolated between two snapshots
+// parent neighborhood time-interpolated between two snapshots
 // =============================================================================
 
 /// trace the coarse -> fine prolongation: each fine cell reads its coarse
-/// parent neighbourhood (`floor_div(f, ratio)` — the Coarsen map, absolute
+/// parent neighborhood (`floor_div(f, ratio)` — the Coarsen map, absolute
 /// indices, ghost-safe for negatives) from the time-interpolated coarse state
 /// `(1 - alpha)*src_old + alpha*src_new`, then applies the inlined per-axis
 /// sweep at `order`. inputs "src_old"/"src_new" are the COARSE field snapshots
@@ -487,32 +488,11 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
     (end_trace(), writes)
 }
 
-/// trace the SINGLE-SNAPSHOT cell prolongation: identical stencil sweep to
-/// `refine_prolong_gv`, but the leaf reads ONE coarse buffer "src" — no time
-/// pair, no alpha. paired with a `field_lerp` pass that time-interpolates the
-/// coarse snapshots once per coarse cell, this halves the prolong kernel's
-/// gather traffic (the time pair reads 2x the loads of a 5^3 ppm
-/// neighbourhood, recomputed per fine cell).
-pub fn refine_prolong_1t_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
-    assert!(
-        (1..=3).contains(&ndim),
-        "refine_prolong_1t_gv: ndim must be 1..=3"
-    );
-    assert!(ratio >= 2, "refine_prolong_1t_gv: ratio must be >= 2");
-    begin_trace();
-    let geom = prolong_geometry(ndim, ratio);
-    let src = ProlongSrc::Single { name: "src" };
-    let ctx = geom.ctx(ndim, order, &src);
-    let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
-    let writes = vec![("dst".to_string(), "dst".into(), val.node())];
-    (end_trace(), writes)
-}
-
 /// trace the MULTI-FIELD (prim batch) cell prolongation: ONE kernel that sweeps
 /// the shared coarse->fine stencil over `ncomp` co-located fields, reading
 /// `src_old_{k}`/`src_new_{k}` and writing `dst_{k}` for k in 0..ncomp. the
 /// per-cell geometry (parent index, parity, plm/ppm weights) is computed ONCE
-/// and reused across all components (graph CSE), and — the point — the host
+/// and reused across all components (graph CSE), and the host
 /// issues ONE dispatch (one rayon launch) for the whole prim set instead of
 /// `ncomp` separate launches. bit-identical to `ncomp` single-field prolongs.
 /// buffers in signature order: src_old_0, src_new_0, .., src_old_{n-1},
@@ -552,9 +532,12 @@ pub fn refine_prolong_multi_gv(
 }
 
 /// the SINGLE-SNAPSHOT multi-field prolongation: `refine_prolong_multi_gv`
-/// with the leaf reading one coarse buffer per component ("src_{k}") — the
-/// batched twin of `refine_prolong_1t_gv`. buffers in signature order:
-/// src_0..src_{n-1} (inputs) then dst_0..dst_{n-1} (outputs); no scalars.
+/// with the leaf reading one coarse buffer per component ("src_{k}") — no time
+/// pair, no alpha. a `field_lerp` pass time-interpolates the coarse snapshots
+/// once per coarse cell, halving the gather traffic (a time pair reads 2x the
+/// loads of a 5^3 ppm neighborhood, recomputed per fine cell). buffers in
+/// signature order: src_0..src_{n-1} (inputs) then dst_0..dst_{n-1} (outputs);
+/// no scalars.
 pub fn refine_prolong_multi_1t_gv(
     ndim: usize,
     ratio: i64,

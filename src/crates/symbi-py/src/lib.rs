@@ -167,12 +167,11 @@ struct Config {
     // the config author's OWN params (subclass fields), grouped, for the live dashboard's
     // problem-setup panel: each is [group, label, value].
     custom_params: Vec<[String; 3]>,
-    // body-diagnostic output cadence in natural units (× time_unit -> code);
+    // body-diagnostic output cadence in natural units (x time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
-    // number of gpus to decompose the domain across, intra-node. 1 =
-    // single device (the only implemented path). >1 is validated here but the decomposed run
-    // loop (M4) is not yet wired, so it errors -- this is a runtime-decomposition knob.
+    // number of gpus to decompose the domain across, intra-node. 1 = single device;
+    // >1 splits the grid into that many tiles evolved in lockstep with halo exchange.
     n_gpus: usize,
 }
 
@@ -1940,7 +1939,7 @@ where
     // on a cartesian black-hole run, split the FOFC counters at the OUTER HORIZON
     // r_+ = M + sqrt(M^2 - a^2): everything inside is causally disconnected (and the
     // near-horizon infall band fires steadily by design), so the exterior signal is the
-    // acceptance criterion for a production run (exterior events == 0). the split is now
+    // acceptance criterion for a production run (exterior events == 0). the split is
     // load-bearing — the freeze-streak HALT gates on the exterior count — so it uses the
     // TRUE spin-dependent r_+, not the Schwarzschild 2M: cells in (r_+, 2M) at nonzero spin
     // are OUTSIDE the horizon and a poison there must still halt the run.
@@ -2252,7 +2251,7 @@ where
                 })
                 .collect();
             table.set_blocks_per_level(&blocks);
-            // conservation drift + div·B: a host-side interior reduction (skipped
+            // conservation drift + div(B): a host-side interior reduction (skipped
             // on device-resident gpu runs). cheap once per benchmark cadence.
             if let Some(cd) = st.conservation_diag() {
                 table.push_conservation(cd.mass, cd.energy, cd.div_b, cd.max_w);
@@ -3768,8 +3767,8 @@ macro_rules! build_and_run_hydro {
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
         // the DOF-lifted (swirl) tile decomposition IS wired: the decomposed build is
-        // DOF-generic and the transport carries the out-of-plane momentum across cuts
-        // (decomp_curvilinear_equivalence swirl gates). refinement / bodies with swirl are
+        // DOF-generic and the transport carries the out-of-plane momentum across cuts.
+        // refinement / bodies with swirl are
         // not, matching the single-device swirl guards below.
         if cfg.n_gpus > 1 {
             if $dof != $d && cfg.refinement_enabled {
@@ -4015,7 +4014,7 @@ macro_rules! build_and_run_hydro {
 /// managed memory otherwise -- so the SAME code runs on one card with `--gpus 2` and on a node
 /// with `--gpus 8`, no machine-specific branch), gathering into `global` for output through the
 /// existing single-grid checkpoint writer. every regime's decomposed build feeds this one loop;
-/// adding a regime is just a tile-build. v1 cadence is linear `checkpoint_interval`.
+/// adding a regime is just a tile-build. the checkpoint cadence is the linear `checkpoint_interval`.
 fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
@@ -4103,7 +4102,7 @@ where
         // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
         // mutates the bodies). build the `&mut` store handles + the `&` kernels from the SAME tiles
         // (disjoint tuple fields). the checkpoint callback receives the shared tile slice it needs
-        // for the gather (it can no longer capture `stores` while the loop holds them mutably).
+        // for the gather (it cannot capture `stores` while the loop holds them mutably).
         let mut stores = Vec::with_capacity(ntiles);
         let mut kernels = Vec::with_capacity(ntiles);
         for (s, k) in tiles.iter_mut() {
@@ -4180,11 +4179,11 @@ where
 /// the multi-gpu (gpus>1) REFINED path: decompose a 2-level static-refinement hierarchy. each tile
 /// is a per-tile `Hierarchy` (its root slab + the global refinement region CLIPPED to that slab, or
 /// single-level where the region misses it); `evolve_hierarchy_decomposed` drives them in lockstep
-/// (root + first-fine-level halo exchange, oracle-proven by decomp_refine_equivalence +
-/// decomp_refine_p3_equivalence). for OUTPUT, gather each level into the global hierarchy -- the
+/// (root + first-fine-level halo exchange), reproducing the monolithic hierarchy to round-off.
+/// for OUTPUT, gather each level into the global hierarchy -- the
 /// root over `counts`, the fine over the `fine_subgrid` sub-grid (a decomposition of the global
 /// fine level) -- and write all its levels through the existing multi-level checkpoint writer.
-/// v1: a SINGLE refined region (the lib driver decomposes the root + first fine level).
+/// exactly one refined region is carried (the lib driver decomposes the root + first fine level).
 fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
@@ -4293,14 +4292,14 @@ where
 }
 
 /// the multi-gpu (gpus>1) REFINED hydro path: per-tile static-refinement hierarchies driven by the
-/// oracle-proven `evolve_hierarchy_decomposed` (root + first-fine-level halo exchange; phases 1-3).
+/// `evolve_hierarchy_decomposed` (root + first-fine-level halo exchange).
 /// each tile builds its root slab + the global refinement region CLIPPED to that slab (single-level
 /// where the region misses it); a patch that spans a cut is split into the abutting tiles and the
 /// fine halos are exchanged at the cut. output gathers each level into the global hierarchy (root
 /// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. hydro + a
 /// single refined region, carrying immersed bodies (with shapes), user sources, and driven
-/// boundaries -- each attached per tile and evolved in lockstep (oracle-gated:
-/// decomp_refine_{body,source,driven}_equivalence). mass-transport tracers use global owners and
+/// boundaries -- each attached per tile and evolved in lockstep, matching the monolithic
+/// hierarchy to round-off. mass-transport tracers use global owners and
 /// migrate complete records across cuts. mesh motion, the passive scalar, and bonded fragments are
 /// not carried here.
 macro_rules! build_and_run_hydro_decomposed_refined {
@@ -4322,8 +4321,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet,
         >;
 
-        // refined decomposition v1 = plain hydro. these combinations each need their own cross-level
-        // multi-tile handling; refuse until that handling exists.
+        // the refined decomposition carries plain hydro. the combinations below each need their own
+        // cross-level multi-tile handling, so they are refused.
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -4557,11 +4556,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
 /// the multi-gpu (gpus>1) hydro path. decompose the domain into
 /// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
-/// (the oracle-proven `decomp::evolve_decomposed`), and for output gather the tiles into one
-/// full-size sim written by the EXISTING single-grid checkpoint path. v1 is single-level hydro:
-/// refinement uses the decomposed-hierarchy path above; immersed bodies / user sources are wired.
-/// checkpoint cadence is the LINEAR `checkpoint_interval`; the log cadence + live display are
-/// single-grid only. correctness is the same oracle contract (decomposed == monolithic).
+/// (`decomp::evolve_decomposed`), and for output gather the tiles into one
+/// full-size sim written by the EXISTING single-grid checkpoint path. the scope is single-level
+/// hydro: refinement uses the decomposed-hierarchy path above; immersed bodies / user sources are
+/// wired. checkpoint cadence is the LINEAR `checkpoint_interval`; the log cadence + live display
+/// are single-grid only. the correctness contract is decomposed == monolithic.
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
@@ -4649,7 +4648,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 // over the tile interior, indexed from the GLOBAL dye IC by the same axis-0-fastest
                 // global lin as the prim seed above. the transport carries prim.chi across cuts
                 // (derived into the exchange set from the store), so the decomposed dye matches the
-                // monolithic run to round-off (oracle: decomp_equivalence dye gates).
+                // monolithic run to round-off.
                 let sim = if cfg.chi_ic.is_empty() {
                     sim
                 } else {
@@ -4680,7 +4679,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
                 // bodies at their GLOBAL positions; each applies the source to its own cells. the
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
-                // binary orbit identically (oracle: decomp_body_equivalence).
+                // binary orbit identically.
 
                 // gravity / accretion sinks PLUS bonded fragments + shaped walls, attached per
                 // tile at their GLOBAL positions (refinement takes the refined decomposed path
@@ -4702,8 +4701,8 @@ macro_rules! build_and_run_hydro_decomposed {
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
                 // attach the user source per tile (two-pass via attach_runtime_source). each tile
                 // evaluates S at its OWN global coords (the per-tile origin above), so a
-                // position-dependent force is correct across cuts -- proven decomposed==monolithic
-                // to round-off by `decomp_source_equivalence`. the global output sim carries no
+                // position-dependent force is correct across cuts -- decomposed == monolithic
+                // to round-off. the global output sim carries no
                 // source (it is touched only at gather/output).
                 let sub = attach_configured_sources(
                     sub,
@@ -4714,8 +4713,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 // the ids ride the boundary enum copied from the physical faces, so only edge
                 // tiles carry Driven faces and interior tiles hold the dags inert. each tile
                 // evaluates the coordinate prescription at its own GLOBAL coords, the same
-                // contract as the per-tile user source (decomposed == monolithic to round-off,
-                // proven by decomp_driven_equivalence).
+                // contract as the per-tile user source (decomposed == monolithic to round-off).
                 let sub = {
                     let mut sub = sub;
                     for json in &cfg.driven_exprs {
@@ -4811,7 +4809,7 @@ macro_rules! build_and_run_hydro_decomposed {
 macro_rules! hydro_dispatch {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            // C4/M9 fail-loud guard: a non-minkowski spacetime that is NOT one of the baked GR
+            // fail-loud guard: a non-minkowski spacetime that is NOT one of the baked GR
             // combinations below would otherwise fall through to a flat `(dims, coords)` arm and run
             // SILENTLY on a Minkowski metric (wrong physics, zero warning). the matches! set is the
             // single source of truth for the baked GR-hydro arms; `test_dispatch_rejects_unbaked_gr`
@@ -5134,9 +5132,9 @@ macro_rules! build_and_run_mhd {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
                 // gridded components seed the TRUE cell B (the face average) so the conserved
-                // state carries every magnetic term from step zero — the old zero-seed left the
-                // relativistic momentum's B^2 v - (v.B) B block missing and the stage-1
-                // bcell_from_bface energy heal is exact only at v = 0 (and euclidean-only).
+                // state carries every magnetic term from step zero. seeding a zero cell B instead
+                // drops the relativistic momentum's B^2 v - (v.B) B block, and the stage-1
+                // bcell_from_bface energy heal recovers it only at v = 0 (and euclidean-only).
                 let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                     if k < $d {
                         face_avg_cell_b::<$d>(&bufs[k], k, idx, n)
@@ -5401,7 +5399,7 @@ macro_rules! build_and_run_imhd {
 
 /// the multi-gpu (gpus>1) ADIABATIC MHD path: the MHD analog of `build_and_run_hydro_decomposed`.
 /// decompose the domain into `cfg.n_gpus` tiles, bind each to a device, and evolve them in lockstep
-/// with the staggered-CT halo exchange (the oracle-proven `decomp::evolve_decomposed`, verified
+/// with the staggered-CT halo exchange (`decomp::evolve_decomposed`, which holds
 /// `decomposed == monolithic` to round-off with div(B) exact). cell state seeds `MhdPrim` from the
 /// global prim rows; the staggered face B seeds each tile from its slice of the global
 /// `staggered_bfields` (`tile_face_buffer`), so the shared internal face is identical in both
@@ -5416,8 +5414,8 @@ macro_rules! build_and_run_mhd_decomposed {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, IdealGas<f64>>;
 
-        // v1 multi-gpu = single-level. these interactions are deferred; refuse
-        // (each needs its own multi-tile handling).
+        // multi-gpu MHD is single-level: refinement needs its own cross-level multi-tile
+        // handling, so it is refused.
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
         }
@@ -5498,7 +5496,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
                 // bodies at their GLOBAL positions; each applies the source to its own cells. the
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
-                // binary orbit identically (oracle: decomp_body_equivalence).
+                // binary orbit identically.
 
                 let sim = if cfg.bodies.is_empty() {
                     sim
@@ -5531,8 +5529,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 // tile evaluates the coordinate prescription at its own GLOBAL coords -- the
                 // same contract as the per-tile user source. the prescription covers the hydro
                 // prims + the cell B; the staggered face B rides the CT ghost fill and the
-                // transverse halo exchange, identically to the monolithic run (oracle:
-                // decomp_driven_mhd_equivalence).
+                // transverse halo exchange, identically to the monolithic run.
                 let sub = {
                     let mut sub = sub;
                     for json in &cfg.driven_exprs {
@@ -5699,7 +5696,7 @@ macro_rules! build_and_run_imhd_decomposed {
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
                 // bodies at their GLOBAL positions; each applies the source to its own cells. the
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
-                // binary orbit identically (oracle: decomp_body_equivalence).
+                // binary orbit identically.
 
                 let sim = if cfg.bodies.is_empty() {
                     sim
@@ -5814,7 +5811,7 @@ macro_rules! build_and_run_imhd_decomposed {
 macro_rules! mhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            // C4/M9 fail-loud guard (see hydro_dispatch): reject a non-minkowski spacetime with
+            // fail-loud guard (mirroring hydro_dispatch): reject a non-minkowski spacetime with
             // no baked GR-MHD arm; silently running it on Minkowski applies the wrong metric. the matches! set
             // mirrors the baked GR-MHD arms; test_dispatch_rejects_unbaked_gr keeps them in lockstep.
             (d, c)
@@ -5863,9 +5860,9 @@ macro_rules! mhd_dispatch {
             // the 2D cartesian (x, y) GRMHD row: the NON-DIAGONAL kerr-schild spatial
             // metric selects the fast-magnetosonic HLLE gas flux + the contact / UCT-HLL densitized
             // CT. the tetrad HLLD wrapper — which the kerr (r, theta) row above already rides on its
-            // non-diagonal gamma_{r phi} — is not yet wired for this chart; HLLE here is a follow-on
-            // gap; the metric's non-diagonality is not the cause (the Gram-Schmidt tetrad handles non-diagonal
-            // spatial metrics). the covariant geodesic + EM-stress source carries the gravity.
+            // non-diagonal gamma_{r phi} — is unbaked for this chart, so the flux is HLLE. the
+            // metric's non-diagonality is not the obstruction (the Gram-Schmidt tetrad handles
+            // non-diagonal spatial metrics). the covariant geodesic + EM-stress source carries the gravity.
             (2, "cartesian") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
@@ -5960,7 +5957,7 @@ macro_rules! mhd_dispatch {
 macro_rules! imhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            // C4/M9 fail-loud guard: isothermal MHD has NO baked GR kernels, so any non-minkowski
+            // fail-loud guard: isothermal MHD has NO baked GR kernels, so any non-minkowski
             // spacetime must fail loud; silently running it flat would drop the curvature.
             (d, c) if $cfg.spacetime != "minkowski" => Err(format!(
                 "isothermal MHD has no GR kernels; (dims={d}, coords={c}, spacetime={}) is unsupported \
@@ -5991,8 +5988,8 @@ macro_rules! imhd_dispatch {
 
 /// the multi-gpu (gpus>1) ISOTHERMAL path: the iso sibling of `build_and_run_hydro_decomposed!`.
 /// builds N iso tiles + a global output sim and hands them to the shared `run_decomposed_loop`
-/// (universal transport). v1 is GLOBALLY isothermal (uniform cs); locally-isothermal cs(x) needs
-/// per-tile cs^2 setup and is deferred (guarded). same non-AMR / no-bodies / no-source scope.
+/// (universal transport). the scope is GLOBALLY isothermal (uniform cs); locally-isothermal cs(x)
+/// needs per-tile cs^2 setup and is refused. same non-AMR / no-bodies / no-source scope.
 macro_rules! build_and_run_iso_decomposed {
     ($cfg:expr, $prims:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
@@ -6062,7 +6059,7 @@ macro_rules! build_and_run_iso_decomposed {
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
                 // bodies at their GLOBAL positions; each applies the source to its own cells. the
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
-                // binary orbit identically (oracle: decomp_body_equivalence).
+                // binary orbit identically.
 
                 let sim = if cfg.bodies.is_empty() {
                     sim
@@ -6417,7 +6414,7 @@ macro_rules! build_and_run_iso {
 macro_rules! iso_dispatch {
     ($cfg:expr, $prims:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            // C4/M9 fail-loud guard: isothermal hydro has NO baked GR kernels, so any non-minkowski
+            // fail-loud guard: isothermal hydro has NO baked GR kernels, so any non-minkowski
             // spacetime must fail loud; silently running it flat would drop the curvature.
             (d, c) if $cfg.spacetime != "minkowski" => Err(format!(
                 "isothermal hydro has no GR kernels; (dims={d}, coords={c}, spacetime={}) is unsupported \
@@ -6440,13 +6437,13 @@ macro_rules! iso_dispatch {
     };
 }
 
-/// runtime dispatch on the config tags → a monomorphized sim. hydro regimes
+/// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
 fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> Result<(), String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
-    // static mesh refinement is wired for hydro (incl. globally-isothermal). the
-    // two cases still pending need extra fine-level prolongation:
+    // static mesh refinement is wired for hydro (incl. globally-isothermal). the two cases
+    // refused below need fine-level prolongation the transfer set does not carry:
     if cfg.refinement_enabled
         && cfg.regime.contains("mhd")
         && !(cfg.dims == 3 && cfg.coord_system == "cartesian")
@@ -6455,7 +6452,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     reflux assumes 1/dx curl coefficients)"
             .to_string());
     }
-    // mesh motion is single-grid uniform-spacing hydro only in this pass.
+    // mesh motion is single-grid uniform-spacing hydro only.
     if cfg.mesh_motion {
         if cfg.refinement_enabled {
             return Err("mesh motion is single-grid only (not wired with refinement)".to_string());
@@ -6469,7 +6466,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
     // bodies on the finest level, gravity-only proxy on coarser) is wired for every HYDRO regime
     // (newtonian/rhd/isothermal — the iso body source/feedback/penalize kernels are baked and the
-    // build macro is shared); mhd remains unwired (staggered-B body coupling pending).
+    // build macro is shared). MHD is refused: coupling a body to a staggered face field is
+    // not wired.
     if !cfg.bodies.is_empty() && cfg.refinement_enabled && cfg.regime.contains("mhd") {
         return Err("immersed bodies with refinement are not wired for MHD (staggered-B body coupling pending)"
             .to_string());
@@ -6491,8 +6489,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         }
         // immersed bodies (incl. moving binaries) and their force/accreted-mass diagnostics are
         // wired for gpus>1: the decomposed loop applies the body source per tile, sums the backward
-        // feedback across tiles, and advances the prescribed orbit identically (oracle-proven by
-        // decomp_body_equivalence). no refusal needed here.
+        // feedback across tiles, and advances the prescribed orbit identically, so no refusal is
+        // needed here.
     }
     // a curved spacetime is a RELATIVISTIC construct: only the relativistic regimes compose
     // with it (the non-relativistic kernel rows are never baked with a spacetime slug).
@@ -6530,7 +6528,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         }
         // gpus > 1 IS wired: the decomposed body step sums each fragment's per-tile fluid load and
         // runs the bonded DEM subcycle on the total, replicated across tiles
-        // (decomp_fragment_equivalence). refinement with fragments stays refused above.
+        // so the assembly evolves identically. refinement with fragments stays refused above.
         if cfg.dims < 2 {
             return Err(format!(
                 "bonded_assembly ({n} fragments) needs a 2d or 3d grid (bond torques are \
@@ -6543,9 +6541,9 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             ));
         }
     }
-    // the passive scalar (dye) rides the uni-grid cartesian NEWTONIAN path in
-    // this increment: the chi kernels are baked cartesian, the drain/wall
-    // penalization does not carry the dye yet, and a driven face has no dye
+    // the passive scalar (dye) rides the uni-grid cartesian NEWTONIAN path: the chi
+    // kernels are baked cartesian, the drain/wall
+    // penalization does not carry the dye, and a driven face has no dye
     // prescription. every other combination fails loud — a silently undyed or
     // wrongly-dyed run reads as valid science.
     if !cfg.chi_ic.is_empty() {
@@ -6562,7 +6560,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             ));
         }
         // gpus > 1 is wired: the decomposed hydro build seeds the dye per tile and the halo
-        // exchange carries prim.chi across cuts (decomp_equivalence dye gates). refinement and
+        // exchange carries prim.chi across cuts. refinement and
         // mesh motion are not — the fine-level prolong and the moving-mesh remap do not carry
         // the dye yet.
         if cfg.refinement_enabled || cfg.mesh_motion {
@@ -6835,10 +6833,9 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 // the pybind11-compatible entry point
 // =============================================================================
 
-// validate a multi-gpu request (`Config.n_gpus`) before any heavy work.
-// gpus==1 is the only implemented path; gpus>1 is validated and rejected with the PRECISE
-// reason -- a cpu build, too few visible devices, or the decomposed run loop (M4) not yet
-// wired -- so the user gets an actionable message and the request never silently degrades to one device.
+// validate a multi-gpu request (`Config.n_gpus`) before any heavy work. an unsatisfiable
+// request is rejected with the PRECISE reason -- a cpu build, or too few visible devices
+// without the oversubscribe opt-in -- so the request never silently degrades to one device.
 /// the outer horizon r_+ containment gate for a GR accretion run. a well-posed
 /// accretion-rate certificate needs the innermost flux surface to be causally one-way;
 /// the domain's inner radius must sit on the correct side of the horizon for the chart:
@@ -6914,8 +6911,8 @@ fn check_excision_request(
     if excision_radius <= 0.0 {
         return Ok(());
     }
-    // every relativistic regime excises: MHD fills the GAS state only (onion fill of
-    // rho/v/p + a magnetized conserved rebuild reading the cell B); the staggered
+    // every relativistic regime excises: MHD fills the GAS state only (a vacuum floor
+    // on rho/v/p + a magnetized conserved rebuild reading the cell B); the staggered
     // faces stay CT-owned, so div(sqrt(gamma) B) is untouched. non-relativistic
     // regimes never reach here (a curved spacetime on a newtonian/iso regime is
     // rejected upstream).
@@ -6979,7 +6976,8 @@ fn check_excision_request(
         // excised region would evolve its copy of those cells and restrict them back
         // over the fill. the excised spheroid spans +-sqrt(r^2 + a^2) equatorially
         // and +-r on the spin axis; reject any refinement region whose box intersects
-        // it (with one root cell of margin for the fill's donor reads).
+        // it, with one root cell of margin so a box that merely abuts the surface is
+        // rejected too.
         let semi_xy = (excision_radius * excision_radius + spin * spin).sqrt();
         for region in refinement_regions {
             if region.len() < 2 * dims {
@@ -7579,8 +7577,7 @@ fn attach_dashboard(py: Python<'_>, rundir: String, poll_ms: u64) -> PyResult<()
 /// the analytic transonic bondi state at radius `r` (bondi radii, code units
 /// G*M = c_inf = rho_inf = 1): `(rho, u, pre)` with `u` the INFLOW speed
 /// magnitude (the radial velocity is `-u * rhat`). the config-side initial
-/// condition and validation target of docs/ideas/accretor.md — seed the
-/// transonic profile directly.
+/// condition for a spherical accretion run — seed the transonic profile directly.
 #[pyfunction]
 fn bondi_profile(r: f64, gamma: f64) -> (f64, f64, f64) {
     let s = symbi_ib::bondi_profile(r, gamma);
@@ -7795,8 +7792,8 @@ mod tile_coord_tests {
         }
     }
 
-    // a uniform axis is untouched: the same additive origin the decomposed builder always produced,
-    // so this change is a no-op wherever it was already correct.
+    // on a uniform axis the map reduces to the additive origin the linear form assumes, so the two
+    // agree there.
 
     // the clip must use the tile's MAP, not `origin + cells * dx`. on a log radial axis the cells
     // widen outward, so the linear form puts the tile's far corner well inside where its last cell
@@ -7824,7 +7821,7 @@ mod tile_coord_tests {
         ];
         let origin = [map.face(0), 0.0, 0.0];
         let true_hi = map.face(m as isize);
-        // the linear estimate the old code used: origin + m * (innermost width).
+        // the linear extent estimate: origin + m * (innermost width).
         let dx0 = map.face(1) - map.face(0);
         let linear_hi = origin[0] + m as f64 * dx0;
         assert!(

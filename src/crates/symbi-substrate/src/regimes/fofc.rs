@@ -533,7 +533,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // reaches it; the with-body select instead evolves the parachute by the body source inline. `None`
     // falls back to the plain `fofc_select` (regimes without the kernel keep the pre-body freeze).
     body_freeze: Option<(f64, f64)>,
-    // MHD-only constrained-transport hooks (no-ops for hydro; see the C2 fix / §3''). a flagged cell
+    // MHD-only constrained-transport hooks (no-ops for hydro). a flagged cell
     // needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with the edge EMF SPLICED
     // (HO off the fallback region, FO on it):
     //  - `ct_save`        : bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF),
@@ -583,7 +583,7 @@ where
     );
     // SUM (not max): the flag is 0/1, so the reduction is the COUNT of flagged cells — it doubles as
     // the fire/skip decision (count == 0 iff every high-order c2p was physical) AND the observability
-    // tally. no extra pass: this replaces the former max-reduce.
+    // tally, in a single pass.
     let fallback_cells = field_reduce(flag, &sim.geom.interior, ReductionOp::Add);
     if fallback_cells < 0.5 {
         advance_freeze_streak(freeze_streak, 0);

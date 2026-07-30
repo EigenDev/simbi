@@ -140,7 +140,7 @@ fn full_substrate_spherical_nmhd_smoke() {
         "spherical and cartesian CFL dt identical ({dt_sph} vs {dt_cart}) — wave_speed_map_sph did not engage",
     );
 
-    // the full curvilinear evolve exercises nmhd_godunov_stage_sph_3d (the NEW Newtonian
+    // the full curvilinear evolve exercises nmhd_godunov_stage_sph_3d (the Newtonian
     // geometric source) + the spherical CT.
     evolve(&mut sph, &sub, T_FINAL).expect("spherical NMHD evolution failed");
 

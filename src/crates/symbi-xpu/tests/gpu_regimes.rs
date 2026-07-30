@@ -8,7 +8,7 @@
 // each test nvcc-compiles the CUDA to PTX, launches it on the
 // GPU, and asserts the device output matches the CPU kernel (modulo nvcc FMA fusion).
 //
-// ABI (re-synced to the current AOT kernels): the CPU `__raw` fns take view-wrapped
+// ABI: the CPU `__raw` fns take view-wrapped
 // buffers (`CpuField` / `CpuFieldMut`, carrying lo+strides) + `grid_size_0` +
 // `dom_lo_0` + the per-kernel scalar tail (NO per-buffer `buf_lo` args — folded into
 // the view). the GPU kernels take the matching `__symbi_View` structs by value
@@ -17,11 +17,11 @@
 // mesh_vtrans); cartesian = all-zero geometry, dx arbitrary (cartesian flux is
 // position-independent), passed IDENTICALLY to both backends so the comparison holds.
 //
-// NOTE: the godunov euler/rk2 integrators are NO LONGER separate AOT kernels (the
-// kernel zoo collapsed into the unified `*_godunov_stage_*` family); their GPU<->CPU
-// validation lives in `crates/symbi/tests/substrate_hydro_gpu.rs` (the production
-// dispatch path runs godunov_euler/rk2 on-device). the standalone single-kernel mass
-// integrator (`godunov_mass_1d`) survives and is still covered here.
+// the godunov euler/rk2 integrators are AOT-emitted as part of the unified
+// `*_godunov_stage_*` family; their GPU<->CPU validation lives in
+// `crates/symbi/tests/substrate_hydro_gpu.rs` (the production dispatch path runs
+// godunov_euler/rk2 on-device). the standalone single-kernel mass integrator
+// (`godunov_mass_1d`) is covered here.
 //
 // run (host-native; NVCC_CCBIN -> g++-15):
 //   NVCC_CCBIN=/usr/bin/g++-15 cargo test -p symbi-xpu --features cuda --test gpu_regimes

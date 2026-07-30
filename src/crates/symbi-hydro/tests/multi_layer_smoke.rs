@@ -3,7 +3,7 @@
 //
 // **end-to-end multi-layer smoke test.** exercises the FULL stack in one place:
 //
-//   spec data → SimulationLaws → SourceEvaluator → time evolution → physics check.
+//   spec data -> SimulationLaws -> SourceEvaluator -> time evolution -> physics check.
 //
 // the load-bearing claim: when the data layer drives real time-stepping,
 // the result matches the analytical answer for cases where one's known.
@@ -11,17 +11,17 @@
 //
 // **tests in this file** (each isolates one layer interaction):
 //
-//   1. `uniform_acceleration_drives_velocity_linearly_in_time`
+//   - `uniform_acceleration_drives_velocity_linearly_in_time`
 //      uniform fluid + constant body force. fluxes cancel (no gradients);
-//      only source RHS contributes. analytical: v(t) = g·t. proves the
+//      only source RHS contributes. analytical: v(t) = g*t. proves the
 //      source-RHS pipeline integrates correctly per step.
 //
-//   2. `additive_composition_holds_under_time_evolution`
+//   - `additive_composition_holds_under_time_evolution`
 //      two overlays on the same field. analytical: net velocity matches
 //      sum of individual force contributions. proves the additive
 //      composition contract survives time evolution (not just static eval).
 //
-//   3. `iso_regime_with_momentum_only_overlay_evolves_correctly`
+//   - `iso_regime_with_momentum_only_overlay_evolves_correctly`
 //      isothermal regime + gravity that drops the energy source (has_energy=false).
 //      validates the iso-special-case routing in SimulationLaws end-to-end.
 // =============================================================================
@@ -44,10 +44,10 @@ use symbi_hydro::{IsoNewtonian, Newtonian, SimulationLaws, SourceEvaluator};
 // same flux from every neighbor — so the source RHS is the SOLE contribution
 // to dU/dt. analytical answer:
 //
-//   dm/dt = ρ·g       (momentum density gains ρ·g per unit time)
-//   dE/dt = ρ·v·g     (energy gains ρ·(v·g) — work done by the force)
+//   dm/dt = rho*g       (momentum density gains rho*g per unit time)
+//   dE/dt = rho*(v.g)   (energy gains rho*(v.g) — work done by the force)
 //
-// integrating from rest: v(t) = g·t, m(t) = ρ₀·g·t (constant ρ₀ since
+// integrating from rest: v(t) = g*t, m(t) = rho_0*g*t (constant rho_0 since
 // mass is conserved and fluid is uniform).
 // =============================================================================
 
@@ -120,7 +120,7 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
     }
 
     // ----- analytical verification -----
-    // v(t) = g·t,  momentum_k = ρ * v_k.
+    // v(t) = g*t,  momentum_k = rho * v_k.
     let t_final = N_STEPS as f64 * DT;
     let final_prim = prim_from_cons(&cons, GAMMA);
 
@@ -135,13 +135,13 @@ fn uniform_acceleration_drives_velocity_linearly_in_time() {
         let v_actual = final_prim.vel[k];
         assert!(
             (v_actual - v_expected).abs() < 1e-12,
-            "component {k}: v({t_final}) = {v_actual} != g·t = {v_expected}",
+            "component {k}: v({t_final}) = {v_actual} != g*t = {v_expected}",
         );
         let mom_expected = RHO_0 * g_ext[k] * t_final;
         let mom_actual = cons.mom[k];
         assert!(
             (mom_actual - mom_expected).abs() < 1e-12,
-            "component {k}: momentum density {mom_actual} != ρ·g·t = {mom_expected}",
+            "component {k}: momentum density {mom_actual} != rho*g*t = {mom_expected}",
         );
     }
 }
@@ -204,9 +204,9 @@ fn additive_composition_holds_under_time_evolution() {
     //
     // the analytical sum is ONLY exact when each overlay's source is
     // INDEPENDENT of the running state. uniform_acceleration depends on
-    // ρ (constant per cell) → constant per step → integrates linearly.
-    // point-mass gravity depends on ρ (constant) AND v (changing) — but
-    // its momentum source `-ρ*GM*(x-xm)/|x-xm|^3` is v-independent, so
+    // rho (constant per cell) -> constant per step -> integrates linearly.
+    // point-mass gravity depends on rho (constant) AND v (changing) — but
+    // its momentum source `-rho*GM*(x-xm)/|x-xm|^3` is v-independent, so
     // it's ALSO constant per step under the static-position assumption.
     //
     // since both individual contributions are constant per step, the
@@ -229,8 +229,8 @@ fn additive_composition_holds_under_time_evolution() {
 //
 // the iso-routing in SimulationLaws / SourceEvaluator: when the regime is
 // isothermal (has_energy=false), the gravity overlay must DROP the energy
-// source automatically. the runtime call sequence (validate → fields_with_overlays
-// → eval) handles this without the caller intervening. this test exercises
+// source automatically. the runtime call sequence (validate -> fields_with_overlays
+// -> eval) handles this without the caller intervening. this test exercises
 // that path end-to-end.
 // =============================================================================
 
@@ -255,7 +255,7 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
         "iso evaluator must expose ONLY 'mom' (has_energy=false drops 'nrg')",
     );
 
-    // initial: uniform iso state at rest. ρ is constant (no mass source) so
+    // initial: uniform iso state at rest. rho is constant (no mass source) so
     // no `mut` is needed — just bind the constant.
     let rho = RHO_0;
     let mut vx = 0.0_f64;
@@ -271,10 +271,10 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
             )
             .expect("mom has overlay");
 
-        // Euler update on momentum density (= ρ * v in 1D).
+        // Euler update on momentum density (= rho * v in 1D).
         let mom_density = rho * vx + DT * s_mom[0];
         vx = mom_density / rho;
-        // ρ unchanged (no mass source); cs_sq is the regime constant.
+        // rho unchanged (no mass source); cs_sq is the regime constant.
         let _cs_sq = CS_SQ;
     }
 
@@ -282,7 +282,7 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
     let v_expected = g_ext[0] * t_final;
     assert!(
         (vx - v_expected).abs() < 1e-12,
-        "iso evolution: v({t_final}) = {vx} != g·t = {v_expected}",
+        "iso evolution: v({t_final}) = {vx} != g*t = {v_expected}",
     );
 }
 
@@ -300,7 +300,7 @@ fn prim_from_cons(cons: &Cons<f64, 3>, gamma: f64) -> Prim<f64, 3> {
     Prim { rho, vel, pre }
 }
 
-/// uniform-cell evolution: no spatial gradients → no flux divergence,
+/// uniform-cell evolution: no spatial gradients -> no flux divergence,
 /// only source-RHS contributes. returns final momentum density vec.
 fn evolve_uniform(
     _eval: &SourceEvaluator,

@@ -13,7 +13,7 @@
 // destination, the pullback (`pullback.rs`) reads it as an ordinary integer-index
 // stencil — there is no "data-dependent gather" and no float->int cast.
 //
-// the per-axis Jacobian sign (`+1`, or `-1` on a reflected axis) is what a field
+// the per-axis jacobian sign (`+1`, or `-1` on a reflected axis) is what a field
 // value picks up: a scalar ignores it, a vector multiplies its component on that
 // axis, a rank-2 tensor twice. that is the entire content of the hand-written
 // `vel_sign` parameter — it is the field's grade reacting to the map.
@@ -68,7 +68,7 @@ impl LatticeMap {
     }
 
     /// the per-axis sign a field value picks up (the diagonal of the map's
-    /// Jacobian): `-1` on a reflected axis, `+1` otherwise. a scalar ignores it;
+    /// jacobian): `-1` on a reflected axis, `+1` otherwise. a scalar ignores it;
     /// a vector multiplies its component on that axis by it; a tensor, twice.
     pub fn jacobian_sign(&self, axis: u8) -> i64 {
         match self {

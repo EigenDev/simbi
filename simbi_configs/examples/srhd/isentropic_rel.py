@@ -29,7 +29,6 @@ class IsentropicWaveParams:
     def make_wave_function(
         self, ell: float
     ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
-        # return lambda x: np.sin(2 * np.pi * x)
         def wave_function(x: NDArray[np.float64]) -> NDArray[np.float64]:
             wave = np.where(
                 np.abs(x) < ell,
@@ -66,8 +65,8 @@ class IsentropicState:
     def sound_speed(
         self, rho: NDArray[np.float64] | float, p: NDArray[np.float64] | float
     ) -> NDArray[np.float64]:
-        # Enthalpy h = 1 + epsilon + p/rho
-        # For ideal gas: h = 1 + (gamma / (gamma - 1)) * (p / rho)
+        # specific enthalpy h = 1 + epsilon + p/rho, which for an ideal gas closes as
+        # h = 1 + (gamma / (gamma - 1)) (p / rho)
         h = 1.0 + self.adiabatic_index * p / (
             rho * (self.adiabatic_index - 1.0)
         )
@@ -83,11 +82,12 @@ class IsentropicState:
         cs = self.sound_speed(rho, p)
         cs_ref = self.sound_speed(self.params.rho_ref, self.params.p_ref)
 
-        # Sqrt of gamma minus 1
+        # the relativistic sound speed saturates at sqrt(gamma - 1), so that value is the
+        # natural scale for the invariant below.
         sgm1 = np.sqrt(self.adiabatic_index - 1.0)
 
-        # Calculate the relativistic Riemann invariant integral term
-        # A(cs) = (1 / sqrt(g-1)) * arctanh(cs / sqrt(g-1))
+        # the relativistic riemann invariant along a simple wave:
+        # A(cs) = (1 / sqrt(gamma-1)) arctanh(cs / sqrt(gamma-1))
         term_now = (1.0 / sgm1) * np.arctanh(cs / sgm1)
         term_ref = (1.0 / sgm1) * np.arctanh(cs_ref / sgm1)
 
@@ -178,7 +178,7 @@ class IsentropicRelWave(SimbiProblem):
             x2 = self.bounds[0][1]
             dx = (x2 - x1) / nx
 
-            # Cell centers: (i + 0.5) * dx
+            # cell centers sit at (i + 0.5) dx
             x = np.linspace(x1 + 0.5 * dx, x2 - 0.5 * dx, nx)
             ell = 0.3
             rho = self.state.density(x, ell)

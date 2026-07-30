@@ -4,10 +4,10 @@
 // dimension expressions for tensor shapes. each axis is a compile-time
 // literal (e.g., 3, 4).
 //
-// shape equality (§ 1.5): two `DimExpr` values are equal iff
+// shape equality: two `DimExpr` values are equal iff
 // `Literal(n) == Literal(n)` (same value).
 //
-// broadcast compatibility (§ 1.5): `S` broadcasts to `T` iff `S` has at
+// broadcast compatibility: `S` broadcasts to `T` iff `S` has at
 // most `T.len()` dims and, after right-aligning, each pair (s, t)
 // satisfies `s == t || s == Literal(1)`.
 // =============================================================================

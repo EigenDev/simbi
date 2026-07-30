@@ -75,7 +75,7 @@ impl KernelRun {
     }
 
     /// compute only `size` cells from `lo` (for stencil kernels whose reconstruction reads
-    /// neighbours, so the boundary cells are left untouched). buffers stay full-grid.
+    /// neighbors, so the boundary cells are left untouched). buffers stay full-grid.
     pub fn compute_window(mut self, lo: impl AsRef<[i32]>, size: impl AsRef<[usize]>) -> Self {
         self.window_lo = Some(lo.as_ref().to_vec());
         self.window_size = Some(size.as_ref().iter().map(|&n| n as u32).collect());
@@ -219,7 +219,7 @@ impl KernelRun {
     }
 
     /// emit the kernel as CPU (rust) source without running it — for the BUILD+EMIT tests
-    /// that inspect the generated text (the masked-Newton unroll is too costly to interpret).
+    /// that inspect the generated text (the masked-newton unroll is too costly to interpret).
     /// no field/scalar bindings are needed; `.grid(...)` (or its len via the writes) fixes ndim.
     pub fn emit_cpu(self) -> Emit {
         let ndim = self.grid.len() as u8;

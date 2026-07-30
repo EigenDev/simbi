@@ -23,7 +23,6 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::exit::{ExitKind, render_exit_frame};
-use crate::input::Key;
 use crate::live::{self, DiagnosticView};
 use crate::renderer::Renderer;
 use crate::terminal::{self, ansi, color};
@@ -300,34 +299,6 @@ impl Table {
         self.dt_hist.push_back(dt);
     }
 
-    /// apply a navigation keypress; returns true when the frame should redraw.
-    pub fn handle_key(&mut self, key: Key) -> bool {
-        let n = live::tab_names(self.blocks_per_level.len() > 1).len();
-        match key {
-            Key::Tab | Key::Right => {
-                self.tab = (self.tab + 1) % n;
-                self.scroll = 0;
-                true
-            }
-            Key::BackTab | Key::Left => {
-                self.tab = (self.tab + n - 1) % n;
-                self.scroll = 0;
-                true
-            }
-            Key::Up => {
-                self.scroll = self.scroll.saturating_sub(1);
-                true
-            }
-            Key::Down => {
-                // cap loosely at the config row count; the renderer clamps to the exact overflow.
-                let cap = self.problem_setup.len() as u16;
-                self.scroll = (self.scroll + 1).min(cap);
-                true
-            }
-            _ => false,
-        }
-    }
-
     /// set the static System Information sub-table (rendered above
     /// the benchmark section). each row is `[category, property, value]`.
     /// the renderer collapses repeated `category` entries to blanks (e.g.
@@ -532,7 +503,7 @@ impl Table {
 
     /// render a 3-col (Category | Property | Value) sub-table at
     /// the current renderer's total width. coalesces repeated `category`
-    /// entries to blanks so the visual grouping is clear ("CPU" → 4 fields
+    /// entries to blanks so the visual grouping is clear ("CPU" -> 4 fields
     /// shows as one "CPU" label + 3 indented blanks).
     fn render_info_section(&self, buf: &mut String, title: &str, rows: &[[String; 3]]) {
         if rows.is_empty() {

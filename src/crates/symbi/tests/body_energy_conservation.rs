@@ -110,7 +110,8 @@ fn two_way_body_ke_change_balances_gas_energy() {
     // is (nrg_old - nrg_new), NEGATIVE when the gas gains, so it matches d(KE_body) < 0. the
     // dissipation stays in the gas as heat and never leaves the ledger. the residual is O(dt): the
     // gas energy is booked at penalize time while the body KE updates at the step midpoint, so the
-    // two agree to the timestep's order (was a ~59% LEAK before the work-on-wall fix).
+    // two agree to the timestep's order. penalization that omits the work done on the wall instead
+    // leaks order half the exchanged energy.
     let rel = (gas_energy_change - dke).abs() / dke.abs();
     assert!(
         rel < 1e-2,

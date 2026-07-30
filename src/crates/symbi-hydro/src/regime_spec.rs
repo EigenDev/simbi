@@ -9,11 +9,11 @@
 //   **`Rhd` and `Rmhd` collapse to consts-plus-c2p-hook.**
 //
 // every regime is identical at the metadata layer EXCEPT for:
-//   1. a small set of `bool` / `u8` flag constants (is_relativistic, is_mhd,
-//      has_energy, field count for the magnetic field),
-//   2. the conservative-to-primitive recovery function — algebraic for
-//      newtonian, Newton-iterate for rhd, KKC false-position for rmhd
-//      (carrier-generic but each with distinct internal physics).
+//   - a small set of `bool` / `u8` flag constants (is_relativistic, is_mhd,
+//     has_energy, field count for the magnetic field),
+//   - the conservative-to-primitive recovery function — algebraic for
+//     newtonian, Newton-iterate for rhd, KKC false-position for rmhd
+//     (carrier-generic but each with distinct internal physics).
 //
 // laws-as-OpNode encodes conservation laws as `algebra::Op` graphs; this
 // module ships the metadata skeleton + the proof that the per-regime
@@ -86,11 +86,11 @@ pub struct RegimeSpec {
     /// kernel-binding manifest preserves this order; tests assert it
     /// matches what `Cons` / `MhdCons` actually expose.
     pub fields: &'static [FieldSpec],
-    /// **primitive-side field manifest** (rho / vel / pre / bcell …).
-    /// drives the I/O writer and reader's primitive-group iteration. without
-    /// this, the names were hand-spelled in two places (`write_level_fields`
-    /// and `read_level_fields`); now `symbi-io::iter_components` consumes it
-    /// to generate the on-disk dataset names — one source of truth per regime.
+    /// **primitive-side field manifest** (rho / vel / pre / bcell ...).
+    /// drives the I/O writer and reader's primitive-group iteration:
+    /// `symbi-io::iter_components` consumes it to generate the on-disk dataset
+    /// names, so `write_level_fields` and `read_level_fields` share ONE naming
+    /// source of truth per regime.
     pub primitive_fields: &'static [FieldSpec],
     /// the EOS the regime is parametric on. checked against the runtime EOS.
     pub eos: EosKind,
@@ -653,7 +653,7 @@ mod tests {
 
         // structural extension: RMHD has the same field NAMES as RHD in order (den, mom,
         // nrg) plus `mag` appended. the hydro prefix names match, but RMHD PROMOTES mom to a
-        // fixed 3-vector (vs RHD's D-vector) — MHD vectors are always 3-component (docs/30).
+        // fixed 3-vector (vs RHD's D-vector) — MHD vectors are always 3-component.
         let s_count = s.fields.len();
         let r_count = r.fields.len();
         assert_eq!(r_count, s_count + 1);

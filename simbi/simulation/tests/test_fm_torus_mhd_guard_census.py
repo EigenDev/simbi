@@ -69,7 +69,7 @@ SPIN = 0.9
 
 # enough steps for the near-horizon infall to engage the stiff magnetized recovery --
 # the regime where the projection is actually exercised -- and few enough to run in
-# seconds. the invariants below are properties of the state at whatever step they are
+# seconds. the invariants are properties of the state at whatever step they are
 # read, so this number sets cost, not sensitivity.
 STEPS = 60
 

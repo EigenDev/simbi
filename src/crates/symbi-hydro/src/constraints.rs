@@ -5,7 +5,7 @@
 //
 // a constraint is a scalar inequality on the conserved state, `c(U) >= 0`. the family in force
 // defines the acceptable set `C = intersect_k { c_k >= 0 }`, and every correction the scheme applies
-// targets `G_safe = G ∩ C` — the physically admissible set intersected with the run's declared
+// targets `G_safe = G intersect C` — the physically admissible set intersected with the run's declared
 // constraints. the admissible set itself is just the always-present member of the family, so there is
 // no separate "projection onto G" path to keep in sync with the floors.
 //
@@ -18,14 +18,14 @@
 //
 // the axioms, each carrying a proof obligation:
 //
-//  A1 CONCAVITY.   every `c_k` is concave in U, so `{c_k >= 0}` is convex and `G ∩ C` inherits the
+//  A1 CONCAVITY.   every `c_k` is concave in U, so `{c_k >= 0}` is convex and `G intersect C` inherits the
 //                  convexity of G (Wu & Tang, arXiv:1709.05838, theorem 2.2). this is what makes the
 //                  segment projection well-posed: a concave `c_k` restricted to the segment is
 //                  concave in the blend parameter, so `{t : c_k >= 0}` is a single interval and the
 //                  boundary is crossed once. `concavity_violation` checks it numerically; a
 //                  constraint that fails is not admissible into the family, whatever it models. a
 //                  Lorentz-factor ceiling is the standard example of one that fails.
-//  A2 PROJECTION.  the corrective operator is a projection: identity on `G ∩ C` (an acceptable state
+//  A2 PROJECTION.  the corrective operator is a projection: identity on `G intersect C` (an acceptable state
 //                  passes through bit-for-bit), idempotent, and minimal along the correction segment.
 //  A3 SIMULTANEOUS. the family is applied as ONE projection onto the intersection, never as a
 //                  sequence of clamps. sequential clamping is order-dependent and NOT idempotent —
@@ -150,8 +150,8 @@ pub trait StateConstraint<S: Scalar> {
 ///
 /// this is the ALWAYS-PRESENT constraint and the only one with no numerical margin of its own: it is
 /// the boundary of physical representability, not a modeling choice, so it is neither a model term
-/// nor mesh-dependent. expressing it here rather than as a special-cased path is what lets the
-/// projection target `G ∩ C` in one operation instead of composing two projections.
+/// nor mesh-dependent. as an ordinary member of the family it lets the projection target
+/// `G intersect C` in one operation, with no composition of two projections.
 pub struct WuTangAdmissibility<S: Scalar> {
     /// the relative margins, scaled by the cell's own state scale by the caller.
     pub eps_d: S,
@@ -474,7 +474,7 @@ where
 ///
 /// `model_term` is what keeps the report honest: mass added because the discretization cannot
 /// resolve a cancellation and mass added because vacuum is being modeled as thin gas are different
-/// claims, and an aggregate that merges them hides the one a reader most needs to see.
+/// claims, and an aggregate that merges them hides the modeling term inside the numerical one.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConstraintLedgerEntry {
     pub name: &'static str,
@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn the_closed_form_crossing_agrees_with_bisection() {
-        // the two paths must agree, or the optimization changed the physics.
+        // the closed form and the bisection locate the SAME crossing of the constraint residual.
         let (gm, gi) = (identity(), identity());
         let floor = TemperatureFloor { f_min: 0.25 };
         let blend = |t: f64| ConstraintState {
@@ -924,7 +924,7 @@ mod tests {
 
     #[test]
     fn an_anchor_certified_against_a_different_field_is_reported_infeasible() {
-        // THE BUG THIS EXISTS FOR, as a property rather than a repro. an anchor certifies "this
+        // an anchor certifies "this
         // conserved state is admissible", and the certificate holds only alongside the magnetic
         // field it was computed against. constrained transport advances B on shared faces, so a
         // stage-input-derived anchor paired with the candidate's post-CT field asserts the

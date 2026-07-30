@@ -10,7 +10,7 @@ from cycler import cycler
 class ThemeConfig:
     """Central theme configuration for visualization styling"""
 
-    # Text styling
+    # text styling
     font_family: str = "serif"
     font_size: int = 12
     title_size: int = 14
@@ -18,31 +18,31 @@ class ThemeConfig:
     tick_size: int = 10
     text_color: str = "black"
 
-    # Line styling
+    # line styling
     line_styles: Sequence[str] = field(
         default_factory=lambda: ["-", "--", ":", "-."]
     )
     line_width: float = 1.5
 
-    # Color styling
+    # color styling
     color_map: str = "viridis"
 
-    # Axis styling
+    # axis styling
     hide_spines: Sequence[str] = field(default_factory=lambda: ["top", "right"])
     grid: bool = False
     axis_below: bool = True
     axis_equal: bool = False
 
-    # Figure styling
+    # figure styling
     fig_size: tuple[float, float] = (8, 6)
     dpi: int = 300
     transparent: bool = False
 
-    # Special styling
+    # special styling
     polar_style: dict[str, Any] = field(default_factory=dict)
     colorbar_style: dict[str, Any] = field(default_factory=dict)
     use_tex: bool = False
-    # Background colors
+    # background colors
     background_colors: dict[str, str] = field(
         default_factory=lambda: {
             "figure": "#ffffff",
@@ -143,41 +143,41 @@ class ThemeConfig:
 
         plt.rcParams.update(
             {
-                # Font settings
+                # font settings
                 "font.family": self.font_family,
                 "font.size": self.font_size,
                 "axes.titlesize": self.title_size,
                 "axes.labelsize": self.label_size,
                 "xtick.labelsize": self.tick_size,
                 "ytick.labelsize": self.tick_size,
-                # Color settings
+                # color settings
                 "text.color": self.text_color,
                 "axes.labelcolor": self.text_color,
                 "xtick.color": self.text_color,
                 "ytick.color": self.text_color,
-                # Line settings
+                # line settings
                 "lines.linewidth": self.line_width,
                 "axes.prop_cycle": default_cycler,
-                # Figure settings
+                # figure settings
                 # "figure.figsize": user_fig_size or self.fig_size,
                 # "figure.dpi": self.dpi,
                 "savefig.transparent": self.transparent,
-                # Text rendering settings
+                # text rendering settings
                 "text.usetex": self.use_tex,
             }
         )
 
     def style_axis(self, ax):
         """Apply styling to a specific axis"""
-        # Hide specified spines
+        # hide specified spines
         for spine in self.hide_spines:
             ax.spines[spine].set_visible(False)
 
-        # Set grid and axis below
+        # set grid and axis below
         ax.grid(self.grid)
         ax.set_axisbelow(self.axis_below)
 
-        # Make axis equal if specified
+        # make axis equal if specified
         if self.axis_equal:
             ax.set_aspect("equal", adjustable="box")
 
@@ -187,7 +187,7 @@ class ThemeConfig:
         ax.set_theta_zero_location(self.polar_style.get("zero_location", "N"))
         ax.set_theta_direction(self.polar_style.get("direction", -1))
 
-        # Hide tick labels if specified
+        # hide tick labels if specified
         if not self.polar_style.get("show_ticks", True):
             ax.set_xticklabels([])
             ax.set_yticklabels([])

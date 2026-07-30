@@ -1,16 +1,15 @@
 // =============================================================================
 // stub_kernels.cu
 //
-// no-op placeholder for the hand-written CUDA kernels that have been moved
-// to crates/symbi/kernels_deprecated/. compiled by build.rs into PTX, then
+// no-op placeholder for the hand-written CUDA kernels in
+// crates/symbi/kernels_deprecated/. compiled by build.rs into PTX, then
 // embedded as the EMPTY_PTX const in src/kernels.rs. every entry-point name
 // the GpuKernels::load() loader looks up is defined here as an empty kernel
 // so cuModuleLoadData and cuModuleGetFunction succeed.
 //
 // the traced dispatch in src/sim/evolve.rs routes around these placeholders.
-// if a deprecated path that has NOT yet been migrated launches one of these
-// stubs, the kernel does nothing and the simulation produces wrong physics.
-// migration status is tracked in kernels_deprecated/README.md.
+// an unmigrated deprecated path that launches one of these stubs computes
+// nothing, and the simulation produces wrong physics.
 // =============================================================================
 
 // hydro/regime kernels

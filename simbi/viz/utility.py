@@ -1,18 +1,12 @@
-# Utility functions for visualization scripts
+# utility functions for visualization scripts
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional, Union
 
 import astropy.constants as const
 import astropy.units as units
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-
-from simbi.types.input import CoordSystem
-
-from ..functional.helpers import find_nearest
 
 # FONT SIZES
 SMALL_SIZE = 6
@@ -196,7 +190,6 @@ class FieldMapper:
         return var
 
 
-# Usage remains the same
 def get_field_str(
     field: str,
     units: bool = False,
@@ -217,19 +210,8 @@ def get_tracer_field_str(field: str, cohort: Optional[int] = None) -> str:
     return label.replace(",c}", rf",c={cohort}}}")
 
 
-def calc_enthalpy(fields: dict[str, NDArray[np.floating[Any]]]) -> Any:
-    return 1.0 + fields["p"] * fields["adiabatic_index"] / (
-        fields["rho"] * (fields["adiabatic_index"] - 1.0)
-    )
-
-
 def calc_lorentz_factor(fields: dict[str, NDArray[np.floating[Any]]]) -> Any:
     return (1.0 + fields["gamma_beta"] ** 2) ** 0.5
-
-
-def calc_beta(fields: dict[str, NDArray[np.floating[Any]]]) -> Any:
-    W = calc_lorentz_factor(fields)
-    return (1.0 - 1.0 / W**2) ** 0.5
 
 
 def unpad(
@@ -284,109 +266,3 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
         return dims[0]
     else:
         raise ValueError("inconsistent dimensionality across files.")
-
-
-def get_colors(
-    interval: NDArray[np.floating[Any]],
-    cmap: matplotlib.colors.ListedColormap,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
-) -> NDArray[Any]:
-    """
-    Return array of rgba colors for a given matplotlib colormap
-
-    Parameters
-    -------------------------
-    interval: interval range for colormarp min and max
-    cmap: the matplotlib colormap instance
-    vmin: minimum for colormap
-    vmax: maximum for colormap
-
-    Returns
-    -------------------------
-    arr: the colormap array generate by the user conditions
-    """
-    matplotlib.colors.Normalize(vmin, vmax)
-    return np.asarray(cmap(interval), dtype=np.float64)
-
-
-def fill_below_intersec(
-    x: NDArray[np.floating[Any]],
-    y: NDArray[np.floating[Any]],
-    constraint: float,
-    color: float,
-    axis: str,
-) -> None:
-    if axis == "x":
-        ind: int = find_nearest(x, constraint)[0]
-    else:
-        ind = find_nearest(y, constraint)[0]
-    plt.fill_between(x[ind:], y[ind:], color=color, alpha=0.1, interpolate=True)
-
-
-def get_file_list(
-    inputs: str, sort: bool = False
-) -> Union[tuple[list[str], int], tuple[dict[int, list[str]], bool]]:
-    from pathlib import Path
-
-    files: Union[list[str], dict[int, list[str]]]
-    dirs = list(filter(lambda x: Path(x).is_dir(), inputs))
-    multidir = len(dirs) > 1
-
-    if multidir:
-        files = {
-            key: sorted(
-                [str(f) for f in Path(fdir).glob("*.h5") if f.is_file()]
-            )
-            for key, fdir in enumerate(inputs)
-        }
-    else:
-        files = []
-        if dirs:
-            files = sorted(
-                [
-                    str(f)
-                    for d in dirs
-                    for f in Path(d).glob("*.h5")
-                    if f.is_file()
-                ]
-            )
-        files += [file for file in filter(lambda x: x not in dirs, inputs)]
-
-    if not isinstance(files, dict):
-        # sort by length of strings now
-        if sort:
-            files.sort(key=len, reverse=False)
-        return files, len(files)
-    else:
-        any(files[key].sort(key=len, reverse=False) for key in files.keys())
-        return files, multidir
-
-
-def map_coordinate_label(
-    coord_name: str,
-    coord_system: CoordSystem,
-) -> str:
-    """Maps a logical coordinate name to a human-readable label."""
-    label_map_cartesian = {
-        "x1": "$x$",
-        "x2": "$y$",
-        "x3": "$z$",
-    }
-    label_map_polar = {
-        "x1": "$r$",
-        "x2": r"$\theta$",
-        "x3": r"$\phi$",
-    }
-    label_map_cylindrical = {
-        "x1": "$r$",
-        "x2": "$z$",
-        "x3": r"$\phi$",
-    }
-
-    if coord_system == CoordSystem.SPHERICAL:
-        return label_map_polar.get(coord_name, coord_name)
-    elif coord_system == CoordSystem.CARTESIAN:
-        return label_map_cartesian.get(coord_name, coord_name)
-    else:
-        return label_map_cylindrical.get(coord_name, coord_name)

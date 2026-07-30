@@ -1,7 +1,7 @@
 // =============================================================================
 // substrate_rmhd_spherical.rs
 //
-// the curvilinear RMHD wiring smoke: RmhdSubstrateKernelSet3D (now M-generic)
+// the curvilinear RMHD wiring smoke: the M-generic RmhdSubstrateKernelSet3D
 // on a SPHERICAL shell through the real evolve() loop, exercising the _sph
 // kernels the godunov/cfl methods dispatch — rmhd_godunov_euler_sph_3d (the
 // area-weighted divergence + the RMHD geometric momentum source: pressure +

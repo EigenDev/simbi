@@ -16,7 +16,7 @@ def _calculate_time_series_value(
     """
     Calculates a single scalar value for a given field at a given time.
     """
-    # Standard field calculation
+    # standard field calculation
     field = data.get_field(field_name, level=0)  # Default to base level
 
     if weight_field_name:
@@ -24,23 +24,6 @@ def _calculate_time_series_value(
         return np.sum(field * weight_field) / np.sum(weight_field)
     else:
         return np.mean(field)
-
-
-def _compute_orbital_averages(
-    time: Array, mdot: Array, time_scale: float
-) -> tuple[Array, Array]:
-    """Compute averages over orbital periods."""
-    n_orbits = (time[-1] - time[0]) / time_scale
-    bins = np.linspace(time[0], time[-1], int(n_orbits) + 1)
-    t_bins = (bins[1:] + bins[:-1]) / 2  # bin centers
-
-    mdot_avg = np.array(
-        [
-            np.mean(mdot[(time >= bins[i]) & (time < bins[i + 1])])
-            for i in range(len(bins) - 1)
-        ]
-    )
-    return t_bins, mdot_avg
 
 
 def compute_orbital_averages(
@@ -51,7 +34,7 @@ def compute_orbital_averages(
     Args:
         time: array of time values
         mdot: array of mdot values
-        time_scale: orbital period (e.g., 2π)
+        time_scale: orbital period (e.g., 2 pi)
 
     Returns:
         t_bins: array of time bin centers
@@ -119,8 +102,8 @@ def create_time_series_data(
             )
         )
 
-        # Handle special case: orbital averages for mdot
-        # This creates a *new* derived field
+        # handle special case: orbital averages for mdot
+        # this creates a *new* derived field
         if name in ["mdot", "maccr"] and config.figure.time_scale:
             if values_array.ndim == 2:
                 ma_times, ma_total_mdot = compute_orbital_averages(

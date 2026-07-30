@@ -179,7 +179,8 @@ class SimData:
 
     def hierarchy(self):
         """access AMR hierarchy info."""
-        # TODO: implement once hierarchy parsing is added to io
+        # the checkpoint reader exposes level count and per-level partitions, not the
+        # box tree, so there is no hierarchy object to hand back
         return None
 
     def list_derived_fields(self) -> list[str]:
@@ -204,7 +205,6 @@ class SimData:
             return set(self._derived_names)
 
         partition = level_data.partitions[0]
-        halo = level_data.mesh.halo_radius
 
         base_names = set(partition.hydro.primitives.keys())
 
@@ -236,14 +236,6 @@ class SimData:
         # single partition case
         if level_data.num_partitions == 1:
             partition = level_data.partitions[0]
-            owned = partition.owned_domain
-            global_shape = level_data.mesh.global_cells
-
-            # check if this is a refined level (owned != full domain)
-            is_refined_subset = not all(
-                owned.start[ii] == 0 and owned.fin[ii] == global_shape[ii]
-                for ii in range(owned.ndim)
-            )
 
             # get field data
             field_data = None

@@ -11,8 +11,7 @@
 // it reuses the proven `emit_cpu` ScalarExpr/ScalarStmt renderer for the f64
 // body and writes, and the same buffer-binding + FieldLoadAt-resolution
 // structure as the CUDA emitter — only the syntax (Rust slices, a cell loop)
-// differs. precision is f64 (the substrate is double-precision; an f32 CPU path
-// is a future concern).
+// differs. precision is f64: the substrate is double-precision.
 //
 // INDICES ARE INTEGERS. coord index params are `I32` in the IR, so coord and
 // index arithmetic is pure `i32` — coord vars, strides, and buffer-lo offsets are
@@ -80,8 +79,8 @@ fn cpu_tile_size() -> usize {
 /// kernel's correctness contract, validated by the carrier oracle), so the bounds
 /// check is dead weight — and an opaque-index check defeats vectorization. read at
 /// emit time (build.rs tracks the env); default OFF (safe checked indexing).
-/// part 1 of the loop-lowering: dropping the checks is the ~8x scalar win measured
-/// in the simd spike. UNSAFE if an index is ever wrong — gate on the test suite.
+/// dropping the checks is worth ~8x on the scalar loop. UNSAFE if an index is
+/// ever wrong.
 fn unchecked_loads() -> bool {
     // vec mode needs the bounds-check branches gone to vectorize, so it implies unchecked.
     std::env::var("SYMBI_UNCHECKED_LOADS")
@@ -230,7 +229,7 @@ impl KernelRenderer for RustRenderer {
     }
     fn cell_prelude(&self, ndim: usize, _n_buffers: u32) -> Vec<String> {
         // the kernel signature takes the view structs DIRECTLY:
-        // `field0: &CpuField<S>, …, field_n: &mut CpuFieldMut<S>`. no per-cell
+        // `field0: &CpuField<S>, ..., field_n: &mut CpuFieldMut<S>`. no per-cell
         // reconstruction needed — input fields capture by ref into the closure,
         // outputs use the standard mut-ptr-rebind dance.
         //

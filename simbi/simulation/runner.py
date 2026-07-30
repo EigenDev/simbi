@@ -79,7 +79,7 @@ def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
 
 def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
-    convert problem config to dict for C++ backend.
+    convert problem config to dict for the rust backend.
 
     this produces the exact format expected by backend.run_simulation().
     """
@@ -223,7 +223,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         if isinstance(value, Path):
             model_dict[key] = str(value)
 
-    # nullify callables (c++ has own implementations)
+    # nullify callables (the backend carries its own implementations)
     for key, value in list(model_dict.items()):
         if callable(value):
             model_dict[key] = None
@@ -566,16 +566,20 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
         )
     backend.validate_simulation(sim_info=exec_dict)
     # the registered binned reductions, reported alongside the validation because every number in
-    # them is fixed at registration and each one decides a cost paid for the whole job. it is a
-    # COURTESY, so it must not be able to fail a validation that has already passed.
+    # them is fixed at registration and each one decides a cost paid for the whole job. the report is
+    # a COURTESY: the backend has already returned its verdict, so a malformed payload surfaces here
+    # as a note on the report and leaves that verdict standing.
     from ..expression.census import describe as describe_censuses
 
-    print(describe_censuses(getattr(problem, "census_expressions", ())))
+    try:
+        print(describe_censuses(getattr(problem, "census_expressions", ())))
+    except Exception as exc:  # noqa: BLE001 - a report may not overturn a passed validation
+        print(f"census report unavailable: {type(exc).__name__}: {exc}")
     print(f"{type(problem).__name__}: validation passed")
 
 
 def _check_first_scalar(problem_name: str, field_name: str, iterator: Any) -> float:
-    """validate one scalar generator value without weakening finite-state rules."""
+    """peek one scalar generator value and require it to be numeric and finite."""
     import math
 
     try:
@@ -643,8 +647,8 @@ def run(
     if not data_dir.exists():
         data_dir.mkdir(parents=True, exist_ok=True)
 
-    # deep generator validation stays opt-in (it consumes fresh iterators);
-    # the zero-cost first-tuple check below always runs.
+    # deep generator validation is opt-in: it consumes fresh iterators. the
+    # zero-cost first-tuple contract check always runs.
     if validate:
         errors = _validate_generator(problem)
         if errors:
@@ -670,9 +674,9 @@ def run(
             print(f"  {key}: {value}")
         return
 
-    # forward gpu block dims for the (future) gpu backend; the run dashboard —
-    # problem setup, live benchmarks, progress, messages — is rendered by the
-    # rust backend (symbi_display::Table), so no python-side summary is printed.
+    # forward gpu block dims to the backend. the run dashboard — problem setup,
+    # live benchmarks, progress, messages — is rendered by the rust backend
+    # (symbi_display::Table), so no python-side summary is printed.
     if gpu_blocks is not None:
         exec_dict["gpu_block_dims"] = tuple(gpu_blocks)
 

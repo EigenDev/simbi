@@ -18,7 +18,7 @@ TABLE_WIDTH = None
 
 
 class RichSimulationSummary:
-    """we're now gonna use Rich for beautiful terminal output"""
+    """Rich-rendered terminal presentation of the simulation parameter summary."""
 
     def __init__(self, console: Console | None = None) -> None:
         """initialize the rich console and styling options

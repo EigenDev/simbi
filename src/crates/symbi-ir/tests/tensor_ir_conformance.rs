@@ -4,16 +4,13 @@
 // integration test suite that pins the behavior of the tensor IR end-to-end:
 //   build graph -> scalarize -> emit_cpu / emit_cuda
 //
-// each test corresponds to a chalkboard-math operation users write
-// via the macro layer (R.5). this file pins every behavior reachable
-// through the IR.
-//
-// section index:
-//   1. broadcast scaling      (scalar * vector via ElementWise + Broadcast)
-//   2. element-wise vector    (Add, Sub, Neg, etc.)
-//   3. component access       (Index)
-//   4. tensor construction    (Construct)
-//   5. reduce + select
+// each test corresponds to a chalkboard-math operation written through the
+// macro layer. this file pins every behavior reachable through the IR:
+//   - broadcast scaling      (scalar * vector via ElementWise + Broadcast)
+//   - element-wise vector    (Add, Sub, Neg, etc.)
+//   - component access       (Index)
+//   - tensor construction    (Construct)
+//   - reduce + select
 // =============================================================================
 
 use symbi_ir::{

@@ -100,8 +100,8 @@ fn one_bucket(sim: &SimSph) -> Field<f64, 1, HostMemory> {
 
 #[test]
 fn total_mass_and_energy_are_a_census_with_no_bins() {
-    // design acceptance: the conservation diagnostic IS a census with no bin axes,
-    // agreeing to round-off. the two paths differ only in how they group the addends.
+    // the conservation diagnostic IS a census with no bin axes, agreeing to
+    // round-off. the two paths differ only in how they group the addends.
     let sim = build_sim();
     let diag = sim
         .conservation_diag()

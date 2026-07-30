@@ -4,17 +4,17 @@
 // the tiling-invariance contract for the first-order flux correction on the
 // decomposed path: an EXCISED cartesian kerr-schild box carrying a cold
 // atmosphere in prescribed mach-17 radial infall trips the correction where the
-// supersonic stream meets the excision rim's donor-filled cells, while staying
+// supersonic stream meets the excision rim's vacuum-floor cells, while staying
 // recoverable — an unexcised clamped core is a PERSISTENT poison that (correctly)
 // fires the freeze-streak fail-loud instead. the per-tile redo — driven from
 // exchange-fresh stage-input halos with the failure reduction evaluated per tile —
 // reproduces the monolithic correction bit-for-bit, THROUGH genuine correction
 // events (the fallback counters assert non-vacuity).
 //
-// the infall is prescribed in the initial data rather than left for gravity to
-// develop: a scheme accurate enough to keep the rim recoverable on its own would
-// otherwise silence the correction and leave the equivalence vacuous, which the
-// fallback-count assertions report as a failure rather than a pass.
+// the infall is prescribed in the initial data, so the correction fires from the
+// first step: a scheme accurate enough to keep the rim recoverable on its own
+// would otherwise silence the correction and leave the equivalence vacuous, which
+// the fallback-count assertions report as a failure.
 // =============================================================================
 
 use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
@@ -42,8 +42,8 @@ const T_FINAL: f64 = 5.0e-4;
 // started scaling with the pressure again; fail fast and loud instead of running forever.
 const DT_FLOOR: f64 = 1.0e-9;
 const R_EXC: f64 = 0.35;
-// prescribed radial infall speed. mach 17 against the cs = 1.15e-2 atmosphere, so the
-// stream reaching the excision rim is firmly supersonic and the rim's donor-filled cells
+// prescribed radial infall speed. mach 173 against the cs = 1.155e-3 atmosphere, so the
+// stream reaching the excision rim is firmly supersonic and the rim's vacuum-floor cells
 // drive the high-order recovery out of the physical set.
 const V_INFALL: f64 = 0.2;
 
@@ -63,17 +63,17 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
     .timestepping(Timestepping::Rk2)
     .allocate()
     .expect("sim construction failed")
-    // a cold atmosphere (p/rho = 1e-4, so cs = sqrt(gamma p / rho) = 1.15e-2) falling
-    // radially inward at 0.2c — mach 17. the infall is PRESCRIBED rather than left to
-    // gravity, so the correction fires from the first step instead of depending on how
-    // fast the well steepens the flow. the supersonic stream meets the excision rim's
-    // donor-filled cells and the high-order c2p there leaves the physical set
+    // a cold atmosphere (p/rho = 1e-6, so cs = sqrt(gamma p / rho) = 1.155e-3) falling
+    // radially inward at 0.2c — mach 173. the infall is PRESCRIBED in the initial data, so
+    // the correction fires from the first step at a rate set by the initial data alone,
+    // independent of how fast the well steepens the flow. the supersonic stream meets the excision rim's
+    // vacuum-floor cells and the high-order c2p there leaves the physical set
     // intermittently: the deliberate, RECOVERABLE FOFC trigger.
     //
     // p/rho = 1e-6 is deliberately colder than the correction needs: the admissibility
     // rate of the geometric source is charged against the covariant energy, whose
-    // killing-energy source vanishes on a stationary metric, so the admissible dt no
-    // longer scales with the pressure. charging the valencia form instead makes dt
+    // killing-energy source vanishes on a stationary metric, so the admissible dt is
+    // independent of the pressure. charging the valencia form instead makes dt
     // proportional to p and collapses this atmosphere into the floor below — this
     // temperature is therefore also the regression guard on that rate.
     .set_initial(|x| {

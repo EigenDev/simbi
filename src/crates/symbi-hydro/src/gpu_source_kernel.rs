@@ -9,7 +9,7 @@
 //
 // **the symmetry made structural:**
 //   SourceEvaluator        GpuSourceKernel
-//   ──────────────────     ──────────────────────────
+//   ------------------     --------------------------
 //   scalarize + interp     Homomorphism<Cuda> + NVRTC
 //   per-cell eval(values)  per-domain `__global__` launch
 //   f64 outputs            double* output buffers

@@ -9,8 +9,8 @@
 # - SPINNING hydro excision genuinely acts (two radii give different interiors)
 #   while the exterior sees only bounded, outward-decaying leakage, and the
 #   excised run keeps the quarter-turn + z-reflection metric symmetries;
-# - MAGNETIZED excision runs (previously rejected fail-loud), genuinely acts,
-#   and PRESERVES the densitized div(B) at machine zero — the fill never
+# - MAGNETIZED excision runs, genuinely acts, and PRESERVES the densitized
+#   div(B) at machine zero — the fill never
 #   touches the staggered field, so the CT invariant survives by construction;
 # - the magnetized excised run agrees with the unexcised run outside the
 #   horizon to the same bounded-leakage envelope (the interior is causally
@@ -118,8 +118,8 @@ def test_spinning_excision_acts_and_leakage_is_bounded() -> None:
     # the leak DECAYS STEEPLY OUTWARD and CONVERGES under refinement, i.e. it is an evanescent
     # truncation-level influence of the surface rather than a standing error.
     #
-    # the bands are FIXED PHYSICAL radii, deliberately independent of dx. an earlier form used
-    # `r > 1.6 + 2*dx`, whose inner edge MOVES INWARD as the grid refines — it samples ever closer to
+    # the bands are FIXED PHYSICAL radii, deliberately independent of dx. a dx-dependent band such
+    # as `r > 1.6 + 2*dx` has an inner edge that MOVES INWARD as the grid refines — it samples ever closer to
     # r_+ (= 1.436), where the leak is naturally larger, so a converging leak reads as a growing one
     # and no fixed threshold on it can be resolution-honest (measured 1.34e-3 at 32^3 rising to
     # 1.64e-3 at 64^3 purely from the band moving).
@@ -130,7 +130,7 @@ def test_spinning_excision_acts_and_leakage_is_bounded() -> None:
     #   [2.3, 3.0]  6.30e-4    3.04e-5    20.8x   (~4.4 order, vs the scheme's 2nd)
     #   [3.0, 4.0]  1.28e-5    1.28e-8      999x
     #   r > 4       6.75e-9    2.96e-14   2.3e5x
-    # the bounds below carry wide margin on the 32^3 values; a surface whose influence STANDS
+    # the asserted bounds carry wide margin on the 32^3 values; a surface whose influence STANDS
     # (resolution-independent) or fails to decay outward breaks them.
     diff = np.abs(a - b)
     scale = np.abs(a).max()

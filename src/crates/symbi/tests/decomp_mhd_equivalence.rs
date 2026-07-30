@@ -9,12 +9,11 @@
 //
 // cpu-only + 2d on purpose: 2d is the minimal constrained-transport case (one E_z edge), and a
 // host run exercises the SAME exchange index math (`exchange_faces`/`face_ghost_strip`) as the
-// gpu path -- so this is the fast iteration loop for the staggered exchange. a gpu variant rides
-// on the same logic once this is green.
+// gpu path -- so this is the fast iteration loop for the staggered exchange.
 //
-// the design hypothesis under test: only the TRANSVERSE bface halos need exchanging; the normal
-// (shared interface) face stays bit-identical by construction. if div(B) drifts, the hypothesis
-// is wrong and the exchange needs the shared face synced.
+// the property under test: only the TRANSVERSE bface halos need exchanging; the normal
+// (shared interface) face stays bit-identical by construction. a div(B) drift means the exchange
+// needs the shared face synced as well.
 // =============================================================================
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
@@ -249,7 +248,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         mono_vals.iter().all(|v| v.is_finite()) && dec_vals.iter().all(|v| v.is_finite()),
         "some global cells were never written (gather bug)"
     );
-    // 1. density equivalence: decomposed == monolithic to round-off.
+    // density equivalence: decomposed == monolithic to round-off.
     // diagnostics FIRST (B-field, the source; then density, downstream), then assert. the curl
     // preserves div(B) for any emf, so div(B)==0 is necessary but not sufficient -- the bcell
     // VALUE equivalence is the real field check.
@@ -290,9 +289,9 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     assert!(de < 1e-11, "{counts:?} {ts:?} density err {de:e}");
 }
 
-// DEBUG: step mono and the 2x2 decomposition in lockstep through ONE RK2 step, comparing the
-// cell-centered B after prime, stage 1, and stage 2. RK2 stage 1 (a0=0,ac=1) is an Euler step and
-// corner-Euler passes, so the divergence must appear in stage 2 -- this pins which operation.
+// a diagnostic bisection: step mono and the 2x2 decomposition in lockstep through ONE RK2 step,
+// comparing the cell-centered B after prime, stage 1, and stage 2. RK2 stage 1 (a0=0,ac=1) is an
+// Euler step, so a divergence that appears only in stage 2 localizes to the corrector.
 #[test]
 #[ignore = "diagnostic, run with --ignored --nocapture"]
 fn mhd_debug_rk2_stages() {

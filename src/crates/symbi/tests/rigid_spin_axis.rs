@@ -3,8 +3,8 @@
 //
 // arbitrary-AXIS rigid spin, end to end: the whole chain — the spec's spin
 // axis, the Body's omega vector, the Rodrigues orientation roll, the runtime
-// 3x3 mask rotation, and the omega x r wall velocity — is axis-general in the
-// code, but nothing exercised a non-z axis. gates:
+// 3x3 mask rotation, and the omega x r wall velocity — is axis-general, and
+// this drives it on a non-z axis. gates:
 // - the orientation roll about x maps y -> z (the isotropic torque-free body
 //   rolls exactly by Rodrigues about its omega axis);
 // - a 3D shaped wall spinning about +x drags the gas into a CIRCULATION about

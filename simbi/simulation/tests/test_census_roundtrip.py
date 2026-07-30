@@ -28,7 +28,6 @@ needs_backend = pytest.mark.skipif(
 )
 
 _N = 64
-_RHO = 2.0
 
 
 def _census_payload(with_axis: bool, **controls):
@@ -73,7 +72,7 @@ def test_binned_census_round_trips_through_the_reader() -> None:
     c = _run(with_axis=True)
 
     # the premise: a census that dropped cells is under-covering its domain, and every
-    # number below would then be a partial sum wearing the shape of a total.
+    # number it reports would then be a partial sum wearing the shape of a total.
     c.assert_fully_binned()
 
     assert c.value_names == ("mass", "mass_x")
@@ -90,7 +89,7 @@ def test_binned_census_round_trips_through_the_reader() -> None:
     assert float(mass.sum()) == pytest.approx(float(c.total("mass")[0]))
 
     # every bin holds a quarter of the box, and each is non-empty — a profile with an empty
-    # bin would make the Favre mean below NaN and the check vacuous.
+    # bin would make the Favre mean NaN and the check vacuous.
     assert (mass > 0.0).all(), f"an empty bin: {mass}"
 
     # the mass-weighted position per bin must land inside that bin. this is the assertion a

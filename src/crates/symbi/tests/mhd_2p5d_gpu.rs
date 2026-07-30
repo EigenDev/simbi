@@ -1,13 +1,13 @@
 // =============================================================================
 // mhd_2p5d_gpu.rs
 //
-// GPU<->CPU parity for the genuine 2.5D MHD path (D=2, DOF=3) — the AGENT.md §4.3
-// carrier gate for the 2.5D substrate kernels (the 3D parity lives in
+// GPU<->CPU parity for the genuine 2.5D MHD path (D=2, DOF=3) — the carrier gate
+// for the 2.5D substrate kernels (the 3D parity lives in
 // substrate_rmhd_gpu.rs). builds the SAME Orszag-Tang-with-Bz 2.5D sim on host
 // (CpuSpace/HostMemory) and device (CudaSpace/UnifiedMemory), evolves a handful of
 // RK2 steps through the production loop, and asserts the conserved state + cell B
-// agree over the interior. regression for the GPU-2.5D efield/snapshot save crash
-// (the 3d copy kernel OOB'd on a 2d field — fixed by the _{D}d save/avg/snapshot copy).
+// agree over the interior. the efield save/avg/snapshot copies must be dimensioned
+// `_{D}d`: a 3d copy kernel over a 2d field reads out of bounds and crashes.
 // =============================================================================
 
 #![cfg(feature = "cuda")]
