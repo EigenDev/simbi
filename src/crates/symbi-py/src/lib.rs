@@ -6633,10 +6633,12 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         // exchange carries prim.chi across cuts. refinement and
         // mesh motion are not — the fine-level prolong and the moving-mesh remap do not carry
         // the dye yet.
-        if cfg.refinement_enabled || cfg.mesh_motion {
-            return Err(
-                "passive_scalar does not support refinement or mesh motion yet".to_string(),
-            );
+        // refinement carries the dye: the fine level allocates its own slots, the concentration
+        // prolongs onto coarse-fine ghosts and restricts back, and the interface dye flux is
+        // materialized so the flux register refluxes it alongside mass. mesh motion still remaps
+        // without it.
+        if cfg.mesh_motion {
+            return Err("passive_scalar does not support mesh motion yet".to_string());
         }
         if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
             return Err(

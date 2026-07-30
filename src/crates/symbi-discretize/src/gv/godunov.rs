@@ -1912,34 +1912,56 @@ fn bcell_godunov_geom(
 // race-free under tiled execution. cartesian flat charts only (dx_d scalars).
 // =============================================================================
 
-// the donor-cell chi flux divergence: sum_d (F_hi - F_lo)/dx_d with
-// F = mass_flux * upwind(prim.chi) selected by the flux sign at THAT face.
+// the donor-cell chi flux divergence: sum_d (F_hi - F_lo)/dx_d, reading the STORED interface dye
+// flux `flux[d].chi` written by `chi_flux_gv`. same convention as the gas: the flux field at a cell
+// index holds the flux through that cell's LO face on axis d.
 fn chi_flux_div_gv(ndim: usize) -> Gv {
     let zero_off = vec![0i32; ndim];
-    let zero = Gv::from_f64(0.0);
     let mut div: Option<Gv> = None;
     for d in 0..ndim {
-        let mut minus = zero_off.clone();
-        minus[d] = -1;
         let mut plus = zero_off.clone();
         plus[d] = 1;
-        let mf_key = format!("mass_flux_{d}");
-        let mf_path = FieldRef::MassFlux(d as u8).name();
-        let chi_path = FieldRef::PrimChi.name();
-        let f_lo = gv_field_at(&mf_key, &mf_path, ndim, &zero_off);
-        let f_hi = gv_field_at(&mf_key, &mf_path, ndim, &plus);
-        let chi_m = gv_field_at("prim_chi", &chi_path, ndim, &minus);
-        let chi_0 = gv_field_at("prim_chi", &chi_path, ndim, &zero_off);
-        let chi_p = gv_field_at("prim_chi", &chi_path, ndim, &plus);
-        let up_lo = Gv::select(f_lo.cmp_ge(zero), chi_m, chi_0);
-        let up_hi = Gv::select(f_hi.cmp_ge(zero), chi_0, chi_p);
-        let term = (f_hi * up_hi - f_lo * up_lo) / Gv::scalar(&format!("dx_{d}"));
+        let key = format!("chi_flux_{d}");
+        let path = FieldRef::ChiFlux(d as u8).name();
+        let f_lo = gv_field_at(&key, &path, ndim, &zero_off);
+        let f_hi = gv_field_at(&key, &path, ndim, &plus);
+        let term = (f_hi - f_lo) / Gv::scalar(&format!("dx_{d}"));
         div = Some(match div {
             None => term,
             Some(a) => a + term,
         });
     }
     div.unwrap()
+}
+
+/// the interface dye flux on ONE axis: `flux[d].chi = mass_flux_d * upwind(prim.chi)`, the
+/// concentration taken from whichever side the mass is flowing out of. donor-cell upwinding on the
+/// sign of the mass flux at that same face, so the dye flux telescopes with the mass flux and a
+/// uniform concentration is carried exactly.
+///
+/// written as a stored field rather than folded into the dye update: a coarse-fine reflux corrects
+/// the conserved dye from the difference between the fine-time-summed and coarse fluxes at the
+/// interface, and `F_chi` is nonlinear in the state, so the correction cannot be reconstructed from
+/// the mass-flux correction after the fact.
+pub fn chi_flux_gv(ndim: usize, dir: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let zero_off = vec![0i32; ndim];
+    let mut minus = zero_off.clone();
+    minus[dir] = -1;
+    let zero = Gv::from_f64(0.0);
+    let mf_key = format!("mass_flux_{dir}");
+    let mf_path = FieldRef::MassFlux(dir as u8).name();
+    let chi_path = FieldRef::PrimChi.name();
+    let f = gv_field_at(&mf_key, &mf_path, ndim, &zero_off);
+    let chi_m = gv_field_at("prim_chi", &chi_path, ndim, &minus);
+    let chi_0 = gv_field_at("prim_chi", &chi_path, ndim, &zero_off);
+    let upwind = Gv::select(f.cmp_ge(zero), chi_m, chi_0);
+    let writes = vec![(
+        format!("chi_flux_{dir}_new"),
+        FieldRef::ChiFlux(dir as u8).into(),
+        (f * upwind).node(),
+    )];
+    (end_trace(), writes)
 }
 
 /// the dye godunov, in the same SSP shu-osher form as the gas stage:

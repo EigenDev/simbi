@@ -128,6 +128,13 @@ where
     /// are what the dye rides. default: no-op (regimes without the dye wired).
     fn chi_update(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _a0: f64, _ac: f64) {}
 
+    /// the per-axis interface dye flux `flux[d].chi = mass_flux_d * upwind(prim.chi)`, written
+    /// during the FLUX phase so the coarse-fine registers sample it alongside the gas fluxes they
+    /// correct. separate from `chi_update` for that reason alone: the divergence that consumes it
+    /// runs later, after fofc has settled the mass flux it rides.
+    /// default: no-op (regimes without the dye wired).
+    fn chi_flux(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
+
     /// does this kernel set carry a NON-fused (additive) source overlay? gates the per-stage
     /// `snapshot_stage` + `source_apply` in `step()`. default: false (fused / source-free sets).
     fn has_additive_source(&self) -> bool {

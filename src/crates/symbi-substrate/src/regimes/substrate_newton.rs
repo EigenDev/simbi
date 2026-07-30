@@ -517,6 +517,25 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
     }
 
+    fn chi_flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        if !sim.has_passive_scalar() {
+            return;
+        }
+        let pre = sim
+            .fields
+            .prim
+            .pre_field()
+            .expect("Newtonian requires prim.pre");
+        // the divergence at an interior cell reads the flux at offset +1, so each axis is swept
+        // over the interior grown by one cell on its own hi side.
+        for dir in 0..D {
+            let mut band = sim.geom.interior.clone();
+            band.spaces[dir].hi += 1;
+            let fname = format!("chi_flux_{dir}_{D}d");
+            dispatch_named(sim, pre, None, dir, &fname, &band, &[], &[]);
+        }
+    }
+
     fn chi_update(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         if !sim.has_passive_scalar() {
             return;

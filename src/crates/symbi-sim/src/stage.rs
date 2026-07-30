@@ -326,6 +326,11 @@ where
                 for dd in 0..D {
                     prof("flux", || kernels.flux(sim, dd));
                 }
+                // the interface dye flux belongs to this phase, not the dye update: the
+                // coarse-fine registers sample every stored flux at the hook below, so a dye
+                // flux written later would be sampled one phase stale and reflux the wrong
+                // mismatch.
+                prof("chi_flux", || kernels.chi_flux(sim));
                 hook(HookPoint::AfterFlux);
             }
             PhaseKind::Efield => prof("efield", || kernels.efield(sim)),

@@ -38,7 +38,7 @@ use symbi_discretize::GvKernel;
 use symbi_discretize::{
     Coords, GeoSource, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
     body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, c2p_status_gv,
-    chi_c2p_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
+    chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
     fofc_emf_splice_gv, fofc_exterior_flag_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
     fofc_select_with_body_gv, fofc_splice_gv, geometric_momentum_source_probe_gv,
     geometry_probe_gv, godunov_mass_gv, imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv,
@@ -410,6 +410,17 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
 // materialized mass flux, plus its concentration recovery and rk snapshot.
 // cartesian flat charts, every dimension; euler + rk2 stage forms.
 fn gen_chi_kernels(out_dir: &str, ndim: u8) {
+    // the per-axis interface dye flux, one kernel per sweep direction like the gas flux.
+    for dir in 0..ndim as usize {
+        let (k, writes) = chi_flux_gv(ndim as usize, dir);
+        emit_gv(
+            out_dir,
+            &format!("chi_flux_{dir}_{ndim}d"),
+            ndim,
+            &k,
+            &writes,
+        );
+    }
     let (k, writes) = chi_godunov_gv(ndim as usize);
     emit_gv(out_dir, &format!("chi_godunov_{ndim}d"), ndim, &k, &writes);
     let (k, writes) = chi_c2p_gv();

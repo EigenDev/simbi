@@ -2453,6 +2453,13 @@ where
         self.fields.cons.alloc_chi(&allocated)?;
         self.fields.prim.alloc_chi(&allocated)?;
         self.workspace.u_n.alloc_chi(&allocated)?;
+        // the per-direction interface dye flux `F_chi = mass_flux * chi_upwind`. materialized
+        // rather than folded into the dye update because a coarse-fine reflux corrects the
+        // conserved dye from the flux MISMATCH at the interface, which needs the fine and coarse
+        // fluxes as stored quantities. same face convention as `flux[d].den`.
+        for dd in 0..D {
+            self.fields.flux[dd].alloc_chi(&allocated)?;
+        }
         // the dye rides in the conserved vector, so the step-entry rollback snapshot must carry
         // it too — otherwise a rejected step would replay from an undyed conserved state.
         if let Some(snapshot) = self

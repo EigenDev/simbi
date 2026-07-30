@@ -102,6 +102,11 @@ pub enum FieldRef {
     /// flux-divergence alias for the energy flux in grid direction `ax`
     /// (`nrg_flux[ax]` == `flux[ax].nrg`).
     NrgFlux(u8),
+    /// flux-divergence alias for the dye flux in grid direction `ax`
+    /// (`chi_flux[ax]` == `flux[ax].chi`). the dye flux is `mass_flux * chi` with the
+    /// concentration upwinded on the sign of that mass flux; storing it at the interface is what
+    /// lets a coarse-fine reflux correct the dye the same way it corrects mass.
+    ChiFlux(u8),
     /// flux-divergence alias for momentum component `comp` swept in grid direction
     /// `axis` (`mom_flux_{comp}[axis]` == `flux[axis].mom[comp]`).
     MomFlux {
@@ -166,6 +171,7 @@ impl FieldRef {
                 ..
             } | FieldRef::MassFlux(_)
                 | FieldRef::NrgFlux(_)
+                | FieldRef::ChiFlux(_)
                 | FieldRef::MomFlux { .. }
                 | FieldRef::BFlux { .. }
                 | FieldRef::FluxMag(_)
@@ -280,6 +286,7 @@ impl FieldRef {
             },
             FieldRef::MassFlux(ax) => format!("mass_flux[{ax}]"),
             FieldRef::NrgFlux(ax) => format!("nrg_flux[{ax}]"),
+            FieldRef::ChiFlux(ax) => format!("chi_flux[{ax}]"),
             FieldRef::MomFlux { comp, axis } => format!("mom_flux_{comp}[{axis}]"),
             FieldRef::BCell(c) => format!("bc_{c}"),
             FieldRef::BCellN(c) => format!("bcn_{c}"),
@@ -345,6 +352,9 @@ impl FieldRef {
         }
         if let Some(r) = path.strip_prefix("nrg_flux") {
             return parse_idx(r).map(FieldRef::NrgFlux);
+        }
+        if let Some(r) = path.strip_prefix("chi_flux") {
+            return parse_idx(r).map(FieldRef::ChiFlux);
         }
         if let Some(r) = path.strip_prefix("mom_flux_") {
             // "{comp}[{axis}]".
@@ -472,6 +482,7 @@ mod tests {
             v.push(FieldRef::PrimMag(k));
             v.push(FieldRef::MassFlux(k));
             v.push(FieldRef::NrgFlux(k));
+            v.push(FieldRef::ChiFlux(k));
             v.push(FieldRef::BCell(k));
             v.push(FieldRef::BCellN(k));
             v.push(FieldRef::WaveSpeedL(k));

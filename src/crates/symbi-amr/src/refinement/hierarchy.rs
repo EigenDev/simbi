@@ -921,6 +921,14 @@ where
                 parent.geom.maps.is_none(),
                 "refinement: non-uniform axis maps need a per-level map split (not built)"
             );
+            // the passive scalar is a run-level opt-in taken on the root, and a fine level is
+            // built fresh rather than cloned, so the dye slots have to be carried down explicitly.
+            // a fine level without them cannot hold the concentration its own cells advect.
+            let fine = if parent.fields.cons.chi_field().is_some() {
+                fine.with_passive_scalar()?
+            } else {
+                fine
+            };
 
             let kernels = make_kernels(&fine);
             let last = levels.last_mut().unwrap();
@@ -971,6 +979,7 @@ where
                 levels[ll].coverage.as_ref().unwrap(),
                 &levels[ll].state.geom.interior,
                 levels[ll].state.fields.cons.has_energy(),
+                levels[ll].state.fields.cons.chi_field().is_some(),
             )?);
             emf_registers.push(if levels[ll].state.fields.mhd.is_some() {
                 Some(EmfRegister::new(

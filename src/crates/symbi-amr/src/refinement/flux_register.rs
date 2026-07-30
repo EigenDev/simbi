@@ -18,7 +18,8 @@
 //
 // levels share ABSOLUTE index space: the fine faces covering coarse face
 // `coord` start at `ratio * coord` — no coverage offset. component-wise over
-// den / mom[0..DOF] / optional nrg (energy-optional regimes skip nrg).
+// den / mom[0..DOF] / optional nrg / optional chi (energy-optional regimes skip
+// nrg; runs without a passive scalar skip chi).
 //
 // two execution paths: UNIFORM-cartesian geometry runs substrate kernels
 // (field_fill / field_axpy_shift / refine_acc_face — cpu AND gpu through the
@@ -29,7 +30,7 @@
 // poisons them with NaN so a stale read is loud.
 //
 // usage:
-//  let reg = FluxRegister::new(&coverage, &coarse_interior, has_energy)?;
+//  let reg = FluxRegister::new(&coverage, &coarse_interior, has_energy, has_dye)?;
 //  reg.zero();
 //  reg.accumulate_coarse(&flux, &geo, dir, w);
 //  reg.accumulate_fine(&fine_flux, &fine_geo, dir, w, ratio);
@@ -72,6 +73,12 @@ fn comps<const D: usize, const DOF: usize, Mem: MemorySpace>(
     if let Some(nrg) = c.nrg_field() {
         v.push(nrg);
     }
+    // the dye rides last so the positional zip stays stable for runs without one. the conserved
+    // dye is refluxed exactly like mass: its interface flux is a stored quantity, so the
+    // fine-summed minus coarse mismatch corrects the covered coarse cells the same way.
+    if let Some(chi) = c.chi_field() {
+        v.push(chi);
+    }
     v
 }
 
@@ -79,13 +86,16 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     /// allocate register faces at the boundary of `coverage` (absolute coarse
     /// indices) within `coarse_interior`; skip faces flush with the coarse
     /// interior boundary.
-    /// `has_energy` MUST match the registered sim's `cons.has_energy()` — the register's
-    /// per-face cons carries the same component set (den / mom / optional nrg) so the
-    /// positional reflux zip (`comps`) stays aligned. iso (no nrg) passes `false`.
+    /// `has_energy` MUST match the registered sim's `cons.has_energy()`, and `has_dye` its
+    /// `cons.chi_field().is_some()` — the register's per-face cons carries the same component set
+    /// (den / mom / optional nrg / optional chi) so the positional reflux zip (`comps`) stays
+    /// aligned. iso (no nrg) passes `false`; a run without a passive scalar passes `false` for the
+    /// dye.
     pub fn new(
         coverage: &Domain<D>,
         coarse_interior: &Domain<D>,
         has_energy: bool,
+        has_dye: bool,
     ) -> symbi_xpu::Result<Self> {
         let mut faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
         let mut domains: [Option<Domain<D>>; 6] = std::array::from_fn(|_| None);
@@ -118,10 +128,12 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         }
                     }
                 }));
-                faces[2 * ax + side] = Some(ConsFieldsGeneric::zeros_with_energy(
-                    &face_domain,
-                    has_energy,
-                )?);
+                let mut face =
+                    ConsFieldsGeneric::zeros_with_energy(&face_domain, has_energy)?;
+                if has_dye {
+                    face.alloc_chi(&face_domain)?;
+                }
+                faces[2 * ax + side] = Some(face);
                 domains[2 * ax + side] = Some(face_domain);
             }
         }
@@ -438,7 +450,7 @@ mod tests {
             lo: 3,
             hi: 7,
         }]);
-        let reg = FluxRegister::new(&coverage, &interior, true).unwrap();
+        let reg = FluxRegister::new(&coverage, &interior, true, false).unwrap();
         let coarse_geo =
             BlockGeometry::uniform(Cartesian, [0.0], [0.1], std::array::from_fn(|d| d));
         let fine_geo = BlockGeometry::uniform(Cartesian, [0.0], [0.05], std::array::from_fn(|d| d));
@@ -463,7 +475,7 @@ mod tests {
             lo: 0,
             hi: 5,
         }]);
-        let touching = FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true).unwrap();
+        let touching = FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true, false).unwrap();
         assert!(touching.faces[0].is_none() && touching.faces[1].is_some());
     }
 

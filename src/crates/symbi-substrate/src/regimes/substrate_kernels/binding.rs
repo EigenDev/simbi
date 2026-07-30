@@ -265,6 +265,9 @@ where
         // spelling (the axis rides in the ref itself).
         FieldRef::MassFlux(ax) => &f.flux[ax as usize].den,
         FieldRef::NrgFlux(ax) => f.flux[ax as usize].nrg_field().expect("flux.nrg"),
+        FieldRef::ChiFlux(ax) => f.flux[ax as usize]
+            .chi_field()
+            .expect("flux.chi bound but the run carries no passive scalar"),
         FieldRef::MomFlux { comp, axis } => &f.flux[axis as usize].mom[comp as usize],
         // cell-centered B component (the fused god+bcell kernel's in-place bcell i/o).
         FieldRef::BCell(c) => &mhd().bcell[c as usize],
