@@ -63,25 +63,18 @@ fn expect_ball(support: &Option<Support>, what: &str, center: &[f64], radius: f6
 
 #[test]
 fn sphere_kernels_derive_the_declared_ball() {
-    // the adiabatic builders take the dye flag; the isothermal ones do not carry a dye yet.
     macro_rules! check {
         ($what:literal, $f:ident) => {{
             let (k, _) = $f(Coords::Cartesian, 2, 2, &[0, 1], false);
             expect_ball(&k.output_support, $what, &POS[..2], RACC + PAD);
         }};
     }
-    macro_rules! check_iso {
-        ($what:literal, $f:ident) => {{
-            let (k, _) = $f(Coords::Cartesian, 2, 2, &[0, 1]);
-            expect_ball(&k.output_support, $what, &POS[..2], RACC + PAD);
-        }};
-    }
     check!("drain", penalize_drain_gv);
     check!("porous", penalize_porous_gv);
     check!("torque_free", penalize_torque_free_gv);
-    check_iso!("torque_free_iso", penalize_torque_free_iso_gv);
-    check_iso!("porous_iso", penalize_porous_iso_gv);
-    check_iso!("drain_iso", penalize_drain_iso_gv);
+    check!("torque_free_iso", penalize_torque_free_iso_gv);
+    check!("porous_iso", penalize_porous_iso_gv);
+    check!("drain_iso", penalize_drain_iso_gv);
     // 2.5d (dof 3 on a 2d grid) shares the in-plane ball.
     let (k, _) = penalize_drain_gv(Coords::Cartesian, 2, 3, &[0, 1], false);
     expect_ball(&k.output_support, "drain 2.5d", &POS[..2], RACC + PAD);

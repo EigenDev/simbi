@@ -129,3 +129,106 @@ fn a_sink_removes_mass_and_its_dye_together() {
          (seeded {CHI}); a mass drain must carry the dye with the mass it removes"
     );
 }
+
+// the isothermal twin of the drain gate. the dye is a slot on the conserved state, orthogonal to
+// the energy slot: `D_chi = rho chi` involves no energy, so an isothermal sink must carry the dye
+// with the mass exactly as an adiabatic one does. this is the gate that would have caught an
+// isothermal run silently concentrating its dye while the adiabatic path was correct.
+#[cfg(test)]
+mod isothermal {
+    use symbi::regimes::substrate_kernels::dispatch_penalize;
+    use symbi::sim::state::*;
+    use symbi_algebra::Tensor;
+    use symbi_geometry::Cartesian;
+    use symbi_hydro::state::PrimG;
+    use symbi_hydro::{IsoNewtonian, Isothermal};
+    use symbi_ib::{Body, BodyCollection, SurfaceSpec};
+    use symbi_xpu::{CpuSpace, HostMemory};
+
+    const N: usize = 48;
+    const L: f64 = 1.0;
+    const RADIUS: f64 = 0.3;
+    const CHI: f64 = 0.7;
+    const CS: f64 = 0.5;
+
+    type SimIso =
+        SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+
+    #[test]
+    fn an_isothermal_sink_removes_mass_and_its_dye_together() {
+        let dx = 2.0 * L / N as f64;
+        let sim = SimIso::build(IsoNewtonian, Isothermal { cs: CS }, Cartesian)
+            .cells([N, N])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .cfl(0.3)
+            .allocate()
+            .expect("sim")
+            .set_initial(|_| PrimG {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: Default::default(),
+            })
+            .build()
+            .with_bodies(
+                BodyCollection::new().add(
+                    Body::rigid_sphere(
+                        0,
+                        Tensor::new([0.0, 0.0]),
+                        Tensor::new([0.0, 0.0]),
+                        1.0,
+                        RADIUS,
+                        1.0,
+                        false,
+                    )
+                    .with_surface(SurfaceSpec::Drain),
+                ),
+            )
+            .with_passive_scalar()
+            .expect("chi alloc");
+
+        let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
+        let prim_chi = sim.fields.prim.chi_field().expect("prim chi");
+        for c in sim.geom.allocated.clone().iter() {
+            let rho = *sim.fields.cons.den.view().at(c);
+            cons_chi.view_mut().set(c, rho * CHI);
+            prim_chi.view_mut().set(c, CHI);
+        }
+
+        let mass = |s: &SimIso| -> f64 {
+            s.geom
+                .interior
+                .iter()
+                .map(|c| *s.fields.cons.den.view().at(c))
+                .sum()
+        };
+        let mass0 = mass(&sim);
+        for _ in 0..40 {
+            dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
+        }
+        let swallowed = (mass0 - mass(&sim)) / mass0;
+        assert!(
+            swallowed > 1e-3,
+            "the isothermal sink drained only {swallowed:e} of the mass; the gate is vacuous"
+        );
+
+        let (mut worst, mut worst_at) = (0.0_f64, [0isize; 2]);
+        for c in sim.geom.interior.iter() {
+            let rho = *sim.fields.cons.den.view().at(c);
+            if rho <= 0.0 {
+                continue;
+            }
+            let err = (*cons_chi.view().at(c) / rho - CHI).abs();
+            if err > worst {
+                worst = err;
+                worst_at = c;
+            }
+        }
+        assert!(
+            worst < 1e-12,
+            "the isothermal sink changed the dye concentration by {worst:e} at {worst_at:?} \
+             (seeded {CHI})"
+        );
+    }
+}

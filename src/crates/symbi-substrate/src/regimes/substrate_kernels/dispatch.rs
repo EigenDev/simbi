@@ -1875,9 +1875,9 @@ fn shaped_penalize_gv(
     match (has_energy, spin) {
         (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape, false),
         (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape, false),
-        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape),
+        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape, false),
         (false, true) => {
-            symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape)
+            symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape, false)
         }
     }
 }
@@ -2327,23 +2327,23 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // reproduces the KernelId name exactly. only the drain is baked off-chart.
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
-        // a dyed run selects the twin that also drains `cons.chi`; the adiabatic surfaces only.
+        // a dyed run selects the twin that also drains `cons.chi`.
         let dye = if sim.has_passive_scalar() { "_dyed" } else { "" };
         let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => {
                 penalize_name(&format!("penalize_drain{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Drain, false) => {
-                penalize_name("penalize_drain_iso", coords_g, D, &geom.axes)
+                penalize_name(&format!("penalize_drain_iso{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
                 penalize_name(&format!("penalize_porous{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, false) => {
-                penalize_name("penalize_porous_iso", coords_g, D, &geom.axes)
+                penalize_name(&format!("penalize_porous_iso{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => {
-                penalize_name("penalize_torque_free_iso", coords_g, D, &geom.axes)
+                penalize_name(&format!("penalize_torque_free_iso{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => {
                 penalize_name(&format!("penalize_torque_free{dye}"), coords_g, D, &geom.axes)

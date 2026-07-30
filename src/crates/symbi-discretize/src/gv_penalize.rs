@@ -913,6 +913,7 @@ pub fn penalize_torque_free_iso_gv(
     ndim: usize,
     dof: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!(
@@ -984,8 +985,14 @@ pub fn penalize_torque_free_iso_gv(
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, IsoModel> {
-        chi: Default::default(),
+    let cons = ConsG::<Gv, 3, IsoModel, Dyed> {
+        // an undyed kernel traces a constant-zero dye: the drain still scales it, nothing reads
+        // the result, and the tracer eliminates the dead arithmetic.
+        chi: if has_dye {
+            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        },
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1014,6 +1021,15 @@ pub fn penalize_torque_free_iso_gv(
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),
             out.mom[a].node(),
+        ));
+    }
+    // the sink swallows gas and its dye together; `penalize_cell` applied the same factor to both.
+    // iso has no energy write, so the dye rides directly after the momentum block.
+    if has_dye {
+        writes.push((
+            "chi_out".to_string(),
+            symbi_ir::FieldRef::cons_chi().into(),
+            out.chi.node(),
         ));
     }
     writes.push((
@@ -1050,8 +1066,9 @@ pub fn penalize_porous_iso_gv(
     ndim: usize,
     dof: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, dof, None, false, axes)
+    penalize_porous_iso_inner(coords, ndim, dof, None, false, axes, has_dye)
 }
 
 /// the arbitrary-shape ISO porous wall: the energy-free counterpart of
@@ -1061,8 +1078,9 @@ pub fn penalize_porous_iso_gv_shaped(
     ndim: usize,
     dof: usize,
     shape: &SdfExpr<f64, 3>,
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), false, &[0, 1, 2][..ndim])
+    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), false, &[0, 1, 2][..ndim], has_dye)
 }
 
 /// the SPINNING ISO porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
@@ -1071,8 +1089,9 @@ pub fn penalize_porous_iso_gv_spinning(
     ndim: usize,
     dof: usize,
     shape: &SdfExpr<f64, 3>,
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), true, &[0, 1, 2][..ndim])
+    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), true, &[0, 1, 2][..ndim], has_dye)
 }
 
 fn penalize_porous_iso_inner(
@@ -1082,6 +1101,7 @@ fn penalize_porous_iso_inner(
     shape: Option<&SdfExpr<f64, 3>>,
     spin: bool,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!(
@@ -1195,8 +1215,14 @@ fn penalize_porous_iso_inner(
         inv_eta_t: k_eta_t * rate_scale,
     }
     .contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, IsoModel> {
-        chi: Default::default(),
+    let cons = ConsG::<Gv, 3, IsoModel, Dyed> {
+        // an undyed kernel traces a constant-zero dye: the drain still scales it, nothing reads
+        // the result, and the tracer eliminates the dead arithmetic.
+        chi: if has_dye {
+            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        },
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1225,6 +1251,15 @@ fn penalize_porous_iso_inner(
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),
             out.mom[a].node(),
+        ));
+    }
+    // the sink swallows gas and its dye together; `penalize_cell` applied the same factor to both.
+    // iso has no energy write, so the dye rides directly after the momentum block.
+    if has_dye {
+        writes.push((
+            "chi_out".to_string(),
+            symbi_ir::FieldRef::cons_chi().into(),
+            out.chi.node(),
         ));
     }
     writes.push((
@@ -1424,6 +1459,7 @@ pub fn penalize_drain_iso_gv(
     ndim: usize,
     dof: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!(
@@ -1470,8 +1506,14 @@ pub fn penalize_drain_iso_gv(
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, IsoModel> {
-        chi: Default::default(),
+    let cons = ConsG::<Gv, 3, IsoModel, Dyed> {
+        // an undyed kernel traces a constant-zero dye: the drain still scales it, nothing reads
+        // the result, and the tracer eliminates the dead arithmetic.
+        chi: if has_dye {
+            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        },
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1503,6 +1545,15 @@ pub fn penalize_drain_iso_gv(
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),
             out.mom[a].node(),
+        ));
+    }
+    // the sink swallows gas and its dye together; `penalize_cell` applied the same factor to both.
+    // iso has no energy write, so the dye rides directly after the momentum block.
+    if has_dye {
+        writes.push((
+            "chi_out".to_string(),
+            symbi_ir::FieldRef::cons_chi().into(),
+            out.chi.node(),
         ));
     }
     writes.push((

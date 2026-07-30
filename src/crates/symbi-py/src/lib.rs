@@ -6616,14 +6616,12 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // every unwired combination fails loud — a silently undyed or wrongly-dyed run reads as
     // valid science.
     if !cfg.chi_ic.is_empty() {
-        // the conserved dye is a slot on the conserved state, orthogonal to the energy slot, so
-        // an isothermal run is TYPED for a dye. what it lacks is baked kernels: the isothermal
-        // penalize family has no dyed twin, so an isothermal sink would drain mass and leave the
-        // dye behind, concentrating it in the surviving gas.
-        if cfg.regime != "newtonian" {
+        // the conserved dye is a slot on the conserved state, orthogonal to the energy slot:
+        // `D_chi = rho chi` involves no energy, so newtonian and isothermal carry one alike. the
+        // relativistic and MHD regimes have no dye transport wired.
+        if !matches!(cfg.regime.as_str(), "newtonian" | "isothermal") {
             return Err(format!(
-                "passive_scalar is wired for the newtonian regime; got '{}' (the isothermal \
-                 penalize kernels carry no dye yet)",
+                "passive_scalar is wired for the newtonian and isothermal regimes; got '{}'",
                 cfg.regime
             ));
         }

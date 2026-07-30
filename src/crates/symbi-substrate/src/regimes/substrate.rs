@@ -32,6 +32,7 @@ use symbi_hydro::source_spec::BuiltSource;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
+    dispatch_named, geom_scalar, scalars_for,
     dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_c2p_status,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
     dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source, dispatch_gradient_boundaries,
@@ -535,6 +536,62 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 &[],
             );
         }
+        // the dye concentration ghost band: a true scalar (reflect sign +1). gradient faces
+        // resolve to a zero-derivative copy, since a prescribed normal derivative is a
+        // per-primitive-variable quantity and the dye carries none.
+        if let Some(chi) = sim.fields.prim.chi_field() {
+            crate::regimes::mhd_substrate::flag_ghost_fill(
+                sim,
+                chi,
+                crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries),
+            );
+        }
+    }
+
+    /// the interface dye flux, written during the FLUX phase so the coarse-fine registers sample it
+    /// alongside the gas fluxes. the dye kernels read only the mass flux and `prim.chi`, so the same
+    /// baked instances serve every regime.
+    fn chi_flux(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+        if !sim.has_passive_scalar() {
+            return;
+        }
+        for dir in 0..D {
+            let mut band = sim.geom.interior.clone();
+            band.spaces[dir].hi += 1;
+            let fname = format!("chi_flux_{dir}_{D}d");
+            dispatch_named(sim, &self.pre, None, dir, &fname, &band, &[], &[]);
+        }
+    }
+
+    fn chi_update(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        if !sim.has_passive_scalar() {
+            return;
+        }
+        let name = format!("chi_godunov_{D}d");
+        let scalars = scalars_for(&name, |bind| {
+            let ScalarBind::Ref(sref) = bind else {
+                panic!("chi_godunov: unexpected spec scalar {bind:?}");
+            };
+            Sc::from_f64(match *sref {
+                ScalarRef::Dt => dt,
+                ScalarRef::A0 => a0,
+                ScalarRef::Ac => ac,
+                other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
+                    .unwrap_or_else(|| panic!("chi_godunov: unexpected scalar {other:?}")),
+            })
+        });
+        dispatch_named(
+            sim,
+            &self.pre,
+            None,
+            0,
+            &name,
+            &sim.geom.interior,
+            &[],
+            &scalars,
+        );
+        let cname = format!("chi_c2p_{D}d");
+        dispatch_named(sim, &self.pre, None, 0, &cname, &sim.geom.interior, &[], &[]);
     }
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {

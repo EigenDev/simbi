@@ -89,7 +89,7 @@ fn shaped_penalize_jit_compiles_curvilinear() {
         symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(),
         "cylindrical shaped kernel not JIT-able"
     );
-    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cylindrical, 3, 3, &shape);
+    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cylindrical, 3, 3, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&k, &w, 3).is_ok(),
         "cylindrical iso shaped kernel not JIT-able"
@@ -107,7 +107,7 @@ fn spinning_penalize_jit_compiles() {
         symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(),
         "adiabatic spinning kernel not JIT-able"
     );
-    let (k, w) = penalize_porous_iso_gv_spinning(Coords::Cartesian, 2, 2, &shape);
+    let (k, w) = penalize_porous_iso_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(),
         "iso spinning kernel not JIT-able"
@@ -119,7 +119,7 @@ fn shaped_iso_porous_penalize_jit_compiles() {
     // the energy-free shaped wall (iso obstacle flows): same CSG normal, no nrg channel.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-    let (kernel, writes) = penalize_porous_iso_gv_shaped(Coords::Cartesian, 2, 2, &shape);
+    let (kernel, writes) = penalize_porous_iso_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok(),
         "the iso shaped penalize kernel is outside the JIT subset",
@@ -145,7 +145,7 @@ fn shaped_penalize_jit_compiles_f32() {
         symbi_jit::compile_gv_kernel_prec(&k, &w, 2, F32).is_ok(),
         "f32 spinning shaped kernel not JIT-able"
     );
-    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cylindrical, 2, 2, &csg);
+    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cylindrical, 2, 2, &csg, false);
     assert!(
         symbi_jit::compile_gv_kernel_prec(&k, &w, 2, F32).is_ok(),
         "f32 iso cylindrical shaped kernel not JIT-able"

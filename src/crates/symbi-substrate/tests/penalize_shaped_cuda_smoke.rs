@@ -103,7 +103,7 @@ fn spinning_penalize_nvrtc_compiles() {
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]);
     let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_spin", 2, &k, &w);
-    let (k, w) = penalize_porous_iso_gv_spinning(Coords::Cartesian, 2, 2, &shape);
+    let (k, w) = penalize_porous_iso_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_spin_iso", 2, &k, &w);
 }
 
@@ -113,6 +113,6 @@ fn shaped_iso_porous_penalize_nvrtc_compiles() {
     // channel — the dropped energy buffer must not desync the binding order.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cartesian, 2, 2, &shape);
+    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_iso", 2, &k, &w);
 }

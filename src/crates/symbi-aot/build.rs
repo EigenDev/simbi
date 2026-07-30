@@ -2472,10 +2472,10 @@ fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, h
 // immersed-body BACKWARD feedback: per cell, per body, the force /
 // torque / accreted-mass contributions -> scratch fields a device reduction sums into
 // each body's BodyDelta. reads cons (pure); writes MAX_SOURCE_BODIES*(ndim+4) scratch outputs.
-// the dyed twins of the three ADIABATIC penalize families. a dyed run binds `cons.chi` and the
+// the dyed twins of the penalize families, adiabatic and isothermal. a dyed run binds `cons.chi` and the
 // kernel drains it by the same factor it drains the density, so the concentration of the gas the
 // sink leaves behind is unchanged. an undyed run keeps the plain kernels, which carry no dye
-// binding at all. isothermal surfaces have no dyed twin yet.
+// binding at all. the dye is orthogonal to the energy slot, so isothermal carries one too.
 fn gen_penalize_dyed(out_dir: &str, ndim: u8) {
     use symbi_discretize::coords::Coords;
     use symbi_discretize::kernel_slug::penalize_name;
@@ -2494,6 +2494,18 @@ fn gen_penalize_dyed(out_dir: &str, ndim: u8) {
         (
             "penalize_torque_free_dyed",
             symbi_discretize::penalize_torque_free_gv(Coords::Cartesian, nd, nd, ax, true),
+        ),
+        (
+            "penalize_drain_iso_dyed",
+            symbi_discretize::penalize_drain_iso_gv(Coords::Cartesian, nd, nd, ax, true),
+        ),
+        (
+            "penalize_porous_iso_dyed",
+            symbi_discretize::penalize_porous_iso_gv(Coords::Cartesian, nd, nd, ax, true),
+        ),
+        (
+            "penalize_torque_free_iso_dyed",
+            symbi_discretize::penalize_torque_free_iso_gv(Coords::Cartesian, nd, nd, ax, true),
         ),
     ] {
         let (k, writes) = built;
@@ -2522,6 +2534,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
         nd,
         nd,
         &[0, 1, 2][..nd as usize],
+        false,
     );
     emit_gv(
         out_dir,
@@ -2544,6 +2557,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
         nd,
         nd,
         &[0, 1, 2][..nd as usize],
+        false,
     );
     emit_gv(
         out_dir,
@@ -2560,6 +2574,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
         nd,
         nd,
         &[0, 1, 2][..nd as usize],
+        false,
     );
     emit_gv(
         out_dir,
@@ -2596,7 +2611,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             &writes,
         );
         let (k, writes) =
-            symbi_discretize::penalize_drain_iso_gv(coords, nd, nd, &[0, 1, 2][..nd as usize]);
+            symbi_discretize::penalize_drain_iso_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
         emit_gv(
             out_dir,
             &penalize_name("penalize_drain_iso", geom, nd, &[0, 1, 2][..nd]),
@@ -2618,6 +2633,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             nd,
             nd,
             &[0, 1, 2][..nd as usize],
+            false,
         );
         emit_gv(
             out_dir,
@@ -2627,7 +2643,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             &writes,
         );
         let (k, writes) =
-            symbi_discretize::penalize_porous_iso_gv(coords, nd, nd, &[0, 1, 2][..nd as usize]);
+            symbi_discretize::penalize_porous_iso_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
         emit_gv(
             out_dir,
             &penalize_name("penalize_porous_iso", geom, nd, &[0, 1, 2][..nd]),
@@ -2665,6 +2681,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             nd,
             dof,
             &[0, 1, 2][..nd as usize],
+            false,
         );
         emit_gv(out_dir, &n("penalize_drain_iso", cart), ndim, &k, &w);
         let (k, w) = symbi_discretize::penalize_porous_gv(
@@ -2679,6 +2696,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             nd,
             dof,
             &[0, 1, 2][..nd as usize],
+            false,
         );
         emit_gv(out_dir, &n("penalize_porous_iso", cart), ndim, &k, &w);
         let (k, w) = symbi_discretize::penalize_torque_free_gv(
@@ -2693,6 +2711,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             nd,
             dof,
             &[0, 1, 2][..nd as usize],
+            false,
         );
         emit_gv(out_dir, &n("penalize_torque_free_iso", cart), ndim, &k, &w);
         for coords in [Coords::Spherical, Coords::Cylindrical] {
@@ -2701,7 +2720,7 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
                 symbi_discretize::penalize_drain_gv(coords, nd, dof, &[0, 1, 2][..nd as usize], false);
             emit_gv(out_dir, &n("penalize_drain", geom), ndim, &k, &w);
             let (k, w) =
-                symbi_discretize::penalize_drain_iso_gv(coords, nd, dof, &[0, 1, 2][..nd as usize]);
+                symbi_discretize::penalize_drain_iso_gv(coords, nd, dof, &[0, 1, 2][..nd as usize], false);
             emit_gv(out_dir, &n("penalize_drain_iso", geom), ndim, &k, &w);
         }
         // the (r, z) AXISYMMETRIC section (axes [0, 2]): identity section frame,
@@ -2721,18 +2740,18 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
             let (k, w) = symbi_discretize::penalize_drain_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
             emit_gv(out_dir, &nm("penalize_drain"), ndim, &k, &w);
             let (k, w) =
-                symbi_discretize::penalize_drain_iso_gv(Coords::Cylindrical, nd, dof_rz, rz);
+                symbi_discretize::penalize_drain_iso_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
             emit_gv(out_dir, &nm("penalize_drain_iso"), ndim, &k, &w);
             let (k, w) = symbi_discretize::penalize_porous_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
             emit_gv(out_dir, &nm("penalize_porous"), ndim, &k, &w);
             let (k, w) =
-                symbi_discretize::penalize_porous_iso_gv(Coords::Cylindrical, nd, dof_rz, rz);
+                symbi_discretize::penalize_porous_iso_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
             emit_gv(out_dir, &nm("penalize_porous_iso"), ndim, &k, &w);
             let (k, w) =
                 symbi_discretize::penalize_torque_free_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
             emit_gv(out_dir, &nm("penalize_torque_free"), ndim, &k, &w);
             let (k, w) =
-                symbi_discretize::penalize_torque_free_iso_gv(Coords::Cylindrical, nd, dof_rz, rz);
+                symbi_discretize::penalize_torque_free_iso_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
             emit_gv(out_dir, &nm("penalize_torque_free_iso"), ndim, &k, &w);
         }
     }
