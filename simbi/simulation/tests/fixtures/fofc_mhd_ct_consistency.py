@@ -4,20 +4,20 @@
 # periodic 2d colliding magnetized ultra-relativistic streams (v = +0.999 / -0.999,
 # p = 1e-6, uniform transverse By = 0.23), run SHORT. the magnetized collision drives
 # the high-order rmhd c2p unphysical on a CORRECTOR substage, firing the first-order
-# flux-correction fallback. this is the C2 constrained-transport instrument: after the
-# FOFC redo the CELL B must be consistent with the staggered FACE field,
-# bcell == interp(bface). WITHOUT the §3'' CT re-run the redo re-advances cell B from the
-# first-order induction flux and never re-interpolates it, so bcell diverges from
-# interp(bface) (measured 1.3e-2 at this b0 on the reverted code). WITH the fix (splice the
-# induction flux + the edge EMF, re-curl the pre-curl face field, then bcell_from_bface) the
-# two agree to roundoff.
+# flux-correction fallback. the constrained-transport invariant it exercises: after the
+# FOFC redo the CELL-centered B must still be consistent with the staggered FACE field,
+# bcell == interp(bface). that holds only if the redo splices the first-order induction
+# flux AND the edge EMF, re-curls the pre-curl face field, and re-derives bcell from
+# bface. a redo that merely re-advances cell B from the first-order induction flux,
+# never re-interpolating it, leaves bcell diverging from interp(bface) by 1.3e-2 at
+# this b0; the full re-curl brings the two to roundoff agreement.
 #
-# by = 0.23 is chosen in the narrow discriminating window [0.22, 0.24]: below ~0.22 the
+# by = 0.23 sits in the narrow discriminating window [0.22, 0.24]: below ~0.22 the
 # collision fires FOFC only on the PREDICTOR (no bcell_from_bface, so bcell stays consistent
 # and the gate is vacuous); at >= ~0.25 the field is strong enough that the base-scheme
-# magnetic-energy patch (a SEPARATE, pre-existing non-conservation, patch ~ B^2) shocks the
-# c2p into a persistent-freeze halt — out of scope for the C2 fix. run SHORT (a few steps,
-# below the 16-substage freeze halt); deterministic at these times.
+# magnetic-energy patch (a separate non-conservation of size ~ B^2) shocks the c2p into a
+# persistent-freeze halt, which is a different failure than the one measured here. run
+# SHORT (a few steps, below the 16-substage freeze halt); deterministic at these times.
 # =============================================================================
 
 from functools import partial
@@ -29,7 +29,7 @@ from simbi.types.typing import GasStateGenerator, InitialStateType, StaggeredBFi
 
 
 class FofcMhdCtConsistency(SimbiProblem):
-    """periodic 2d magnetized colliding streams (C2 CT-consistency instrument)."""
+    """periodic 2d magnetized colliding streams (CT-consistency instrument)."""
 
     adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0, description="adiabatic index")]
     b0: Annotated[float, ProblemParam(0.23, cli=True, description="transverse By")]

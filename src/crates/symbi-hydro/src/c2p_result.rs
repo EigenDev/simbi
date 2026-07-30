@@ -151,7 +151,7 @@ pub const C2P_FAILURE_SENTINEL: f64 = 1.0;
 // pressure floor, the superluminal margin, and the input-NaN check had all diverged).
 //
 // these are POST-HOC flags on the RAW recovered state — NO silent floor: the caller returns
-// the raw recovery value, this only reports what is non-physical (feedback_no_silent_floors).
+// the raw recovery value, this only reports what is non-physical.
 // thresholds are dimensionally clean:
 //   * NON_FINITE       : rho or pressure is NaN.
 //   * NEGATIVE_PRESSURE: pressure <= 0. a near-zero positive pressure is the

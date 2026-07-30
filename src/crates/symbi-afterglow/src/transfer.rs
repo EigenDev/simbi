@@ -1035,9 +1035,9 @@ mod tests {
     // measure the SAME flux density, because both are normalized by the SPN98 per-Hz
     // emissivity (packets carry the band-integrated energy, importance-sampled in frequency;
     // the deposit integrates emissivity x shape directly). one wide observer-time bin over the
-    // full arrival span, one frequency, z = 0: F_mc / F_deposit = 1 up to shot noise. (the two
-    // paths previously used unrelated normalizations — a bolometric gamma_min^2 budget vs the
-    // spectral emissivity — and disagreed by ~50x.)
+    // full arrival span, one frequency, z = 0: F_mc / F_deposit = 1 up to shot noise. the shared
+    // normalization is what makes the ratio meaningful: a bolometric gamma_min^2 energy budget on
+    // one path against a spectral emissivity on the other puts the two ~50x apart.
     #[test]
     fn monte_carlo_flux_matches_deposit() {
         let cond = conditions();

@@ -6,7 +6,7 @@
 # so the normal field Bx is carried on its (thin) face and NEVER curled (it must stay at
 # its constant IC), while the transverse By,Bz are cell-centered conserved variables
 # evolved by the out-of-plane cell-B flux predictor. this exercises the out-of-plane
-# predictor end-to-end through the python runner (oop_predictor_spec.md).
+# predictor end-to-end through the python runner.
 #
 # IC (gamma=2, x0=0.5): left rho=1, p=1, B=(0.75, 1, 0); right rho=0.125, p=0.1,
 # B=(0.75, -1, 0); v=0 both sides. the characteristic compound wave reverses By, so it

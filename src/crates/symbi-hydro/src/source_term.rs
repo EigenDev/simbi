@@ -2,7 +2,7 @@
 // source_term.rs
 //
 // the carrier-generic CONSERVATION LIFT + its built-in acceleration fields. the
-// `+ Σ S(U)` half of the conservation form, written ONCE over `S: Scalar` —
+// `+ sum S(U)` half of the conservation form, written ONCE over `S: Scalar` —
 // COMPUTED at S=f64 (the analytical reference) and TRACED at S=Gv (the rendered
 // kernel) from the SAME definition. this is the carrier discipline the physics
 // (flux, c2p) already follows, applied to the source half.
@@ -100,7 +100,7 @@ pub fn relax_energy<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> S {
     dot(vel, &relax_momentum(rho, vel, kappa, v_ref))
 }
 
-// ── full conserved-state relaxation (the buffer zone) ────────────────────────
+// ----- full conserved-state relaxation (the buffer zone) ---------------------
 //
 // where `relax_*` relaxes the intensive VELOCITY toward `v_ref` at fixed density,
 // the `sponge_*` family relaxes EVERY conserved component toward a reference state

@@ -2,7 +2,7 @@
 # checkpoint.py
 #
 # checkpoint loading and config merging for simbi simulations.
-# the actual state data is loaded by C++ - python just handles metadata
+# the actual state data is loaded by the rust backend - python just handles metadata
 # and config merging with checkpoint_safe field validation.
 #
 # usage:
@@ -250,7 +250,7 @@ def merge_with_checkpoint(
     # the flags the user EXPLICITLY chose: from_cli records the argv-provided
     # dests; a directly-constructed problem carries the same fact in
     # model_fields_set. a class default that merely differs from the checkpoint
-    # is NOT an override — the checkpoint wins silently, as before.
+    # is NOT an override — the checkpoint wins silently.
     cli_explicit = getattr(problem, "_cli_explicit", None)
     explicit = cli_explicit if cli_explicit is not None else problem.model_fields_set
 
@@ -293,7 +293,7 @@ def merge_with_checkpoint(
     # the checkpoint INDEX is resume state: the next dump must continue the
     # monotonic numbering from where the run stopped (chkpt.030 -> chkpt.031), so force it from the
     # checkpoint like start_time. it is checkpoint_safe (serializable, user-visible), so the generic
-    # merge above would otherwise reset it to the config default 0 and re-number every restart from
+    # field merge would otherwise reset it to the config default 0 and re-number every restart from
     # zero — silently overwriting the earlier checkpoints on disk.
     if "checkpoint_index" in checkpoint_config:
         merged_data["checkpoint_index"] = checkpoint_config["checkpoint_index"]
@@ -323,37 +323,3 @@ def merge_with_checkpoint(
 
     # create new instance with merged config
     return type(problem)(**merged_data)
-
-
-def validate_checkpoint_compatibility(
-    problem: SimbiProblem,
-    checkpoint_path: Path,
-) -> list[str]:
-    """
-    check if problem config is compatible with checkpoint.
-
-    returns list of error messages (empty if compatible).
-    """
-    errors = []
-    metadata, mesh_shape = load_checkpoint_metadata(checkpoint_path)
-    checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
-    immutable_fields = problem.get_checkpoint_immutable_fields()
-
-    for field_name in immutable_fields:
-        if field_name not in checkpoint_config:
-            continue
-
-        user_value = getattr(problem, field_name)
-        checkpoint_value = checkpoint_config[field_name]
-
-        # skip if user didn't explicitly set (using default)
-        if user_value == problem.model_fields[field_name].default:
-            continue
-
-        if user_value != checkpoint_value:
-            errors.append(
-                f"{field_name}: user={user_value}, checkpoint={checkpoint_value} "
-                f"(field is checkpoint_safe=False)"
-            )
-
-    return errors

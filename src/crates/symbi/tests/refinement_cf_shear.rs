@@ -17,9 +17,9 @@
 // run ~97% kinetic-energy dominated — the energy-equation cancellation mode
 // is armed; the isothermal regimes pin the advection/CT coupling).
 //
-// this is the gate family member the binary-disk investigation found
-// missing: the conservation/divb gates push waves THROUGH interfaces; none
-// holds kinetic-dominated flow ALONG one.
+// this is the one member of the coarse-fine gate family that holds
+// kinetic-dominated flow ALONG an interface; the conservation and divb gates
+// push waves THROUGH one instead.
 //
 // usage:
 //  cargo test -p symbi --release --test refine_cf_shear

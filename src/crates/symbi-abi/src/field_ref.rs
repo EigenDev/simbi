@@ -16,8 +16,8 @@
 // (`name()`), and `parse()` recovers the typed ref from a runtime path. the
 // consumer (`resolve_path`) parses once at the decode boundary and matches
 // EXHAUSTIVELY — adding a field is then a compile error until every match covers
-// it, and the name can no longer be wrong. the `GvKernel` manifest stays
-// string-typed; only the decode chokepoint goes typed.
+// it. the `GvKernel` manifest stays string-typed; only the decode chokepoint
+// goes typed.
 //
 // usage:
 //  // consumer (dispatch): match FieldRef::parse(path)? {
@@ -514,9 +514,8 @@ mod tests {
     }
 
     // the invariant the whole module exists for: name() and parse() are exact
-    // inverses over every representable variant. this is the gate that would have
-    // caught the mesh_adot drift — a producer and consumer both routed through
-    // FieldRef cannot disagree on a name.
+    // inverses over every representable variant, so a producer and a consumer
+    // both routed through FieldRef cannot disagree on a name.
     #[test]
     fn name_parse_round_trips() {
         for r in all_variants() {

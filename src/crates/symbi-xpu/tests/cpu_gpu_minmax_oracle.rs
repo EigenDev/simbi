@@ -1,7 +1,7 @@
 // =============================================================================
 // cpu_gpu_minmax_oracle.rs
 //
-// tier-1 #2b: a REAL CPU<->GPU numeric equivalence oracle for `min` / `max` /
+// a REAL CPU<->GPU numeric equivalence oracle for `min` / `max` /
 // `abs`. the carrier oracle (interp) shares CPU std semantics, so it is
 // structurally BLIND to the documented CPU<->GPU divergence: CUDA renders these
 // ops as order-asymmetric ternaries while the f64 std methods are NaN-symmetric.
@@ -9,10 +9,9 @@
 // runs it on the device, evaluates the SAME graph through the interpreter, and
 // bit-compares over an IEEE-edge input sweep (NaN / +-Inf / +-0.0 / negatives).
 //
-// they MUST agree bit-for-bit once both backends emit each op from one
-// definition (scalarize lowers Min/Max/Abs to Select+cmp; the f64 carrier matches
-// the same ternary). before that reconciliation this test FAILS — which is the
-// point: it is the safety net the carrier gate could not provide.
+// they MUST agree bit-for-bit because both backends emit each op from one
+// definition: scalarize lowers Min/Max/Abs to Select+cmp, and the f64 carrier
+// matches the same ternary.
 //
 // run:
 //   cargo test -p symbi-xpu --features cuda --test cpu_gpu_minmax_oracle

@@ -2,14 +2,14 @@
 // rhd_c2p.rs
 //
 // the RHD iterative cons->prim scheme LOWERS + EMITS valid CPU code. this is a
-// BUILD + EMIT test only — it does NOT run the kernel, because the masked Newton
+// BUILD + EMIT test only — it does NOT run the kernel, because the masked newton
 // unroll is exponential in the #4 interpreter (see feedback). the numerical
 // validation (vs rhd_to_primitive) runs through the COMPILED path in the AOT
 // crate, where the unroll CSE-collapses to linear.
 //
 // what this checks: the scheme builds without graph errors; the emitted Rust has
-// the conserved reads, the gamma param, the Newton unroll (nested if/else from
-// branch), sqrt (Lorentz + the body), and the prim writes.
+// the conserved reads, the gamma param, the newton unroll (nested if/else from
+// branch), sqrt (lorentz + the body), and the prim writes.
 // =============================================================================
 
 mod harness;
@@ -60,17 +60,17 @@ fn rhd_c2p_1d_lowers_and_emits() {
         "gamma must be a scalar param (precision-generic S):\n{src}"
     );
 
-    // the Newton emits as ONE loop (body emitted once, no 8x unroll) —
+    // the newton emits as ONE loop (body emitted once, no 8x unroll) —
     // identified by its literal `0..8` bound. the cache-tiled default CPU
     // emit ALSO emits per-axis cell loops (`for _d in 0.._ts`) for the outer
-    // iteration, so count the Newton specifically by its `0..8` bound.
+    // iteration, so count the newton specifically by its `0..8` bound.
     let n_newton = src.matches(" in 0..8").count();
     assert_eq!(
         n_newton, 1,
         "expected exactly ONE Newton loop (0..8, no 8x unroll), got {n_newton}:\n{src}"
     );
 
-    // sqrt appears (Lorentz factor in the body + recovery).
+    // sqrt appears (lorentz factor in the body + recovery).
     assert!(src.contains(".sqrt()"), "missing sqrt:\n{src}");
     // the three prim writes are present.
     assert!(
@@ -106,7 +106,7 @@ fn rhd_c2p_is_dimension_generic() {
 #[test]
 fn rhd_face_flux_1d_lowers_and_emits() {
     // the gv RHD flux (PLM stencil + riemann::hlle at the Rhd regime) emits valid CPU
-    // code: the conserved reads + gamma, the sqrt (Lorentz / relativistic wave speeds),
+    // code: the conserved reads + gamma, the sqrt (lorentz / relativistic wave speeds),
     // the stencil reads/writes, integer-only indices.
     let e = KernelRun::new(rhd_flux_gv::<1>(0))
         .grid([1usize])
@@ -141,7 +141,7 @@ fn rhd_face_flux_1d_lowers_and_emits() {
         src.contains(".sqrt()"),
         "missing sqrt (Lorentz / wave speeds):\n{src}"
     );
-    // a face flux is a STENCIL — PLM reconstruction reads shifted neighbours.
+    // a face flux is a STENCIL — PLM reconstruction reads shifted neighbors.
     assert!(
         src.contains("] = ") && src.contains("buf"),
         "missing reads/writes:\n{src}"

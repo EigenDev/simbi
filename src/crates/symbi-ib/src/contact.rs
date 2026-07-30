@@ -48,7 +48,7 @@ pub struct ContactMaterial {
 }
 
 /// the contact subsystem: the material plus the per-pair tangential slip
-/// accumulators of the currently touching pairs.
+/// accumulators of the touching pairs.
 #[derive(Clone, Debug)]
 pub struct Contacts {
     pub material: ContactMaterial,
@@ -129,7 +129,7 @@ impl Contacts {
         }
     }
 
-    /// number of pairs currently carrying contact state.
+    /// number of pairs carrying contact state.
     pub fn active(&self) -> usize {
         self.slip.len()
     }

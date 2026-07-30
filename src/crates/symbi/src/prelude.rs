@@ -8,7 +8,7 @@
 // `Sim` types + builder, the `evolve` entry points, the per-regime godunov / constrained-
 // transport `KernelSet`s, and the primitive / conserved value types.
 //
-// purely ADDITIVE — every fully-qualified path still works; this just spares the boilerplate.
+// every name here is also reachable by its fully-qualified path.
 //
 // usage:
 //   use symbi::prelude::*;
@@ -39,8 +39,8 @@ pub use symbi_xpu::{CudaSpace, UnifiedMemory};
 #[cfg(feature = "gpu")]
 pub use symbi_xpu::{DeviceMemory, DeviceSpace};
 // the FEATURE-SELECTED backend: the device space/memory under any gpu feature, else CPU
-// (CpuSpace / HostMemory) — re-exported so an example drops its per-file `#[cfg(feature="gpu")]`
-// Space/Mem block in favor of `SimDefault*` (below).
+// (CpuSpace / HostMemory) — the backing of the `SimDefault*` aliases, so a single source file
+// compiles for either backend without a per-file `#[cfg(feature="gpu")]` Space/Mem block.
 pub use symbi_xpu::{DefaultMemory, DefaultSpace};
 
 // --- the simulation state, fluent builder, and setup enums ---
@@ -81,8 +81,8 @@ pub type SimCpuGeneric<R, const D: usize, const DOF: usize, M, E> =
     SimStateGeneric<R, D, DOF, M, E, CpuSpace, HostMemory, f64>;
 
 /// a sim on the FEATURE-SELECTED backend (GPU under `--features cuda`, else CPU), natural DOF = D
-/// — the example default: ONE binary that runs on whichever backend it's built for, no per-file
-/// `#[cfg(feature="cuda")]` Space/Mem block.
+/// — ONE binary that runs on whichever backend it's built for, with the `#[cfg(feature="cuda")]`
+/// Space/Mem selection confined to this alias.
 pub type SimDefault<R, const D: usize, M, E> =
     SimState<R, D, M, E, DefaultSpace, DefaultMemory, f64>;
 /// feature-selected backend with an EXPLICIT vector DOF (1.5D / 2.5D MHD lift).

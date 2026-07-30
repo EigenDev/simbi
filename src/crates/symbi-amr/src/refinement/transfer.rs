@@ -365,7 +365,7 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
 /// pass time-interpolates the coarse snapshots ONCE PER COARSE CELL over the
 /// parent region of `region` (+ stencil halo), then the single-snapshot prolong
 /// reads the lerped buffer — half the gather traffic of the fused time-pair
-/// kernel (which re-lerps the whole stencil neighbourhood per FINE cell), with
+/// kernel (which re-lerps the whole stencil neighborhood per FINE cell), with
 /// bit-identical output (the lerp expression and its consumption are unchanged;
 /// only where the intermediate lives moves). `lerp` is a caller-owned coarse
 /// scratch (allocated once — the step loop allocates nothing per call). falls
@@ -588,10 +588,10 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    // ─── reference oracle ────────────────────────────────────────────────────
-    // the ORIGINAL overlapping per-face slab construction. the disjoint
-    // `cf_ghost_slabs` must cover the EXACT same cell set — this is the
-    // union-equivalence contract that lets the refactor be numerically a no-op.
+    // ─── reference construction ──────────────────────────────────────────────
+    // the overlapping per-face slab construction. the disjoint `cf_ghost_slabs`
+    // must cover the EXACT same cell set — the union-equivalence contract that
+    // makes the disjoint form numerically indistinguishable.
     fn old_overlapping_slabs<const D: usize>(
         allocated: &Domain<D>,
         interior: &Domain<D>,
@@ -655,7 +655,7 @@ mod tests {
         }
     }
 
-    // LAW: disjointness + union-equivalence to the reference oracle, over a
+    // LAW: disjointness + union-equivalence to the reference construction, over a
     // sweep of boundary configurations (every subset of the 6 faces being CF).
     fn check_laws<const D: usize>(allocated: &Domain<D>, interior: &Domain<D>) {
         for mask in 0u32..(1 << (2 * D)) {

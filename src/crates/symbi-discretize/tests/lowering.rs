@@ -465,7 +465,7 @@ fn geometry_probe_kernels_lower() {
     .grid([8, 8])
     .assert_lowers();
     // full rmhd geometric momentum source (total pressure + gas inertial + magnetic tension), 3D
-    // spherical AND cylindrical — the coord-generic Christoffel covers both (cyl: r-phi pair).
+    // spherical AND cylindrical — the coord-generic christoffel covers both (cyl: r-phi pair).
     for coords in [Coords::Spherical, Coords::Cylindrical] {
         KernelRun::new(geometric_momentum_source_probe_gv(
             coords,

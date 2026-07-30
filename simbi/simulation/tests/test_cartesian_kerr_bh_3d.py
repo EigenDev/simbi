@@ -122,14 +122,13 @@ def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
     # states would also "agree").
     assert a["rho"].max() > 1.05 * RHO0, "no accretion developed in the a = 0 kerr run"
     # the a = 0 kerr metric is ALGEBRAICALLY the schwarzschild cartesian KS chart
-    # (2H = 2M/r, l = x/r), and both charts now contract their rank-1 forms with the
-    # ACTUAL |l|^2, so they agree INSIDE the r < M/2 radius floor too — where the floor
-    # drives |l| below 1 and a unit-l assumption once made the two continue the core
-    # differently. the evolved states therefore agree to ROUNDOFF everywhere, not merely
-    # to a bound that decays outward: measured 1.3e-14 (strong field) and 1.8e-14
-    # (exterior). the old form of this gate also required the strong-field disagreement
-    # to be at least 2x the exterior one, which described the leak rather than the law
-    # and cannot hold once both are at roundoff.
+    # (2H = 2M/r, l = x/r), and both charts contract their rank-1 forms with the ACTUAL
+    # |l|^2, so they agree INSIDE the r < M/2 radius floor too — the floor drives |l|
+    # below 1, where a unit-l assumption would continue the core differently in the two
+    # charts. the evolved states therefore agree to ROUNDOFF everywhere, not merely to a
+    # bound that decays outward: measured 1.3e-14 (strong field) and 1.8e-14 (exterior).
+    # no ratio between the two shells is asserted; with both at roundoff, their ratio
+    # describes the leak instead of the law.
     dd = 2.0 * L / RES
     xs = (np.arange(RES) + 0.5) * dd - L
     z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
@@ -141,8 +140,8 @@ def test_cartesian_kerr_a0_matches_kerr_schild() -> None:
         d_ext = np.abs(a[nm] - b[nm])[ext].max()
         # roundoff on both shells: the two charts are the same spacetime, evaluated by two
         # code paths, and nothing about the radius floor may separate them. these bounds are
-        # ~1000x tighter than the 1e-2 / 1e-4 they replace and would catch any reappearance
-        # of the unit-l inconsistency at its first digit.
+        # roundoff-tight, ~1000x below the 1e-2 / 1e-4 that a decaying-leak reading would
+        # permit, so a unit-l inconsistency fails them at its first digit.
         assert d_mid < 1e-11, f"a=0 kerr vs kerr_schild strong-field mismatch in {nm}: {d_mid:e}"
         assert d_ext < 1e-11, f"a=0 kerr vs kerr_schild exterior mismatch in {nm}: {d_ext:e}"
 

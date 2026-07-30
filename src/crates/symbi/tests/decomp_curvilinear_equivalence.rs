@@ -3,13 +3,13 @@
 //
 // the correctness contract for multi-gpu domain decomposition on a CURVILINEAR
 // chart, validated in-process on the cpu. decomp_equivalence.rs proves the
-// Cartesian case; this proves the case that actually matters for disks and
+// cartesian case; this proves the case that actually matters for disks and
 // accretors, where the metric varies with radius.
 //
 // on a cylindrical (r, z) or spherical (r, theta) grid the wave speeds, the
 // geometric source, and the face areas all depend on r. so a radial cut hands
 // each tile a DIFFERENT r-range: a tile is not a translate of its neighbor the
-// way a Cartesian tile is. the only thing that makes the decomposed run
+// way a cartesian tile is. the only thing that makes the decomposed run
 // reproduce the monolithic one is a per-tile radial origin placed so the tile's
 // local cell i sits at the same physical r as the undecomposed grid's global
 // cell tc*m + i, plus the halo exchange feeding each cut face the neighbor's
@@ -356,8 +356,7 @@ fn sph_geometric_radial_four_tile_rk2() {
 // scale factor h3 = r) onto the 2D grid. it is advected by the in-plane radial flow and
 // carries an angular-momentum geometric source; the decomposition must exchange it across
 // a radial cut like any other momentum component (the transport ranges over mom[0..DOF]).
-// this is the piece the swirl build-macro refusal was guarding: only the BUILD hardcoded
-// DOF = D, never the transport.
+// the DOF = D assumption lives only in the BUILD macro, never in the transport.
 mod swirl {
     use super::*;
 

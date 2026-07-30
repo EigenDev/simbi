@@ -9,22 +9,22 @@
 // `x_k` Params to in-kernel cell centroids, so position-dependent overlays
 // (point-mass gravity) fuse the same way as uniform accel.
 //
-// **what this validates** as a single layered claim:
+// what this validates as a single layered claim:
 //
-//   1. `SimulationLaws::new(&NEWTONIAN_SPEC).with_fused_family(uniform_accel)`
-//      -> `derive_fused_binding()` -> `FusedSourceBinding::from_pair()` ->
-//      `AdiabaticSubstrateKernelSet::with_fused_source()` produces a kernel
-//      set whose evolve loop accelerates an initially-stationary gas in 2D
-//      (the 2D AOT kernel exists + the data-driven derivation
-//      reaches it through the substrate).
+//   - `SimulationLaws::new(&NEWTONIAN_SPEC).with_fused_family(uniform_accel)`
+//     -> `derive_fused_binding()` -> `FusedSourceBinding::from_pair()` ->
+//     `AdiabaticSubstrateKernelSet::with_fused_source()` produces a kernel
+//     set whose evolve loop accelerates an initially-stationary gas in 2D
+//     (the 2D AOT kernel exists + the data-driven derivation
+//     reaches it through the substrate).
 //
-//   2. `FusedSourceFamily::PointMassGravity` with a body at the origin
-//      produces a kernel whose Param manifest includes `xm_k` and `gm`
-//      (NOT `x_k` — those bind to the in-kernel centroid), so
-//      the position-dependent overlay actually fuses with the godunov.
+//   - `FusedSourceFamily::PointMassGravity` with a body at the origin
+//     produces a kernel whose Param manifest includes `xm_k` and `gm`
+//     (the cell position `x_k` binds to the in-kernel centroid instead), so
+//     the position-dependent overlay actually fuses with the godunov.
 //
-//   3. backwards-compat — a `SimulationLaws` with no families derives None,
-//      the kernel-set runs the unfused godunov, gas stays at rest.
+//   - a `SimulationLaws` with no families derives None, the kernel-set runs
+//     the unfused godunov, gas stays at rest.
 //
 // run: cargo test -p symbi --test fused_source_full_stack
 // =============================================================================
@@ -114,7 +114,7 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
     );
     assert!(
         (mean_vx - analytical_vx).abs() < 0.5 * analytical_vx.abs(),
-        "mean vx = {mean_vx} too far from analytical g·t = {analytical_vx}",
+        "mean vx = {mean_vx} too far from analytical g*t = {analytical_vx}",
     );
     assert!(
         mean_vy.abs() < 1e-6,
@@ -126,13 +126,12 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
 fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
     // structural claim: the `point_mass_grav` 2D AOT kernel
     // declares `xm_k` + `gm` as scalar params (body parameters, runtime-
-    // bound), but DOES NOT declare `x_k` (cell position) — those Params
-    // were bound to the in-kernel centroid, computed from
-    // `x_lo + i*dx`. proves the position-dependent overlay actually fused
-    // (the spec's `x_k` Params resolved INSIDE the trace at codegen
-    // time).
+    // bound), and the cell position `x_k` binds to the in-kernel centroid
+    // computed from `x_lo + i*dx`. proves the position-dependent overlay
+    // actually fused (the spec's `x_k` Params resolved INSIDE the trace at
+    // codegen time).
     let (_kfn, ir_blob) = kernel_by_name::<f64>("adiabatic_godunov_stage_with_point_mass_grav_2d")
-        .expect("Phase 3b should have AOT-baked adiabatic point_mass_grav 2D");
+        .expect("adiabatic point_mass_grav 2D must be AOT-baked");
     assert!(!ir_blob.is_empty());
 
     // the kernel manifest lists scalars. xm_0, xm_1, gm MUST appear (body
@@ -155,11 +154,11 @@ fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
     );
     assert!(
         !scalar_names.contains(&"x_0"),
-        "x_0 leaked into scalars — Phase 2c centroid binding broke; scalars = {scalar_names:?}",
+        "x_0 leaked into scalars — the centroid binding broke; scalars = {scalar_names:?}",
     );
     assert!(
         !scalar_names.contains(&"x_1"),
-        "x_1 leaked into scalars — Phase 2c centroid binding broke; scalars = {scalar_names:?}",
+        "x_1 leaked into scalars — the centroid binding broke; scalars = {scalar_names:?}",
     );
 
     // and the geometry scalars ARE present (the centroid is computed from them).
@@ -175,12 +174,12 @@ fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
 
 #[test]
 fn empty_simulation_laws_derives_no_binding() {
-    // backwards-compat: no families declared => `derive_fused_binding` => None
-    // => substrate routes through the unfused godunov (the prior default).
+    // no families declared => `derive_fused_binding` => None => substrate
+    // routes through the unfused godunov.
     let laws = SimulationLaws::new(&NEWTONIAN_SPEC);
     assert!(
         laws.derive_fused_binding().is_none(),
-        "an empty SimulationLaws must derive None — backwards compat",
+        "an empty SimulationLaws must derive None",
     );
 }
 
@@ -205,7 +204,7 @@ fn fused_source_family_round_trip_uniform_accel() {
         let kname = format!("adiabatic_godunov_stage_with_uniform_accel_{ndim}d");
         assert!(
             kernel_by_name::<f64>(&kname).is_some(),
-            "Phase 3b AOT kernel {kname} missing — fan-out regressed",
+            "AOT kernel {kname} missing — the bake fan-out regressed",
         );
     }
 }
@@ -235,7 +234,7 @@ fn fused_source_family_round_trip_point_mass_grav() {
         let kname = format!("adiabatic_godunov_stage_with_point_mass_grav_{ndim}d");
         assert!(
             kernel_by_name::<f64>(&kname).is_some(),
-            "Phase 2c AOT kernel {kname} missing",
+            "AOT kernel {kname} missing",
         );
     }
 }

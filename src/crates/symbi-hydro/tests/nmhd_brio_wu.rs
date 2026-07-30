@@ -157,7 +157,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
     let by_e = interior(&p_hlle, |p| p.mag[1]);
     let by_d = interior(&p_hlld, |p| p.mag[1]);
 
-    // 1) PHYSICAL everywhere (the algebraic c2p must recover rho,p > 0).
+    // - PHYSICAL everywhere (the algebraic c2p must recover rho,p > 0).
     for (label, ps) in [("hllc", &p_hllc), ("hlld", &p_hlld)] {
         for (i, pi) in ps[NG..NG + N].iter().enumerate() {
             assert!(
@@ -173,7 +173,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         }
     }
 
-    // 2) Bx (normal field) stays EXACTLY constant (induction F(Bx)=0 in 1D).
+    // - Bx (normal field) stays EXACTLY constant (induction F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
         assert!(
             (pi.mag[0] - 0.75).abs() < 1e-12,
@@ -182,7 +182,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         );
     }
 
-    // 3) NON-OSCILLATORY: HLLE is the monotone baseline; a buggy solver oscillates
+    // - NON-OSCILLATORY: HLLE is the monotone baseline; a buggy solver oscillates
     //    -> TV inflates. a correct SHARPER solver keeps TV ~ the same (a monotone
     //    profile's TV is diffusion-independent). this is the direct "noise" test.
     let (tv_re, tv_rc, tv_rd) = (
@@ -206,7 +206,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}"
     );
 
-    // 4) SAME solution as HLLE, only sharper: small L1 distance.
+    // - SAME solution as HLLE, only sharper: small L1 distance.
     assert!(
         l1_diff(&rho_d, &rho_e) < 0.05,
         "HLLD rho diverges from HLLE: L1 {}",
@@ -218,7 +218,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         l1_diff(&rho_c, &rho_e)
     );
 
-    // 5) HLLD actually SHARPENS, confirming the HLLD path is active:
+    // - HLLD actually SHARPENS, confirming the HLLD path is active:
     //    the steepest density gradient is larger than HLLE's.
     let max_grad = |f: &[f64]| {
         f.windows(2)
@@ -232,7 +232,7 @@ fn nmhd_brio_wu_hlld_hllc_are_clean_shock_capturing() {
         max_grad(&rho_e),
     );
 
-    // 6) the Brio-Wu signature: By flips sign across the tube (the compound/rotational
+    // - the Brio-Wu signature: By flips sign across the tube (the compound/rotational
     //    structure), and the density develops intermediate states between L and R.
     let by_min = by_d.iter().cloned().fold(f64::MAX, f64::min);
     let by_max = by_d.iter().cloned().fold(f64::MIN, f64::max);

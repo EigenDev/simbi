@@ -113,9 +113,9 @@ def test_cartesian_ks_bh_3d_exterior_excision_leakage_is_bounded_and_decays() ->
     xs = (np.arange(n) + 0.5) * dx - 5.0
     z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
     r = np.sqrt(x * x + y * y + z * z)
-    # the excision genuinely acted (non-vacuous): the two interiors differ. this
-    # assert is what exposed the excision phase being silently absent from the
-    # hierarchy step (the raw single-grid loop had it; the python path did not).
+    # the excision genuinely acted (non-vacuous): the two interiors differ. an excision
+    # phase missing from the hierarchy step leaves the two interiors identical, which is
+    # invisible to every other assertion here.
     inner = r < 1.2
     assert np.abs(a["rho"][inner] - b["rho"][inner]).max() > 1e-8, (
         "the two excision radii produced identical interiors; the pass never ran"

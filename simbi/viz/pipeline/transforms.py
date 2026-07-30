@@ -36,18 +36,18 @@ FIELD_ALIASES = {
 class SlicePlan:
     """A complete, explicit plan for slicing and reordering data."""
 
-    # The tuple to index the NumPy array, e.g., (5, slice(None), slice(None))
+    # the tuple to index the NumPy array, e.g., (5, slice(None), slice(None))
     index_tuple: tuple
 
-    # The *original* indices of the domain arrays to keep,
+    # the *original* indices of the domain arrays to keep,
     # already in the new logical order (e.g., [2, 1] for [x1_arr, x2_arr])
     final_domain_indices: list[int]
 
-    # The transpose order to apply to the data *after* slicing
+    # the transpose order to apply to the data *after* slicing
     # e.g., (1, 0) to turn (ny, nx) -> (nx, ny)
     transpose_order: tuple[int, ...]
 
-    # The logical names of the final axes, e.g., ["x1", "x2"]
+    # the logical names of the final axes, e.g., ["x1", "x2"]
     final_axis_names: list[str]
 
 
@@ -121,9 +121,9 @@ def plan_slice(
     # domain[k] to be the coordinate array of values axis k -- the plotter reads
     # domain[0] as the outer/slower axis (vertical) and domain[1] as the inner/faster
     # (horizontal), matching the unsliced/native path. reordering the domain into logical
-    # (x1,x2,x3) order WITHOUT a matching value transpose is what transposed a non-square
-    # slice: the domain claimed (x1,x2) while the values stayed (x2,x1), so the coordinate
-    # lengths no longer matched the value grid.
+    # (x1,x2,x3) order WITHOUT a matching value transpose transposes a non-square slice:
+    # the domain claims (x1,x2) while the values stay (x2,x1), so the coordinate lengths
+    # disagree with the value grid.
     remaining_indices = sorted(set(range(ndim)) - sliced_axes_indices)
     final_domain_indices = remaining_indices
     transpose_order = tuple(range(len(remaining_indices)))
@@ -197,7 +197,7 @@ def prepare_field_level(
                 )
                 break
 
-    # Get the domain, in data-storage order (e.g., nz, ny, nx)
+    # get the domain, in data-storage order (e.g., nz, ny, nx)
     # if crop_to_owned=True, mesh already has cropped coordinates
     # use vertices (edges) for the domain
     # polygon plots need edges; other plots will extract centers if needed
@@ -477,28 +477,6 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
         time=fields_2d[0].time,
         level_bounds=level_bounds if len(level_bounds) > 1 else None,
     )
-
-
-def compose_2d_render(
-    fields_2d: list[FieldData],
-    render_mode: Literal["pcolormesh", "polygons"],
-) -> FieldData:
-    """
-    Composes a list of 2D fields into a single renderable FieldData object.
-
-    This is the "stitching" step for 2D refined or polygon plots.
-    """
-    if not fields_2d:
-        raise ValueError("Cannot compose an empty list of fields.")
-
-    if render_mode == "pcolormesh":
-        # returns a single 2D FieldData object
-        return _compose_pcolormesh(fields_2d)
-    elif render_mode == "polygons":
-        # returns a single 1D FieldData object (of polygons)
-        return _compose_polygons(fields_2d)
-    else:
-        raise ValueError(f"Unknown render_mode: {render_mode}")
 
 
 def compose_fields_for_render(

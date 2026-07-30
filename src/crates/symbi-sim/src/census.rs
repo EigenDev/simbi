@@ -837,7 +837,7 @@ where
     /// `covered` is this level's cells that a FINER level resolves. they are excluded from the
     /// reduction: the finer level contributes the same physical volume at its own resolution, so
     /// counting both would add the refined region twice — a total that is wrong by exactly the
-    /// refined volume and otherwise entirely plausible. a level with no finer neighbour passes
+    /// refined volume and otherwise entirely plausible. a level with no finer neighbor passes
     /// `None` and every interior cell is a leaf.
     ///
     /// returns `None` when the fields are not host-accessible (a device-resident run); the
@@ -1230,7 +1230,7 @@ mod generic_binning_tests {
             let n_seg = sp.n_segments();
             // a sweep that lands ON every edge, just inside and just outside each, between
             // edges, far outside both ends, and NaN — the coordinates where a binning rule
-            // differs from a neighbouring one.
+            // differs from a neighboring one.
             let mut probes: Vec<f64> = vec![f64::NAN, -1.0e300, 1.0e300];
             for axis in &axes {
                 for &e in axis.edges() {

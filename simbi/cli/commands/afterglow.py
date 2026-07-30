@@ -1386,7 +1386,7 @@ def execute_polarization(args: Namespace, remaining: Optional[list] = None) -> N
     print(f"loading photon events from {args.events}...")
     events, meta = read_photon_events(args.events)
 
-    print(f"computing polarization for observer angle {args.observer_angle}°...")
+    print(f"computing polarization for observer angle {args.observer_angle} deg...")
 
     pol = compute_polarization(
         events,

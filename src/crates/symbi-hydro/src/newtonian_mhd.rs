@@ -65,7 +65,7 @@ pub fn nmhd_recover<S: Scalar, const D: usize>(
 
 /// fast magnetosonic speed along nhat. closed form, single physical sqrt.
 /// the discriminant is >= 0 for physical inputs; safe_sqrt guards anyway so the
-/// radicand cannot trace a NaN into the kernel (carrier gate, CLAUDE.md 4.3).
+/// radicand cannot trace a NaN into the kernel.
 #[inline]
 fn fast_magnetosonic<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -112,7 +112,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
         S: OrderedNumeric,
     {
         // algebraic, no iteration: strip magnetic energy, then invert hydro.
-        // raw IEEE math; no silent floors (feedback_no_silent_floors). the
+        // raw IEEE math; no silent floors. the
         // ErrorCode is an explicit diagnostic, the value is the raw unfloored
         // computation so downstream NaN propagation stays visible at the dt
         // reduction. the math is `nmhd_recover` (the carrier-safe single source);

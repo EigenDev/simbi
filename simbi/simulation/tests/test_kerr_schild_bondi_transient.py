@@ -96,7 +96,7 @@ def test_bondi_transient_crosses_the_horizon_with_positive_pressure() -> None:
 
         # the PREMISE: the domain must actually span the horizon and the excision surface, with
         # live cells on both sides. a grid that stopped outside r_+ would test an inner wall, not a
-        # horizon, and every through-horizon assertion below would be vacuous.
+        # horizon, and every through-horizon assertion would be vacuous.
         assert r[0] < _R_EXCISION < _R_HORIZON < r[-1], (
             f"the grid does not span the excision surface and the horizon "
             f"(r = [{r[0]:.3f}, {r[-1]:.3f}], r_exc = {_R_EXCISION}, r_+ = {_R_HORIZON})"
@@ -105,7 +105,8 @@ def test_bondi_transient_crosses_the_horizon_with_positive_pressure() -> None:
         assert exterior.sum() > 0.5 * _RESOLUTION, "too few live cells outside the excision surface"
 
         # NO FLOOR: the pressure must stay strictly positive on its own across the live region.
-        # the old bug drove it negative near the inner boundary.
+        # an error in the gravity/densitization balance drives it negative near the inner
+        # boundary.
         assert pre[exterior].min() > 0.0, (
             f"pressure went non-positive outside the excision surface: "
             f"min = {pre[exterior].min():.3e}"
@@ -113,9 +114,9 @@ def test_bondi_transient_crosses_the_horizon_with_positive_pressure() -> None:
         assert np.isfinite(vel).all(), "velocity went non-finite"
 
         # the physical signature of correct inward densitization: gas accretes, so the density
-        # RISES above ambient as it approaches the hole. the old bug did the opposite — it DEPLETED
-        # the inner density before the negative-pressure crash — so the direction of the change,
-        # not its size, separates fix from bug.
+        # RISES above ambient as it approaches the hole. a densitization imbalance does the
+        # opposite, DEPLETING the inner density before the negative-pressure crash, so the
+        # DIRECTION of the change discriminates, not its size.
         inner = np.argmax(exterior)  # innermost live cell
         assert rho[inner] > 1.1 * _RHO_AMBIENT, (
             f"density did not rise at the innermost live cell: rho = {rho[inner]:.3f} "

@@ -59,10 +59,10 @@ def extract_timestep(filename: str | Path) -> float:
     extract timestep number from checkpoint filename for sorting.
 
     handles various naming conventions:
-    - 128.chkpt.0042.h5 → 42.0
-    - 128.chkpt.1_000_000.h5 → 1000000.0
-    - sim_t100.5.h5 → 100.5
-    - checkpoint_001.h5 → 1.0
+    - 128.chkpt.0042.h5 -> 42.0
+    - 128.chkpt.1_000_000.h5 -> 1000000.0
+    - sim_t100.5.h5 -> 100.5
+    - checkpoint_001.h5 -> 1.0
 
     args:
         filename: checkpoint filename

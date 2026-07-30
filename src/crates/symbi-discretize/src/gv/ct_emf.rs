@@ -79,7 +79,7 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
 
 /// the chart-generic spatial metric (gamma + gamma^{-1}) at a world position — the tetrad-frame
 /// HLLD fan needs the full metric beyond the ADM scalars. same (spacetime, coords) selection as
-/// [`gr_adm_at`]; the orthonormal_basis(dir) Gram-Schmidt of this gamma is the tetrad.
+/// [`gr_adm_at`]; the orthonormal_basis(dir) gram-schmidt of this gamma is the tetrad.
 fn gr_spatial_metric_at(
     spacetime: Spacetime,
     coords: Coords,
@@ -177,7 +177,7 @@ fn gr_plane_pos(coords: Coords, axes: &[usize], p0: Gv, p1: Gv) -> Tensor<Gv, 3>
     }))
 }
 
-/// the Gardiner & Stone CT-contact edge EMF (the SOFT-SIGN blend), carrier-generic at S=Gv.
+/// the gardiner & stone CT-contact edge EMF (the SOFT-SIGN blend), carrier-generic at S=Gv.
 /// a pointwise function of the 4 face EMFs, 4 cell-corner
 /// EMFs, and 4 density fluxes: `s = f/(|f|+eps)`; `0.5*((a+b) + s*(a-b))`, transitions
 /// continuously through f=0 (= a hard 3-way sign in the |f|>>eps limit). div(B) unaffected.
@@ -290,12 +290,12 @@ pub fn rmhd_ct_curl_2d_dir_gv(dir: usize) -> (GvKernel, Vec<(String, FieldBind, 
     )
 }
 
-/// the 2.5D CARTESIAN OHMIC RESISTIVE edge EMF: adds the anomalous/Ohmic contribution `eta * J_z`
+/// the 2.5D CARTESIAN OHMIC RESISTIVE edge EMF: adds the anomalous/ohmic contribution `eta * J_z`
 /// to the out-of-plane edge EMF `ez` (efield[0]) IN PLACE, where `J_z = dB_y/dx - dB_x/dy` is the
 /// current on the z-edge from the staggered face field (`bx` = bface[0], `by` = bface[1]). the
 /// difference stencil is the ADJOINT of the `E -> B` induction curl (`rmhd_ct_curl_2d_dir_gv`): its
-/// `+1` neighbour offsets become the `-1` offsets here, so the composed `curl(eta * curl(B))` is a
-/// NEGATIVE-definite discrete Laplacian — the field DIFFUSES (decays as `exp(-eta k^2 t)`), never
+/// `+1` neighbor offsets become the `-1` offsets here, so the composed `curl(eta * curl(B))` is a
+/// NEGATIVE-definite discrete laplacian — the field DIFFUSES (decays as `exp(-eta k^2 t)`), never
 /// anti-diffuses. the same div-B-clean curl then consumes `ez`, so the update carries no new
 /// monopole (`div(curl) = 0` — the existing symbolic proof covers it). `eta = 0` is an exact no-op.
 pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -306,8 +306,8 @@ pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>
     let idy = Gv::scalar("idy");
     let bx = Gv::field("bx", "bx");
     let by = Gv::field("by", "by");
-    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbour below in y
-    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbour behind in x
+    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbor below in y
+    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbor behind in x
     let jz = idx * (by - by_im) - idy * (bx - bx_jm);
     let ez_new = ez + eta * jz;
     (
@@ -321,7 +321,7 @@ pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>
 /// dir-edge from the two transverse face components (`b_p1` = bface[p1], `b_p2` = bface[p2],
 /// p1=(dir+1)%3, p2=(dir+2)%3). the `-1` difference offsets are the ADJOINT of the per-dir induction
 /// curl `rmhd_ct_curl_3d_dir_gv` (whose `+1` reads they mirror), so the composed
-/// `curl(eta * curl(B))` is the negative-definite discrete Laplacian — the field diffuses, never
+/// `curl(eta * curl(B))` is the negative-definite discrete laplacian — the field diffuses, never
 /// anti-diffuses. the same div-B-clean 3D curl consumes the augmented EMF. `eta = 0` is a no-op.
 pub fn rmhd_resistive_emf_3d_dir_gv(dir: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -400,10 +400,10 @@ pub fn rmhd_ct_curl_cyl_rz_gv(
 
 /// the 2.5D CYLINDRICAL r-z OHMIC RESISTIVE edge EMF: adds `eta * J_phi` to the out-of-plane edge
 /// EMF `ephi` (efield[0]) IN PLACE, where `J_phi` is the MIMETIC ADJOINT of the cylindrical induction
-/// curl `rmhd_ct_curl_cyl_rz_gv` — so `-curl(eta * J)` is a negative-definite Laplacian (stable
-/// diffusion). CANDIDATE form (metric-free, from `J = W_E^-1 C^T W_F` with the natural cyl weights
-/// `w_r ∝ r_edge, w_z ∝ r_c, w_E ∝ r_edge`, whose r-factors cancel); the ADJOINT ORACLE
-/// `⟨C E, B⟩_F = ⟨E, J B⟩_E` validates or corrects it to machine precision. `B_r` = bface[0],
+/// curl `rmhd_ct_curl_cyl_rz_gv` — so `-curl(eta * J)` is a negative-definite laplacian (stable
+/// diffusion). metric-free form, from `J = W_E^-1 C^T W_F` with the natural cyl weights
+/// `w_r \propto r_edge, w_z \propto r_c, w_E \propto r_edge`, whose r-factors cancel; the discrete
+/// adjoint identity `<C E, B>_F = <E, J B>_E` pins it to machine precision. `B_r` = bface[0],
 /// `B_z` = bface[1]. `eta = 0` is an exact no-op.
 pub fn rmhd_resistive_emf_cyl_rz_gv(
     spacing: &[Spacing],
@@ -420,10 +420,10 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(
     let inv_dz = Gv::ONE / (gv_axis_face_at(1, spacing[1], 1) - gv_axis_face_at(1, spacing[1], 0));
     let br = Gv::field("br", "br");
     let bz = Gv::field("bz", "bz");
-    let br_zm = gv_field_at("br", "br", 2, &[0, -1]); // B_r at the neighbour below in z (axis 1)
-    let bz_rm = gv_field_at("bz", "bz", 2, &[-1, 0]); // B_z at the neighbour behind in r (axis 0)
+    let br_zm = gv_field_at("br", "br", 2, &[0, -1]); // B_r at the neighbor below in z (axis 1)
+    let bz_rm = gv_field_at("bz", "bz", 2, &[-1, 0]); // B_z at the neighbor behind in r (axis 0)
     // J_phi = (curl B)_phi = dB_r/dz - dB_z/dr (backward differences). this sign makes -curl(eta J) a
-    // NEGATIVE-definite Laplacian (magnetic energy decays); the flipped sign would grow it. matches
+    // NEGATIVE-definite laplacian (magnetic energy decays); the flipped sign would grow it. matches
     // the cartesian resistive convention J = +(curl B).
     let jphi = inv_dz * (br - br_zm) - inv_dr * (bz - bz_rm);
     let ephi_new = ephi + eta * jphi;
@@ -435,7 +435,7 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(
 
 /// the COVARIANT 2.5D orthogonal-chart OHMIC RESISTIVE edge EMF: adds `eta * J_out` to the
 /// out-of-plane corner EMF, where `J_out = (1/(h_i h_j)) [d_i(h_j B_j) - d_j(h_i B_i)]` is the physical
-/// curl of the poloidal field in the running orthogonal chart, `h_i` the chart's Lamé scale factors
+/// curl of the poloidal field in the running orthogonal chart, `h_i` the chart's lame scale factors
 /// (`Metric::scale_factors`). this is the DEC codifferential — the mimetic ADJOINT of the induction
 /// curl — written through the scale factors, so ONE kernel covers every 2.5D orthogonal chart:
 /// cyl r-z (`h = (1, 1)`) recovers the metric-free `d_z B_r - d_r B_z`; cyl r-phi and spherical r-theta
@@ -535,7 +535,7 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(
 }
 
 /// the 2.5D SPHERICAL (r-theta plane, out-of-plane phi) CT curl from the single corner EMF
-/// E_phi (efield[0]), in-place on `b` (bface[dir]). Faraday dB/dt = -curl E with E = E_phi phi-hat
+/// E_phi (efield[0]), in-place on `b` (bface[dir]). faraday dB/dt = -curl E with E = E_phi phi-hat
 /// (axisymmetric) gives the spherical-metric in-plane update:
 ///   dir=0 (B_r,   r-face):     dB_r/dt   = -(1/(r_f sin th_c)) d_th(sin th * E_phi)   (th = grid axis 1)
 ///   dir=1 (B_th, theta-face):  dB_th/dt  = +(1/r_c) d_r(r * E_phi)                     (r  = grid axis 0)
@@ -730,9 +730,9 @@ pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 /// the CT face->cell B interpolation `bcell_c = 0.5*(bface_c + bface_c[+e_c])`, in place on the
 /// in-plane cell B (mag rows only). the cell field is a DERIVED quantity — the arithmetic average of
 /// its two bounding faces — used for reconstruction + the c2p magnetic-energy subtraction. NO energy
-/// correction: `cons.nrg` (tau) already carries the magnetic energy and is conserved by the Godunov
-/// flux (the Poynting term); the old `nrg += 0.5 d|bcell|^2` patch DOUBLE-ACCOUNTED it and did not
-/// telescope.
+/// correction: `cons.nrg` (tau) already carries the magnetic energy and is conserved by the godunov
+/// flux (the poynting term), so a `nrg += 0.5 d|bcell|^2` patch would DOUBLE-ACCOUNT it and does
+/// not telescope.
 pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let half = Gv::from_f64(0.5);
@@ -916,17 +916,14 @@ pub fn rmhd_edge_emf_gr_gv(
     )
 }
 
-/// the CURVED-SPACETIME CT face->cell B interpolation + magnetic-energy correction: the
-/// flat [`rmhd_bcell_from_bface_gv`] with the energy patch contracted through the SPATIAL
-/// METRIC at the volume-weighted centroid (the c2p metric point):
-///   nrg += 1/2 [ gamma_ij B^i B^j |_new - gamma_ij B^i B^j |_old ]
-/// over the FULL 3-vector (in-plane comps interpolate from faces, the out-of-plane comp is
-/// untouched but enters the contraction through non-diagonal gamma). the flat euclidean
-/// sumsq under-counts the correction by the metric factors (gamma_rr = 1/f at schwarzschild).
-/// the v = 0 convention of the flat patch is kept — the one-step instrument adjudicates it.
+/// the CURVED-SPACETIME CT face->cell B interpolation: each in-plane cell component is the
+/// arithmetic average of its two bounding faces, exactly as in the flat
+/// [`rmhd_bcell_from_bface_gv`]. NO magnetic-energy correction — tau carries the magnetic
+/// energy and is conserved by the godunov flux, so a `nrg += 1/2 d(gamma_ij B^i B^j)` patch
+/// would double-account it and does not telescope.
 pub fn rmhd_bcell_from_bface_gr_gv(
-    // the interpolation is metric-FREE now (the metric only entered the deleted energy patch); the
-    // chart args are kept for the bake's call-site symmetry with the other GR kernels.
+    // the interpolation is metric-FREE; the chart args are kept for call-site symmetry with the
+    // other GR kernels.
     _spacetime: Spacetime,
     _coords: Coords,
     _spacing: &[Spacing],
@@ -945,8 +942,8 @@ pub fn rmhd_bcell_from_bface_gr_gv(
         .collect();
     // interpolate each in-plane cell component from its two bounding faces (arithmetic average;
     // metric-free — the cell field is a derived reconstruction / c2p quantity holding no conserved status). NO
-    // energy patch: tau carries the magnetic energy and is conserved by the Godunov flux;
-    // the old metric-weighted `nrg += 1/2 d(gamma_ij B^i B^j)` double-accounted it non-conservatively.
+    // energy patch: tau carries the magnetic energy and is conserved by the godunov flux, so a
+    // metric-weighted `nrg += 1/2 d(gamma_ij B^i B^j)` would double-account it non-conservatively.
     let writes: Vec<(String, FieldBind, NodeId)> = axes
         .iter()
         .enumerate()
@@ -964,10 +961,10 @@ pub fn rmhd_bcell_from_bface_gr_gv(
 }
 
 /// the per-direction UCT flux/diffusion coefficients at the edge — the (a^L, a^R, d^L, d^R) of the
-/// master formula (Mignone & Del Zanna 2020, Eq. 30). `al`/`ar` are the advective flux weights of the
+/// master formula (mignone & del zanna 2020, Eq. 30). `al`/`ar` are the advective flux weights of the
 /// upwind/downwind states (a^L + a^R = 1); `dl`/`dr` the dissipative diffusion coefficients (equal
 /// for HLL/HLLC's symmetric advection, distinct for HLLD). THIS is the only solver-specific piece:
-/// HLL fills it from the fast speeds (regime-generic); HLLC/HLLD swap it for the contact/Alfvén-aware
+/// HLL fills it from the fast speeds (regime-generic); HLLC/HLLD swap it for the contact/alfven-aware
 /// coefficients (Eq. 38 / 44) — the SAME master EMF kernel consumes it.
 struct UctDir {
     al: Gv,
@@ -1044,8 +1041,8 @@ fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
     }
 }
 
-/// the UCT edge EMF in MASTER form (Mignone & Del Zanna 2020, Eq. 33) — the structure that
-/// generalizes across Riemann solvers by swapping only the per-direction (a^L, a^R, d) coefficients
+/// the UCT edge EMF in MASTER form (mignone & del zanna 2020, Eq. 33) — the structure that
+/// generalizes across riemann solvers by swapping only the per-direction (a^L, a^R, d) coefficients
 /// (`uct_*_coeffs`). for the out-of-plane (z) edge:
 /// ```text
 ///   Ez = -vbar_x (a^L_x B_y^E + a^R_x B_y^W) + d_x (B_y^E - B_y^W)   [x: advect + diffuse B_y]
@@ -1108,7 +1105,7 @@ pub fn rmhd_edge_emf_uct_gv(
     let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
     let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
     let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
-    // SOLVER-SPECIFIC coefficients (HLL here; swap uct_hll_coeffs -> hllc/hlld later).
+    // the SOLVER-SPECIFIC coefficients; HLL here, and the only piece an hllc/hlld variant replaces.
     let cx = uct_hll_coeffs(apx, amx);
     let cy = uct_hll_coeffs(apy, amy);
     // upwind transverse velocities (Eq. 29): vbar_x upwind in x (alpha^+ carries the West/left state),
@@ -1120,7 +1117,7 @@ pub fn rmhd_edge_emf_uct_gv(
     // VERIFIED vs the CT curl: Ez[i,j] is the corner (i-1/2,j-1/2); B_y is at the corner's y but
     // offset +-1/2 in x (recon along x = its transverse), B_x at the corner's x offset +-1/2 in y.
     // one-sided minmod-theta extrapolation: +1/2 toward the edge from the lower face, -1/2 from the
-    // upper. needs the 2nd transverse neighbour -> bface allocated with +-2 transverse halo.
+    // upper. needs the 2nd transverse neighbor -> bface allocated with +-2 transverse halo.
     let theta = Gv::scalar("theta");
     let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| -> Gv {
         let off = |d: i32| -> Vec<i32> {
@@ -1343,7 +1340,7 @@ pub fn rmhd_edge_emf_uct_gr_3d_gv(
 /// VERIFIED on the field-loop test). `base` the face offset; `axis` the reconstruction direction (the
 /// face's TRANSVERSE: x for B_y on y-faces, y for B_x on x-faces); `sign` = +1 reconstructs +1/2
 /// toward the edge from the lower face, -1 reconstructs -1/2 from the upper. minmod-theta slope;
-/// needs the 2nd transverse neighbour, hence bface's +-2 transverse halo.
+/// needs the 2nd transverse neighbor, hence bface's +-2 transverse halo.
 fn recon_face_to_edge(
     ndim: usize,
     theta: Gv,
@@ -1391,7 +1388,7 @@ fn uct_master_emf(
     // a^L (= alpha^+/sum) weights the UPWIND face: West for +x (a^L -> by_w), South for +y (a^L -> bx_s)
     // — CONSISTENT with the diffusion's d^L->West/d^R->East pairing and with vbar (apx*vx_w). pairing
     // a^L to the downwind face is anti-upwind: invisible for symmetric speeds (a^L==a^R, subsonic OT)
-    // but ADVECTS THE DOWNWIND state at supersonic Mach -> instability (the field-loop blow-up). the
+    // but ADVECTS THE DOWNWIND state at supersonic mach -> instability (the field-loop blow-up). the
     // single x-upwound vbar (NOT the literal W/E-distinct Eq:UCT_HLL2) is retained: the latter was
     // implemented and made OT noisier (the upwinding supplies smoothing the bare master form lacks).
     let adv_x = zero_g - vbar_x * (cx.al * by_w + cx.ar * by_e);
@@ -1473,7 +1470,7 @@ pub(crate) fn hlld_wave_sum_terms(
         + alam_r * (bt_r - bstar_r)
 }
 
-/// proof entry point for the HLLD wave-sum dissipation-sign pairing (M8). traces `hlld_wave_sum_terms`
+/// proof entry point for the HLLD wave-sum dissipation-sign pairing. traces `hlld_wave_sum_terms`
 /// in ISOLATION with symbolic leaves: the five staggered / star transverse fields
 /// {bt_l, bstar_l, bc, bstar_r, bt_r} are the LinForm "fields", the four ABSOLUTE fan speeds
 /// {alam_l, aalf_l, aalf_r, alam_r} the opaque scalars. because the wave-sum is LINEAR in the fields,
@@ -1581,7 +1578,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
     let amx = zero_g.max(neg_min4("e_wsl1", "wsl_p1"));
     let apy = zero_g.max(max4("e_wsr2", "wsr_p2"));
     let amy = zero_g.max(neg_min4("e_wsl2", "wsl_p2"));
-    // per-FACE HLLC coefficients: each face uses ITS OWN two cells (first-order L/R) + Davis face
+    // per-FACE HLLC coefficients: each face uses ITS OWN two cells (first-order L/R) + davis face
     // speeds (s_r = max(0, ws_r^L, ws_r^R), s_l = min(0, ws_l^L, ws_l^R)) so lstar = m_n^hll/rho^hll
     // is CONSISTENT (the contact stays inside the fan -> no degeneracy blow-up). then the diffusion
     // is MAX-combined to the edge (the maximal-diffusion edge reconstruction). vn/bn read the normal
@@ -1660,7 +1657,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
     )
 }
 
-/// the NMHD UCT-HLLD edge EMF — Mignone & Del Zanna (2020), reproduced VERBATIM. NO liberties, NO
+/// the NMHD UCT-HLLD edge EMF — mignone & del zanna (2020), reproduced VERBATIM. NO liberties, NO
 /// floors. the composition is the solver-agnostic MASTER form (eq:emf2D, = `uct_master_emf`,
 /// byte-identical structure to UCT-HLL); per the paper, the ONLY solver-specific part is the per-face
 /// (a,d) coefficients — the five-wave HLLD fan (eq:UCT_HLLD_ad, eq:UCT_HLLD_nu, eq:By_chi). edge
@@ -1668,7 +1665,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(
 /// on the advective `a` (eq:dEW). upwind transverse velocity `vbar` (eq:vt), shared with UCT-HLL.
 /// NO floor on rho^{*s}: physical states give rho^{*s} > 0; the degenerate guard (nu* = 0 when the
 /// rotational waves collapse, eps = 1e-9) is the ONLY safeguard. zeroth order = R+/- reconstruction
-/// is identity (theta = 0). Mignone & Del Zanna method 2.
+/// is identity (theta = 0). mignone & del zanna method 2.
 pub fn nmhd_edge_emf_uct_hlld_gv(
     ndim: usize,
     g1: usize,
@@ -1704,8 +1701,8 @@ pub fn nmhd_edge_emf_uct_hlld_gv(
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
     // PLM reconstruction of a CELL field to a face — identical to the gas flux's plm_theta_gv (same
-    // theta, same limiter: theta<0 selects van Leer). THE FIX: M&DZ feed the edge-EMF fan the SAME
-    // reconstructed L/R face states the 1D gas Riemann solves (Eq. 29 + the per-face Riemann input),
+    // theta, same limiter: theta<0 selects van leer). the edge-EMF fan is fed the SAME
+    // reconstructed L/R face states the 1D gas riemann solves (Eq. 29 + the per-face riemann input),
     // NOT cell-centered values — cell states make the EMF fan inconsistent with the flux at sharp
     // reconstruction, which is the OT/field-loop checkerboard. L uses sign +1 (reconstruct toward the
     // +naxis face), R uses -1.
@@ -1755,8 +1752,9 @@ pub fn nmhd_edge_emf_uct_hlld_gv(
     let nhat_x = Tensor::<Gv, 3>::unit(0);
     let nhat_y = Tensor::<Gv, 3>::unit(1);
     // per-FACE UCT-HLLD coefficients (a^L, d^L, d^R) from the RECONSTRUCTED L/R states
-    // (eq:UCT_HLLD_ad via hlld_newtonian_coeffs) — the EMF fan is now IDENTICAL to the gas flux's at
-    // the same reconstructed face state (the CT-consistency M&DZ require). NO clamp.
+    // (eq:UCT_HLLD_ad via hlld_newtonian_coeffs) — the EMF fan is IDENTICAL to the gas flux's at
+    // the same reconstructed face state, which is the CT-consistency mignone & del zanna require.
+    // NO clamp.
     let hlld_face = |l: &[i32],
                      r: &[i32],
                      naxis: usize,
@@ -1841,7 +1839,7 @@ pub fn nmhd_edge_emf_uct_hlld_gv(
 }
 
 /// the ISOTHERMAL UCT-HLLD edge EMF (IMHD). twin of `nmhd_edge_emf_uct_hlld_gv` but the per-face fan
-/// is `hlld_isothermal_coeffs` (M&DZ 2020 Appendix A: no contact mode -> chi~^s uses the HLL central
+/// is `hlld_isothermal_coeffs` (M&DZ 2020 appendix A: no contact mode -> chi~^s uses the HLL central
 /// state, a/d/nu unchanged) and the prim has NO pressure (`Isothermal{cs}`, `IsoMhdPrim`). everything
 /// else — staggered-B recon to the edge, the single-vbar advection, the master composition — matches
 /// the NMHD kernel verbatim.
@@ -1990,8 +1988,8 @@ pub fn imhd_edge_emf_uct_hlld_gv(
     )
 }
 
-/// the RELATIVISTIC UCT-HLLD edge EMF (RMHD). built from the WAVE-SUM dissipative flux (Mignone &
-/// Del Zanna 2020 Eq. 39 + MUB09 star states). the classical coefficient form (Eq. 44) bakes in a
+/// the RELATIVISTIC UCT-HLLD edge EMF (RMHD). built from the WAVE-SUM dissipative flux (mignone &
+/// del zanna 2020 Eq. 39 + MUB09 star states). the classical coefficient form (Eq. 44) bakes in a
 /// CLASSICAL velocity-chi that is invalid relativistically and fails the
 /// energy-telescoping property, so it is unusable here.
 ///
@@ -2005,9 +2003,9 @@ pub fn imhd_edge_emf_uct_hlld_gv(
 ///             + |lambda^{sR}|(B_t^{sR}-B_c) + |lambda^R|(B_t^R-B_t^{sR}) ]
 /// ```
 /// `B_t^{sL,sR}` single-star (`hlld_rmhd_states.bstar`), `B_c` contact (`.bc`); `lambda` fast (`lam`),
-/// `lambda^{s}` Alfven (`alf`). BOUNDED by construction (field differences times |speed| — no ratio,
+/// `lambda^{s}` alfven (`alf`). BOUNDED by construction (field differences times |speed| — no ratio,
 /// no 1/B_t, no floor, no clamp). reduces EXACTLY to `-F_hlld_rmhd[B_t]` in 1D (verified to machine
-/// precision). the STAGGERED transverse face fields are the Riemann L/R (CT consistency, M&DZ p.8) so
+/// precision). the STAGGERED transverse face fields are the riemann L/R (CT consistency, M&DZ p.8) so
 /// Phi damps the staggered checkerboard; cell velocities/rho/pre are the 2-cell edge average. gated on
 /// `success`: where the secant fails, Phi -> the finite HLL dissipation (the lam are always finite).
 pub fn rmhd_edge_emf_uct_hlld_gv(
@@ -2043,9 +2041,9 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    // PLM-reconstruct a CELL field to a face (same theta + limiter as the gas flux). the Mignone &
-    // Del Zanna exact recipe: the wave-sum's per-face Riemann must use the SAME reconstructed L/R states
-    // the gas flux solves; a 2-cell-averaged single edge Riemann uses cell states that make the EMF fan
+    // PLM-reconstruct a CELL field to a face (same theta + limiter as the gas flux). the mignone &
+    // del zanna exact recipe: the wave-sum's per-face riemann must use the SAME reconstructed L/R states
+    // the gas flux solves; a 2-cell-averaged single edge riemann uses cell states that make the EMF fan
     // inconsistent with the flux at sharp reconstruction (the plm=2 checkerboard, the relativistic D1).
     let theta = Gv::scalar("theta");
     let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {
@@ -2064,7 +2062,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
         q0 + Gv::from_f64(0.5 * sign) * slope
     };
     // RMHD prim reconstructed to ONE side of a face; the face-NORMAL and the dissipated TRANSVERSE B
-    // are both overridden with the staggered div-free values (constant-B_n Riemann; the transverse is
+    // are both overridden with the staggered div-free values (constant-B_n riemann; the transverse is
     // the staggered face that gets dissipated). L uses sign +1 (toward +naxis face), R uses -1.
     let prim_face = |base: &[i32],
                      naxis: usize,
@@ -2108,7 +2106,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
     let bx_s_face = gv_field_at("e_bface_a", "bface_a", ndim, &se);
     let by_w_face = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
     let by_e_face = gv_field_at("e_bface_b", "bface_b", ndim, &ne);
-    // the wave-sum dissipative flux Phi (M&DZ Eq. 39) for a Riemann whose transverse component is `t`,
+    // the wave-sum dissipative flux Phi (M&DZ Eq. 39) for a riemann whose transverse component is `t`,
     // with staggered endpoints `bt_l`,`bt_r` and the single-/double-star fields from `st`. gated on
     // `success` -> HLL dissipation (NaN-safe true select; the HLL branch uses only the finite lam).
     let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv| -> Gv {
@@ -2129,7 +2127,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
         let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // x-Riemann dissipates B_y (component 1), normal B_x (0). PER-FACE: North (NW->NE) and South
+    // x-riemann dissipates B_y (component 1), normal B_x (0). PER-FACE: North (NW->NE) and South
     // (SW->SE), each from reconstructed states (matching the gas flux); Phi_x = 1/2(Phi_N + Phi_S)
     // (M&DZ Eq. 34 edge average). normal B_x = the staggered FACE B_x; transverse B_y = by_w / by_e.
     let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
@@ -2156,7 +2154,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
         wave_sum(&st_xn, 1, by_w, by_e),
         wave_sum(&st_xs, 1, by_w, by_e),
     );
-    // y-Riemann dissipates B_x (component 0), normal B_y (1). PER-FACE: West (SW->NW) and East
+    // y-riemann dissipates B_x (component 0), normal B_y (1). PER-FACE: West (SW->NW) and East
     // (SE->NE). normal B_y = the staggered FACE B_y; transverse B_x = bx_s / bx_n.
     let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
     let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
@@ -2200,9 +2198,9 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
 }
 
 /// the CURVED-SPACETIME UCT-HLLD edge EMF (the wave-sum dissipative form, M&DZ Eq. 39) for the
-/// 2.5D (r, theta) poloidal plane — the sharp, Alfven-resolving GR-UCT EMF. mirrors the flat
+/// 2.5D (r, theta) poloidal plane — the sharp, alfven-resolving GR-UCT EMF. mirrors the flat
 /// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (GR-HLLD): (1) the per-face
-/// HLLD Riemann uses the ORTHONORMAL-frame MUB09 solver `hlld_rmhd_states_gr_ortho(.., &face_metric)`
+/// HLLD riemann uses the ORTHONORMAL-frame MUB09 solver `hlld_rmhd_states_gr_ortho(.., &face_metric)`
 /// — the flat star fields + speeds map back to the coordinate frame (fields /sqrt(g_i), speeds
 /// /sqrt(g_n)) so the wave-sum telescopes EXACTLY to the coordinate HLLD B_t flux (proven,
 /// riemann/hlld.rs); (2) the advective velocity is the transport velocity vtilde = alpha v - beta
@@ -2211,7 +2209,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(
 /// (3) the whole coordinate EMF is densitized by sqrt(gamma)(corner) -> Etilde_phi (the same corner-
 /// densitization as the GR-UCT-HLL EMF; the corner-averaged Phi (Eq. 34) is a corner quantity).
 /// SCHWARZSCHILD + SPINNING KERR — the kerr-schild 2D MHD row is unbaked. the per-face metrics sit at
-/// each Riemann's face center, matching the gas HLLD flux. baked per spacing.
+/// each riemann's face center, matching the gas HLLD flux. baked per spacing.
 pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     spacetime: Spacetime,
     coords: Coords,
@@ -2259,7 +2257,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     let r_f = gv_axis_face_at(0, spacing[0], 0);
     let th_f = gv_axis_face_at(1, spacing[1], 0);
     // the face spatial metric (for the tetrad fan) + the (alpha, sqrt(gamma), FULL shift) ADM triad at
-    // a point, chart-generic via [`gr_spatial_metric_at`] / [`gr_adm_at`]: diagonal Schwarzschild/disk,
+    // a point, chart-generic via [`gr_spatial_metric_at`] / [`gr_adm_at`]: diagonal schwarzschild/disk,
     // the non-diagonal cartesian/kerr gamma, and the KS multi-axis shift alike.
     let metric_at = |c0: Gv, c1: Gv| -> SpatialMetric<Gv, 3> {
         gr_spatial_metric_at(spacetime, coords, gr_plane_pos(coords, axes, c0, c1))
@@ -2268,8 +2266,8 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, c0, c1))
     };
     // the world position (grid-0 coord, grid-1 coord) of a face point: grid axis `fa` sits on a FACE
-    // (offset `fo`), the OTHER grid axis on a CELL centre (offset `co`). feeds metric_at / adm_at at
-    // each Riemann's own face centre.
+    // (offset `fo`), the OTHER grid axis on a CELL center (offset `co`). feeds metric_at / adm_at at
+    // each riemann's own face center.
     let face_cell = |fa: usize, fo: i64, co: i64| -> (Gv, Gv) {
         let ca = 1 - fa;
         let cell = |d: usize, o: i64| {
@@ -2299,7 +2297,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     // the reconstructed face prim in WORLD component order: vel_p1/p2/out carry the physical
     // components (pc1, pc2, out), so place each at its world index. the staggered normal face-B
     // `bn` overrides the physical normal component `n_phys`, the transverse edge-B `bt` the
-    // transverse `t_phys` — both world component indices (pc for the active Riemann).
+    // transverse `t_phys` — both world component indices (pc for the active riemann).
     let prim_face = |base: &[i32],
                      naxis: usize,
                      sign: f64,
@@ -2363,7 +2361,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // the grid-g1-face Riemann (world normal pc1) at its two grid-g2 cell centres (N=0, S=-1): the
+    // the grid-g1-face riemann (world normal pc1) at its two grid-g2 cell centers (N=0, S=-1): the
     // fan solves along the world axis pc1 and rides the moving-interface speed vf = beta^{pc1}/alpha.
     // its wave-sum feeds the pc2 (transverse) field flux, read at the world index pc2 of the states.
     let (an0, an1) = face_cell(g1, 0, 0);
@@ -2382,7 +2380,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         wave_sum(&st_xn, pc2, by_w, by_e, vf_xn),
         wave_sum(&st_xs, pc2, by_w, by_e, vf_xs),
     );
-    // the grid-g2-face Riemann (world normal pc2) at its two grid-g1 cell centres (W=-1, E=0): vf =
+    // the grid-g2-face riemann (world normal pc2) at its two grid-g1 cell centers (W=-1, E=0): vf =
     // beta^{pc2}/alpha (zero on the spherical polar angle and the disk azimuth, nonzero on cartesian
     // y and cylindrical z). its wave-sum feeds the pc1 field flux (world index pc1 of the states).
     let (bw0, bw1) = face_cell(g2, 0, -1);
@@ -2423,7 +2421,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
 
 /// the CURVED-SPACETIME UCT-HLLD edge EMF for the FULL 3D grid, along edge axis `dir` — the
 /// wave-sum dissipative form (M&DZ Eq. 39) with the three GR generalizations of the 2D builder
-/// (`rmhd_edge_emf_uct_hlld_gr_gv`): per-face ORTHONORMAL-frame MUB09 fans at each Riemann's own
+/// (`rmhd_edge_emf_uct_hlld_gr_gv`): per-face ORTHONORMAL-frame MUB09 fans at each riemann's own
 /// face metric, the transport velocity vtilde = alpha v - beta with the fan speeds relative to the
 /// moving interface vf = beta^n/alpha, and the corner sqrt(gamma) densitization. identity chart
 /// only (physical component == grid axis): the edge is cell-centered along `dir` and cornered on
@@ -2484,7 +2482,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
     let metric_at =
         |x: Tensor<Gv, 3>| -> SpatialMetric<Gv, 3> { gr_spatial_metric_at(spacetime, coords, x) };
     // the 3d position of a face point: grid axis `fa` on a FACE (offset `fo`), the
-    // OTHER transverse axis on a cell centre (offset `co`), the edge axis cell-centered.
+    // OTHER transverse axis on a cell center (offset `co`), the edge axis cell-centered.
     let face_pos = |fa: usize, fo: i64, co: i64| -> Tensor<Gv, 3> {
         let ca = if fa == g1 { g2 } else { g1 };
         let mut c = [Gv::ZERO; 3];
@@ -2572,7 +2570,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
         let phi_hll = uct_hll_coeffs(ap, am).dl * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // the grid-g1-face Riemann (world normal pc1) at its two grid-g2 cell centres.
+    // the grid-g1-face riemann (world normal pc1) at its two grid-g2 cell centers.
     let xn_pos = face_pos(g1, 0, 0);
     let (a_xn, _, b_xn) = gr_adm_at(spacetime, coords, xn_pos);
     let vf_xn = b_xn[pc1] / a_xn;
@@ -2589,7 +2587,7 @@ pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
         wave_sum(&st_xn, pc2, by_w, by_e, vf_xn),
         wave_sum(&st_xs, pc2, by_w, by_e, vf_xs),
     );
-    // the grid-g2-face Riemann (world normal pc2) at its two grid-g1 cell centres.
+    // the grid-g2-face riemann (world normal pc2) at its two grid-g1 cell centers.
     let yw_pos = face_pos(g2, 0, -1);
     let (a_yw, _, b_yw) = gr_adm_at(spacetime, coords, yw_pos);
     let vf_yw = b_yw[pc2] / a_yw;
@@ -2658,7 +2656,7 @@ pub fn rmhd_average_efield_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) 
 /// is read at the same offsets and the edge is first-order iff ANY of the four incident cells is
 /// flagged. `e_fo` is read+write IN PLACE. after the splice the curl of this single-valued edge EMF
 /// gives flagged cells first-order (diffused, recoverable) B while leaving non-flagged faces at the
-/// high-order value (I5) and staying divergence-free (I2).
+/// high-order value and preserving div(B) = 0.
 pub fn fofc_emf_splice_gv(
     ndim: usize,
     g1: usize,

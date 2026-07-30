@@ -1,20 +1,14 @@
 // =============================================================================
-// !!! CONTRACT NOTE: the excision fill is a DIRICHLET VACUUM SINK (rho = 1e-10,
-// v = 0, p = 1e-12; gv_excise.rs), NOT the onion-sweep outward copy this file's
-// prose describes — a uniform state inside the sphere is rewritten to the floor,
-// not preserved. the cpu-vs-gpu relative assertions below remain valid, but this
-// file is cfg-stripped on non-cuda hosts and has NOT been compile-checked since
-// the redesign: the first cuda session must re-verify it against the cpu twin
-// (excise_dispatch.rs, which asserts the floor bitwise).
 // excise_dispatch_gpu.rs
 //
 // the device twin of excise_dispatch: horizon excision on an origin-containing
 // cartesian kerr-schild box, run on device memory (NVRTC render of the AOT
 // excise_fill / excise_writeback / excise_p2c kernels) and asserted BIT-CLOSE to
-// the CPU pass. the onion-sweep fill + valencia rebuild + the source-CFL mask
-// behave identically on device: the far field stays untouched and the excised
-// sphere is rewritten the same way it is on host. these emit paths had never
-// executed on a device before this gate.
+// the CPU pass. the excision fill is a DIRICHLET VACUUM SINK (rho = 1e-10,
+// v = 0, p = 1e-12; gv_excise.rs): every cell inside the excised sphere is
+// rewritten to that floor each pass. the fill + valencia rebuild + the
+// source-CFL mask behave identically on device — the far field stays untouched
+// and the excised sphere is rewritten the same way it is on host.
 //
 // runs on the host GPU (NVRTC needs no nvcc). run:
 //   cargo test -p symbi --features cuda --test excise_dispatch_gpu

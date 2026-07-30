@@ -243,7 +243,7 @@ class CategoryRenderer:
         line = f"| {name.ljust(28, '.')} {value}"
         logger.info(line)
 
-        # If there's a description, add it on the next line
+        # if there's a description, add it on the next line
         if description:
             desc_line = f"|{' ' * 30}{description}"
             logger.info(desc_line)
@@ -423,7 +423,7 @@ class SimulationParameterSummary:
 
         volume = x1_size * x2_size * x3_size
         summary["Physical domain"] = (
-            f"({x1_size:.1f} × {x2_size:.1f} × {x3_size:.1f}) = {volume:.1f} cubic units"
+            f"({x1_size:.1f} x {x2_size:.1f} x {x3_size:.1f}) = {volume:.1f} cubic units"
         )
 
         # add cell metrics
@@ -553,12 +553,12 @@ def print_simulation_parameters(
     local_params = params.copy()
     local_params["gpu_block_dims"] = gpu_block_dims
     try:
-        # Import locally to avoid dependency issues
+        # import locally to avoid dependency issues
         from .rich_summary import print_rich_simulation_parameters
 
         print_rich_simulation_parameters(local_params)
     except ImportError:
-        # Fall back to the original version if Rich is not available
+        # fall back to the original version if Rich is not available
         summary = SimulationParameterSummary()
         summary_string = summary.generate_parameter_summary(local_params)
         print(summary_string)

@@ -5,14 +5,13 @@
 // dedup by SOURCE CONTENT; a user-supplied name alone does not distinguish
 // two sources. without this:
 //
-//   1. two callers passing the same `kernel_name` (or `cache_key`) but
-//      distinct source strings would silently share a cache slot;
-//   2. whoever compiled first wins; the other's launch attempts the
-//      first's cached PTX with the SECOND's argument layout;
-//   3. CUDA returns `CUDA_ERROR_INVALID_VALUE` from `cuLaunchKernel`,
-//      or worse, a wrong-result kernel that silently corrupts data;
-//   4. test-ORDERING becomes correctness-critical — a classic distributed-
-//      state footgun.
+//   - two callers passing the same `kernel_name` (or `cache_key`) but
+//     distinct source strings would silently share a cache slot;
+//   - whoever compiled first wins; the other's launch attempts the
+//     first's cached PTX with the SECOND's argument layout;
+//   - CUDA returns `CUDA_ERROR_INVALID_VALUE` from `cuLaunchKernel`,
+//     or worse, a wrong-result kernel that silently corrupts data;
+//   - test-ORDERING becomes correctness-critical.
 //
 // the fix is content-addressed cache keys: `compute_internal_cache_key(name,
 // content) = "{name}#{hash(content):016x}"`. distinct contents always

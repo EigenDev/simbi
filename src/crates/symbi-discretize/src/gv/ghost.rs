@@ -101,7 +101,7 @@ pub fn neumann_ghost_fill_gv(
 /// the ROBIN lattice-map ghost fill: prescribe `a*U_face + b*(dU/dn) = c` per primitive variable at
 /// the boundary FACE, with the face midway between the edge cell and the ghost (separation `dist`).
 /// reuses the outflow EDGE source; the per-variable coefficients are `rob_{a,b,c}_*`. degenerates to
-/// Dirichlet (`b = 0`) and Neumann (`a = 0`) per `symbi_hydro::boundary_term::robin_ghost`.
+/// dirichlet (`b = 0`) and neumann (`a = 0`) per `symbi_hydro::boundary_term::robin_ghost`.
 pub fn robin_ghost_fill_gv(
     ndim: usize,
     ncomp: usize,
@@ -254,7 +254,7 @@ pub fn imhd_ghost_fill_gv(
 /// (the c2p metric point, so the cellwise cancellation transfers at roundoff) and
 /// v^r(ghost) carrying the wall map's vel_sign. q(src) needs the source cell's position, an
 /// integer map expression — `gv_axis_face_at_index` evaluates the coordinate map there.
-/// reduces to the plain copy when gamma_{r phi} = 0, so it is baked for Kerr only.
+/// reduces to the plain copy when gamma_{r phi} = 0, so it is baked for kerr only.
 pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     use symbi_geometry::{KerrKS, Metric};
     begin_trace();
@@ -322,7 +322,7 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, Fi
 ///   B^phi(ghost) = [B^phi(src) + q(src) B^r(src)] - q(ghost) B^r(ghost).
 /// the in-plane B^r/B^theta pick up the wall map's vel_sign like the velocity; q is at the same
 /// volume-weighted centroid the velocity copy + the c2p use. reduces to the plain copy at
-/// gamma_{r phi} = 0, so it is baked for Kerr only. DOF = 3 swirl (2D grid).
+/// gamma_{r phi} = 0, so it is baked for kerr only. DOF = 3 swirl (2D grid).
 pub fn rmhd_kerr_ghost_fill_gv(
     spacing: &[Spacing],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {

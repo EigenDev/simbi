@@ -1,7 +1,7 @@
 // =============================================================================
 // evolve_runtime_source_iso.rs
 //
-// **Gap B regime-agnosticism proof**: the SAME runtime user-source mechanism that drives the
+// the runtime user-source mechanism is regime-agnostic: the SAME mechanism that drives the
 // adiabatic set (evolve_runtime_source.rs) drives the ISOTHERMAL set with NO energy equation. a
 // force `a = [p0, 0]` (p0 = 0.5) loaded at runtime (python -> json -> SourceConfig) accelerates the
 // gas; iso momentum is rho*v, so total x-momentum grows as rho*g*t*ncells exactly — and crucially

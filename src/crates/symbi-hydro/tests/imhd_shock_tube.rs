@@ -145,7 +145,7 @@ fn imhd_hlld_is_clean_shock_capturing() {
     let by_e = interior(&p_hlle, |p| p.mag[1]);
     let by_d = interior(&p_hlld, |p| p.mag[1]);
 
-    // 1) PHYSICAL everywhere (isothermal density = HLL average -> stays positive).
+    // - PHYSICAL everywhere (isothermal density = HLL average -> stays positive).
     for (i, pi) in p_hlld[NG..NG + N].iter().enumerate() {
         assert!(
             pi.rho.is_finite() && pi.rho > 0.0,
@@ -154,12 +154,12 @@ fn imhd_hlld_is_clean_shock_capturing() {
         );
     }
 
-    // 2) Bx (normal field) stays EXACTLY constant (F(Bx)=0 in 1D).
+    // - Bx (normal field) stays EXACTLY constant (F(Bx)=0 in 1D).
     for pi in &p_hlld[NG..NG + N] {
         assert!((pi.mag[0] - 3.0).abs() < 1e-12, "Bx drifted: {}", pi.mag[0]);
     }
 
-    // 3) NON-OSCILLATORY: TV(hlld) <~ TV(hlle) (the monotone baseline).
+    // - NON-OSCILLATORY: TV(hlld) <~ TV(hlle) (the monotone baseline).
     let (tv_re, tv_rd) = (total_variation(&rho_e), total_variation(&rho_d));
     let (tv_be, tv_bd) = (total_variation(&by_e), total_variation(&by_d));
     eprintln!("[imhd] TV(rho): hlle={tv_re:.4} hlld={tv_rd:.4}");
@@ -173,12 +173,12 @@ fn imhd_hlld_is_clean_shock_capturing() {
         "HLLD By OSCILLATES: TV {tv_bd:.4} vs hlle {tv_be:.4}"
     );
 
-    // 4) SAME solution as HLLE, only sharper: small L1 distance.
+    // - SAME solution as HLLE, only sharper: small L1 distance.
     let l1 = l1_diff(&rho_d, &rho_e);
     eprintln!("[imhd] L1(rho_hlld - rho_hlle) = {l1:.4}");
     assert!(l1 < 0.05, "HLLD rho diverges from HLLE: L1 {l1}");
 
-    // 5) HLLD actually SHARPENS the discontinuity, confirming the HLLD path is active.
+    // - HLLD actually SHARPENS the discontinuity, confirming the HLLD path is active.
     let max_grad = |f: &[f64]| {
         f.windows(2)
             .map(|w| (w[1] - w[0]).abs())
@@ -191,7 +191,7 @@ fn imhd_hlld_is_clean_shock_capturing() {
         max_grad(&rho_e),
     );
 
-    // 6) the wave structure formed: density develops an intermediate state between L and R.
+    // - the wave structure formed: density develops an intermediate state between L and R.
     let rho_mid = rho_d[N / 2];
     assert!(
         rho_mid > 0.1 && rho_mid < 1.0,

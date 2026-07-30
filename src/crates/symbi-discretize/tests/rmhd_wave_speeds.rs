@@ -221,7 +221,7 @@ fn run_map(inputs: &[(&str, Vec<f64>)], gamma: f64) -> Vec<f64> {
 fn rmhd_wave_speed_map_bounds_cpp_quartic() {
     // the 3D CFL map (RMHD is 3D): lambda = max_d (max(|lambda_-|, |lambda_+|) * inv_dx_d).
     // the map traces `rmhd_magnetosonic_cfl_speeds` (the cheap c_f^2 upper bound); the
-    // exact Mignone & Del Zanna quartic stays on the Riemann/flux path. so the
+    // exact mignone & del zanna quartic stays on the riemann/flux path. so the
     // contract is CFL-SAFETY: the bound must never
     // UNDER-estimate the exact characteristic speed (an under-estimate would make dt too large
     // and the scheme unstable), and it must stay subluminal. both are validated per state.

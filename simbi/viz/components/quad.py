@@ -31,7 +31,7 @@ class QuadPlotProps(ComponentProps):
     alpha: float = 1.0
     plot_type: Literal["polar", "cartesian"] = "cartesian"
 
-    # Mesh visualization (optional)
+    # mesh visualization (optional)
     show_mesh_grid: bool = False
     mesh_color: str = "white"
     mesh_alpha: float = 0.3
@@ -111,9 +111,8 @@ class QuadPlotComponent(Component):
         if self._mesh and self._initialized:
             self._mesh.set_cmap(self._resolve_cmap())
             self._mesh.set_alpha(props.alpha)
-            # Other style updates can go here
 
-        # Handle mesh grid toggle
+        # handle mesh grid toggle
         if self.props.show_mesh_grid:
             self._draw_mesh_grid(self.last_x, self.last_y)
         else:
@@ -209,9 +208,9 @@ class QuadPlotComponent(Component):
         if self._mesh is None:
             raise RuntimeError("Mesh is not initialized. Call render() first.")
 
-        # Check if coordinates have changed
+        # check if coordinates have changed
         if not np.allclose(x, self.last_x) or not np.allclose(y, self.last_y):
-            # Coordinates changed: must remove and re-create mesh
+            # coordinates changed: must remove and re-create mesh
             if self._mesh in self.ax.collections:
                 self._mesh.remove()
             if self._mirror_mesh and self._mirror_mesh in self.ax.collections:
@@ -225,7 +224,7 @@ class QuadPlotComponent(Component):
                 shading=self.props.shading,
                 alpha=self.props.alpha,
             )
-            # Handle polar mirror (if needed)
+            # handle polar mirror (if needed)
             if self.ax.name == "polar":
                 self._mirror_mesh = self.ax.pcolormesh(
                     -x[::-1],
@@ -238,7 +237,7 @@ class QuadPlotComponent(Component):
             self.last_x = x
             self.last_y = y
         else:
-            # Just update values
+            # just update values
             self._mesh.set_array(values.ravel())
             if self._mirror_mesh:
                 self._mirror_mesh.set_array(values.ravel())

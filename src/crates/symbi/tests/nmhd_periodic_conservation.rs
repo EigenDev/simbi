@@ -1,14 +1,14 @@
 // =============================================================================
 // nmhd_periodic_conservation.rs
 //
-// regression pin for the staggered-bface ghost fill (the CT wrap-drift fix):
-// the bface transverse halo was never filled, so the transversely-extended
-// flux sweep read zero normal-B at every boundary-adjacent ghost face, the
-// boundary-edge EMFs were wrong from the first step, the two periodic wrap
-// copies of every face drifted apart, and the flux telescoping leaked mass
-// ~1e-9/step (hydro was exact; divB never noticed — CT preserves it for any
-// EMF). with the fill, the wrap copies stay BIT-identical by induction and
-// the periodic totals are conserved to machine precision.
+// regression pin for the staggered-bface ghost fill. an unfilled bface
+// transverse halo leaves the transversely-extended flux sweep reading zero
+// normal-B at every boundary-adjacent ghost face; the boundary-edge EMFs are
+// then wrong from the first step, the two periodic wrap copies of every face
+// drift apart, and the flux telescoping leaks mass ~1e-9/step (hydro stays
+// exact, and divB stays clean since CT preserves it for any EMF). with the
+// halo filled the wrap copies stay BIT-identical by induction and the periodic
+// totals are conserved to machine precision.
 //
 // pins, on a single-level orszag-tang run with periodic walls:
 //   (a) the bface transverse halo equals its periodic source exactly,

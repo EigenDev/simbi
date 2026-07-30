@@ -1,16 +1,16 @@
 // =============================================================================
 // error.rs
 //
-// shape-error reporting for the tensor IR. follows the spec's § 12.4
-// decision: a single ShapeError enum with rich variants, accumulated on
-// the Graph and drained at the macro boundary. builders return NodeId
+// shape-error reporting for the tensor IR: a single ShapeError enum with
+// rich variants, accumulated on the Graph and drained at the macro
+// boundary. builders return NodeId
 // unconditionally; on failure the error is pushed and the builder
 // emits a "poison" node whose type is whatever makes downstream code
 // fail gracefully (handled in graph.rs).
 //
 // each variant carries source spans where they're available. two-span
 // variants (DimMismatch, ElementMismatch) cite both conflicting nodes
-// so diagnostics can point at both, per § 12.3.
+// so diagnostics can point at both.
 // =============================================================================
 
 use proc_macro2::Span;
@@ -52,7 +52,7 @@ pub enum ShapeError {
         context: String,
     },
 
-    /// shapes weren't broadcast-compatible (per § 1.5 broadcast rule).
+    /// shapes weren't broadcast-compatible.
     BroadcastIncompatible {
         left: Vec<DimExpr>,
         right: Vec<DimExpr>,

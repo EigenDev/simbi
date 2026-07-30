@@ -921,11 +921,6 @@ def tabulated_3d(
     )
 
 
-def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:
-    """Map a function over expressions."""
-    return [f(expr) for expr in exprs]
-
-
 def floor(expr: Expr) -> Expr:
     """Floor function."""
     return Expr(expr._graph, expr._graph.add_node("floor", expr._node_id))

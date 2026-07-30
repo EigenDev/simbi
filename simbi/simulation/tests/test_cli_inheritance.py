@@ -1,12 +1,12 @@
 # =============================================================================
 # test_cli_inheritance.py
 #
-# regression: a subclass that overrides a core knob (e.g., `solver`) ONLY to
-# change its default must keep the base class's `cli=True`. otherwise the
-# Annotated override replaces the base metadata wholesale, dropping the cli
-# flag, so `--solver` is an unknown arg that `parse_known_args` silently
-# swallows — and the run uses the wrong riemann solver. the mro-aware
-# `_field_is_cli` restores the exposure (the child default/type still win).
+# a subclass that overrides a core knob (e.g., `solver`) ONLY to change its
+# default must keep the base class's `cli=True`. an Annotated override replaces
+# the base metadata wholesale, so without an mro-aware lookup the cli flag is
+# dropped, `--solver` becomes an unknown arg that `parse_known_args` silently
+# swallows, and the run uses the wrong riemann solver. `_field_is_cli` walks the
+# mro to keep the exposure (the child default/type still win).
 # =============================================================================
 from typing import Annotated
 
@@ -35,8 +35,8 @@ def test_non_cli_base_field_stays_hidden() -> None:
 
 
 def test_cli_solver_override_applies_to_real_config() -> None:
-    # the real regression: kh overrides solver's default to HLLC and drops
-    # cli=True. without the mro-aware fix, --solver is silently ignored.
+    # kh overrides solver's default to HLLC and drops cli=True from its Annotated
+    # metadata; without the mro walk, --solver is silently ignored.
     assert KelvinHelmholtz.from_cli([]).solver is Solver.HLLC
     assert KelvinHelmholtz.from_cli(["--solver", "hlle"]).solver is Solver.HLLE
     assert KelvinHelmholtz.from_cli(["--solver", "hllc"]).solver is Solver.HLLC

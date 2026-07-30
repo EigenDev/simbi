@@ -1464,7 +1464,7 @@ mod tests {
     fn hllc_wave_properties_clamp_is_identity_on_physical_state() {
         // physical gamma > 1 strong rarefaction: the radicand stays positive, so
         // the `.max(S::ZERO)` clamp is an IDENTITY. the f64 and Gv paths must
-        // agree, confirming the fix does not perturb non-degenerate states.
+        // agree: the clamp leaves non-degenerate states untouched.
         let gamma = 1.4_f64;
         let cs = (gamma * 1.0 / 1.0_f64).sqrt();
         let state = [1.0, 1.0, 1.0, 1.0, -3.0, 3.0, cs, cs, gamma];

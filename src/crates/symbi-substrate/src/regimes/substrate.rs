@@ -471,7 +471,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 }
                 outputs.push(&self.pre);
                 // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
-                // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
+                // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int \sqcup float
                 // coproduct).
                 let (ints, scalars) = resolve_params(
                     &name,

@@ -2,14 +2,14 @@
 // source_term_carrier.rs
 //
 // the source-term carrier + user-expression gates. two layers:
-//   1. built-in carrier-generic sources (`UniformAccel`, `PointMassGravity`) traced at S=Gv and
-//      rendered/evaluated, matching their analytical form (`S_mom_k = rho*g_ext_k`, etc.) — the
-//      f64 half lives in symbi-hydro (`source_term::tests`), so f64 == Gv == analytical from ONE
-//      definition, no separate eval path, no graph-divergence bug class.
-//   2. USER expressions bridged from a DAG (`expr_bridge`) + rendered through the SAME splice path
-//      (`splice_user_source_gv`): a raw user field codegens correctly, and the AXIOMATIC wrappers
-//      (`user_force_*` / `user_cooling_source`) enforce the work-energy coupling `S_nrg = rho*(a.v)`
-//      BY CONSTRUCTION — a user cannot desync energy from the force.
+//   - built-in carrier-generic sources (`UniformAccel`, `PointMassGravity`) traced at S=Gv and
+//     rendered/evaluated, matching their analytical form (`S_mom_k = rho*g_ext_k`, etc.) — the
+//     f64 half lives in symbi-hydro (`source_term::tests`), so f64 == Gv == analytical from ONE
+//     definition, no separate eval path, no graph-divergence bug class.
+//   - USER expressions bridged from a DAG (`expr_bridge`) + rendered through the SAME splice path
+//     (`splice_user_source_gv`): a raw user field codegens correctly, and the AXIOMATIC wrappers
+//     (`user_force_*` / `user_cooling_source`) enforce the work-energy coupling `S_nrg = rho*(a.v)`
+//     BY CONSTRUCTION — energy cannot desync from the force.
 // =============================================================================
 
 mod harness;

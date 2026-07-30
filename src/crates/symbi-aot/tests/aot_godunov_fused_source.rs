@@ -2,25 +2,25 @@
 // aot_godunov_fused_source.rs
 //
 // the FUSED-source godunov AOT-compiles to a single
-// Rust kernel that applies `div(F) + Σ spec_source + integrator` in ONE call.
+// Rust kernel that applies `div(F) + \sum spec_source + integrator` in ONE call.
 //
 //   - `iso_godunov_stage_with_uniform_accel_1d` — iso (mass + mom) + uniform
 //     external acceleration overlay (mom only; iso has no energy law).
 //   - `adiabatic_godunov_stage_with_uniform_accel_1d` — adiabatic + uniform
-//     accel overlays for BOTH momentum (S_mom = ρ·g_ext) AND energy
-//     (S_nrg = ρ·v·g_ext). proves the multi-source fusion is baked into
+//     accel overlays for BOTH momentum (S_mom = rho*g_ext) AND energy
+//     (S_nrg = rho*v*g_ext). proves the multi-source fusion is baked into
 //     the compiled kernel at build time.
 //
 // **what's validated**:
-//   1. each fused kernel resolves through the AOT registry (`kernel_by_name`)
-//      and the generated `pub fn ..__raw<S>(..)` signature — present means the
-//      build emitted, compiled, and registered.
-//   2. invoked on a uniform state with zero-flux inputs, the kernels produce
-//      EXACTLY the analytical source update (`mom_new = mom + dt·ρ·g_ext`
-//      and, for adiabatic, `nrg_new = nrg + dt·ρ·v·g_ext`). bit-exact at f64.
-//   3. the kernels also work at f32 (Scalar genericity through to the AOT
-//      artifact) — the SAME generated fn body, inferred for f32 from input
-//      buffers, produces the analytical update within f32 tol.
+//   - each fused kernel resolves through the AOT registry (`kernel_by_name`)
+//     and the generated `pub fn ..__raw<S>(..)` signature — present means the
+//     build emitted, compiled, and registered.
+//   - invoked on a uniform state with zero-flux inputs, the kernels produce
+//     EXACTLY the analytical source update (`mom_new = mom + dt*rho*g_ext`
+//     and, for adiabatic, `nrg_new = nrg + dt*rho*v*g_ext`). bit-exact at f64.
+//   - the kernels also work at f32 (Scalar genericity through to the AOT
+//     artifact) — the SAME generated fn body, inferred for f32 from input
+//     buffers, produces the analytical update within f32 tol.
 //
 // run: cargo test -p symbi-aot --test aot_godunov_fused_source
 // =============================================================================
@@ -31,7 +31,7 @@ use symbi_aot::{NamedKernel, kernel_by_name};
 // drive the forward-Euler stage (a0=0, ac=1): u_n is multiplied by 0, so it is set to the current
 // cons (start-of-step snapshot) and contributes nothing — the result is the pure euler update the
 // callers assert against. all buffers use lo=0 and extent = data.len().
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn iso_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
     mass_flux: &[S],
     mom_flux: &[S],
@@ -69,7 +69,7 @@ fn iso_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn adi_fused<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
     mass_flux: &[S],
     mom_flux: &[S],
@@ -271,7 +271,7 @@ fn adiabatic_aot_fused_step_applies_both_mom_and_nrg_overlays() {
             mom_out[i],
             mom_expected,
         );
-        // energy overlay: S_nrg = ρ · v · g_ext = ρ · (mom/ρ) · g_ext = mom · g_ext
+        // energy overlay: S_nrg = rho * v * g_ext = rho * (mom/rho) * g_ext = mom * g_ext
         let v_in = mom_in[i] / rho_in[i];
         let nrg_expected = nrg_in[i] + dt * rho_in[i] * v_in * g_ext_0;
         assert!(
@@ -331,7 +331,7 @@ fn iso_aot_fused_runs_at_f32() {
 #[test]
 fn bake_matrix_emits_every_regime_family_ndim_cell() {
     // **structural fingerprint**: the data-driven bake
-    // matrix in build.rs (REGIMES × FUSED_FAMILIES × ndim) must emit a
+    // matrix in build.rs (REGIMES x FUSED_FAMILIES x ndim) must emit a
     // kernel at every cell of the cube. asserts the loop walked the table
     // — adding a row to REGIMES or FUSED_FAMILIES MUST surface here as a
     // new kernel without any other change in the codebase.

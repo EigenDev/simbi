@@ -95,7 +95,7 @@ pub fn imhd_wave_speed_map_gv(
 // Gv metric (`cfl_inv_widths_gv`). NO Expr quartic, NO splice, NO hand-written iso speed.
 //
 // `axes[d]` is the COORDINATE gridded axis `d` maps to: identity for cartesian/spherical,
-// `[0, 2]` for the cyl r-z swirl. the Euler map reads the normal velocity `vel[axes[d]]`
+// `[0, 2]` for the cyl r-z swirl. the euler map reads the normal velocity `vel[axes[d]]`
 // directly (`wave_speeds_axis` reads only the normal) and leaves the non-gridded velocity
 // slots ZERO — so the swirl CFL reads v_r/v_z but never the folded v_phi, and those zeroed
 // slots never enter the graph (dead). the host reduces `lambda` by max -> dt = cfl/lambda_max.
@@ -128,7 +128,7 @@ fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
 /// evaluate the metric (lapse alpha, shift beta^r, the h_c = sqrt(gamma_cc) scale factors) at this
 /// radius — the uniform `x_lo + (i + 1/2) dx` formula evaluates the metric at ~r_min for EVERY cell
 /// on a log grid (alpha^2/beta^r/scale factors suppressed by f(r_min)/f(r)), overestimating dt into a
-/// silent CFL violation. bit-identical to the old uniform formula on a `Uniform` axis
+/// silent CFL violation. bit-identical to the plain uniform formula on a `Uniform` axis
 /// (`face_at(0) + 1/2 dx = x_lo + (i + 1/2) dx`). single source shared by every wave-speed map.
 fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
     let half = Gv::from_f64(0.5);
@@ -142,7 +142,7 @@ fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
     }
 }
 
-/// trace the COMPLETE ideal-gas Euler CFL wave-speed map at `S = Gv` — the Newtonian regime
+/// trace the COMPLETE ideal-gas euler CFL wave-speed map at `S = Gv` — the newtonian regime
 /// (which also drives the isothermal CFL at gamma->1) or `Rhd`. reads rho/pre + the gridded
 /// normal velocities `vel[axes[d]]` (non-gridded slots left ZERO; `wave_speeds_axis` reads
 /// only the normal, so they stay dead) + gamma, then folds `lambda = max_d (max(|sl|,|sr|) *
@@ -176,11 +176,11 @@ where
     for d in 0..ndim {
         let c = axes[d];
         let raw = Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
-        // Valencia storage: `prim.vel` is the CONTRAVARIANT v^i; the SR characteristic speed is a
+        // valencia storage: `prim.vel` is the CONTRAVARIANT v^i; the SR characteristic speed is a
         // function of the PHYSICAL velocity V^c = h_c v^c, with the metric scale factor h_c =
         // sqrt(gamma_cc). spherical GR: h_r = sqrt(gamma_rr) = 1/alpha (det-g-flat), h_theta = r,
         // h_phi = r sin(theta). the per-axis coordinate factor (alpha^2 radial / alpha angular) applied
-        // below completes the Banyuls-Font coordinate speed. flat -> h = 1 (untouched, bit-identical).
+        // below completes the banyuls-font coordinate speed. flat -> h = 1 (untouched, bit-identical).
         vel[c] = if matches!(spacetime, Spacetime::Minkowski) {
             raw
         } else {
@@ -214,10 +214,10 @@ where
     // otherwise — the static binding makes v_g exactly zero, and `s - 0` /
     // `|s|` are bit-identical).
     let half = Gv::from_f64(0.5);
-    // GR coordinate CFL: the Banyuls-Font coordinate signal speed
+    // GR coordinate CFL: the banyuls-font coordinate signal speed
     //   lambda_coord^c = alpha sqrt(gamma^{cc}) lambda^{SR} - beta^c.
-    // for the det-g-flat family (Schwarzschild, Kerr-Schild) the RADIAL factor alpha sqrt(gamma^{rr})
-    // = alpha^2 (Schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the ANGULAR factor = alpha. a
+    // for the det-g-flat family (schwarzschild, kerr-schild) the RADIAL factor alpha sqrt(gamma^{rr})
+    // = alpha^2 (schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the ANGULAR factor = alpha. a
     // ZERO-shift background keeps the multiplicative form `base * factor` (bit-identical to the
     // pre-genericization kernel); a SHIFTED background (kerr-schild beta^r != 0) subtracts beta^r per
     // characteristic root BEFORE the max|.|, which the multiplicative form cannot express. the lapse /
@@ -231,8 +231,8 @@ where
                 .iter()
                 .position(|&c| c == 0)
                 .expect("GR wave-speed map needs a radial axis");
-            // spacing-aware: the lapse/shift are evaluated at the geometric-mean radius on a log grid,
-            // not the uniform ~r_min the old `x_lo + (i+1/2) dx` gave (silent CFL violation on log GR).
+            // spacing-aware: the lapse/shift are evaluated at the geometric-mean radius on a log grid.
+            // the arithmetic `x_lo + (i+1/2) dx` sits at ~r_min there — a silent CFL violation.
             Some(gv_cell_center(d_r, spacing))
         }
     };
@@ -261,7 +261,7 @@ where
                 } else {
                     None
                 } {
-                    // zero shift (Schwarzschild + every angular axis): `base * factor` -> bit-identical.
+                    // zero shift (schwarzschild + every angular axis): `base * factor` -> bit-identical.
                     None => base * factor,
                     // shifted (kerr-schild radial): lambda_coord = factor*(s - vg) - beta^r, carried
                     // per characteristic root through the abs/max (the shift breaks the multiplicative
@@ -571,7 +571,7 @@ pub fn kerr_wave_speed_map_gv(
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
     // spacing-aware cell centers: the radial axis may be LOG (kerr log-radial is baked), so the
     // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius. theta is
-    // uniform -> bit-identical to the old midpoint.
+    // uniform -> its center is the plain arithmetic midpoint.
     let r = gv_cell_center(0, spacing);
     let th = gv_cell_center(1, spacing);
     let mass = Gv::scalar("schwarzschild_mass");
@@ -592,7 +592,7 @@ pub fn kerr_wave_speed_map_gv(
     (end_trace(), writes)
 }
 
-/// the Newtonian / isothermal CFL wave-speed map (gamma->1 drives isothermal, 1.4 adiabatic) —
+/// the newtonian / isothermal CFL wave-speed map (gamma->1 drives isothermal, 1.4 adiabatic) —
 /// `Newtonian::wave_speeds_axis` (`|v_d| + cs`) traced to the complete timestep kernel.
 pub fn iso_wave_speed_map_gv(
     coords: Coords,
@@ -611,7 +611,7 @@ pub fn iso_wave_speed_map_gv(
     )
 }
 
-/// the RHD CFL wave-speed map — the relativistic Mignone-Bodo per-axis speed (`Rhd::
+/// the RHD CFL wave-speed map — the relativistic mignone-bodo per-axis speed (`Rhd::
 /// wave_speeds_axis`, the SAME core the RHD flux's HLLE consumes) traced to the timestep kernel.
 pub fn rhd_wave_speed_map_gv(
     coords: Coords,
@@ -627,11 +627,11 @@ pub fn rhd_wave_speed_map_gv(
 /// (`rmhd_magnetosonic_cfl_speeds`). the CFL needs
 /// only a stable upper bound on the signal speed, and the bound is ~25x cheaper than the
 /// quartic (~30 ops + 1 sqrt vs ~750 ops + ~10 transcendentals, ALL of which trace into the
-/// kernel because `S::select` evaluates every arm). the quartic stays on the Riemann/flux
+/// kernel because `S::select` evaluates every arm). the quartic stays on the riemann/flux
 /// path (`rmhd_flux_gv` -> extremal_speeds), where HLLE diffusion needs the tight estimate.
 /// see docs/c9fbdcb_perf_study/02. reads the full 3-velocity + 3-magnetic-field (vsq/bsq).
 /// RMHD is fixed 3D (identity axes); the folded geometry + max-reduction is the same single-
-/// trace form as the Euler map.
+/// trace form as the euler map.
 pub fn rmhd_wave_speed_map_gv(
     coords: Coords,
     spacing: &[Spacing],
@@ -666,7 +666,7 @@ pub fn rmhd_wave_speed_map_gv(
     (end_trace(), writes)
 }
 
-/// trace the PER-CELL RMHD wave speeds — the EXACT Mignone & Del Zanna quartic
+/// trace the PER-CELL RMHD wave speeds — the EXACT mignone & del zanna quartic
 /// (`Rmhd::wave_speeds`, raw min/max, NO zero-clamp) evaluated once per cell for each of the
 /// 3 directions, writing `wave_speed_l[d] = lambda_min^d` and `wave_speed_r[d] = lambda_max^d`.
 ///
@@ -674,7 +674,7 @@ pub fn rmhd_wave_speed_map_gv(
 /// every face — the dominant 166-register, 12-transcendental cost) onto the cell index space:
 /// the quartic's direction-INDEPENDENT guts (rho/h/c_s^2/b_mu^2/...) are CSE-shared across the
 /// 3 directions; only vn/bn and the resolvent differ. the flux then reads the two adjacent
-/// cells' stored speeds for the Davis fan (`hlle_with_speeds`), and CFL folds the same fields
+/// cells' stored speeds for the davis fan (`hlle_with_speeds`), and CFL folds the same fields
 /// — one computation, three consumers (flux, CFL, UCT-HLL). the zero-clamp for the HLL fan is
 /// applied at the FLUX (min/max of the two cells, clamped), so the stored values are raw.
 /// the CURVED-SPACETIME per-cell RMHD wave speeds — the SHIFTED coordinate characteristic
@@ -754,7 +754,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
 
 /// the SOURCE-admissibility CFL for GR-RMHD — the wu 2017 `lambda_S` mechanism. the covariant
 /// geodesic + EM-stress source advances `U -> U + dt S`, and the step must leave the result inside
-/// the admissible set: `D > 0`, `q(U) = E - sqrt(D^2 + |S|^2) > 0` AND `psi(U) > 0` (Wu & Tang,
+/// the admissible set: `D > 0`, `q(U) = E - sqrt(D^2 + |S|^2) > 0` AND `psi(U) > 0` (wu & tang,
 /// theorem 2.1).
 ///
 /// the rate is the RECIPROCAL of the largest time the source ray may be followed before it leaves
@@ -1010,9 +1010,9 @@ pub fn rmhd_source_cfl_gr_gv(
     // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
     //
     // the threshold is the LARGER of r_+ and the excision surface, so a run that excises further out
-    // keeps masking everything it excises. an excised cell is additionally numerical padding whose
-    // onion-filled state can sit near the cone boundary indefinitely, the frozen clamped-core metric
-    // driving enormous geodesic sources over donor-copied gas. gating cell CENTERS on r_+ matches how
+    // keeps masking everything it excises. an excised cell is additionally numerical padding: its
+    // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
+    // clamped-core metric driving enormous geodesic sources over it. gating cell CENTERS matches how
     // interior guard activations are counted. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
@@ -1086,7 +1086,7 @@ pub fn rhd_source_cfl_gr_gv(
     let d_cons = Gv::field("cons_den", FieldRef::cons_den()) * inv_dens;
     // the effective inertia e = rho h W^2 = h D^2 / rho_prim (W = D/rho_prim), reconstructed
     // metric-free and independent of the energy variable: the RHD nrg slot stores the killing
-    // energy, not the Valencia tau, so `rho + tau + pre` no longer names rho h W^2. the eulerian
+    // energy, not the valencia tau, so `rho + tau + pre` does not name rho h W^2. the eulerian
     // energy for the admissibility cone follows as E = e - p = rho h W^2 - p = tau + D (below).
     let gamma_eos = Gv::scalar("gamma");
     let h_enth = Gv::ONE + gamma_eos / (gamma_eos - Gv::ONE) * pre / rho;
@@ -1286,9 +1286,9 @@ pub fn rhd_source_cfl_gr_gv(
     // 3.3e9 while the exterior maximum was 17.9, a factor 1.8e8 in dt.
     //
     // the threshold is the LARGER of r_+ and the excision surface, so a run that excises further out
-    // keeps masking everything it excises. an excised cell is additionally numerical padding whose
-    // onion-filled state can sit near the cone boundary indefinitely, the frozen clamped-core metric
-    // driving enormous geodesic sources over donor-copied gas. gating cell CENTERS on r_+ matches how
+    // keeps masking everything it excises. an excised cell is additionally numerical padding: its
+    // state is frozen at the vacuum floor and can sit near the cone boundary indefinitely, the
+    // clamped-core metric driving enormous geodesic sources over it. gating cell CENTERS matches how
     // interior guard activations are counted. cartesian charts only (spherical charts never excise).
     let lam_s = if coords == Coords::Cartesian
         && matches!(spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
@@ -1359,14 +1359,14 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 ///
 /// two facts make the hydro projection carry over unchanged:
 /// - the RMHD c2p's OWN admissibility criterion is the B-FREE cone `E^2 > D^2 + gamma^{ij} S_i S_j`
-///   (`relativistic_cone_residual`, the Wu 2017 bound shared with the hydro recovery) — the magnetic
+///   (`relativistic_cone_residual`, the wu 2017 bound shared with the hydro recovery) — the magnetic
 ///   terms do not enter it, so `admissible_theta` is the same function;
 /// - because that cone is B-free it is CONVEX in `(D, S_i, tau)` at FIXED `B`, so blending only the
 ///   hydro slots is sound. that matters: `B` is CONSTRAINED-TRANSPORT-evolved and must NOT be
 ///   touched, or `div(B) = 0` breaks. the projection leaves the staggered field alone by
 ///   construction.
 ///
-/// GRMHD is UNDENSITIZED (the Valencia state with the covariant killing energy in the `nrg` slot),
+/// GRMHD is UNDENSITIZED (the valencia state with the covariant killing energy in the `nrg` slot),
 /// so there is no `sqrt(-g)` here; the eulerian energy is recovered as
 /// `E = (ehat + D + beta^i S_i)/alpha`, the same inversion the GRMHD c2p performs.
 ///
@@ -1770,7 +1770,7 @@ pub fn constraint_projection_gv(
 
 /// the grmhd fofc geometric-source fraction. `a_*` is the admissible source-free
 /// low-order flux+ct anchor and `x_*` is the same conservative update with the full
-/// metric source. the kernel writes only `theta`; replaying the Godunov stage with
+/// metric source. the kernel writes only `theta`; replaying the godunov stage with
 /// that multiplier preserves the single-valued face fluxes and constrained-transport
 /// field instead of blending complete neighboring cell states.
 pub fn fofc_source_theta_gr_mhd_gv(
@@ -1898,7 +1898,7 @@ pub fn fofc_source_theta_gr_mhd_gv(
 /// the FOFC ADMISSIBLE-BOUNDARY PROJECTION for GR-hydro (adiabatic) — the provable replacement for the
 /// freeze parachute. where the spliced first-order conserved `x_*` is inadmissible, blend it toward the
 /// stage-input anchor `us_*` (admissible from stage entry) exactly onto the boundary of the
-/// relativistic admissible set `G = { D > 0, E^2 > D^2 + gamma^{ij} S_i S_j }` (Wu & Tang 2015). G is
+/// relativistic admissible set `G = { D > 0, E^2 > D^2 + gamma^{ij} S_i S_j }` (wu & tang 2015). G is
 /// CONVEX, so the segment from an admissible anchor to any candidate crosses partial-G at most once and
 /// the projection ALWAYS yields an admissible state — an already-admissible cell passes through
 /// untouched (theta = 1), so no cell is ever unrecoverable. reads + writes the densitized conserveds
@@ -2009,7 +2009,7 @@ pub fn fofc_project_gr_gv(
     (end_trace(), writes)
 }
 
-/// the CLASSICAL (Newtonian ideal-gas) per-cell wave speeds (`NewtonianMhd::wave_speeds` = the fast
+/// the CLASSICAL (newtonian ideal-gas) per-cell wave speeds (`NewtonianMhd::wave_speeds` = the fast
 /// magnetosonic bound, lmin/lmax = v_n -/+ c_f). materializes `wave_speed_l/r[dir]` so UCT (which
 /// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes compute speeds
 /// inline in the flux and otherwise do NOT store them. mirror of `rmhd_wave_speeds_cell_gv`.
@@ -2089,11 +2089,11 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 }
 
 #[cfg(test)]
-mod m1_log_radius_tests {
-    // M1 regression: the GR wave-speed maps must evaluate the metric at the SPACING-AWARE cell
-    // center. on a log axis that is the geometric mean of the bounding faces (r_min * 10^((i+1/2)
-    // slope)); the old uniform `x_lo + (i+1/2) dx` formula put every cell at ~r_min, suppressing
-    // alpha^2 / beta^r / the scale factors and overestimating dt (a silent CFL violation).
+mod log_radius_tests {
+    // the GR wave-speed maps must evaluate the metric at the SPACING-AWARE cell center. on a log
+    // axis that is the geometric mean of the bounding faces (r_min * 10^((i+1/2) slope)); the
+    // arithmetic `x_lo + (i+1/2) dx` puts every cell at ~r_min, suppressing alpha^2 / beta^r /
+    // the scale factors and overestimating dt into a silent CFL violation.
     use super::*;
     use symbi_ir::graph::NodeId;
     use symbi_ir::gv::{begin_trace, end_trace, with_trace};
@@ -2137,8 +2137,8 @@ mod m1_log_radius_tests {
         begin_trace();
         let node = gv_cell_center(0, &[Spacing::Log]).node();
         let (r_min, slope, i) = (3.0_f64, 0.02_f64, 10.0_f64);
-        // spacing is now a runtime scalar: select the log map (map_kind_0 = 1); the `Spacing::Log`
-        // builder arg is vestigial (the face map reads `map_kind`).
+        // spacing is a runtime scalar: select the log map (map_kind_0 = 1). the `Spacing::Log`
+        // builder arg is inert — the face map reads `map_kind`.
         let got = eval(
             node,
             &[
@@ -2151,14 +2151,14 @@ mod m1_log_radius_tests {
         );
         end_trace();
         let geomean = r_min * 10f64.powf((i + 0.5) * slope); // sqrt(face_i * face_{i+1})
-        let old_uniform_bug = r_min + (i + 0.5) * slope;
+        let arithmetic_midpoint = r_min + (i + 0.5) * slope;
         assert!(
             (got - geomean).abs() < 1e-10,
             "log cell center {got} != geometric mean {geomean} (metric radius wrong on log grid)"
         );
         assert!(
-            (got - old_uniform_bug).abs() > 1e-3,
-            "M1 fix is a no-op: still the uniform x_lo + (i+1/2) dx radius"
+            (got - arithmetic_midpoint).abs() > 1e-3,
+            "log cell center collapsed to the uniform x_lo + (i+1/2) dx radius"
         );
     }
 

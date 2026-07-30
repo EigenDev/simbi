@@ -240,7 +240,7 @@ def validate_props(component: str, config: dict[str, Any]) -> ComponentProps:
     props_cls = get_props_class(component)
 
     # name unknown keys up front with a close-match suggestion; pydantic's
-    # extra=forbid would reject them too, but without the did-you-mean.
+    # extra=forbid rejects them without one.
     known = set(props_cls.model_fields)
     unknown = [k for k in config if k not in known]
     if unknown:
@@ -315,8 +315,8 @@ def load_component_props(
 
     for component, config in merged.items():
         if component not in PROPS_REGISTRY:
-            # an unknown component silently dropping EVERY override under it
-            # (qaud.cmap=inferno) misleads worse than an error; suggest the fix.
+            # accepting an unknown component name would silently drop EVERY override
+            # under it (qaud.cmap=inferno), so it raises with a close-match suggestion.
             import difflib
 
             close = difflib.get_close_matches(component, PROPS_REGISTRY, n=1)
@@ -338,32 +338,6 @@ def load_component_props(
         )
 
     return props
-
-
-def get_props_for_component(
-    component_name: str,
-    loaded_props: dict[str, ComponentProps],
-    defaults: Optional[dict[str, Any]] = None,
-) -> ComponentProps:
-    """
-    Get props for a specific component, with fallback to defaults.
-
-    Args:
-        component_name: name of the component (e.g., "polygon")
-        loaded_props: dict from load_component_props()
-        defaults: optional default values to use if not in loaded_props
-
-    Returns:
-        props instance for the component
-    """
-    key = component_name.lower().replace("-", "_")
-
-    if key in loaded_props:
-        return loaded_props[key]
-
-    # fall back to defaults or empty props
-    props_cls = get_props_class(key)
-    return props_cls(**(defaults or {}))
 
 
 def load_theme_config(

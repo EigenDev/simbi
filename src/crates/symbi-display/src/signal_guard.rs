@@ -255,11 +255,6 @@ impl ScreenGuard {
             libc::tcflush(0, libc::TCIFLUSH);
         }
     }
-
-    /// whether the alternate screen is (still) active.
-    pub fn is_active(&self) -> bool {
-        IN_ALT.load(Ordering::SeqCst)
-    }
 }
 
 impl Drop for ScreenGuard {

@@ -150,7 +150,7 @@ fn evolve_3d(eta: f64) -> f64 {
 
 #[test]
 fn resistive_field_decays_at_eta_k_squared_3d() {
-    // the same B_x = B0 sin(k y) diffusion, now through the THREE-edge 3D resistive EMF (only J_z is
+    // the same B_x = B0 sin(k y) diffusion, through the THREE-edge 3D resistive EMF (only J_z is
     // nonzero for a y-only field, but the full 3-edge dispatch runs). must match exp(-eta k^2 t).
     let eta = 0.05;
     let ratio = evolve_3d(eta);

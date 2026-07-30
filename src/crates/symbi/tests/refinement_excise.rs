@@ -3,11 +3,11 @@
 //
 // horizon excision on a REFINED hierarchy: the excise pass runs on the level that OWNS the excised
 // region — the ROOT, since the request gate forbids a fine patch overlapping the excised core — while
-// an off-horizon fine patch refines the far field. the excise dispatch runs per level (not only the
-// finest), so a refined root actually excises its core; gating it on `!has_finer` silently skipped
-// excision on every refined-root run. gates, each split at the horizon r_+ = 2M:
+// an off-horizon fine patch refines the far field. the excise dispatch runs per level, so a
+// refined root excises its own core; a dispatch restricted to the finest level would leave the
+// excised region untouched on every refined-root run. gates, each split at the horizon r_+ = 2M:
 // - NON-VACUITY: the excised INTERIOR (r < r_+, where the excise pass acts) differs from an
-//   unexcised run — the check that exposed the pass being silently dead on a refined root;
+//   unexcised run, so a silently dead pass on a refined root cannot pass;
 // - CAUSAL ISOLATION: the EXTERIOR (r > r_+) is nearly independent of the excision surface's radius
 //   AND its presence. discrete disconnection is BOUNDED not exact (the flux stencil couples across
 //   r_+ at truncation level), so the exterior leak must be ORDERS below the interior effect — a
@@ -139,10 +139,9 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
     };
 
     // NON-VACUITY: excision genuinely ran on the REFINED ROOT. the excised interior (r < r_+, which
-    // the excise pass donor-fills) must differ from the un-excised run — this is what exposed the
-    // pass being silently skipped on a refined root (excise gated on `!has_finer`), which the
-    // per-level excise dispatch fixes. the comparison is against NO excision, the only baseline a
-    // correct scheme is obliged to differ from.
+    // the excise pass freezes at the cold vacuum floor) must differ from the un-excised run; a dispatch that skipped the
+    // pass on a refined root would leave the two identical. the comparison is against NO excision,
+    // the only baseline a correct scheme is obliged to differ from.
     let interior_acted = split(&root_a, &none, true);
     assert!(
         interior_acted > 1e-10,
@@ -153,12 +152,11 @@ fn refined_run_excises_the_root_and_evolves_the_fine_patch() {
     // CAUSAL ISOLATION: the EXTERIOR (r > r_+) is nearly independent of what happens inside the
     // horizon — of both the excision surface's position and its very presence. discrete causal
     // disconnection is BOUNDED, not exact: the flux stencil couples the two sides of r_+ at
-    // truncation level, so a small residual leak crosses outward and decays with resolution (this is
-    // the same bounded cross-horizon leak the horizon-excision-leakage gate measures directly). the
+    // truncation level, so a small residual leak crosses outward and decays with resolution. the
     // isolation is stated as a RATIO: the exterior leak must be orders below the interior excision
     // effect. measured: interior changes by 2.6e1, exterior leaks 6.0e-5 (radius) / 4.5e-7 (presence)
     // — ~6 decades of isolation. the bound carries wide margin; a surface whose influence leaks O(1)
-    // outward (e.g. the inconsistent-core-determinant defect fixed earlier) fails it loudly.
+    // outward (an inconsistent core determinant, say) fails it loudly.
     let exterior_vs_radius = split(&root_b, &root_a, false); // 0.5 vs 0.35, exterior
     let exterior_vs_none = split(&none, &root_a, false); // none vs 0.35, exterior
     let isolation_bound = 1e-3 * interior_acted; // exterior leak must be < 0.1% of the interior effect

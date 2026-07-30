@@ -9,7 +9,7 @@
 // - an MHD regime: allocate -> set_initial -> seed_faces -> build (faces owed,
 //   so set_initial lands at NeedsCells; seed_faces reaches Ready + sets the
 //   bface_initialized flag)
-// also pins the new fallible allocate() validation surface.
+// also pins the fallible allocate() validation surface.
 // =============================================================================
 
 use symbi::prelude::*;

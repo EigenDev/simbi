@@ -1,12 +1,12 @@
 // =============================================================================
 // shaped_wall_twoway_iso_gpu.rs
 //
-// device parity gates closing the two remaining cheap shaped-wall fronts:
+// device parity gates for two shaped-wall paths:
 // - TWO-WAY torque spin-up: a free (two_way) shaped spinner in still gas is
 //   dragged toward rest by the reaction torque. the spinning kernel's torque
-//   diagnostic + the integrated body omega must match host==device — the device
-//   twin of the reaction-torque feedback loop (the spin twin used PRESCRIBED
-//   spin; this exercises the two-way path where the torque steers omega);
+//   diagnostic + the integrated body omega must match host==device — the
+//   two-way path, where the reduced torque steers omega, as distinct from a
+//   prescribed spin;
 // - ISO shaped wall: an energy-free shaped obstacle (no nrg channel) penalizes
 //   identically on device, cons + force receipt bit-close to the CPU run.
 //

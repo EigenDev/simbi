@@ -1,7 +1,7 @@
 // =============================================================================
 // drain.rs
 //
-// the well-posed uniform-scaling volumetric drain (docs/ideas/accretor.md §2):
+// the well-posed uniform-scaling volumetric drain:
 // the exact-exponential relaxation `U -> U exp(-chi dt / tau)`, applied
 // post-hydro on the masked cells. scaling EVERY conserved component by the SAME
 // factor `f` leaves each intensive primitive (velocity, specific internal
@@ -57,8 +57,8 @@ pub fn drain_timescale<S: Scalar>(dx: S, c_s: S, c_drain: S) -> S {
 /// contribution to the body -- the cell-integrated `U_old - U_new` (absorbed
 /// mass and drag force), which makes gas+body conservation exact to machine
 /// precision. the SAME scalar factor multiplies EVERY conserved component (the
-/// accretor.md §2.2 DESIGN INVARIANT), including the energy slot, so the
-/// intensive primitive state is untouched.
+/// DESIGN INVARIANT), including the energy slot, so the intensive primitive state
+/// is untouched.
 #[inline]
 pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
     cons: &ConsG<S, D, E>,
@@ -141,7 +141,7 @@ mod tests {
         }
     }
 
-    // the DESIGN INVARIANT (accretor.md §2.2): uniform scaling leaves the intensive
+    // the DESIGN INVARIANT: uniform scaling leaves the intensive
     // primitive state pointwise invariant. a mass-only sink would change the velocity.
     #[test]
     fn uniform_scaling_leaves_intensive_primitives_invariant() {

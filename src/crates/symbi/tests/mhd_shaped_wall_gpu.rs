@@ -2,7 +2,7 @@
 // mhd_shaped_wall_gpu.rs
 //
 // device parity for a SHAPED (CSG) rigid immersed wall on a 2.5D MHD sim
-// (NewtonianMhd, D=2, DOF=3) — the magnetized shaped-wall front. the shaped
+// (NewtonianMhd, D=2, DOF=3) — the magnetized shaped-wall path. the shaped
 // penalize binds c_a2 = max |B|^2/rho to lift the wall relaxation to the fast
 // magnetosonic speed; it rewrites the cell-centered gas state (den, all 3 mom,
 // nrg) in place while the staggered CT faces stay untouched. this gates that the

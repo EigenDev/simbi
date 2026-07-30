@@ -13,7 +13,7 @@ from copy import deepcopy
 from functools import lru_cache, partial, reduce
 from typing import Any, Callable, Hashable, Iterable, TypeVar
 
-# Transform type - a function that transforms one type to another
+# transform type - a function that transforms one type to another
 T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")

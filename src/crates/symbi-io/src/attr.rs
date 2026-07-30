@@ -1,11 +1,10 @@
 // =============================================================================
 // attr.rs
 //
-// `Attr` — a typed scalar metadata value. unifies the things that today the
-// checkpoint writer takes as `(&str, &str)` — gamma is f64, iteration is u64,
-// regime is a String — into one enum. coupled with `Metadata::with(k, v)`,
-// callers write `extras.with("gm", 1.0).with("problem", "kepler")` and never
-// `let x_s = x.to_string()` again.
+// `Attr` — a typed scalar metadata value. one enum over the primitive sorts
+// checkpoint metadata carries: gamma is f64, iteration is u64, regime is a
+// String. coupled with `Metadata::with(k, v)`, call sites pass naked literals:
+// `extras.with("gm", 1.0).with("problem", "kepler")`.
 // =============================================================================
 
 /// a typed metadata value. construction goes through `From<T> for Attr` for
@@ -152,9 +151,8 @@ impl Attr {
 }
 
 // =============================================================================
-// `Metadata` — typed key/value bag built via fluent `.with(key, value)`. the
-// answer to "no more to_string in examples". any value that impls `Into<Attr>`
-// (every common primitive does) goes in unchanged.
+// `Metadata` — typed key/value bag built via fluent `.with(key, value)`. any
+// value that impls `Into<Attr>` (every common primitive does) goes in unchanged.
 // =============================================================================
 
 /// builder-style typed metadata bag. order-preserving so the resulting file

@@ -8,12 +8,12 @@
 // symbolic proof because the extractor could not represent the lapse `sqrt(f)` / `sqrt(h)`.
 //
 // the GR densitized weight is the flat spherical area times the lapse factor:
-//   Schwarzschild: sqrt(gamma) = r^2 sin(theta) / sqrt(f),   f = 1 - 2M/r   (lapse in the DENOMINATOR)
-//   Kerr-Schild:   sqrt(gamma) = r^2 sin(theta) * sqrt(h),   h = 1 + 2M/r   (lapse in the NUMERATOR)
+//   schwarzschild: sqrt(gamma) = r^2 sin(theta) / sqrt(f),   f = 1 - 2M/r   (lapse in the DENOMINATOR)
+//   kerr-schild:   sqrt(gamma) = r^2 sin(theta) * sqrt(h),   h = 1 + 2M/r   (lapse in the NUMERATOR)
 // the lapse is an OPAQUE, radially-keyed symbol `sqrt_f@<2m>` (proof/extract.rs): identical at a
 // shared radial face (so the div-weight's lapse cancels the curl's inverse lapse there — a rational
 // num/den cancellation), distinct across faces, and REMAPPED by the divergence's radial shift. once
-// it cancels, the residual is the SAME flat r^2 sin(theta) telescoping as the Minkowski proof.
+// it cancels, the residual is the SAME flat r^2 sin(theta) telescoping as the minkowski proof.
 //
 // the 2D poloidal curl from the single densitized corner EMF Etilde (`ez`), flux form:
 //   dir=0 (B_r,   r-face):    dB_r/dt  = -(1/w_r)  d_th(Etilde),  w_r  = sqrt(gamma)(r_f, th_c) dth
@@ -71,8 +71,8 @@ fn dx(ax: usize) -> Poly {
     Poly::var(&format!("dx_{ax}"))
 }
 
-/// the radial lapse factor of `sqrt(gamma)` at the radial half-unit offset `two_m`. Schwarzschild
-/// carries `1/sqrt(f)` (lapse in the DENOMINATOR); Kerr-Schild carries `sqrt(h)` (NUMERATOR). the
+/// the radial lapse factor of `sqrt(gamma)` at the radial half-unit offset `two_m`. schwarzschild
+/// carries `1/sqrt(f)` (lapse in the DENOMINATOR); kerr-schild carries `sqrt(h)` (NUMERATOR). the
 /// same opaque `sqrt_f@<2m>` atom either way — it cancels the extracted curl's reciprocal factor at
 /// the same radial offset.
 fn lapse(two_m: i64, in_numerator: bool) -> RatFun {
@@ -152,8 +152,8 @@ fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
 }
 
 // bug-injection: a WRONG lapse radial offset on the low r-face weight must NOT cancel — the sqrt_f
-// atoms no longer match at the shared face, so the residual survives. proves the proof is lapse-aware
-// (Schwarzschild chart; the Kerr-Schild control is identical up to the numerator/denominator side).
+// atoms disagree at the shared face, so the residual survives. proves the proof is lapse-aware
+// (schwarzschild chart; the kerr-schild control is identical up to the numerator/denominator side).
 #[test]
 fn divb_2d_sph_gr_symbolic_detects_wrong_lapse_offset() {
     let curl_r = curl(0, Spacetime::SchwarzschildKS);

@@ -178,18 +178,6 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         fields
     }
 
-    /// return all scalar field raw pointers in order: den, mom[0..DOF], nrg.
-    /// for isothermal regimes (nrg = None), pushes a null pointer.
-    pub fn all_ptrs(&self) -> Vec<*const Sc> {
-        let mut ptrs = Vec::with_capacity(DOF + 2);
-        ptrs.push(self.den.as_ptr());
-        for dd in 0..DOF {
-            ptrs.push(self.mom[dd].as_ptr());
-        }
-        ptrs.push(self.nrg.as_ref().map_or(std::ptr::null(), |f| f.as_ptr()));
-        ptrs
-    }
-
     /// allocate all fields including energy. default for non-isothermal regimes.
     pub fn zeros(domain: &Domain<NDIM>) -> symbi_xpu::Result<Self> {
         Self::zeros_with_energy(domain, true)
@@ -661,14 +649,14 @@ pub struct MhdStaggeredFields<
     /// combines from the correct base. only touched on a firing MHD substage.
     pub bcell_stage: BcellFields<D, DOF, M, Sc>,
 
-    /// face-centered B: bface[d] on interior.extend(d, 0, 1) with ±1 transverse
+    /// face-centered B: bface[d] on interior.extend(d, 0, 1) with +/-1 transverse
     /// halo on each axis tt != d (the MHD/RMHD face domains).
     /// this is the CT "truth" — evolved by discrete curl of E.
     /// only used in 2D/3D.
     pub bface: BfaceFields<D, M, Sc>,
 
     /// FOFC: snapshot of `bface` taken in `post_godunov` immediately BEFORE the corrector/euler curl
-    /// (bface is untouched until then, so this is `bface^n`). the C2 CT redo restores `bface <-
+    /// (bface is untouched until then, so this is `bface^n`). the CT redo restores `bface <-
     /// bface_n` and re-applies the curl from the SPLICED edge EMF (HO off the fallback region, FO on
     /// it), so the curl is applied exactly ONCE. only used in 2D/3D, only touched on a firing substage.
     pub bface_n: BfaceFields<D, M, Sc>,
@@ -680,7 +668,7 @@ pub struct MhdStaggeredFields<
     /// saved E from RK2 stage 1 (for time-averaging).
     pub efield_n: EfieldFields<D, M, Sc>,
 
-    /// FOFC: save of the HIGH-ORDER edge EMF (`= efield` at FOFC entry). the C2 CT redo splices the
+    /// FOFC: save of the HIGH-ORDER edge EMF (`= efield` at FOFC entry). the CT redo splices the
     /// edge EMF `edge_flag ? E_FO(Contact) : E_HO`, keeping the saved HO EMF here on edges touching no
     /// flagged cell so their face field is bit-unchanged (I5). only touched on a firing substage.
     pub efield_ho: EfieldFields<D, M, Sc>,
@@ -747,11 +735,11 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         };
 
         // face-centered B: one extra in normal direction; for MHD the CT
-        // stencil needs a TRANSVERSE halo. ±2 (not ±1): the faithful UCT edge EMF
+        // stencil needs a TRANSVERSE halo. +/-2 (not +/-1): the faithful UCT edge EMF
         // (Mignone & Del Zanna) PLM-reconstructs the staggered transverse field to
-        // the edge, whose minmod slope reaches the second transverse neighbour. ±1
-        // suffices for bface→bcell + curl-of-E (which read 1 neighbour); the extra
-        // layer is filled by the same owned→alloc ghost-fill driver and is harmless
+        // the edge, whose minmod slope reaches the second transverse neighbor. +/-1
+        // suffices for bface->bcell + curl-of-E (which read 1 neighbor); the extra
+        // layer is filled by the same owned->alloc ghost-fill driver and is harmless
         // to the narrower readers. on-disk checkpoint is interior-only, unaffected.
         let mut bface_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         let mut bface_n_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
@@ -860,32 +848,6 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             bface_initialized: std::sync::atomic::AtomicBool::new(false),
         })
     }
-
-    /// gather cell-centered B at a coordinate.
-    pub fn gather_bcell(&self, coord: [isize; D]) -> symbi_algebra::Tensor<Sc, D> {
-        symbi_algebra::Tensor::new(std::array::from_fn(|dd| *self.bcell[dd].view().at(coord)))
-    }
-
-    /// scatter cell-centered B at a coordinate.
-    pub fn scatter_bcell(&self, coord: [isize; D], mag: symbi_algebra::Tensor<Sc, D>) {
-        for dd in 0..D {
-            self.bcell[dd].view_mut().set(coord, mag[dd]);
-        }
-    }
-
-    /// push bcell pointers to GPU kernel args (b0 [, b1 [, b2]]).
-    pub fn push_bcell_ptrs_to(&self, args: &mut symbi_xpu::KernelArgs) {
-        for dd in 0..D {
-            args.push(&(self.bcell[dd].as_ptr() as u64));
-        }
-    }
-
-    /// push bflux pointers for one direction to GPU kernel args.
-    pub fn push_bflux_ptrs_to(&self, dir: usize, args: &mut symbi_xpu::KernelArgs) {
-        for dd in 0..D {
-            args.push(&(self.bflux[dir][dd].as_ptr() as u64));
-        }
-    }
 }
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim
@@ -902,7 +864,7 @@ pub struct RkWorkspaceGeneric<
     /// held for the `a0*u_n` SSP term): `u_stage` is the stage-INPUT cons, taken
     /// before each godunov stage so the additive source pass evaluates `S` at the
     /// same state the fused stage does — the bit-for-bit `fused == plain + additive`
-    /// invariant (see `godunov_with_fused_source` S2 proof). dead weight unless an
+    /// invariant `godunov_with_fused_source` establishes. dead weight unless an
     /// additive source overlay is active (the step loop gates the snapshot).
     pub u_stage: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     /// when set, every `u_stage` binding resolves to `u_n` instead. at the FIRST stage of a
@@ -1593,8 +1555,8 @@ pub enum BoundaryType {
 }
 
 /// per-axis boundary conditions, `D`-shaped (not the 3D-padded `[BoundaryType; 6]`): one `[lo, hi]`
-/// pair per axis. replaces the flat 6-array in `SimStateGeneric` / `SimBuilder` so the boundary
-/// count is dimension-correct and the lo/hi accessors name the face explicitly.
+/// pair per axis, so the boundary count is dimension-correct and the lo/hi accessors name the
+/// face explicitly.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Boundaries<const D: usize>(pub [[BoundaryType; 2]; D]);
 
@@ -1933,7 +1895,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// `stage_input_is_un` at each call site is how a buffer alias drifts into a correctness bug.
     /// whether this simulation has immersed bodies (an attached collection
     /// with at least one body — `immersed.is_some()` alone disagrees with this
-    /// in the zero-body-collection state the historical parse bug produced).
+    /// when a collection is attached with zero bodies in it).
     pub fn has_bodies(&self) -> bool {
         self.immersed
             .as_ref()
@@ -2146,7 +2108,7 @@ where
     /// on a curved spacetime the conserved momentum is the Valencia COVARIANT `S_i = rho h W^2
     /// gamma_ij v^j`, so the seed evaluates the spatial metric at the cell and stores the covariant
     /// state (via `to_conserved_covariant`) — the metric radius is the VOLUME-WEIGHTED radial
-    /// centroid, the SAME point the metric-aware c2p inverts at, so the storage↔recovery round-trip
+    /// centroid, the SAME point the metric-aware c2p inverts at, so the storage<->recovery round-trip
     /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
     pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
         use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -2275,7 +2237,7 @@ where
     }
 
     /// gather the regime's CONSERVED state at a cell — the inverse of `seed_cell`'s scatter, with
-    /// the cell-centered B folded in for MHD. `sim.cons_at(c)` replaces the per-test hand-rebuild
+    /// the cell-centered B folded in for MHD, so a caller never hand-assembles
     /// `MhdCons { hydro: Cons { den: *..view().at(c), mom: Tensor::new([..]), nrg: .. }, mag: .. }`.
     pub fn cons_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Cons {
         use symbi_hydro::state::SeedableCons;

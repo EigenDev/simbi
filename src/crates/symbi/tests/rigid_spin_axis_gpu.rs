@@ -4,9 +4,9 @@
 // the device twin of rigid_spin_axis: a 3D shaped (SDF sphere) rigid wall
 // spinning about the +x axis, run on device memory (NVRTC render of the
 // SPINNING shaped GvKernel — the runtime 3x3 mask rotation + omega x r wall
-// velocity) and asserted BIT-CLOSE to the CPU run. this closes the arbitrary-
-// axis spin front on device: the spinning kernel path (selected by a nonzero
-// omega) was compile-verified but never run for physics on a device.
+// velocity) and asserted BIT-CLOSE to the CPU run. the spinning kernel path is
+// selected by a nonzero omega, so this is the arbitrary-axis spin physics
+// running on a device, not merely compiling for one.
 // gates:
 // - PARITY: the evolved cons state matches the CPU run;
 // - AXIS: the circulation the drag sets up is about X (L_x grows, L_z at

@@ -11,9 +11,9 @@
 //
 // exact laws (IEEE-exact: identity, commutativity, involution, sub-via-neg, select,
 // comparison structure) assert `==`; floating laws (associativity, distributivity, the
-// transcendental/hyperbolic identities) assert bounded relative error. classifying each
-// law by its true guarantee is the rigor — overclaiming "bit-exact associativity" would be
-// the same prose-ahead-of-engine defect the review flagged.
+// transcendental/hyperbolic identities) assert bounded relative error. each law is
+// classified by the guarantee it actually holds: claiming bit-exact associativity for
+// floating-point addition would assert something the carrier cannot deliver.
 // =============================================================================
 
 macro_rules! carrier_law_suite {

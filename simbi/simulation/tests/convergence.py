@@ -11,9 +11,9 @@
 # for a scheme of order p on N cells across the domain (dx/L = 1/N). an ABSOLUTE
 # tolerance on E pins both C and N at once, so it silently encodes the resolution,
 # the domain, the cfl and the scheme's dissipation. change any of them and the
-# number becomes a lie that reads as a physics failure -- which is exactly what
-# happened here: a sharper wave-speed estimate moved C by a factor of three and
-# five tests reported a magnetic-term bug that did not exist.
+# number becomes a lie that reads as a physics failure: a sharper wave-speed
+# estimate moves C by a factor of three, which an absolute tolerance reports as a
+# magnetic-term bug that does not exist.
 #
 # two quantities survive that:
 #

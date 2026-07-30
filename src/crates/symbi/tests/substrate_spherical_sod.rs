@@ -452,7 +452,7 @@ fn full_substrate_spherical_2d_adiabatic() {
 // finite/positive/(subluminal) state + geometry ACTIVE (the radial profile differs from
 // the IDENTICAL Cartesian run; a Cartesian-vs-Cartesian run is bit-identical, diff 0). a
 // missing _sph kernel would panic in kernel_by_name, so a clean run proves dispatch too.
-// these cover the emitted-but-untested cells: adiabatic 3D, iso 2D/3D, rhd 2D/3D.
+// the cells covered here are adiabatic 3D, iso 2D/3D, and rhd 2D/3D.
 
 const TR: usize = 24; // 3D wedge radial cells
 const TT: usize = 8; // theta cells

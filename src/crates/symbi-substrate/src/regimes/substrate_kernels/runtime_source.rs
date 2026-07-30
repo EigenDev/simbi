@@ -748,7 +748,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.interior);
     // the SAME cache-tiling policy the AOT kernels get through `dispatch_fields_each`: a big window
-    // is fanned over a disjoint block cover so the godunov flux-divergence stencil's neighbour reads
+    // is fanned over a disjoint block cover so the godunov flux-divergence stencil's neighbor reads
     // (which run along the SLOW memory axes) stay L1-resident, avoiding a stream from main memory. without this
     // the fused stage is the one kernel in the step that never tiles. bit-identical: the cover
     // partitions the window, so each cell is computed once by the same kernel on the same inputs.

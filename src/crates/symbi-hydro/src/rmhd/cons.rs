@@ -206,7 +206,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // MIRROR the root-finder's velocity ceiling (the shared c2p ceiling v_limit^2 = r^2/(1+r^2)). the
     // recovery must apply the SAME cap: a strong-field root sits at the ceiling, so the uncapped
     // vsq = mu^2 rbar_sq can reach >= 1, giving gbsq < -1 and ww = sqrt(1+gbsq) = NaN — a NaN rho/p
-    // that poisons neighbours; the intended behaviour is a clean fail-loud (p <= 0 flagged below). capped,
+    // that poisons neighbors; the intended behavior is a clean fail-loud (p <= 0 flagged below). capped,
     // ww/rho/p stay finite and the q(U) verdict routes the zone through first-order correction.
     let vsq = (mu2 * rbar_sq).min(crate::c2p_result::relativistic_velocity_ceiling_sq(r_sq));
     let gbsq = vsq / (S::ONE - vsq);
@@ -221,7 +221,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // clamp (mu -> muu0, v -> v_limit) recovers a cold near-light-speed state that IS superluminal:
     // q(U)/D = (tau/D + 1) - sqrt(1 + gamma^{ij} S_i S_j / D^2) < 0. the raw (rho > 0 & pre > 0)
     // test accepts such a clamped state (pre from eps_e stays > 0), so its face state poisons a
-    // neighbour's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
+    // neighbor's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
     // routes the zone through first-order correction instead. r_sq is metric-raised (line ~115).
     let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
     let pre = S::select(cone_ok, pre, crate::c2p_result::c2p_cone_fail_pressure(dd));
@@ -240,7 +240,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
 
 /// the host RMHD cons->prim: the branch-free `rmhd_recover` plus post-hoc C2pResult
 /// diagnostics. no silent floor — the value is the raw recovered state, the ErrorCode
-/// is the explicit signal (matches `Newtonian::to_primitive`; feedback_no_silent_floors).
+/// is the explicit signal, never a silent floor (matches `Newtonian::to_primitive`).
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
 /// native `<` / `<=` / `==` on a host scalar. the kernel path is `rmhd_recover` above
@@ -320,43 +320,6 @@ mod tests {
         mu - muhat
     }
 
-    // the FULL find_mu_plus (doubling + bisection + break) that the carrier-generic
-    // bisection elides; agreement to ~1e-9 proves the elision.
-    // UNUSED: kept as the analytic reference; no test asserts against it.
-    // allow(dead_code) preserves the reference.
-    #[allow(dead_code)]
-    fn ref_find_mu_plus(beesq: f64, beedrsq: f64, r: f64) -> f64 {
-        if r < 1.0 {
-            return 1.0;
-        }
-        let mut mu_lower = 0.0;
-        let mut mu_upper = 1.0;
-        let mut f_upper = ref_fmu49(mu_upper, beesq, beedrsq, r);
-        while f_upper < 0.0 {
-            mu_upper *= 2.0;
-            f_upper = ref_fmu49(mu_upper, beesq, beedrsq, r);
-        }
-        let eps = 1.0e-12;
-        let mut mu_mid = 1.0;
-        let mut f_lower = ref_fmu49(mu_lower, beesq, beedrsq, r);
-        let mut iter = 0;
-        while iter < 50 && (mu_upper - mu_lower) > eps {
-            mu_mid = 0.5 * (mu_lower + mu_upper);
-            let f_mid = ref_fmu49(mu_mid, beesq, beedrsq, r);
-            if f_mid.abs() < eps {
-                break;
-            }
-            if f_mid * f_lower < 0.0 {
-                mu_upper = mu_mid;
-            } else {
-                mu_lower = mu_mid;
-                f_lower = f_mid;
-            }
-            iter += 1;
-        }
-        mu_mid * 1.000001
-    }
-
     #[test]
     fn kkc_fmu49_matches_cpp_reference() {
         let cases = [
@@ -397,8 +360,8 @@ mod tests {
     fn find_mu_plus_is_the_kkc_fmu49_root() {
         // find_mu_plus returns mu_+, the root of the auxiliary kkc_fmu49 (KKC Eq. 49). verify it
         // is a genuine root (|f_a(mu_+)| ~ 0) and a valid UPPER bracket (f_a(mu_+) >= 0 >= f_a below
-        // it). the r >= 1 cases are exactly where the old `return 1` bracket spanned the spurious
-        // second root of the master function.
+        // it). the r >= 1 cases are exactly where a fixed `mu_upper = 1` bracket would span the
+        // spurious second root of the master function.
         let cases = [
             (0.3, 0.02, 1.2),
             (0.8, 0.1, 2.0),
@@ -439,7 +402,7 @@ mod tests {
         // r.b != 0, r_mag ~ 2.43 > h0 = 1). the master function has TWO roots under the velocity
         // cutoff: the physical mu ~ 0.198 (|v| ~ 0.474, p ~ 0.38) and a spurious mu ~ 0.995 (|v| ~
         // 2.37, p < 0) in the post-mu_+ kink region. the [0, mu_+] bracket must select the physical
-        // one. with the old `return 1` bracket this recovered p ~ -0.88, v ~ 1.45 (superluminal).
+        // one; a fixed `mu_upper = 1` bracket selects the spurious root, p ~ -0.88, v ~ 1.45.
         let eos = IdealGas { gamma: 2.0 };
         let cons = MhdCons::<f64, 3> {
             hydro: crate::state::Cons {
@@ -476,12 +439,11 @@ mod tests {
     }
 
     // =========================================================================
-    // c2p iter-distribution probe — 2026-06-07
+    // c2p iteration-count distribution
     //
-    // measures actual iter counts for `find_mu_plus` (bisection) and the main
-    // false-position loop on orszag_tang IC states, with a `break` on convergence
-    // (the fixed-iter freeze removed). answers: which of the two loops actually dominates?
-    // can mu-cache (lever 5) help, or does find_mu_plus eat the budget anyway?
+    // measures actual iteration counts for `find_mu_plus` (bisection) and the main
+    // false-position loop on orszag_tang IC states, each terminating on convergence rather
+    // than a fixed iteration budget, so the two loops' relative cost is measurable.
     //
     // run: `cargo test --release -p symbi-hydro c2p_iter_distribution -- --nocapture`
     // =========================================================================
@@ -543,10 +505,10 @@ mod tests {
         let rperp = rvec - rparr;
         let rp_sq = rperp.dot(&rperp);
 
-        // 1. bracket via instrumented bisection.
+        // bracket via instrumented bisection.
         let (muu0, fmp_iters) = find_mu_plus_instrumented(bee_sq, rdb_sq, r_mag, tol);
 
-        // 2. false-position with Illinois half-damp + real break.
+        // false-position with Illinois half-damp, terminating on convergence.
         let mut mul = 0.0_f64;
         let mut muu = muu0;
         let mut f_lo = kkc_fmu44::<f64>(mul, r_mag, rp_sq, bee_sq, rdb_sq, qq, dd, gamma);
@@ -619,7 +581,7 @@ mod tests {
 
     #[test]
     fn c2p_iter_distribution_orszag_tang() {
-        // generate a 128×128 grid of orszag_tang IC cells, convert each to cons,
+        // generate a 128x128 grid of orszag_tang IC cells, convert each to cons,
         // run instrumented c2p, accumulate histograms for find_mu_plus and fp.
         let gamma = 5.0 / 3.0;
         let v0 = 0.5;
@@ -748,8 +710,8 @@ mod tests {
         );
     }
 
-    // item 3: resolves the find_mu_plus=1 / kkc_fmu44-bracket concern. the proof on
-    // `find_mu_plus` covers kkc_fmu49; the root actually solved is kkc_fmu44. these
+    // `find_mu_plus` is proven against kkc_fmu49, but the root actually solved is kkc_fmu44,
+    // so the bracket has to be established for kkc_fmu44 separately. these
     // EVOLVED-state cases (high Lorentz W, strong AND weak magnetization, low density —
     // the regime t=0 orszag_tang never reaches, where r can exceed 1) exercise the
     // production rmhd_recover end to end and confirm PHYSICAL (warm, p > 0) states ALWAYS

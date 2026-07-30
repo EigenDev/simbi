@@ -309,7 +309,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
             level_data = data.levels[level]
 
-            # only single-partition supported currently
+            # derived fields are computed on a single contiguous partition
             if level_data.num_partitions != 1:
                 raise NotImplementedError(
                     "multi-partition support not implemented"
@@ -994,7 +994,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     # meaningless when computed on partial refined domains
     composite_required = {
         "Sigma",  # surface_density: integrates over z-column
-        "j",  # angular_momentum_density: uses r × v with coordinates
+        "j",  # angular_momentum_density: uses cross(r, v) with coordinates
         "j_spec",  # specific_angular_momentum: same
         "mass_flux",  # uses coordinate radius
     }

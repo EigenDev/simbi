@@ -55,7 +55,7 @@ def _run(spin: float) -> np.ndarray:
         data_directory=Path(d),
     )
     # enough steps for the near-horizon infall to engage the excised-region source
-    # mask -- the regime the invariants below are about -- and few enough to run in
+    # mask -- the regime the invariants are about -- and few enough to run in
     # seconds. every property asserted here is a property of the STATE at whatever
     # step it is read, so this number sets cost, not sensitivity. whether the torus
     # survives to t = 5 is a SOAK, a different question at three orders more cost;

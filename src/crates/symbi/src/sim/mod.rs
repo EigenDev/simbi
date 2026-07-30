@@ -11,13 +11,13 @@
 // =============================================================================
 
 // the sim-state core lives in `symbi-sim`; re-exported at the `crate::sim::*`
-// paths so every downstream caller (regimes, dispatch, prelude, tests) is untouched.
+// paths, which is where regimes, dispatch, the prelude, and tests name it.
 pub use symbi_sim::{
     checkpoint, config, decomp, driver, hydro_ops, run_args, state, substrate_seam, tracers,
 };
 
 // SMR lives in the `symbi-amr` crate; re-exported at the `crate::sim::refinement`
-// path so downstream callers (tests, examples) are untouched.
+// path, which is where tests and examples name it.
 pub use symbi_amr::refinement;
 
 pub mod evolve;

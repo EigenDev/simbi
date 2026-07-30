@@ -309,7 +309,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         ke
     }
 
-    /// the world-frame angular momentum `L = I omega = R (inertia_body ⊙ (R^T omega))` — the rigid-
+    /// the world-frame angular momentum `L = I omega = R (inertia_body .* (R^T omega))` — the rigid-
     /// body spin state a viz glyph draws, and the conserved quantity a torque-free sink must not gain.
     pub fn angular_momentum(&self) -> Tensor<S, 3> {
         let wb = matvec3(

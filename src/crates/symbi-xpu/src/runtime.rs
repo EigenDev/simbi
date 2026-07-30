@@ -123,16 +123,6 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
         &self.runtime
     }
 
-    /// (test-only accessor) inspect the cache's internal keys. used by
-    /// `tests::dispatcher_cache.rs` to assert content-addressed dedup
-    /// without requiring a GPU runtime.
-    #[doc(hidden)]
-    pub fn cache_keys_for_test(&self) -> Vec<String> {
-        let cache = self.cache.lock().unwrap();
-        let mut keys: Vec<String> = cache.keys().cloned().collect();
-        keys.sort();
-        keys
-    }
 }
 
 /// the content-addressed cache key the dispatcher uses INTERNALLY for

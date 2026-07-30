@@ -1,11 +1,11 @@
 // =============================================================================
 // metric_conformance.rs
 //
-// M6 / D4 — a trait-wide self-consistency gate on the ADM surface of every Metric impl. the trait
+// a trait-wide self-consistency gate on the ADM surface of every Metric impl. the trait
 // carries flat DEFAULTS for the spacetime-background methods (spacetime = Minkowski, lapse = 1,
 // shift = 0, spacetime_scalars = empty) so a genuinely flat metric stays ergonomic. that default is
-// a FOOTGUN for a curved metric: forget to override `lapse` and it silently bakes flat, gravity-free
-// physics with no error (the review's M6). rust cannot force a subtrait to override a supertrait's
+// a FOOTGUN for a curved metric: an unoverridden `lapse` silently bakes flat, gravity-free
+// physics with no error. rust cannot force a subtrait to override a supertrait's
 // DEFAULTED method, so this test is the guardrail: it asserts, for the whole realized metric set,
 // that the background methods are MUTUALLY CONSISTENT —
 //   - flat metrics: spacetime == Minkowski, lapse == 1, shift == 0, no spacetime scalars;
@@ -15,8 +15,8 @@
 // a curved metric that inherits any flat default trips the matching assertion here.
 //
 // (`volume_factor` is enforced at COMPILE time — it is a required trait method with no default, so a
-// metric that omits the proper reduced-dimension measure fails to build; the reduced-D semantic is
-// spot-checked below.)
+// metric that omits the proper reduced-dimension measure fails to build; the reduced-D semantic
+// itself is spot-checked here.)
 // =============================================================================
 
 use symbi_algebra::Tensor;

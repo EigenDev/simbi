@@ -23,19 +23,19 @@
 // shares the isothermal cs map) and iso->"iso"; the mhd families use the regime prefix; the bcell
 // predictor + ct curl are always "rmhd_" (faraday induction is regime-agnostic).
 //
-// SCOPE: flat spacetime only. non-minkowski combinations are guarded arm-or-Err by the C4 fail-loud
-// guard (`test_dispatch_rejects_unbaked_gr`). the c2p family is geometry-light on a flat metric and
-// is not enumerated here.
+// SCOPE: flat spacetime only. non-minkowski combinations are guarded arm-or-Err
+// (`test_dispatch_rejects_unbaked_gr`). the c2p family is geometry-light on a flat metric, so it is
+// enumerated by the curved-family gates instead.
 // =============================================================================
 
 use symbi::regimes::substrate_kernels::{geom_suffix, kernel_exists, mhd_geom_suffix};
 use symbi_geometry::Geometry;
 
 // known-unbaked flat combos the dispatch can request that are DELIBERATELY not baked (they fail
-// loud at dispatch). empty: every flat gap this gate surfaced — 1D
-// curvilinear MHD (spherical + cylindrical), the 2D spherical nmhd/imhd wave-speed slug bug, and
-// (formerly) the log-radial charts — is baked / covered (spacing is a runtime scalar). a NEW
-// gap fails the test until it is baked or listed here.
+// loud at dispatch). the list is empty: every flat combination the dispatch can request — including
+// 1D curvilinear MHD (spherical + cylindrical), 2D spherical nmhd/imhd wave speeds, and the
+// log-radial charts (spacing is a runtime scalar, so they share the uniform kernel) — is baked. a
+// NEW gap fails the test until it is baked or listed here.
 const KNOWN_UNBAKED: &[&str] = &[];
 
 fn assert_family(missing: &mut Vec<String>, name: String) {
@@ -156,17 +156,17 @@ fn chi_family_is_baked_for_every_dimension() {
 // the CURVED-spacetime families.
 //
 // the gates above are FLAT-only, and they enumerate the four families a flat step
-// requests. that leaves the curved-only families — the wu 2017 source-admissibility CFL
-// and the admissible-boundary projection — outside any coverage at all, on both axes:
-// wrong spacetime AND absent from the family list.
+// requests. the curved-only families — the wu 2017 source-admissibility CFL
+// and the admissible-boundary projection — are enumerated here: they appear on no flat
+// arm, so nothing above reaches them.
 //
-// the gap was not hypothetical. the MHD projection dispatch built its name with an EMPTY
-// chart segment, on the reasoning that MHD carries no momentum-DOF lift. the bake names it
-// with the grid-axis chart segment, so the two agreed only on cartesian (segment empty
-// either way) and diverged on every curvilinear chart — the spherical GRMHD projection
-// panicked the first time a cell needed it, in 1D and 2D alike, and had therefore never
-// run. a name divergence must fail HERE, at a gate that builds both sides, rather than
-// mid-run inside a physics test whose failure names a missing kernel instead of a bug.
+// the failure mode is a chart-segment disagreement between the dispatch and the bake. MHD
+// carries no momentum-DOF lift, which invites an EMPTY chart segment on the dispatch side,
+// while the bake names the kernel with the grid-axis chart segment. the two then agree only
+// on cartesian (segment empty either way) and diverge on every curvilinear chart, so the
+// spherical GRMHD projection panics the first time a cell needs it, in 1D and 2D alike. a
+// name divergence must fail HERE, at a gate that builds both sides, ahead of a physics test
+// whose failure names a missing kernel instead of a bug.
 //
 // the arms mirror the curved match arms of `hydro_dispatch!` / `mhd_dispatch!` in
 // symbi-py: those are the (dimension, chart, spacetime) combinations a config can select.
@@ -244,8 +244,8 @@ fn every_curved_admissibility_kernel_is_emitted() {
 
     // GRHD: the chart segment comes from the SAME derivation the dispatch runs. calling
     // `geom_suffix` directly here would re-spell it, and a gate that re-spells the thing it
-    // is checking passes whatever the dispatch does — which is exactly how both call sites
-    // shipped an empty segment unnoticed.
+    // is checking passes whatever the dispatch does — including an empty segment on both
+    // sides.
     for a in curved_hydro_arms() {
         let chart = fofc_project_chart(ChartKeying::MomentumDof, a.coords, a.axes, a.dof, a.dims);
         assert_family(
@@ -354,8 +354,8 @@ fn the_projection_name_is_built_once_for_both_sides() {
         fofc_project_name("rmhd", "_sph", Spacetime::SchwarzschildKS, 2),
         "rmhd_fofc_project_sph_ks_2d"
     );
-    // cartesian's chart segment is empty, which is exactly why an empty segment passed
-    // unnoticed there while breaking every curvilinear chart.
+    // cartesian's chart segment is empty, so an empty segment agrees with the bake there
+    // while breaking every curvilinear chart.
     assert_eq!(
         fofc_project_name("rmhd", "", Spacetime::SchwarzschildKS, 3),
         fofc_project_name("rmhd", "", Spacetime::SchwarzschildKS, 3),

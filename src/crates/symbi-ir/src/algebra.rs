@@ -8,16 +8,12 @@
 // infinity/nan/is_nan, branch default for state-typed conditionals, and the
 // FieldLoad/IterateInline payload.
 //
-// constitution voice: this file preserves UPPERCASE EMPHASIS on load-bearing
-// invariants (A1, FREEZE LAW, NEVER USE) and lowercase for narration. that's
-// the deliberate register; new additions match it.
-//
 // the IR is a FREE ALGEBRA over the operation signature defined in section 1.
 // every Carrier (each `Scalar` impl) is a TOTAL HOMOMORPHISM from this free
 // algebra into a concrete algebra: `f64` evaluates, `Gv` traces into IR,
-// future `Sym` interprets symbolically, future `Dual<C>` carries derivatives.
-// lowering (CPU emit, CUDA emit) is also a homomorphism — into a source-code
-// algebra. rewrites are equational laws preserved by every homomorphism.
+// `Dual<C>` carries derivatives. lowering (CPU emit, CUDA emit) is also a
+// homomorphism — into a source-code algebra. rewrites are equational laws
+// preserved by every homomorphism.
 //
 // invariant: this module contains ZERO `panic!`/`unwrap`/`expect`. category
 // errors (carrier dialect, variance, scope, algebra, theory composition,
@@ -44,8 +40,7 @@ use symbi_algebra::FieldElement;
 /// the algebraic laws every `Scalar` carrier satisfies. these are not prose: each is an
 /// EXECUTABLE PROPERTY swept over a deterministic sample grid on both concrete carriers
 /// (f64 + f32) in `tests/carrier_laws.rs`, classified exact-vs-floating; the homomorphism
-/// law (f64 == traced-Gv) is in `tests/carrier_oracle_new.rs`. (they also drive the rewrite
-/// system, deferred per the rent test.)
+/// law (f64 == traced-Gv) is in `tests/carrier_oracle_new.rs`.
 pub mod laws {
     //! ## ring + abelian-group
     //! - Add: associative, commutative, identity Zero.
@@ -98,7 +93,7 @@ pub mod laws {
     //! NaN is the only value where `x.cmp_eq(x) == false`. callers MUST use
     //! `is_nan(x)`, NEVER `x.cmp_eq(S::nan())` — the latter is always false.
     //!
-    //! ## the homomorphism law (A1 stated precisely)
+    //! ## the homomorphism law
     //! for every Carrier `S`, every Op `f` of arity N, and every term `a_i`:
     //!
     //! ```text
@@ -112,9 +107,9 @@ pub mod laws {
 // =============================================================================
 // section 2 — Mask: the carrier-polymorphic boolean.
 //
-// on `f64`, Mask = `bool`. on `Gv`, Mask = a graph-node handle. there is
-// intentionally NO `Into<bool>`: that would re-open A1's runtime-panic hole
-// (Gv → bool has no total definition).
+// on `f64`, Mask = `bool`. on `Gv`, Mask = a graph-node handle. `Into<bool>`
+// is intentionally absent: `Gv -> bool` has no total definition, so admitting
+// it would open a runtime-panic hole.
 // =============================================================================
 
 pub trait Mask:
@@ -128,12 +123,11 @@ impl Mask for bool {}
 // section 3 — Scalar: a TOTAL homomorphism from Free<Op> into a concrete algebra.
 //
 // invariants:
-//   1. every Op in §1 has a corresponding method on this trait. partial impls
-//      are an A1 violation.
-//   2. NO `PartialOrd`. native `<`, `>`, `<=`, `>=` on `S: Scalar` must NOT
-//      compile in generic code. comparisons return `S::Mask`.
-//   3. NO `to_f64` on the trait. extracting a concrete value from a Carrier
-//      is a debug-only side channel that does not live in the algebraic core.
+//   - every Op has a corresponding method on this trait; the impl is TOTAL.
+//   - comparisons return `S::Mask`. `PartialOrd` is absent so native `<`, `>`,
+//     `<=`, `>=` on `S: Scalar` fail to compile in generic code.
+//   - the trait has no `to_f64`. extracting a concrete value from a Carrier
+//     is a debug-only side channel that lives outside the algebraic core.
 // =============================================================================
 
 pub trait Scalar:
@@ -191,7 +185,7 @@ pub trait Scalar:
     ///
     /// on `f64`/`f32` this is the identity. on tracing Carriers (Gv) this
     /// PANICS for a non-literal node — extracting a concrete value from a
-    /// trace is an A1 violation by construction.
+    /// trace breaks the homomorphism by construction.
     ///
     /// callers using this MUST be at the host/emitter boundary (eos parameter
     /// read-back, host-side reduction reading device buffers, test diffs
@@ -295,7 +289,7 @@ pub trait Scalar:
 
     // ── HIGHER-ORDER: trace-safe conditional for state-typed results ──────
     /// **NEVER use native `if cond { ... } else { ... }`** on a value
-    /// derived from `S: Scalar`. that's an A1 VIOLATION on Gv: only the
+    /// derived from `S: Scalar`. that BREAKS THE HOMOMORPHISM on Gv: only the
     /// branch evaluated by the host is traced, and the traced kernel
     /// silently disagrees with the host's f64 eval. use `branch` instead.
     ///
@@ -365,7 +359,7 @@ pub trait Scalar:
     /// declare a **bounded-pressure phase**: run `body`, return its result;
     /// on tracing Carriers, intermediates that were created inside the
     /// closure die at the closure's closing brace. lets nvcc / rustc see
-    /// shorter live ranges → tighter register allocation.
+    /// shorter live ranges -> tighter register allocation.
     ///
     /// **call site usage:** group naturally-cohesive computation —
     /// reconstruction, wave-speed quartic, HLLE flux — inside its own
@@ -431,21 +425,11 @@ pub trait Scalar:
 // section 4 — Selectable: state types lift `select` componentwise.
 //
 // every state type (`Cons`, `Prim`, `Flux`, etc.) participating in branch-free
-// physics implements this. a future `#[derive(Selectable)]` will verify every
-// field is `Selectable<S>` and emit `select` fieldwise.
+// physics implements this.
 // =============================================================================
 
 pub trait Selectable<S: Scalar>: Sized + Copy {
     fn select(m: S::Mask, t: Self, f: Self) -> Self;
-
-    /// compatibility alias. takes a Self-typed condition (encoded 0/1 in the
-    /// 0.0/1.0 convention) as the branch selector. defaults to
-    /// `select(cond.cmp_gt(ZERO), ...)` — i.e., "non-zero is true". prefer
-    /// `select` with an explicit Mask in new code.
-    #[inline]
-    fn sel(cond: S, t: Self, f: Self) -> Self {
-        Self::select(cond.cmp_gt(S::ZERO), t, f)
-    }
 }
 
 /// every Scalar is trivially Selectable for itself.
@@ -949,15 +933,15 @@ impl Scalar for f32 {
 // =============================================================================
 // section 8 — Carrier locations (where each homomorphism lives in the workspace).
 //
-//   `Scalar for f64`         — this file, §7. evaluating Carrier.
-//   `Scalar for f32`         — this file, §7 (sibling impl). single-precision.
+//   `Scalar for f64`         — this file. evaluating Carrier.
+//   `Scalar for f32`         — this file (sibling impl). single-precision.
 //   `Scalar for Gv`          — crates/symbi-discretize/src/gv.rs. IR-tracing.
 //                              lives there because the graph it builds is part
 //                              of the IR substrate.
-//   `Scalar for Sym`         — future, crates/symbi-core/src/sym.rs.
-//   `Scalar for Dual<C>`     — future, crates/symbi-core/src/dual.rs.
+//   `Scalar for Dual<C>`     — crates/symbi-ir/src/dual.rs. forward-mode
+//                              derivative carrier.
 //
-// each MUST be a total homomorphism. the totality lint (task A5) checks it.
+// each MUST be a total homomorphism.
 // =============================================================================
 
 // =============================================================================
@@ -1109,7 +1093,7 @@ mod tests {
     }
     #[test]
     fn f64_branch_evaluates_both_closures() {
-        // documents the A1 trap: native `if cond { yes() } else { no() }`
+        // documents the trap: native `if cond { yes() } else { no() }`
         // would only evaluate the chosen arm. `branch` evaluates BOTH (for
         // the f64 carrier this is wasted work; for Gv it is the trace).
         let counter = std::cell::Cell::new(0);

@@ -11,7 +11,8 @@
 //     bracketed iterate — does not trip serde_json's recursion limit.
 //   - the emitted blobs are well-formed: each renders to a named __global__.
 //
-// the actual on-GPU render+launch+compare is the step-3c distrobox gate.
+// launching the rendered source and comparing against the CPU kernel needs a device, so
+// it is out of this test's reach.
 // =============================================================================
 
 use symbi_aot::{

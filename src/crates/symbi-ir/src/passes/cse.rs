@@ -8,7 +8,7 @@
 // reused across all conserved-flux components in a riemann kernel), the
 // same subexpression is duplicated at every consumer. for large kernels
 // the duplication is multiplicative — newton_face_flux_3d emitted single
-// CUDA lines of 700 KB+ pre-CSE, with 5× duplication per output. rustc's
+// CUDA lines of 700 KB+ pre-CSE, with 5x duplication per output. rustc's
 // memory peaks at 40-50 GiB just parsing the resulting `&'static str`
 // literals.
 //
@@ -45,7 +45,7 @@
 // which the existing physics-regression test suite would catch
 // long before reaching production.
 //
-// V1 scope: skips into For-loop bodies (iter-var visibility). only
+// the pass skips into For-loop bodies (iter-var visibility). only
 // F64-producing subexpressions are eligible — Bool / comparison
 // results would need separate element tracking.
 // =============================================================================
@@ -75,13 +75,13 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
     // scope-aware CSE. before the flat-pass below
     // runs, recursively CSE each `Scope`'s body so duplicates LOCAL to a
     // scope land inside that scope's braces (the scope acts as a hoisting
-    // barrier per the design). this is the structural fix for the
+    // barrier). this is the structural fix for the
     // `wave_speed_map` 239-`__cse_N`-temp pathology: putting the quartic-
     // coefficient phase inside `S::scope` localises its
     // intermediates and nvcc sees their lifetimes end at the `}`.
     //
     // `recursive_cse_scopes` ALSO walks into `For` / `If` bodies — those
-    // stay opaque to the OUTER flat-pass below (V1 policy), but a `Scope`
+    // stay opaque to the OUTER flat-pass below, but a `Scope`
     // nested inside them still benefits from per-scope CSE.
     recursive_cse_scopes(body, prefix);
 
@@ -238,8 +238,8 @@ fn dce_in_place(body: &mut Vec<ScalarStmt>, outputs: &[ScalarExpr]) {
 /// duplicates within a scope hoist to the scope's start, never escaping.
 ///
 /// the outer `cse_in_place` runs AFTER this, so the outer flat-pass sees
-/// the post-recursion body. it CAN'T peek inside a Scope (V1 `count_in_stmt`
-/// policy: only immediate child expressions) — it only sees the Scope's
+/// the post-recursion body. it CAN'T peek inside a Scope (`count_in_stmt`
+/// counts only immediate child expressions) — it only sees the Scope's
 /// `result` expression. that's the architectural intent: scopes are
 /// hoisting barriers.
 fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
@@ -480,7 +480,7 @@ fn hash_expr_step(e: &ScalarExpr, child_hashes: &[u64]) -> u64 {
 ///
 /// classify each ScalarExpr by the cost of RECOMPUTING it vs the cost of
 /// HOLDING it in a register across its live range. hoisting a value costs
-/// ~1 SM cycle stall risk per warp (register pressure → spill); recomputing
+/// ~1 SM cycle stall risk per warp (register pressure -> spill); recomputing
 /// a cheap op costs ~0-1 cycles. so cheap shared-twice values are a net
 /// loss when hoisted, and transcendentals shared once are mandatory hoists.
 ///
@@ -625,8 +625,8 @@ fn is_trivial(e: &ScalarExpr) -> bool {
     matches!(e, ScalarExpr::Const(_) | ScalarExpr::Var(_))
 }
 
-/// for V1, only F64-typed expressions are eligible. Bool / comparison
-/// results would need separate element tracking in the emitted Let.
+/// only F64-typed expressions are eligible. Bool / comparison results
+/// would need separate element tracking in the emitted Let.
 fn is_f64_expr(e: &ScalarExpr) -> bool {
     use crate::passes::scalarize::BinaryKind;
     match e {
@@ -659,7 +659,7 @@ fn is_f64_expr(e: &ScalarExpr) -> bool {
 // ---- pass 1: hash + count, single bottom-up walk ----
 
 fn count_in_stmt(stmt: &ScalarStmt, counts: &mut HashMap<u64, usize>) {
-    // CSE policy V1: only the immediate child expression participates in CSE;
+    // only the immediate child expression participates in CSE;
     // descending into For / If sub-bodies would cross iter-var / branch scope
     // boundaries. derived from `ScalarStmt::child_expr` — every variant with
     // an immediate scalar expression is handled uniformly.
@@ -875,7 +875,7 @@ fn rewrite_expr(
     //   - cost_class: per-op policy from the table above;
     //   - is_trivial: defence in depth (Trivial class threshold is MAX, but
     //     a Const that hashes oddly should still bail);
-    //   - is_f64_expr: V1 element-tracking — Bool-typed exprs would need a
+    //   - is_f64_expr: element-tracking — Bool-typed exprs would need a
     //     separate Let element.
     let count = state.counts.get(&self_hash).copied().unwrap_or(0);
     let threshold = effective_threshold(&rewritten);
@@ -1070,9 +1070,8 @@ mod tests {
 
     #[test]
     fn shared_subexpr_hoisted_to_let() {
-        // Div is medium-class (threshold 2). a Div shared 2× still
-        // hoists. swapping `Mul` (cheap, threshold 4) for `Div` keeps the
-        // topology of the test while staying on the new policy's right side.
+        // Div is medium-class (threshold 2), so a Div shared 2x hoists; the
+        // cheap class (Mul, threshold 4) would not at the same share count.
         let xx = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("z")));
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = vec![
@@ -1152,7 +1151,7 @@ mod tests {
     #[test]
     fn nested_shared_subexpr_emits_deeper_let_first() {
         // both fixtures must be medium-class so 2 uses suffices.
-        // inner = Div(x, w); outer = Div(inner, y). both shared 2× across the
+        // inner = Div(x, w); outer = Div(inner, y). both shared 2x across the
         // two outputs. deepest-first emission ordering is unchanged.
         let xx = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("w")));
         let xxpy = ScalarExpr::BinOp(BinaryKind::Div, Box::new(xx.clone()), Box::new(v("y")));
@@ -1225,7 +1224,7 @@ mod tests {
     #[test]
     fn deeply_duplicated_tree_completes_quickly() {
         // switch the duplicated op from Mul (cheap, threshold 4) to
-        // Div (medium, threshold 2). every level is shared 2× via its
+        // Div (medium, threshold 2). every level is shared 2x via its
         // parent's `Div(e, e)`, so under the medium threshold the inner
         // 15 levels still hoist. the test's purpose remains: pass 1's
         // single-walk hash builder must stay O(N) — the change in
@@ -1288,7 +1287,7 @@ mod tests {
     fn shared_subexpr_inside_scope_hoists_inside_scope() {
         // outer body:
         //   let result: f64 = scope phase {
-        //       let z: f64 = (x / y) * (x / y);  // (x/y) appears 2× → CSE candidate
+        //       let z: f64 = (x / y) * (x / y);  // (x/y) appears 2x -> CSE candidate
         //       z + 1
         //   };
         // Div is medium-class (threshold 2). Add (cheap, threshold 4)
@@ -1400,11 +1399,11 @@ mod tests {
         }
     }
 
-    /// **flat-code regression**: no Scope means same behavior as before for
-    /// hoist-eligible candidates. this is the "no patchwork" property —
-    /// scope-aware CSE doesn't change anything for code that hasn't opted into scopes.
+    /// scope-aware CSE is a no-op on code that contains no `Scope`: a
+    /// hoist-eligible candidate in a flat body hoists exactly as it would with the
+    /// scope pass absent.
     #[test]
-    fn flat_code_with_no_scope_unchanged_by_step_2() {
+    fn flat_code_with_no_scope_hoists_normally() {
         // (x / y) * (x / y) — pure flat duplication of a medium-class op.
         let xy_div = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));
         let mut body: Vec<ScalarStmt> = vec![];
@@ -1462,7 +1461,7 @@ mod tests {
         cse_in_place(&mut body, &mut outputs, "__cse_");
         assert!(
             body.is_empty(),
-            "cheap-class Mul shared 3× must NOT hoist; got body = {:?}",
+            "cheap-class Mul shared 3x must NOT hoist; got body = {:?}",
             body
         );
     }
@@ -1477,7 +1476,7 @@ mod tests {
         assert_eq!(
             body.len(),
             1,
-            "cheap-class Mul shared 4× must hoist exactly once; got body = {:?}",
+            "cheap-class Mul shared 4x must hoist exactly once; got body = {:?}",
             body
         );
     }
@@ -1492,7 +1491,7 @@ mod tests {
         assert_eq!(
             body.len(),
             1,
-            "medium-class Div shared 2× must hoist exactly once; got body = {:?}",
+            "medium-class Div shared 2x must hoist exactly once; got body = {:?}",
             body
         );
     }
@@ -1512,7 +1511,7 @@ mod tests {
         assert_eq!(
             body.len(),
             1,
-            "medium-class sqrt shared 2× must hoist; got body = {:?}",
+            "medium-class sqrt shared 2x must hoist; got body = {:?}",
             body
         );
     }
@@ -1532,7 +1531,7 @@ mod tests {
         assert_eq!(
             body.len(),
             1,
-            "expensive sin shared 2× must hoist; got body = {:?}",
+            "expensive sin shared 2x must hoist; got body = {:?}",
             body
         );
     }
@@ -1574,7 +1573,7 @@ mod tests {
         assert_eq!(
             body.len(),
             1,
-            "memory FieldLoadAt shared 2× must hoist; got body = {:?}",
+            "memory FieldLoadAt shared 2x must hoist; got body = {:?}",
             body
         );
     }
@@ -1588,7 +1587,7 @@ mod tests {
         cse_in_place(&mut body, &mut outputs, "__cse_");
         assert!(
             body.is_empty(),
-            "trivial Var shared 10× must NOT hoist; got body = {:?}",
+            "trivial Var shared 10x must NOT hoist; got body = {:?}",
             body
         );
 
@@ -1598,7 +1597,7 @@ mod tests {
         cse_in_place(&mut body, &mut outputs, "__cse_");
         assert!(
             body.is_empty(),
-            "trivial Const shared 10× must NOT hoist; got body = {:?}",
+            "trivial Const shared 10x must NOT hoist; got body = {:?}",
             body
         );
     }
@@ -1617,21 +1616,20 @@ mod tests {
         assert_eq!(
             body.len(),
             1,
-            "FreeCall shared 2× must hoist (expensive class); got body = {:?}",
+            "FreeCall shared 2x must hoist (expensive class); got body = {:?}",
             body
         );
     }
 
     /// **the load-bearing demonstration**: a kernel that mixes cheap and
     /// expensive operations. only the expensive shared values land in
-    /// __cse_ lets; the cheap shared-twice values stay inline. this is
-    /// EXACTLY the wave_speed_map win the design doc projects.
+    /// __cse_ lets; the cheap shared-twice values stay inline.
     #[test]
     fn mixed_kernel_hoists_only_expensive_shares() {
         // a 2-output kernel:
         //   out0 = sin(x) + (a * b)        // sin shared, mul shared
-        //   out1 = sin(x) + (a * b) * 2    // sin shared 2×, mul shared 2×
-        // sin → hoist (expensive ≥ 2). mul → stay inline (cheap < 4).
+        //   out1 = sin(x) + (a * b) * 2    // sin shared 2x, mul shared 2x
+        // sin -> hoist (expensive >= 2). mul -> stay inline (cheap < 4).
         let sin = ScalarExpr::MethodCall {
             receiver: Box::new(v("x")),
             method: "sin".to_string(),
@@ -1725,10 +1723,10 @@ mod tests {
         // outer body:
         //   let r: f64 = scope outer {
         //       let m: f64 = scope inner {
-        //           let p = (x / y) * (x / y);   // (x/y) ×2 INSIDE inner
+        //           let p = (x / y) * (x / y);   // (x/y) x2 INSIDE inner
         //           p
         //       };
-        //       m + m                            // m ×2 INSIDE outer, AFTER inner closes
+        //       m + m                            // m x2 INSIDE outer, AFTER inner closes
         //   };
         // Div is medium-class so the 2-share hoists.
         let x1 = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));

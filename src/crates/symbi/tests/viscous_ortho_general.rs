@@ -86,8 +86,8 @@ fn rz_swirl_rigid_rotation_nulls_and_shear_acts() {
             .iter()
             .map(|c| *sim.fields.cons.nrg_field().unwrap().view().at(c))
             .collect();
-        // trim two z-rows? z is periodic and the profile is z-uniform, so only the
-        // radial edges see outflow-ghost contamination: trim two r-rings. layout is
+        // z is periodic and the profile is z-uniform, so only the radial edges see
+        // outflow-ghost contamination: trim two r-rings, no z-rows. layout is
         // last-axis-fastest (z fastest), so ring i occupies [i*nz, (i+1)*nz).
         let trim = |v: &[f64], w: &[f64]| -> f64 {
             v.iter()

@@ -85,7 +85,7 @@ fn main() {
         emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k, ct_w);
     }
 
-    // the Ohmic resistive edge EMF (eta * J_z added to Ez) — the SAME Gv trace the CPU bakes, so
+    // the ohmic resistive edge EMF (eta * J_z added to Ez) — the SAME Gv trace the CPU bakes, so
     // the CUDA lowering is the GPU portability gate for generic resistive MHD.
     let (res_k, res_w) = rmhd_resistive_emf_2d_gv();
     emit_gv(&out_dir, "rmhd_resistive_emf_2d", 2, res_k, res_w);

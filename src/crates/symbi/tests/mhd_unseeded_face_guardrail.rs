@@ -1,13 +1,13 @@
 // =============================================================================
 // mhd_unseeded_face_guardrail.rs
 //
-// new-user guardrail (ergonomics pass, win 4): an MHD sim whose staggered face B was never
-// seeded must fail at evolve ENTRY with an actionable message — not march into a deep c2p/dt
-// panic. seeding cell-centered B (seed_cell/seed_cells) does NOT initialize the faces; the
-// constrained transport needs the staggered `bface` as its divergence-free ground truth.
+// an MHD sim whose staggered face B was never seeded must fail at evolve ENTRY with an
+// actionable message, ahead of any deep c2p/dt panic. seeding cell-centered B
+// (seed_cell/seed_cells) leaves the faces uninitialized; the constrained transport needs the
+// staggered `bface` as its divergence-free ground truth.
 //
-// (also a compact showcase of the ergonomics pass: prelude + SimCpuGeneric + builder +
-// seed_cells + substrate().)
+// the setup is also the minimal frontend path: prelude + SimCpuGeneric + builder +
+// seed_cells + substrate().
 // =============================================================================
 
 use symbi::prelude::*;

@@ -1,8 +1,8 @@
 # =============================================================================
 # sod.py
 #
-# sod shock tube problem using the new SimbiProblem api.
-# demonstrates the minimal, clean interface for defining physics problems.
+# sod shock tube problem on the SimbiProblem api.
+# demonstrates the minimal interface for defining physics problems.
 #
 # usage:
 #   simbi run sod --end-time 0.2 --resolution 1000

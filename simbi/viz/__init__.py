@@ -8,21 +8,6 @@ from .api import (
     plot_time_series,
 )
 
-# from .body_diagnostics import (
-#     BinaryTimeSeries,
-#     BodyTimeSeries,
-#     SingleBodyTimeSeries,
-#     compute_binary_dynamics,
-#     load_body_timeseries,
-#     plot_accretion_rate,
-#     plot_binary_diagnostics_summary,
-#     plot_body_diagnostics_summary,
-#     plot_forces,
-#     plot_orbital_elements,
-#     plot_radial_acceleration,
-#     plot_separation,
-#     plot_torques,
-# )
 from . import colormaps  # noqa: F401  (import for side effect: registers the simbi_* composites)
 from .cli import setup_parser as setup_viz_parser
 from .config_loader import generate_example_config, load_component_props

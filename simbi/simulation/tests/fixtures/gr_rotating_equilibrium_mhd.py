@@ -5,8 +5,8 @@
 # GrRotatingEquilibrium constant-l orbit (Fishbone-Moncrief 1976, at general
 # spin, dynamic boundaries pinned to the analytic state) run on the RELATIVISTIC-
 # MHD kernel path with a vanishing magnetic field. at B = 0 the RMHD equations
-# reduce to GRHD, so the SAME analytic equilibrium is stationary — but the state
-# now flows through the full spinning-kerr RMHD flux (the tetrad HLLD, the shift,
+# reduce to GRHD, so the SAME analytic equilibrium is stationary — while the state
+# flows through the full spinning-kerr RMHD flux (the tetrad HLLD, the shift,
 # and the v^phi FRAME-DRAGGING w-reconstruction), c2p, and covariant EM-stress
 # source. it is the accuracy check for those pieces: the one-step S_phi residual
 # must sit at truncation and CONVERGE under refinement (a raw v^phi

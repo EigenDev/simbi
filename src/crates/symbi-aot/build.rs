@@ -16,8 +16,8 @@
 //                              conserved update, matching the production
 //                              iso godunov for the no-gravity case.
 //
-// in production (a later refactor) this codegen runs from a RegimeSpec registry;
-// here it generates a fixed set to prove the mechanism.
+// the emitted set is fixed here; the production bake drives the same builders from a
+// RegimeSpec registry.
 // =============================================================================
 
 use std::fs;
@@ -212,8 +212,8 @@ fn write_registry(out_dir: &str) {
     src.push_str("        _ => return None,\n    })\n}\n");
     // the ENUMERABLE registry: every generated kernel's (name, neutral IR blob).
     // registry-wide audits (the ghost-width law over FieldLoadAt stencil reach)
-    // iterate this list, so a newly generated kernel is audited the build
-    // it appears without being named by hand.
+    // iterate this list, so a newly generated kernel is audited the build it appears in,
+    // without being named by hand.
     src.push_str(
         "\n/// every generated kernel's (name, neutral IR blob), in registration order.\n",
     );
@@ -444,7 +444,7 @@ fn coords_suffix(coords: Coords) -> &'static str {
 //
 // `RegimeBuild` + `FamilyKind` declare every point in the fused-kernel bake
 // matrix as DATA. the codegen loop in main() walks
-// these tables × ndim and dispatches to the one `gen_godunov_euler_unified`
+// these tables x ndim and dispatches to the one `gen_godunov_euler_unified`
 // chokepoint. adding a regime or a family is a row addition; adding a
 // geometry is a column. zero copy-paste. RHD/RMHD + curvilinear extensions
 // follow once their fused-source builders validate against the GPU.
@@ -699,12 +699,12 @@ fn geo_source(prefix: &str) -> GeoSource {
 }
 
 // the SINGLE godunov emit chokepoint for BOTH fused / unfused variants. the
-// integrator stage is no longer a codegen axis: one `{prefix}_godunov_stage{geom_suffix}_{D}d`
+// integrator stage is NOT a codegen axis: one `{prefix}_godunov_stage{geom_suffix}_{D}d`
 // kernel takes the SSP Shu-Osher convex coefficients `(a0, ac)` as RUNTIME scalars, so the
 // same kernel serves forward-Euler, SSP-RK2, and SSP-RK3 (the driver feeds the per-stage
 // coefficients). `fused = None` emits the plain kernel; `fused = Some((slug, specs))` adds
 // the `_with_{slug}` infix and splices the specs into the forward-Euler operator. one helper
-// covers the cross-product — (fused × regime × ndim × geometry) is data, never copy-paste.
+// covers the cross-product — (fused x regime x ndim x geometry) is data, never copy-paste.
 fn gen_godunov_stage(
     out_dir: &str,
     ndim: u8,
@@ -783,8 +783,8 @@ fn gen_godunov_with_body_source(
 
 // the STANDALONE ADDITIVE source kernel `{prefix}_source_with_{slug}{geom}_{D}d`: `cons += dt*S`
 // for the spec family, as a separate per-stage pass (the general source executor). same splice as
-// the fused godunov, minus the flux/combine — so plain godunov + this pass is the
-// proven-equivalent decomposition of the fused stage. the driver passes dt = ac*dt.
+// the fused godunov, minus the flux/combine — so plain godunov + this pass is an exact
+// decomposition of the fused stage. the driver passes dt = ac*dt.
 fn gen_source_apply(
     out_dir: &str,
     ndim: u8,
@@ -1516,7 +1516,7 @@ fn gen_rmhd_fofc_project_gr(out_dir: &str, ndim: u8, geom: Geom) {
 }
 
 // the STATE-CONSTRAINT PROJECTION: the whole declared family (admissibility + whatever floors and
-// ceilings the run configures) enforced by ONE simultaneous projection onto `G ∩ C`. each member's
+// ceilings the run configures) enforced by ONE simultaneous projection onto `G \cap C`. each member's
 // parameter is a RUNTIME scalar, so a single baked kernel serves every configuration and a neutral
 // value leaves a member declared and applicable but never binding. curved spacetime only.
 fn gen_rmhd_constraint_projection(out_dir: &str, ndim: u8, geom: Geom) {
@@ -2892,7 +2892,7 @@ fn main() {
         }
     }
     // horizon excision (cartesian kerr-schild charts, 2d + 3d, spin-generic): the
-    // onion-sweep gas fill pair (chart-agnostic prim propagation on the uniform grid,
+    // gas fill pair (a chart-agnostic pointwise vacuum floor on the uniform grid,
     // masked on the kerr-schild radius r_ks(x; a) < r_exc — the sphere at a = 0, the
     // oblate spheroid at spin) + the valencia conserved rebuild at the cell's own
     // metric. the hydro p2c rebuilds (D, S_i, tau) gas-only; the MAGNETIZED p2c folds
@@ -3147,7 +3147,7 @@ fn main() {
     // monopole kernel family. gas godunov (the ideal-MHD stress in the covariant
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
-    // zero — the transverse-B curved measures land with the phase-B densitized CT).
+    // zero — the transverse-B curved measures ride the densitized CT).
     for geom in [Geom::sph(1).schwarzschild_ks()] {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
@@ -3157,7 +3157,8 @@ fn main() {
         gen_rmhd_face_flux_gr_mode(&out_dir, 1, 0, geom.clone(), false, true); // FOFC rusanov fallback
         // the orthonormal-frame MUB09 HLLD gas flux: schwarzschild (zero shift) and kerr-schild
         // (the shift rides the fan as the moving-interface speed beta^r/alpha). spinning kerr is
-        // rejected in the flux match itself (dragging-consistent reconstruction, phase C).
+        // rejected in the flux match itself: frame dragging demands a dragging-consistent
+        // reconstruction the wrapper does not perform.
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), true);
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
@@ -3166,7 +3167,7 @@ fn main() {
     // GRMHD in the cartesian kerr-schild (x, y) plane: the spatial metric is NON-DIAGONAL
     // (gamma_ij = delta_ij + 2H x_i x_j / r^2, H = M/r, r = |x|), so the gas flux runs the
     // fast-magnetosonic HLLE fan (the orthonormal MUB09 HLLD wrapper assumes a diagonal spatial
-    // metric — the tetrad generalization is a follow-on) and the CT runs the contact / UCT-HLL
+    // metric) and the CT runs the contact / UCT-HLL
     // densitized corner EMF. div(B) is preserved by the coordinate curl of the densitized EMF
     // Etilde = sqrt(gamma) E divided by the per-face sqrt(gamma) weight (Font eq. 101), which
     // telescopes for any weight. the covariant geodesic + EM-stress source carries the gravity.
@@ -3235,8 +3236,8 @@ fn main() {
     // sqrt(R^2 + z^2); the CT carries the TWO-component in-plane shift beta^R, beta^z; out-of-plane
     // corner EMF the toroidal E_phi). the CT (contact + UCT-HLL) addresses the true in-plane axes via
     // gr_ct_plane, so the GAPPED (R, z) grid-axis set [0, 2] reconstructs the staggered field along
-    // the axis whose transverse halo it carries. HLLE gas flux; the HLLD orthonormal wrapper is a
-    // follow-on (diagonal-metric only, so even the disk defers it).
+    // the axis whose transverse halo it carries. HLLE gas flux: the HLLD orthonormal wrapper
+    // requires a diagonal spatial metric, which neither cylindrical GR chart has.
     for geom in [
         Geom::cyl_rphi().schwarzschild_ks(),
         Geom::cyl_rz().schwarzschild_ks(),
@@ -3261,11 +3262,11 @@ fn main() {
         // along the world normal (pc), so the gapped grid-axis set is handled.
         gen_rmhd_gr_uct_hlld(&out_dir, &geom);
     }
-    // GRMHD phase C: the spinning-kerr 2D SWIRL row (sph_swirl -> DOF = 3 momentum for the frame
+    // GRMHD on the spinning-kerr 2D SWIRL row (sph_swirl -> DOF = 3 momentum for the frame
     // dragging). the flux runs the tetrad HLLD (non-diagonal gamma_{r phi}) + the moving-interface
     // shift; the covariant EM-stress source, the c2p, and the contact / UCT-HLL edge EMF are all
-    // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only (the kerr arm is a
-    // follow-on), so kerr runs the contact or UCT-HLL CT.
+    // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only, so kerr runs the contact
+    // or UCT-HLL CT.
     for geom in [Geom::sph_swirl().kerr()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
@@ -3335,7 +3336,7 @@ fn main() {
         }
     }
     // RMHD HLLC + HLLD — 1D + 3D variants matching the HLLE RMHD layout
-    // (no 2D RMHD today). HLLD is now fully carrier-generic (see hlld.rs).
+    // (2D RMHD is unbaked). HLLD is fully carrier-generic (see hlld.rs).
     gen_rmhd_hllc_face_flux(&out_dir, 1, 0);
     gen_rmhd_hlld_face_flux(&out_dir, 1, 0);
     for dir in 0..3u8 {
@@ -3346,16 +3347,16 @@ fn main() {
     //
     // every fused godunov kernel symbi-aot emits is one point in the cube:
     //
-    //   {regime}  ×  {fused family}  ×  {ndim}  ×  {integrator kind}  ×  {geometry}
+    //   {regime}  x  {fused family}  x  {ndim}  x  {integrator kind}  x  {geometry}
     //
     // declaring it as data + a nested loop replaces the copy-paste fan-out.
     // adding RHD / RMHD = one row in `REGIMES`; adding accretion = one row
-    // in `FAMILIES`; adding spherical = wrap a `for geom in GEOMS` loop
-    // (deferred until the curvilinear fused path validates on GPU). this
+    // in `FAMILIES`; adding spherical = wrap a `for geom in GEOMS` loop.
+    // curvilinear fused kernels are unbaked. this
     // is the LOAD-BEARING shape: every new fused-kernel variant is a data
     // addition, never a new emit block. ONE godunov-stage kernel per cell
     // serves every SSP scheme — the integrator stage is a runtime coefficient,
-    // no longer a codegen axis.
+    // not a codegen axis.
     for ndim in 1u8..=3 {
         for regime in REGIMES {
             for family in FUSED_FAMILIES {
@@ -3371,8 +3372,8 @@ fn main() {
                     Some((family.slug(), &refs)),
                 );
                 // the STANDALONE ADDITIVE variant — `cons += dt*S` as a separate per-stage pass.
-                // the general source executor + the proven-equivalent decomposition of the fused
-                // stage (plain godunov + this pass == fused stage; the S2 equivalence test).
+                // the general source executor: plain godunov + this pass reproduces the fused
+                // stage exactly.
                 gen_source_apply(
                     &out_dir,
                     ndim,
@@ -3435,7 +3436,8 @@ fn main() {
     }
     // curvilinear body source (one generic builder per geometry): cyl r-phi disk plane (2D) +
     // r-phi-z (3D); spherical meridional (2D) + full (3D). the r-z axisymmetric body shares the
-    // cyl 2D name with r-phi and needs a runtime axis-role to disambiguate (deferred).
+    // cyl 2D name with r-phi, so distinguishing them needs a runtime axis-role that the
+    // kernel name cannot carry; it is unbaked.
     gen_body_source(&out_dir, 2, Coords::Cylindrical);
     gen_body_source(&out_dir, 3, Coords::Cylindrical);
     gen_body_source(&out_dir, 2, Coords::Spherical);
@@ -3528,7 +3530,7 @@ fn main() {
     // first-order flux-correction copies + select for every regime x dimension (the substrate runs
     // FOFC after c2p). pointwise, so one triple per (prefix, has_energy, ndim) covers every chart.
     // MHD: ncomp = 3 (the 3-vector momentum). hydro: ncomp = ndim (momentum = dimensions, DOF == D;
-    // the spherical-swirl DOF-lift is a follow-on).
+    // the spherical-swirl DOF-lift is unbaked).
     for ndim in 1u8..=3 {
         gen_fofc(&out_dir, ndim, "rmhd", 3, true);
         gen_fofc(&out_dir, ndim, "nmhd", 3, true);
@@ -3980,7 +3982,7 @@ fn main() {
     // recompiles, contrary to the prior comment here. that left the generated CPU+CUDA
     // kernels stale after any gv-builder / physics edit (GPU-vs-CPU mismatch / gpu=0 until
     // a manual `cargo clean -p symbi-aot`). watch the substrate source explicitly so any
-    // physics change regenerates the kernels. NOTE: emitting any rerun-if-changed disables
+    // physics change regenerates the kernels. emitting any rerun-if-changed disables
     // the default whole-package watch, so build.rs is listed too.
     println!("cargo:rerun-if-changed=build.rs");
     // GPU smem tiling opt-in. same A/B-honesty reason.

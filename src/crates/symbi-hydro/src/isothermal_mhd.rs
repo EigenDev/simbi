@@ -48,7 +48,7 @@ pub fn imhd_recover<S: Scalar, const D: usize>(
     cons: &IsoMhdCons<S, D>,
 ) -> IsoMhdPrim<S, D> {
     // mul-by-reciprocal to match the kernel form bit-for-bit (CPU == GPU). IEEE
-    // div-by-zero -> inf/NaN, no silent floor (feedback_no_silent_floors).
+    // div-by-zero -> inf/NaN, no silent floor.
     let inv_rho = S::ONE / cons.den;
     IsoMhdPrim {
         hydro: PrimG {
@@ -62,7 +62,7 @@ pub fn imhd_recover<S: Scalar, const D: usize>(
 
 /// fast magnetosonic speed along nhat. closed form, single physical sqrt; the
 /// isothermal sound speed `a^2 = cs^2` is constant (Isothermal EOS ignores p).
-/// safe_sqrt guards the radicand so no NaN traces into the kernel (CLAUDE.md 4.3).
+/// safe_sqrt guards the radicand so no NaN traces into the kernel.
 #[inline]
 fn fast_magnetosonic<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,

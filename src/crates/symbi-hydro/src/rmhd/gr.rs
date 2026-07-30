@@ -60,13 +60,13 @@ pub struct RmhdGr<S: Scalar, const D: usize> {
 /// WHY THIS RATHER THAN THE FAST-MAGNETOSONIC BOUND. `c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2` is a
 /// valid HLL estimate and is what the cheap CFL rate uses, but it is a BOUND, not the characteristic
 /// speed. the per-cell speed buffers exist so the flux fan and the UCT edge EMF can read the exact
-/// quartic roots without re-solving per face; filling them with a bound instead made every
-/// curved-spacetime UCT EMF more diffusive than its flat counterpart on identical physics. on an
-/// EXACTLY minkowski metric the two differed by 55% on the left-going speed, which is what the
-/// zero-mass kerr-schild oracle detects.
+/// quartic roots without re-solving per face; a bound in those buffers makes every curved-spacetime
+/// UCT EMF more diffusive than its flat counterpart on identical physics. on an EXACTLY minkowski
+/// metric the bound and the exact left-going root differ by 55%.
 ///
 /// on a flat metric the tetrad is the identity and `alpha` is one, so this reduces to the flat
-/// quartic BIT-FOR-BIT -- the zero-mass identity holds by construction rather than by tolerance.
+/// quartic BIT-FOR-BIT: at zero mass the curved and flat speeds are identical to the last bit, an
+/// exact equality rather than a tolerance.
 pub fn rmhd_gr_wave_speeds_axis<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim: &MhdPrim<S, D>,

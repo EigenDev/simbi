@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from typing import Optional, Sequence, Union
+from typing import Sequence, Union
 
 import matplotlib
 import numpy as np

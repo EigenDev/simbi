@@ -6,7 +6,6 @@
 # =============================================================================
 import sys
 from argparse import Namespace, _SubParsersAction
-from pathlib import Path
 from typing import Optional
 
 from simbi.viz import (

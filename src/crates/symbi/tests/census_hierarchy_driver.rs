@@ -4,15 +4,14 @@
 // a census through the REFINEMENT HIERARCHY driver, which is the driver the configuration front
 // end actually runs. every other census test drives the uni-grid evolve loop.
 //
-// that asymmetry is not a detail. a census reached production having been built and gated entirely
-// against the uni-grid loop, and three separate pieces of it were simply absent on the hierarchy:
-// the samples were never taken, and the checkpoint writer never emitted the group. neither is a
-// crash or a missing kernel — a checkpoint with no census group reads exactly like a run that
-// registered none, so the whole feature reported success while recording nothing.
+// that asymmetry matters because the hierarchy has its own sampling hook and its own checkpoint
+// writer, and either one going missing is SILENT: a hierarchy that never takes the samples, or a
+// writer that never emits the census group, produces no crash and no missing-kernel panic. a
+// checkpoint with no census group reads exactly like a run that registered none, so the whole
+// feature reports success while recording nothing.
 //
-// what makes that class expensive is that the hierarchy was reachable ONLY through the python
-// extension, so observing any of it meant a multi-minute optimized rebuild. it is reachable from
-// here in milliseconds.
+// the hierarchy is otherwise reachable only through the python extension, where observing any of
+// this means a multi-minute optimized rebuild; from here it takes milliseconds.
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -110,8 +109,8 @@ fn the_hierarchy_driver_records_a_census_sample_per_step() {
 
 #[test]
 fn a_hierarchy_checkpoint_carries_the_census_group() {
-    // the second half of the same seam: sampling into a history that no writer emits is
-    // indistinguishable, from the outside, from never sampling at all.
+    // sampling into a history that no writer emits is indistinguishable, from the outside, from
+    // never sampling at all.
     let mut sim = build();
     sim.store
         .censuses
@@ -136,8 +135,8 @@ fn a_hierarchy_checkpoint_carries_the_census_group() {
     let bytes = std::fs::read(&path).expect("checkpoint readable");
     let _ = std::fs::remove_dir_all(&dir);
     // the group name travels as a plain string in the hdf5 link table, so its presence is
-    // checkable without a reader. what is being asserted is that the writer emitted the group at
-    // all — the failure was its complete absence, not a wrong value inside it.
+    // checkable without a reader. what is asserted is that the writer emitted the group at all;
+    // the failure mode under test is its complete absence.
     let needle = b"census";
     assert!(
         bytes.windows(needle.len()).any(|w| w == needle),

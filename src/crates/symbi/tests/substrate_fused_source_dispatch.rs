@@ -10,17 +10,17 @@
 // body_source) pattern.
 //
 // **what this validates**:
-//   1. the runtime composes the right fused-kernel name and the AOT registry
-//      resolves it (no missing kernel panic);
-//   2. `source_scalars` correctly routes spec params (`g_ext_0`, ...) through
-//      `scalars_for` into the kernel's declared scalar tail (the substrate's
-//      type-sorted scalar manifest accepts them);
-//   3. invoked on a SimState with constant flux buffers (zero divergence) and
-//      the `uniform_accel` overlay, the per-cell cons.mom is updated exactly by
-//      the analytical `mom + dt\cdot\rho\cdot g_ext_0` — bit-close at f64;
-//   4. cons.nrg picks up the energy-overlay contribution too (`v\cdot g_ext`); cons.den
-//      stays invariant — proves the multi-source binding routes to the right
-//      conservation laws.
+//   - the runtime composes the right fused-kernel name and the AOT registry
+//     resolves it (no missing kernel panic);
+//   - `source_scalars` correctly routes spec params (`g_ext_0`, ...) through
+//     `scalars_for` into the kernel's declared scalar tail (the substrate's
+//     type-sorted scalar manifest accepts them);
+//   - invoked on a SimState with constant flux buffers (zero divergence) and
+//     the `uniform_accel` overlay, the per-cell cons.mom is updated exactly by
+//     the analytical `mom + dt\cdot\rho\cdot g_ext_0` — bit-close at f64;
+//   - cons.nrg picks up the energy-overlay contribution too (`v\cdot g_ext`); cons.den
+//     stays invariant — proves the multi-source binding routes to the right
+//     conservation laws.
 //
 // run: cargo test -p symbi --test substrate_fused_source_dispatch
 // =============================================================================
@@ -133,15 +133,15 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
 
         assert!(
             (rho_out - rho_v).abs() < tol,
-            "cell {c:?}: rho_new {rho_out} ≠ rho_in {rho_v} (mass should be invariant under the momentum/energy overlays)",
+            "cell {c:?}: rho_new {rho_out} != rho_in {rho_v} (mass should be invariant under the momentum/energy overlays)",
         );
         assert!(
             (mom_out - mom_expected).abs() < tol,
-            "cell {c:?}: mom_new {mom_out} ≠ analytical {mom_expected}",
+            "cell {c:?}: mom_new {mom_out} != analytical {mom_expected}",
         );
         assert!(
             (nrg_out - nrg_expected).abs() < tol,
-            "cell {c:?}: nrg_new {nrg_out} ≠ analytical {nrg_expected} (the AOT-fused nrg overlay must apply)",
+            "cell {c:?}: nrg_new {nrg_out} != analytical {nrg_expected} (the AOT-fused nrg overlay must apply)",
         );
     }
 }
@@ -215,11 +215,11 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
         let mom_expected = mom_v + dt * rho_v * g_ext_0;
         assert!(
             (rho_out - rho_v).abs() < tol,
-            "iso cell {c:?}: rho_new {rho_out} ≠ rho_in {rho_v}",
+            "iso cell {c:?}: rho_new {rho_out} != rho_in {rho_v}",
         );
         assert!(
             (mom_out - mom_expected).abs() < tol,
-            "iso cell {c:?}: mom_new {mom_out} ≠ analytical {mom_expected}",
+            "iso cell {c:?}: mom_new {mom_out} != analytical {mom_expected}",
         );
     }
 }

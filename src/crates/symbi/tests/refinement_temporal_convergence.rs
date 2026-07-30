@@ -11,8 +11,8 @@
 // substep-start-frozen ghosts make the interface flux first-order in time
 // (measured 1.14); stage-correct shu-osher time interpolation
 // (hierarchy.rs::stage_time_fractions) restores near-second order (measured
-// 1.62 at the production cfl pair; see the in-test comment for the deep-dt
-// saturation analysis).
+// 1.62 at the production cfl pair; the slope saturates near 1.3 at deep dt,
+// where the mixed space-time prolongation term dominates).
 //
 // usage:
 //  cargo test -p symbi --release --test refine_temporal_convergence

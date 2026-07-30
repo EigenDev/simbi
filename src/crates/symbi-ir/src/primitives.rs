@@ -3,35 +3,28 @@
 //
 // LAYER 0 UNIVERSAL PRIMITIVES — categorical structures over the substrate.
 //
-// these are the type-level disciplines that physics (Layer 1, in symbi-hydro)
-// depends on, but the IR substrate is paradigm-agnostic about. they discharge
-// three axioms:
-//
-//   A3 (algebra)            — LinearSpace: opt-in, nominal algebraic structure.
-//   A4 (indices + geometry) — Variance markers (re-exported), Geometry trait.
-//   A5 (scope)              — Scoped<Sc, T> for multi-rank correctness.
+// these are the type-level disciplines physics depends on but the IR substrate
+// is paradigm-agnostic about: algebraic structure, index variance + geometry,
+// and rank scope.
 //
 // what's here:
 //   - variance              — Indexed<V, S, D> (re-exported from symbi-algebra);
 //                             same-variance arithmetic compiles, mixed is a
 //                             compile error; metric-free contraction.
-//   - Scope + Scoped        — per-rank vs cross-rank value discipline (DORMANT
-//                             until multi-rank code arrives; retained so the
-//                             eventual MPI lift is a non-breaking add).
+//   - Scope + Scoped        — the per-rank vs cross-rank value discipline: a
+//                             `Local` value may differ between ranks, a `Global`
+//                             one is agreed across all of them, and crossing
+//                             requires an explicit `elevate` / `localize`.
 //   - LinearSpace           — types that declare additive + scalar-multiplicative
 //                             structure (Cons + Cons OK; Prim + Prim won't compile
 //                             because Prim doesn't impl LinearSpace).
 //   - Geometry              — the metric-bearing manifold. FlatCartesian (ZST,
 //                             identity metric) is the working impl; Cylindrical
-//                             and Spherical are forward placeholders until the
-//                             Regime-trait geometry lift forces them.
-//
-// these traits have no downstream consumers (physics uses the legacy
-// `symbi_algebra::Scalar` + ad-hoc trait bounds).
+//                             and Spherical are declared shells.
 //
 // references:
-//   - crate::algebra        — the new `Scalar` / `Mask` these traits build on
-//   - symbi-algebra::variance — `Indexed`/`Upper`/`Lower` (used unchanged)
+//   - crate::algebra        — the `Scalar` / `Mask` these traits build on
+//   - symbi-algebra::variance — `Indexed`/`Upper`/`Lower`
 // =============================================================================
 
 #![deny(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
@@ -46,7 +39,7 @@ use crate::algebra::{Scalar, Selectable};
 // `Indexed<V, S, D>` repr-transparent over `Tensor<S, D>` already lives).
 //
 // arithmetic only within same variance (Upper + Upper compiles, Upper + Lower
-// has no impl → compile error). `contract(v, w)` is the metric-free pairing.
+// has no impl -> compile error). `contract(v, w)` is the metric-free pairing.
 // see crates/symbi-algebra/src/variance.rs for the implementation.
 // =============================================================================
 
@@ -56,9 +49,9 @@ pub use symbi_algebra::{Contravariant, Covariant, Indexed, Lower, Upper, contrac
 // section 2 — Scope: per-rank vs cross-rank value discipline (A5).
 //
 // arithmetic between same-scope values compiles; cross-scope arithmetic has
-// NO impl → compile error. crossing scopes is explicit via `elevate` (Local
-// → Global, triggers communication when ranks > 1) or `localize` (Global
-// → Local, trivial — every rank already agrees).
+// NO impl -> compile error. crossing scopes is explicit via `elevate` (Local
+// -> Global, triggers communication when ranks > 1) or `localize` (Global
+// -> Local, trivial — every rank already agrees).
 //
 // dormant: no multi-rank consumer; retained for the MPI lift as a
 // non-breaking type-discipline addition.
@@ -114,7 +107,7 @@ impl<Sc: Scope, T> Scoped<Sc, T> {
 }
 
 impl<T: Copy> Scoped<Global, T> {
-    /// every rank already agrees on this value → narrowing to Local is free.
+    /// every rank already agrees on this value -> narrowing to Local is free.
     pub fn localize(self) -> Scoped<Local, T> {
         Scoped {
             value: self.value,
@@ -123,7 +116,7 @@ impl<T: Copy> Scoped<Global, T> {
     }
 }
 
-// arithmetic preserved within a single scope; cross-scope has no impl → compile error.
+// arithmetic preserved within a single scope; cross-scope has no impl -> compile error.
 
 impl<Sc: Scope, T: Add<Output = T>> Add for Scoped<Sc, T> {
     type Output = Scoped<Sc, T>;
@@ -158,8 +151,6 @@ impl<Sc: Scope, T: Neg<Output = T>> Neg for Scoped<Sc, T> {
 // Cons * scalar); `Prim<S, D>` deliberately does NOT (Prim + Prim won't
 // compile because no `Add` impl).
 //
-// a future `#[derive(LinearSpace)]` macro will verify every field impls
-// LinearSpace over the same Scalar and emit Add/Sub/Mul/select fieldwise.
 // =============================================================================
 
 pub trait LinearSpace:
@@ -277,7 +268,7 @@ mod tests {
         assert_eq!(*cc.get(), -2.0);
     }
 
-    // ---- Scope: Global → Local is free -----------------------------------
+    // ---- Scope: Global -> Local is free -----------------------------------
     #[test]
     fn scoped_global_localize_preserves_value() {
         let gg: Scoped<Global, f64> = Scoped::new(42.0);

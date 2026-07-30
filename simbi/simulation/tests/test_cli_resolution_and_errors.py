@@ -1,12 +1,13 @@
 # =============================================================================
 # test_cli_resolution_and_errors.py
 #
-# regressions for two cli ergonomics fixes:
+# two contracts of the CLI input path:
 #  - a SHORT resolution input is padded to the field's declared tuple arity with
 #    singleton trailing axes, so a 2d run on a 3-component (mhd) config needs
 #    only `--resolution nx,ny`; the unused nz=1 is filled in.
-#  - bad cli input surfaces as a clean, traceback-free `ConfigError` (a bad enum
-#    used to escape as a raw KeyError; a bad int dumped the whole model dict).
+#  - bad cli input surfaces as a clean, traceback-free `ConfigError`: an invalid
+#    enum names the valid choices, and a malformed number does not echo the whole
+#    model-input dict.
 # =============================================================================
 from typing import Annotated
 
@@ -51,7 +52,7 @@ def test_non_numeric_resolution_raises_config_error() -> None:
 
 
 def test_bad_enum_raises_config_error_with_choices() -> None:
-    # a bad enum value used to escape as a raw KeyError('BOGUS') traceback.
+    # a bad enum value must surface as a ConfigError, never a raw KeyError('BOGUS').
     with pytest.raises(ConfigError) as exc:
         OrszagTang.from_cli(["--resolution", "64,64", "--solver", "bogus"])
     msg = str(exc.value)

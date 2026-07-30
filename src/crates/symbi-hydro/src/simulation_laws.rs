@@ -9,11 +9,11 @@
 //
 // the additive RHS:
 //
-//   ∂U/∂t = -div(F_intrinsic(U))
-//           + Σ_geometric S_g(U)
-//           + Σ_gravity S_grav(U)
-//           + Σ_ib S_ib(U)
-//           + Σ_user S_user(U)
+//   partial_t U = -div(F_intrinsic(U))
+//           + sum_geometric S_g(U)
+//           + sum_gravity S_grav(U)
+//           + sum_ib S_ib(U)
+//           + sum_user S_user(U)
 //
 // composition is **purely additive** (A1's commutative + associative `Add`),
 // so the order of overlay kinds is documentation only. but the
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn spec_data_drives_primary_cuda_emit_end_to_end() {
-        // spec data → SimulationLaws → composition → primary scalarize emit →
+        // spec data -> SimulationLaws -> composition -> primary scalarize emit ->
         // concrete CUDA C. raw literals stay raw (precision-explicit via buffer
         // ptr types); the math functions are libdevice names (`sqrt`, the bare
         // C name; no `.sqrt()` method call), and there is no carrier-generic `S::from_f64` wrap.

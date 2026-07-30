@@ -4,7 +4,7 @@
 // proves the CURVILINEAR (spherical) constrained-transport curl
 // (rmhd_ct_curl_3d_dir under Coords::Spherical) preserves the AREA-WEIGHTED
 // div(B) = 0 to machine precision — the curvilinear generalization of the
-// Cartesian rmhd_ct_curl3d_divb gate. this is the
+// cartesian rmhd_ct_curl3d_divb gate. this is the
 // non-negotiable correctness check for curvilinear CT.
 //
 // the curl is the ONE coord-generic orthogonal-curl in the scale factors h_p
@@ -12,7 +12,7 @@
 // line-element weight h_p is a function of the GLOBAL edge index (same corner ->
 // same h, scale_factor independent of the edge's own axis), so the point-form
 // area-weighted divergence telescopes to 0 exactly — same guarantee as
-// Cartesian, independent of the metric.
+// cartesian, independent of the metric.
 //
 // staggering (cell-indexed, row-major (i*M+j)*M+k): B_dir on the LOW dir-face,
 // E_p on the edge parallel to p. div(B) is the point-form spherical flux balance
@@ -211,7 +211,7 @@ fn ct_curl_sph_constant_edge_flux_is_curl_free() {
     // axis, so every weighted forward difference vanishes => curl = 0 for all three
     // face components. a WRONG metric weight would not cancel. b=0, dt=1 => new_b
     // must be machine zero. this pins the per-dir h-weighting (div B alone cannot —
-    // Cartesian h=1 also telescopes).
+    // cartesian h=1 also telescopes).
     let f = M * M * M;
     let c0 = 1.7;
     let mut e = [vec![0.0; f], vec![0.0; f], vec![0.0; f]];

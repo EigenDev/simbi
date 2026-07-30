@@ -1,7 +1,7 @@
 // =============================================================================
 // executor_law_unnamed_time.rs
 //
-// executor law E1: no unnamed time. the sum of the per-phase profiler
+// the no-unnamed-time executor law: the sum of the per-phase profiler
 // accumulators (`symbi_sim::driver::prof`) must account for nearly all of the
 // step loop's wall time. a dispatch or reduction added to the loop without a
 // `prof` wrapper is invisible to every profile — an unwrapped `body_feedback`

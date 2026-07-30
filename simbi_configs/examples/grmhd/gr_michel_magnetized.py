@@ -136,7 +136,7 @@ class GrMichelMagnetized(SimbiProblem):
         ]
 
     def monopole(self, r: float) -> float:
-        """the divergence-free contravariant B^r(r), normalised so B^r(r_in) = b_ref.
+        """the divergence-free contravariant B^r(r), normalized so B^r(r_in) = b_ref.
 
         the constraint is `d_r(sqrt(gamma) B^r) = 0`, and sqrt(gamma) is CHART
         DEPENDENT, so the profile is too:

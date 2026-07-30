@@ -202,24 +202,6 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
     )
 
 
-def is_animation_requested(args: Namespace) -> bool:
-    """Check if animation was requested."""
-    return (
-        getattr(args, "animate", False)
-        or getattr(args, "kind", "snapshot") == "movie"
-    )
-
-
-def should_show_plot(args: Namespace) -> bool:
-    """Determine if plot should be displayed."""
-    return not getattr(args, "no_show", False)
-
-
-def get_save_path(args: Namespace) -> Optional[str]:
-    """Get the save path if specified."""
-    return getattr(args, "save_as", None)
-
-
 def load_props_from_args(args: Namespace) -> dict[str, ComponentProps]:
     """
     Load component props from config file and/or cli overrides.

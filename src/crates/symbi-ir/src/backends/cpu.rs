@@ -3,7 +3,7 @@
 //
 // CPU backend for the tensor IR: LoweredFn -> Rust source string.
 //
-// emission shape (V1, elemental-style):
+// emission shape (elemental-style):
 //
 //   pub fn <name>(<scalar params>) -> <return_type> {
 //       <let statements>
@@ -33,7 +33,7 @@ pub fn emit_cpu(f: &LoweredFn) -> String {
     let mut out = String::new();
     emit_signature(&mut out, f);
     out.push_str(" {\n");
-    // the elemental (V1) path is always f64 — the hand-written elementals are f64.
+    // the elemental path is always f64 — the hand-written elementals are f64.
     for stmt in &f.body {
         out.push_str("    ");
         emit_stmt(&mut out, stmt, false);

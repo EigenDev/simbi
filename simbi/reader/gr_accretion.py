@@ -95,7 +95,7 @@ def accretion_rate(
 
     `rho` has shape `(nr, ntheta)` (axisymmetric) or `(nr,)` (spherical 1D). `v_contra`
     is the list of CONTRAVARIANT valencia velocity component arrays with the same shape.
-    `r` is the radial cell centres `(nr,)`; `theta` the polar cell centres `(ntheta,)`
+    `r` is the radial cell centers `(nr,)`; `theta` the polar cell centers `(ntheta,)`
     or None for 1D. `dtheta`/`dphi` are the coordinate cell widths (1D uses the full
     sphere). `spacetime` selects the chart. Returns `Mdot` of shape `(nr,)`.
     """
@@ -108,7 +108,7 @@ def accretion_rate(
     if rho.ndim != 2:
         raise ValueError(f"accretion_rate: expected rho of ndim 1 or 2, got {rho.ndim}")
     if theta is None:
-        raise ValueError("accretion_rate: 2D rho requires theta cell centres")
+        raise ValueError("accretion_rate: 2D rho requires theta cell centers")
     theta = np.asarray(theta, dtype=float)
     if dtheta is None:
         dtheta = np.gradient(theta)
@@ -244,7 +244,7 @@ def cartesian_ks_u_xy(
 
 def _bilinear(field: Array, xc: Array, yc: Array, xs: Array, ys: Array) -> Array:
     """bilinear sample of `field` (storage (ny, nx), x fastest) at points (xs, ys),
-    given the cell-centre coordinate axes xc (nx,) and yc (ny,)."""
+    given the cell-center coordinate axes xc (nx,) and yc (ny,)."""
     fx = np.clip((xs - xc[0]) / (xc[1] - xc[0]), 0.0, len(xc) - 1.0 - 1e-9)
     fy = np.clip((ys - yc[0]) / (yc[1] - yc[0]), 0.0, len(yc) - 1.0 - 1e-9)
     i0 = fx.astype(int)
@@ -279,7 +279,7 @@ def ring_accretion_rate(
     the second form uses the det-g-flat identity alpha sqrt(gamma) = 1 of the
     kerr-schild chart and n_i dl = x_i dphi on a coordinate circle — no
     densitization factors survive. fields are sampled onto each ring by bilinear
-    interpolation from the cell-centre grid (`xc`/`yc` the axis coordinates,
+    interpolation from the cell-center grid (`xc`/`yc` the axis coordinates,
     storage (ny, nx) with x fastest). in steady state the continuity equation
     makes the result r_ex-independent for every ring outside the horizon."""
     rho = np.asarray(rho, dtype=float)

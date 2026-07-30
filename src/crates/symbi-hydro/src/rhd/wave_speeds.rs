@@ -34,13 +34,12 @@ pub(crate) fn rhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
 ///   - `v_sq` = gamma_ij v^i v^j, the PHYSICAL speed squared (|V|^2), ONLY in the `(1 - v^2)` factors.
 ///   `disc = (1 - v_sq)( gamma_nn (1 - v_sq cs^2) - vn^2 (1 - cs^2) )`
 ///   `lambda_pm = alpha [ vn(1 - cs^2) +/- cs sqrt(disc) ] / (1 - v_sq cs^2)`, `gamma_nn = gamma^{nn}`.
-/// feeding the PHYSICAL velocity to BOTH slots (the old bug) drives `disc < 0` once |V| approaches
-/// alpha (near the horizon), collapsing the Riemann fan to NaN — the gr_bondi inner-boundary crash.
+/// feeding the PHYSICAL velocity to BOTH slots drives `disc < 0` once |V| approaches
+/// alpha (near the horizon), collapsing the Riemann fan to NaN.
 /// with the correct split, cauchy-schwarz `vn^2 <= gamma^{nn} v_sq` guarantees `disc >= gamma^{nn}
 /// (1 - v_sq)^2 >= 0`; for Schwarzschild (`gamma^{rr} = alpha^2`, v^r = alpha V) `disc = alpha^2
 /// (1-V^2)^2` and `lambda_pm = alpha^2 (V +/- cs)/(1 +/- V cs)` (sonic point at |V| = cs).
 /// at `gamma_nn = 1, alpha = 1, v_sq = vn^2` it reduces EXACTLY to the flat `rhd_speeds_from_vn`.
-#[allow(dead_code)]
 #[inline]
 pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(
     cs_sq: S,
@@ -57,8 +56,10 @@ pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(
     ((term - rad) * inv, (term + rad) * inv)
 }
 
-/// davis wave speed estimates for RHD (simpler, less tight bounds).
-/// kept as a reference but not used — the Regime impl uses the Mignone-Bodo speeds.
+/// the davis wave-speed estimate for RHD: `s_l = (vn - cs)/(1 - cs vn)`, `s_r = (vn + cs)/(1 + cs vn)`,
+/// the relativistic addition of +/- cs to the fluid's normal velocity. a valid but looser HLL bound
+/// than the Mignone-Bodo characteristic speeds the Regime impl evolves with; retained as the
+/// comparison baseline for solver diffusivity, so it has no caller.
 #[inline]
 #[allow(dead_code)]
 fn davis_wave_speeds_reference<S: Scalar, const D: usize>(
@@ -254,9 +255,9 @@ mod tests {
 
     #[test]
     fn gr_fan_is_finite_at_transonic_inner_state() {
-        // the gr_bondi crash regression: at the near-horizon steady inner state (r ~ 3.05, M=1, so
+        // at the near-horizon steady inner state of a spherical accretion flow (r ~ 3.05, M=1, so
         // f ~ 0.344, alpha ~ 0.587) with a transonic physical velocity |V| ~ 0.64 > alpha, the fan
-        // MUST be real. the pre-fix formula returned NaN here (disc < 0), collapsing the wave speed.
+        // MUST be real: a negative discriminant here would collapse both wave speeds to NaN.
         let (cs_sq, alpha) = (0.0132_f64, 0.587_f64); // cs ~ 0.115, alpha^2 ~ f
         let grr_inv = alpha * alpha; // gamma^{rr} = alpha^2
         for &big_v in &[-0.64_f64, -0.7, -0.85, -0.95] {
@@ -271,10 +272,10 @@ mod tests {
 
     #[test]
     fn conflating_the_physical_velocity_into_the_contravariant_slot_collapses_the_fan() {
-        // the gate above asserts the fan is REAL at a transonic near-horizon state. on its own that
-        // says nothing — a formula that never produced a NaN would satisfy it too. this pins the
-        // other side: the specific defect it defends against does collapse the fan, at the same
-        // state, so the regression is exerting real pressure rather than passing vacuously.
+        // asserting the fan is REAL at a transonic near-horizon state says nothing on its own — a
+        // formula that never produced a NaN would satisfy it too. this pins the other side: the
+        // specific slot conflation DOES collapse the fan at that same state, so the finiteness
+        // assertion exerts real pressure rather than passing vacuously.
         //
         // the defect is a slot conflation. `vn` is the CONTRAVARIANT normal velocity v^n and
         // `v_sq` the PHYSICAL speed squared gamma_ij v^i v^j; on a static diagonal chart they are
@@ -305,8 +306,8 @@ mod tests {
 
     #[test]
     fn the_discriminant_is_non_negative_for_every_admissible_state() {
-        // the THEOREM behind the fix, exercised directly instead of through a problem that happens
-        // to reach the dangerous regime. with the slots split correctly, cauchy-schwarz gives
+        // the THEOREM behind the slot split, exercised directly instead of through a problem that
+        // happens to reach the dangerous regime. with the slots split correctly, cauchy-schwarz gives
         // vn^2 <= gamma^{nn} v_sq, hence
         //   disc = (1 - v^2)( gamma^{nn}(1 - v^2 cs^2) - vn^2 (1 - cs^2) ) >= gamma^{nn}(1 - v^2)^2
         // which is non-negative for any subluminal state on any positive-definite metric. so the

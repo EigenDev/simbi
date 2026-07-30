@@ -9,7 +9,7 @@
 //   results to the CPU `SourceEvaluator` path on the same SimulationLaws.
 //
 // proves the A1 homomorphism law for the GPU lowering target by witnessing
-// it numerically: spec data → CPU eval ≡ spec data → GPU launch (modulo
+// it numerically: spec data -> CPU eval == spec data -> GPU launch (modulo
 // nvcc/NVRTC FMA fusion drift, which is ULP-bounded).
 //
 // run (in the cuda-enabled environment, e.g., symbi-cuda distrobox):
@@ -107,7 +107,7 @@ fn gpu_launch_gravity_mom_matches_cpu_evaluator_per_cell() {
 
         for k in 0..3 {
             // FMA fusion: NVRTC fuses, the CPU interpreter doesn't. expect
-            // ULP-bounded drift; the existing GPU↔CPU validation suite
+            // ULP-bounded drift; the existing GPU<->CPU validation suite
             // (`gpu_regimes.rs`) uses 1e-9 relative. apply the same.
             let g = gpu_out[k][i];
             let c = cpu[k];
@@ -173,7 +173,7 @@ fn gpu_launch_ib_localization_holds_on_real_hardware() {
 
 #[test]
 fn gpu_launch_composed_overlays_sums_additively_on_hardware() {
-    // **the composition × GPU witness**: two overlay sources, summed
+    // **the composition x GPU witness**: two overlay sources, summed
     // additively via `build_total_source`, lowered through
     // `Homomorphism<Cuda>`, NVRTC-compiled, launched. the GPU output
     // matches the CPU evaluator's per-cell sum to ULP-bounded drift.

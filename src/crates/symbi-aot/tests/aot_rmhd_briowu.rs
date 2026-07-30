@@ -21,7 +21,7 @@ use symbi_aot::NamedKernel;
 // thin shims binding the emitted kernels BY FIELD NAME (NamedKernel) — order-
 // independent, and a missing/renamed field panics with the manifest's expected
 // names, catching a drift that would otherwise pass silently. all buffers here are 1D (lo = 0).
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn rmhd_c2p_1d(
     den: &[f64],
     sx: &[f64],
@@ -75,7 +75,7 @@ fn rmhd_c2p_1d(
         .run();
 }
 
-#[allow(clippy::too_many_arguments, dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn rmhd_face_flux_1d(
     rho: &[f64],
     vx: &[f64],

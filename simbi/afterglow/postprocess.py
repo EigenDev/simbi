@@ -213,7 +213,7 @@ def compute_observer_time(
     """
     compute observer arrival time from emission coordinates.
 
-    t_obs = (1 + z) * (t_em + r·n_obs / c)
+    t_obs = (1 + z) * (t_em + dot(r, n_obs) / c)
 
     args:
         t_emission: emission time [s]
@@ -264,10 +264,6 @@ def compute_observed_energy(
     returns:
         observed energy [erg]
     """
-    # beaming factor (should match doppler_factor from generation)
-    # for photons propagating at c, this is geometric projection
-    cos_theta = px * observer_direction[0] + py * observer_direction[1] + pz * observer_direction[2]
-
     # observed energy (beaming already encoded in emission, just apply redshift)
     E_obs = energy / (1.0 + redshift)
 
@@ -333,22 +329,14 @@ def compute_lightcurve(
 
     bin_centers = np.sqrt(time_bins[1:] * time_bins[:-1])
 
-    # compute flux density for each frequency
-    # simple energy binning (monochromatic approximation)
-    # proper version would convolve with synchrotron spectrum
-
-    h = 6.62607015e-27  # planck constant [erg·s]
-    c = 2.99792458e10   # speed of light [cm/s]
+    # flux density per frequency under the monochromatic approximation: photon
+    # energies are binned directly, with no convolution against a synchrotron spectrum
     Jy = 1e-23          # jansky [erg/cm^2/s/Hz]
 
     fluxes = {}
 
     for nu in frequencies:
-        # photon energy corresponding to frequency
-        E_nu = h * nu
-
-        # simple binning: count photons near this energy
-        # (real implementation should integrate spectrum)
+        # count photons near this energy rather than integrating over the band
         E_obs = compute_observed_energy(
             filtered.energy,
             filtered.px,
@@ -372,7 +360,7 @@ def compute_lightcurve(
                 # luminosity distance
                 d_L = meta.d_L
 
-                # flux: L / (4π d_L^2 Δt Δν)
+                # flux: L / (4 pi d_L^2 dt dnu)
                 # simplified: assume all energy at frequency nu
                 dnu = nu * 0.1  # bandwidth (10% of frequency)
                 flux = E_total / (4.0 * np.pi * d_L**2 * dt * dnu)
@@ -630,8 +618,8 @@ def compute_spectrum(
         meta.z
     )
 
-    # bin photons by energy → frequency
-    h = 6.62607015e-27  # erg·s
+    # bin photons by energy -> frequency
+    h = 6.62607015e-27  # erg s
     nu_obs = E_obs / h
 
     # histogram into frequency bins
@@ -646,7 +634,7 @@ def compute_spectrum(
             dt = time_window * 86400.0  # s
             d_L = meta.d_L
 
-            # flux: E / (4π d_L^2 Δt Δν)
+            # flux: E / (4 pi d_L^2 dt dnu)
             flux = E_total / (4.0 * np.pi * d_L**2 * dt * dnu)
 
             # convert to mJy

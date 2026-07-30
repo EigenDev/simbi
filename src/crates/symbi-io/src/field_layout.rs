@@ -16,11 +16,11 @@
 use symbi_hydro::{FieldKind, FieldSpec};
 
 /// the canonical on-disk dataset name for one COMPONENT of one FieldSpec.
-/// - `Scalar`           → `fs.name` ("den", "nrg", "rho", ...)
-/// - `DimVector`        → `m1..mD` for momentum, `v1..vD` for velocity, ...
-/// - `FixedVector { n }`→ `b1..bn`  (e.g., magnetic, always 3-component)
+/// - `Scalar`           -> `fs.name` ("den", "nrg", "rho", ...)
+/// - `DimVector`        -> `m1..mD` for momentum, `v1..vD` for velocity, ...
+/// - `FixedVector { n }`-> `b1..bn`  (e.g., magnetic, always 3-component)
 ///
-/// the (NAME → SUFFIX) mapping is the canonical on-disk convention — existing
+/// the (NAME -> SUFFIX) mapping is the canonical on-disk convention — existing
 /// checkpoint files + every `scripts/plot_*.py` read identical paths.
 pub fn dataset_name(fs: &FieldSpec, idx: usize) -> String {
     match fs.kind {
@@ -30,7 +30,7 @@ pub fn dataset_name(fs: &FieldSpec, idx: usize) -> String {
     }
 }
 
-/// `den` → `m`, `vel` → `v`, `mag` → `b` — the canonical single-letter
+/// `den` -> `m`, `vel` -> `v`, `mag` -> `b` — the canonical single-letter
 /// on-disk prefix. momentum uses `m` (conserved) and `v` for primitive
 /// velocity; the FieldSpec on cons carries `"mom"` and on prim carries
 /// `"vel"`.

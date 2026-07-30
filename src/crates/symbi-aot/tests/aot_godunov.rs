@@ -4,7 +4,7 @@
 // run the BUILD-TIME-GENERATED godunov kernel (compiled into this crate from a
 // substrate RegimeSpec via emit_kernel_cpu) and diff against the hand-written
 // reference. since the SAME kernel matches hand-written via the #4
-// interpreter, this transitively proves the AOT-compiled Rust ≡ the interpreter
+// interpreter, this transitively proves the AOT-compiled Rust \equiv the interpreter
 // — and, more importantly, that the generated Rust COMPILES and RUNS.
 //
 // the generated signature (see the header in OUT_DIR/godunov_generated.rs):
@@ -128,7 +128,7 @@ fn aot_mass_godunov_conserves_over_many_steps() {
 
     let mass0: f64 = rho.iter().sum::<f64>() * dx;
 
-    // 50 steps -> t = 0.3125, bump centre 0.3 -> ~0.61, well clear of the edges.
+    // 50 steps -> t = 0.3125, bump center 0.3 -> ~0.61, well clear of the edges.
     let steps = 50;
     for _ in 0..steps {
         // upwind face flux (a > 0): F[j] = a * rho[left cell]; transmissive edges.

@@ -18,8 +18,8 @@
 //     PTX / x86 / ...
 //
 // every production kernel — c2p, flux, wave-speed, godunov, ghost-fill, CT curl,
-// immersed source — is built this way (`gv.rs` / `gv_immersed.rs`); the geometry
-// is traced in-kernel from the cell index (`gv::cell_geometry_gv`).
+// immersed source — is built this way (the `gv` module / `gv_immersed.rs`); the
+// geometry is traced in-kernel from the cell index (`gv::cell_geometry_gv`).
 // =============================================================================
 
 pub mod coords;
@@ -34,9 +34,8 @@ pub mod kernel_slug;
 pub mod lattice;
 
 pub use coords::{Coords, Spacetime, Spacing};
-// facade: the carrier types live in symbi-ir alongside Op + Graph (consolidated
-// 2026-05-30; symbi-core was folded in). re-export them so the builder return
-// types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
+// facade: the carrier types live in symbi-ir alongside Op + Graph. re-export them so the
+// builder return types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use gv::{
     GeoSource, adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv,
     adiabatic_hllc_flux_gv, boundary_fill_from_built_gv, c2p_status_gv, chi_c2p_gv, chi_godunov_gv,
@@ -85,7 +84,7 @@ pub use gv_penalize::{
 };
 pub use gv_refinement::{
     ProlongOrder, field_axpy_shift_gv, field_copy_gv, field_fill_gv, field_lerp_multi_gv,
-    refine_acc_edge_gv, refine_acc_face_gv, refine_prolong_1t_gv, refine_prolong_face_gv,
+    refine_acc_edge_gv, refine_acc_face_gv, refine_prolong_face_gv,
     refine_prolong_gv, refine_prolong_multi_1t_gv, refine_prolong_multi_gv,
     refine_prolong_sweep_multi_gv, refine_restrict_face_gv, refine_restrict_gv,
 };

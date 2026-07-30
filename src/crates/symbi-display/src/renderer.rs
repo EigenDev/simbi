@@ -5,10 +5,10 @@
 // handles layout calculation, box drawing, text alignment, and progress bars.
 //
 // key algorithm: proportional column width distribution
-//   1. calculate content widths (max of header/data)
-//   2. compute overhead (borders + padding)
-//   3. scale all columns to fill available space
-//   4. redistribute leftover after clamping to constraints
+//   - calculate content widths (max of header/data)
+//   - compute overhead (borders + padding)
+//   - scale all columns to fill available space
+//   - redistribute leftover after clamping to constraints
 //
 // usage:
 //   let mut r = Renderer::new();

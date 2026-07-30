@@ -1,6 +1,7 @@
 // diagnostic: reproduce the nmhd_orszag_tang example's IC + config and watch the
-// interior density. prints min/max rho at t=0 (should be uniform gamma^2) and over
-// the first steps, to localize a 1600x blow-up (IC? first step? bounded?).
+// interior density. prints min/max rho at t=0 (uniform gamma^2 for a correct IC)
+// and over the first steps, localizing a density blow-up to the IC, to the first
+// step, or to secular growth.
 
 use std::f64::consts::PI;
 

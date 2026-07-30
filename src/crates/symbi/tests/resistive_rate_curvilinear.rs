@@ -2,9 +2,9 @@
 // resistive_rate_curvilinear.rs
 //
 // the RATE certificate for curvilinear resistive MHD: the adjoint oracle proves the operator is a
-// stable (negative-definite) diffusion, but not that it diffuses at the CORRECT physical rate. here we
-// seed the analytic free-decay EIGENMODES and confirm the discrete operator returns their eigenvalue
-// via the Rayleigh quotient
+// stable (negative-definite) diffusion, but not that it diffuses at the CORRECT physical rate. this
+// seeds the analytic free-decay EIGENMODES and confirms the discrete operator returns their
+// eigenvalue via the Rayleigh quotient
 //
 //     lambda = - <B, L B>_F / (eta <B, B>_F)  ==  k^2     (L B = eta grad^2 B),
 //

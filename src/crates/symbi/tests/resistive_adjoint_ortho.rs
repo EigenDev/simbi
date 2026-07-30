@@ -10,9 +10,9 @@
 //
 // to machine precision, with the DEC Hodge weights w_E = h2, w_{B0} = h1 h2, w_{B1} = h0 h2 (h2 the
 // out-of-plane scale factor). random compact-support fields keep every stencil in the full-stencil
-// interior so the identity is exact. cyl r-z is metric-free (a regression on the hand-derived kernel);
-// cyl r-phi and spherical exercise the (1/r) d_r(r .) metric — the proof that ONE covariant kernel
-// serves all charts.
+// interior so the identity is exact. cyl r-z carries no metric factor in its current; cyl r-phi and
+// spherical exercise the (1/r) d_r(r .) metric — the proof that ONE covariant kernel serves all
+// charts.
 // =============================================================================
 
 use symbi::sim::state::*;

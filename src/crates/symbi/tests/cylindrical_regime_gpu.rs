@@ -1,7 +1,7 @@
 // =============================================================================
 // cylindrical_regime_gpu.rs
 //
-// GPU<->CPU validation for the NEWLY-emitted cylindrical-natural hydro cells: the
+// GPU<->CPU validation for the cylindrical-natural hydro cells: the
 // cyl-1D (radial) and cyl-3D (r,phi,z) "_cyl" godunov + wave-speed maps for all three
 // EOS regimes (iso / newton-adiabatic / rhd). builds host (AOT CPU) + unified (NVRTC)
 // sims, runs godunov_euler + cfl on each, diffs < 1e-9. (cyl-2D r-phi is already

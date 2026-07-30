@@ -728,7 +728,7 @@ mod tests {
 
     #[test]
     fn test_dream_api_expression() {
-        // mirrors dream.md: ij * h - 0.5
+        // cell-center coordinate from an integer index pair: x = ij * h - 0.5
         let ij = Tensor::<f64, 2>::new([50.0, 50.0]);
         let h = 0.01;
         let x = ij * h - 0.5;

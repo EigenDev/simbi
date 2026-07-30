@@ -3,14 +3,14 @@
 //
 // validates the ISOTHERMAL immersed-body source/feedback builders against the
 // same spec as the adiabatic kernels (immersed_source.rs). the body PHYSICS is
-// EOS-independent — gravity + Bondi-Hoyle accretion are functions of (den, mom,
+// EOS-independent — gravity + bondi-hoyle accretion are functions of (den, mom,
 // cs) only — so the iso kernels must:
-//   1. produce den/mom updates BITWISE-IDENTICAL to the adiabatic kernels when
-//      the sound speed matches (the key invariant: the shared `body_contribution`
-//      is the single source of truth);
-//   2. match the analytic accretion spec with cs from prim.pre (= cs^2*rho),
-//      the isothermal closure for the sound speed;
-//   3. emit NO energy write.
+//   - produce den/mom updates BITWISE-IDENTICAL to the adiabatic kernels when
+//     the sound speed matches (the shared `body_contribution` is the single
+//     source of truth);
+//   - match the analytic accretion spec with cs from prim.pre (= cs^2*rho),
+//     the isothermal closure for the sound speed;
+//   - emit NO energy write.
 // =============================================================================
 
 mod harness;

@@ -6,8 +6,8 @@
 // selects which analytic finite-volume closed form `cell_geometry_gv` emits, and
 // the per-axis spacing selects the index -> coordinate map branch.
 //
-// axis order is natural per system: Cartesian (x, y, z), Spherical (r, theta, phi),
-// Cylindrical (r, phi, z). matching this to the field memory layout is an axis-role
+// axis order is natural per system: cartesian (x, y, z), spherical (r, theta, phi),
+// cylindrical (r, phi, z). matching this to the field memory layout is an axis-role
 // concern (see `gv::cell_geometry_gv`'s `axes` map).
 // =============================================================================
 

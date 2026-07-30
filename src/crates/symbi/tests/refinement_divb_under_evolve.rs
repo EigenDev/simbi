@@ -154,8 +154,7 @@ fn composite_mass_momx(hier: &Hier) -> (f64, f64) {
 }
 
 /// the single-level relative mass drift on the same problem to time `t` — the
-/// pre-existing CT periodic-wrap non-conservation the composite bound
-/// calibrates against.
+/// CT periodic-wrap non-conservation the composite bound calibrates against.
 fn single_level_control_drift(t: f64) -> f64 {
     let dx = 1.0 / N as f64;
     let dz = 1.0 / NZ as f64;

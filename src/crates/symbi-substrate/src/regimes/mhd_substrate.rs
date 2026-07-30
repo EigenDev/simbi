@@ -90,8 +90,8 @@ where
 // =============================================================================
 // fused buffer-copy helpers (Tier 2A) — bypass the substrate dispatch for the
 // rmhd_save_efield / rmhd_average_efield pointwise copies (the rayon par_iter
-// setup ~100 µs dwarfs the ~5 µs memcpy; 9 such calls per RK2 step). single-
-// threaded copy_from_slice -> memcpy; see docs/c9fbdcb_perf_study/07.
+// setup ~100 us dwarfs the ~5 us memcpy; 9 such calls per RK2 step). single-
+// threaded copy_from_slice -> memcpy.
 // =============================================================================
 
 #[inline]
@@ -730,8 +730,8 @@ pub(crate) fn restore_step<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// snapshot the stage-INPUT GAS conserved (den, mom, [nrg]) into `u_stage`, the
-/// pre-godunov state the additive `source_apply` evaluates `S` at (the S2 invariant
-/// shared with the fused path). gas-only: B is not a source target, so bcell is NOT
+/// pre-godunov state the additive `source_apply` evaluates `S` at, the same state the fused
+/// path evaluates it at. gas-only: B is not a source target, so bcell is NOT
 /// captured here. mirrors `snapshot` (which targets u_n) but writes u_stage.
 pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -835,7 +835,7 @@ where
     }
 }
 
-/// FOFC C2 CT save: `bflux -> bflux_ho` (the HO induction flux) + `efield -> efield_ho` (the HO edge
+/// FOFC CT save: `bflux -> bflux_ho` (the HO induction flux) + `efield -> efield_ho` (the HO edge
 /// EMF), before the first-order redo overwrites them. paired with the bflux splice + emf splice.
 pub(crate) fn fofc_ct_save<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -875,7 +875,7 @@ pub(crate) fn fofc_restore_bcell_stage<const D: usize, const DOF: usize, Mem, Sc
     fofc_copy_fields(&pairs);
 }
 
-/// FOFC: restore the pre-curl face field `bface <- bface_n`, so the C2 CT redo re-applies the curl
+/// FOFC: restore the pre-curl face field `bface <- bface_n`, so the CT redo re-applies the curl
 /// exactly once from the spliced edge EMF.
 pub(crate) fn fofc_restore_bface_n<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1072,7 +1072,7 @@ fn ct_face_curl(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<usize>) {
 
 /// the CT edge EMF over each edge of the staggered complex. one code path for every
 /// D: loop the `StaggerComplex` edges (3 in 3D, 1 in 2.5D, none in 1.5D). each edge's
-/// E is the contact-formula EMF from its two in-plane neighbours' vel/bcell/bflux/fden.
+/// E is the contact-formula EMF from its two in-plane neighbors' vel/bcell/bflux/fden.
 pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     ct_method: CtMethod,
@@ -1085,7 +1085,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     // the RMHD UCT-HLLD edge EMF declares the EOS scalar (gamma); the UCT edge EMFs declare the PLM
-    // slope limiter (theta, for the transverse R± reconstruction of the staggered fields); the rest
+    // slope limiter (theta, for the transverse R+/- reconstruction of the staggered fields); the rest
     // have an empty scalar manifest. resolve BY MANIFEST so one call serves all.
     let st = spacetime_slug(sim.geom.spacetime);
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
@@ -1325,7 +1325,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 
     // FOFC: snapshot bface -> bface_n BEFORE the curl. only the CURLING stages reach here (the
     // predictor returned above after saving its EMF), so this captures `bface^n` — the value the
-    // C2 CT redo restores before re-applying the curl exactly once from the spliced edge EMF.
+    // CT redo restores before re-applying the curl exactly once from the spliced edge EMF.
     {
         let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
             (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
@@ -1335,12 +1335,12 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // OHMIC RESISTIVITY (2.5D cartesian): add `eta * J` to the edge EMF so the curl carries the
     // resistive diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD), a
     // non-2.5D grid, or a curvilinear chart skips it — the 3D + curvilinear resistive EMFs are
-    // follow-ons.
+    // unbaked.
     if eta > 0.0 {
         // OHMIC HEATING IS AUTOMATIC + energy-conserving here: nrg is the TOTAL energy (conserved by
         // the godunov flux), and `bcell_from_bface` reconciles it with the resistively-decayed B, so
-        // the dissipated magnetic energy 1/2 B^2 becomes gas internal energy exactly (verified to
-        // machine precision by tests/ohmic_heating.rs). NO separate Joule-source term is needed.
+        // the dissipated magnetic energy 1/2 B^2 becomes gas internal energy exactly, to machine
+        // precision. NO separate Joule-source term is needed.
         apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
     }
 
@@ -1717,7 +1717,7 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
 /// edge EMFs. cartesian binds the transverse inverse-widths; curvilinear the per-cell geom weights;
 /// GR the densitized coordinate lengths + metric scalars. a face with no incident edges (e.g. Bx in
 /// 1.5D) is not updated. reads `efield` (whatever is currently there — the HO averaged EMF in the HO
-/// path, or the FOFC-spliced EMF in the C2 redo), writes `bface` in place. extracted from
+/// path, or the FOFC-spliced EMF in the CT redo), writes `bface` in place. standing apart from
 /// `post_godunov` so the FOFC redo can curl the restored `bface_n` from the spliced EMF.
 pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,

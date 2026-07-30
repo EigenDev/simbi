@@ -58,7 +58,7 @@ pub fn torque_axes(ndim: usize) -> std::ops::Range<usize> {
     }
 }
 
-/// map the coordinate cell centroid `(r, theta, phi)` / `(R, phi, z)` to Cartesian
+/// map the coordinate cell centroid `(r, theta, phi)` / `(R, phi, z)` to cartesian
 /// so the sphere SDF measures the PHYSICAL distance to the body. a coordinate-space
 /// subtraction is meaningless on a curved grid (`sqrt((r - r_b)^2 + (theta -
 /// theta_b)^2)` is not a distance); on a Cartesian grid this is the identity. the
@@ -98,9 +98,9 @@ fn centroid_to_cartesian(coords: Coords, ndim: usize, axes: &[usize], centroid: 
 
 /// rotate a CARTESIAN vector into the cell's PHYSICAL (orthonormal) frame — the
 /// frame the substrate stores momentum in. the surface normal is a geometric
-/// Cartesian direction; the wall / torque-free split projects the physical
+/// cartesian direction; the wall / torque-free split projects the physical
 /// momentum onto it, so it must be rotated here. `x` is the COORDINATE centroid
-/// (the rotation depends on the local basis). identity on a Cartesian grid.
+/// (the rotation depends on the local basis). identity on a cartesian grid.
 fn vector_from_cartesian(
     coords: Coords,
     ndim: usize,
@@ -133,10 +133,10 @@ fn vector_from_cartesian(
     }
 }
 
-/// rotate a PHYSICAL-frame vector into the global Cartesian frame — used to book
+/// rotate a PHYSICAL-frame vector into the global cartesian frame — used to book
 /// the lab-frame torque `r_cart x F_cart` (the accreted force receipt is in the
 /// physical frame; the cross product needs both vectors in one frame). identity
-/// on a Cartesian grid, so the Cartesian torque is bit-unchanged.
+/// on a cartesian grid, so the cartesian torque is bit-unchanged.
 fn vector_to_cartesian(
     coords: Coords,
     ndim: usize,
@@ -252,7 +252,7 @@ fn solid_velocity_phys(
 }
 
 /// the immersed body's mask geometry as a traced SDF, centered at `center` (the body
-/// position `body_0_pos_*` in Cartesian): a sphere of radius `body_0_racc`. this is the
+/// position `body_0_pos_*` in cartesian): a sphere of radius `body_0_racc`. this is the
 /// ONE seam every penalization kernel (drain / porous-wall / torque-free, adiabatic and
 /// iso) shares — the mask cannot drift between kernels.
 fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
@@ -267,18 +267,9 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
 /// `x` before the shape; translation alone is the moving-body core.)
 ///
 /// `center` is the body's CENTER OF MASS AND its mask/geometric center at once — they coincide for
-/// every symmetric body (sphere, symmetric CSG), which is all that exists today.
-///
-/// EXTENSION — a body whose mask center is OFFSET from its center of mass (an asymmetric mass
-/// distribution, e.g. a tumbling asteroid): only the MASK PLACEMENT offsets; everything dynamical
-/// stays COM-referenced. keep `body_0_pos_*` as the COM (translation, gravity, the omega x r wall
-/// velocity, and the torque moment arm `x - center` are all already about it — the offset arm falls
-/// out because the force acts on the offset mask). the localized changes are: (1) a body-frame
-/// `mask_offset` field on `Body` (default zero) + a `body_0_com_offset_*` scalar bound like the
-/// other body scalars; (2) HERE, translate the shape to `center + R * mask_offset` (compose the
-/// orientation matrix `body_0_rot_*` with the offset); (3) widen the mask's
-/// support ball to cover `center + R*mask_offset +- radius`. the receipt (`cartesian_receipt`) and
-/// the spin (`solid_velocity`) need NO change — they stay about the COM `center`.
+/// a symmetric body (sphere, symmetric CSG). everything dynamical (translation, gravity, the
+/// omega x r wall velocity, the torque moment arm `x - center`) is referenced to the COM, so an
+/// asymmetric mass distribution would offset the MASK PLACEMENT alone.
 fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> SdfExpr<Gv, 3> {
     match shape {
         None => SdfExpr::<Gv, 3>::Sphere {
@@ -383,8 +374,8 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     let eta = Gv::scalar("eta");
     let bx = Gv::field("bx", "bx");
     let by = Gv::field("by", "by");
-    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbour below in y
-    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbour behind in x
+    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbor below in y
+    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbor behind in x
     let dx0 = Gv::scalar("dx_0");
     let dx1 = Gv::scalar("dx_1");
     let jz = (Gv::ONE / dx0) * (by - by_im) - (Gv::ONE / dx1) * (bx - bx_jm);
@@ -414,12 +405,12 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     (kernel, writes)
 }
 
-/// the 3D cartesian body-masked Ohmic resistive edge EMF along edge `dir`: adds `eta * chi * J_dir`
+/// the 3D cartesian body-masked ohmic resistive edge EMF along edge `dir`: adds `eta * chi * J_dir`
 /// to that edge's EMF in place, where `chi` is the body indicator sampled at the dir-edge and
 /// `J_dir = dB_p2/dx_p1 - dB_p1/dx_p2` (p1=(dir+1)%3, p2=(dir+2)%3) is the current from the two
 /// transverse faces. it is the bulk 3D resistive EMF (`rmhd_resistive_emf_3d_dir_gv`) gated by the
 /// mask, so the same div-B-clean 3D curl consumes it and the composed operator is the mask-weighted
-/// negative-definite Laplacian: the body can only shed the field threading it.
+/// negative-definite laplacian: the body can only shed the field threading it.
 pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Writes) {
     let ndim = 3usize;
     let axes: &[usize] = &[0, 1, 2][..ndim];
@@ -515,7 +506,7 @@ pub fn penalize_drain_gv(
 
     // the mask geometry as a traced SDF: phi = |x - body_pos| - r_mask, and
     // chi = 0.5 (1 - tanh(phi / w)). the distance is PHYSICAL, so the coordinate
-    // centroid is mapped to Cartesian first (identity on a Cartesian grid).
+    // centroid is mapped to cartesian first (identity on a cartesian grid).
     let center: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim {
             Gv::scalar(&format!("body_0_pos_{a}"))
@@ -711,7 +702,7 @@ fn penalize_porous_inner(
             Gv::ZERO
         }
     });
-    // the mask distance is PHYSICAL: map the coordinate centroid to Cartesian.
+    // the mask distance is PHYSICAL: map the coordinate centroid to cartesian.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sdf = if spin {
@@ -731,8 +722,8 @@ fn penalize_porous_inner(
     let inv_tau = signal_speed(cs) / (c_drain * min_w);
     let rate_scale = signal_speed(cs) / min_w;
 
-    // the outward surface normal in the cell's PHYSICAL frame (the Cartesian normal rotated into
-    // the orthonormal basis; identity on a Cartesian grid). the sphere path is r_hat =
+    // the outward surface normal in the cell's PHYSICAL frame (the cartesian normal rotated into
+    // the orthonormal basis; identity on a cartesian grid). the sphere path is r_hat =
     // x_rel/|x_rel|, with |x_rel| = 0 guarded to a zero normal (its whole du is tangential,
     // finite). the shaped path is the exact CSG gradient — the SDF outward unit normal via Dual
     // autodiff — which is the arbitrary surface's normal everywhere the distance is smooth.
@@ -873,7 +864,7 @@ fn penalize_porous_inner(
 /// the ISOTHERMAL torque-free accretor: the drain plus a
 /// tangential ANTI-relaxation `lambda_t = -xi lambda_rho` about the sphere
 /// normal, so the accreted mass carries no net angular momentum to the body
-/// (the Dittmann & Ryan 2021 torque-free sink, coordinate-free via the SDF
+/// (the dittmann & ryan 2021 torque-free sink, coordinate-free via the SDF
 /// normal). the retention floor (`Relax.ut_growth_cap`, set by the property)
 /// bounds the growing tangential factor at the evacuation limit. `xi = 0`
 /// reduces bit-for-bit to `penalize_drain_iso`; `xi = 1` is torque-free. no
@@ -916,7 +907,7 @@ pub fn penalize_torque_free_iso_gv(
             Gv::ZERO
         }
     });
-    // the mask distance is PHYSICAL: map the coordinate centroid to Cartesian.
+    // the mask distance is PHYSICAL: map the coordinate centroid to cartesian.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);
@@ -924,9 +915,9 @@ pub fn penalize_torque_free_iso_gv(
     tag_body_mask(&chi, coords, ndim, axes, None, false);
     let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
-    // the outward surface normal in the cell's PHYSICAL frame: the Cartesian
+    // the outward surface normal in the cell's PHYSICAL frame: the cartesian
     // r_hat from the body center rotated into the orthonormal basis (identity on
-    // a Cartesian grid; e_r for a centered accretor). the torque-free channel's
+    // a cartesian grid; e_r for a centered accretor). the torque-free channel's
     // radial/tangential split is about this normal, so it must match the frame
     // the momentum lives in.
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
@@ -1408,7 +1399,7 @@ pub fn penalize_drain_iso_gv(
         }
     });
     // the mask distance is the PHYSICAL distance to the body: map the coordinate
-    // centroid to Cartesian (identity on a Cartesian grid), then the euclidean SDF.
+    // centroid to cartesian (identity on a cartesian grid), then the euclidean SDF.
     let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);

@@ -207,7 +207,7 @@ pub fn compute_lightcurve_from_events(
 /// `frequency_hz > 0` selects the OBSERVED frequency band `nu0 +/- frac_bandwidth/2 * nu0`
 /// per packet (nu_obs = delta * nu_emit / (1+z), the same selection the light curve uses), so
 /// the image is the monochromatic per-Hz flux map a `1/dnu` calibration expects. 0 disables
-/// banding (an all-band energy image — divide by a bandwidth at your peril).
+/// banding, giving an all-band energy image whose values carry no per-Hz normalization.
 #[allow(clippy::too_many_arguments)]
 pub fn compute_skymap(
     events: &[PhotonEvent],

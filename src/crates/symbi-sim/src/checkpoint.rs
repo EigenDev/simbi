@@ -6,16 +6,10 @@
 // concerns (file format, field naming, error handling) live in the symbi-io
 // crate; this module only describes WHAT SimState contributes to the schema.
 //
-// the on-disk layout is preserved bit-for-bit (existing `scripts/plot_*.py`
-// readers + every existing checkpoint file continue to work). public API
-// changes:
-//   - `write_checkpoint(sim, path, extras: &Metadata)` — typed extras kill
-//     the `&[(&str, &str)]` stringly-typed pattern. callers build
-//     `Metadata::new().with("key", value)` with naked typed values.
-//   - same for `load_checkpoint` / `read_checkpoint_meta`, which now return
-//     `Result<_, symbi_io::IoError>`.
-//
-// the `CheckpointSchedule` helper is independent of the I/O schema.
+// extras ride in as a typed `symbi_io::Metadata` — callers build
+// `Metadata::new().with("key", value)` with naked typed values — and
+// `write_checkpoint` / `load_checkpoint` / `read_checkpoint_meta` all return
+// `Result<_, symbi_io::IoError>`.
 // =============================================================================
 
 use std::path::Path;
@@ -54,66 +48,9 @@ fn write_tree_atomic(path: &Path, tree: &Tree<'_>) -> Result<()> {
     Ok(())
 }
 
-// =============================================================================
-// CheckpointSchedule — unchanged, owned here for historical compatibility.
-// =============================================================================
-
-#[derive(Clone, Debug)]
-pub struct CheckpointSchedule {
-    pub next_time: f64,
-    pub interval: f64,
-    pub dlogt: f64,
-    pub tstart: f64,
-    pub index: usize,
-}
-
-impl CheckpointSchedule {
-    pub fn linear(interval: f64) -> Self {
-        CheckpointSchedule {
-            next_time: interval,
-            interval,
-            dlogt: 0.0,
-            tstart: 0.0,
-            index: 0,
-        }
-    }
-    pub fn logarithmic(dlogt: f64, tstart: f64) -> Self {
-        CheckpointSchedule {
-            next_time: tstart * 10.0_f64.powf(dlogt),
-            interval: 0.0,
-            dlogt,
-            tstart,
-            index: 0,
-        }
-    }
-    pub fn should_checkpoint(&self, time: f64) -> bool {
-        time_at_or_after(time, self.next_time)
-    }
-    pub fn advance(&mut self) {
-        self.index += 1;
-        if self.dlogt != 0.0 {
-            self.next_time = self.tstart * 10.0_f64.powf((self.index + 1) as f64 * self.dlogt);
-        } else {
-            self.next_time = (self.index + 1) as f64 * self.interval;
-        }
-    }
-    pub fn next(&self) -> f64 {
-        self.next_time
-    }
-    pub fn with_index(mut self, idx: usize) -> Self {
-        self.index = idx;
-        if self.dlogt != 0.0 {
-            self.next_time = self.tstart * 10.0_f64.powf((self.index + 1) as f64 * self.dlogt);
-        } else {
-            self.next_time = (self.index + 1) as f64 * self.interval;
-        }
-        self
-    }
-    pub fn filename(&self, prefix: &str, data_dir: &str) -> String {
-        format!("{}/{}_{:04}.h5", data_dir, prefix, self.index)
-    }
-}
-
+/// whether `time` has reached a cadence boundary, tolerant of the roundoff an
+/// accumulating clock carries: a step that lands within 32 eps of the boundary
+/// counts as having reached it, so a checkpoint is never skipped by one ulp.
 pub fn time_at_or_after(time: f64, boundary: f64) -> bool {
     let tolerance = 32.0 * f64::EPSILON * time.abs().max(boundary.abs());
     time >= boundary || (time - boundary).abs() <= tolerance
@@ -1212,7 +1149,7 @@ where
 }
 
 /// **AMR checkpoint** — write an entire refinement hierarchy into ONE file as
-/// `/level_0`, `/level_1`, … sibling groups (the frozen v2.0 reader walks
+/// `/level_0`, `/level_1`, ... sibling groups (the frozen v2.0 reader walks
 /// `while level_i in f`). `levels[0]` is the coarse level and authors the global
 /// `/metadata`; every level carries its own mesh + fields. this is the
 /// "all levels, one file" layout.
@@ -2541,7 +2478,7 @@ mod tests {
 
     #[test]
     fn body_diagnostics_series_lands_in_the_checkpoint() {
-        // the Mdot(t)/F_acc(t) series (docs/ideas/accretor.md §5): pushed per
+        // the Mdot(t)/F_acc(t) accretion series: pushed per
         // step by evolve_bodies, flushed into every checkpoint as the
         // `body_diagnostics` group. shapes: time/dt [len], mass_delta [len, nb],
         // force [len, nb, D]. this pins the group layout the steady-state

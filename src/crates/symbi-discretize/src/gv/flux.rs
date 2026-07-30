@@ -15,7 +15,7 @@ use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
 /// primitive (rho, v_{0,1,2}, pre, B_{0,1,2}) to the face, then the canonical
-/// `riemann::hlle(&NewtonianMhd, ...)`. unlike `rmhd_flux_gv`, the Davis fan
+/// `riemann::hlle(&NewtonianMhd, ...)`. unlike `rmhd_flux_gv`, the davis fan
 /// speeds are computed INLINE by `hlle` from the reconstructed L/R states (the
 /// closed-form magnetosonic is cheap), avoiding a materialized
 /// per-cell field and its kernel. `ndim` is the reconstruction grid; `dir`
@@ -65,8 +65,8 @@ fn nmhd_reconstruct(
     }
     // the NORMAL field is the staggered, divergence-free FACE field — read it DIRECTLY (one
     // value at the face, no reconstruction) and override the cell-reconstructed B normal
-    // component. Gardiner-Stone (2005) CT-Godunov coupling: reconstructed bcell gives
-    // bn_l != bn_r, breaking the Riemann solver's constant-Bn assumption (OT noise/blow-up).
+    // component. gardiner-stone (2005) CT-godunov coupling: reconstructed bcell gives
+    // bn_l != bn_r, breaking the riemann solver's constant-Bn assumption (OT noise/blow-up).
     // the face field is read along GRID axis `dir`; the overridden component is the physical
     // normal `coord_n` (they coincide for cartesian; differ for the cyl r-z swirl/axisym).
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
@@ -148,8 +148,8 @@ pub fn nmhd_hllc_flux_gv(
     (end_trace(), writes)
 }
 
-/// NMHD HLLD face flux — `hlld_newtonian` (Miyoshi-Kusano 2005, full 5-wave). the
-/// robust solver: the algebraic c2p + this closed-form HLLD make Orszag-Tang stable.
+/// NMHD HLLD face flux — `hlld_newtonian` (miyoshi-kusano 2005, full 5-wave). the
+/// robust solver: the algebraic c2p + this closed-form HLLD make orszag-tang stable.
 pub fn nmhd_hlld_flux_gv(
     ndim: u8,
     dir: u8,
@@ -205,7 +205,7 @@ fn imhd_reconstruct(
         bl.push(l);
         br.push(r);
     }
-    // staggered div-free normal FACE field (Gardiner-Stone CT coupling): read along grid `dir`,
+    // staggered div-free normal FACE field (gardiner-stone CT coupling): read along grid `dir`,
     // override the physical normal component `coord_n` (= axes[dir]). see nmhd_reconstruct.
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
@@ -261,7 +261,7 @@ pub fn imhd_flux_gv(
     (end_trace(), writes)
 }
 
-/// isothermal-MHD HLLD face flux — `hlld_isothermal` (Mignone 2007, 3-state).
+/// isothermal-MHD HLLD face flux — `hlld_isothermal` (mignone 2007, 3-state).
 pub fn imhd_hlld_flux_gv(
     ndim: u8,
     dir: u8,
@@ -298,7 +298,7 @@ fn mesh_face_velocity_gv(dir: u8) -> Gv {
     mesh_adot * x_face + Gv::scalar(&MeshScalar::Vtrans(dir).name())
 }
 
-// shared euler (ideal-gas Newtonian/relativistic) face reconstruction: bind the
+// shared euler (ideal-gas newtonian/relativistic) face reconstruction: bind the
 // scalar tail (gamma, theta), theta-MC PLM-reconstruct the (rho, vel_{0..D}, pre)
 // primitive to the `dir`-grid face, and return the IdealGas eos + L/R primitives +
 // the sweep normal + the moving-face velocity. the solver (HLLE / HLLC) is the only
@@ -369,7 +369,7 @@ fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> Vec<(String, FieldBi
     writes
 }
 
-/// trace an ideal-gas Euler face flux (Newtonian OR relativistic) along sweep `dir` —
+/// trace an ideal-gas euler face flux (newtonian OR relativistic) along sweep `dir` —
 /// the gv single source: PLM-reconstruct (rho, every vel_k, pre) to the face, then the
 /// canonical `riemann::hlle(regime, IdealGas, L, R, n_hat, 0)` (symbi-hydro). replaces
 /// the hand-written `hlle_flux` / `rhd_hlle_flux` Expr builders + their per-component
@@ -397,7 +397,7 @@ where
     (end_trace(), writes)
 }
 
-/// the adiabatic (ideal-gas Newtonian Euler) face flux — `euler_hlle_flux_gv` at the
+/// the adiabatic (ideal-gas newtonian euler) face flux — `euler_hlle_flux_gv` at the
 /// `Newtonian` regime. replaces the cartesian `hlle_flux(.., has_energy=true)` builder.
 /// cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
 pub fn adiabatic_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -412,8 +412,8 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, N
     euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n)
 }
 
-/// the RHD (special-relativistic Euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
-/// regime (relativistic U/F/wave speeds via Mignone-Bodo). replaces the `rhd_hlle_flux`
+/// the RHD (special-relativistic euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
+/// regime (relativistic U/F/wave speeds via mignone-bodo). replaces the `rhd_hlle_flux`
 /// Expr builder + `rhd_side`. cartesian-only (rhd has no cyl r-z), ncomp == ndim == D.
 pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize)
@@ -472,7 +472,7 @@ where
     // the ADM face block, selected by (spacetime, chart): the kerr-schild spacetime is expressed in
     // the SPHERICAL chart (SchwarzschildKS, radial shift) OR the CARTESIAN chart
     // (SchwarzschildKSCartesian, non-diagonal, shift along every axis). the shift `beta` is carried
-    // out for the per-axis shift term below (zero for the static Schwarzschild chart).
+    // out for the per-axis shift term below (zero for the static schwarzschild chart).
     // `volume_factor` is sqrt(det gamma) of the FULL chart at any instantiated `D`, so a reduced
     // radial or equatorial block still carries the suppressed directions' measure (spherical 1D:
     // r^2/sqrt(f)); `alpha * volume_factor = sqrt(-g)` is the densitization the state and the flux
@@ -619,7 +619,7 @@ where
         sqrt_gamma,
     };
     let coord_n = axes[dir as usize];
-    // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
+    // RUSANOV / local lax-friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
     // s = +/- alpha sqrt(gamma^{nn}) - beta^n — the STATE-INDEPENDENT maximal signal bound in
     // COORDINATE form, matching the shift the flux carries. every fluid characteristic lies inside
     // the light cone, so it cannot under-bound near the boundary of the physical set; the low-order
@@ -826,7 +826,7 @@ pub fn rmhd_flux_gv(
         },
         mag: Tensor::new([b[0], b[1], b[2]]),
     };
-    // normal B from the staggered FACE field (Gardiner-Stone CT coupling) — reconstructed
+    // normal B from the staggered FACE field (gardiner-stone CT coupling) — reconstructed
     // bcell gives bn_l != bn_r, breaking the constant-Bn assumption. see nmhd_reconstruct.
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim, dir, 0);
     bl[coord_n] = bn_face;
@@ -835,9 +835,9 @@ pub fn rmhd_flux_gv(
     let right = mk(rho_r, &vr, pre_r, &br);
     let nhat = Tensor::<Gv, 3>::unit(coord_n);
 
-    // wave speeds are NO LONGER recomputed here — they are materialized once per cell by
-    // rmhd_wave_speeds_cell_gv into wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic).
-    // the HLL fan is the cell-centered Davis estimate over the two cells sharing this face:
+    // the wave speeds are materialized once per cell by rmhd_wave_speeds_cell_gv into
+    // wave_speed_l[dir]/wave_speed_r[dir] (the exact quartic) and READ here.
+    // the HLL fan is the cell-centered davis estimate over the two cells sharing this face:
     // plm_theta_gv reconstructs L from cell `coord - e_dir` (offset -1) and R from cell `coord`
     // (offset 0), so the fan reads those same two cells' speeds. the rmhd zero-clamp is applied
     // here (the stored per-cell speeds are raw). this strips the 166-register / 12-transcendental
@@ -896,9 +896,9 @@ pub fn rmhd_flux_gv(
     (k, writes)
 }
 
-/// the RMHD face flux on a curved SPATIAL metric — the GRMHD path (Valencia covariant U/F via
+/// the RMHD face flux on a curved SPATIAL metric — the GRMHD path (valencia covariant U/F via
 /// `RmhdGr` + the fast-magnetosonic-bound coordinate wave speeds). PLM-reconstruct the 8 MHD
-/// primitives (the normal B from the staggered face field, Gardiner-Stone), build the in-kernel
+/// primitives (the normal B from the staggered face field, gardiner-stone), build the in-kernel
 /// `SpatialMetric` + lapse at the swept-axis face, and run the HLL fan at the `RmhdGr` regime.
 /// wave speeds are INLINE (the bound is quartic-free), so the GR path skips the materialized
 /// per-cell quartic the flat kernel reads. on the kerr-schild chart the fan carries the radial
@@ -951,7 +951,7 @@ pub fn rmhd_flux_gr_gv(
         bl.push(l);
         br.push(r);
     }
-    // normal B from the staggered FACE field (Gardiner-Stone CT coupling) — shared by both sides.
+    // normal B from the staggered FACE field (gardiner-stone CT coupling) — shared by both sides.
     let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim as u8, dir, 0);
     bl[coord_n] = bn_face;
     br[coord_n] = bn_face;
@@ -1120,14 +1120,14 @@ pub fn rmhd_flux_gr_gv(
     // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
     // constant added to the magnetic flux after the fan (identical to adding it to both sides).
     // covariant (killing) energy flux: F_ehat/alpha = alpha F_tau + (alpha-1) F_D - beta^i F_{S_i},
-    // the linear re-split of the Valencia numerical fluxes into the free-index-down energy current,
+    // the linear re-split of the valencia numerical fluxes into the free-index-down energy current,
     // in the SAME face convention the RHD arm stores: the godunov works in the flat coordinate
     // measure (sqrt(gm) = sqrt(gm_flat)/alpha, static) and re-applies ONE cell lapse to the energy
     // divergence like every other conserved law, so the face slot owes a 1/alpha — storing the
     // fully self-contained sqrt(-g) current here instead leaves a spurious energy source
     // f_ehat * d_n(ln alpha) on any chart with a varying lapse. both HLLD and HLLE emit the
-    // Valencia flux in the shifted-G "godunov re-applies alpha" convention
-    // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat Valencia energy flux).
+    // valencia flux in the shifted-G "godunov re-applies alpha" convention
+    // (F_X = F_X* - (beta^n/alpha) X*). alpha=1, beta=0 -> F_tau (the flat valencia energy flux).
     let covariant_nrg = |f: &symbi_hydro::MhdCons<Gv, 3>| {
         alpha * f.nrg + (alpha - Gv::ONE) * f.den - beta.dot(&f.mom)
     };
@@ -1279,14 +1279,14 @@ pub fn rmhd_flux_gr_gv(
 
 // =============================================================================
 // HLLC face flux — contact-resolving 3-wave solver, regime-specific bodies. one
-// builder per regime (Newtonian, RHD, RMHD) mirroring the HLLE builder shape:
+// builder per regime (newtonian, RHD, RMHD) mirroring the HLLE builder shape:
 // same PLM reconstruction, same scalar tail (gamma, theta), same write manifest.
-// the Riemann solver is the only structural difference. defaulted to the
-// Standard shock-smoother arm at trace time — Quirk/Fleischmann are host-time
+// the riemann solver is the only structural difference. defaulted to the
+// Standard shock-smoother arm at trace time — quirk/fleischmann are host-time
 // dispatch knobs not exposed through the substrate yet.
 // =============================================================================
 
-/// adiabatic (ideal-gas Newtonian Euler) HLLC face flux. mirrors
+/// adiabatic (ideal-gas newtonian euler) HLLC face flux. mirrors
 /// `euler_hlle_flux_gv(&Newtonian, ...)` but calls `riemann::hllc` instead of
 /// `riemann::hlle`. carrier-generic over Gv; iso is structurally excluded
 /// (no contact wave -> HLLE-only).
@@ -1313,7 +1313,7 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
 /// recovers standard HLLC at supersonic faces and central differencing at zero mach. cures the
 /// grid-aligned shock instability AND the HLLC low-mach over-dissipation. newtonian only (the
 /// relativistic HLLC bodies ignore the LM correction). the `phi` helpers are fully branchless
-/// (`S::select`), so the Fleischmann arm traces at S = Gv just like the Standard arm.
+/// (`S::select`), so the fleischmann arm traces at S = Gv just like the Standard arm.
 pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -1331,7 +1331,7 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     (end_trace(), writes)
 }
 
-/// RHD HLLC face flux — Mignone-Bodo (2005) quadratic for the contact speed.
+/// RHD HLLC face flux — mignone-bodo (2005) quadratic for the contact speed.
 /// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
 pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -1348,7 +1348,7 @@ pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, Fiel
     (end_trace(), writes)
 }
 
-/// RHD HLLC-LM face flux — the Mignone-Bodo star states with the acoustic dissipation scaled down
+/// RHD HLLC-LM face flux — the mignone-bodo star states with the acoustic dissipation scaled down
 /// at low local mach number. differs from `rhd_hllc_flux_gv` only in the limiter it selects; the
 /// scaling is a property of the riemann solver, so the traced kernel is the same body.
 pub fn rhd_hllc_lm_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -1366,7 +1366,7 @@ pub fn rhd_hllc_lm_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, F
     (end_trace(), writes)
 }
 
-/// RMHD HLLC face flux — Mignone-Bodo (2006), null vs non-null normal B-field
+/// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field
 /// branch. mirrors `rmhd_flux_gv` (8-component MHD primitive) but routes the
 /// reconstructed L/R state through `riemann::hllc_rmhd`; `rmhd_flux_gv` routes through `hlle`.
 pub fn rmhd_hllc_flux_gv(
@@ -1389,8 +1389,8 @@ pub fn rmhd_hllc_flux_gv(
     (end_trace(), writes)
 }
 
-/// RMHD HLLD face flux — Mignone, Ugliano & Bodo (2009) 5-wave solver, the
-/// full magnetosonic/Alfven/contact wave resolution. uses `Scalar::iterate_vec`
+/// RMHD HLLD face flux — mignone, ugliano & bodo (2009) 5-wave solver, the
+/// full magnetosonic/alfven/contact wave resolution. uses `Scalar::iterate_vec`
 /// for the 15-step secant on pressure (freeze-on-converged), eagerly computes
 /// HLLE as the divergence fallback, and selects via a success mask at the end.
 /// shares the MHD primitive shape with HLLE/HLLC.

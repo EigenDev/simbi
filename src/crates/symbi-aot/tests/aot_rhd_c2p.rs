@@ -8,12 +8,12 @@
 // iterate produces CORRECT numbers at run time.
 //
 // two independent checks on the same compiled kernel `rhd_c2p_1d`:
-//   1. ROUND-TRIP: pick analytic primitives (rho, v, p), forward-map to the
-//      conserved (D, S, tau) via the standard RHD relations, run c2p, and assert
-//      it recovers the originals. this is the physical ground truth.
-//   2. REFERENCE: an independent Rust `rhd_to_primitive` (a do-while Newton
-//      iteration run to convergence) on the same conserved
-//      states; the compiled 20-step masked unroll must match it.
+//   - ROUND-TRIP: pick analytic primitives (rho, v, p), forward-map to the
+//     conserved (D, S, tau) via the standard RHD relations, run c2p, and assert
+//     it recovers the originals. this is the physical ground truth.
+//   - REFERENCE: an independent Rust `rhd_to_primitive` (a do-while Newton
+//     iteration run to convergence) on the same conserved
+//     states; the compiled 20-step masked unroll must match it.
 //
 // generated signature (OUT_DIR/rhd_c2p_generated.rs):
 //   rhd_c2p_1d(cons_den, cons_mom_0, cons_nrg : &[f64],         // inputs

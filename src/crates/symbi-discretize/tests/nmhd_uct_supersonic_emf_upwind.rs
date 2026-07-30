@@ -14,8 +14,8 @@
 // CT curl preserves div(B) for ANY edge EMF, advective coefficients included).
 //
 // the gate stands up the minimal physics that exposes it: a weak magnetic loop
-// (Gardiner & Stone 2005 / simbi_configs/examples/field_loop.py) advected
-// SUPERSONICALLY (|v| = sqrt(5), cs ~ 1.29 => Mach ~ 1.7) on a small periodic
+// (gardiner & stone 2005 / simbi_configs/examples/field_loop.py) advected
+// SUPERSONICALLY (|v| = sqrt(5), cs ~ 1.29 => mach ~ 1.7) on a small periodic
 // grid, evolved purely by the CT induction loop (uniform rho/p/v -> the gas is
 // frozen, only B advects). it chains the production kernels through the CPU
 // interpreter harness:
@@ -43,8 +43,8 @@ use symbi_hydro::state::Prim;
 const NX: usize = 12;
 const NY: usize = 12;
 // buffers carry a ghost halo wide enough for the EMF/curl stencils: the EMF reads
-// transverse neighbours at -2..+1 (recon_face_to_edge needs the 2nd transverse
-// neighbour), the curl reads +1. NG=3 covers both sides with margin.
+// transverse neighbors at -2..+1 (recon_face_to_edge needs the 2nd transverse
+// neighbor), the curl reads +1. NG=3 covers both sides with margin.
 const NG: usize = 3;
 const BX: usize = NX + 2 * NG; // full buffer extent, x
 const BY: usize = NY + 2 * NG; // full buffer extent, y
@@ -158,7 +158,7 @@ impl Sim {
     }
 
     // periodic wrap of one staggered face buffer: copy the interior into the ghost
-    // halo so the stencils read the wrapped neighbour. cell-indexed staggering with
+    // halo so the stencils read the wrapped neighbor. cell-indexed staggering with
     // NX/NY interior cells -> period NX (x), NY (y).
     fn wrap(buf: &mut [f64]) {
         // x ghosts
@@ -370,7 +370,7 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
     let mut sim = Sim::new();
     sim.wrap_all();
 
-    // sanity: the supersonic regime is real (Mach > 1) — the bug is invisible otherwise.
+    // sanity: the supersonic regime is real (mach > 1) — the bug is invisible otherwise.
     let cs = (GAMMA * PRE0 / RHO0).sqrt();
     let speed = (sim.vx * sim.vx + sim.vy * sim.vy).sqrt();
     assert!(
@@ -385,16 +385,14 @@ fn nmhd_uct_supersonic_emf_stays_bounded() {
     );
 
     // a CFL dt from the (constant) max signal speed. CFL=0.1 sits comfortably inside the
-    // forward-Euler CT stability limit, so the UCT diffusion makes the CORRECT scheme
+    // forward-euler CT stability limit, so the UCT diffusion makes the CORRECT scheme
     // monotonically DECAY the (slightly over-resolved) loop energy. the downwind-paired
-    // bug breaks this: it anti-diffuses the supersonically-advected transverse field, so
-    // the energy GROWS instead -> the discriminating signal. 80 steps advects the loop
-    // long enough for the bug's growth to clear the boundedness band (the flipped pairing
-    // already blows past 5x E0 by ~step 13; the correct pairing damps the seed monotonically).
+    // pairing breaks this: it anti-diffuses the supersonically-advected transverse field,
+    // so the energy GROWS instead -> the discriminating signal.
     let cfl = 0.1;
     let dt = cfl * dx().min(dy()) / sim.smax();
-    // the flipped pairing blows past 5x E0 by ~step 13; 20 steps keeps margin past that while
-    // staying fast. the correct pairing damps the seed monotonically over the same window.
+    // the downwind pairing blows past 5x E0 by roughly the 13th update, so 20 updates keeps
+    // margin past that. the upwind pairing damps the seed monotonically over the same window.
     let n_steps = 20;
 
     let mut e_max = e0;

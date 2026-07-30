@@ -2,16 +2,15 @@
 // lower.rs
 //
 // scalarization pass: tensor IR -> a "lowered" form (LoweredFn) that
-// per-backend emitters (R.3.f CPU, R.3.g CUDA) turn into target source.
+// per-backend emitters (CPU, CUDA) turn into target source.
 //
 // the lowered form is a sequence of scalar let-statements followed by
 // one or more output scalar expressions (one per scalar component of
 // the output tensor). it is intentionally simpler than the existing
 // scalar IR — no graph, no node IDs, just a list of bindings + a list
-// of return values. this is enough for V1 literal-dim lowering.
-//
-// const-generic dim support (loops that survive into target source)
-// is unimplemented; generic dims trigger a panic.
+// of return values. every tensor dim must be a Literal: const-generic dim
+// support (loops that survive into target source) is unimplemented, and a
+// generic dim triggers a panic.
 // =============================================================================
 
 use std::collections::{HashMap, HashSet};
@@ -131,12 +130,11 @@ pub enum ScalarExpr {
         field_key: String,
         components: Vec<ScalarExpr>,
     },
-    /// F1.B.8: free-function call by name with scalar args. emit lowers
+    /// free-function call by name with scalar args. emit lowers
     /// as `name(arg0, arg1, ...)` on both CPU and CUDA targets. the
     /// function definition lives outside this elemental — either a
-    /// scalar elemental's `_cuda` accessor (for kernels that
-    /// chain through F1.B.8's opaque-call substrate) or a host
-    /// function on the CPU path.
+    /// scalar elemental's `_cuda` accessor or a host function on the
+    /// CPU path.
     FreeCall { name: String, args: Vec<ScalarExpr> },
     /// numeric conversion `value as <to>` — the lowered form of
     /// `ElementWiseOp::Cast`, inserted by the graph's usual arithmetic conversions
@@ -220,7 +218,7 @@ pub enum ScalarStmt {
         op: BinaryKind,
         value: ScalarExpr,
     },
-    /// F2.F: `name = value;` — plain (non-compound) assignment.
+    /// `name = value;` — plain (non-compound) assignment.
     /// applied to a previously-declared `LetMut`. used by Op::Fold's
     /// lowering, where the body lambda returns a new accumulator that
     /// REPLACES (not accumulates into) the current one. CompoundAssign
@@ -479,8 +477,7 @@ impl ScalarStmt {
 
 /// one scalar parameter of the lowered function. when `array_len` is
 /// Some, the param is a rank-1 array (`[element; len]`); otherwise
-/// it's a plain scalar. multi-rank generic params are not supported
-/// in V1 (rank-1 only).
+/// it's a plain scalar. generic params are rank-1 at most.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LoweredParam {
     pub name: String,
@@ -557,7 +554,7 @@ impl Scalarizer {
         }
     }
 
-    /// F1.B.10b: compute in-degree per NodeId by walking the graph
+    /// compute in-degree per NodeId by walking the graph
     /// once. used by `maybe_hoist_to_let` to share ScalarExpr trees
     /// across consumers — without this, each downstream reference
     /// CLONES the entire binding sub-tree, producing exponential
@@ -656,17 +653,16 @@ impl Scalarizer {
             Op::Lambda(_) => {
                 Binding::Concrete(vec![ScalarExpr::Const(crate::ConstValue::F64(0.0))])
             }
-            // F2.C: Apply lowers to a `FreeCall(name, args)` on the scalar
+            // Apply lowers to a `FreeCall(name, args)` on the scalar
             // side — resolve the device-function name via `graph.fn_def`.
             Op::Apply { lambda, args } => {
                 let fn_name = graph.fn_def(*lambda).name.clone();
                 Binding::Concrete(self.lower_opaque_call(&fn_name, args))
             }
-            // F2.F: Fold lowers to a `LetMut acc = init; For i in 0..count
-            // { acc = body(acc, i); }; acc`. accumulator is rank-0 for V1
-            // (rank > 0 fold needs per-component LetMut + Assign — punted
-            // until a real call site demands it). produces a Binding to
-            // the accumulator's `Var(name)`.
+            // Fold lowers to a `LetMut acc = init; For i in 0..count
+            // { acc = body(acc, i); }; acc`. the accumulator is rank-0; a
+            // rank > 0 fold would need per-component LetMut + Assign.
+            // produces a Binding to the accumulator's `Var(name)`.
             Op::Fold {
                 lambda,
                 init,
@@ -712,7 +708,7 @@ impl Scalarizer {
         self.bindings.insert(id, binding);
     }
 
-    /// F2.F: lower an Op::Fold into a `LetMut + For + Assign` sequence.
+    /// lower an Op::Fold into a `LetMut + For + Assign` sequence.
     /// returns a single-element binding holding `Var(acc_name)` so
     /// downstream consumers see the post-loop accumulator value.
     fn lower_fold(
@@ -723,10 +719,9 @@ impl Scalarizer {
         out_ty: &TensorTy,
         graph: &Graph,
     ) -> Vec<ScalarExpr> {
-        // V1 scope: rank-0 accumulator.
         assert_eq!(
             out_ty.rank, 0,
-            "lower_fold V1: rank-0 accumulator only (got rank {})",
+            "lower_fold: rank-0 accumulator only (got rank {})",
             out_ty.rank
         );
         let acc_name = self.fresh("fold_acc");
@@ -758,7 +753,7 @@ impl Scalarizer {
             // DimExpr can't carry a runtime expression — that's an
             // emit-layer extension. literal counts required.
             other => panic!(
-                "lower_fold V1: count must be a literal integer Const; got {:?}",
+                "lower_fold: count must be a literal integer Const; got {:?}",
                 other
             ),
         };
@@ -1200,9 +1195,9 @@ impl Scalarizer {
     }
 
     fn lower_index(&mut self, tensor: NodeId, idxs: &[DimIndex], graph: &Graph) -> Vec<ScalarExpr> {
-        // V1: only literal indices into a literal-dim tensor produce a
-        // determinate flat index. Generic indices require loop emission
-        // (R.3.h); panics.
+        // only literal indices into a literal-dim tensor produce a
+        // determinate flat index. Generic indices require loop emission;
+        // panics.
         let in_shape = resolve_literal_dims(&graph.ty(tensor).shape);
         let mut flat = Vec::with_capacity(idxs.len());
         for d in idxs {
@@ -1341,9 +1336,8 @@ impl Scalarizer {
 /// function name is the caller's choice (typically the elemental or
 /// kernel function name).
 ///
-/// V1 limitation: every dim in every tensor type must be Literal.
-/// Generic dims trigger a panic; const-generic loop support is
-/// unimplemented.
+/// every dim in every tensor type must be Literal. Generic dims trigger a
+/// panic; const-generic loop support is unimplemented.
 pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
     let mut sc = Scalarizer::new();
     let in_degrees = Scalarizer::compute_in_degrees(graph);
@@ -1364,7 +1358,7 @@ pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
         result_element: out_ty.element,
         result_shape: out_ty.shape,
     };
-    // F1.B.10: CSE pass collapses duplicated sub-expressions to
+    // CSE pass collapses duplicated sub-expressions to
     // __cse_<n> Lets. without this, large kernels emit single-line
     // CUDA source strings >700 KB and blow up rustc's memory during
     // string-literal lowering (40-50 GiB anon-RSS on the symbi crate).
@@ -1374,7 +1368,7 @@ pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
 
 /// kernel-mode scalarization: walk the graph once and extract one
 /// scalar result per element of `outputs`, sharing the let-binding
-/// body across all outputs. used by the kernel emitter (R.6.d) to
+/// body across all outputs. used by the kernel emitter to
 /// emit a single __global__ that performs multiple buffer writes.
 ///
 /// every output node must be rank-0 (writes to a buffer are scalar);
@@ -1456,7 +1450,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
             scope_body.insert(id, body_set);
             scope_result.insert(id, *result);
             for &b in body {
-                // first-seen wins → INNERMOST scope claims the NodeId.
+                // first-seen wins -> INNERMOST scope claims the NodeId.
                 scope_owner.entry(b).or_insert(id);
             }
         }
@@ -1681,7 +1675,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
         body: sc.body,
         outputs: lowered_outputs,
     };
-    // F1.B.10: CSE pass. see comment in `scalarize`.
+    // CSE pass. see comment in `scalarize`.
     crate::passes::cse::cse_kernel(&mut k);
     k
 }
@@ -1913,7 +1907,7 @@ fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
 
 /// arithmetic-identity peephole on the scalar IR. eliminates the dead ops
 /// emitted by substrate constructions that contract against unit vectors
-/// (e.g., `v · ehat` for `ehat = (1, 0, 0)` lowers to `v0*1 + v1*0 + v2*0`).
+/// (e.g., `contract(v, ehat)` for `ehat = (1, 0, 0)` lowers to `v0*1 + v1*0 + v2*0`).
 ///
 /// SAFE set (the ONLY identities folded here):
 ///   `x + 0 -> x`,  `0 + x -> x`
@@ -2053,7 +2047,7 @@ mod tests {
         DimExpr::Literal(n)
     }
 
-    // ---- F2.F: Op::Fold lowering ----
+    // ---- Op::Fold lowering ----
 
     #[test]
     fn fold_lowers_to_letmut_for_assign() {
@@ -2404,7 +2398,7 @@ mod tests {
         );
     }
 
-    // ---- R.3.b: ElementWise scalarization ----
+    // ---- ElementWise scalarization ----
 
     use crate::ElementWiseOp;
     use crate::TranscendentalOp;
@@ -2624,7 +2618,7 @@ mod tests {
         }
     }
 
-    // ---- R.3.b: Transcendental scalarization ----
+    // ---- Transcendental scalarization ----
 
     #[test]
     fn transcendental_sin_emits_method_call() {
@@ -2737,7 +2731,7 @@ mod tests {
         assert_eq!(UnaryKind::Neg.rust_operator(), "-");
     }
 
-    // ---- R.3.c: Construct ----
+    // ---- Construct ----
 
     #[test]
     fn construct_three_scalars_into_rank_1() {
@@ -2793,7 +2787,7 @@ mod tests {
         }
     }
 
-    // ---- R.3.c: Index ----
+    // ---- Index ----
 
     #[test]
     fn index_extracts_correct_scalar() {
@@ -2844,7 +2838,7 @@ mod tests {
         let _ = scalarize(&g, s, "f");
     }
 
-    // ---- R.3.c: Broadcast ----
+    // ---- Broadcast ----
 
     #[test]
     fn broadcast_scalar_replicates() {
@@ -2911,7 +2905,7 @@ mod tests {
         }
     }
 
-    // ---- R.3.d: Reduce ----
+    // ---- Reduce ----
 
     use crate::ReduceOp;
 
@@ -3069,7 +3063,7 @@ mod tests {
         ));
     }
 
-    // ---- R.3.d: Select ----
+    // ---- Select ----
 
     #[test]
     fn select_scalar_picks_branch() {

@@ -211,7 +211,7 @@ def test_accretion_from_checkpoint_rejects_flat_and_massless():
 
 
 def _cartesian_ks_grid(n, half_width):
-    """cell-centre axes of an even-resolution origin-containing square (centers
+    """cell-center axes of an even-resolution origin-containing square (centers
     straddle the origin, never on an axis)."""
     dx = 2.0 * half_width / n
     c = (np.arange(n) + 0.5) * dx - half_width

@@ -1,7 +1,7 @@
 // =============================================================================
 // rmhd_uct_hlld_wave_sum_symbolic.rs
 //
-// the SYMBOLIC proof of the HLLD wave-sum EMF DISSIPATION-SIGN PAIRING (M8) — the invariant the
+// the SYMBOLIC proof of the HLLD wave-sum EMF DISSIPATION-SIGN PAIRING — the invariant the
 // upwind proof (nmhd_uct_emf_upwind_symbolic) explicitly does NOT cover, because the HLLD edge EMF
 // kernels (`rmhd_edge_emf_uct_hlld_gv` + `_gr_gv`) build a wave-sum dissipative flux Phi (M&DZ Eq. 39),
 // an assembly outside the `uct_master_emf` coefficient form.
@@ -103,9 +103,9 @@ fn hlld_wave_sum_dissipation_pairing_symbolic() {
     );
 }
 
-// NEGATIVE control: mispair the two fast-wave endpoints (|lam_L| <-> |lam_R|) — the anti-diffusive
-// bug. the checker must reject it (bt_l now lands on the wrong wave), so the pairing proof is not
-// vacuously green.
+// NEGATIVE control: mispair the two fast-wave endpoints (|lam_L| <-> |lam_R|), which makes the
+// dissipation anti-diffusive. the checker must reject it (bt_l lands on the wrong wave), so the
+// pairing proof is not vacuously green.
 #[test]
 fn hlld_wave_sum_symbolic_detects_swapped_fast_waves() {
     let (kernel, writes) = hlld_wave_sum_proof_kernel(true);

@@ -4,9 +4,9 @@
 // validates the CT face->cell B interpolation (rmhd_bcell_from_bface) against its
 // straight-Rust reference: each in-plane cell B component is the arithmetic average
 // of its two bracketing faces. NO energy correction — cons.nrg (tau) carries the
-// magnetic energy and is conserved by the Godunov Poynting flux; the old
-// `nrg += 0.5*(|bcell_new|^2 - |bcell_old|^2)` patch double-accounted it and did not
-// telescope, so it was removed (spec §6). pointwise per cell with a +1 face offset;
+// magnetic energy and is conserved by the godunov poynting flux; an
+// `nrg += 0.5*(|bcell_new|^2 - |bcell_old|^2)` patch would double-account it and does not
+// telescope. pointwise per cell with a +1 face offset;
 // tested on a small 3D grid (ndim = 3, so all three components interpolate from faces).
 //   bcell_c = 0.5*(bface_c[coord] + bface_c[coord+e_c])
 // =============================================================================

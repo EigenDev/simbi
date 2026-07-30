@@ -1,5 +1,6 @@
-// a theta-independent state on marcus's exact grid shape MUST render an
-// angularly uniform arc — any modulation along the arc is a sampling artifact.
+// a theta-independent state on a 1024 x 699 spherical-polar quarter wedge MUST
+// render an angularly uniform arc — any modulation along the arc is a sampling
+// artifact.
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Spherical;

@@ -473,7 +473,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1} (+ the
                 // metric mass/spin and the LOG-AWARE grid scalars on the kerr instance).
                 // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
-                // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
+                // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int \sqcup float
                 // coproduct).
                 let (ints, scalars) = resolve_params(
                     &name,

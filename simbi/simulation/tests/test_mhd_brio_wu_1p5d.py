@@ -1,12 +1,12 @@
 # =============================================================================
 # test_mhd_brio_wu_1p5d.py
 #
-# the reduced-dimension out-of-plane predictor gate (oop_predictor_spec.md). on a 1.5D
-# newtonian-MHD Brio-Wu shock tube (D=1, DOF=3) the transverse By,Bz have NO staggered
-# face and are cell-centered conserved variables evolved SOLELY by the out-of-plane cell-B
-# flux predictor. before the predictor was restored, By was frozen at its sharp +-1 IC
-# jump, which drove the gas pressure negative; the correct out-of-plane evolution develops
-# the Brio-Wu compound wave (By reverses through intermediate values) and stays physical.
+# the reduced-dimension out-of-plane predictor gate. on a 1.5D newtonian-MHD Brio-Wu
+# shock tube (D=1, DOF=3) the transverse By,Bz have NO staggered face and are
+# cell-centered conserved variables evolved SOLELY by the out-of-plane cell-B flux
+# predictor. a missing predictor freezes By at its sharp +-1 IC jump and drives the gas
+# pressure negative; the correct out-of-plane evolution develops the Brio-Wu compound
+# wave (By reverses through intermediate values) and stays physical.
 #
 # asserts: Bx const to machine (the no-CT 1.5D property), physicality everywhere, the
 # unshocked end states survive, the compound wave reverses By through intermediate values,
@@ -50,7 +50,7 @@ def test_brio_wu_1p5d_out_of_plane_predictor() -> None:
     # out-of-plane Bz stays identically zero (no source seeds it).
     assert np.max(np.abs(bz)) < 1e-12, f"Bz grew from zero (max {np.max(np.abs(bz)):.2e})"
 
-    # physicality everywhere — a frozen By drives p < 0 (the regression signature).
+    # physicality everywhere — a frozen By drives p < 0.
     assert np.all(np.isfinite(rho)) and np.all(rho > 0.05), "rho non-finite or unphysical"
     assert np.all(np.isfinite(pre)) and np.all(pre > 0.0), "pre non-finite or non-positive"
 

@@ -2,12 +2,10 @@
 // element.rs
 //
 // element type of a tensor: the scalar primitive at every component.
-// the supported types are F64, F32, I32, U32, Bool. promotions and casts
-// are out of scope for V1 — mismatched
-// elements at op-construction time are an IR build error.
-//
-// V2 will extend with BF16, F16, Complex64, Complex32; the enum's
-// non-exhaustive layout keeps that addition source-compatible.
+// the supported types are F64, F32, I32, U32, Bool. there are no implicit
+// promotions: mismatched elements at op-construction time are an IR build
+// error. the enum's non-exhaustive layout keeps adding a type (BF16, F16,
+// Complex64, ...) source-compatible for downstream matches.
 // =============================================================================
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

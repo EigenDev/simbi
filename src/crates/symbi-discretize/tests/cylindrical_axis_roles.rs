@@ -91,7 +91,7 @@ fn cylindrical_rz_swirl_source_matches_analytic() {
 #[test]
 fn cylindrical_rz_swirl_flux_is_advective() {
     // ncomp>ndim hydro flux: cylindrical (r,z) [0,2], ncomp=3.
-    // the gv cyl r-z flux (riemann::hlle at the Newtonian regime, coord_n = axes[0] = r)
+    // the gv cyl r-z flux (riemann::hlle at the newtonian regime, coord_n = axes[0] = r)
     // builds a momentum flux for ALL THREE coordinates; for a uniform state HLLE returns the
     // physical flux, so along the r-sweep (coord_n=r):
     //   F_den = rho*v_r;  F_mom_r = rho*v_r^2 + p;  F_mom_phi = rho*v_phi*v_r (advection, NO

@@ -24,8 +24,8 @@ pub mod dispatch;
 
 // the substrate (KernelSets + regime->KernelSet map + dispatch) and the kernel
 // support utilities live in the `symbi-substrate` crate; re-exported at the
-// `crate::regimes` / `crate::kernels` paths so evolve, refinement, the prelude,
-// and downstream callers are untouched.
+// `crate::regimes` / `crate::kernels` paths, which is where evolve, refinement,
+// the prelude, and downstream callers name them.
 pub use symbi_substrate::{kernels, regimes};
 
 // ---- re-exports ----

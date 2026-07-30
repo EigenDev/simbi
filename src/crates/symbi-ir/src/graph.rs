@@ -5,10 +5,6 @@
 // and a `TensorTy`. nodes reference each other by `NodeId` (a u32
 // newtype indexing into the graph's vector).
 //
-// R.1.d ships the skeleton with only `Const` and `Param` op variants
-// implemented. the remaining ops (Construct, Index, Reduce,
-// ElementWise, Transcendental, Select, Broadcast) land in R.2.
-//
 // invariants:
 //   - every `NodeId` is in-bounds of `nodes` and `types`.
 //   - `types[i]` is the result type of node `i`.
@@ -31,11 +27,11 @@ use crate::{DimExpr, ElementTy, Symbol, TensorTy};
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NodeId(pub u32);
 
-// ----- op variants (R.1.d: skeleton only) -----
+// ----- op variants -----
 
 /// payload of a `Const` node. one variant per supported `ElementTy`.
 ///
-/// F2.A: Hash + Eq are implemented over the *bit pattern* of floats.
+/// Hash + Eq are implemented over the *bit pattern* of floats.
 /// two F64(NaN) values with identical bit
 /// patterns are considered equal; two NaNs with different bit patterns
 /// are not. this is what hash-cons needs (structural identity).
@@ -451,12 +447,9 @@ impl TranscendentalOp {
     }
 }
 
-/// the IR op carried by a node. R.1.d implemented Const and Param;
-/// R.2.a adds Construct, Index, Broadcast. the remaining four ops
-/// (Reduce, ElementWise, Transcendental, Select) land later
-/// in R.2.
+/// the IR op carried by a node.
 ///
-/// F2.A: Op + dependents implement Hash + Eq so the Graph can
+/// Op + dependents implement Hash + Eq so the Graph can
 /// structural-hash-cons identical (Op, output-type) pairs into a single
 /// NodeId at construction. equal subgraphs collapse to shared NodeIds,
 /// which means sharing is preserved through scalarize / emit without
@@ -474,7 +467,7 @@ pub enum Op {
     /// extract a rank-0 element. one DimIndex per axis of the input.
     Index(NodeId, Vec<DimIndex>),
     /// explicit broadcast to a target shape (the input's shape must
-    /// broadcast to the target per § 1.5).
+    /// broadcast to the target).
     Broadcast(NodeId, Vec<DimExpr>),
     /// element-wise op with broadcast-aware shape inference. arity is
     /// 1 or 2 depending on the op tag.
@@ -499,19 +492,19 @@ pub enum Op {
     /// iteration; LoadAt covers the second case (gather at a runtime
     /// source coord, e.g., ghost-fill remap).
     LoadAt(Symbol, Vec<NodeId>),
-    /// F2.C: a first-class function value. references a `FnDef`
+    /// a first-class function value. references a `FnDef`
     /// stored in the graph's `lambdas` table by FnId. the lambda's
     /// signature lives in FnDef.params; the body is a sub-Graph with
     /// `FnDef.output` as its result NodeId. Lambda nodes carry a
     /// placeholder tensor type (rank-0 F64) — they're callable handles,
     /// so they should only be consumed by `Op::Apply`.
     Lambda(FnId),
-    /// F2.C: apply a Lambda value to arguments. `lambda` must be a
+    /// apply a Lambda value to arguments. `lambda` must be a
     /// NodeId pointing at an `Op::Lambda` in the same graph. `args`
     /// match the lambda's FnDef.params in count and type. result type
     /// equals the type of the lambda's body output.
     Apply { lambda: NodeId, args: Vec<NodeId> },
-    /// F2.F: bounded fold. canonical catamorphism over the natural
+    /// bounded fold. canonical catamorphism over the natural
     /// number `count`. `lambda` must be `Op::Lambda` with FnDef of
     /// shape `(Acc, Idx) -> Acc`. semantics:
     ///
@@ -527,8 +520,7 @@ pub enum Op {
     /// output.ty`. `count` is rank-0 integer (literal or runtime
     /// param); `lambda.params[1]` is rank-0 integer.
     ///
-    /// Fold is the only iteration primitive in the IR — there is no
-    /// `Op::While`. all iteration is statically bounded by `count`,
+    /// all iteration is statically bounded by `count`,
     /// preserving the DAG's termination-by-construction property.
     /// dynamic-termination patterns (Newton with adaptive step
     /// rejection, etc.) live at the host level outside the IR.
@@ -861,13 +853,13 @@ pub struct Node {
 /// the tensor IR graph. nodes and types are kept in parallel vectors so
 /// `types[i]` is always the result type of `nodes[i]`. shape errors
 /// produced during construction accumulate on the side and are drained
-/// at the macro boundary (per spec § 12.4).
-/// F2.C: opaque handle into a Graph's `lambdas` table. distinguished
+/// at the macro boundary.
+/// opaque handle into a Graph's `lambdas` table. distinguished
 /// from NodeId so the type system catches accidental mixing.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FnId(pub u32);
 
-/// F2.C: structural function definition. lives in `Graph.lambdas`,
+/// structural function definition. lives in `Graph.lambdas`,
 /// referenced by `Op::Lambda(FnId)`. `body` is a sub-Graph; `output`
 /// is the NodeId within that sub-Graph that yields the result.
 ///
@@ -894,12 +886,7 @@ pub struct Graph {
     param_index: HashMap<Symbol, NodeId>,
     output: Option<NodeId>,
     errors: Vec<ShapeError>,
-    /// graph-level dim constraint. when set, restricts the
-    /// kernel to a specific ndim during macro emission. the constraint is
-    /// carried explicitly here.
-    /// `None` means "no graph-level constraint".
-    pinned_ndim: Option<u8>,
-    /// F2.A: structural cache for hash-consing. keyed on (Op, output
+    /// structural cache for hash-consing. keyed on (Op, output
     /// TensorTy); equal keys map to the same NodeId. populated by
     /// `push` after a successful insert. invariant: two semantically
     /// identical sub-graphs share a single NodeId, so downstream
@@ -911,11 +898,11 @@ pub struct Graph {
     /// non-param ops with mismatched span info still collapse; the
     /// kept node uses the FIRST span seen.
     hashcons: HashMap<(Op, TensorTy), NodeId>,
-    /// F2.C: first-class function definitions. addressable by FnId
+    /// first-class function definitions. addressable by FnId
     /// (the index here). `Op::Lambda(FnId)` makes a NodeId for the
     /// function value; `Op::Apply { lambda, args }` invokes it.
     lambdas: Vec<FnDef>,
-    /// F2.E: `FnDef.name` -> Lambda NodeId for that function. lets
+    /// `FnDef.name` -> Lambda NodeId for that function. lets
     /// `get_or_register_lambda` return a stable NodeId across calls
     /// so every Apply for the same function references one Lambda.
     /// parallel to `param_index` (which serves the same role for params).
@@ -978,19 +965,7 @@ impl Graph {
         self.output
     }
 
-    /// F5.4-retire: pin a graph-level ndim constraint. last call wins.
-    /// the macro pipeline reads `pinned_ndim()` and intersects it with
-    /// any other ndim constraints during emission.
-    pub fn pin_ndim(&mut self, ndim: u8) {
-        self.pinned_ndim = Some(ndim);
-    }
-
-    /// returns the graph-level pinned ndim, if any.
-    pub fn pinned_ndim(&self) -> Option<u8> {
-        self.pinned_ndim
-    }
-
-    // ----- error accumulator (R.1.e) -----
+    // ----- error accumulator -----
 
     /// has any builder recorded a shape error so far?
     pub fn has_errors(&self) -> bool {
@@ -1009,14 +984,14 @@ impl Graph {
         std::mem::take(&mut self.errors)
     }
 
-    /// record a shape error. used internally by op builders in R.2+;
-    /// public to let test code exercise the accumulator without
+    /// record a shape error. called by the op builders on a shape-inference
+    /// failure; public to let test code exercise the accumulator without
     /// constructing a real op-failure path.
     pub fn record_error(&mut self, err: ShapeError) {
         self.errors.push(err);
     }
 
-    // ----- builders (R.1.d: Const + Param only; R.2 adds the rest) -----
+    // ----- builders -----
 
     /// add a rank-0 constant. type is derived from the value's element.
     /// span is optional; pass None at non-macro construction sites.
@@ -1044,7 +1019,7 @@ impl Graph {
         self.add_param(sym, TensorTy::scalar(element), None)
     }
 
-    // ----- R.2.a builders: Construct, Index, Broadcast -----
+    // ----- builders: Construct, Index, Broadcast -----
 
     /// stack N tensors of rank K into one tensor of rank K+1 with a
     /// new outermost axis of length N. all inputs must agree on
@@ -1137,7 +1112,7 @@ impl Graph {
     }
 
     /// explicitly broadcast a tensor to a target shape. the input's
-    /// shape must broadcast to `target` per § 1.5.
+    /// shape must broadcast to `target`.
     pub fn broadcast(
         &mut self,
         tensor: NodeId,
@@ -1161,7 +1136,7 @@ impl Graph {
         self.push(Op::Broadcast(tensor, target), out_ty, span)
     }
 
-    // ----- R.2.b builders: ElementWise + Transcendental -----
+    // ----- builders: ElementWise + Transcendental -----
 
     /// element-wise op (arithmetic, comparison, classification). arity
     /// is fixed per op tag. binary ops broadcast their inputs to a
@@ -1473,7 +1448,7 @@ impl Graph {
         self.push(Op::Transcendental(op, inputs), out_ty, span)
     }
 
-    // ----- R.2.c builders: Reduce + Select -----
+    // ----- builders: Reduce + Select -----
 
     /// reduce a tensor along the given axes. axes must be sorted, in
     /// bounds, with no duplicates. Min/Max accept float or int inputs;
@@ -1652,7 +1627,7 @@ impl Graph {
         )
     }
 
-    // ----- F2.C: first-class functions -----
+    // ----- first-class functions -----
 
     /// register a function in the graph's `lambdas` table and return
     /// a NodeId for the corresponding `Op::Lambda(FnId)`. the FnDef
@@ -1676,14 +1651,14 @@ impl Graph {
         // Lambda carries a placeholder rank-0 F64 type. it is a callable
         // value; only Op::Apply consumes it directly.
         let nid = self.push(Op::Lambda(fn_id), TensorTy::scalar(ElementTy::F64), span);
-        // F2.E: register the by-name index so subsequent
+        // register the by-name index so subsequent
         // `get_or_register_lambda` calls return THIS NodeId, reusing the
         // single Lambda for the same function.
         self.lambda_index.entry(name).or_insert(nid);
         nid
     }
 
-    /// F2.E: return the Lambda NodeId for `fn_def.name`, registering
+    /// return the Lambda NodeId for `fn_def.name`, registering
     /// `fn_def` only if no Lambda for that name already exists in this
     /// graph. ensures every call site referring to function `f` uses
     /// the same Lambda NodeId, so `Op::Apply` hash-cons can merge
@@ -1695,7 +1670,7 @@ impl Graph {
         self.add_lambda(fn_def, span)
     }
 
-    /// F2.E: lookup-only variant — does this graph already have a
+    /// lookup-only variant — does this graph already have a
     /// Lambda for the given function name?
     pub fn find_lambda(&self, name: &Symbol) -> Option<NodeId> {
         self.lambda_index.get(name).copied()
@@ -1774,7 +1749,7 @@ impl Graph {
         self.push(Op::Apply { lambda, args }, result_ty, span)
     }
 
-    /// F2.F: bounded fold. constructs `Op::Fold { lambda, init, count }`
+    /// bounded fold. constructs `Op::Fold { lambda, init, count }`
     /// after validating:
     ///   - `lambda` is `Op::Lambda` whose FnDef has exactly 2 params
     ///     of shape `(Acc, Idx) -> Acc`,
@@ -2168,11 +2143,10 @@ impl Graph {
     // ----- internal -----
 
     fn push(&mut self, op: Op, ty: TensorTy, span: Option<Span>) -> NodeId {
-        // F2.A hash-cons. params bypass — they're externally keyed
-        // by symbol and dedup'd in `add_param`. F2.C Lambda also
-        // bypasses: each `add_lambda` is meant to allocate a new
-        // FnId; sharing happens at the FnDef level (not yet) or via
-        // the Apply call sites. Op::Apply still hash-conses.
+        // hash-cons. params bypass — they're externally keyed
+        // by symbol and dedup'd in `add_param`. Lambda also
+        // bypasses: each `add_lambda` allocates a new FnId; sharing
+        // happens at the Apply call sites. Op::Apply still hash-conses.
         // IterAcc: each placeholder is a distinct loop accumulator — sharing two
         // would alias unrelated loops. bypass hash-cons like Param/Lambda.
         // `Op::Scope` bypasses hash-cons too. each
@@ -2390,7 +2364,7 @@ mod tests {
         );
     }
 
-    // ---- error accumulator (R.1.e) ----
+    // ---- error accumulator ----
 
     #[test]
     fn fresh_graph_has_no_errors() {
@@ -2466,7 +2440,7 @@ mod tests {
         assert_eq!(g.ty(n).element, ElementTy::F64);
     }
 
-    // ---- R.2.a: Construct ----
+    // ---- Construct ----
 
     fn vec3(g: &mut Graph) -> NodeId {
         // helper: rank-1 dim-3 Untagged param of element F64.
@@ -2548,7 +2522,7 @@ mod tests {
         assert!(g.has_errors());
     }
 
-    // ---- R.2.a: Index ----
+    // ---- Index ----
 
     #[test]
     fn index_extracts_scalar() {
@@ -2588,7 +2562,7 @@ mod tests {
         assert!(!g.has_errors());
     }
 
-    // ---- R.2.a: Broadcast ----
+    // ---- Broadcast ----
 
     #[test]
     fn broadcast_scalar_to_vector() {
@@ -2630,7 +2604,7 @@ mod tests {
         assert_eq!(g.ty(r).element, ElementTy::F64);
     }
 
-    // ---- R.2.b: ElementWise ----
+    // ---- ElementWise ----
 
     fn scalar_f64(g: &mut Graph, name: &str) -> NodeId {
         g.add_scalar_param(name, ElementTy::F64)
@@ -2747,7 +2721,7 @@ mod tests {
         );
     }
 
-    // ---- R.2.b: Transcendental ----
+    // ---- Transcendental ----
 
     #[test]
     fn transcendental_sin_preserves_element() {
@@ -2815,7 +2789,7 @@ mod tests {
         assert_eq!(TranscendentalOp::Sin.name(), "Sin");
     }
 
-    // ---- R.2.c: Reduce ----
+    // ---- Reduce ----
 
     #[test]
     fn reduce_max_collapses_one_axis() {
@@ -2931,7 +2905,7 @@ mod tests {
         assert_eq!(g.ty(r).element, ElementTy::Bool);
     }
 
-    // ---- R.2.c: Select ----
+    // ---- Select ----
 
     fn bool_scalar(g: &mut Graph, name: &str) -> NodeId {
         g.add_param(
@@ -3009,7 +2983,7 @@ mod tests {
         );
     }
 
-    // ---- F2.A: hash-cons contract ----
+    // ---- hash-cons contract ----
 
     #[test]
     fn hashcons_same_const_returns_same_id() {
@@ -3032,7 +3006,7 @@ mod tests {
 
     #[test]
     fn hashcons_nan_bit_patterns_disambiguate() {
-        // NaN bit patterns differ → different consts. structurally
+        // NaN bit patterns differ -> different consts. structurally
         // identical NaN bit patterns share.
         let nan1 = f64::from_bits(0x7ff8_0000_0000_0001);
         let nan2 = f64::from_bits(0x7ff8_0000_0000_0002);
@@ -3089,10 +3063,10 @@ mod tests {
         assert_ne!(outer, xx_a);
     }
 
-    // ---- F2.C: Lambda + Apply contracts ----
+    // ---- Lambda + Apply contracts ----
 
     fn build_square_fn() -> FnDef {
-        // λx. x * x — body has one param + one Mul.
+        // the function x -> x * x; body has one param + one Mul.
         let mut body = Graph::new();
         let x = body.add_scalar_param("x", ElementTy::F64);
         let sq = body.element_wise(ElementWiseOp::Mul, vec![x, x], None);
@@ -3191,7 +3165,7 @@ mod tests {
 
     #[test]
     fn apply_is_hashconsed() {
-        // calling apply(l, [a]) twice should share — F2.A applies to
+        // calling apply(l, [a]) twice should share — hash-cons applies to
         // Apply nodes (Lambda nodes bypass via the FnId path).
         let mut g = Graph::new();
         let l = g.add_lambda(build_square_fn(), None);
@@ -3203,7 +3177,7 @@ mod tests {
 
     #[test]
     fn get_or_register_lambda_returns_existing_by_name() {
-        // F2.E: same fn name => same NodeId.
+        // same fn name => same NodeId.
         let mut g = Graph::new();
         let l1 = g.get_or_register_lambda(build_square_fn(), None);
         let l2 = g.get_or_register_lambda(build_square_fn(), None);
@@ -3223,7 +3197,7 @@ mod tests {
     fn apply_via_get_or_register_lambda_shares_lambda_nid() {
         // build the Lambda twice via get_or_register; both Apply nodes
         // reference the SAME lambda NodeId, so Apply hash-cons
-        // (F2.A + F2.C) collapses them.
+        // collapses them.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let l1 = g.get_or_register_lambda(build_square_fn(), None);
@@ -3246,7 +3220,7 @@ mod tests {
         assert_eq!(g.fn_defs().len(), 2);
     }
 
-    // ---- F2.F: Op::Fold contracts ----
+    // ---- Op::Fold contracts ----
 
     /// build a lambda of shape `(acc: f64, i: i32) -> f64`. body: acc + 1.0.
     /// the iteration index `i` is unused — that's allowed and tests the

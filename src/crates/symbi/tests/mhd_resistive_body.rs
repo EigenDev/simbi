@@ -483,10 +483,10 @@ fn resistive_body_3d_localizes_and_dissipates() {
 
 #[test]
 fn drain_sink_in_2p5d_mhd_is_local_and_stable() {
-    // REGRESSION: the immersed-body penalize under 2.5D MHD (D=2, DOF=3). the dispatch once bound the
-    // full DOF=3 momentum where the kernel writes only the D=2 in-plane components, shifting the nrg
-    // write onto mom[2] and wiping the gas energy on EVERY cell -> whole-domain NaN in a few steps.
-    // a Drain sink must instead evolve stably and remove gas only INSIDE its mask, leaving the far gas
+    // the immersed-body penalize under 2.5D MHD (D=2, DOF=3). the kernel writes only the D=2
+    // in-plane momentum components, so a dispatch that binds the full DOF=3 momentum shifts the nrg
+    // write onto mom[2] and wipes the gas energy on EVERY cell -> whole-domain NaN in a few steps.
+    // a Drain sink must evolve stably and remove gas only INSIDE its mask, leaving the far gas
     // exactly at the ambient state.
     let dx = 1.0 / N as f64;
     let k = 2.0 * std::f64::consts::PI;

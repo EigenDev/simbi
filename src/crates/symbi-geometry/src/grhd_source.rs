@@ -165,7 +165,7 @@ where
 }
 
 /// the rest-mass-subtracted covariant (killing) energy from the valencia energy `tau`:
-///   E_hat = sqrt(gamma) ( alpha tau + (alpha - 1) D - beta^i S_i )   (docs/covariant_energy.md)
+///   E_hat = sqrt(gamma) ( alpha tau + (alpha - 1) D - beta^i S_i )
 /// evolving `E_hat` in the energy slot conserves the relativistic bernoulli invariant `h u_t` to
 /// roundoff on ANY stationary background (the killing energy density minus the zero-source baryon
 /// density), where the eulerian `tau` carries a geodesic source that does not vanish. reduces to
@@ -206,7 +206,7 @@ pub fn ehat_to_tau<S: Scalar, const D: usize>(
 /// is `-rho eps` at rest) to `+tau` at rest, matching the Valencia energy sign. the energy source is
 /// IDENTICALLY ZERO on a stationary metric (the t-row of `(1/2)(d_nu g_ab)T^ab`), so this evolves
 /// the killing energy current exactly. equals the ADM `E_hat = sqrt(gamma)(alpha tau + (alpha-1) D -
-/// beta^i S_i)` (docs/covariant_energy.md), but `sqrt(-g) T^j_t` is the fully-densitized covariant
+/// beta^i S_i)`, but `sqrt(-g) T^j_t` is the fully-densitized covariant
 /// flux — no alpha/shift/sqrt(gamma) reassembly.
 /// `rho` = rest density, `w` = rho h, `v` = valencia contravariant v^i, `p` = pressure.
 pub fn coord_energy_cons_flux<S: Scalar, M, const D: usize>(
@@ -797,9 +797,9 @@ mod tests {
     // spatial metric — S_theta = (E (v^phi)^2 + p g^{phi phi}) r^2 sin(theta) cos(theta), S_r gains
     // the azimuthal centrifugal block E (v^phi)^2 r sin^2(theta), and S_phi vanishes by axisymmetry.
     //
-    // the ENERGY source needs one term the radial-block oracle cannot supply. that oracle carries
-    // the angular blocks at ISOTROPIC PRESSURE only, so the fluid's angular kinetic blocks are
-    // missing from `T^{mu nu} Gamma^t_{mu nu}`. on this chart
+    // the ENERGY source needs one term the (t, r)-block specialization cannot supply. that form
+    // carries the angular blocks at ISOTROPIC PRESSURE only, so the fluid's angular kinetic blocks
+    // are missing from `T^{mu nu} Gamma^t_{mu nu}`. on this chart
     //
     //     Gamma^t_{kk} = -(1/2) g^{tr} d_r g_{kk},        g^{tr} = beta^r / alpha^2
     //

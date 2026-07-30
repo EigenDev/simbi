@@ -91,7 +91,7 @@ fn excision_fills_the_sphere_and_leaves_the_far_field_bit_untouched() {
     let dx = 2.0 * L / N as f64;
     let (mut n_live, mut n_excised_changed) = (0usize, 0usize);
     for (i, c) in sim.geom.interior.iter().enumerate() {
-        // the cell-centre radius; the +-2 dx band dodges the rim's exact
+        // the cell-center radius; the +-2 dx band dodges the rim's exact
         // centroid-convention edge so the classification is unambiguous.
         let lo = sim.geom.interior.spaces[0].lo;
         let x = sim.geom.x_lo[0] + ((c[0] - lo) as f64 + 0.5) * dx;

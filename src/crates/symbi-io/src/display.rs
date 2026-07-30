@@ -118,9 +118,8 @@ impl<'a> fmt::Display for TreeBufDisplay<'a> {
     }
 }
 
-/// shorthand: `eprintln!("{}", display_tree_buf(&tree, ""))`. the `prefix`
-/// argument is reserved for future use (indenting under a header); pass `""`
-/// for the standard layout.
+/// shorthand: `eprintln!("{}", display_tree_buf(&tree, ""))`. `prefix` is
+/// ignored; the tree always renders at column zero.
 pub fn display_tree_buf<'a>(tree: &'a TreeBuf, _prefix: &str) -> TreeBufDisplay<'a> {
     TreeBufDisplay(tree)
 }

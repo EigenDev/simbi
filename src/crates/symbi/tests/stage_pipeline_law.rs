@@ -161,9 +161,9 @@ fn tiny_sim(with_chi: bool) -> Sim {
 }
 
 // the per-STEP extras (viscous, excise, horizon ledger, penalize, feedback)
-// under the same equality demand — this is the coverage whose absence let the
-// zero-GR-ledger bug ship: the ledger booking existed in one driver only, and
-// no gate compared the drivers' per-step sequences.
+// under the same equality demand. an extra present in one driver only — a
+// horizon-ledger booking, say — reports zero on every run that takes the other
+// driver, and only a per-step sequence comparison catches it.
 #[test]
 fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
     const T: f64 = 2.5e-3;
@@ -253,14 +253,14 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
 
 // the DECOMPOSED (gpus > 1) driver against the canonical sequence, modulo its
 // three DOCUMENTED structural deltas — anything else is drift:
-//   1. no stage-input elision: snapshot_stage runs at EVERY gated stage,
-//      including stage 0 of a multi-stage scheme (the uni-grid driver elides
-//      that copy into the per-step snapshot);
-//   2. a second ghost_fill per stage, after the halo exchange (cut-corner
-//      consistency);
-//   3. the excise protocol is sweep-based with its own equivalence oracle
-//      (decomp_excise_equivalence), so excise-family calls are normalized out
-//      of both logs here.
+//   - no stage-input elision: snapshot_stage runs at EVERY gated stage,
+//     including stage 0 of a multi-stage scheme (the uni-grid driver elides
+//     that copy into the per-step snapshot);
+//   - a second ghost_fill per stage, after the halo exchange (cut-corner
+//     consistency);
+//   - the excise protocol is sweep-based with its own equivalence oracle
+//     (decomp_excise_equivalence), so excise-family calls are normalized out
+//     of both logs here.
 // the passive scalar is config-fenced off this driver, so chi stays false.
 #[test]
 fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {

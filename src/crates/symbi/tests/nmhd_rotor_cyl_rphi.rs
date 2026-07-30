@@ -32,7 +32,7 @@ const R_LO: f64 = 1.0;
 const R_HI: f64 = 2.0;
 const PHI_LO: f64 = 0.0;
 const PHI_HI: f64 = 1.0;
-// rotor centre + radii (in-plane spin), in physical (r, r*phi) distance.
+// rotor center + radii (in-plane spin), in physical (r, r*phi) distance.
 const RC: f64 = 1.5;
 const PHIC: f64 = 0.5;
 const R0: f64 = 0.15;

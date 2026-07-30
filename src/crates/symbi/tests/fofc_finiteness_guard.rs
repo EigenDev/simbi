@@ -2,11 +2,10 @@
 // fofc_finiteness_guard.rs
 //
 // the FOFC physicality gate guards the FULL state vector, reaching past density (and pressure where the
-// energy is modelled): a cell whose spliced first-order VELOCITY is non-finite — a NaN/inf momentum
-// with a finite density — must be FROZEN to the admissible stage input. this is the gap
-// the review flagged for iso, whose only other guard is the density, so a NaN momentum would
-// otherwise ride through the FOFC select until the next flux divergence poisoned the density a step
-// later.
+// energy is modeled): a cell whose spliced first-order VELOCITY is non-finite — a NaN/inf momentum
+// with a finite density — must be FROZEN to the admissible stage input. the iso regime is the
+// exposed case: density is its only other guard, so a NaN momentum otherwise rides through the FOFC
+// select until the next flux divergence poisons the density a step later.
 //
 // A/B on the select KERNEL, isolated from the flux dynamics (a live NaN propagates into the density
 // within one godunov, so a sim-level test cannot attribute the flag): a hand-built state gives a

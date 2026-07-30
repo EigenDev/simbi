@@ -147,7 +147,7 @@ class SimbiProblem(BaseModel):
 
     # extra="forbid": a typo'd constructor kwarg (cfl_numbr=0.9) must fail loudly,
     # not vanish while the field keeps its default. assignment constraints are
-    # enforced FIELD-ONLY via __setattr__ below — pydantic's validate_assignment
+    # enforced FIELD-ONLY via __setattr__ — pydantic's validate_assignment
     # would re-run every model validator per assignment, which recurses infinitely
     # for the common pattern of a validator that assigns fields.
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
@@ -359,7 +359,7 @@ class SimbiProblem(BaseModel):
             cli=True,
             checkpoint_safe=True,
             description="body-diagnostics output cadence (natural units, "
-            "× time_unit). 0 disables. only emitted when the problem has "
+            "x time_unit). 0 disables. only emitted when the problem has "
             "immersed bodies; writes <data_dir>diagnostics.dat",
         ),
     ]
@@ -381,7 +381,7 @@ class SimbiProblem(BaseModel):
             checkpoint_safe=True,
             description="number of gpus to decompose the domain across, intra-node "
             "(NVLink/peer). 1 = single device (default). >1 requires a gpu build "
-            "(./dev.py install --gpu or --hip) and at least that many visible devices. "
+            "(./dev.py install --cuda or --hip) and at least that many visible devices. "
             "the backend (cuda/hip) is a BUILD choice; this is purely how many devices "
             "to use at runtime",
         ),
@@ -567,8 +567,8 @@ class SimbiProblem(BaseModel):
         """compute dimensionality from resolution.
 
         mhd is genuine 1.5d / 2.5d / 3d (spatial d in {1,2,3}, vector dof=3), so
-        it no longer forces 3d — the spatial dimensionality is read from the
-        resolution like every other regime.
+        its spatial dimensionality is read from the resolution like every other
+        regime.
         """
         if self.resolution is None:
             return 3  # default assumption for uninitialized resolution
@@ -885,8 +885,8 @@ class SimbiProblem(BaseModel):
 
         # pad a SHORT resolution to the field's declared tuple arity with singleton
         # trailing axes: a 2d input (1024,1024) satisfies a 3-component field as
-        # (1024,1024,1). this scrubs the requirement that a 2d problem stored as a
-        # flat 3d slab (the mhd convention, nz=1) must spell out the unused axis.
+        # (1024,1024,1), so a 2d problem stored as a flat 3d slab (the mhd
+        # convention, nz=1) need not spell out the unused axis.
         # an OVER-long input is left for validation to reject with a clear message.
         if "resolution" in data and isinstance(data["resolution"], tuple):
             arity = cls._tuple_field_arity("resolution")
@@ -977,7 +977,7 @@ class SimbiProblem(BaseModel):
 
     @model_validator(mode="after")
     def _coerce_refinement_types(self) -> SimbiProblem:
-        """convert refinement_ratios to np.uint64 for c++ backend."""
+        """convert refinement_ratios to np.uint64 for the rust backend."""
         if self.refinement_ratios:
             object.__setattr__(
                 self,
@@ -1163,8 +1163,8 @@ class SimbiProblem(BaseModel):
         against the field's own constraints (ge/gt/le), and the cross-field checks
         re-run once setup returns.
 
-        if you override this method in a subclass, call super().setup() first
-        to ensure the full setup chain executes:
+        a subclass override must call super().setup() first so the full setup
+        chain executes:
 
             bounds: Annotated[Optional[list], ProblemParam(None, ...)]
 
@@ -1198,7 +1198,7 @@ class SimbiProblem(BaseModel):
         """
         self.__setup_base_reached = False
         # field assignments inside setup() validate individually (the field-only
-        # __setattr__ check); the explicit re-runs below restore full cross-field
+        # __setattr__ check); the explicit validator re-runs restore full cross-field
         # consistency once every setup mutation has landed.
         self.setup()
 

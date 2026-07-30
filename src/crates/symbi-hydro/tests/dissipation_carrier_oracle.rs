@@ -3,9 +3,8 @@
 //
 // unit + carrier-equivalence coverage for the adaptive-dissipation detectors in
 // `symbi_hydro::dissipation` (quirk_strong_shock, adaptive_phi, local_mach).
-// these are carrier-generic over
-// `S: Scalar`, used in the HLLC riemann path, and the carrier gate (CLAUDE.md
-// 4.3) demands a Gv-equivalence test that ALSO renders.
+// these are carrier-generic over `S: Scalar` and used in the HLLC riemann path, so each one
+// needs a Gv-equivalence test that ALSO renders to device source.
 //
 // two layers:
 // - f64 unit tests that straddle every codim-1 branch-switch surface (the cmp/

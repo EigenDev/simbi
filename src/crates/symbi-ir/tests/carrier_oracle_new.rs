@@ -1,14 +1,13 @@
 // =============================================================================
 // carrier_oracle_new.rs
 //
-// Tier 1 chunk 4: CARRIER-EQUIVALENCE ACCEPTANCE for the NEW
-// `symbi_ir::algebra::Scalar` impl on `Gv`. proves the homomorphism law for
-// the new trait, end-to-end, against the same physics templated over
-// `S: Scalar` and run two ways:
+// CARRIER-EQUIVALENCE ACCEPTANCE for the `symbi_ir::algebra::Scalar` impl on
+// `Gv`. proves the homomorphism law end-to-end, against the same physics
+// templated over `S: Scalar` and run two ways:
 //
 //   eval_f64(physics)  ==  interp(trace_Gv(physics))
 //
-// every load-bearing surface of the new trait gets a test: ring arithmetic,
+// every load-bearing surface of the trait gets a test: ring arithmetic,
 // sqrt + transcendentals, IEEE consts, comparisons returning `Self::Mask`,
 // `select`/`branch` through the Mask + `Selectable`, hyperbolics, and
 // `iterate` with the FREEZE LAW (kepler c2p regression class).
@@ -72,7 +71,7 @@ fn ring_arithmetic_matches_f64() {
 // =============================================================================
 
 fn rel_sound_speed_sq<S: Scalar>(gamma: S, p: S, rho: S) -> S {
-    // cs² = gamma * p / (rho * h),  h = 1 + gamma * p / (rho * (gamma - 1))
+    // cs^2 = gamma * p / (rho * h),  h = 1 + gamma * p / (rho * (gamma - 1))
     // exercises Sub/Mul/Div/Add + Self::ONE.
     let h = S::ONE + gamma * p / (rho * (gamma - S::ONE));
     (gamma * p) / (rho * h)
@@ -91,14 +90,14 @@ fn rel_sound_speed_sq_matches_f64() {
 }
 
 fn sqrt_then_div<S: Scalar>(a: S, b: S) -> S {
-    // exercises sqrt + Div: lorentz-factor-like  1 / sqrt(1 - v²) with v² = a*b.
+    // exercises sqrt + Div: lorentz-factor-like  1 / sqrt(1 - v^2) with v^2 = a*b.
     let v_sq = a * b;
     S::ONE / (S::ONE - v_sq).sqrt()
 }
 
 #[test]
 fn sqrt_then_div_matches_f64() {
-    let (a, b) = (0.3_f64, 0.4); // v² = 0.12 < 1
+    let (a, b) = (0.3_f64, 0.4); // v^2 = 0.12 < 1
     let want = sqrt_then_div::<f64>(a, b);
     let got = gv_eval(|x| sqrt_then_div(x[0], x[1]), &["a", "b"], &[a, b]);
     close(want, got, "sqrt_then_div (lorentz-like)");
@@ -160,7 +159,7 @@ fn cubic_resolvent_real<S: Scalar>(p: S, q: S) -> S {
 
 #[test]
 fn cubic_resolvent_real_matches_f64() {
-    let (p, q) = (-3.0_f64, 1.5); // -p/3 = 1 > 0 → m real, valid branch
+    let (p, q) = (-3.0_f64, 1.5); // -p/3 = 1 > 0 -> m real, valid branch
     let want = cubic_resolvent_real::<f64>(p, q);
     let got = gv_eval(|x| cubic_resolvent_real(x[0], x[1]), &["p", "q"], &[p, q]);
     close(want, got, "cubic_resolvent_real (sinh+asinh+sqrt)");
@@ -183,21 +182,21 @@ fn newton_sqrt<S: Scalar>(a: S, x0: S) -> S {
     )
 }
 
-// IGNORED IN CHUNK 4. `Op::IterateInline` is `scalarize_kernel`-only by design
+// `Op::IterateInline` is `scalarize_kernel`-only by design
 // (see scalarize.rs comment near the IterateInline unreachable: "cone-partitioned;
 // scalarize_kernel handles it directly"). this acceptance file uses the simpler
 // `scalarize(graph, output, name)` path which doesn't set up the iterate body
 // context — IterAcc lowers outside an IterateInline loop body and panics.
 //
 // the iterate impl is structurally identical to the Gv impl (same graph
-// ops, same FREEZE LAW). f64-side iterate freeze is pinned by Tier 0's
+// ops, same FREEZE LAW). f64-side iterate freeze is pinned by the
 // `f64_iterate_freeze_holds_pre_convergence_value` test. the carrier-equivalence
 // (Gv trace + interp) for iterate is covered by the symbi-discretize
 // carrier_oracle.rs harness — that harness drives
 // `scalarize_kernel` + the production interp and validates iterate via real
 // rhd/rmhd c2p round-trips.
 #[test]
-#[ignore = "iterate requires scalarize_kernel; covered by Chunk 5's discretize harness migration"]
+#[ignore = "iterate requires scalarize_kernel; covered by the discretize carrier_oracle harness"]
 fn newton_sqrt_iterate_matches_with_freeze() {
     // converging case: a = 4, x0 = 2.0 should converge to ~2.0 (already there).
     // Newton at a fixed point converges in 1 step; freeze keeps acc=2.0.

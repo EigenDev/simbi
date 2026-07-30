@@ -8,7 +8,7 @@
 //
 // the implementation is intentionally a SINGLE-PASS recursive walk: for each
 // group node, create the HDF5 group, drain its attrs + datasets + children.
-// no parallel reader/writer code — both directions share the same Tree shape.
+// both directions share the same Tree shape.
 // =============================================================================
 
 use std::path::Path;
@@ -86,7 +86,6 @@ impl Hdf5Backend {
 
 // ----- adapter for writing attrs/datasets to either a File or a Group --
 
-#[allow(dead_code)] // `create_group` reserved for future per-write group helper
 enum FileOrGroup<'a> {
     File(&'a hdf5_metno::File),
     Group(&'a hdf5_metno::Group),
@@ -106,14 +105,6 @@ impl<'a> FileOrGroup<'a> {
             .shape(shape)
             .create(name)
             .map_err(|e| IoError::Backend(format!("create dataset '{name}': {e}")))
-    }
-    #[allow(dead_code)] // part of the FileOrGroup API surface; kept for parity with `group()` below.
-    fn create_group(&self, name: &str) -> Result<hdf5_metno::Group> {
-        let r = match self {
-            Self::File(f) => f.create_group(name),
-            Self::Group(g) => g.create_group(name),
-        };
-        r.map_err(|e| IoError::Backend(format!("create group '{name}': {e}")))
     }
     fn new_attr_bool(&self, name: &str) -> Result<hdf5_metno::Attribute> {
         let r = match self {
@@ -242,7 +233,6 @@ fn write_subtree_into(grp: &hdf5_metno::Group, sub: &Tree<'_>) -> Result<()> {
 
 // ----- READ side -----------------------------------------------------------
 
-#[allow(dead_code)] // `group` reserved for descend helpers
 enum FileOrGroupRead<'a> {
     File(&'a hdf5_metno::File),
     Group(&'a hdf5_metno::Group),
@@ -274,14 +264,6 @@ impl<'a> FileOrGroupRead<'a> {
         match self {
             Self::File(f) => f.dataset(name),
             Self::Group(g) => g.dataset(name),
-        }
-        .map_err(|_| IoError::MissingPath(name.into()))
-    }
-    #[allow(dead_code)] // part of the FileOrGroupRead API surface; reserved for nested-group reads.
-    fn group(&self, name: &str) -> Result<hdf5_metno::Group> {
-        match self {
-            Self::File(f) => f.group(name),
-            Self::Group(g) => g.group(name),
         }
         .map_err(|_| IoError::MissingPath(name.into()))
     }

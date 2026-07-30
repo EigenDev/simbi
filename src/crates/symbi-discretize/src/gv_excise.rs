@@ -17,8 +17,8 @@
 // exterior flux; accretion and outflow are different boundary conditions and only
 // the absorber is correct for a black hole.
 //
-//   excise_fill      prim (own + diagonals) -> scratch = one onion sweep
-//   excise_writeback scratch -> prim                    (the sweep commit)
+//   excise_fill      prim -> scratch = the vacuum-floor fill
+//   excise_writeback scratch -> prim                    (the fill commit)
 //   excise_p2c       prim -> cons, valencia to_conserved at the cell centroid,
 //                    excised cells only (live cells pass their cons through)
 //
@@ -27,8 +27,8 @@
 // rebuilds (D, S_i, tau) with it — the staggered faces are never written, so
 // the densitized div(B) invariant survives excision by construction.
 //
-// the fill/writeback pair runs onion_pass_count times (values propagate one
-// diagonal cell inward per sweep); p2c runs once after the last sweep. the
+// the fill is pointwise and idempotent, so a single pass fills the region; the
+// pair runs under a store-driven pass count and p2c runs once after it. the
 // dispatch box is the excision region's index bbox — computed host-side, so
 // no output-support declaration rides the artifacts.
 //
@@ -104,11 +104,10 @@ fn excised_mask_3d(x: &[Gv; 3]) -> <Gv as Scalar>::Mask {
     ks_excised(x, Gv::scalar("kerr_spin"), Gv::scalar("excision_radius"))
 }
 
-/// one 2d onion sweep over `1 + dof + 1` gas primitives: every excised cell
-/// takes the primitive state of its diagonal-outward neighbor; live cells copy
-/// their own state. writes the swept state to the exc_0.. scratch (the commit
-/// is `excise_writeback`, so the parallel stencil never reads a value written
-/// by the same sweep). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
+/// one 2d fill pass over `1 + dof + 1` gas primitives: every excised cell is
+/// frozen at the cold vacuum floor; live cells copy their own state. writes the
+/// filled state to the exc_0.. scratch (the commit is `excise_writeback`, so the
+/// fill never reads a value written by the same pass). `dof = 2` is the in-plane GR-hydro state; `dof = 3`
 /// carries the out-of-plane momentum of the 2.5d MHD state.
 fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
     begin_trace();
@@ -122,7 +121,7 @@ fn excise_fill_2d_dof_gv(dof: usize) -> (GvKernel, Writes) {
     let x = [c[0], c[1]];
     let excised = excised_mask_2d(&x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
-    // live cells keep their own state. the boundary Riemann then rarefies the exterior gas INTO the
+    // live cells keep their own state. the boundary riemann then rarefies the exterior gas INTO the
     // vacuum -- a one-way absorbing accretion BC (nothing returns), the physical horizon.
     let filled: Vec<Gv> = (0..nf)
         .map(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]))
@@ -187,8 +186,8 @@ pub fn excise_writeback_dof1_gv() -> (GvKernel, Writes) {
 /// rebuild the conserved state of every excised cell from its (just-filled)
 /// primitives: the valencia `to_conserved` (covariant S_i = rho h W^2 gamma_ij v^j)
 /// with the cartesian kerr-schild spatial metric at the cell's own centroid — a
-/// donor cell's conserved state carries the donor's metric factors, so only the
-/// primitive copy + local rebuild is exact. live cells pass their conserved
+/// conserved state copied from any other cell would carry that cell's metric
+/// factors, so setting the primitives and rebuilding locally is the exact route. live cells pass their conserved
 /// state through untouched (in-place select). the metric is the spinning-kerr
 /// rank-1 form with the host-filled `kerr_spin` (zero for the a = 0 chart).
 pub fn excise_p2c_gv() -> (GvKernel, Writes) {
@@ -414,7 +413,7 @@ pub fn excise_fill_3d_gv() -> (GvKernel, Writes) {
     let x = [c[0], c[1], c[2]];
     let excised = excised_mask_3d(&x);
     // the vacuum-floor sink: an excised (inside-horizon) cell is frozen at a cold c2p-safe vacuum;
-    // live cells keep their own state. the boundary Riemann rarefies the exterior gas INTO the
+    // live cells keep their own state. the boundary riemann rarefies the exterior gas INTO the
     // vacuum -- a one-way absorbing accretion BC (nothing returns), the physical horizon.
     let filled: [Gv; 5] =
         std::array::from_fn(|kk| Gv::select(excised, vacuum_floor(kk, nf), own[kk]));
@@ -544,7 +543,7 @@ fn excise_p2c_mhd_dim_gv(ndim: usize) -> (GvKernel, Writes) {
     );
     // the covariant energy slot ehat = alpha tau + (alpha-1) D - beta^i S_i reads the cell lapse and
     // shift, so the excised-fill storage carries the same 3+1 block the flux/c2p use. RMHD keeps the
-    // Valencia solver (to_conserved gives tau), so re-split the energy slot here as the flux kernel does.
+    // valencia solver (to_conserved gives tau), so re-split the energy slot here as the flux kernel does.
     let alpha = m.lapse(xt);
     let beta = m.shift(xt);
     let regime = RmhdGr { metric, alpha };

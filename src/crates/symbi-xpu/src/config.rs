@@ -11,7 +11,7 @@
 //   SYMBI_BLOCK_1D=256        // 1D substrate kernels
 //   SYMBI_BLOCK_2D=32,8       // 2D substrate kernels
 //   SYMBI_BLOCK_3D=8,8,4      // 3D substrate kernels
-// see `block_dims()`. unset / unparseable falls back to the default and
+// see `block_for()`. unset / unparseable falls back to the default and
 // the failure is reported ONCE on stderr (silent fallback would mask typos).
 // =============================================================================
 
@@ -54,9 +54,9 @@ impl LaunchConfig {
 /// the block shape for a launch over a window of per-axis `extent` (the exec-domain
 /// sizes — the SAME values passed to `LaunchConfig::for_{1,2,3}d`). an explicit
 /// `SYMBI_BLOCK_{1D,2D,3D}` env override wins (the escape hatch); otherwise the shape is
-/// EXTENT-AWARE (`extent_aware_block`). this replaces the old rank-only `block_dims`,
-/// whose fixed `[8,8,4]` idled most of each block on quasi-1D / 2D runs (a 3D kernel over
-/// a thin transverse axis — `nz < block.z` left those lanes returning immediately).
+/// EXTENT-AWARE (`extent_aware_block`). a rank-only fixed shape such as `[8,8,4]` idles
+/// most of each block on quasi-1D / 2D runs: a 3D kernel over a thin transverse axis
+/// (`nz < block.z`) leaves those lanes returning immediately.
 pub fn block_for(ndim: usize, extent: &[u32]) -> [u32; 3] {
     env_block(ndim).unwrap_or_else(|| extent_aware_block(ndim, extent))
 }
@@ -110,17 +110,6 @@ pub fn extent_aware_block(ndim: usize, extent: &[u32]) -> [u32; 3] {
     grow_axis(&mut b, 1, g(1), false);
     grow_axis(&mut b, 2, g(2), false);
     [b[0].max(1), b[1].max(1), b[2].max(1)]
-}
-
-/// legacy rank-only block default (env-or-fixed), kept for compatibility. prefer
-/// `block_for(ndim, extent)`, which is extent-aware. dims unused by the rank are 1.
-pub fn block_dims(ndim: usize) -> [u32; 3] {
-    assert!(
-        (1..=3).contains(&ndim),
-        "block_dims: ndim {ndim} not in 1..=3"
-    );
-    let fixed = [[256u32, 1, 1], [16, 16, 1], [8, 8, 4]][ndim - 1];
-    env_block(ndim).unwrap_or(fixed)
 }
 
 /// the EXPLICIT per-process block override from `SYMBI_BLOCK_{1D,2D,3D}`, or `None` if

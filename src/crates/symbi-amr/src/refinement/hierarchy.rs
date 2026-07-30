@@ -22,10 +22,9 @@
 // keeps the same global physical origin — `geom.centroid` is correct on every
 // level with the same formula, and no coverage-relative translation exists.
 //
-// the bit-for-bit gate: a 1-level hierarchy must reproduce evolve() exactly
-// (crates/symbi/tests/refine_hierarchy.rs); the conservation gate: a 2-level
-// static nesting conserves the composite-grid totals to machine precision
-// (crates/symbi/tests/refine_conservation.rs).
+// two invariants pin the construction: a 1-level hierarchy reproduces the uni-grid
+// evolve() bit-for-bit, and a 2-level static nesting conserves the composite-grid
+// totals to machine precision.
 //
 // usage:
 //  let mut hier = Hierarchy::with_refinement(sim, kernels, &regions, order, make)?;
@@ -766,9 +765,9 @@ where
     /// conserved component is prolonged coarse -> fine interior; the fine levels
     /// then refine the solution as they evolve.
     ///
-    /// note: hydro-complete + mhd cell-centered B. the staggered fine `bface` is
-    /// NOT seeded here — mhd refinement needs face prolongation, wired alongside
-    /// the mhd AMR path.
+    /// the seeded state is hydro-complete plus the mhd cell-centered B. the staggered
+    /// fine `bface` is NOT seeded here: a face field needs face prolongation, which the
+    /// mhd refinement path supplies.
     pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<()> {
         for ll in 1..self.levels.len() {
             let (lo, hi) = self.levels.split_at(ll);
@@ -1506,7 +1505,7 @@ where
     /// step — covered coarse cells are conservative averages of fine data, so
     /// a fast feature resolved only on the fine level is diluted out of the
     /// root's own cfl; level l subcycles RATIO^l times, so its limit enters
-    /// scaled by RATIO^l (tests/refine_per_level_cfl.rs pins this).
+    /// scaled by RATIO^l.
     fn step_root(&mut self, t_final: f64) {
         // the per-root-step wave-speed pass + global min reduction. instrumented because it is a
         // FULL-GRID read of prim on every level, once per step, and sits OUTSIDE the substage loop:
@@ -1713,9 +1712,8 @@ where
     /// shu-osher stage time `alpha0 + c_k / RATIO` (see
     /// stage_time_fractions), which restores second-order temporal coupling
     /// at the interface — substep-start-frozen ghosts measurably collapse the
-    /// boundary to first order (tests/refine_temporal_convergence.rs). the stage
-    /// loop mirrors sim/evolve.rs::step — the bit-for-bit gate holds the two
-    /// in lockstep.
+    /// boundary to first order. the stage loop mirrors sim/evolve.rs::step, and a
+    /// 1-level hierarchy reproduces it bit-for-bit.
     /// a rejected step rolls back the conserved gas state, the magnetic field, the primitives,
     /// the mesh motion, the level clocks, and discrete-tracer ancestry. on a REFINED hierarchy a
     /// level's step epilogue — tracer spawning, immersed-body accretion, the horizon receipt —
@@ -1750,9 +1748,9 @@ where
     }
 
     /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost
-    /// prolongation) + the rk u_n snapshot. extracted from `advance_level` (which calls begin /
-    /// stage* / tail in order -- bit-for-bit unchanged) so the DECOMPOSED root driver can drive the
-    /// root stages stage-by-stage with a root halo exchange BETWEEN stages (rk2-root requires the
+    /// prolongation) + the rk u_n snapshot. `advance_level` calls begin / stage* / tail in order;
+    /// splitting them out lets the DECOMPOSED root driver drive the root stages one at a time with
+    /// a root halo exchange BETWEEN stages (rk2-root requires the
     /// corrector to read each neighbor's stage-1 update, exactly like the single-level exchange).
     pub fn level_step_begin(&mut self, level: usize, dt: f64) {
         let has_finer = level + 1 < self.levels.len();
@@ -2964,11 +2962,11 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
 /// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay TILE-LOCAL
 /// (a coarse cell + the fine cells at its face are co-located; any register write to a cut-adjacent
 /// GHOST is overwritten by the next root exchange). global dt = min over tiles of `root_cfl_dt()`.
-/// proven `decomposed == monolithic` by `decomp_refine_equivalence.rs` + its spanning-cut variant.
+/// `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
 ///
 /// LEVELS 2+ are advanced TILE-LOCALLY (inside the level-1 fine tile, via the recursive
 /// `level_step_tail(1)`); decomposing a patch that spans a cut on a level >= 2 is not supported.
-/// hydro only in the root post-step (mesh motion / immersed bodies + refinement-decomp deferred;
+/// hydro only in the root post-step (mesh motion and immersed bodies are not carried there;
 /// the root clock is advanced directly). `on_checkpoint(iteration, time, &tiles)` fires every
 /// `interval` root steps and once at the end (devices drained first).
 #[allow(clippy::too_many_arguments)]
@@ -3112,7 +3110,7 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                 symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_reflux(0, 0.0));
             }
         }
-        // the root clock (mesh motion in the root post-step remains deferred).
+        // the root clock; the root post-step carries no mesh motion.
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || {
                 let s = &mut tiles[i].levels[0].state;

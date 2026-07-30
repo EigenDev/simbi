@@ -1,9 +1,9 @@
 # =============================================================================
 # gr_michel_magnetized_2d.py
 #
-# the 2D (r, theta) magnetized michel monopole — the curved-CT instrument (design
-# 44 phase B): the exact michel transonic hydro profile on an equatorial wedge,
-# threaded by the theta-uniform radial monopole B^r = C sqrt(f)/r^2. the state is
+# the 2D (r, theta) magnetized michel monopole — the curved-CT instrument: the
+# exact michel transonic hydro profile on an equatorial wedge, threaded by the
+# theta-uniform radial monopole B^r = C sqrt(f)/r^2. the state is
 # theta-uniform and purely radial, so the out-of-plane EMF
 # E_phi = v_theta B_r - v_r B_theta vanishes POINTWISE at every gather point of
 # the contact assembly — the staggered field must stay BITWISE static through the

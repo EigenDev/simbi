@@ -2,7 +2,7 @@
 // rmhd_edge_emf.rs
 //
 // validates the substrate rmhd_edge_emf (the CT edge-EMF gather + soft-sign
-// Gardiner-Stone blend) against an INDEPENDENT straight-Rust transcription of the
+// gardiner-stone blend) against an INDEPENDENT straight-Rust transcription of the
 // production ct_edge_emf (kernels_shared.rs) + soft_upwind. this is the gather
 // geometry — the error-prone 12-input staggered stencil — checked against the
 // working production reference, on a NON-uniform field (so the offsets + the

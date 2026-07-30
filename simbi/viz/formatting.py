@@ -1,7 +1,6 @@
 from typing import Any, Optional
 
 from matplotlib.axes import Axes
-from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
 from simbi.viz.utility import get_field_str
@@ -83,23 +82,6 @@ def apply_legend(ax: Axes) -> None:
     ax.legend(loc="best")
 
 
-def add_colorbar(
-    fig: Figure,
-    artist: Any,
-    cax: Axes,  # the colorbar axes must be provided
-    label: Optional[str] = None,
-    orientation: str = "vertical",
-) -> Colorbar:
-    """
-    Adds a colorbar to the *provided* cax.
-    This is now a simple formatter.
-    """
-    cbar = fig.colorbar(artist, cax=cax, orientation=orientation)
-    if label:
-        cbar.set_label(get_field_str(label))
-    return cbar
-
-
 class FigureFormatter:
     """
     encapsulates all figure-level formatting and layout responsibilities.
@@ -141,9 +123,9 @@ class FigureFormatter:
         to show a legend (only line-like artists) and for other display hints.
 
         Label derivation from metadata:
-          - "label" (str): single label → use as ylabel
-          - "labels" (list): if len == 1 → ylabel, no legend
-                             if len > 1 → legend, no ylabel
+          - "label" (str): single label -> use as ylabel
+          - "labels" (list): if len == 1 -> ylabel, no legend
+                             if len > 1 -> legend, no ylabel
 
         Args:
             fig: matplotlib Figure

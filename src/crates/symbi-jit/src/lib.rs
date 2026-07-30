@@ -444,7 +444,7 @@ fn collect_let_defs<'a>(stmts: &'a [ScalarStmt], out: &mut HashMap<String, &'a S
 /// AND the real `symbi_grid` `Field`/`View` storage (`symbi_algebra::strides_from_extent`):
 /// `stride[0]=1, stride[ax]=stride[ax-1]*extent[ax-1]`. axis 0 is fastest-varying in memory. this
 /// is the convention the AOT kernels read real fields with — last-axis-fastest would transpose
-/// axes for D>=2 and mis-read every off-diagonal stencil neighbour.
+/// axes for D>=2 and mis-read every off-diagonal stencil neighbor.
 fn emit_flat_index(b: &mut FunctionBuilder, coord: &[Value], ctx: &StencilCtx) -> Value {
     let mut idx = b.ins().iconst(types::I64, 0);
     let mut stride = b.ins().iconst(types::I64, 1);
@@ -1108,8 +1108,8 @@ impl CompiledKernel {
     /// the CACHE-TILED raw-base driver: fan the kernel over a disjoint block cover of the exec
     /// window in ONE fork-join, walking each block SERIALLY with axis 0 innermost. this is the JIT
     /// twin of the AOT `ExecPolicy::Cover` (`symbi-exec/src/policy.rs`) — a stencil kernel re-reads
-    /// each cell's neighbours across adjacent output cells, and on a full-grid sweep the reuse
-    /// distance along the slow axes exceeds cache, so every neighbour read hits RAM. a small block
+    /// each cell's neighbors across adjacent output cells, and on a full-grid sweep the reuse
+    /// distance along the slow axes exceeds cache, so every neighbor read hits RAM. a small block
     /// keeps that reuse L1-resident.
     ///
     /// bit-identical to [`run_parallel_raw`]: the blocks PARTITION the window, so every cell is
@@ -2033,7 +2033,7 @@ mod tests {
         // `x` is read at its OWN cell AND written (the in-place `cons.*` field), while the only
         // NEIGHBOUR read (`f[c+1]`) is of a SEPARATE read-only field (the godunov's fluxes). this
         // is the soundness boundary of the aliasing: an in-place field is read only at its own
-        // index (read-before-write per cell), never at a neighbour (which would be a cross-cell
+        // index (read-before-write per cell), never at a neighbor (which would be a cross-cell
         // read-after-write race). dispatched via `run_parallel_raw` with `x`'s buffer aliased as
         // both an input base and the output base; `f` distinct + read-only. must equal the interp
         // run (separate buffers), bit-for-bit.
@@ -2048,7 +2048,7 @@ mod tests {
         let c0 = g.add_scalar_param("_coord_0", ElementTy::I32);
         let one = g.add_const(ConstValue::I32(1), None);
         let c0p = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
-        let f_nbr = g.load_at(Symbol::intern("f"), vec![c0p], None); // f[c+1] — read-only neighbour
+        let f_nbr = g.load_at(Symbol::intern("f"), vec![c0p], None); // f[c+1] — read-only neighbor
         let two = g.add_const(ConstValue::F64(2.0), None);
         let two_fnbr = g.element_wise(ElementWiseOp::Mul, vec![two, f_nbr], None);
         let sum = g.element_wise(ElementWiseOp::Add, vec![x_cell, two_fnbr], None); // x[c] + 2*f[c+1]
@@ -2056,7 +2056,7 @@ mod tests {
         assert!(!g.has_errors(), "graph errors: {:?}", g.errors());
 
         let n = 48usize;
-        let ext = (n + 1) as u32; // +1 so the f[c+1] neighbour read stays in bounds
+        let ext = (n + 1) as u32; // +1 so the f[c+1] neighbor read stays in bounds
         let x0: Vec<f64> = (0..ext)
             .map(|i| 0.5 + 1.3 * (i as f64 * 0.071).fract())
             .collect();
@@ -2141,7 +2141,7 @@ mod tests {
     fn run_cover_raw_matches_run_parallel_raw_3d() {
         // the cache-tiled cover must be a pure REORDERING of the flat parallel driver: the blocks
         // PARTITION the window, so every cell is computed exactly once on the same inputs. the
-        // discriminating case is a 3D stencil with a neighbour read on EVERY axis (the slow-axis
+        // discriminating case is a 3D stencil with a neighbor read on EVERY axis (the slow-axis
         // reads are the ones tiling makes cache-resident) over a window divisible by NO block edge,
         // so the last block on each axis is short and the clamp is exercised.
         use symbi_ir::Symbol;
@@ -2174,7 +2174,7 @@ mod tests {
         assert!(!g.has_errors(), "graph errors: {:?}", g.errors());
 
         // window 13 x 11 x 7 — divisible by none of the block edges below; buffer +1 per axis so the
-        // `c + 1` neighbour reads stay in bounds.
+        // `c + 1` neighbor reads stay in bounds.
         let win = [13u32, 11, 7];
         let ext = [win[0] + 1, win[1] + 1, win[2] + 1];
         let n: usize = ext.iter().map(|&e| e as usize).product();

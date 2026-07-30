@@ -7,15 +7,15 @@
 // 12 written values match the values originally placed in the View.
 //
 // what this catches:
-//   - any future drift in the `DeviceView` Rust-side `#[repr(C)]` layout
-//     (size, field offsets, alignment) that the static_asserts in
-//     `substrate_gpu.rs` cannot catch alone (those only fix the Rust side);
-//   - any drift in the `__symbi_View` CUDA struct emitted by the kernel
-//     preamble that diverges from the Rust POD passed by value.
+//   - drift in the `DeviceView` Rust-side `#[repr(C)]` layout (size, field
+//     offsets, alignment), which the static_asserts in `substrate_gpu.rs` cannot
+//     catch alone (those only pin the Rust side);
+//   - drift in the `__symbi_View` CUDA struct emitted by the kernel preamble
+//     away from the Rust POD passed by value.
 //
-// without this round-trip the two structs MUST be kept in sync by hand
-// — eyeball + comment. a one-byte field reorder on either side would
-// otherwise show up only as garbled physics deep inside a hydro run.
+// the round-trip is the only mechanical check that the two structs agree: a
+// one-byte field reorder on either side otherwise shows up only as garbled
+// physics deep inside a hydro run.
 //
 // the kernel source declares its own `__symbi_View` locally; it does not reuse
 // the substrate's emitter preamble. the test verifies both sides independently

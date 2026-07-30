@@ -4,10 +4,10 @@
 // **schema-driven serialization for symbi**. one `Tree` (the schema graph)
 // feeds every output channel:
 //
-//   • `Hdf5Backend`  — production checkpoint files
-//   • `JsonBackend`  — schema introspection (`schema_json`)
-//   • `TreeDisplay`  — terminal pretty-print
-//   • `symbi-display`-side table renderer (via `Tree::iter_attrs`)
+//   - `Hdf5Backend`  — production checkpoint files
+//   - `JsonBackend`  — schema introspection (`schema_json`)
+//   - `TreeDisplay`  — terminal pretty-print
+//   - `symbi-display`-side table renderer (via `Tree::iter_attrs`)
 //
 // the writer and reader walk the SAME Tree — no parallel mirror code, no
 // hand-spelled field names in two places. typed `Attr` + `Metadata::with(..)`

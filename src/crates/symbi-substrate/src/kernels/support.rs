@@ -106,7 +106,7 @@ pub struct GhostMapParams<const D: usize> {
 
 /// build the launch domain for the (`axis`, `side`) sweep step of `drive_sweep`.
 ///
-/// - axis `axis`: a halo slab (allocated-side ↔ interior-side boundary)
+/// - axis `axis`: a halo slab (allocated-side <-> interior-side boundary)
 /// - axes in `done` (axes already swept): full ALLOCATED extent — the slab
 ///   covers x-halo positions whose `axis`-halo will be filled now (this is
 ///   what fills the corners/edges via successive sweeps)
@@ -317,9 +317,8 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
 /// cell width. kernels compute `s_max` themselves (map + reduction); this
 /// helper applies the scaling `cfl * dx_min / s_max`.
 ///
-/// note: this is the isotropic form. the anisotropic-correct form is
-/// `cfl_from_lambda`, which call sites use once their wave-speed maps are in
-/// per-axis form.
+/// this is the isotropic form. the anisotropic-correct form is `cfl_from_lambda`,
+/// which a call site with a per-axis wave-speed map uses instead.
 #[inline]
 pub fn cfl_from_smax(s_max: f64, cfl_number: f64, dx_min: f64) -> f64 {
     cfl_number * dx_min / s_max
@@ -447,7 +446,7 @@ mod tests {
                 hi: 10,
             },
         ]);
-        // every contact is Skip → every region should be filtered.
+        // every contact is Skip -> every region should be filtered.
         let bc = [[BcType::Skip, BcType::Skip], [BcType::Skip, BcType::Skip]];
         let mut visited = 0;
         GhostFillDriver::<2>::new(&alloc, &interior, bc).drive(|_region, _params| {
@@ -489,7 +488,7 @@ mod tests {
         let mut saw_lo_x_reflect = false;
         GhostFillDriver::<2>::new(&alloc, &interior, bc).drive(|region, params| {
             if region.directions[0] == FaceSide::Minus {
-                // axis 0 reflects on the Minus side → vel_sign[0] should be -1.
+                // axis 0 reflects on the Minus side -> vel_sign[0] should be -1.
                 assert_eq!(params.vel_sign[0], -1.0);
                 saw_lo_x_reflect = true;
             }
@@ -597,7 +596,7 @@ mod tests {
     }
 
     /// drive_sweep should skip dispatches whose side has BcType::Skip — exactly
-    /// the way `drive` would. all-skip → zero dispatches.
+    /// the way `drive` would. all-skip -> zero dispatches.
     #[test]
     fn drive_sweep_skips_skip_sides() {
         let alloc = Domain::new([

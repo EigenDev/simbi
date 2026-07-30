@@ -50,7 +50,7 @@ fn run(excision_radius: f64) -> (Vec<f64>, Vec<f64>) {
 
 /// `log_radial` selects the geometric radial map the accretion problems actually use. it belongs in
 /// this gate because the kernel's face map reads the axis map's own PARAMETER — the log slope, not
-/// a linear width — and a dispatch that hands it the wrong one puts every cell centre outside the
+/// a linear width — and a dispatch that hands it the wrong one puts every cell center outside the
 /// excision surface, masking nothing. a uniform-only gate cannot see that: the conversion between
 /// the two is the identity there.
 fn run_on(excision_radius: f64, log_radial: bool) -> ((Vec<f64>, Vec<f64>), Vec<f64>) {

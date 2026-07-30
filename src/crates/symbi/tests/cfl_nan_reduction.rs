@@ -1,7 +1,7 @@
 // =============================================================================
 // cfl_nan_reduction.rs
 //
-// regression for the no-silent-floors keystone: a SINGLE NaN cell in the
+// no silent floors: a SINGLE NaN cell in the
 // wave-speed scratch must propagate through the CFL max-reduction so the
 // downstream dt guard fires. f64::max(finite, NaN) == finite silently DROPS the
 // NaN, which would let garbage advance past check_dt_or_panic to checkpoint.
@@ -100,8 +100,8 @@ fn finite_field_max_min_unchanged() {
     assert_eq!(field_reduce(&f, &interior, ReductionOp::Min), hmin);
 }
 
-// the full chain: NaN lambda_max -> NaN dt -> check_dt returns Err. proves the reduction fix
-// actually arms the (now fallible) guard.
+// the full chain: NaN lambda_max -> NaN dt -> check_dt returns Err. a NaN-propagating reduction is
+// what arms the fallible guard.
 #[test]
 fn nan_lambda_max_trips_dt_guard() {
     let (alloc, interior) = host_3d(8, 2, 6);

@@ -4,11 +4,11 @@
 // the correctness contract for multi-gpu domain decomposition, validated IN-PROCESS
 // on the cpu -- no second device, no peer copy, no mpi.
 //
-// the one thing that must be right before any transport work: a domain split into a
+// the base contract every transport rests on: a domain split into a
 // grid of tiles, with same-level halo exchange each step, must reproduce the
 // monolithic run to round-off. this isolates the decomposition + halo math from all
-// hardware and transport concerns. once green, peer-copy (2 gpus) and mpi (multi-node)
-// are transport substitutions under a proven-correct decomposition.
+// hardware and transport concerns; peer-copy (2 gpus) and mpi (multi-node) are then
+// transport substitutions under a proven-correct decomposition.
 //
 // a decomposition is a per-axis tile count `counts: [usize; D]`. the monolithic run is
 // just `counts = [1; D]` (one tile, no cuts), so the same code path validates both.
@@ -152,8 +152,8 @@ macro_rules! decomp_harness {
             }
 
             // drive the PRODUCTION decomposed evolve loop (symbi-sim::decomp) over this
-            // harness's tiles. exercises the same function the multi-gpu python entry runs --
-            // the hand-rolled loop is gone, so a divergence between test and production is
+            // harness's tiles. exercises the same function the multi-gpu python entry runs, so
+            // a divergence between test and production is
             // impossible. interval = u64::MAX: no mid-run callback, the equivalence check
             // reads the final state via `global_den`.
             fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
@@ -332,7 +332,7 @@ macro_rules! decomp_harness {
                 );
             }
 
-            // the ATLAS gate: with a passive scalar allocated, a decomposition must reproduce
+            // the passive-scalar gate: with a dye field allocated, a decomposition must reproduce
             // the monolithic DYE field to round-off -- which it can only do if prim.chi is
             // exchanged across every cut. the dye is derived into the transport set from the
             // store, so this is what proves the derivation actually carries it.
@@ -388,9 +388,9 @@ decomp_harness!(d3, 3, CpuSpace, HostMemory, LocalCopy);
 
 // the same harness on the gpu memory space: every kernel routes through the production
 // run_gpu path (NVRTC -> launch), fields live in unified memory, and the exchange's host
-// LocalCopy reads them after a device drain. one device with several subdomains -- no
-// speedup, but it proves the decomposition works against device fields before a second
-// gpu exists. needs `--features cuda` and a cuda device.
+// LocalCopy reads them after a device drain. one device with several subdomains carries no
+// speedup; it establishes the decomposition against device fields on a single card. needs
+// `--features cuda` and a cuda device.
 #[cfg(feature = "gpu")]
 decomp_harness!(gpu_d1, 1, DeviceSpace, DeviceMemory, DeviceCopy);
 // the 2x2 grid exercises StagedCopy: the gather/scatter pack/unpack that peer-copy reuses.
@@ -415,7 +415,7 @@ fn rk2_four_tile_1d() {
 }
 
 // rk3 adds a second between-stage exchange. this pins the complete three-stage
-// orchestration before the single-grid and decomposed step runners are unified.
+// orchestration.
 #[test]
 fn rk3_four_tile_1d() {
     d1::assert_matches([4], Timestepping::Rk3);
@@ -475,11 +475,11 @@ fn gpu_rk2_quad_tile_2d_grid() {
     gpu_d2::assert_matches([2, 2], Timestepping::Rk2);
 }
 
-// the multi-gpu peer transport, now the UNIVERSAL transport. `PeerCopy` is adaptive: on this
-// single card the two logical devices fold onto the same physical gpu, can't peer, and it stages
+// the multi-gpu peer transport, which is the universal transport. `PeerCopy` is adaptive: on a
+// single card the two logical devices fold onto the same physical gpu, cannot peer, and it stages
 // over managed memory; on a 2+ gpu node the SAME code moves halos with `cuMemcpyPeer` over
-// nvlink. so this runs EVERYWHERE -- no self-skip -- and proves the one transport that ships to
-// the cluster is correct here too. `enable_peer_mesh` is a no-op when no pair can peer.
+// nvlink. so this runs on every configuration -- no self-skip -- and pins the one transport that
+// ships to the cluster. `enable_peer_mesh` is a no-op when no pair can peer.
 #[cfg(feature = "gpu")]
 #[test]
 fn gpu_peer_rk2_quad_tile_2d_grid() {

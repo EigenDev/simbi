@@ -1,11 +1,10 @@
 // =============================================================================
 // rhd_sod_conservation.rs
 //
-// the RHD multi-step CONSERVATION + CFL + POSITIVITY gate (T2). complements
-// substrate_rhd_sod (single end-state subluminal check) by sampling invariants
-// every SAMPLE_EVERY steps under the post-phase-A/D emit path — a regression on
-// consolidated IR, identity folding, or view-struct buffer ABIs will surface here
-// as drift in a conserved global.
+// the RHD multi-step CONSERVATION + CFL + POSITIVITY gate. it samples the integral
+// invariants every SAMPLE_EVERY steps rather than checking one end state, so a
+// regression in consolidated IR, identity folding, or view-struct buffer ABIs
+// surfaces here as drift in a conserved global.
 //
 // IC: Marti-Mueller relativistic Sod (\gamma = 5/3): (\rho, p) = (1, 1) | (0.125, 0.1),
 // v = 0. reflective walls keep the integral diagnostics fully closed (no
@@ -104,7 +103,7 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
         let energy_rel = (energy - energy0).abs() / energy0;
         assert!(
             mass_rel < 1e-9,
-            "MASS CONSERVATION BROKEN at iter {} t={:.4e}: mass {} → {} (rel drift {:e}, > 1e-9)",
+            "MASS CONSERVATION BROKEN at iter {} t={:.4e}: mass {} -> {} (rel drift {:e}, > 1e-9)",
             s.iteration,
             s.time,
             mass0,
@@ -113,7 +112,7 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
         );
         assert!(
             energy_rel < 1e-8,
-            "ENERGY CONSERVATION BROKEN at iter {} t={:.4e}: nrg {} → {} (rel drift {:e}, > 1e-8)",
+            "ENERGY CONSERVATION BROKEN at iter {} t={:.4e}: nrg {} -> {} (rel drift {:e}, > 1e-8)",
             s.iteration,
             s.time,
             energy0,
@@ -130,21 +129,21 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
             let v = *s.fields.prim.vel[0].view().at(*c);
             assert!(
                 rho.is_finite() && rho > 0.0,
-                "POSITIVITY BROKEN (ρ ≤ 0 or NaN) at iter {} cell {:?}: rho = {}",
+                "POSITIVITY BROKEN (rho <= 0 or NaN) at iter {} cell {:?}: rho = {}",
                 s.iteration,
                 c,
                 rho,
             );
             assert!(
                 p.is_finite() && p > 0.0,
-                "POSITIVITY BROKEN (p ≤ 0 or NaN) at iter {} cell {:?}: p = {}",
+                "POSITIVITY BROKEN (p <= 0 or NaN) at iter {} cell {:?}: p = {}",
                 s.iteration,
                 c,
                 p,
             );
             assert!(
                 v.abs() < 1.0,
-                "CAUSALITY BROKEN (|v| ≥ 1) at iter {} cell {:?}: v = {}",
+                "CAUSALITY BROKEN (|v| >= 1) at iter {} cell {:?}: v = {}",
                 s.iteration,
                 c,
                 v,
@@ -165,7 +164,7 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
         let courant = dt_next * max_lambda / dx;
         assert!(
             courant <= CFL + 1e-12,
-            "CFL BOUND VIOLATED at iter {} t={:.4e}: dt·λ/dx = {:e} > CFL ({}) by {:e}",
+            "CFL BOUND VIOLATED at iter {} t={:.4e}: dt*lambda/dx = {:e} > CFL ({}) by {:e}",
             s.iteration,
             s.time,
             courant,

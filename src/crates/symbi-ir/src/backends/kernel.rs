@@ -1,7 +1,7 @@
 // =============================================================================
 // emit_kernel.rs
 //
-// chalkboard-pipeline kernel emitter (R.6.d.2). given a scalarized
+// chalkboard-pipeline kernel emitter. given a scalarized
 // tensor IR graph plus the kernel-mode side-tables (field-read keys
 // with their dotted runtime paths, field writes, scalar user params),
 // produces a complete __global__ kernel over the per-cell view ABI
@@ -15,8 +15,8 @@
 // in `symbi_ir::emit`. SYCL/FPGA would slot in as sibling emitters
 // (the IR is target-agnostic; only the source text shifts).
 //
-// the macro layer (R.6.d.3) wraps each ndim ∈ {1,2,3} in its own
-// invocation to populate per-ndim KernelDescriptors.
+// the macro layer wraps each ndim in {1,2,3} in its own invocation to
+// populate per-ndim KernelDescriptors.
 //
 // usage:
 //   let desc = emit_kernel_from_lowering(&graph, &KernelEmitInputs {
@@ -47,8 +47,8 @@ pub struct KernelEmitInputs<'a> {
     pub target: TargetConfig,
     /// whether all of this kernel's buffers share ONE allocated layout, so the
     /// cell index can be computed once and shared across reads. the PRODUCER sets
-    /// this (it knows the kernel's buffer topology); the IR stays domain-agnostic
-    /// and no longer infers it from the kernel name. true for single-layout
+    /// this (it knows the kernel's buffer topology); the IR stays domain-agnostic.
+    /// true for single-layout
     /// cell-centered kernels (c2p, wave-speed maps, pure-hydro face flux); false
     /// for staggered mhd face-flux (edge efield) and amr prolong/restrict (two grids).
     pub coalesce_layout: bool,
@@ -68,7 +68,7 @@ pub struct KernelEmitInputs<'a> {
     /// after the thread-index prelude. body Param references
     /// `_coord_0`/`_coord_1`/`_coord_2` resolve there.
     pub coord_components: &'a [u8],
-    /// F1.B.11: device-function definitions to include in the kernel
+    /// device-function definitions to include in the kernel
     /// source, ahead of the `__global__` block. emitted in order — the
     /// caller (kernel macro) is responsible for topological order
     /// (callees before callers) and de-duplication. each entry is a
@@ -437,8 +437,8 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
         // Metal (MSL) is f32-only and needs its own renderer (the binding-index ABI
         // + no-`double` capability gate); it lands with that backend.
         Target::Metal => unimplemented!(
-            "Metal renderer not yet implemented (docs/design/15 §4); render from IR \
-             once MetalRenderer exists"
+            "Metal renderer not implemented; render from IR once \
+             MetalRenderer exists"
         ),
     }
 }

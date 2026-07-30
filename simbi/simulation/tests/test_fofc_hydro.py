@@ -22,7 +22,7 @@ from simbi.simulation import runner
 
 def _run(cls, args, steps: int = 400):
     # `steps` is a COST bound, not a physical one: the first-order redo engages within
-    # the first few steps a shock exists, so what is asserted below (no crash, a state
+    # the first few steps a shock exists, so what is asserted (no crash, a state
     # that stayed admissible) is visible early. the 3D case carries a hundred times the
     # cells of the 1D one, so it gets proportionally fewer.
     d = tempfile.mkdtemp() + "/"

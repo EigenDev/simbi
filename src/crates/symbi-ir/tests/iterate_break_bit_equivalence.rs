@@ -1,14 +1,13 @@
 // =============================================================================
 // iterate_break_bit_equivalence.rs
 //
-// closes the direct-evidence gap for the IterateInline `break_when` claim
-// (the freeze-law invariant): running an iterate WITH a
-// break-predicate produces BIT-EXACT the same f64 result as running the SAME
-// iterate WITHOUT a break-predicate, provided convergence fires before the
-// iteration cap. the break is a perf shortcut; the freeze pattern
+// the IterateInline `break_when` predicate is a PERF SHORTCUT, not a semantic
+// change: running an iterate WITH a break-predicate produces BIT-EXACT the same
+// f64 result as running the SAME iterate WITHOUT one, provided convergence fires
+// before the iteration cap. the freeze pattern
 // `step = select(conv, x, x_new)` already pins the converged value.
 //
-// physics: Newton iteration for sqrt(2), f(x) = x² - 2, f'(x) = 2x, step
+// physics: Newton iteration for sqrt(2), f(x) = x^2 - 2, f'(x) = 2x, step
 // x_new = x - f(x)/f'(x). converges quadratically; the freeze predicate is
 // |x_new - x| < 1e-10. 20 deterministic LCG initial guesses in [0.5, 10); for
 // each:
@@ -20,7 +19,7 @@
 //   scalarize_kernel (which handles IterateInline's cone partitioning), both
 //   run through the CPU interpreter. assert IDENTICAL bits.
 //
-// the IR is built through the low-level Graph API (`with_trace |t| t.graph()…`)
+// the IR is built through the low-level Graph API (`with_trace |t| t.graph()...`)
 // because `Gv::iterate` always passes
 // Some(conv) — only the direct builder can flip the knob. lowering uses
 // scalarize_kernel (NOT plain scalarize) because IterAcc only resolves inside
@@ -98,7 +97,7 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
     let f_with_break = build_newton_sqrt2(true, 64);
     let f_no_break = build_newton_sqrt2(false, 64);
 
-    // deterministic LCG over [0.5, 10.0]; both sides of √2 at varying distances.
+    // deterministic LCG over [0.5, 10.0]; both sides of sqrt2 at varying distances.
     // Newton converges in ~6-8 steps from this range, well inside max=64.
     let mut state: u64 = 0xA5;
     let mut mismatches: Vec<(f64, f64, f64)> = Vec::new();
@@ -106,7 +105,7 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
         state = state
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
-        let u = ((state >> 33) as f64) / (1u64 << 31) as f64; // ∈ [0,1)
+        let u = ((state >> 33) as f64) / (1u64 << 31) as f64; // in [0,1)
         let x0_val = 0.5 + 9.5 * u;
 
         let a = Cpu.eval_elemental(&f_with_break, &[x0_val])[0];
@@ -115,11 +114,11 @@ fn iterate_break_is_bit_equivalent_to_no_break() {
         let sqrt2 = std::f64::consts::SQRT_2;
         assert!(
             (a - sqrt2).abs() < 1e-10,
-            "case {i}: with-break newton did not converge from x0={x0_val}: got {a}, expected ≈{sqrt2}",
+            "case {i}: with-break newton did not converge from x0={x0_val}: got {a}, expected ~={sqrt2}",
         );
         assert!(
             (b - sqrt2).abs() < 1e-10,
-            "case {i}: no-break newton did not converge from x0={x0_val}: got {b}, expected ≈{sqrt2}",
+            "case {i}: no-break newton did not converge from x0={x0_val}: got {b}, expected ~={sqrt2}",
         );
 
         if a.to_bits() != b.to_bits() {
@@ -167,7 +166,7 @@ fn iterate_break_equivalent_when_cap_hit_before_convergence() {
         b,
         a.to_bits() ^ b.to_bits(),
     );
-    // verify the test really IS hitting the cap path (value ≠ √2).
+    // verify the test really IS hitting the cap path (value != sqrt2).
     assert!(
         (a - std::f64::consts::SQRT_2).abs() > 1e-3,
         "shallow Newton converged unexpectedly — bump x0 further or shrink the cap",

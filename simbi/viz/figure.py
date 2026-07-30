@@ -293,9 +293,9 @@ class Figure:
     def save(self, path: str):
         """
         Save figure with smart extension based on plot type:
-          - line/time_series/coordinate_profile → .pdf (vector)
-          - quad/polygon (2d) → .png (hi-res raster)
-          - animation → .mp4
+          - line/time_series/coordinate_profile -> .pdf (vector)
+          - quad/polygon (2d) -> .png (hi-res raster)
+          - animation -> .mp4
         """
         from simbi.reader import logger
         from simbi.reader.progress import create_progress_bar
@@ -353,10 +353,10 @@ class Figure:
                 # user specified extension, respect it
                 save_path = base + ext
             elif is_line_like and not is_2d:
-                # line plots → pdf (vector graphics)
+                # line plots -> pdf (vector graphics)
                 save_path = base + ".pdf"
             else:
-                # 2d plots → png (hi-res raster)
+                # 2d plots -> png (hi-res raster)
                 save_path = base + ".png"
 
             self.fig.savefig(

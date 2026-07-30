@@ -1,11 +1,10 @@
 // =============================================================================
 // rmhd_2p5d_hlld_smoke.rs
 //
-// regression: a 2.5D RMHD sim must run with `--solver hlld`. the RMHD HLLD face fluxes were
-// emitted at 1D + 3D but the 2.5D block shipped HLLE-only, so a 2D RMHD run with `--solver hlld`
-// panicked at dispatch ("no generated kernel rmhd_face_flux_hlld_2d_0"). this pins the now-emitted
-// 2D RMHD HLLD fluxes (cartesian; r-phi reuses them; cyl r-z has its own "_cyl_rz" variants). also
-// a compact showcase of the ergonomics surface.
+// regression: a 2.5D RMHD sim must run with `--solver hlld`. an emission block covering only 1D
+// and 3D leaves a 2D RMHD run with `--solver hlld` panicking at dispatch ("no generated kernel
+// rmhd_face_flux_hlld_2d_0"). this pins the 2D RMHD HLLD fluxes (cartesian; r-phi reuses them;
+// cyl r-z has its own "_cyl_rz" variants).
 //
 // hllc IS valid for rmhd (hllc-mhd = the contact-resolving hllc flux + the hll edge emf); hllc-lm
 // is rejected because the low-mach correction is a non-relativistic gas closure. the (solver,
