@@ -37,7 +37,6 @@ pub use collection::{BinaryParams, BodyCollection, MAX_SOURCE_BODIES, ReferenceF
 pub use contact::{ContactMaterial, Contacts};
 pub use diagnostics::DiagnosticAccumulator;
 pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_speed_from_cons};
-pub use excise::{onion_fill_cell, onion_pass_count};
 pub use gravity::{MutualGravity, gravitational_potential_energy};
 pub use history::BodyHistory;
 pub use motion::{advance_binary, apply_body_deltas, keplerian_binary, rotate_2d, rotate_3d};
