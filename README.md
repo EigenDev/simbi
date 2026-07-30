@@ -31,7 +31,7 @@
 
 SIMBI is a finite volume code for astrophysical fluid simulations. If you want to throw relativistic jets, shock tubes, stellar explosions, or magnetized turbulence at a grid and see what happens, this is the tool. Results from SIMBI have shown up in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, covering relativistic jets, shock morphology, and stellar explosions.
 
-A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. I emabarked on this because I got super interested in graph theory and how it can be used to help generate architecture-agnostic code, and I wanted to give it a shot from a clean slate in rust (see [Sethi & Ullman 1970](https://dl.acm.org/doi/10.1145/321607.321620) and works that cite them. Super interesting and deep stuff imo.) The physics is the same, the speed got better (because I became a better progrtammer over the years from the wee ol' monolithic-to-the-max days), and the codebase is a lot easier to reasin about. You drive the whole thing from Python, so you never have to touch the Rust unless you want to. Also, you might notice
+A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. I embarked on this because I got super interested in graph theory and how it can be used to help generate architecture-agnostic code, and I wanted to give it a shot from a clean slate in rust (see [Sethi & Ullman 1970](https://dl.acm.org/doi/10.1145/321607.321620) and works that cite them. Super interesting and deep stuff imo.) The physics is the same, the speed got better (because I became a better programmer over the years from the wee ol' monolithic-to-the-max days), and the codebase is a lot easier to reason about. You drive the whole thing from Python; the Rust is there when you want it.
 <!--that the russt workspace is called `symbi` instead of `simbi`. Well, that's because I really love the idea of turning symbolic expressions into machine code, but since both "simbi" and "symbi" sound the same, I thought that shift was a cool nod to the new direction of the codebase. The Python package is still called `simbi`, so you can keep your scripts and configs the same.-->
 
 **What you get:**
@@ -46,7 +46,7 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is frozen at a cold vacuum, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
-- In-situ binned reductions (a "census"): declare shell profiles as expressions and the run reduces them on the device each cadence, straight into the checkpoint — handy when you want a scaling law rather than a pile of snapshots
+- In-situ binned reductions (a "census"): declare shell profiles as expressions and the run reduces them on the device each cadence, straight into the checkpoint — handy when what you want out of a run is a scaling law
 - Lagrangian tracer particles that ride along with the flow, across refinement levels and multi-GPU cuts too
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
@@ -55,8 +55,7 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 > CUDA and HIP are peer production backends generated from the same kernel
 definitions. Multi-*node* decomposition is the next step on the roadmap;
 single-node multi-GPU already runs today.
-I don't have a science problem that needs multi-node at this time, so it prob won't be added for 
-quite a while.
+My science problems fit on one node these days, so multi-node sits far down the list.
 ---
 
 ## Simulation Gallery
@@ -77,9 +76,9 @@ quite a while.
 
 ## Quick Start
 
-If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too (Not really. Just my strong recommendation is all). It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary (though conda is objectively broader and more powerful. It's just too ""powerful" for my use cases these days), and it makes the whole setup a two-line affair.
+If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too — a strong recommendation, freely ignored. It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary (though conda is objectively broader and more powerful; it's just a bit much for my use cases these days), and it makes the whole setup a two-line affair.
 
-Do not have uv yet? Grab it:
+Need uv? Grab it:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -106,12 +105,12 @@ project helper:
 
 ```bash
 uv sync --no-install-project   # puts maturin in the venv; dev.py needs it
-./dev.py install --cuda        # or --hip for AMD; they're alternatives, not a sequence
+./dev.py install --cuda        # or --hip for AMD; pick the one matching your card
 uv run simbi run marti-muller --mode gpu --resolution 1024
 ```
 
-That is the whole thing. No CMake, no Ninja, no compiler environment variables to babysit.
-(Though, I am a big fan of those tools! I learned so much about programming and developing
+That is the whole thing — cargo and maturin drive the build end to end.
+(Though, I am a big fan of CMake and Ninja! I learned so much about programming and developing
 a major project like this from utilizing those tools. It just becomes a bit much for me to
 deal with as I explore more architectures and directions. Cargo is standard enough for my 
 purposes these days. :D)
@@ -129,12 +128,12 @@ purposes these days. :D)
 - For AMD GPU execution, ROCm providing `libamdhip64` and `libhiprtc`
 - On Linux, `patchelf` (uv and maturin will tell you if it is missing)
 
-That is it. You do not need `nvcc` or `hipcc`. Kernels are compiled at runtime
-with NVRTC on NVIDIA devices and hipRTC on AMD devices.
+That is it. Kernels compile at run time with NVRTC on NVIDIA devices and hipRTC
+on AMD devices, so the driver runtime is the whole GPU toolchain requirement.
 
 ### The uv way (recommended)
 
-Seriously, just use uv. It builds the Rust extension through maturin behind the scenes and you never think about it again.
+Seriously, just use uv. It builds the Rust extension through maturin behind the scenes and stays out of your way from there on.
 
 ```bash
 # spin up an isolated environment
@@ -159,7 +158,7 @@ Just want the `simbi` command on your PATH without thinking about environments? 
 uv tool install .
 ```
 
-Now `simbi` works from anywhere, no `uv run` prefix needed.
+Now `simbi` works from anywhere, on its own.
 
 ### Working on SIMBI itself?
 
@@ -187,8 +186,8 @@ python -m pytest
 simbi run sedov --mode cpu
 ```
 
-If the environment is not activated, suppress uv's automatic synchronization so it
-does not rebuild the project:
+Outside an activated environment, suppress uv's automatic synchronization so it
+leaves the built project alone:
 
 ```bash
 uv run --no-sync pytest
@@ -197,7 +196,7 @@ uv run --no-sync simbi run sedov --mode cpu
 
 Run `uv sync --no-install-project` again after dependency changes. Run
 `python dev.py install` again after Rust, AOT, PyO3, or backend-feature changes.
-Pure Python changes require neither step.
+Pure Python changes take effect immediately.
 
 ### GPU builds
 
@@ -214,8 +213,8 @@ both installed and pick the backend at run time with `--mode cpu` or `--mode gpu
 threads with rayon, so size it with `RAYON_NUM_THREADS` if you want to pin it.
 
 If you build a GPU backend into a fresh clone, pass `--with-cpu` to keep a CPU extension around too;
-otherwise `--mode cpu` finds nothing and drops into demo mode. `--cuda` and `--hip` are alternatives,
-not a sequence — the second one overwrites the first's `gpu_ext`.
+otherwise `--mode cpu` finds nothing and drops into demo mode. `--cuda` and `--hip` are alternatives:
+whichever you build last owns `gpu_ext`.
 
 ### Cleaning up
 
@@ -338,10 +337,10 @@ kill on a cluster still leaves you something to resume from.
 > nothing.
 
 Resuming with `--checkpoint` picks up the sim clock and the checkpoint numbering, so you get
-`031, 032, ...` rather than stomping on earlier files. `end_time` becomes the larger of yours and
-the checkpoint's, so you can extend a run but not shorten it. Fields marked `checkpoint_safe=True`
-you can override on the command line; if you pass a flag that *isn't* safe and it conflicts, the run
-refuses with a `ConfigError` instead of quietly picking one.
+`031, 032, ...` alongside the earlier files. `end_time` becomes the larger of yours and
+the checkpoint's, so a restart can only extend a run. Fields marked `checkpoint_safe=True`
+you can override on the command line; pass a conflicting flag that lacks that mark and the run
+stops with a `ConfigError`, leaving the choice to you.
 
 One thing to know: the `body_diagnostics` and census series inside a checkpoint cover the current
 run segment only and start empty again after a restart. Stitch the segments offline.
@@ -358,16 +357,17 @@ by default.
 `l` toggle log color, `o` cycle the 3D slice plane, `+`/`-` zoom about the center.
 
 `simbi attach <data_dir>` gives you the same view of a headless run over a shared filesystem — it
-polls the snapshot `--live` writes, no sockets involved. It's read-only by design, so `f`/`c`/`l`
-and the panel keys work (the snapshot ships every field) but pause/step/checkpoint do not reach the
-solver. It needs the run to still be going: the snapshot is removed when the run ends.
+polls the snapshot `--live` writes, over the shared filesystem alone. The view is read-only by
+design, so `f`/`c`/`l` and the panel keys work (the snapshot ships every field) while
+pause/step/checkpoint stay with the owning process. It needs the run to still be going: the
+snapshot is removed when the run ends.
 
 ### In-situ profiles (census)
 
-Sometimes what you want out of a run is a scaling, not a picture, and dumping a thousand full
-snapshots to get it is silly. A census is a binned reduction: you declare the bin axes and what to
-accumulate as expressions, and the run reduces them on the device every cadence and tucks the result
-into each checkpoint. No snapshot needed.
+Sometimes what you want out of a run is a scaling law, and dumping a thousand full snapshots to get
+one is silly. A census is a binned reduction: you declare the bin axes and what to accumulate as
+expressions, and the run reduces them on the device every cadence and tucks the result into each
+checkpoint, ready to read straight back out.
 
 ```python
 from simbi import expression as expr
@@ -394,9 +394,9 @@ def census_expressions(self) -> list[ExpressionDict]:
     ]
 ```
 
-Note that you only ever accumulate sums. That's deliberate: sums merge cleanly across refinement
-levels, across decomposed tiles, and across restart segments, whereas a mean does not. So the reader
-forms means and variances as ratios of sums when you ask for them:
+Note that you only ever accumulate sums. That's deliberate: sums are the quantity that merges
+cleanly across refinement levels, across decomposed tiles, and across restart segments. So the
+reader forms means and variances as ratios of sums when you ask for them:
 
 ```python
 from simbi.reader import census_names, read_census
@@ -670,22 +670,22 @@ Point a horizon-penetrating chart (`SCHWARZSCHILD_KS` or `KERR_KS`) at a black h
 *swallow* it. Set `excision_radius` to a radius inside the horizon (above the metric-guard radius
 M/2, so around 0.7 r_+) and every step the cells inside get frozen at a cold vacuum floor, with
 their conserved state rebuilt from the local metric. The exterior gas rarefies in and nothing comes
-back out, so the accretion-rate certificate stays well-posed and there's no coordinate singularity
-to babysit. Works for hydro and MHD (the staggered magnetic faces stay constrained-transport-owned),
+back out, so the accretion-rate certificate stays well-posed and the chart stays regular straight
+through the horizon. Works for hydro and MHD (the staggered magnetic faces stay constrained-transport-owned),
 for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decomposed path.
 
 ### Coordinate systems
 
 - `CARTESIAN`, the usual x, y, z
 - `SPHERICAL`, r, theta, phi
-- `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which in 2D both mean the r-z plane (they're the same metric; watch out, the default plane is r-z, not r-phi)
-- `PLANAR_CYLINDRICAL`, if you want the r-phi plane instead
+- `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which in 2D both mean the r-z plane (they're the same metric; watch out, r-z is the default plane)
+- `PLANAR_CYLINDRICAL`, the r-phi plane
 
 ### Numerical methods
 
 **Riemann solvers:**
 - `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
-- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — a smooth cell never pays for the shock estimate. Works on the MHD regimes too (HLLC flux + HLL edge EMF); it's the *isothermal* regimes that can't take it, since they have no contact wave
+- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — the shock estimate is paid for only in the cells that need it. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
 - `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC, for both Newtonian and relativistic hydro
 - `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
 
@@ -721,29 +721,29 @@ proof valid.
 
 **A few extras:**
 - `plm_theta`, the PLM reconstruction parameter (must be > 0 and <= 2, default 1.5). For piecewise-constant use `reconstruction=PCM` or `--order 1`
-- `reconstruction` picks `PCM` or `PLM`, and `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`). `Limiter` lives at `simbi.types.input`, not `simbi.types`
+- `reconstruction` picks `PCM` or `PLM`, and `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`). `Limiter` lives at `simbi.types.input`
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
 ### What runs where
 
-Not every feature is baked for every chart and regime. These are all refused loudly at startup
-rather than silently doing the wrong thing, but it saves you a crash to know up front:
+Feature coverage varies by chart and regime. Every combination below is checked at startup and
+refused loudly when it falls outside the table, though it saves you a round trip to know up front:
 
 | Feature | Where it works |
 |---|---|
-| `HLLC` / `HLLC_LM` | everything except the isothermal regimes (no contact wave). `HLLC_LM` is Newtonian + RHD |
+| `HLLC` / `HLLC_LM` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_LM` is Newtonian + RHD |
 | `HLLD` | the MHD regimes |
-| viscosity | Newtonian and MHD, cartesian 2D/3D and curvilinear 2D. Silently a no-op on `RHD` |
+| viscosity | Newtonian and MHD, cartesian 2D/3D and curvilinear 2D. `RHD` accepts the coefficient and silently ignores it |
 | alpha-disk viscosity | cartesian 2D, and it needs a central immersed body |
 | resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |
-| refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and won't combine with immersed bodies or mesh motion |
-| passive scalar | Newtonian cartesian, no refinement / mesh motion / bodies |
+| refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and runs on its own — immersed bodies and mesh motion are separate paths |
+| passive scalar | Newtonian cartesian, base grid only, standalone |
 | tracers | flat cartesian (refinement is fine) |
 | horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is refused on purpose — that slice is a black *string*, and the staircased excision circle seeds a growing m = 4 mode |
 
 For a GR run you'll also want `schwarzschild_mass` and, on Kerr, `kerr_spin` (with `|a| <= M`).
-`excision_radius` isn't a base field — declare it on your own subclass, and keep it between `M/2`
+`excision_radius` comes from your own subclass — declare it there, and keep it between `M/2`
 and `r_+`.
 
 ### Non-ideal transport
@@ -773,8 +773,8 @@ refinement_subcycling_mode: Annotated[
 **Subcycling modes:**
 - `STANDARD` / `NONE`, the fixed-ratio schedule: level `l` takes `2^l` steps per root step, and the
   root step is picked so every level stays inside its own CFL. These two are the same thing.
-- `ADAPTIVE` / `MANUAL` are not implemented yet. They raise `NotImplementedError` at validation
-  instead of quietly handing you the fixed schedule.
+- `ADAPTIVE` / `MANUAL` are still on the roadmap. Today they raise `NotImplementedError` at
+  validation, so a config that asks for one says so up front.
 
 ---
 
@@ -806,7 +806,7 @@ A few core pieces:
 - **`symbi-afterglow`** does the radiation transport and observables
 - **`symbi-py`** is the thin pyo3 bridge that becomes the `cpu_ext` and `gpu_ext` Python modules
 
-A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That last part is what makes multi-GPU work: a subdomain is just a self-contained simulation state, so `gpus > 1` splits the domain into tiles that halo-exchange between neighbors in lockstep — bit-identical to a monolithic run, and riding the exact halo machinery the refinement hierarchy already uses. Multi-*node* is the natural next step from here.
+A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver touches state only through that one interface. That last part is what makes multi-GPU work: a subdomain is just a self-contained simulation state, so `gpus > 1` splits the domain into tiles that halo-exchange between neighbors in lockstep — bit-identical to a monolithic run, and riding the exact halo machinery the refinement hierarchy already uses. Multi-*node* is the natural next step from here.
 
 The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the production CUDA and HIP paths share one kernel definition and diverge only in the small target-specific runtime and token mapping at the bottom.
 
@@ -820,7 +820,7 @@ There are 68 ready-to-run configs under `simbi_configs/examples/`, sorted into `
 `srhd/`, `srmhd/`, `isothermal/`, `grhd/`, `grmhd/`, and `ibm/`. A sampler:
 
 The `Run with` column is the slug you pass to `simbi run` (the file stem with underscores swapped
-for dashes; underscores also work). You never need the directory — the CLI finds it by name.
+for dashes; underscores also work). The CLI finds it by name, wherever it lives.
 
 | Example | Run with | What it is |
 |---------|----------|------------|
@@ -921,7 +921,7 @@ archivePrefix = {ascl},
 
 Found a bug or want a feature? Open an issue at [GitHub Issues](https://github.com/EigenDev/simbi/issues).
 
-When something will not install, check the basics first:
+When an install fails, check the basics first:
 
 ```bash
 python --version   # want 3.10 or newer
@@ -974,4 +974,4 @@ the following people for their contributions to the project:
 ---
 
 > Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool.
-The developmental speed boost was just undeniable versus if I had taken the time to do it myself (during my finite postdoc). Sigh, drinking the koolaid sparingly...
+On a finite postdoc clock, the developmental speed boost was plain. Sigh, drinking the koolaid sparingly...
