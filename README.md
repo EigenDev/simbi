@@ -31,7 +31,13 @@
 
 SIMBI is a finite volume code for astrophysical fluid simulations. If you want to throw relativistic jets, shock tubes, stellar explosions, or magnetized turbulence at a grid and see what happens, this is the tool. Results from SIMBI have shown up in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, covering relativistic jets, shock morphology, and stellar explosions.
 
+<<<<<<< HEAD
 A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. I embarked on this because I got super interested in graph theory and how it can be used to help generate architecture-agnostic code, and I wanted to give it a shot from a clean slate in rust (see [Sethi & Ullman 1970](https://dl.acm.org/doi/10.1145/321607.321620) and works that cite them. Super interesting and deep stuff imo.) The physics is the same, the speed got better (because I became a better programmer over the years from the wee ol' monolithic-to-the-max days), and the codebase is a lot easier to reason about. You drive the whole thing from Python; the Rust is there when you want it.
+||||||| cb8b3f62
+A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. The physics is the same, the speed got better, and the codebase is a lot easier to live in. You drive the whole thing from Python, so you never have to touch the Rust unless you want to.
+=======
+A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. I emabarked on this because I got super interested in graph theory and how it can be used to help generate architecture-agnostic code, and I wanted to give it a shot from a clean slate in rust (see [Sethi & Ullman 1970](https://dl.acm.org/doi/10.1145/321607.321620) and works that cite them. Super interesting and deep stuff imo.) The physics is the same, the speed got better (because I became a better progrtammer over the years from the wee ol' monolithic-to-the-max days), and the codebase is a lot easier to reasin about. You drive the whole thing from Python, so you never have to touch the Rust unless you want to. Also, you might notice
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 <!--that the russt workspace is called `symbi` instead of `simbi`. Well, that's because I really love the idea of turning symbolic expressions into machine code, but since both "simbi" and "symbi" sound the same, I thought that shift was a cool nod to the new direction of the codebase. The Python package is still called `simbi`, so you can keep your scripts and configs the same.-->
 
 **What you get:**
@@ -46,7 +52,12 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is frozen at a cold vacuum, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
+<<<<<<< HEAD
 - In-situ binned reductions (a "census"): declare shell profiles as expressions and the run reduces them on the device each cadence, straight into the checkpoint — handy when what you want out of a run is a scaling law
+||||||| cb8b3f62
+=======
+- In-situ binned reductions (a "census"): declare shell profiles as expressions and the run reduces them on the device each cadence, straight into the checkpoint — handy when you want a scaling law rather than a pile of snapshots
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 - Lagrangian tracer particles that ride along with the flow, across refinement levels and multi-GPU cuts too
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
@@ -55,7 +66,15 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 > CUDA and HIP are peer production backends generated from the same kernel
 definitions. Multi-*node* decomposition is the next step on the roadmap;
 single-node multi-GPU already runs today.
+<<<<<<< HEAD
 My science problems fit on one node these days, so multi-node sits far down the list.
+||||||| cb8b3f62
+An AMD/HIP backend is in the tree as an experimental build feature (the compute layer is backend-agnostic, so the CUDA and HIP paths share one kernel definition). Multi-*node* decomposition is the next step on the roadmap; single-node multi-GPU already runs today.
+
+=======
+I don't have a science problem that needs multi-node at this time, so it prob won't be added for 
+quite a while.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 ---
 
 ## Simulation Gallery
@@ -76,7 +95,13 @@ My science problems fit on one node these days, so multi-node sits far down the 
 
 ## Quick Start
 
+<<<<<<< HEAD
 If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too — a strong recommendation, freely ignored. It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary (though conda is objectively broader and more powerful; it's just a bit much for my use cases these days), and it makes the whole setup a two-line affair.
+||||||| cb8b3f62
+If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too. It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary, and it makes the whole setup a two-line affair.
+=======
+If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too (Not really. Just my strong recommendation is all). It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary (though conda is objectively broader and more powerful. It's just too ""powerful" for my use cases these days), and it makes the whole setup a two-line affair.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 Need uv? Grab it:
 
@@ -105,7 +130,13 @@ project helper:
 
 ```bash
 uv sync --no-install-project   # puts maturin in the venv; dev.py needs it
+<<<<<<< HEAD
 ./dev.py install --cuda        # or --hip for AMD; pick the one matching your card
+||||||| cb8b3f62
+./dev.py install --gpu
+=======
+./dev.py install --cuda        # or --hip for AMD; they're alternatives, not a sequence
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 uv run simbi run marti-muller --mode gpu --resolution 1024
 ```
 
@@ -128,8 +159,15 @@ purposes these days. :D)
 - For AMD GPU execution, ROCm providing `libamdhip64` and `libhiprtc`
 - On Linux, `patchelf` (uv and maturin will tell you if it is missing)
 
+<<<<<<< HEAD
 That is it. Kernels compile at run time with NVRTC on NVIDIA devices and hipRTC
 on AMD devices, so the driver runtime is the whole GPU toolchain requirement.
+||||||| cb8b3f62
+That is it. You do not need `nvcc`. Kernels are compiled at runtime with NVRTC, so the GPU build figures out your card's architecture on its own.
+=======
+That is it. You do not need `nvcc` or `hipcc`. Kernels are compiled at runtime
+with NVRTC on NVIDIA devices and hipRTC on AMD devices.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 ### The uv way (recommended)
 
@@ -186,6 +224,7 @@ python -m pytest
 simbi run sedov --mode cpu
 ```
 
+<<<<<<< HEAD
 Outside an activated environment, suppress uv's automatic synchronization so it
 leaves the built project alone:
 
@@ -197,6 +236,21 @@ uv run --no-sync simbi run sedov --mode cpu
 Run `uv sync --no-install-project` again after dependency changes. Run
 `python dev.py install` again after Rust, AOT, PyO3, or backend-feature changes.
 Pure Python changes take effect immediately.
+||||||| cb8b3f62
+Plain `uv pip install -e .` works too for the Python side, but it will not recompile the Rust on its own, so `./dev.py install` is the better contributor loop.
+=======
+If the environment is not activated, suppress uv's automatic synchronization so it
+does not rebuild the project:
+
+```bash
+uv run --no-sync pytest
+uv run --no-sync simbi run sedov --mode cpu
+```
+
+Run `uv sync --no-install-project` again after dependency changes. Run
+`python dev.py install` again after Rust, AOT, PyO3, or backend-feature changes.
+Pure Python changes require neither step.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 ### GPU builds
 
@@ -213,8 +267,15 @@ both installed and pick the backend at run time with `--mode cpu` or `--mode gpu
 threads with rayon, so size it with `RAYON_NUM_THREADS` if you want to pin it.
 
 If you build a GPU backend into a fresh clone, pass `--with-cpu` to keep a CPU extension around too;
+<<<<<<< HEAD
 otherwise `--mode cpu` finds nothing and drops into demo mode. `--cuda` and `--hip` are alternatives:
 whichever you build last owns `gpu_ext`.
+||||||| cb8b3f62
+The CPU and GPU extensions coexist as separate modules (`cpu_ext` and `gpu_ext`), so you can keep both installed and pick the backend at run time with `--mode cpu`, `--mode omp` (OpenMP-threaded CPU, size it with `--nthreads N`), or `--mode gpu`.
+=======
+otherwise `--mode cpu` finds nothing and drops into demo mode. `--cuda` and `--hip` are alternatives,
+not a sequence — the second one overwrites the first's `gpu_ext`.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 ### Cleaning up
 
@@ -337,6 +398,7 @@ kill on a cluster still leaves you something to resume from.
 > nothing.
 
 Resuming with `--checkpoint` picks up the sim clock and the checkpoint numbering, so you get
+<<<<<<< HEAD
 `031, 032, ...` alongside the earlier files. `end_time` becomes the larger of yours and
 the checkpoint's, so a restart can only extend a run. Fields marked `checkpoint_safe=True`
 you can override on the command line; pass a conflicting flag that lacks that mark and the run
@@ -397,6 +459,68 @@ def census_expressions(self) -> list[ExpressionDict]:
 Note that you only ever accumulate sums. That's deliberate: sums are the quantity that merges
 cleanly across refinement levels, across decomposed tiles, and across restart segments. So the
 reader forms means and variances as ratios of sums when you ask for them:
+||||||| cb8b3f62
+=======
+`031, 032, ...` rather than stomping on earlier files. `end_time` becomes the larger of yours and
+the checkpoint's, so you can extend a run but not shorten it. Fields marked `checkpoint_safe=True`
+you can override on the command line; if you pass a flag that *isn't* safe and it conflicts, the run
+refuses with a `ConfigError` instead of quietly picking one.
+
+One thing to know: the `body_diagnostics` and census series inside a checkpoint cover the current
+run segment only and start empty again after a restart. Stitch the segments offline.
+
+Each checkpoint carries `metadata` (time, dt, iteration, gamma, cfl, regime, spacetime, solver,
+spacing, ...) plus a `level_<N>` group per refinement level holding the primitives and conserved
+state, and — when the run has them — `bodies`, `body_diagnostics`, `tracers`, and `census/<name>`.
+Immersed-body runs also append a plain-text `diagnostics.dat` (time, position, velocity, force,
+torque, mass, accreted mass, accretion rate per body) if you set `--diagnostic-interval`; it's off
+by default.
+
+**Live TUI keys:** `space` pause, `s` single-step, `w` checkpoint now, `q`/`Esc` quit (writes an
+`interrupted` checkpoint), `Tab`/arrows to move between panels, `f` cycle field, `c` cycle colormap,
+`l` toggle log color, `o` cycle the 3D slice plane, `+`/`-` zoom about the center.
+
+`simbi attach <data_dir>` gives you the same view of a headless run over a shared filesystem — it
+polls the snapshot `--live` writes, no sockets involved. It's read-only by design, so `f`/`c`/`l`
+and the panel keys work (the snapshot ships every field) but pause/step/checkpoint do not reach the
+solver. It needs the run to still be going: the snapshot is removed when the run ends.
+
+### In-situ profiles (census)
+
+Sometimes what you want out of a run is a scaling, not a picture, and dumping a thousand full
+snapshots to get it is silly. A census is a binned reduction: you declare the bin axes and what to
+accumulate as expressions, and the run reduces them on the device every cadence and tucks the result
+into each checkpoint. No snapshot needed.
+
+```python
+from simbi import expression as expr
+
+@computed_field
+@property
+def census_expressions(self) -> list[ExpressionDict]:
+    g = expr.ExprGraph()
+    x1, x2, x3 = (expr.variable(v, g) for v in ("x1", "x2", "x3"))
+    r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3)
+    vx, vy, vz = (expr.velocity(ii, g) for ii in (0, 1, 2))
+    v_r = (x1 * vx + x2 * vy + x3 * vz) / r
+    rho, dv = expr.density(g), expr.cell_volume(g)
+    m = rho * dv
+    return [
+        expr.Census(
+            name="shells",
+            axes=[expr.BinAxis("r", r, expr.log_edges(1e-3, 1.0, 64))],
+            values={"volume": dv, "mass": m, "mass_vr": m * v_r},
+            op=expr.ReductionOp.ADD,
+            sample_interval=0.05,
+            cadence=expr.Cadence.PER_LEVEL_STEP,
+        ).serialize()
+    ]
+```
+
+Note that you only ever accumulate sums. That's deliberate: sums merge cleanly across refinement
+levels, across decomposed tiles, and across restart segments, whereas a mean does not. So the reader
+forms means and variances as ratios of sums when you ask for them:
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 ```python
 from simbi.reader import census_names, read_census
@@ -670,22 +794,50 @@ Point a horizon-penetrating chart (`SCHWARZSCHILD_KS` or `KERR_KS`) at a black h
 *swallow* it. Set `excision_radius` to a radius inside the horizon (above the metric-guard radius
 M/2, so around 0.7 r_+) and every step the cells inside get frozen at a cold vacuum floor, with
 their conserved state rebuilt from the local metric. The exterior gas rarefies in and nothing comes
+<<<<<<< HEAD
 back out, so the accretion-rate certificate stays well-posed and the chart stays regular straight
 through the horizon. Works for hydro and MHD (the staggered magnetic faces stay constrained-transport-owned),
+||||||| cb8b3f62
+M/2, so around 0.7 r_+) and the cells inside are excised every step: their primitives are
+overwritten by a causal, outward one-way "onion" sweep and their conserved state is rebuilt from
+the local metric, so nothing unphysical leaks back out across the horizon and the accretion-rate
+certificate stays well-posed — no coordinate singularity to babysit. It works for hydro and MHD
+(the staggered magnetic faces stay constrained-transport-owned), for spinning (`KERR`) horizons,
+on the GPU, and across the multi-GPU decomposed path.
+=======
+back out, so the accretion-rate certificate stays well-posed and there's no coordinate singularity
+to babysit. Works for hydro and MHD (the staggered magnetic faces stay constrained-transport-owned),
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decomposed path.
 
 ### Coordinate systems
 
 - `CARTESIAN`, the usual x, y, z
 - `SPHERICAL`, r, theta, phi
+<<<<<<< HEAD
 - `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which in 2D both mean the r-z plane (they're the same metric; watch out, r-z is the default plane)
 - `PLANAR_CYLINDRICAL`, the r-phi plane
+||||||| cb8b3f62
+- `CYLINDRICAL`, r, phi, z
+- `AXIS_CYLINDRICAL`, cylindrical with axis symmetry
+- `PLANAR_CYLINDRICAL`, 2D cylindrical in the r-phi plane
+=======
+- `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which in 2D both mean the r-z plane (they're the same metric; watch out, the default plane is r-z, not r-phi)
+- `PLANAR_CYLINDRICAL`, if you want the r-phi plane instead
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 ### Numerical methods
 
 **Riemann solvers:**
 - `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
+<<<<<<< HEAD
 - `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — the shock estimate is paid for only in the cells that need it. Works on the MHD regimes too (HLLC flux + HLL edge EMF); the *isothermal* regimes stay on `HLLE`, whose two-wave fan matches their wave structure
+||||||| cb8b3f62
+- `HLLC`, HLL with a contact wave (hydrodynamics), Toro's adaptive pressure estimates evaluated lazily — a smooth cell never pays for the shock estimate
+- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC
+=======
+- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — a smooth cell never pays for the shock estimate. Works on the MHD regimes too (HLLC flux + HLL edge EMF); it's the *isothermal* regimes that can't take it, since they have no contact wave
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 - `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC, for both Newtonian and relativistic hydro
 - `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
 
@@ -721,12 +873,20 @@ proof valid.
 
 **A few extras:**
 - `plm_theta`, the PLM reconstruction parameter (must be > 0 and <= 2, default 1.5). For piecewise-constant use `reconstruction=PCM` or `--order 1`
+<<<<<<< HEAD
 - `reconstruction` picks `PCM` or `PLM`, and `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`). `Limiter` lives at `simbi.types.input`
+||||||| cb8b3f62
+- `plm_theta`, the PLM reconstruction parameter (0 to 2, default 1.5; 0 gives you piecewise-constant)
+- `use_quirk_smoothing`, [Quirk 1994](https://onlinelibrary.wiley.com/doi/abs/10.1002/fld.1650180603)'s carbuncle fix
+=======
+- `reconstruction` picks `PCM` or `PLM`, and `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`). `Limiter` lives at `simbi.types.input`, not `simbi.types`
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
 ### What runs where
 
+<<<<<<< HEAD
 Feature coverage varies by chart and regime. Every combination below is checked at startup and
 refused loudly when it falls outside the table, though it saves you a round trip to know up front:
 
@@ -744,6 +904,26 @@ refused loudly when it falls outside the table, though it saves you a round trip
 
 For a GR run you'll also want `schwarzschild_mass` and, on Kerr, `kerr_spin` (with `|a| <= M`).
 `excision_radius` comes from your own subclass — declare it there, and keep it between `M/2`
+||||||| cb8b3f62
+=======
+Not every feature is baked for every chart and regime. These are all refused loudly at startup
+rather than silently doing the wrong thing, but it saves you a crash to know up front:
+
+| Feature | Where it works |
+|---|---|
+| `HLLC` / `HLLC_LM` | everything except the isothermal regimes (no contact wave). `HLLC_LM` is Newtonian + RHD |
+| `HLLD` | the MHD regimes |
+| viscosity | Newtonian and MHD, cartesian 2D/3D and curvilinear 2D. Silently a no-op on `RHD` |
+| alpha-disk viscosity | cartesian 2D, and it needs a central immersed body |
+| resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |
+| refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and won't combine with immersed bodies or mesh motion |
+| passive scalar | Newtonian cartesian, no refinement / mesh motion / bodies |
+| tracers | flat cartesian (refinement is fine) |
+| horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is refused on purpose — that slice is a black *string*, and the staircased excision circle seeds a growing m = 4 mode |
+
+For a GR run you'll also want `schwarzschild_mass` and, on Kerr, `kerr_spin` (with `|a| <= M`).
+`excision_radius` isn't a base field — declare it on your own subclass, and keep it between `M/2`
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 and `r_+`.
 
 ### Non-ideal transport
@@ -773,8 +953,17 @@ refinement_subcycling_mode: Annotated[
 **Subcycling modes:**
 - `STANDARD` / `NONE`, the fixed-ratio schedule: level `l` takes `2^l` steps per root step, and the
   root step is picked so every level stays inside its own CFL. These two are the same thing.
+<<<<<<< HEAD
 - `ADAPTIVE` / `MANUAL` are still on the roadmap. Today they raise `NotImplementedError` at
   validation, so a config that asks for one says so up front.
+||||||| cb8b3f62
+- `NONE`, every level advances on the same timestep
+- `STANDARD`, subcycle by the refinement ratio
+- `MANUAL`, you specify substeps per level
+=======
+- `ADAPTIVE` / `MANUAL` are not implemented yet. They raise `NotImplementedError` at validation
+  instead of quietly handing you the fixed schedule.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 ---
 
@@ -820,7 +1009,13 @@ There are 68 ready-to-run configs under `simbi_configs/examples/`, sorted into `
 `srhd/`, `srmhd/`, `isothermal/`, `grhd/`, `grmhd/`, and `ibm/`. A sampler:
 
 The `Run with` column is the slug you pass to `simbi run` (the file stem with underscores swapped
+<<<<<<< HEAD
 for dashes; underscores also work). The CLI finds it by name, wherever it lives.
+||||||| cb8b3f62
+for dashes; underscores also work).
+=======
+for dashes; underscores also work). You never need the directory — the CLI finds it by name.
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
 
 | Example | Run with | What it is |
 |---------|----------|------------|
@@ -974,4 +1169,10 @@ the following people for their contributions to the project:
 ---
 
 > Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool.
+<<<<<<< HEAD
 On a finite postdoc clock, the developmental speed boost was plain. Sigh, drinking the koolaid sparingly...
+||||||| cb8b3f62
+The speed boost was just undeniable versus if I had taken the time to do it myself (during my finite postdoc). Sigh, drinking the koolaid sparingly...
+=======
+The developmental speed boost was just undeniable versus if I had taken the time to do it myself (during my finite postdoc). Sigh, drinking the koolaid sparingly...
+>>>>>>> a07e40eb1886b038395b8c63c950980db7565c47
