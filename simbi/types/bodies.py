@@ -176,10 +176,25 @@ class AccretionProperties:
                 f"accretion_radius must be > 0: a sink of zero radius drains no "
                 f"gas. got {self.accretion_radius}."
             )
-        if self.sink_rate < 0.0:
+        # the drain rate is NOT a free parameter. every immersed-boundary surface (drain, porous,
+        # torque-free) drains through the penalization stack at `1 / tau` with
+        # `tau = c_drain * dx / c_s` — the local sound-crossing time of a cell, scaled by a
+        # convergence dial. the legacy in-godunov sink that `sink_rate` once set is retired, and the
+        # scalar is bound to zero wherever a surface exists, which is everywhere.
+        #
+        # refused rather than ignored: a run that sets it is asserting control over the accretion
+        # rate that it does not have, and the resulting Mdot looks entirely reasonable — it is simply
+        # the sound-crossing drain, whatever the dial said. with `r_acc` a fixed multiple of `dx` and
+        # `c_s ~ r^-1/2` near an accretor, that rate is a FIXED multiple of the local dynamical rate
+        # `1 / t_acc` at every resolution, so the sink is self-similar and there is nothing here to
+        # tune per run.
+        if self.sink_rate != 0.0:
             raise _config_error(
-                f"sink_rate must be >= 0: a negative drain rate injects mass. "
-                f"got {self.sink_rate}."
+                f"sink_rate={self.sink_rate} is not a live parameter: the immersed-boundary "
+                "penalization surface owns accretion, and it drains at the local sound-crossing "
+                "rate c_s/(c_drain*dx) — the scalar is bound to zero. drop the argument. to change "
+                "the drain rate the dial is `c_drain` on the substrate kernel set (tau = c_drain*dx"
+                "/c_s), which is not yet exposed to the configuration layer."
             )
         if self.porosity is not None and not (0.0 <= self.porosity <= 1.0):
             raise _config_error(

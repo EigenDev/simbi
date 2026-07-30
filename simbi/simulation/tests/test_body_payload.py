@@ -82,7 +82,7 @@ def _accretor() -> ImmersedBodyConfig:
         position=(0.0, 0.0, 0.0),
         radius=0.05,
         accretion=AccretionProperties(
-            accretion_radius=0.1, sink_rate=0.5, porosity=0.3
+            accretion_radius=0.1, porosity=0.3
         ),
     )
 

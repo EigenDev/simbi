@@ -130,25 +130,19 @@ class SphericalBondiTest(SimbiProblem):
     ]
 
     # =========================================================================
-    # accretion parameters (the well-posed uniform-scaling DRAIN, docs/ideas/accretor.md)
+    # accretion (the well-posed uniform-scaling DRAIN, docs/ideas/accretor.md)
     #
-    # the drain scales EVERY conserved component inside the mask by exp(-drain_rate*dt),
-    # drain_rate = chi * min(sink_rate, cs/dx): the intensive gas state is invariant (no
-    # acoustic injection), positivity is unconditional, and the accretion rate is EMERGENT
-    # (a functional of the solved flow, never a target). the emergent rate is INSENSITIVE to
-    # sink_rate once it saturates the sound-crossing cap cs/dx (accretor.md §6, the plateau) --
-    # the sonic surface regulates it, so long as r_acc sits inside the sonic radius r_s.
+    # the drain scales EVERY conserved component inside the mask by exp(-dt/tau) with
+    # tau = c_drain * dx / c_s, the local sound-crossing time: the intensive gas state is invariant
+    # (no acoustic injection), positivity is unconditional, and the accretion rate is EMERGENT -- a
+    # functional of the solved flow, never a target. the sonic surface regulates it, so long as
+    # r_acc sits inside the sonic radius r_s.
+    #
+    # THERE IS NO RATE DIAL. the penalization surface owns accretion and c_drain is fixed at 1
+    # (accretor.md C_drain = 1, the fast drain), which is the saturated / plateau case this setup
+    # wants. the dial lives on the substrate kernel set and is not exposed to the configuration
+    # layer.
     # =========================================================================
-    sink_rate: Annotated[
-        float,
-        ProblemParam(
-            1.0e6,
-            cli=True,
-            description="drain rate dial (1/time); saturates at the sound-crossing "
-            "rate cs/dx -> the fast drain (accretor.md C_drain=1). 0 disables accretion",
-            group="accretion",
-        ),
-    ]
     r_acc_scale: Annotated[
         float,
         ProblemParam(
@@ -679,12 +673,9 @@ class SphericalBondiTest(SimbiProblem):
                 gravitational=GravitationalProperties(
                     softening_length=softening
                 ),
-                # the drain: mask radius r_acc + the rate dial sink_rate (saturating at the
-                # sound-crossing rate). the emergent Mdot validates against 4 pi lambda_c(gamma).
-                accretion=AccretionProperties(
-                    accretion_radius=r_acc,
-                    sink_rate=self.sink_rate,
-                ),
+                # the drain: the mask radius is the only parameter. the surface drains at the local
+                # sound-crossing rate, and the emergent Mdot validates against 4 pi lambda_c(gamma).
+                accretion=AccretionProperties(accretion_radius=r_acc),
             )
         ]
 
