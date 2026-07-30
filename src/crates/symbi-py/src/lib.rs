@@ -45,7 +45,7 @@ use symbi_hydro::regime::Regime;
 use symbi_hydro::state::PrimG;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
-use symbi_sim::checkpoint::{load_checkpoint_level, time_at_or_after, write_hierarchy_checkpoint};
+use symbi_sim::checkpoint::{time_at_or_after, write_hierarchy_checkpoint};
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
