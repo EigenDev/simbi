@@ -466,3 +466,77 @@ fn a_restart_onto_a_moved_region_is_refused_by_the_restart_itself() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// =============================================================================
+// the checkpoint's mesh description is written in REVERSED (storage) axis order — `global_cells` as
+// [nx_D, .., nx_1] and the geometry groups named by storage slot — so that a reader's plot axes are
+// not transposed. every gate above is ONE-DIMENSIONAL, where that reversal is the identity, and a
+// cubic grid hides it just as well. an anisotropic multi-dimensional grid is the only shape that
+// exposes it, and reading the wrong axis rejects every legitimate restart it touches.
+// =============================================================================
+
+type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+
+#[test]
+fn an_anisotropic_grid_verifies_against_its_own_axes() {
+    let (nx, ny) = (32usize, 8usize);
+    let (lx, ly) = (1.0f64, 0.25f64);
+    let ic2 = |x: [f64; 2]| Prim {
+        rho: 1.0 + 0.3 * (x[0] + x[1]),
+        vel: Tensor::new([0.1, -0.2]),
+        pre: 1.0,
+    };
+    let sim = Sim2::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([nx, ny])
+        .origin([-0.5 * lx, -0.5 * ly])
+        .spacing([lx / nx as f64, ly / ny as f64])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim")
+        .set_initial(ic2)
+        .build();
+
+    // the premise: the two axes must differ in BOTH cell count and physical extent, or a swapped
+    // read agrees by coincidence and this proves nothing.
+    assert_ne!(nx, ny, "the cell counts must differ");
+    assert!(
+        (lx - ly).abs() > 1.0e-12,
+        "the physical extents must differ"
+    );
+
+    let dir = std::env::temp_dir().join(format!("restart_aniso_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("c.h5");
+    let p = path.to_str().expect("utf-8");
+    symbi_sim::checkpoint::write_checkpoint(&sim, p, &Default::default())
+        .expect("checkpoint written");
+
+    symbi_sim::checkpoint::verify_checkpoint_level_geometry(&sim, p, 0).unwrap_or_else(|e| {
+        panic!(
+            "a {nx}x{ny} grid failed to verify against the checkpoint it just wrote: {e}. the mesh \
+             description is stored in reversed axis order, so reading it forward compares axis 0 \
+             against the last axis's extent"
+        )
+    });
+
+    // and the check must still DISCRIMINATE on an anisotropic grid: a genuinely different grid is
+    // refused. swapping the two axes is the sharpest case — same total cells, same total volume.
+    let swapped = Sim2::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([ny, nx])
+        .origin([-0.5 * ly, -0.5 * lx])
+        .spacing([ly / ny as f64, lx / nx as f64])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim")
+        .set_initial(ic2)
+        .build();
+    let err = symbi_sim::checkpoint::verify_checkpoint_level_geometry(&swapped, p, 0)
+        .expect_err("a transposed grid must be refused");
+    assert!(
+        format!("{err}").contains("axis"),
+        "the refusal must name the axis that disagrees: {err}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+

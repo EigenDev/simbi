@@ -1472,7 +1472,11 @@ where
     };
     for ax in 0..D {
         let want = sim.geom.interior.spaces[ax].size();
-        let got = *cells.get(ax).unwrap_or(&0) as usize;
+        // `mesh/global_cells` is written in REVERSED (storage) axis order, matching the reversed
+        // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`. reading it
+        // forward compares axis 0 against the LAST axis's count, which agrees only on a cubic grid
+        // and rejects every anisotropic one.
+        let got = *cells.get(D - 1 - ax).unwrap_or(&0) as usize;
         if got != want {
             return Err(IoError::Backend(format!(
                 "{path}: level {level_index} was written with {got} cell(s) on axis {ax} but this \
@@ -1488,7 +1492,10 @@ where
         .find_group("geometry")
         .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry")))?;
     for ax in 0..D {
-        let slot = sim.geom.axes[ax];
+        // the geometry groups are named by STORAGE slot, `(0..D).rev().enumerate()` in the writer,
+        // so slot `D - 1 - ax` holds axis `ax`. the same reversal as `global_cells`, and equally
+        // invisible on a cubic grid or in one dimension.
+        let slot = D - 1 - ax;
         let dim = geometry
             .find_group(&format!("dim_{slot}"))
             .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry/dim_{slot}")))?;
