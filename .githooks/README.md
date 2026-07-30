@@ -2,11 +2,16 @@
 
 ## pre-push
 
-runs test suite before allowing push to remote.
+a fast build check before allowing push to remote: does the whole workspace
+still compile? it does NOT run the test suite -- that belongs in CI.
 
 ### installation
 
-hooks are automatically installed in `.git/hooks/` when you run any command that touches the repo.
+copy `pre-push` into `.git/hooks/` (or point `core.hooksPath` at this dir):
+
+```bash
+cp .githooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+```
 
 ### bypass (emergencies only)
 
@@ -16,20 +21,16 @@ git push --no-verify
 
 ### how it works
 
-1. checks if build directory exists
-2. checks if tests are enabled in build
-3. runs `meson test -C build --print-errorlogs`
-4. allows push only if all tests pass
+1. checks that `cargo` and the `src/` workspace are present (skips if not)
+2. runs `cargo check --workspace --all-targets --manifest-path src/Cargo.toml`
+   (type-checks lib + bins + tests + examples, no codegen, no test run)
+3. allows push only if the workspace compiles
 
-### enabling tests in build
-
-```bash
-./dev.py build --build-tests
-```
-
-or with meson directly:
+this catches the common breakage -- a signature change that misses a call site,
+a stale example -- in under a minute. run the actual test suite yourself (or in
+CI) when relevant:
 
 ```bash
-meson setup build -Dbuild_tests=true
-meson compile -C build
+cargo test --release --manifest-path src/Cargo.toml --workspace          # cpu
+cargo test --features cuda --manifest-path src/Cargo.toml                 # gpu host
 ```

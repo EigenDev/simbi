@@ -22,6 +22,9 @@ class ParamMetadata:
     cli: bool = False
     checkpoint_safe: bool = False
     cli_name: Optional[str] = None
+    # optional section label for the live-dashboard "problem setup" panel; custom params sharing a
+    # group render together. None -> the default "Parameters" group.
+    group: Optional[str] = None
 
 
 def ProblemParam(
@@ -31,6 +34,7 @@ def ProblemParam(
     checkpoint_safe: bool = False,
     cli_name: Optional[str] = None,
     description: Optional[str] = None,
+    group: Optional[str] = None,
     **field_kwargs: Any,
 ) -> FieldInfo:
     """
@@ -49,7 +53,7 @@ def ProblemParam(
         pydantic FieldInfo with embedded ParamMetadata
 
     examples:
-        # required field, not cli-configurable, must match checkpoint
+        # required field, checkpoint-locked, must match checkpoint
         bounds: Annotated[Sequence[Sequence[float]], ProblemParam(..., description="domain bounds")]
 
         # optional with default, cli-configurable, safe to override on restart
@@ -62,6 +66,7 @@ def ProblemParam(
         cli=cli,
         checkpoint_safe=checkpoint_safe,
         cli_name=cli_name,
+        group=group,
     )
     extra: dict[str, Any] = {"param_metadata": metadata}
     return Field(

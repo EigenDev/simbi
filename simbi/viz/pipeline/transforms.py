@@ -13,10 +13,11 @@ import numpy as np
 from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
+from ..figure import Figure
 from ..types import Array, CoordSystem, FieldData
 
-# Maps logical axis names (user-facing) to the data's array index.
-# This example assumes data is stored (nz, ny, nx) or (x3, x2, x1).
+# maps logical axis names (user-facing) to the data's array index.
+# this example assumes data is stored (nz, ny, nx) or (x3, x2, x1).
 AXIS_MAP = {"x1": 2, "x2": 1, "x3": 0}
 INV_AXIS_MAP = {v: k for k, v in AXIS_MAP.items()}
 
@@ -35,24 +36,37 @@ FIELD_ALIASES = {
 class SlicePlan:
     """A complete, explicit plan for slicing and reordering data."""
 
-    # The tuple to index the NumPy array, e.g., (5, slice(None), slice(None))
+    # the tuple to index the NumPy array, e.g., (5, slice(None), slice(None))
     index_tuple: tuple
 
-    # The *original* indices of the domain arrays to keep,
+    # the *original* indices of the domain arrays to keep,
     # already in the new logical order (e.g., [2, 1] for [x1_arr, x2_arr])
     final_domain_indices: list[int]
 
-    # The transpose order to apply to the data *after* slicing
+    # the transpose order to apply to the data *after* slicing
     # e.g., (1, 0) to turn (ny, nx) -> (nx, ny)
     transpose_order: tuple[int, ...]
 
-    # The logical names of the final axes, e.g., ["x1", "x2"]
+    # the logical names of the final axes, e.g., ["x1", "x2"]
     final_axis_names: list[str]
 
 
 def find_slice_index(coord_array: Array, position: float) -> int:
-    """Find the index closest to the specified position in a coordinate array."""
-    return int(np.abs(coord_array - position).argmin())
+    """Find the index closest to the specified position in a coordinate array.
+
+    the coordinate array may be the VERTEX array (n+1 entries for n cells): a
+    position at or past the upper edge argmins to index n, which overflows the
+    n-cell values array. clamp to the last CELL index, and refuse a position
+    outside the domain with a message naming the bounds."""
+    lo, hi = float(coord_array[0]), float(coord_array[-1])
+    if not (min(lo, hi) <= position <= max(lo, hi)):
+        raise ValueError(
+            f"slice position {position} is outside the domain [{lo:g}, {hi:g}] "
+            "— check the --slice value"
+        )
+    idx = int(np.abs(coord_array - position).argmin())
+    # a vertex array has one more entry than the cell-value axis it indexes.
+    return min(idx, len(coord_array) - 2) if len(coord_array) >= 2 else 0
 
 
 def plan_slice(
@@ -70,7 +84,7 @@ def plan_slice(
     ndim = len(domain)
 
     if not slice_spec:
-        # Pass-through Plan (e.g., Full 3D)
+        # pass-through plan (e.g., full 3D)
         logical_names = [INV_AXIS_MAP.get(i, f"dim_{i}") for i in range(ndim)]
         return SlicePlan(
             index_tuple=tuple(slice(None) for _ in range(ndim)),
@@ -79,11 +93,11 @@ def plan_slice(
             final_axis_names=logical_names,
         )
 
-    # Slicing Plan
+    # slicing plan
     index_tuple_list: list[Any] = [slice(None)] * ndim
     sliced_axes_indices = set()
 
-    # Build the index tuple
+    # build the index tuple
     for axis_name, position in slice_spec.items():
         if axis_name not in AXIS_MAP:
             raise KeyError(f"Invalid axis name '{axis_name}' in slice config.")
@@ -102,34 +116,27 @@ def plan_slice(
         index_tuple_list[axis_index] = slice_index
         sliced_axes_indices.add(axis_index)
 
-    # Determine which axes remain and their *logical* order
-    remaining_indices = sorted(list(set(range(ndim)) - sliced_axes_indices))
-
-    # Get logical names of remaining axes, e.g., ["x1", "x2"]
-    # We sort this to ensure the final plot is always in a
-    # predictable order (e.g., x1, then x2, then x3).
-    remaining_logical_names = sorted(
-        [INV_AXIS_MAP[i] for i in remaining_indices],
-        key=lambda name: name,  # Sorts alphabetically: x1, x2, x3
-    )
-
-    # Get original domain indices in the new logical order
-    # e.g., [2, 1] (index for "x1", index for "x2")
-    final_domain_indices = [AXIS_MAP[name] for name in remaining_logical_names]
-
-    # Create the transpose order
-    # This maps the sliced data's axes to the new logical order
-    # e.g., if remaining_indices is [1, 2] (for ny, nx)
-    # and final_domain_indices is [2, 1] (for x1, x2)
-    # We need to map axis 1 -> new axis 0 (nx)
-    # and axis 0 -> new axis 1 (ny)
-    # The transpose_order is [1, 0]
+    # the surviving axes in DATA-AXIS order (ascending index). `sliced_values` keeps its
+    # axes in exactly this order, so the DOMAIN must stay in the same order for
+    # domain[k] to be the coordinate array of values axis k -- the plotter reads
+    # domain[0] as the outer/slower axis (vertical) and domain[1] as the inner/faster
+    # (horizontal), matching the unsliced/native path. reordering the domain into logical
+    # (x1,x2,x3) order WITHOUT a matching value transpose transposes a non-square slice:
+    # the domain claims (x1,x2) while the values stay (x2,x1), so the coordinate lengths
+    # disagree with the value grid.
+    remaining_indices = sorted(set(range(ndim)) - sliced_axes_indices)
+    final_domain_indices = remaining_indices
     transpose_order = tuple(range(len(remaining_indices)))
+    # AXIS LABELS, by contrast, are the logical names in forward (x1,x2,x3) order: the
+    # labeler pairs axis_names[0] with the horizontal axis, which is domain[1] = the
+    # inner axis = the lowest-numbered surviving logical axis. this mirrors the native
+    # convention (domain reversed, names forward), so a slice labels like an unsliced plot.
+    final_axis_names = sorted(INV_AXIS_MAP[i] for i in remaining_indices)
     return SlicePlan(
         index_tuple=tuple(index_tuple_list),
         final_domain_indices=final_domain_indices,
         transpose_order=transpose_order,
-        final_axis_names=remaining_logical_names,
+        final_axis_names=final_axis_names,
     )
 
 
@@ -140,12 +147,12 @@ def execute_slice(
 
     sliced_values = values[plan.index_tuple]
 
-    # Reorder (transpose) the data to match logical order
-    # For a 1D slice, sliced_values is (e.g.,) 100-long,
-    # transpose_order is (0,), so this does nothing, which is correct. (I think)
+    # reorder (transpose) the data to match logical order
+    # for a 1D slice, sliced_values is (e.g.,) 100-long,
+    # transpose_order is (0,), so this does nothing, which is correct.
     transposed_values = sliced_values.transpose(plan.transpose_order)
 
-    # Reorder the domain to match
+    # reorder the domain to match
     new_domain = [domain[i] for i in plan.final_domain_indices]
 
     return transposed_values, new_domain
@@ -190,9 +197,9 @@ def prepare_field_level(
                 )
                 break
 
-    # Get the domain, in data-storage order (e.g., nz, ny, nx)
+    # get the domain, in data-storage order (e.g., nz, ny, nx)
     # if crop_to_owned=True, mesh already has cropped coordinates
-    # use vertices (edges) for the domain, not cell centers
+    # use vertices (edges) for the domain
     # polygon plots need edges; other plots will extract centers if needed
     full_domain = [getattr(mesh, f"x{i}v") for i in range(values.ndim, 0, -1)]
 
@@ -214,9 +221,8 @@ def prepare_field_level(
     name = f"{field_name}_L{level}" if level > 0 else field_name
 
     # if effective dim is less than current dim, further squeeze
-    # the axis map needs to be considered here. We might have a 3D
-    # problem, but symmetry results in a quasi-2D or quasi-1D dataset.
-    # We must carefully select the axis names accordingly.
+    # the axis map matters here: a 3D problem with symmetry reduces to a
+    # quasi-2D or quasi-1D dataset, so the axis names are selected accordingly.
     axis_names = [INV_AXIS_MAP[i] for i in non_singleton_axes]
     if effective_dim == 1:
         axis_names = ["x1"]
@@ -237,6 +243,50 @@ def prepare_field_level(
         coord_system=CoordSystem(data.metadata.coord_system),
         time=data.metadata.time,
     )
+
+
+def prepare_figure(
+    config: VisualizationConfig,
+    nfiles: int = 1,
+    projection: Literal["polar", "cartesian"] | None = None,
+    nlvls: int = 1,
+    coord_system: CoordSystem = CoordSystem.CARTESIAN,
+    formatter: Optional[object] = None,
+    overlay_mode: bool = False,
+) -> Figure:
+    """Create and prepare a figure based on configuration.
+
+    Accepts an optional `formatter` argument which will be forwarded to the
+    Figure constructor. This allows callers (and tests) to inject a custom
+    formatter instance or policy.
+    """
+    import matplotlib.pyplot as plt
+
+    config.theme.apply(
+        nfiles=nfiles,
+        nfields=len(config.plot.fields) * nlvls,
+        overlay_mode=overlay_mode,
+    )
+    if projection == "polar":
+        fig, ax = plt.subplots(
+            1,
+            1,
+            figsize=config.figure.fig_size,
+            subplot_kw={"projection": "polar"},
+            layout="constrained",
+        )
+    else:
+        fig = plt.figure(figsize=config.figure.fig_size)
+        ax = fig.add_subplot(111)
+
+    # pass optional formatter into the Figure so it can control layout policy
+    figure = Figure(config, formatter=formatter)
+
+    figure.fig = fig
+    figure.axes["main"] = ax
+    figure.coord_system = coord_system
+
+    return figure
 
 
 def extract_field(field_name: str) -> Callable[[SimData], Array]:
@@ -267,6 +317,25 @@ def get_effective_dimensions(data: SimData, config: VisualizationConfig) -> int:
     return min(config.plot.ndim, x)
 
 
+def _block_average(arr: Array, block_shape: tuple[int, ...]) -> Array:
+    """N-dimensional block averaging (downsampling)."""
+    if len(arr.shape) != len(block_shape):
+        raise ValueError("Array shape and block shape must have same ndim.")
+
+    new_shape = []
+    for i, dim in enumerate(arr.shape):
+        block_size = block_shape[i]
+        if dim % block_size != 0:
+            raise ValueError(
+                f"Axis {i} (size {dim}) not divisible by block size {block_size}"
+            )
+        new_shape.extend([dim // block_size, block_size])
+
+    reshaped = arr.reshape(tuple(new_shape))
+    avg_axes = tuple(range(1, len(new_shape), 2))
+    return np.mean(reshaped, axis=avg_axes)
+
+
 def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
     """
     Composes 2D fields for pcolormesh rendering.
@@ -274,51 +343,49 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
     If refined, this "squashes" fine levels onto the base grid.
     If Unigrid, this is a no-op.
     """
-    # Unigrid case: Just return the single 2D field.
+    # unigrid case: just return the single 2D field.
     if len(fields_2d) == 1:
         return fields_2d[0]
 
-    # refined case: Start with the base level (L0)
+    # refined case: start with the base level (L0)
     base_field = fields_2d[0]
     base_x, base_y = base_field.domain
     composited_values = base_field.values.copy()
 
-    # Loop over finer levels and "squash" them onto the base
+    # loop over finer levels and "squash" them onto the base
     for fine_field in fields_2d[1:]:
         fine_x, fine_y = fine_field.domain
         fine_values = fine_field.values
 
-        # Find overlapping indices in the base grid
+        # find overlapping indices in the base grid
         i_start = np.searchsorted(base_x, fine_x[0], side="left")
         i_end = np.searchsorted(base_x, fine_x[-1], side="right")
         j_start = np.searchsorted(base_y, fine_y[0], side="left")
         j_end = np.searchsorted(base_y, fine_y[-1], side="right")
 
-        # Get the sub-region of the base grid that is covered
+        # get the sub-region of the base grid that is covered
         coarse_nx = i_end - i_start
         coarse_ny = j_end - j_start
 
-        # Check if the fine grid dimensions are a multiple
+        # check if the fine grid dimensions are a multiple
         # of the coarse grid region it's covering
         fine_ny, fine_nx = fine_values.shape
         if fine_nx % coarse_nx != 0 or fine_ny % coarse_ny != 0:
-            # Grid mismatch, cannot perform clean block averaging
+            # grid mismatch, cannot perform clean block averaging
             continue
 
-        # Downsample the fine data to the coarse grid's resolution
+        # downsample the fine data to the coarse grid's resolution
         ref_ratio_x = fine_nx // coarse_nx
         ref_ratio_y = fine_ny // coarse_ny
 
-        from .refinement import block_average
-
-        averaged_fine_data = block_average(
+        averaged_fine_data = _block_average(
             fine_values, (ref_ratio_y, ref_ratio_x)
         )
 
-        # Overwrite the base grid data with the averaged fine data
+        # overwrite the base grid data with the averaged fine data
         composited_values[j_start:j_end, i_start:i_end] = averaged_fine_data
 
-    # Return a new 2D FieldData object
+    # return a new 2D FieldData object
     return FieldData(
         name=base_field.name,
         time=base_field.time,
@@ -340,18 +407,22 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     all_patches = []
     all_values = []
 
-    # We must track regions covered by finer levels to avoid overplotting
+    # track regions covered by finer levels to avoid overplotting
     refined_regions = []
 
-    # Iterate from finest level (end of list) to coarsest (start)
+    # iterate from finest level (end of list) to coarsest (start)
     for field in reversed(fields_2d):
-        x_edges, y_edges = field.domain
+        # field.domain is in DATA-STORAGE order (slow..fast = [y, x] for 2D), matching the
+        # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, as
+        # [y, x]: unpacking as (x, y) makes the y-edges drive the x-loop and `values[j, i]` run off axis 0 on a
+        # non-square (refined) patch. a square level hides the swap (both edge arrays are equal).
+        y_edges, x_edges = field.domain
         values = field.values
 
-        # Create cell patches for this level
+        # create cell patches for this level
         for j in range(len(y_edges) - 1):
             for i in range(len(x_edges) - 1):
-                # Check if this cell is covered by an already-processed
+                # check if this cell is covered by an already-processed
                 # finer level
                 cell_x_center = (x_edges[i] + x_edges[i + 1]) / 2
                 cell_y_center = (y_edges[j] + y_edges[j + 1]) / 2
@@ -368,7 +439,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
                 if is_covered:
                     continue
 
-                # Not covered, so add this "leaf cell"
+                # not covered, so add this "leaf cell"
                 patch = [
                     (x_edges[i], y_edges[j]),
                     (x_edges[i + 1], y_edges[j]),
@@ -378,7 +449,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
                 all_patches.append(patch)
                 all_values.append(values[j, i])
 
-        # Add this level's domain to the list of refined regions
+        # add this level's domain to the list of refined regions
         refined_regions.append(
             {
                 "xmin": x_edges[0],
@@ -396,7 +467,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     ]
 
     axis_names = fields_2d[0].axis_names
-    # Return a new 1D FieldData object (the "Polygon Contract")
+    # return a new 1D FieldData object (the "Polygon Contract")
     return FieldData(
         name=f"{fields_2d[0].name}_polygons",
         values=np.array(all_values),
@@ -406,28 +477,6 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
         time=fields_2d[0].time,
         level_bounds=level_bounds if len(level_bounds) > 1 else None,
     )
-
-
-def compose_2d_render(
-    fields_2d: list[FieldData],
-    render_mode: Literal["pcolormesh", "polygons"],
-) -> FieldData:
-    """
-    Composes a list of 2D fields into a single renderable FieldData object.
-
-    This is the "stitching" step for 2D refined or polygon plots.
-    """
-    if not fields_2d:
-        raise ValueError("Cannot compose an empty list of fields.")
-
-    if render_mode == "pcolormesh":
-        # Returns a single 2D FieldData object
-        return _compose_pcolormesh(fields_2d)
-    elif render_mode == "polygons":
-        # Returns a single 1D FieldData object (of polygons)
-        return _compose_polygons(fields_2d)
-    else:
-        raise ValueError(f"Unknown render_mode: {render_mode}")
 
 
 def compose_fields_for_render(

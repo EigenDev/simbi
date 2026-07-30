@@ -66,13 +66,6 @@ def is_dataclass_instance(obj: Type[Any]) -> bool:
     return is_dataclass(obj) and not isinstance(obj, type)
 
 
-def as_list(x: Any) -> list[Any]:
-    if isinstance(x, (Sequence, list, np.ndarray)):
-        return list(x)
-    else:
-        return [x]
-
-
 def calc_any_mean(arr: NDArray[Any], cellspacing: str) -> Any:
     if cellspacing == "linear":
         return 0.5 * (arr[1:] + arr[:-1])
@@ -144,18 +137,6 @@ def calc_vertices(
                 return np.sqrt(tmp[..., 1:] * tmp[..., :-1])
 
 
-def calc_domega(
-    *, x2: NDArray[Any], x3: NDArray[Any] | None = None
-) -> NDArray[Any]:
-    x2v = calc_vertices(arr=x2, direction=1)
-    dcos = np.cos(x2v[:-1]) - np.cos(x2v[1:])
-    if x3:
-        x3v = calc_vertices(arr=x3, direction=1)
-        return np.asanyarray(dcos * (x3v[1:] - x3v[:-1]))
-
-    return np.asanyarray(2.0 * np.pi * dcos)
-
-
 def get_vertices(
     coords: NDArray[np.floating[Any]], is_radial: bool = False, axis: int = -1
 ) -> NDArray[np.floating[Any]]:
@@ -166,7 +147,7 @@ def get_vertices(
     else:
         vertices = 0.5 * (coords[..., 1:] + coords[..., :-1])
 
-    # Add boundary vertices
+    # add boundary vertices
     vertices = np.insert(vertices, 0, coords[..., 0], axis=axis)
     vertices = np.insert(
         vertices, vertices.shape[axis], coords[..., -1], axis=axis
@@ -207,22 +188,22 @@ def calc_volume_2d(
     Returns:
         (n2, n1) array of cell volumes
     """
-    # Create meshgrids from vertices
+    # create meshgrids from vertices
     x1vv: NDArray[np.floating[Any]]
     x1vv, _ = np.meshgrid(x1v, x2v, indexing="ij")
 
     if coord_system == "spherical":
-        # dr³ has shape (n1, n2)
+        # dr^3 has shape (n1, n2)
         dr3: NDArray[np.floating[Any]] = (x1vv[1:] ** 3 - x1vv[:-1] ** 3) / 3.0
         # dcos has shape (n2,)
         dcos: NDArray[np.floating[Any]] = np.cos(x2v[:-1]) - np.cos(x2v[1:])
-        # Broadcast for multiplication
+        # broadcast for multiplication
         return (2.0 * np.pi * dr3[:, :-1] * dcos[None, :]).T
 
     elif coord_system == "cartesian":
         dx: NDArray[np.floating[Any]] = x1v[1:] - x1v[:-1]  # shape (n1,)
         dy: NDArray[np.floating[Any]] = x2v[1:] - x2v[:-1]  # shape (n2,)
-        # Use outer product for correct broadcasting
+        # use outer product for correct broadcasting
         return np.outer(dy, dx)
 
     elif coord_system == "cylindrical":
@@ -230,7 +211,7 @@ def calc_volume_2d(
             x1v[1:] ** 2 - x1v[:-1] ** 2
         ) / 2.0  # shape (n1,)
         dphi: NDArray[np.floating[Any]] = x2v[1:] - x2v[:-1]  # shape (n2,)
-        # Use outer product for correct broadcasting
+        # use outer product for correct broadcasting
         return np.outer(dphi, dr2)
 
     raise ValueError(f"Unsupported coordinate system: {coord_system}")
@@ -282,7 +263,7 @@ def calc_cell_volume(
     """Calculate cell volumes for 1D, 2D, or 3D grids"""
     ndim: int = len(coords)
 
-    # Convert to vertices if needed
+    # convert to vertices if needed
     if not vertices:
         is_radial: bool = coord_system in ["spherical", "cylindrical"]
         coords = [
@@ -388,7 +369,7 @@ def print_progress(
             # prefer the central factory if available
             from simbi.reader.progress import create_progress_bar
 
-            # ensure we have a console to pass in
+            # ensure a console is available to pass in
             try:
                 from rich.console import Console
 

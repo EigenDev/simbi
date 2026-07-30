@@ -1,58 +1,38 @@
 # =============================================================================
-# simbi/analysis/__init__.py
+# analysis
 #
-# pure physics/math analysis functions with no viz dependency.
-# reusable from notebooks, scripts, or the viz pipeline.
+# offline science diagnostics over run outputs (docs/ideas/accretor.md §5):
+# the body-exchange time series (Mdot(t), F_acc(t)) written by the run into
+# each checkpoint's `body_diagnostics` group, the steady-state detector and
+# windowed averaging, and the sonic-surface / stagnation-point extractors.
+# usage:
+#   from simbi.analysis import load_body_diagnostics, steady_state_time
+#   diag = load_body_diagnostics("run.chkpt.final.h5")
+#   t0 = steady_state_time(diag.time, diag.mdot[:, 0])
 # =============================================================================
-from .bondi import accretion_coefficient, bondi_profiles
-from .radial_profiles import (
-    mass_flux_profile,
-    momentum_equation_terms,
-    radial_velocity_profile,
-    reynolds_delta_v_profile,
-    sound_speed_profile,
-    spherical_profile,
-    stitch_leaf_cells,
-    time_average_profiles,
-    turbulent_velocity_sq_profile,
-)
-from .spectrum import (
-    angular_power_spectrum,
-    angular_velocity_power_spectrum,
-    composite_angular_power_spectrum,
-    composite_angular_velocity_power_spectrum,
-    composite_shell_averaged_scalar_spectrum,
-    composite_shell_averaged_spectrum,
-    lomb_scargle_fap_levels,
-    lomb_scargle_psd,
-    phase_fold,
-    shell_averaged_scalar_spectrum,
-    shell_averaged_spectrum,
-    welch_lomb_scargle_psd,
+
+from .accretion import (
+    BodyDiagnostics,
+    DatDiagnostics,
+    averaged_rate,
+    load_body_diagnostics,
+    load_diagnostics_dat,
+    mdot_from_cumulative,
+    sonic_radius_vs_angle,
+    sphere_flux,
+    stagnation_distance,
+    steady_state_time,
 )
 
 __all__ = [
-    "accretion_coefficient",
-    "angular_power_spectrum",
-    "angular_velocity_power_spectrum",
-    "bondi_profiles",
-    "composite_angular_power_spectrum",
-    "composite_angular_velocity_power_spectrum",
-    "composite_shell_averaged_spectrum",
-    "composite_shell_averaged_scalar_spectrum",
-    "lomb_scargle_fap_levels",
-    "lomb_scargle_psd",
-    "phase_fold",
-    "mass_flux_profile",
-    "momentum_equation_terms",
-    "radial_velocity_profile",
-    "reynolds_delta_v_profile",
-    "shell_averaged_scalar_spectrum",
-    "shell_averaged_spectrum",
-    "sound_speed_profile",
-    "spherical_profile",
-    "stitch_leaf_cells",
-    "time_average_profiles",
-    "turbulent_velocity_sq_profile",
-    "welch_lomb_scargle_psd",
+    "BodyDiagnostics",
+    "DatDiagnostics",
+    "averaged_rate",
+    "load_body_diagnostics",
+    "load_diagnostics_dat",
+    "mdot_from_cumulative",
+    "sonic_radius_vs_angle",
+    "sphere_flux",
+    "stagnation_distance",
+    "steady_state_time",
 ]

@@ -24,7 +24,7 @@ from simbi.types.typing import (
     MHDStateGenerators,
 )
 
-from .checkpoint import merge_with_checkpoint, validate_checkpoint_compatibility
+from .checkpoint import merge_with_checkpoint
 from .param import ProblemParam, get_param_metadata
 from .problem import SimbiProblem
 from .runner import run, to_execution_dict
@@ -37,7 +37,6 @@ __all__ = [
     # utilities
     "to_execution_dict",
     "merge_with_checkpoint",
-    "validate_checkpoint_compatibility",
     "get_param_metadata",
     # types - input
     "BoundaryCondition",

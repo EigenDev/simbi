@@ -12,13 +12,10 @@
 # component-specific styling (cmap, log_scale, alpha, etc.) is handled
 # entirely by component props via --config and --props.
 # =============================================================================
-from argparse import Namespace
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
-# re-export for backward compatibility
-from .registry import PLOT_TYPE_ALIASES as _PLOT_TYPE_TO_REGISTRY  # noqa: F401
 from .styling.theme import ThemeConfig
 from .types import Bounds
 
@@ -35,33 +32,34 @@ class FigureConfig(BaseModel):
     xscale: Literal["linear", "log", "symlog", "asinh"] = "linear"
     yscale: Literal["linear", "log", "symlog", "asinh"] = "linear"
     title: Optional[str] = None
-    draw_bodies: bool = False
     time_scale: Optional[float] = None
     time_units: str = ""
     transparent: bool = False
+    # overlay each immersed body's silhouette on the field plot (cartesian only; the
+    # body signed-distance is cartesian, so it does not align with a polar/spherical plot).
+    draw_bodies: bool = False
+    # overlay the black-hole event horizon (and excision surface) of a curved-spacetime
+    # run, read from the checkpoint metadata; a flat (minkowski) run draws nothing.
+    draw_horizon: bool = False
+    # scatter mass-transport tracers on the field plot; a run with no
+    # `tracers` group draws nothing.
+    draw_tracers: bool = False
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class PlotConfig(BaseModel):
     """Plot type and data configuration."""
 
-    plot_type: str
+    plot_type: Literal["line", "multidim", "coordinate_bin", "time_series"]
     fields: list[str]
     ndim: int = 1
     slice: Optional[dict[str, float]] = None
+    # field-value normalization: a numeric string (divide by the constant), or "max"/"min"
+    # (divide by the field's own extremum). None = no normalization.
+    norm: Optional[str] = None
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-    @field_validator("plot_type")
-    @classmethod
-    def validate_plot_type(cls, v: str) -> str:
-        valid = set(_PLOT_TYPE_TO_REGISTRY.keys())
-        if v not in valid:
-            raise ValueError(
-                f"unknown plot type '{v}'. valid: {', '.join(sorted(valid))}"
-            )
-        return v
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
     @field_validator("ndim")
     @classmethod
@@ -78,15 +76,15 @@ class RefinementConfig(BaseModel):
     active_levels: Optional[set[int]] = None
     render_mode: Literal["polygons", "pcolormesh"] = "polygons"
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class CoordinateConfig(BaseModel):
     """Configuration for coordinate binning plots."""
 
-    n_bins: int = 256
+    n_bins: int = 64
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class TimeSeriesConfig(BaseModel):
@@ -94,28 +92,7 @@ class TimeSeriesConfig(BaseModel):
 
     weight: Optional[str] = None
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-
-class TemporalSpectrumConfig(BaseModel):
-    """configuration for temporal power spectrum plots."""
-
-    psd_method: Literal["standard", "welch"] = "standard"
-    n_segments: int = 8
-    overlap: float = 0.5
-    normalize_psd: bool = False
-    pre_filter_width: Optional[float] = None
-
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-
-class PhaseFoldConfig(BaseModel):
-    """configuration for phase-folded time series plots."""
-
-    n_bins: int = 50
-    show_orbits: bool = False
-
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class AnimationConfig(BaseModel):
@@ -125,7 +102,7 @@ class AnimationConfig(BaseModel):
     frame_rate: int = 30
     save_all_frames: bool = False
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
     @field_validator("frame_rate")
     @classmethod
@@ -133,91 +110,6 @@ class AnimationConfig(BaseModel):
         if v <= 0:
             raise ValueError(f"frame_rate must be positive, got {v}")
         return v
-
-
-class OverlayConfig(BaseModel):
-    """Configuration for a single overlay layer (e.g., contour lines)."""
-
-    field: str
-    component: str = "contour"
-    levels: list[float] = Field(default_factory=lambda: [1.0])
-    color: str = "lightgrey"
-    linewidth: float = 1
-    linestyle: str = "--"
-    alpha: float = 1.0
-    filled: bool = False
-    label_contours: bool = False
-
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
-
-    @field_validator("alpha")
-    @classmethod
-    def validate_alpha(cls, v: float, info: ValidationInfo) -> float:
-        if v < 0 or v > 1:
-            raise ValueError(f"alpha must be between 0 and 1, got {v}")
-        return v
-
-
-def parse_overlay_spec(
-    spec: str,
-    default_color: str = "white",
-    default_linewidth: float = 1.5,
-) -> OverlayConfig:
-    """
-    parse overlay specification string.
-
-    format: FIELD:COMPONENT:LEVELS
-    examples:
-        "mach:contour:1.0"
-        "mach:contour:1.0,2.0,3.0"
-    """
-    parts = spec.split(":")
-
-    if len(parts) < 1:
-        raise ValueError(
-            f"invalid overlay spec: '{spec}'. expected FIELD:COMPONENT:LEVELS"
-        )
-
-    field = parts[0]
-    component = parts[1] if len(parts) > 1 else "contour"
-    levels_str = parts[2] if len(parts) > 2 else "1.0"
-
-    try:
-        levels = [float(x.strip()) for x in levels_str.split(",")]
-    except ValueError as e:
-        raise ValueError(f"invalid levels in overlay spec '{spec}': {e}")
-
-    return OverlayConfig(
-        field=field,
-        component=component,
-        levels=levels,
-        color=default_color,
-        linewidth=default_linewidth,
-    )
-
-
-def overlays_from_args(args: Namespace) -> list[OverlayConfig]:
-    """
-    parse field overlay arguments into OverlayConfig list.
-
-    handles --field-overlay flag which can be specified multiple times.
-    """
-    raw_overlays = getattr(args, "field_overlays", None)
-    if not raw_overlays:
-        return []
-
-    default_color = getattr(args, "overlay_color", "white")
-    default_linewidth = getattr(args, "overlay_linewidth", 1.5)
-
-    overlays: list[OverlayConfig] = []
-
-    for overlay_group in raw_overlays:
-        for spec in overlay_group:
-            overlays.append(
-                parse_overlay_spec(spec, default_color, default_linewidth)
-            )
-
-    return overlays
 
 
 class VisualizationConfig(BaseModel):
@@ -228,12 +120,7 @@ class VisualizationConfig(BaseModel):
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     coordinate: CoordinateConfig = Field(default_factory=CoordinateConfig)
     time_series: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
-    temporal_spectrum: TemporalSpectrumConfig = Field(
-        default_factory=TemporalSpectrumConfig
-    )
-    phase_fold: PhaseFoldConfig = Field(default_factory=PhaseFoldConfig)
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
-    overlays: list[OverlayConfig] = Field(default_factory=list)
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}

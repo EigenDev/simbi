@@ -1,0 +1,13 @@
+[package]
+name = "symbi-abi"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# the typed ABI names round-trip through the serialized kernel manifest (FieldBind /
+# ScalarBind are serde fields of symbi-ir's `Prepared`). serde derive is the only dep —
+# this crate is a leaf so the IR can carry the vocabulary without owning it.
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

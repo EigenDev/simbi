@@ -15,6 +15,13 @@ from .io import Checkpoint
 ComputeFunc = Callable[[dict[str, Any]], Any]
 
 
+class FieldComputationError(ValueError):
+    """a derived field could not be computed from the checkpoint's stored
+    datasets (e.g. a pressure-dependent field on a file with no pressure).
+    deliberately not a KeyError: callers that skip fields absent from a
+    level must still surface this as a hard failure."""
+
+
 # =============================================================================
 # physics primitives
 # =============================================================================
@@ -32,6 +39,15 @@ class VectorMode(Enum):
 def _dot_product(a: Sequence[Array], b: Sequence[Array]) -> Array:
     """dot product of two vector fields."""
     return np.sum([a[ii] * b[ii] for ii in range(len(a))], axis=0)
+
+
+def _vector_dof(regime: str, ndim: int) -> int:
+    """number of stored velocity / magnetic vector components. an mhd field is a 3-vector no
+    matter the spatial dimensionality: a 2.5D (D=2) or 1.75D (D=1) run still evolves and stores the
+    out-of-plane components (the toroidal v_phi and b_phi), so reading only the ndim in-plane ones
+    drops real data — zeroing the magnetic pressure of a purely toroidal field and corrupting the
+    lorentz factor and v.B of any rotating flow. a hydro velocity has one component per axis."""
+    return 3 if "mhd" in regime else ndim
 
 
 def lorentz_factor(
@@ -78,20 +94,6 @@ def _enthalpy(
     return 1.0 + gamma * pre / (rho * (gamma - 1.0))
 
 
-def sound_speed(
-    rho: Array, pre: Array, gamma: float, regime: str
-) -> Array:
-    """
-    adiabatic sound speed.
-
-    newtonian:    cs^2 = gamma * p / rho
-    relativistic: cs^2 = gamma * p / (rho * h),
-                  h = 1 + gamma * p / (rho * (gamma - 1))
-    """
-    h = _enthalpy(rho, pre, gamma, regime)
-    return np.sqrt(gamma * pre / (rho * h))
-
-
 def labframe_density(
     rho: Array, velocity: Sequence[Array], regime: str
 ) -> Array:
@@ -118,10 +120,10 @@ def labframe_energy_density(
     W = 1.0 / np.sqrt(1.0 - vsq)
     h = _enthalpy(rho, pre, gamma, regime)
 
-    if regime == "srhd":
+    if regime == "rhd":
         return np.asarray(rho * W**2 * h - pre - rho * W)
 
-    if regime == "srmhd":
+    if regime == "rmhd":
         bsq = sum(b**2 for b in bfield)
         vdb = _dot_product(vel, bfield)
         return np.asarray(
@@ -143,7 +145,7 @@ def labframe_momentum(
     """compute lab-frame momentum."""
     if regime == "newtonian":
         mom_vec = np.asarray(rho) * np.asarray(vel)
-    elif "sr" in regime:
+    elif regime in ("rhd", "rmhd"):
         h = _enthalpy(rho, pre, gamma, regime)
         D = labframe_density(rho, vel, regime).squeeze()
         W = lorentz_factor(vel, regime)
@@ -156,7 +158,7 @@ def labframe_momentum(
 
         magnetic_part: Array | float = 0.0
         vel = [v.squeeze() for v in vel]
-        if regime == "srmhd":
+        if regime == "rmhd":
             bsq = np.array(sum(b**2 for b in bfield), dtype=float)
             vdb = _dot_product(vel, bfield)
             magnetic_part = np.array(
@@ -180,7 +182,7 @@ def magnetic_pressure(
 ) -> Array:
     """compute magnetic pressure."""
     bsq: Array = np.sum([b**2 for b in bfields], axis=0)
-    if regime == "srmhd":
+    if regime == "rmhd":
         W = 1.0 / np.sqrt(1.0 - _dot_product(velocity, velocity))
         vdb = _dot_product(velocity, bfields)
         bsq = bsq / W**2 + vdb**2
@@ -207,9 +209,9 @@ def enthalpy_density(
     """compute enthalpy density."""
     if regime == "newtonian":
         return rho
-    elif regime == "srhd":
+    elif regime == "rhd":
         return rho * _enthalpy(rho, pre, adiabatic_index, regime)
-    elif regime == "srmhd":
+    elif regime == "rmhd":
         return rho * _enthalpy(
             rho, pre, adiabatic_index, regime
         ) + 2.0 * magnetic_pressure(bfields, velocity, regime)
@@ -222,48 +224,27 @@ def magnetization(rho: Array, bfields: Sequence[Array]) -> Array:
 
 
 # =============================================================================
-# reynolds-decomposition helpers
-# =============================================================================
-def make_fluctuation(
-    getter: Callable[[Any], Array],
-) -> Callable[[Any], Array]:
-    """
-    reynolds-decomposition factory: q' = q - <q>.
-
-    `getter(ctx)` produces the base scalar field from a compute context
-    (primitive dict or level_context_t). the returned function subtracts
-    the spatial mean, yielding the signed fluctuation suitable for
-    diverging colormaps.
-    """
-
-    def compute(ctx: Any) -> Array:
-        q = np.asarray(getter(ctx))
-        return np.asarray(q - np.mean(q))
-
-    return compute
-
-
-def make_relative_fluctuation(
-    getter: Callable[[Any], Array],
-) -> Callable[[Any], Array]:
-    """
-    relative fluctuation: (q - <q>) / <q>.
-
-    useful for scale-invariant comparison (e.g. subsonic density
-    fluctuations). guards against division by zero via np.finfo tiny.
-    """
-
-    def compute(ctx: Any) -> Array:
-        q = np.asarray(getter(ctx))
-        mean = np.mean(q)
-        return np.asarray((q - mean) / (mean + np.finfo(float).tiny))
-
-    return compute
-
-
-# =============================================================================
 # computation pipeline factory
 # =============================================================================
+def _broadcast_cell_centers(mesh: Any, ndim: int) -> tuple[Array, ...]:
+    """cell-center coordinate arrays reshaped to broadcast along their storage axis.
+
+    field arrays are stored in (x3, x2, x1) = (z, y, x) order, so x1 varies along
+    the last array axis, x2 the second-to-last, and x3 the first. a bare 1d
+    coordinate array broadcasts against the last axis only: correct for x1, but it
+    transposes x2/x3 against the data — silent on a square grid, a shape error on a
+    non-square one. each returned array carries singleton axes so it multiplies
+    against its own storage axis."""
+    x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+    if ndim == 1:
+        return (x,)
+    y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+    if ndim == 2:
+        return x[None, :], y[:, None]
+    z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+    return x[None, None, :], y[None, :, None], z[:, None, None]
+
+
 def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     """
     create a pipeline of derived field computations.
@@ -288,6 +269,15 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         def get(self, key: str, default=None):
             return self._fields.get(key, default)
 
+        def __contains__(self, key: str) -> bool:
+            # without this, `key in ctx` falls back to integer __getitem__
+            # iteration and raises KeyError: 0 — which broke every b*_mean
+            # derived field on MHD checkpoints.
+            return key in self._fields
+
+        def __iter__(self):
+            return iter(self._fields)
+
         def __getattr__(self, name: str):
             # forward attribute access to mesh for convenience
             if hasattr(self.mesh, name):
@@ -297,8 +287,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     # simple wrapper representing a derived field
     class derived_field_t:
         def __init__(
-            self, func: Callable[..., Array], requires_composite: bool = False
+            self,
+            name: str,
+            func: Callable[..., Array],
+            requires_composite: bool = False,
         ):
+            self._name = name
             self._func = func
             self._requires_composite = requires_composite
 
@@ -315,7 +309,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
             level_data = data.levels[level]
 
-            # only single-partition supported currently
+            # derived fields are computed on a single contiguous partition
             if level_data.num_partitions != 1:
                 raise NotImplementedError(
                     "multi-partition support not implemented"
@@ -349,13 +343,39 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
                 for name, field in partition.hydro.magnetic.items():
                     mapping[name] = field.data
 
+            # the isothermal regime carries no pressure dataset; its eos
+            # closes with p = cs^2 rho at the constant metadata sound speed,
+            # so p-dependent derived fields stay computable.
+            if "p" not in mapping and regime == "isothermal":
+                cs = data.metadata.sound_speed
+                if cs is not None:
+                    mapping["p"] = cs * cs * mapping["rho"]
+
             # provide context to compute function
             ctx = level_context_t(mapping, mesh)
-            result = self._func(ctx)
+            try:
+                result = self._func(ctx)
+            except KeyError as exc:
+                missing = exc.args[0] if exc.args else "?"
+                hint = ""
+                if missing == "p" and regime == "isothermal":
+                    hint = (
+                        " (this isothermal checkpoint predates the"
+                        " 'sound_speed' metadata attr, so p = cs^2 rho"
+                        " cannot be reconstructed)"
+                    )
+                raise FieldComputationError(
+                    f"derived field '{self._name}' needs base field"
+                    f" '{missing}', which this {regime} checkpoint does not"
+                    f" store; available: {sorted(mapping)}{hint}"
+                ) from exc
             return np.asarray(result)
 
     def get_velocities(fields: dict[str, Array]) -> list[Array]:
-        return [fields[f"v{ii}"] for ii in range(1, ndim + 1)]
+        # gather the full 3-component vector DOF for mhd: the out-of-plane v_phi is a stored,
+        # evolved field in 2.5D / 1.75D runs and enters the lorentz factor and v.B. callers that
+        # need a fixed 3-vector zero-pad the (genuinely absent) tail.
+        return [fields[f"v{ii}"] for ii in range(1, _vector_dof(regime, ndim) + 1)]
 
     def get_b_fields(fields: dict[str, Array]) -> list[Array]:
         """
@@ -370,9 +390,13 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             b1 shape differs from rho by +1 along the x1-normal axis (fastest varying / last axis)
             b2 differs by +1 along x2-normal (middle axis)
             b3 differs by +1 along x3-normal (slowest / first axis)
+          the field is a 3-vector: in a 2.5D / 1.75D run the out-of-plane component (the toroidal
+          b_phi) is cell-centered (no face in the missing axis) and is accepted as-is below.
         """
-        # gather raw (possibly face-centered) arrays or None placeholders
-        raw = [fields.get(f"b{ii}", None) for ii in range(1, ndim + 1)]
+        # gather the full 3-component magnetic vector DOF for mhd: missing entries resolve to
+        # zeros. reading only b1..b_ndim drops the out-of-plane b_phi, which zeros the magnetic
+        # pressure of a purely toroidal field.
+        raw = [fields.get(f"b{ii}", None) for ii in range(1, _vector_dof(regime, ndim) + 1)]
         rho_shape = tuple(np.asarray(fields["rho"]).shape)
 
         def _average_faces_to_cells(face_arr: Array, axis: int) -> Array:
@@ -490,22 +514,32 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
         return _compute
 
-    def compute_b_mean_component(
+    def compute_b_labframe_component(
         component: int,
     ) -> Callable[[dict[str, Array]], Array]:
-        def _compute(fields: dict[str, Array]) -> Array:
-            field_name = f"b{component}"
-            if field_name not in fields:
-                return np.zeros_like(fields["rho"])
+        """cell-centered lab-frame magnetic field component b_i. face-centered values are
+        averaged to the cell center by get_b_fields, which also accepts the out-of-plane
+        component of a 2.5d / 1.75d run as-is (it carries no face in the missing axis)."""
 
-            view = fields[field_name]
-            if field_name == "b1":
-                return 0.5 * (view[..., 1:] + view[..., :-1])
-            elif field_name == "b2":
-                return 0.5 * (view[:, 1:, :] + view[:, :-1, :])
-            elif field_name == "b3":
-                return 0.5 * (view[1:, :, :] + view[:-1, :, :])
-            raise ValueError(f"invalid b-field component: {field_name}")
+        def _compute(fields: dict[str, Array]) -> Array:
+            return np.asarray(get_b_fields(fields)[component])
+
+        return _compute
+
+    def compute_b_four_component(
+        component: int,
+    ) -> Callable[[dict[str, Array]], Array]:
+        """spatial component of the comoving magnetic four-vector,
+        b^i = B^i / W + W (v.B) v^i, with B the cell-centered lab-frame field, v the
+        three-velocity, and W the lorentz factor. its norm b_mu b^mu = |B|^2 / W^2 +
+        (v.B)^2 equals twice the relativistic magnetic pressure."""
+
+        def _compute(fields: dict[str, Array]) -> Array:
+            vel = get_velocities(fields)
+            b = get_b_fields(fields)
+            W = lorentz_factor(vel, regime)
+            vdb = _dot_product(vel, b)
+            return np.asarray(b[component] / W + W * vdb * vel[component])
 
         return _compute
 
@@ -545,12 +579,15 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             get_b_fields(fields), get_velocities(fields), regime
         )
 
-    def compute_sound_speed(fields: dict[str, Array]) -> Array:
-        return sound_speed(fields["rho"], fields["p"], gamma, regime)
+    def compute_magnetic_energy(fields: dict[str, Array]) -> Array:
+        """lab-frame magnetic energy density 1/2 |B|^2 (cell-centered B). distinct from `pmag`,
+        which carries the relativistic (comoving) magnetic pressure for rmhd."""
+        b = get_b_fields(fields)
+        return np.asarray(0.5 * _dot_product(b, b))
 
     def compute_mach_number(fields: dict[str, Array]) -> Array:
         v_mag = compute_velocity_magnitude(fields)
-        cs = compute_sound_speed(fields)
+        cs = np.sqrt(gamma * fields["p"] / fields["rho"])
         return np.asanyarray(v_mag / cs)
 
     def compute_chi_density(fields: dict[str, Array]) -> Array:
@@ -562,8 +599,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def angular_momentum_density(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
-        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+        coords = _broadcast_cell_centers(mesh, ndim)
+        x, y = coords[0], coords[1]
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -586,8 +623,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def specific_angular_momentum(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
-        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+        coords = _broadcast_cell_centers(mesh, ndim)
+        x, y = coords[0], coords[1]
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -610,7 +647,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         den = level_data["rho"]
 
         if den.ndim == 3:
-            dz = mesh.x3v[1:] - mesh.x3v[:-1]
+            dz = (mesh.x3v[1:] - mesh.x3v[:-1])[:, None, None]
             Sigma = np.sum(den * dz, axis=0)
             Lz_int = np.sum(Lz * dz, axis=0)
             return np.asarray(Lz_int / (Sigma + np.finfo(float).tiny))
@@ -620,22 +657,22 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         den = level_data["rho"]
         if den.ndim == 3:
             mesh = getattr(level_data, "mesh")
-            dz = mesh.x3v[1:] - mesh.x3v[:-1]
+            dz = (mesh.x3v[1:] - mesh.x3v[:-1])[:, None, None]
             return np.asarray(np.sum(den * dz, axis=0))
         return np.asarray(den)
 
     def mass_flux(level_data: dict[str, Any]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
-        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+        coords = _broadcast_cell_centers(mesh, ndim)
         vx, vy = level_data["v1"], level_data["v2"]
 
         if vx.ndim == 3:
-            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+            x, y, z = coords
             r = np.sqrt(x**2 + y**2 + z**2)
             vz = level_data["v3"]
             vr = (x * vx + y * vy + z * vz) / (r + np.finfo(float).tiny)
         else:
+            x, y = coords[0], coords[1]
             r = np.sqrt(x**2 + y**2)
             vr = (x * vx + y * vy) / (r + np.finfo(float).tiny)
 
@@ -679,7 +716,13 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         returns: sqrt(\\omega_x^2 + \\omega_y^2 + \\omega_z^2)
         """
         mesh = getattr(level_data, "mesh")
-        vx, vy, vz = get_velocities(level_data)
+        # get_velocities returns ndim entries: pad the out-of-plane components
+        # with zeros so the 2d (and 1d) branches below unpack a full 3-vector;
+        # unpacking fewer than three would raise a bare ValueError.
+        vels = get_velocities(level_data)
+        while len(vels) < 3:
+            vels.append(np.zeros_like(vels[0]))
+        vx, vy, vz = vels
 
         # cell-centered coordinates
         coords = []
@@ -740,7 +783,13 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         q < 0: strain-dominated regions (shear layers)
         """
         mesh = getattr(level_data, "mesh")
-        vx, vy, vz = get_velocities(level_data)
+        # get_velocities returns ndim entries: pad the out-of-plane components
+        # with zeros so the 2d (and 1d) branches below unpack a full 3-vector;
+        # unpacking fewer than three would raise a bare ValueError.
+        vels = get_velocities(level_data)
+        while len(vels) < 3:
+            vels.append(np.zeros_like(vels[0]))
+        vx, vy, vz = vels
 
         # cell-centered coordinates
         coords = []
@@ -893,45 +942,6 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
         return np.asarray(grad_mag)
 
-    def compute_entropy_measure(level_data: dict[str, Array]) -> Array:
-        """
-        entropy measure: p / rho^gamma
-        useful for identifying shocks and mixing regions.
-        """
-        gamma_val = gamma
-        p = level_data["p"]
-        rho = level_data["rho"]
-        entropy = p / (rho**gamma_val + 1e-20)  # avoid division by zero
-        return np.asarray(entropy)
-
-    def compute_turbulent_velocity(level_data: dict[str, Array]) -> Array:
-        """turbulent velocity: |v - <v>| where <v> is the spatial mean per component."""
-        components = [level_data[f"v{ii}"] for ii in range(1, ndim + 1)]
-        fluctuations = [vi - np.mean(vi) for vi in components]
-        return np.asarray(np.sqrt(sum(dv**2 for dv in fluctuations)))
-
-    def compute_entropy_gradient(level_data: dict[str, Array]) -> Array:
-        """
-        gradient magnitude of entropy s = p / rho^gamma.
-        """
-        mesh = getattr(level_data, "mesh")
-        p = level_data["p"]
-        rho = level_data["rho"]
-        s = p / (rho**gamma + 1e-20)
-
-        coords = []
-        if ndim >= 1:
-            coords.append(0.5 * (mesh.x1v[1:] + mesh.x1v[:-1]))
-        if ndim >= 2:
-            coords.append(0.5 * (mesh.x2v[1:] + mesh.x2v[:-1]))
-        if ndim >= 3:
-            coords.append(0.5 * (mesh.x3v[1:] + mesh.x3v[:-1]))
-
-        grads = [
-            np.gradient(s, coords[ax], axis=ndim - 1 - ax) for ax in range(ndim)
-        ]
-        return np.asarray(np.sqrt(sum(g**2 for g in grads)))
-
     # build base pipeline of functions
     base_pipeline: dict[str, Callable[..., Any]] = {
         "W": compute_W,
@@ -944,7 +954,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "sigma": compute_magnetization,
         "ptot": compute_total_pressure,
         "pmag": compute_magnetic_pressure,
-        "cs": compute_sound_speed,
+        "emag": compute_magnetic_energy,
         "mach": compute_mach_number,
         "chi_dens": compute_chi_density,
         "j": angular_momentum_density,
@@ -957,52 +967,34 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "okubo_weiss": compute_okubo_weiss,
         "div_v": compute_divergence,
         "schlieren": compute_schlieren,
-        "entropy-measure": compute_entropy_measure,
-        "entropy-gradient": compute_entropy_gradient,
-        "v_turb": compute_turbulent_velocity,
     }
 
-    # add component fields
-    for ii in range(1, ndim + 1):
+    # add component fields. an mhd velocity / momentum is a 3-vector regardless of the spatial
+    # dimensionality (a 2.5d / 1.75d run still evolves the out-of-plane component), so the
+    # component count follows the stored vector dof: 3 for mhd, ndim for hydro.
+    vector_dof = _vector_dof(regime, ndim)
+    for ii in range(1, vector_dof + 1):
         base_pipeline[f"u{ii}"] = compute_u_component(ii - 1)
         base_pipeline[f"m{ii}"] = compute_momentum_component(ii - 1)
 
     if data.metadata.is_mhd:
-        for ii in range(1, ndim + 1):
-            base_pipeline[f"b{ii}_mean"] = compute_b_mean_component(ii)
-
-    # reynolds-decomposition variants: delta_<field> = field - <field>
-    # registered automatically for every primitive scalar present in the
-    # checkpoint and for the velocity magnitude / mach number.
-    prim_names: set[str] = set()
-    if data.levels and data.levels[0].num_partitions >= 1:
-        prim_names = set(data.levels[0].partitions[0].hydro.primitives.keys())
-
-    def _prim_getter(name: str) -> Callable[[dict[str, Array]], Array]:
-        return lambda ctx, _name=name: ctx[_name]
-
-    for name in prim_names:
-        base_pipeline[f"delta_{name}"] = make_fluctuation(_prim_getter(name))
-        base_pipeline[f"delta_rel_{name}"] = make_relative_fluctuation(
-            _prim_getter(name)
-        )
-
-    # velocity magnitude fluctuation: |v| - <|v|> (distinct from v_turb which is
-    # the magnitude of the per-component velocity fluctuation vector).
-    base_pipeline["delta_v"] = make_fluctuation(compute_velocity_magnitude)
-    base_pipeline["delta_rel_v"] = make_relative_fluctuation(
-        compute_velocity_magnitude
-    )
-
-    # mach number fluctuation
-    base_pipeline["delta_mach"] = make_fluctuation(compute_mach_number)
+        # cell-centered lab-frame magnetic field b1_mean / b2_mean / b3_mean (the plain b1/b2/b3
+        # names resolve to the raw face-centered fields, so the cell-centered form carries the
+        # _mean suffix).
+        for ii in range(1, vector_dof + 1):
+            base_pipeline[f"b{ii}_mean"] = compute_b_labframe_component(ii - 1)
+        # spatial components of the comoving magnetic four-vector, defined only for the
+        # relativistic mhd regime.
+        if regime == "rmhd":
+            for ii in range(1, vector_dof + 1):
+                base_pipeline[f"bmu{ii}"] = compute_b_four_component(ii - 1)
 
     # fields requiring composite/base-level computation
     # these involve spatial integration or coordinate transformations that are
     # meaningless when computed on partial refined domains
     composite_required = {
         "Sigma",  # surface_density: integrates over z-column
-        "j",  # angular_momentum_density: uses r × v with coordinates
+        "j",  # angular_momentum_density: uses cross(r, v) with coordinates
         "j_spec",  # specific_angular_momentum: same
         "mass_flux",  # uses coordinate radius
     }
@@ -1010,7 +1002,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     # wrap functions into derived-field objects exposing evaluate(level)
     pipeline: dict[str, Any] = {
         name: derived_field_t(
-            func, requires_composite=(name in composite_required)
+            name, func, requires_composite=(name in composite_required)
         )
         for name, func in base_pipeline.items()
     }

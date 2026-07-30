@@ -1,0 +1,17 @@
+[package]
+name = "symbi-grid"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+gpu = ["symbi-xpu/gpu"]
+cuda = ["gpu", "symbi-xpu/cuda"]
+hip = ["gpu", "symbi-xpu/hip"]
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-xpu = { path = "../symbi-xpu" }
+
+[lints]
+workspace = true

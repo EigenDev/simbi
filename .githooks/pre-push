@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-push hook
+#
+# fast build check before allowing push to remote: does the whole workspace
+# (lib + bins + tests + examples) still COMPILE? this catches the common
+# breakage class -- a signature change that misses a call site, a stale example
+# -- in well under a minute, without codegen or running the test farm.
+#
+# it deliberately does NOT run the test suite. release builds + heavy
+# integration/convergence tests take many minutes and belong in CI, not in the
+# push path. run them yourself when relevant:
+#   cargo test --release --manifest-path src/Cargo.toml --workspace
+#
+# to bypass (emergencies only):
+#   git push --no-verify
+# =============================================================================
+
+set -u
+
+workspace="src"
+
+echo "running pre-push build check..."
+echo "========================================"
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "warning: cargo not found -- skipping build check"
+    exit 0
+fi
+
+if [ ! -f "${workspace}/Cargo.toml" ]; then
+    echo "warning: no rust workspace at ${workspace}/ -- skipping build check"
+    exit 0
+fi
+
+# `check --all-targets` type-checks lib, bins, tests, and examples without
+# codegen (no -C opt-level, no linking of test binaries) -- the fast path.
+echo "executing cargo check (${workspace}/, all targets)..."
+if cargo check --workspace --all-targets --manifest-path "${workspace}/Cargo.toml"; then
+    echo "========================================"
+    echo "workspace compiles -- proceeding with push..."
+    exit 0
+else
+    echo "========================================"
+    echo "build check failed"
+    echo ""
+    echo "fix the compile errors before pushing"
+    echo "or use 'git push --no-verify' to bypass"
+    exit 1
+fi

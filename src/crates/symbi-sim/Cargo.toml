@@ -1,0 +1,23 @@
+[package]
+name = "symbi-sim"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+gpu = ["symbi-xpu/gpu", "symbi-grid/gpu"]
+cuda = ["gpu", "symbi-xpu/cuda", "symbi-grid/cuda"]
+hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip"]
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-geometry = { path = "../symbi-geometry" }
+symbi-hydro = { path = "../symbi-hydro" }
+symbi-grid = { path = "../symbi-grid" }
+symbi-ir = { path = "../symbi-ir" }
+symbi-ib = { path = "../symbi-ib" }
+symbi-xpu = { path = "../symbi-xpu" }
+symbi-io = { path = "../symbi-io" }
+
+[lints]
+workspace = true

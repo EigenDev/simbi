@@ -16,37 +16,7 @@ def _calculate_time_series_value(
     """
     Calculates a single scalar value for a given field at a given time.
     """
-    # body diagnostic fields
-    _body_accretion_fields = {
-        "mdot": "accretion_rate",
-        "maccr": "total_accreted_mass",
-    }
-    _body_vector_fields = {
-        "force_x": ("force", 0),
-        "force_y": ("force", 1),
-        "force_z": ("force", 2),
-        "torque_x": ("torque", 0),
-        "torque_y": ("torque", 1),
-        "torque_z": ("torque", 2),
-    }
-
-    if field_name in _body_accretion_fields:
-        if data.body_collection is None:
-            raise ValueError("No bodies in this run.")
-        prop = _body_accretion_fields[field_name]
-        return np.array(
-            [getattr(v.accretion, prop) for v in data.body_collection.bodies]
-        )
-
-    if field_name in _body_vector_fields:
-        if data.body_collection is None:
-            raise ValueError("No bodies in this run.")
-        attr, idx = _body_vector_fields[field_name]
-        return np.array(
-            [getattr(v, attr)[idx] for v in data.body_collection.bodies]
-        )
-
-    # Standard field calculation
+    # standard field calculation
     field = data.get_field(field_name, level=0)  # Default to base level
 
     if weight_field_name:
@@ -57,46 +27,29 @@ def _calculate_time_series_value(
 
 
 def compute_orbital_averages(
-    time: Array,
-    mdot: Array,
-    time_scale: float,
-    percentiles: tuple[float, float] = (10.0, 90.0),
-) -> tuple[Array, Array, Array, Array]:
-    """compute averages and percentile bands over orbital periods.
+    time: Array, mdot: Array, time_scale: float
+) -> tuple[Array, Array]:
+    """Compute averages over orbital periods.
 
-    args:
+    Args:
         time: array of time values
         mdot: array of mdot values
-        time_scale: orbital period (e.g. 2pi)
-        percentiles: (lower, upper) percentiles for bands
+        time_scale: orbital period (e.g., 2 pi)
 
-    returns:
+    Returns:
         t_bins: array of time bin centers
         mdot_avg: array of averaged mdot values
-        p_lo: lower percentile per bin
-        p_hi: upper percentile per bin
     """
     n_orbits = (time[-1] - time[0]) / time_scale
     bins = np.linspace(time[0], time[-1], int(n_orbits) + 1)
     t_bins = (bins[1:] + bins[:-1]) / 2  # bin centers
-
-    mdot_avg = np.empty(len(t_bins))
-    p_lo = np.empty(len(t_bins))
-    p_hi = np.empty(len(t_bins))
-
-    for ii in range(len(t_bins)):
-        mask = (time >= bins[ii]) & (time < bins[ii + 1])
-        chunk = mdot[mask]
-        if len(chunk) > 0:
-            mdot_avg[ii] = np.mean(chunk)
-            p_lo[ii] = np.percentile(chunk, percentiles[0])
-            p_hi[ii] = np.percentile(chunk, percentiles[1])
-        else:
-            mdot_avg[ii] = np.nan
-            p_lo[ii] = np.nan
-            p_hi[ii] = np.nan
-
-    return t_bins, mdot_avg, p_lo, p_hi
+    mdot_avg = np.array(
+        [
+            np.mean(mdot[(time >= bins[i]) & (time < bins[i + 1])])
+            for i in range(len(bins) - 1)
+        ]
+    )
+    return t_bins, mdot_avg
 
 
 def create_time_series_data(
@@ -122,27 +75,12 @@ def create_time_series_data(
         data = load_data(file_path)
         times.append(data.metadata.time)
 
-        if i == 0 and data.body_collection:
-            nbodies = list(data.body_collection.bodies)
-            body_names = [rf"$M_{{{i + 1}}}$" for i in range(len(nbodies))]
-
         for name in field_names:
             value = _calculate_time_series_value(data, name, weight_field)
             field_values_over_time[name].append(value)
 
     final_fields: list[FieldData] = []
     time_array = np.array(times)
-
-    # if there are two bodies, we label the less massive one M_2
-    # and the more massive one M_1
-    if len(body_names) == 2 and data.body_collection is not None:
-        masses = []
-        for body in data.body_collection.bodies:
-            masses.append(body.mass)
-        if masses[0] > masses[1]:
-            body_names = [r"$M_1$", r"$M_2$"]
-        else:
-            body_names = [r"$M_2$", r"$M_1$"]
 
     for name in field_names:
         values_array = np.array(field_values_over_time[name])
@@ -164,11 +102,11 @@ def create_time_series_data(
             )
         )
 
-        # Handle special case: orbital averages for mdot
-        # This creates a *new* derived field with percentile bands
+        # handle special case: orbital averages for mdot
+        # this creates a *new* derived field
         if name in ["mdot", "maccr"] and config.figure.time_scale:
             if values_array.ndim == 2:
-                ma_times, ma_total_mdot, p_lo, p_hi = compute_orbital_averages(
+                ma_times, ma_total_mdot = compute_orbital_averages(
                     time_array,
                     np.sum(values_array, axis=1),
                     time_scale=config.figure.time_scale or 2 * np.pi,
@@ -180,13 +118,11 @@ def create_time_series_data(
                             values=ma_total_mdot,
                             domain=[ma_times],
                             spacing_types=["linear"],
-                            bands=(p_lo, p_hi),
                         )
                     )
 
     return PlotData(
         fields=final_fields,
-        body_collection=None,  # Not relevant for time series
         time=None,  # Not relevant
         dimensions=1,
         coord_system=None,  # Not relevant

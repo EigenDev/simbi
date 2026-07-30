@@ -6,8 +6,8 @@
 # =============================================================================
 from __future__ import annotations
 
-import ast
 import importlib
+import inspect
 import os
 import sys
 from argparse import Namespace
@@ -15,59 +15,47 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from simbi.simulation import SimbiProblem, run
+from simbi.simulation.runner import validate_problem
 
 
-def _get_problem_classes(script: str) -> list[str]:
+def _discover_problem_classes(script: str) -> list[tuple[str, type[SimbiProblem]]]:
     """
-    extract all classes that inherit from SimbiProblem.
-    uses ast parsing to avoid importing the module twice.
+    import the config module and return its SimbiProblem subclasses in source order.
+
+    discovery imports the module (the same import the run itself performs) and tests
+    the real subclass relationship, so a config may inherit from another config in an
+    imported module — a config subclassing an imported base is resolved correctly,
+    which a base-NAME scan of the file cannot do. only classes DEFINED in the script
+    are returned: an imported base config is a SimbiProblem subclass too, but its
+    __module__ names its own module, so it is excluded.
     """
-    with open(script) as f:
-        root = ast.parse(f.read())
-
-    # build inheritance graph
-    graph: dict[str, set[str]] = {}
-    for node in root.body:
-        if isinstance(node, ast.ClassDef):
-            bases = [b.id for b in node.bases if isinstance(b, ast.Name)]
-            graph[node.name] = set(bases)
-
-    # find all classes deriving from SimbiProblem (directly or indirectly)
-    def is_problem_class(name: str, visited: set[str] | None = None) -> bool:
-        if visited is None:
-            visited = set()
-        if name in visited:
-            return False
-        visited.add(name)
-
-        if name == "SimbiProblem":
-            return True
-
-        bases = graph.get(name, set())
-        return any(is_problem_class(b, visited) for b in bases)
-
-    return [
-        name
-        for name in graph
-        if is_problem_class(name) and name != "SimbiProblem"
-    ]
-
-
-def _load_problem_class(script: str, class_name: str) -> type[SimbiProblem]:
-    """dynamically import and return a problem class."""
     script_path = Path(script).resolve()
     module_name = script_path.stem
 
-    # add script directory to path
     sys.path.insert(0, str(script_path.parent))
-
     try:
         module = importlib.import_module(module_name)
-        return getattr(module, class_name)
     finally:
-        # clean up sys.path
         if str(script_path.parent) in sys.path:
             sys.path.remove(str(script_path.parent))
+
+    def source_line(cls: type) -> int:
+        # a class without recoverable source (dynamically built) sorts first.
+        try:
+            return inspect.getsourcelines(cls)[1]
+        except (OSError, TypeError):
+            return 0
+
+    found = [
+        (name, obj)
+        for name, obj in vars(module).items()
+        if inspect.isclass(obj)
+        and issubclass(obj, SimbiProblem)
+        and obj is not SimbiProblem
+        and obj.__module__ == module.__name__
+    ]
+    found.sort(key=lambda pair: source_line(pair[1]))
+    return found
 
 
 def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
@@ -79,21 +67,36 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
     3. runs the simulation
     """
     script = args.config_script
-    problem_classes = _get_problem_classes(script)
+    # the active subparser (run parser) is used to register the config's cli params and,
+    # when no config is given, to print the generic run help.
+    active_parser = getattr(args, "active_parser", None)
+
+    # no config supplied: `simbi run --help/--peek/--info` -> generic run help (exit 0);
+    # a bare `simbi run` -> a helpful error (the config is required).
+    if script is None:
+        if active_parser is not None:
+            active_parser.print_help()
+        if not getattr(args, "info", False):
+            print(
+                "\nerror: a config is required.  usage: simbi run <config> [options]\n"
+                "       list configs:        simbi run --configs\n"
+                "       peek a config's flags: simbi run <config> --help",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return
+
+    problem_classes = _discover_problem_classes(script)
 
     if not problem_classes:
-        raise ValueError(
+        from simbi.simulation.problem import ConfigError
+
+        raise ConfigError(
             f"no SimbiProblem subclasses found in {script}. "
             "ensure your config defines a class that inherits from SimbiProblem."
         )
 
-    # get the active subparser (run parser) for cli registration
-    active_parser = getattr(args, "active_parser", None)
-
-    for class_name in problem_classes:
-        # load the class
-        problem_class = _load_problem_class(script, class_name)
-
+    for class_name, problem_class in problem_classes:
         # setup cli params from the problem class
         if active_parser is not None:
             problem_class.setup_cli(active_parser)
@@ -118,6 +121,7 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
                         )
                         desc = info.description or ""
                         print(f"  {name}: {default}  # {desc}")
+            _peek_censuses(problem_class, argv, args)
             continue
 
         # create instance from cli args
@@ -133,19 +137,43 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
         # configure environment
         _configure_environment(args)
 
-        # run the simulation
-        print(f"\nrunning {class_name}...")
-        print("=" * 60)
-        run(problem, compute_mode=args.compute_mode)
+        if getattr(args, "validate_only", False):
+            validate_problem(problem, compute_mode=args.compute_mode)
+            continue
+
+        # run the simulation. no preamble: the live dashboard is a self-contained
+        # full-screen tool that owns the terminal for the duration of the run.
+        run(
+            problem,
+            compute_mode=args.compute_mode,
+            live_monitor=getattr(args, "live_monitor", False),
+        )
 
 
 def _configure_environment(args: Namespace) -> None:
     """configure environment variables for simulation."""
-    if hasattr(args, "nthreads") and args.nthreads:
-        os.environ["OMP_NUM_THREADS"] = str(args.nthreads)
-        os.environ["NTHREADS"] = str(args.nthreads)
-
-    if args.compute_mode == "omp":
-        os.environ["USE_OMP"] = "1"
-
     # gpu block dims are set by RegisterGPUBlockDimensions action
+
+
+def _peek_censuses(problem_class: type, argv: Optional[Sequence[str]], args: Namespace) -> None:
+    """report the registered binned reductions alongside the config's flags.
+
+    every number in the report is fixed at registration — the bin count, the graph size, the
+    cadence — and each one decides a cost paid for the whole job. a hundred-thousand-bin histogram
+    sampled every step is a legitimate thing to ask for; discovering it from a queue slot is not.
+
+    the registrations live on an INSTANCE, so this builds one from the defaults. a problem whose
+    construction needs arguments that were not supplied simply has nothing to report here, which is
+    not an error: showing the flags is what was asked for.
+    """
+    from simbi.expression.census import describe
+
+    try:
+        problem = problem_class.from_cli(argv, args)
+        payloads = problem.census_expressions
+    except Exception:
+        return
+    if payloads:
+        print()
+        print(describe(payloads))
+

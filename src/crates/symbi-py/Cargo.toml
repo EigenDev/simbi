@@ -1,0 +1,30 @@
+[package]
+name = "symbi-py"
+version.workspace = true
+edition.workspace = true
+
+# the python extension module. `name = "cpu_ext"` makes the init symbol
+# `PyInit_cpu_ext`, so python imports it as `simbi.libs.cpu_ext` once the
+# built dylib is renamed `cpu_ext.<ext-suffix>`. the gpu variant is the same
+# source compiled with `--features cuda`, installed as `gpu_ext`.
+[lib]
+name = "cpu_ext"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+gpu = ["symbi/gpu"]
+cuda = ["gpu", "symbi/cuda"]
+hip = ["gpu", "symbi/hip"]
+
+[dependencies]
+symbi = { path = "../symbi" }
+symbi-sim = { path = "../symbi-sim" }
+symbi-hydro = { path = "../symbi-hydro" }
+symbi-geometry = { path = "../symbi-geometry" }
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-io = { path = "../symbi-io" }
+symbi-afterglow = { path = "../symbi-afterglow" }
+symbi-ib = { path = "../symbi-ib" }
+symbi-display = { path = "../symbi-display" }
+pyo3 = { version = "0.23", features = ["extension-module"] }

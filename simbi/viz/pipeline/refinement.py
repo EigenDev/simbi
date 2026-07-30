@@ -4,6 +4,20 @@ from typing import Sequence
 import numpy as np
 
 from simbi.reader.adapter import SimData
+from simbi.reader.computation import FieldComputationError
+
+
+def _get_field_loud(data: SimData, field_name: str, level: int):
+    """get_field with a composite-path failure that NAMES the available fields
+    instead of a bare KeyError from deep inside the level walk."""
+    try:
+        return data.get_field(field_name, level)
+    except KeyError:
+        available = ", ".join(sorted(data.available_fields(0)))
+        raise FieldComputationError(
+            f"field '{field_name}' is not available at level {level}; "
+            f"available fields: {available}"
+        ) from None
 from simbi.types import MeshConfig
 
 from ..types import Array, FieldData
@@ -42,9 +56,9 @@ def compute_refinement_boxes(
     lower_indices = []
     upper_indices = []
 
-    # Iterate in data order (axis 0, 1, 2...)
+    # iterate in data order (axis 0, 1, 2...)
     for axis_index in range(ndim):
-        # Get logical name (x3, x2, x1) from data index (0, 1, 2)
+        # get logical name (x3, x2, x1) from data index (0, 1, 2)
         logical_name = INV_AXIS_MAP.get(axis_index)
         if logical_name is None:
             continue  # Or raise error if mapping is incomplete
@@ -53,21 +67,21 @@ def compute_refinement_boxes(
         fine_coords = fine_mesh.get(f"{logical_name}c")
 
         if coarse_coords is None or fine_coords is None:
-            # Fallback or error if coordinates are missing
+            # fallback or error if coordinates are missing
             lower_indices.append(0)
             upper_indices.append(0)
             continue
 
-        # Find coarse grid indices that bound the fine grid
+        # find coarse grid indices that bound the fine grid
         lower = np.searchsorted(coarse_coords, fine_coords[0], side="left")
         upper = np.searchsorted(coarse_coords, fine_coords[-1], side="right")
-        # Ensure upper index is inclusive and valid
+        # ensure upper index is inclusive and valid
         upper = max(lower, upper - 1)
 
         lower_indices.append(lower)
         upper_indices.append(upper)
 
-    # Assumes a single contiguous refined box
+    # assumes a single contiguous refined box
     box = BoxND(
         lower=tuple(lower_indices),
         upper=tuple(upper_indices),
@@ -87,23 +101,23 @@ def create_composite_field(
     """
     base_mesh = data.level_mesh(0)
 
-    # Get base coordinates in *logical* order (x1, x2, x3)
+    # get base coordinates in *logical* order (x1, x2, x3)
     logical_coords = []
     for i in range(1, ndim + 1):
         coord = getattr(base_mesh, f"x{i}v")
         if coord is not None:
             logical_coords.append(coord)
 
-    # Reverse to get *data* order (x3, x2, x1) to match array shape
+    # reverse to get *data* order (x3, x2, x1) to match array shape
     data_order_domain = list(reversed(logical_coords))
 
     if not data.has_refinement() or len(active_levels - {0}) == 0:
-        # Single level case
-        values = data.get_field(field_name, 0)
+        # single level case
+        values = _get_field_loud(data, field_name, 0)
         return values, data_order_domain
 
-    # Start with base level data
-    base_values = data.get_field(field_name, 0)
+    # start with base level data
+    base_values = _get_field_loud(data, field_name, 0)
     composite = base_values.copy()
 
     hierarchy = data.hierarchy()
@@ -113,19 +127,19 @@ def create_composite_field(
             data_order_domain,
         )  # Should not happen if has_refinement
 
-    # Process each active refinement level in order
+    # process each active refinement level in order
     for level in sorted(active_levels - {0}):
         if level >= data.num_levels:
             continue
 
-        level_values = data.get_field(field_name, level)
+        level_values = _get_field_loud(data, field_name, level)
         level_mesh = data.level_mesh(level)
         ref_ratio = hierarchy.ref_ratios[level - 1]
 
-        # Compute refinement boxes for this level
+        # compute refinement boxes for this level
         boxes = compute_refinement_boxes(base_mesh, level_mesh, ref_ratio, ndim)
 
-        # Update composite with refined data
+        # update composite with refined data
         composite = overlay_refined_data(
             composite, level_values, boxes, ref_ratio
         )
@@ -138,7 +152,7 @@ def block_average(arr: Array, block_shape: tuple[int, ...]) -> Array:
     if len(arr.shape) != len(block_shape):
         raise ValueError("Array shape and block shape must have same ndim.")
 
-    # New shape for reshaping, e.g., (nz, Rz, ny, Ry, nx, Rx)
+    # new shape for reshaping, e.g., (nz, Rz, ny, Ry, nx, Rx)
     new_shape = []
     for i, dim in enumerate(arr.shape):
         block_size = block_shape[i]
@@ -151,7 +165,7 @@ def block_average(arr: Array, block_shape: tuple[int, ...]) -> Array:
 
     reshaped = arr.reshape(tuple(new_shape))
 
-    # Axes to average over (the new block axes)
+    # axes to average over (the new block axes)
     avg_axes = tuple(range(1, len(new_shape), 2))
 
     return np.mean(reshaped, axis=avg_axes)
@@ -164,12 +178,11 @@ def overlay_refined_data(
     result = coarse_data.copy()
 
     for box in boxes:
-        # Get coarse grid region indices (z, y, x)
+        # get coarse grid region indices (z, y, x)
         slices = tuple(slice(x, u + 1) for x, u in zip(box.lower, box.upper))
 
-        # Calculate corresponding fine grid indices
-        # Note: This assumes the fine_data array starts at index 0
-        # for the refined region.
+        # calculate corresponding fine grid indices; the fine_data array starts at
+        # index 0 for the refined region
         fine_slices = tuple(
             slice(0, (u - x + 1) * ref_ratio)
             for x, u in zip(box.lower, box.upper)
@@ -177,19 +190,19 @@ def overlay_refined_data(
 
         fine_region = fine_data[fine_slices]
 
-        # Average fine data to coarse grid resolution
+        # average fine data to coarse grid resolution
         block_shape = tuple(ref_ratio for _ in range(fine_region.ndim))
         averaged = block_average(fine_region, block_shape)
 
-        # Ensure averaged data has the correct shape
+        # ensure averaged data has the correct shape
         expected_shape = tuple(u - x + 1 for x, u in zip(box.lower, box.upper))
         if averaged.shape != expected_shape:
-            # This can happen due to off-by-one in box computation
-            # Simple truncation is one fix:
+            # an off-by-one in the box computation leaves a longer block average;
+            # truncate to the coarse region extent
             s = tuple(slice(0, s) for s in expected_shape)
             averaged = averaged[s]
 
-        # Update coarse grid with averaged fine data
+        # update coarse grid with averaged fine data
         result[slices] = averaged
 
     return result
@@ -205,7 +218,7 @@ def prepare_composite_field(
     Prepares a single composite FieldData object.
     NO slicing is performed.
     """
-    # This returns (nz, ny, nx) data and [x3_arr, x2_arr, x1_arr] domain
+    # this returns (nz, ny, nx) data and [x3_arr, x2_arr, x1_arr] domain
     values, data_order_domain = create_composite_field(
         field_name, data, active_levels, effective_dim
     )
@@ -216,7 +229,7 @@ def prepare_composite_field(
             f"domain dim ({len(data_order_domain)})"
         )
 
-    # Return the full-dimensional data
+    # return the full-dimensional data
     # use base level mesh for spacing types
     base_mesh = data.level_mesh(0)
     spacing_types = list(base_mesh.spacing_types)

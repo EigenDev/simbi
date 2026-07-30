@@ -1,0 +1,18 @@
+[package]
+name = "symbi-afterglow"
+version = "0.1.0"
+edition = "2024"
+
+# phase 1 is a pure CGS post-processing core (synchrotron physics + the EATS light curve) with no
+# symbi dependency — it operates on neutral hydro arrays. the symbi-checkpoint adapter (phase 2)
+# will add symbi-io / symbi-sim above this, keeping the physics a clean leaf.
+#
+# typenum provides the type-level integer arithmetic behind the compile-time dimensional analysis
+# (src/units.rs) — the stable-rust mechanism for tracking M/L/T exponents through mul/div (the
+# c++ `quantity<{M1+M2}>` would need nightly `generic_const_exprs`; `uom` can't do gaussian
+# half-powers). small, stable, no transitive deps.
+[dependencies]
+typenum = "1"
+
+[lints]
+workspace = true

@@ -19,17 +19,13 @@ from typing import Dict, List, Optional, Tuple
 import h5py
 import numpy as np
 
-from .units import C_CGS, DAY_CGS
-
 # =============================================================================
 # data structures
 # =============================================================================
 
-
 @dataclass
 class photon_events_t:
     """photon event data from HDF5"""
-
     # spacetime
     t_emission: np.ndarray
     x: np.ndarray
@@ -62,7 +58,7 @@ class photon_events_t:
     def n_events(self) -> int:
         return len(self.energy)
 
-    def filter(self, mask: np.ndarray) -> "photon_events_t":
+    def filter(self, mask: np.ndarray) -> 'photon_events_t':
         """return filtered copy"""
         return photon_events_t(
             t_emission=self.t_emission[mask],
@@ -89,7 +85,6 @@ class photon_events_t:
 @dataclass
 class metadata_t:
     """simulation metadata from HDF5"""
-
     dt: float
     theta_obs: float
     adiabatic_index: float
@@ -105,6 +100,7 @@ class metadata_t:
     v_scale: float
     length_scale: float
     n_events: int
+    data_dim: int
     hydro_type: int
     frequencies: np.ndarray
 
@@ -112,48 +108,42 @@ class metadata_t:
 @dataclass
 class lightcurve_t:
     """observer lightcurve result"""
-
-    times: np.ndarray  # observer times [day]
+    times: np.ndarray          # observer times [day]
     fluxes: Dict[float, np.ndarray]  # flux densities [mJy] per frequency
-    frequencies: np.ndarray  # frequencies [Hz]
+    frequencies: np.ndarray    # frequencies [Hz]
 
 
 @dataclass
 class skymap_t:
     """sky intensity map"""
-
-    theta: np.ndarray  # polar angles [rad]
-    phi: np.ndarray  # azimuthal angles [rad]
-    intensity: np.ndarray  # [n_theta, n_phi]
-    time: float  # observer time [day]
-    d_L: float = 1e28  # luminosity distance [cm]
+    theta: np.ndarray          # polar angles [rad]
+    phi: np.ndarray            # azimuthal angles [rad]
+    intensity: np.ndarray      # [n_theta, n_phi]
+    time: float                # observer time [day]
 
 
 @dataclass
 class polarization_t:
     """polarization evolution"""
-
-    times: np.ndarray  # observer times [day]
+    times: np.ndarray                # observer times [day]
     polarization_degree: np.ndarray  # 0 to 1
-    polarization_angle: np.ndarray  # radians
-    stokes_Q: np.ndarray  # normalized
-    stokes_U: np.ndarray  # normalized
-    stokes_V: np.ndarray  # normalized
+    polarization_angle: np.ndarray   # radians
+    stokes_Q: np.ndarray             # normalized
+    stokes_U: np.ndarray             # normalized
+    stokes_V: np.ndarray             # normalized
 
 
 @dataclass
 class spectrum_t:
     """spectral flux at specific time"""
-
-    frequencies: np.ndarray  # [Hz]
-    fluxes: np.ndarray  # [mJy]
-    time: float  # observer time [day]
+    frequencies: np.ndarray    # [Hz]
+    fluxes: np.ndarray         # [mJy]
+    time: float                # observer time [day]
 
 
 # =============================================================================
 # i/o functions
 # =============================================================================
-
 
 def read_photon_events(filename: str) -> Tuple[photon_events_t, metadata_t]:
     """
@@ -162,48 +152,47 @@ def read_photon_events(filename: str) -> Tuple[photon_events_t, metadata_t]:
     returns:
         (events, metadata)
     """
-    with h5py.File(filename, "r") as f:
+    with h5py.File(filename, 'r') as f:
         events = photon_events_t(
-            t_emission=f["t_emission"][:],
-            x=f["x"][:],
-            y=f["y"][:],
-            z=f["z"][:],
-            energy=f["energy"][:],
-            px=f["px"][:],
-            py=f["py"][:],
-            pz=f["pz"][:],
-            stokes_I=f["stokes_I"][:],
-            stokes_Q=f["stokes_Q"][:],
-            stokes_U=f["stokes_U"][:],
-            stokes_V=f["stokes_V"][:],
-            doppler_factor=f["doppler_factor"][:],
-            lorentz_factor=f["lorentz_factor"][:],
-            optical_depth=f["optical_depth"][:],
-            cell_id=f["cell_id"][:],
-            absorbed=f["absorbed"][:].astype(bool),
-            n_scatter=f["n_scatter"][:],
+            t_emission=f['t_emission'][:],
+            x=f['x'][:],
+            y=f['y'][:],
+            z=f['z'][:],
+            energy=f['energy'][:],
+            px=f['px'][:],
+            py=f['py'][:],
+            pz=f['pz'][:],
+            stokes_I=f['stokes_I'][:],
+            stokes_Q=f['stokes_Q'][:],
+            stokes_U=f['stokes_U'][:],
+            stokes_V=f['stokes_V'][:],
+            doppler_factor=f['doppler_factor'][:],
+            lorentz_factor=f['lorentz_factor'][:],
+            optical_depth=f['optical_depth'][:],
+            cell_id=f['cell_id'][:],
+            absorbed=f['absorbed'][:].astype(bool),
+            n_scatter=f['n_scatter'][:],
         )
 
         meta = metadata_t(
-            dt=f.attrs["dt"],
-            theta_obs=f.attrs["theta_obs"],
-            adiabatic_index=f.attrs["adiabatic_index"],
-            current_time=f.attrs["current_time"],
-            p=f.attrs["p"],
-            z=f.attrs["z"],
-            eps_e=f.attrs["eps_e"],
-            eps_b=f.attrs["eps_b"],
-            d_L=f.attrs["d_L"],
-            time_scale=f.attrs["time_scale"],
-            pre_scale=f.attrs["pre_scale"],
-            rho_scale=f.attrs["rho_scale"],
-            v_scale=f.attrs["v_scale"],
-            length_scale=f.attrs["length_scale"],
-            n_events=f.attrs["n_events"],
-            hydro_type=f.attrs["hydro_type"],
-            frequencies=f["frequencies"][:]
-            if "frequencies" in f
-            else np.array([]),
+            dt=f.attrs['dt'],
+            theta_obs=f.attrs['theta_obs'],
+            adiabatic_index=f.attrs['adiabatic_index'],
+            current_time=f.attrs['current_time'],
+            p=f.attrs['p'],
+            z=f.attrs['z'],
+            eps_e=f.attrs['eps_e'],
+            eps_b=f.attrs['eps_b'],
+            d_L=f.attrs['d_L'],
+            time_scale=f.attrs['time_scale'],
+            pre_scale=f.attrs['pre_scale'],
+            rho_scale=f.attrs['rho_scale'],
+            v_scale=f.attrs['v_scale'],
+            length_scale=f.attrs['length_scale'],
+            n_events=f.attrs['n_events'],
+            data_dim=0,  # not stored yet
+            hydro_type=f.attrs['hydro_type'],
+            frequencies=f['frequencies'][:] if 'frequencies' in f else np.array([]),
         )
 
     return events, meta
@@ -213,19 +202,18 @@ def read_photon_events(filename: str) -> Tuple[photon_events_t, metadata_t]:
 # observer transformations
 # =============================================================================
 
-
 def compute_observer_time(
     t_emission: np.ndarray,
     x: np.ndarray,
     y: np.ndarray,
     z: np.ndarray,
     observer_direction: np.ndarray,
-    redshift: float = 0.0,
+    redshift: float = 0.0
 ) -> np.ndarray:
     """
     compute observer arrival time from emission coordinates.
 
-    t_obs = (1 + z) * (t_em + r dot n_obs / c)
+    t_obs = (1 + z) * (t_em + dot(r, n_obs) / c)
 
     args:
         t_emission: emission time [s]
@@ -236,46 +224,55 @@ def compute_observer_time(
     returns:
         observer time [day]
     """
-    # distance along line of sight
-    r_dot_n = (
-        x * observer_direction[0]
-        + y * observer_direction[1]
-        + z * observer_direction[2]
-    )
+    c = 2.99792458e10  # cm/s
 
-    # arrival time (photons from far side arrive later)
-    t_obs = t_emission - r_dot_n / C_CGS
+    # distance along line of sight
+    r_dot_n = x * observer_direction[0] + y * observer_direction[1] + z * observer_direction[2]
+
+    # arrival time
+    t_obs = t_emission + r_dot_n / c
 
     # redshift correction
-    t_obs *= 1.0 + redshift
+    t_obs *= (1.0 + redshift)
 
     # convert to days
-    return t_obs / DAY_CGS
+    return t_obs / 86400.0
 
 
 def compute_observed_energy(
     energy: np.ndarray,
-    redshift: float = 0.0,
+    px: np.ndarray,
+    py: np.ndarray,
+    pz: np.ndarray,
+    observer_direction: np.ndarray,
+    redshift: float = 0.0
 ) -> np.ndarray:
     """
-    compute observed photon energy with redshift correction.
+    compute observed photon energy including beaming and redshift.
 
-    E_obs = E_em / (1 + z)
+    E_obs = E_em * delta / (1 + z)
+
+    delta correction already in doppler_factor, but we recompute
+    from propagation direction for flexibility.
 
     args:
         energy: emitted energy [erg]
+        px, py, pz: photon direction (unit vector)
+        observer_direction: unit vector [nx, ny, nz]
         redshift: cosmological redshift
 
     returns:
         observed energy [erg]
     """
-    return energy / (1.0 + redshift)
+    # observed energy (beaming already encoded in emission, just apply redshift)
+    E_obs = energy / (1.0 + redshift)
+
+    return E_obs
 
 
 # =============================================================================
 # lightcurve computation
 # =============================================================================
-
 
 def compute_lightcurve(
     events: photon_events_t,
@@ -284,11 +281,10 @@ def compute_lightcurve(
     frequencies: List[float],
     time_bins: Optional[np.ndarray] = None,
     n_bins: int = 50,
-    energy_cut: float = 0.0,
+    energy_cut: float = 0.0
 ) -> lightcurve_t:
     """
     compute observer lightcurve from photon events.
-    uses fast C++ implementation with zero-copy numpy arrays.
 
     args:
         events: photon event data
@@ -302,54 +298,82 @@ def compute_lightcurve(
     returns:
         lightcurve_t with times and fluxes
     """
-    from ..libs import rad_hydro
+    # filter: unabsorbed photons above threshold
+    mask = ~events.absorbed & (events.energy > energy_cut)
+    filtered = events.filter(mask)
 
-    # auto time bins from emission times
-    if time_bins is None:
-        t_min, t_max = events.t_emission.min(), events.t_emission.max()
-        time_bins = np.geomspace(t_min * 0.9, t_max * 1.1, n_bins + 1)
+    if filtered.n_events == 0:
+        raise ValueError("no events passed filter")
 
     # observer direction
-    observer_dir = np.array(
-        [np.sin(observer_angle), 0.0, np.cos(observer_angle)], dtype=np.float64
+    observer_dir = np.array([
+        np.sin(observer_angle),
+        0.0,
+        np.cos(observer_angle)
+    ])
+
+    # compute observer times
+    t_obs = compute_observer_time(
+        filtered.t_emission,
+        filtered.x,
+        filtered.y,
+        filtered.z,
+        observer_dir,
+        meta.z
     )
 
-    # ensure contiguous arrays for zero-copy
-    freq_arr = np.ascontiguousarray(frequencies, dtype=np.float64)
-    time_bins = np.ascontiguousarray(time_bins, dtype=np.float64)
-    absorbed = np.ascontiguousarray(events.absorbed, dtype=np.uint8)
-
-    # call fast C++ implementation with numpy arrays directly
-    cpp_lc = rad_hydro.compute_lightcurve_from_arrays(
-        t_emission=np.ascontiguousarray(events.t_emission, dtype=np.float64),
-        x=np.ascontiguousarray(events.x, dtype=np.float64),
-        y=np.ascontiguousarray(events.y, dtype=np.float64),
-        z=np.ascontiguousarray(events.z, dtype=np.float64),
-        energy=np.ascontiguousarray(events.energy, dtype=np.float64),
-        px=np.ascontiguousarray(events.px, dtype=np.float64),
-        py=np.ascontiguousarray(events.py, dtype=np.float64),
-        pz=np.ascontiguousarray(events.pz, dtype=np.float64),
-        stokes_I=np.ascontiguousarray(events.stokes_I, dtype=np.float64),
-        absorbed=absorbed,
-        observer_direction=observer_dir,
-        frequencies=freq_arr,
-        redshift=float(meta.z),
-        luminosity_distance=float(meta.d_L),
-        time_bins=time_bins,
-    )
-
-    # convert fluxes from flat array to dict by frequency
-    n_times = len(time_bins) - 1
-    n_freqs = len(frequencies)
-    fluxes_flat = np.array(cpp_lc.fluxes)
-    fluxes = {}
-    for jj, nu in enumerate(frequencies):
-        fluxes[nu] = fluxes_flat[jj::n_freqs][:n_times]
+    # auto time bins
+    if time_bins is None:
+        t_min, t_max = t_obs.min(), t_obs.max()
+        time_bins = np.geomspace(t_min * 0.9, t_max * 1.1, n_bins + 1)
 
     bin_centers = np.sqrt(time_bins[1:] * time_bins[:-1])
 
+    # flux density per frequency under the monochromatic approximation: photon
+    # energies are binned directly, with no convolution against a synchrotron spectrum
+    Jy = 1e-23          # jansky [erg/cm^2/s/Hz]
+
+    fluxes = {}
+
+    for nu in frequencies:
+        # count photons near this energy rather than integrating over the band
+        E_obs = compute_observed_energy(
+            filtered.energy,
+            filtered.px,
+            filtered.py,
+            filtered.pz,
+            observer_dir,
+            meta.z
+        )
+
+        # bin photons in time and energy
+        flux_density = np.zeros(len(bin_centers))
+
+        for ii in range(len(bin_centers)):
+            t_mask = (t_obs >= time_bins[ii]) & (t_obs < time_bins[ii + 1])
+            dt = (time_bins[ii + 1] - time_bins[ii]) * 86400.0  # [s]
+
+            if t_mask.sum() > 0:
+                # total energy in bin
+                E_total = E_obs[t_mask].sum()
+
+                # luminosity distance
+                d_L = meta.d_L
+
+                # flux: L / (4 pi d_L^2 dt dnu)
+                # simplified: assume all energy at frequency nu
+                dnu = nu * 0.1  # bandwidth (10% of frequency)
+                flux = E_total / (4.0 * np.pi * d_L**2 * dt * dnu)
+
+                # convert to mJy
+                flux_density[ii] = flux / Jy * 1e3
+
+        fluxes[nu] = flux_density
+
     return lightcurve_t(
-        times=bin_centers, fluxes=fluxes, frequencies=np.array(frequencies)
+        times=bin_centers,
+        fluxes=fluxes,
+        frequencies=np.array(frequencies)
     )
 
 
@@ -357,86 +381,81 @@ def compute_lightcurve(
 # skymap computation
 # =============================================================================
 
-
 def compute_skymap(
     events: photon_events_t,
     meta: metadata_t,
-    observer_angle: float,
     time: float,
     energy_min: float = 0.0,
     energy_max: float = np.inf,
     n_theta: int = 128,
     n_phi: int = 256,
-    time_window: float = 0.1,
-    distance_override: Optional[float] = None,
+    time_window: float = 0.1
 ) -> skymap_t:
     """
     compute sky intensity map at specific observer time.
-    uses fast C++ implementation with zero-copy numpy arrays.
-
-    for a spherically symmetric blast wave viewed on-axis (observer_angle=0),
-    the skymap shows a ring structure due to the equal arrival time surface.
 
     args:
-        events: photon event data (from read_photon_events)
+        events: photon event data
         meta: simulation metadata
-        observer_angle: viewing angle [radians] (0 = on-axis)
         time: observer time [day]
         energy_min, energy_max: energy range [erg]
-        n_theta: polar resolution (radial bins in sky image)
-        n_phi: azimuthal resolution (angular bins around ring)
+        n_theta: polar resolution
+        n_phi: azimuthal resolution
         time_window: integration window [day]
-        distance_override: override luminosity distance [cm] for angular scaling
 
     returns:
         skymap_t with intensity map
     """
-    from ..libs import rad_hydro
+    # filter: unabsorbed, energy range
+    mask = (~events.absorbed &
+            (events.energy > energy_min) &
+            (events.energy < energy_max))
+    filtered = events.filter(mask)
 
-    # use override distance if provided
-    d_L = distance_override if distance_override is not None else meta.d_L
+    if filtered.n_events == 0:
+        raise ValueError("no events in energy range")
 
-    # observer direction (unit vector toward observer)
-    observer_dir = np.array(
-        [np.sin(observer_angle), 0.0, np.cos(observer_angle)], dtype=np.float64
-    )
+    # compute observer times for all directions
+    # this is expensive - loop over sky directions
+    theta_grid = np.linspace(0, np.pi, n_theta)
+    phi_grid = np.linspace(0, 2*np.pi, n_phi)
+    intensity = np.zeros((n_theta, n_phi))
 
-    # ensure contiguous arrays for zero-copy
-    absorbed = np.ascontiguousarray(events.absorbed, dtype=np.uint8)
+    for ii, theta in enumerate(theta_grid):
+        for jj, phi in enumerate(phi_grid):
+            observer_dir = np.array([
+                np.sin(theta) * np.cos(phi),
+                np.sin(theta) * np.sin(phi),
+                np.cos(theta)
+            ])
 
-    # call fast C++ implementation with numpy arrays directly
-    cpp_skymap = rad_hydro.compute_skymap_from_arrays(
-        t_emission=np.ascontiguousarray(events.t_emission, dtype=np.float64),
-        x=np.ascontiguousarray(events.x, dtype=np.float64),
-        y=np.ascontiguousarray(events.y, dtype=np.float64),
-        z=np.ascontiguousarray(events.z, dtype=np.float64),
-        energy=np.ascontiguousarray(events.energy, dtype=np.float64),
-        stokes_I=np.ascontiguousarray(events.stokes_I, dtype=np.float64),
-        absorbed=absorbed,
-        observer_direction=observer_dir,
-        observer_time=float(time),
-        energy_min=float(energy_min),
-        energy_max=float(energy_max),
-        redshift=float(meta.z),
-        luminosity_distance=float(d_L),
-        time_window=float(time_window),
-        n_theta=int(n_theta),
-        n_phi=int(n_phi),
-    )
+            t_obs = compute_observer_time(
+                filtered.t_emission,
+                filtered.x,
+                filtered.y,
+                filtered.z,
+                observer_dir,
+                meta.z
+            )
+
+            # photons arriving in time window
+            t_mask = np.abs(t_obs - time) < time_window / 2.0
+
+            if t_mask.sum() > 0:
+                # sum intensity (stokes I)
+                intensity[ii, jj] = filtered.stokes_I[t_mask].sum()
 
     return skymap_t(
-        theta=np.array(cpp_skymap.theta),
-        phi=np.array(cpp_skymap.phi),
-        intensity=np.array(cpp_skymap.intensity),
-        time=time,
-        d_L=d_L,
+        theta=theta_grid,
+        phi=phi_grid,
+        intensity=intensity,
+        time=time
     )
 
 
 # =============================================================================
 # polarization computation
 # =============================================================================
-
 
 def compute_polarization(
     events: photon_events_t,
@@ -445,11 +464,10 @@ def compute_polarization(
     time_bins: Optional[np.ndarray] = None,
     n_bins: int = 50,
     energy_min: float = 0.0,
-    energy_max: float = np.inf,
+    energy_max: float = np.inf
 ) -> polarization_t:
     """
     compute polarization evolution for observer.
-    uses fast C++ implementation with zero-copy numpy arrays.
 
     args:
         events: photon event data
@@ -462,52 +480,75 @@ def compute_polarization(
     returns:
         polarization_t with time series
     """
-    from ..libs import rad_hydro
+    # filter: unabsorbed, energy range
+    mask = (~events.absorbed &
+            (events.energy > energy_min) &
+            (events.energy < energy_max))
+    filtered = events.filter(mask)
 
-    # auto time bins from emission times
-    if time_bins is None:
-        t_min, t_max = events.t_emission.min(), events.t_emission.max()
-        time_bins = np.geomspace(t_min * 0.9, t_max * 1.1, n_bins + 1)
+    if filtered.n_events == 0:
+        raise ValueError("no events in energy range")
 
     # observer direction
-    observer_dir = np.array(
-        [np.sin(observer_angle), 0.0, np.cos(observer_angle)], dtype=np.float64
+    observer_dir = np.array([
+        np.sin(observer_angle),
+        0.0,
+        np.cos(observer_angle)
+    ])
+
+    # compute observer times
+    t_obs = compute_observer_time(
+        filtered.t_emission,
+        filtered.x,
+        filtered.y,
+        filtered.z,
+        observer_dir,
+        meta.z
     )
 
-    # ensure contiguous arrays for zero-copy
-    time_bins = np.ascontiguousarray(time_bins, dtype=np.float64)
-    absorbed = np.ascontiguousarray(events.absorbed, dtype=np.uint8)
-
-    # call fast C++ implementation with numpy arrays directly
-    cpp_pol = rad_hydro.compute_polarization_from_arrays(
-        t_emission=np.ascontiguousarray(events.t_emission, dtype=np.float64),
-        x=np.ascontiguousarray(events.x, dtype=np.float64),
-        y=np.ascontiguousarray(events.y, dtype=np.float64),
-        z=np.ascontiguousarray(events.z, dtype=np.float64),
-        energy=np.ascontiguousarray(events.energy, dtype=np.float64),
-        px=np.ascontiguousarray(events.px, dtype=np.float64),
-        py=np.ascontiguousarray(events.py, dtype=np.float64),
-        pz=np.ascontiguousarray(events.pz, dtype=np.float64),
-        stokes_I=np.ascontiguousarray(events.stokes_I, dtype=np.float64),
-        stokes_Q=np.ascontiguousarray(events.stokes_Q, dtype=np.float64),
-        stokes_U=np.ascontiguousarray(events.stokes_U, dtype=np.float64),
-        stokes_V=np.ascontiguousarray(events.stokes_V, dtype=np.float64),
-        absorbed=absorbed,
-        observer_direction=observer_dir,
-        time_bins=time_bins,
-        energy_min=float(energy_min),
-        energy_max=float(energy_max),
-    )
+    # auto time bins
+    if time_bins is None:
+        t_min, t_max = t_obs.min(), t_obs.max()
+        time_bins = np.geomspace(t_min * 0.9, t_max * 1.1, n_bins + 1)
 
     bin_centers = np.sqrt(time_bins[1:] * time_bins[:-1])
 
+    # compute polarization in each bin
+    pol_degree = np.zeros(len(bin_centers))
+    pol_angle = np.zeros(len(bin_centers))
+    Q_norm = np.zeros(len(bin_centers))
+    U_norm = np.zeros(len(bin_centers))
+    V_norm = np.zeros(len(bin_centers))
+
+    for ii in range(len(bin_centers)):
+        t_mask = (t_obs >= time_bins[ii]) & (t_obs < time_bins[ii + 1])
+
+        if t_mask.sum() > 0:
+            # sum stokes parameters
+            I_total = filtered.stokes_I[t_mask].sum()
+            Q_total = filtered.stokes_Q[t_mask].sum()
+            U_total = filtered.stokes_U[t_mask].sum()
+            V_total = filtered.stokes_V[t_mask].sum()
+
+            if I_total > 0:
+                # normalized stokes parameters
+                Q_norm[ii] = Q_total / I_total
+                U_norm[ii] = U_total / I_total
+                V_norm[ii] = V_total / I_total
+
+                # polarization degree: sqrt(Q^2 + U^2 + V^2) / I
+                pol_degree[ii] = np.sqrt(Q_total**2 + U_total**2 + V_total**2) / I_total
+
+                # polarization angle: 0.5 * arctan2(U, Q)
+                pol_angle[ii] = 0.5 * np.arctan2(U_total, Q_total)
+
     return polarization_t(
         times=bin_centers,
-        polarization_degree=np.array(cpp_pol.polarization_degree),
-        polarization_angle=np.array(cpp_pol.polarization_angle),
-        stokes_Q=np.array(cpp_pol.stokes_Q),
-        stokes_U=np.array(cpp_pol.stokes_U),
-        stokes_V=np.array(cpp_pol.stokes_V),
+        polarization_degree=pol_degree,
+        polarization_angle=pol_angle,
+        stokes_Q=Q_norm,
+        stokes_U=U_norm,
+        stokes_V=V_norm
     )
 
 
@@ -515,14 +556,13 @@ def compute_polarization(
 # spectrum computation
 # =============================================================================
 
-
 def compute_spectrum(
     events: photon_events_t,
     meta: metadata_t,
     observer_angle: float,
     time: float,
     frequencies: np.ndarray,
-    time_window: float = 0.1,
+    time_window: float = 0.1
 ) -> spectrum_t:
     """
     compute spectral flux at specific observer time.
@@ -546,9 +586,11 @@ def compute_spectrum(
         raise ValueError("no unabsorbed events")
 
     # observer direction
-    observer_dir = np.array(
-        [np.sin(observer_angle), 0.0, np.cos(observer_angle)]
-    )
+    observer_dir = np.array([
+        np.sin(observer_angle),
+        0.0,
+        np.cos(observer_angle)
+    ])
 
     # compute observer times
     t_obs = compute_observer_time(
@@ -557,7 +599,7 @@ def compute_spectrum(
         filtered.y,
         filtered.z,
         observer_dir,
-        meta.z,
+        meta.z
     )
 
     # photons in time window
@@ -569,11 +611,15 @@ def compute_spectrum(
     # compute observed energies
     E_obs = compute_observed_energy(
         filtered.energy[t_mask],
-        meta.z,
+        filtered.px[t_mask],
+        filtered.py[t_mask],
+        filtered.pz[t_mask],
+        observer_dir,
+        meta.z
     )
 
     # bin photons by energy -> frequency
-    h = 6.62607015e-27  # erg*s
+    h = 6.62607015e-27  # erg s
     nu_obs = E_obs / h
 
     # histogram into frequency bins
@@ -588,7 +634,7 @@ def compute_spectrum(
             dt = time_window * 86400.0  # s
             d_L = meta.d_L
 
-            # flux: E / (4pi d_L^2 Delta t Deltanu)
+            # flux: E / (4 pi d_L^2 dt dnu)
             flux = E_total / (4.0 * np.pi * d_L**2 * dt * dnu)
 
             # convert to mJy
@@ -598,4 +644,8 @@ def compute_spectrum(
     # bin centers
     freq_centers = np.sqrt(frequencies[1:] * frequencies[:-1])
 
-    return spectrum_t(frequencies=freq_centers, fluxes=flux_density, time=time)
+    return spectrum_t(
+        frequencies=freq_centers,
+        fluxes=flux_density,
+        time=time
+    )

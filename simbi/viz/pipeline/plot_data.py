@@ -1,6 +1,7 @@
 from typing import Optional, Sequence
 
 from simbi.reader.adapter import SimData
+from simbi.reader.computation import FieldComputationError
 
 from ..config import VisualizationConfig
 from ..types import CoordSystem, FieldData, PlotData
@@ -46,7 +47,7 @@ def prepare_fields(
             config.refinement, "composite_view", False
         )
 
-    # determine if we should crop to owned region
+    # determine whether to crop to the owned region
     # crop when visualizing a single refined level only
     single_level = len(active_levels) == 1
     crop_to_owned = single_level and not use_composite
@@ -60,7 +61,13 @@ def prepare_fields(
             )
             all_fields.append(field_data)
         else:
-            # prepare one field for each active level
+            # prepare one field for each active level. a field genuinely
+            # absent from one level is skipped, but a field that produces
+            # nothing on ANY level must fail here by name: dropping it
+            # silently yields an empty PlotData whose validation error
+            # ("dimensions = 0") points nowhere near the cause.
+            produced = 0
+            last_missing: KeyError | None = None
             for level in sorted(active_levels):
                 if level >= data.num_levels:
                     continue
@@ -71,8 +78,16 @@ def prepare_fields(
                         data, field_name, level, ndim, crop_to_owned=should_crop
                     )
                     all_fields.append(field_data)
-                except KeyError:
+                    produced += 1
+                except KeyError as exc:
+                    last_missing = exc
                     continue
+            if produced == 0:
+                raise FieldComputationError(
+                    f"field '{field_name}' is not available in this"
+                    f" checkpoint (tried levels {sorted(active_levels)});"
+                    f" available: {sorted(data.available_fields())}"
+                ) from last_missing
 
     return all_fields
 
@@ -130,21 +145,53 @@ def create_plot_data(
     > Prepares full-dim refinement levels (respecting composite_view).
     > Applies optional slicing.
     """
-    # Handles refinement logic (gets full-dim fields)
+    # handles refinement logic (gets full-dim fields)
     full_dim_fields = prepare_fields(data, field_names, config)
 
-    # Get slice spec from config
+    # get slice spec from config
     slice_spec: Optional[dict[str, float]] = None
     if hasattr(config, "plot") and hasattr(config.plot, "slice"):
         slice_spec = config.plot.slice
 
-    # Apply Slicing
+    # apply slicing
     sliced_fields = apply_slicing(full_dim_fields, slice_spec)
 
-    # Package and return the (potentially un-stitched) fields
+    # field-value normalization: divide each field by a constant, or its own "max"/"min"
+    # (M&DZ-style "relative to max value": pass the number, e.g., max(initial)).
+    norm = getattr(getattr(config, "plot", None), "norm", None)
+    if norm is not None and sliced_fields:
+        import numpy as np
+
+        def _denom(arr: "np.ndarray") -> float:
+            if norm == "max":
+                d = float(np.nanmax(arr))
+            elif norm == "min":
+                d = float(np.nanmin(arr))
+            else:
+                try:
+                    d = float(norm)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"--norm must be a number, 'max', or 'min'; got '{norm}'"
+                    )
+            return d if d != 0.0 else 1.0
+
+        sliced_fields = [
+            fd.model_copy(update={"values": fd.values / _denom(fd.values)})
+            for fd in sliced_fields
+        ]
+
+    # an empty field list would fail PlotData validation with a message
+    # ("dimensions = 0") far from the cause; name the inputs instead.
+    if not sliced_fields:
+        raise FieldComputationError(
+            f"no plottable fields were produced for {list(field_names)}"
+            + (f" with slice {slice_spec}" if slice_spec else "")
+        )
+
+    # package and return the (potentially un-stitched) fields
     return PlotData(
         fields=sliced_fields,
-        body_collection=data.body_collection,
         time=data.metadata.time,
         dimensions=sliced_fields[0].ndim if sliced_fields else 0,
         coord_system=CoordSystem(data.metadata.coord_system),

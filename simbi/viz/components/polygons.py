@@ -1,8 +1,9 @@
 """
 Polygon plot component for visualization.
 
-Renders 2D AMR data as a PolyCollection. Expects 1D FieldData
-where domain is a list of patches and values are cell scalars.
+This component is a simple renderer. It expects to be given
+a single, 1D FieldData object where the domain is a list of patches
+and the values are a list of corresponding colors.
 """
 
 from typing import Optional, Sequence
@@ -10,22 +11,49 @@ from typing import Optional, Sequence
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
+from pydantic import ValidationInfo, field_validator
 
-from simbi.reader.io import BodyCollection
 
 from ..config import FigureConfig
-from ..types import FieldData, RenderResult
-from .interface import Component
-from .shared import ColormappedProps, create_color_normalization, draw_bodies
+from ..types import ColorRange, FieldData, RenderResult
+from .interface import Component, ComponentProps
+from .quad import _create_color_normalization
 
 
-class PolygonPlotProps(ColormappedProps):
-    """Properties for a polygon (AMR) plot component."""
+class PolygonPlotProps(ComponentProps):
+    """Properties for a *single* polygon plot component."""
 
+    cmap: str = "viridis"
+    color_range: ColorRange = ColorRange(min=None, max=None)
+    log_scale: bool = False
+    power: float = 1.0
+    alpha: float = 1.0
+
+    # mesh visualization (optional)
+    show_mesh_grid: bool = False
+    mesh_color: str = "white"
+    mesh_alpha: float = 0.3
+    mesh_linewidth: float = 0.1
+
+    # level bounds visualization (optional)
     show_level_bounds: bool = False
     level_color: str = "white"
-    level_linewidth: float = 1
+    level_linewidth: float = 1.5
     level_alpha: float = 0.8
+
+    @field_validator("power")
+    @classmethod
+    def validate_power(cls, v: float, _: ValidationInfo) -> float:
+        if v <= 0:
+            raise ValueError(f"Power must be positive, got {v}")
+        return v
+
+    @field_validator("alpha", "mesh_alpha")
+    @classmethod
+    def validate_alpha(cls, v: float, _: ValidationInfo) -> float:
+        if v < 0 or v > 1:
+            raise ValueError(f"Alpha must be between 0 and 1, got {v}")
+        return v
 
 
 class PolygonPlotComponent(Component):
@@ -34,15 +62,12 @@ class PolygonPlotComponent(Component):
     Expects 1D FieldData adhering to the "Polygon Contract".
     """
 
-    def __init__(
-        self, props: PolygonPlotProps, bodies: Optional[BodyCollection] = None
-    ):
+    def __init__(self, props: PolygonPlotProps):
         self.props = props
         self._poly_collection: Optional[PolyCollection] = None
         self._level_artists: list = []
         self._initialized: bool = False
         self._first_render: bool = True
-        self.bodies: Optional[BodyCollection] = bodies
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -59,7 +84,7 @@ class PolygonPlotComponent(Component):
         if self._poly_collection and self._initialized:
             self._poly_collection.set_cmap(props.cmap)
             self._poly_collection.set_alpha(props.alpha)
-            # Update edge colors based on mesh grid toggle
+            # update edge colors based on mesh grid toggle
             edge_color = (
                 self.props.mesh_color if self.props.show_mesh_grid else "none"
             )
@@ -85,7 +110,7 @@ class PolygonPlotComponent(Component):
                 "Expected 1D FieldData with '_polygons' suffix."
             )
 
-        # Extract data from the "Polygon Contract"
+        # extract data from the "Polygon Contract"
         patches = data.domain
         values = data.values
 
@@ -97,8 +122,8 @@ class PolygonPlotComponent(Component):
         x_min, x_max = np.min(all_x), np.max(all_x)
         y_min, y_max = np.min(all_y), np.max(all_y)
 
-        # Create color normalization
-        norm = create_color_normalization(
+        # create color normalization
+        norm = _create_color_normalization(
             values,
             self.props.color_range,
             self.props.log_scale,
@@ -113,7 +138,7 @@ class PolygonPlotComponent(Component):
                 self.props.mesh_linewidth if self.props.show_mesh_grid else 0
             )
 
-            # Create the new PolyCollection
+            # create the new PolyCollection
             self._poly_collection = PolyCollection(
                 patches,
                 array=values,
@@ -138,13 +163,6 @@ class PolygonPlotComponent(Component):
 
         self.ax.set_aspect("equal", adjustable="box")
 
-        if style.draw_bodies and self.bodies:
-            self.draw_bodies(
-                self.bodies,
-                zorder=10,
-                axes=data.axis_names if data.axis_names else ["x1", "x2"],
-            )
-
         if self.props.show_level_bounds and data.level_bounds:
             self._draw_level_bounds(data.level_bounds)
 
@@ -152,12 +170,6 @@ class PolygonPlotComponent(Component):
             artists={"collection": self._poly_collection},
             metadata={"mappable": self._poly_collection},
         )
-
-    def draw_bodies(
-        self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
-    ) -> None:
-        """Draw immersed bodies on the plot."""
-        draw_bodies(self.ax, body_collection, zorder, axes)
 
     def _draw_level_bounds(
         self, level_bounds: Sequence[tuple[float, float, float, float]]
@@ -180,7 +192,7 @@ class PolygonPlotComponent(Component):
                 fill=False,
                 edgecolor=self.props.level_color,
                 linewidth=self.props.level_linewidth,
-                alpha=0.2,  # self.props.level_alpha,
+                alpha=self.props.level_alpha,
                 zorder=5,
             )
             self.ax.add_patch(rect)

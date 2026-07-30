@@ -1,0 +1,24 @@
+[package]
+name = "symbi-jit"
+version.workspace = true
+edition.workspace = true
+
+# =============================================================================
+# symbi-jit — the CPU's NVRTC. compiles a scalarized `LoweredFn` (the IR the
+# interpreter `Cpu::eval_elemental` runs) to NATIVE machine code at runtime via
+# Cranelift, so a user-defined source runs compiled on CPU — symmetric with the
+# GPU's NVRTC path. see docs/design/36_source_jit_cranelift.md.
+# =============================================================================
+
+[dependencies]
+symbi-ir = { path = "../symbi-ir" }
+symbi-algebra = { path = "../symbi-algebra" }
+cranelift-jit = "0.116"
+cranelift-module = "0.116"
+cranelift-native = "0.116"
+cranelift-frontend = "0.116"
+cranelift-codegen = "0.116"
+rayon = "1"
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "symbi-geometry"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-ir = { path = "../symbi-ir" }
+
+[lints]
+workspace = true

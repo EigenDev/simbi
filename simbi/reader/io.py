@@ -26,8 +26,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from simbi.functional import Err, Ok, Result
-from simbi.types.bodies import Body
-from simbi.types.input import Metadata
+from simbi.reader.logging import logger
+from simbi.types.input import Metadata, normalize_regime
 
 # =============================================================================
 # core types
@@ -110,6 +110,7 @@ class MeshGeometry:
     dims: tuple[tuple[float, float], ...]  # [(x1min, x1max), ...]
     global_cells: tuple[int, ...]  # [nx3, nx2, nx1] in storage order
     spacing_types: tuple[str, ...]  # ["linear", "log", ...]
+    spacing_ratios: tuple[float, ...]  # adjacent-cell width ratios
     metric: str  # "cartesian", "spherical", etc.
     halo_radius: int
     coordinate_system: str = "physical"  # "physical" or "comoving"
@@ -158,32 +159,11 @@ class LevelData:
 
 
 @dataclass(frozen=True)
-class BodyCollection:
-    """collection of bodies in the simulation."""
-
-    count: int
-    system_name: str
-    reference_frame: str
-    bodies: list[Body]
-    binary_params: Optional[dict] = None
-
-
-@dataclass(frozen=True)
-class HierarchyInfo:
-    """AMR hierarchy metadata."""
-
-    num_levels: int
-    ref_ratios: list[int]  # ref_ratios[i] = ratio between level i and level i+1
-
-
-@dataclass(frozen=True)
 class Checkpoint:
     """complete checkpoint state."""
 
     metadata: Metadata
     levels: list[LevelData]
-    bodies: Optional[BodyCollection] = None
-    hierarchy: Optional[HierarchyInfo] = None
 
     @property
     def num_levels(self) -> int:
@@ -274,7 +254,11 @@ def read_primitives(
 
     prim_group = hydro_group["primitives"]
 
-    # C++ names → Python names
+    # C++ names -> Python names. the cell-centered magnetic components (b1, b2, b3)
+    # are written into the primitives group by the rust backend; read them here so
+    # they are plottable. for 2.5D MHD the out-of-plane B_phi (b3) is ONLY cell-
+    # centered (no face counterpart in the staggered CT set), so without this it is
+    # unreachable -> `simbi plot --field b3` yields zero fields (dimensions=0).
     field_map = {
         "rho": "rho",
         "pre": "p",
@@ -282,6 +266,9 @@ def read_primitives(
         "v1": "v1",
         "v2": "v2",
         "v3": "v3",
+        "b1": "b1",
+        "b2": "b2",
+        "b3": "b3",
     }
 
     fields = {}
@@ -358,9 +345,7 @@ def read_partition(
     )
 
 
-def read_mesh_geometry(
-    mesh_group: h5py.Group, level_group: h5py.Group = None
-) -> Result[MeshGeometry, str]:
+def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -> Result[MeshGeometry, str]:
     """read mesh configuration."""
     try:
         global_cells = tuple(mesh_group["global_cells"][()])
@@ -382,6 +367,7 @@ def read_mesh_geometry(
         rank = len(global_cells)
         dims = []
         spacing_types = []
+        spacing_ratios = []
 
         for dd in range(rank):
             dim_group = geo[f"dim_{dd}"]
@@ -395,6 +381,7 @@ def read_mesh_geometry(
                 if isinstance(spacing_type_val, bytes)
                 else str(spacing_type_val)
             )
+            spacing_ratios.append(float(dim_group.attrs.get("ratio", 1.0)))
 
         # read motion state from level group if present
         coordinate_system = "physical"
@@ -410,15 +397,14 @@ def read_mesh_geometry(
                     else str(coord_sys_val)
                 )
             scale_factor_a = float(level_group.attrs.get("scale_factor_a", 1.0))
-            scale_factor_adot = float(
-                level_group.attrs.get("scale_factor_adot", 0.0)
-            )
+            scale_factor_adot = float(level_group.attrs.get("scale_factor_adot", 0.0))
 
         return Ok(
             MeshGeometry(
                 dims=tuple(dims),
                 global_cells=global_cells,
                 spacing_types=tuple(spacing_types),
+                spacing_ratios=tuple(spacing_ratios),
                 metric=metric,
                 halo_radius=halo_radius,
                 coordinate_system=coordinate_system,
@@ -454,8 +440,11 @@ def read_level(
         if part_result.is_ok():
             partitions.append(part_result.value)
         else:
-            # log warning but continue
-            pass
+            # a corrupt partition is dropped but never silently: the stitched
+            # field would otherwise show unexplained zero holes.
+            logger.warning(
+                "dropping corrupt partition_%d: %s", partition_id, part_result.error
+            )
         partition_id += 1
 
     if not partitions:
@@ -489,6 +478,12 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
             bcs = tuple(
                 decode_str(bc_group.attrs[f"bc_{i}"]) for i in range(num_bcs)
             )
+        elif "boundary_conditions" in attrs:
+            bcs = tuple(
+                boundary.strip()
+                for boundary in decode_str(attrs["boundary_conditions"]).split(",")
+                if boundary.strip()
+            )
 
         return Ok(
             Metadata(
@@ -504,6 +499,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 cfl=float(attrs["cfl"]),
                 plm_theta=float(attrs["plm_theta"]),
                 viscosity=float(attrs.get("viscosity", 0.0)),
+                resistivity=float(attrs.get("resistivity", 0.0)),
                 # domain
                 dimensions=int(attrs["dimensions"]),
                 coord_system=decode_str(attrs["coord_system"]),
@@ -512,7 +508,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 is_mhd=bool(attrs["is_mhd"]),
                 is_relativistic=bool(attrs.get("is_relativistic", False)),
                 # enums
-                regime=decode_str(attrs["regime"]),
+                regime=normalize_regime(decode_str(attrs["regime"])),
                 solver=decode_str(attrs["solver"]),
                 reconstruction=decode_str(attrs["reconstruction"]),
                 timestepping=decode_str(attrs["timestepping"]),
@@ -521,147 +517,24 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                     attrs.get("checkpoint_interval", 0.0)
                 ),
                 x1_spacing=decode_str(attrs.get("x1_spacing", "linear")),
+                x1_spacing_ratio=float(attrs.get("x1_spacing_ratio", 1.0)),
                 x2_spacing=decode_str(attrs.get("x2_spacing", "linear")),
+                x2_spacing_ratio=float(attrs.get("x2_spacing_ratio", 1.0)),
                 x3_spacing=decode_str(attrs.get("x3_spacing", "linear")),
+                x3_spacing_ratio=float(attrs.get("x3_spacing_ratio", 1.0)),
                 boundary_conditions=bcs,
                 initial_time=float(attrs.get("initial_time", attrs["time"])),
+                sound_speed=(
+                    float(attrs["sound_speed"])
+                    if "sound_speed" in attrs
+                    else None
+                ),
+                spacetime=decode_str(attrs.get("spacetime", "minkowski")),
+                schwarzschild_mass=float(attrs.get("schwarzschild_mass", 0.0)),
             )
         )
     except Exception as e:
         return Err(f"failed to read metadata: {e}")
-
-
-def read_bodies(bodies_group: h5py.Group) -> Result[BodyCollection, str]:
-    """read body collection."""
-    from simbi.types.bodies import (
-        AccretionProperties,
-        Body,
-        BodyCapability,
-        GravitationalProperties,
-        RigidProperties,
-    )
-
-    try:
-        count = int(bodies_group.attrs["count"])
-        system_name = (
-            bodies_group.attrs["system_name"].decode("utf-8")
-            if isinstance(bodies_group.attrs["system_name"], bytes)
-            else str(bodies_group.attrs["system_name"])
-        )
-        reference_frame = (
-            bodies_group.attrs["reference_frame"].decode("utf-8")
-            if isinstance(bodies_group.attrs["reference_frame"], bytes)
-            else str(bodies_group.attrs["reference_frame"])
-        )
-
-        # read binary params if present
-        binary_params = None
-        if "binary_params" in bodies_group:
-            bp = bodies_group["binary_params"]
-            binary_params = {
-                "total_mass": float(bp.attrs["total_mass"]),
-                "semi_major": float(bp.attrs["semi_major"]),
-                "eccentricity": float(bp.attrs["eccentricity"]),
-                "mass_ratio": float(bp.attrs["mass_ratio"]),
-                "orbital_period": float(bp.attrs["orbital_period"]),
-                "is_circular_orbit": bool(bp.attrs["is_circular_orbit"]),
-                "prescribed_motion": bool(bp.attrs["prescribed_motion"]),
-            }
-
-        # read individual bodies
-        bodies = []
-        for ii in range(count):
-            body_key = f"body_{ii}"
-            if body_key not in bodies_group:
-                continue
-
-            bg = bodies_group[body_key]
-
-            # core properties
-            mass = float(bg.attrs["mass"])
-            radius = float(bg.attrs["radius"])
-            capabilities = BodyCapability(int(bg.attrs["capabilities"]))
-            position = tuple(bg["position"][()])
-            velocity = tuple(bg["velocity"][()])
-            force = tuple(bg["force"][()])
-            torque = tuple(bg["torque"][()])
-
-            # capability-specific data
-            gravitational = None
-            if "gravitational" in bg:
-                grav_g = bg["gravitational"]
-                gravitational = GravitationalProperties(
-                    softening_length=float(grav_g.attrs["softening_length"])
-                )
-
-            accretion = None
-            if "accretion" in bg:
-                accr_g = bg["accretion"]
-                accretion = AccretionProperties(
-                    sink_rate=float(accr_g.attrs["sink_rate"]),
-                    accretion_radius=float(accr_g.attrs["accretion_radius"]),
-                    total_accreted_mass=float(
-                        accr_g.attrs["total_accreted_mass"]
-                    ),
-                    accretion_rate=float(accr_g.attrs["accretion_rate"]),
-                    sink_delta=float(accr_g.attrs["sink_delta"]),
-                )
-
-            rigid = None
-            if "rigid" in bg:
-                rigid_g = bg["rigid"]
-                rigid = RigidProperties(
-                    inertia=float(rigid_g.attrs["inertia"]),
-                    apply_no_slip=bool(rigid_g.attrs["apply_no_slip"]),
-                )
-
-            body = Body(
-                mass=mass,
-                radius=radius,
-                position=position,
-                velocity=velocity,
-                force=force,
-                torque=torque,
-                capabilities=capabilities,
-                gravitational=gravitational,
-                accretion=accretion,
-                rigid=rigid,
-            )
-            bodies.append(body)
-
-        return Ok(
-            BodyCollection(
-                count=count,
-                system_name=system_name,
-                reference_frame=reference_frame,
-                bodies=bodies,
-                binary_params=binary_params,
-            )
-        )
-    except Exception as e:
-        return Err(f"failed to read bodies: {e}")
-
-
-def read_hierarchy(h5file: h5py.File) -> Optional[HierarchyInfo]:
-    """read AMR hierarchy info from /hierarchy/ group."""
-    if "hierarchy" not in h5file:
-        return None
-
-    hg = h5file["hierarchy"]
-    num_levels = int(hg.attrs.get("num_levels", 1))
-    if num_levels <= 1:
-        return None
-
-    ref_ratios = []
-    for lvl in range(1, num_levels):
-        lg = hg.get(f"level_{lvl}")
-        if lg is not None and "refinement_ratio" in lg.attrs:
-            ref_ratios.append(int(lg.attrs["refinement_ratio"]))
-        else:
-            # default to 2 if not stored
-            ref_ratios.append(2)
-
-    return HierarchyInfo(num_levels=num_levels, ref_ratios=ref_ratios)
 
 
 # =============================================================================
@@ -695,12 +568,6 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
             if meta_result.is_err():
                 return Err(f"failed to read metadata: {meta_result.error}")
 
-            # check if this is a diagnostic-only file (no hydro)
-            file_type = f.attrs.get("type", b"checkpoint")
-            if isinstance(file_type, bytes):
-                file_type = file_type.decode("utf-8")
-            is_diagnostic = file_type == "diagnostic"
-
             # read all levels
             levels = []
             level_id = 0
@@ -709,29 +576,20 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
                 if level_result.is_ok():
                     levels.append(level_result.value)
                 else:
-                    # log warning but try next level
-                    pass
+                    # a corrupt level is dropped but never silently: an AMR
+                    # plot missing its fine level looks like missing physics.
+                    logger.warning(
+                        "dropping corrupt level_%d: %s", level_id, level_result.error
+                    )
                 level_id += 1
 
-            if not levels and not is_diagnostic:
+            if not levels:
                 return Err("no valid levels found")
-
-            # read bodies if present
-            bodies = None
-            if "bodies" in f:
-                bodies_result = read_bodies(f["bodies"])
-                if bodies_result.is_ok():
-                    bodies = bodies_result.value
-
-            # read AMR hierarchy if present
-            hierarchy = read_hierarchy(f)
 
             return Ok(
                 Checkpoint(
                     metadata=meta_result.value,
                     levels=levels,
-                    bodies=bodies,
-                    hierarchy=hierarchy,
                 )
             )
 

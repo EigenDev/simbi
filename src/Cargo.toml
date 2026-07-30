@@ -1,0 +1,79 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/symbi",
+    "crates/symbi-algebra",
+    "crates/symbi-geometry",
+    "crates/symbi-hydro",
+    "crates/symbi-grid",
+    "crates/symbi-abi",
+    "crates/symbi-ir",
+    "crates/symbi-jit",
+    "crates/symbi-discretize",
+    "crates/symbi-aot",
+    "crates/symbi-exec",
+    "crates/symbi-sim",
+    "crates/symbi-substrate",
+    "crates/symbi-amr",
+    "crates/symbi-afterglow",
+    "crates/symbi-afterglow-io",
+    "crates/symbi-xpu",
+    "crates/symbi-expr",
+    "crates/symbi-ib",
+    "crates/symbi-display",
+    "crates/symbi-io",
+    "crates/symbi-py",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# warnings are errors across every workspace crate (each crate opts in via
+# `[lints] workspace = true`). `deny` (not `forbid`) so a deliberate, documented
+# `#[allow(...)]` at a specific site can still override it — e.g., the emitted
+# kernels' allow attrs, or a kept-but-orphaned reference fn. dependencies are
+# unaffected (workspace lints apply only to our own crates).
+[workspace.lints.rust]
+warnings = "deny"
+
+# thin LTO + single codegen unit lets the compiler inline across the
+# kernel-dispatch hot path (substrate_kernels -> substrate_gpu -> symbi-xpu)
+# that otherwise crosses crate boundaries on every launch. measured wins on
+# AOT-compiled scalar kernels (CPU per-cell loops) and on the launch glue.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# the cdylib bridge (cpu_ext / gpu_ext) is the terminal crate: it monomorphizes the whole
+# workspace, so under the workspace-wide codegen-units = 1 its codegen serializes onto a single
+# core while the rest of the machine idles — the long pole of the build. it is dispatch glue, not a
+# hot compute path (the flops live in the lower physics crates), so split its codegen across all
+# cores; thin-lto still reunifies cross-crate, leaving runtime unchanged. actual parallelism is
+# bounded by cargo's job count, so this stays correct on any core count.
+[profile.release.package.symbi-py]
+codegen-units = 256
+
+# debug-build size control (docs: the 134 test+example binaries x full DWARF of a heavily
+# monomorphized generic codebase = a ~200GB target/). `line-tables-only` keeps panic file:line +
+# backtraces (the nan-locator / check_dt_or_panic / manifest-slot panics all still resolve) while
+# dropping the heavy type/local-variable DWARF that explodes per monomorphization; deps carry no
+# debuginfo at all (we never step into serde/rayon/hdf5); split-debuginfo keeps DWARF out of the
+# linked binaries. lose only debugger LOCAL-variable inspection, which this CFD work rarely uses.
+# DEBUGINFO OFF WORKSPACE-WIDE. the recursive dwarf emitter (llvm createAndAddScopeChildren)
+# overflows the compiler stack -> SIGBUS on heavily-monomorphized crates EVEN at line-tables-only.
+# it hit symbi-substrate then symbi-aot; the threshold is depth-of-inlined-lexical-scope, so any
+# crate can cross it as the codebase grows (B2's metric contractions add monomorphization). rather
+# than whack-a-mole per crate, drop debuginfo everywhere: no DWARF scope tree -> no overflow, and
+# faster debug builds (less to emit).
+# the crash dies cleanly (~20s + backtrace) interactively but HANGS indefinitely under sandboxed /
+# agent shells (signal handling differs), masquerading as an endless compile — the insidious part.
+# COST: panic file:line in DEBUG builds (the panic MESSAGE still prints; `release` already carries
+# no debuginfo, so the canonical path is unaffected). need a source line for one crate while
+# debugging? temporarily add `[profile.dev.package.<crate>] debug = "line-tables-only"`.
+[profile.dev]
+debug = false
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false

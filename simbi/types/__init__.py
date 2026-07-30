@@ -5,26 +5,24 @@
 # =============================================================================
 from .bodies import (
     AccretionProperties,
-    BaseBody,
     BinaryComponentConfig,
     BinaryConfig,
-    Body,
     BodyCapability,
-    BodyData,
-    BodyDiagnostics,
     BodySystemConfig,
-    DeformableProperties,
-    ElasticProperties,
     GravitationalProperties,
     GravitationalSystemConfig,
     ImmersedBodyConfig,
     RigidProperties,
 )
+from .shape import Shape
 from .input import (
     Array,
     BoundaryCondition,
+    Neumann,
+    Robin,
     CellSpacing,
     CoordSystem,
+    Spacetime,
     HierarchyData,
     IArray,
     LevelData,
@@ -32,11 +30,13 @@ from .input import (
     Metadata,
     ProcessedData,
     RawHDF5,
+    CtMethod,
     Reconstruction,
     Regime,
     Solver,
     SubCycleMode,
     TimeStepping,
+    TracerScheme,
     UArray,
 )
 from .typing import (
@@ -51,13 +51,18 @@ from .typing import (
 __all__ = [
     # enums
     "BoundaryCondition",
+    "Neumann",
+    "Robin",
     "CellSpacing",
     "CoordSystem",
+    "Spacetime",
     "Reconstruction",
     "Regime",
     "Solver",
+    "CtMethod",
     "SubCycleMode",
     "TimeStepping",
+    "TracerScheme",
     # generator types
     "GasStateFunction",
     "GasStateGenerator",
@@ -76,11 +81,7 @@ __all__ = [
     "LevelData",
     "HierarchyData",
     # body types
-    "Body",
     "BodyCapability",
-    "BodyData",
-    "BodyDiagnostics",
-    "BaseBody",
     "BodySystemConfig",
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
@@ -89,6 +90,5 @@ __all__ = [
     "GravitationalProperties",
     "AccretionProperties",
     "RigidProperties",
-    "ElasticProperties",
-    "DeformableProperties",
+    "Shape",
 ]

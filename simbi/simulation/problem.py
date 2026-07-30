@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import warnings
 from abc import abstractmethod
 from pathlib import Path
@@ -21,28 +22,117 @@ from typing import Annotated, Any, Callable, ClassVar, Optional, Sequence, Union
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    PrivateAttr,
+    ValidationError,
+    computed_field,
+    model_validator,
+)
 
-from simbi.types.bodies import BodySystemConfig, ImmersedBodyConfig
+from simbi.types.bodies import BodySystemConfig, BondedAssembly, ImmersedBodyConfig
 
 # re-export types that problem authors need
 from simbi.types.input import (
     BoundaryCondition,
+    Neumann,
+    Robin,
     CellSpacing,
     CoordSystem,
+    Spacetime,
+    CtMethod,
+    Limiter,
     Reconstruction,
     RefinementMode,
     Regime,
     Solver,
     SubCycleMode,
     TimeStepping,
+    TracerScheme,
 )
 from simbi.types.typing import (
     ExpressionDict,
+    GasStateGenerator,
     InitialStateType,
 )
 
 from .param import ProblemParam, get_param_metadata
+
+
+class ConfigError(Exception):
+    """a user-facing configuration error.
+
+    carries a pre-formatted, traceback-free message; the cli boundary prints it
+    verbatim and exits non-zero instead of dumping a pydantic stack trace.
+    """
+
+
+def _to_enum(enum_type: Any, value: str, field_name: str) -> Any:
+    """look up an enum member by case-insensitive name, raising a ValueError that
+    names the field and LISTS the valid choices. a plain `enum_type[name]` raises
+    a bare KeyError that pydantic does NOT wrap — it escapes as a raw traceback.
+    """
+    try:
+        return enum_type[value.upper()]
+    except KeyError:
+        choices = ", ".join(e.name.lower() for e in enum_type)
+        raise ValueError(
+            f"{field_name}: '{value}' is not a valid choice; pick one of: {choices}"
+        ) from None
+
+
+def _error_hint(field: str, err: dict) -> Optional[str]:
+    """a targeted, actionable hint for a single pydantic error, or None."""
+    etype = err.get("type", "")
+    flag = "--" + field.replace("_", "-")
+    if field == "resolution":
+        return (
+            f"pass comma-separated axis sizes, e.g., `{flag} 256,256`; trailing "
+            "axes default to 1, so a 2d run needs only nx,ny"
+        )
+    if field == "bounds":
+        return f"pass `{flag} [[x0,x1],[y0,y1]]` — one [min,max] pair per axis"
+    if etype == "missing":
+        return f"this field is required — pass `{flag} <value>`"
+    if etype in ("int_parsing", "float_parsing", "int_from_float"):
+        return f"expected a number — check the value passed to `{flag}`"
+    if etype in ("too_long", "too_short"):
+        ctx = err.get("ctx", {})
+        want = ctx.get("actual_length") or ctx.get("field_type")
+        return f"wrong number of values{f' (need {want})' if want else ''} for `{flag}`"
+    return None
+
+
+def _humanize_validation_error(setup_name: str, exc: ValidationError) -> str:
+    """render a pydantic ValidationError as a clinical, actionable report:
+    one line per offending field with the bad value and a fix hint."""
+    n = exc.error_count()
+    header = f"{n} invalid setting{'s' if n != 1 else ''} for '{setup_name}':"
+    lines = [header, ""]
+    for err in exc.errors():
+        field = str(err["loc"][0]) if err["loc"] else ""
+        # strip pydantic's wrapping prefix on validator-raised errors.
+        msg = err["msg"]
+        for prefix in ("Value error, ", "Assertion failed, "):
+            if msg.startswith(prefix):
+                msg = msg[len(prefix):]
+                break
+        # field-scoped errors get a `field:` prefix; model-level errors (raised
+        # in the before-validator) already name the field in the message.
+        loc = ".".join(str(p) for p in err["loc"])
+        line = f"  {loc}: {msg}" if loc else f"  {msg}"
+        # echo the offending value only for FIELD-scoped errors; a model-level
+        # error carries the whole input dict as `input`, which is noise.
+        if "input" in err and err["loc"] and not isinstance(err["input"], dict):
+            line += f"  (got: {err['input']!r})"
+        lines.append(line)
+        hint = _error_hint(field, err)
+        if hint:
+            lines.append(f"      hint: {hint}")
+    lines.append("")
+    lines.append("run with `--info` to list every parameter and its default.")
+    return "\n".join(lines)
 
 
 class SimbiProblem(BaseModel):
@@ -55,7 +145,50 @@ class SimbiProblem(BaseModel):
     3. optionally overriding computed properties for custom physics
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # extra="forbid": a typo'd constructor kwarg (cfl_numbr=0.9) must fail loudly,
+    # not vanish while the field keeps its default. assignment constraints are
+    # enforced FIELD-ONLY via __setattr__ — pydantic's validate_assignment
+    # would re-run every model validator per assignment, which recurses infinitely
+    # for the common pattern of a validator that assigns fields.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    # per-field TypeAdapter cache for the field-only assignment validation.
+    _field_adapters: ClassVar[dict[str, Any]] = {}
+
+    # the flags the user EXPLICITLY passed on the command line. from_cli fills it
+    # (possibly with the empty set — no flags passed); None marks a problem that
+    # never went through the cli, where model_fields_set carries the same fact.
+    # the checkpoint merge uses it to distinguish "user demanded --solver hllc"
+    # from "the class default happens to differ from the checkpoint".
+    _cli_explicit: Optional[set[str]] = PrivateAttr(default=None)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # enforce the FIELD's own constraints (type, ge/gt/le) on every assignment
+        # — an out-of-range value written in setup() or user code must not reach
+        # the backend — WITHOUT re-running the model validators (whole-model
+        # consistency is _finalize's job, once, after setup).
+        fields = type(self).model_fields
+        if name in fields:
+            key = f"{type(self).__qualname__}.{name}"
+            adapter = SimbiProblem._field_adapters.get(key)
+            if adapter is None:
+                from pydantic import TypeAdapter
+
+                info = fields[name]
+                adapter = TypeAdapter(
+                    Annotated[info.annotation, info],
+                    config=None if info.annotation is None else ConfigDict(arbitrary_types_allowed=True),
+                )
+                SimbiProblem._field_adapters[key] = adapter
+            try:
+                value = adapter.validate_python(value)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"invalid assignment to {type(self).__name__}.{name}: "
+                    + "; ".join(e["msg"] for e in exc.errors())
+                    + f" (got: {value!r})"
+                ) from None
+        super().__setattr__(name, value)
 
     # class-level storage for cli parser
     _cli_parser: ClassVar[Optional[argparse.ArgumentParser]] = None
@@ -70,13 +203,64 @@ class SimbiProblem(BaseModel):
     coord_system: Annotated[
         CoordSystem, ProblemParam(..., description="coordinate system")
     ]
+    spacetime: Annotated[
+        Spacetime,
+        ProblemParam(
+            Spacetime.MINKOWSKI,
+            cli=True,
+            description="background spacetime (flat minkowski, or schwarzschild for GR)",
+        ),
+    ]
+    schwarzschild_mass: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="schwarzschild geometric mass M (G=c=1); only used when "
+            "spacetime is schwarzschild",
+        ),
+    ]
+    kerr_spin: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="kerr specific angular momentum a = J/M, |a| < M; only used "
+            "when spacetime is kerr",
+        ),
+    ]
+    max_dt: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="upper clamp on the CFL time step (dt = min(dt_cfl, max_dt)); "
+            "0 disables. pins the dt sequence across runs whose CFL estimators differ",
+        ),
+    ]
     regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
     bounds: Annotated[
         Sequence[Sequence[float]],
         ProblemParam(..., description="domain bounds"),
     ]
     adiabatic_index: Annotated[
-        float, ProblemParam(..., ge=1.0, le=2.0, description="adiabatic index")
+        Optional[float],
+        ProblemParam(
+            None,
+            ge=1.0,
+            le=2.0,
+            description="adiabatic index; required for energy-bearing regimes, "
+            "irrelevant for isothermal ones (which use sound_speed)",
+        ),
+    ]
+    sound_speed: Annotated[
+        Optional[float],
+        ProblemParam(
+            None,
+            gt=0.0,
+            description="constant isothermal sound speed; required for isothermal "
+            "regimes unless locally_isothermal (then cs^2(x) is derived per cell)",
+        ),
     ]
 
     # =========================================================================
@@ -112,6 +296,16 @@ class SimbiProblem(BaseModel):
             description="simulation start time",
         ),
     ]
+    checkpoint_log_anchor: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            ge=0.0,
+            description="positive reference time for LOG-spaced checkpoints; distinct from "
+            "start_time (the physical/resume clock). 0 = use start_time. set this (not start_time) "
+            "when the log anchor differs from the run start, so restarts resume at the checkpoint time.",
+        ),
+    ]
 
     # =========================================================================
     # output settings - checkpoint_safe=True
@@ -135,6 +329,28 @@ class SimbiProblem(BaseModel):
             description="checkpoint interval",
         ),
     ]
+    time_unit: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            gt=0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="natural time unit (code units per unit); checkpoint "
+            "names + the live display report time / time_unit. e.g., set to the "
+            "orbital period for a binary so output reads in orbits",
+        ),
+    ]
+    time_unit_label: Annotated[
+        str,
+        ProblemParam(
+            "t",
+            cli=True,
+            checkpoint_safe=True,
+            description="label for the natural time unit (e.g., 'orbit'); 't' "
+            "means code units and is omitted from checkpoint names",
+        ),
+    ]
     diagnostic_interval: Annotated[
         float,
         ProblemParam(
@@ -142,7 +358,9 @@ class SimbiProblem(BaseModel):
             ge=0.0,
             cli=True,
             checkpoint_safe=True,
-            description="body diagnostic output interval (0 = use checkpoint_interval)",
+            description="body-diagnostics output cadence (natural units, "
+            "x time_unit). 0 disables. only emitted when the problem has "
+            "immersed bodies; writes <data_dir>diagnostics.dat",
         ),
     ]
     checkpoint_index: Annotated[
@@ -152,6 +370,20 @@ class SimbiProblem(BaseModel):
             ge=0,
             checkpoint_safe=True,
             description="checkpoint index for resuming",
+        ),
+    ]
+    gpus: Annotated[
+        int,
+        ProblemParam(
+            1,
+            ge=1,
+            cli=True,
+            checkpoint_safe=True,
+            description="number of gpus to decompose the domain across, intra-node "
+            "(NVLink/peer). 1 = single device (default). >1 requires a gpu build "
+            "(./dev.py install --cuda or --hip) and at least that many visible devices. "
+            "the backend (cuda/hip) is a BUILD choice; this is purely how many devices "
+            "to use at runtime",
         ),
     ]
     checkpoint_file: Annotated[
@@ -185,10 +417,26 @@ class SimbiProblem(BaseModel):
         Solver,
         ProblemParam(Solver.HLLE, cli=True, description="numerical solver"),
     ]
+    ct_method: Annotated[
+        CtMethod,
+        ProblemParam(
+            CtMethod.CONTACT,
+            cli=True,
+            description="CT edge-EMF scheme (contact | uct); MHD only",
+        ),
+    ]
     reconstruction: Annotated[
         Reconstruction,
         ProblemParam(
             Reconstruction.PLM, cli=True, description="spatial reconstruction"
+        ),
+    ]
+    limiter: Annotated[
+        Limiter,
+        ProblemParam(
+            Limiter.MINMOD,
+            cli=True,
+            description="PLM slope limiter (minmod | vanleer); minmod uses plm_theta (1=minmod, 2=MC)",
         ),
     ]
     timestepping: Annotated[
@@ -206,15 +454,21 @@ class SimbiProblem(BaseModel):
     plm_theta: Annotated[
         float,
         ProblemParam(
-            1.5, gt=0.0, le=2.0, cli=True, description="plm theta parameter"
+            1.5, gt=0.0, le=2.0, cli=True,
+            description="minmod-MC compression in (0,2] (1=minmod, 2=MC); ignored for --limiter vanleer",
         ),
     ]
     boundary_conditions: Annotated[
-        Union[BoundaryCondition, Sequence[BoundaryCondition]],
+        Union[
+            BoundaryCondition,
+            Neumann,
+            Robin,
+            Sequence[Union[BoundaryCondition, Neumann, Robin]],
+        ],
         ProblemParam(
             BoundaryCondition.OUTFLOW,
             cli=True,
-            description="boundary conditions",
+            description="boundary conditions; a face may be a Neumann/Robin gradient wall",
         ),
     ]
 
@@ -225,13 +479,37 @@ class SimbiProblem(BaseModel):
         CellSpacing,
         ProblemParam(CellSpacing.LINEAR, description="x1 cell spacing"),
     ]
+    x1_spacing_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            description="adjacent x1 cell-width ratio for geometric spacing",
+        ),
+    ]
     x2_spacing: Annotated[
         CellSpacing,
         ProblemParam(CellSpacing.LINEAR, description="x2 cell spacing"),
     ]
+    x2_spacing_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            description="adjacent x2 cell-width ratio for geometric spacing",
+        ),
+    ]
     x3_spacing: Annotated[
         CellSpacing,
         ProblemParam(CellSpacing.LINEAR, description="x3 cell spacing"),
+    ]
+    x3_spacing_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            cli=True,
+            description="adjacent x3 cell-width ratio for geometric spacing",
+        ),
     ]
 
     # =========================================================================
@@ -248,7 +526,7 @@ class SimbiProblem(BaseModel):
     ]
 
     # =========================================================================
-    # refinement / fmr settings (fixed mesh refinement only for now)
+    # refinement / fmr settings (fixed mesh refinement only)
     # =========================================================================
     refinement_enabled: Annotated[
         bool, ProblemParam(False, description="enable mesh refinement")
@@ -267,7 +545,13 @@ class SimbiProblem(BaseModel):
     ]
     refinement_subcycling_mode: Annotated[
         SubCycleMode,
-        ProblemParam(SubCycleMode.NONE, description="subcycling mode"),
+        ProblemParam(
+            SubCycleMode.NONE,
+            description="refinement subcycling schedule. only the implemented fixed-ratio "
+            "schedule is selectable: level l advances 2^l times per root step, with the root "
+            "step limited by every level's own cfl. NONE and STANDARD both select it and are "
+            "equivalent; ADAPTIVE and MANUAL are refused",
+        ),
     ]
     refinement_mode: Annotated[
         RefinementMode,
@@ -280,9 +564,12 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def dimensionality(self) -> int:
-        """compute dimensionality from resolution."""
-        if self.regime in [Regime.SRMHD]:
-            return 3
+        """compute dimensionality from resolution.
+
+        mhd is genuine 1.5d / 2.5d / 3d (spatial d in {1,2,3}, vector dof=3), so
+        its spatial dimensionality is read from the resolution like every other
+        regime.
+        """
         if self.resolution is None:
             return 3  # default assumption for uninitialized resolution
         if isinstance(self.resolution, int):
@@ -293,13 +580,16 @@ class SimbiProblem(BaseModel):
     @property
     def is_mhd(self) -> bool:
         """check if simulation involves mhd."""
-        return self.regime in [Regime.SRMHD]
+        return self.regime in [Regime.RMHD, Regime.NMHD, Regime.IMHD]
 
     @computed_field
     @property
     def isothermal(self) -> bool:
-        """check if simulation is isothermal."""
-        return self.adiabatic_index == 1.0
+        """isothermal is a REGIME, not a gamma value. the isothermal closure
+        (p = cs^2 rho, no energy equation) is a structurally different eos — NOT
+        the gamma->1 limit of the adiabatic path — so it is keyed on the regime,
+        never on adiabatic_index == 1."""
+        return self.regime in [Regime.ISOTHERMAL, Regime.IMHD]
 
     @computed_field
     @property
@@ -309,11 +599,45 @@ class SimbiProblem(BaseModel):
             return 9
         return self.dimensionality + 3
 
+    def expected_primitive_arity(self) -> Optional[tuple[int, str]]:
+        """the EXACT per-cell primitive tuple (length, signature) that
+        `initial_primitive_state`'s gas generator must yield — or None when the
+        width is not uniquely fixed by the regime. the reader maps the tuple
+        POSITIONALLY, so a too-long tuple silently shifts a trailing field (e.g.
+        pressure) into an ignored slot rather than erroring; pinning the length
+        turns that into a loud failure.
+
+        the layout is `rho`, then one velocity per DOF, then pressure. it is exact
+        only when BOTH are fixed:
+        - DOF is 3 for mhd (v3 couples to B, so it is carried even in 1.5d/2.5d).
+          for pure hydro it is `dimensionality` ONLY on a cartesian chart; a
+          curvilinear chart (spherical/cylindrical) carries transverse velocities
+          for angular momentum with no matching spatial axis, and relativistic
+          hydro (rhd) likewise carries an azimuthal v3 on a curved/rotating chart
+          — so those DOFs are not fixed by dimensionality (width UNDETERMINED).
+        - pressure is mandatory for an energy regime. an ISOTHERMAL run may or may
+          not pass an explicit p/cs field (p = cs^2 rho is derivable), so its width
+          is UNDETERMINED (None).
+        callers fall back to a lower-bound check for the None cases."""
+        if self.isothermal:
+            return None  # optional trailing p/cs entry
+        if self.is_mhd:
+            dof = 3  # v3 couples to B on every chart
+        elif (
+            self.regime != Regime.RHD
+            and self.coord_system == CoordSystem.CARTESIAN
+        ):
+            dof = self.dimensionality  # cartesian hydro carries no extra velocity
+        else:
+            return None  # curvilinear / relativistic: chart-dependent velocity dof
+        fields = ["rho"] + [f"v{ii + 1}" for ii in range(dof)] + ["p"]
+        return len(fields), "(" + ", ".join(fields) + ")"
+
     @computed_field
     @property
     def is_relativistic(self) -> bool:
         """check if simulation is relativistic."""
-        return self.regime in [Regime.SRHD, Regime.SRMHD]
+        return self.regime in [Regime.RHD, Regime.RMHD]
 
     @computed_field
     @property
@@ -337,7 +661,14 @@ class SimbiProblem(BaseModel):
         if log_enabled and num_outputs > 0:
             import math
 
-            return math.log10(self.end_time / self.start_time) / num_outputs
+            anchor = self.checkpoint_log_anchor if self.checkpoint_log_anchor > 0.0 else self.start_time
+            if anchor <= 0.0:
+                raise ConfigError(
+                    "log-spaced checkpoints need a positive time anchor: set "
+                    "checkpoint_log_anchor (or a positive start_time) — the "
+                    "cadence is log10(end_time / anchor), undefined at 0"
+                )
+            return math.log10(self.end_time / anchor) / num_outputs
         return 0.0
 
     # =========================================================================
@@ -358,8 +689,10 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def ambient_sound_speed(self) -> float:
-        """ambient sound speed for isothermal simulations."""
-        return 0.0
+        """ambient (constant) isothermal sound speed — derived from the
+        `sound_speed` field. kept as the wire/checkpoint name the backends read;
+        disk configs may still override it directly for a reference cs_0."""
+        return self.sound_speed if self.sound_speed is not None else 0.0
 
     @computed_field
     @property
@@ -371,6 +704,14 @@ class SimbiProblem(BaseModel):
     @property
     def viscosity(self) -> float:
         """viscosity coefficient."""
+        return 0.0
+
+    @computed_field
+    @property
+    def resistivity(self) -> float:
+        """bulk ohmic resistivity eta for non-ideal mhd. the induction equation
+        gains a diffusive emf eta*J, dissipating magnetic energy into the gas.
+        zero recovers ideal mhd."""
         return 0.0
 
     @computed_field
@@ -422,12 +763,35 @@ class SimbiProblem(BaseModel):
     # =========================================================================
     @computed_field
     @property
-    def hydro_source_expressions(self) -> ExpressionDict:
-        return {}
+    def source_expressions(self) -> list[ExpressionDict]:
+        """ordered source terms applied additively during each stage."""
+        return []
 
     @computed_field
     @property
-    def gravity_source_expressions(self) -> ExpressionDict:
+    def census_expressions(self) -> list[ExpressionDict]:
+        """binned reductions over the grid, emitted as a time series in the checkpoint.
+
+        each entry is a `simbi.expression.Census(...).serialize()`. a census is a
+        pointwise map followed by a segmented reduce: bin axes cut the grid into
+        buckets, and each registered accumulator is combined within its bucket. no
+        axes at all is a global reduction, which is how a total mass or energy is
+        expressed.
+
+        the reduce combines SUMS or extrema, not statistics. a mean or a variance is
+        not order-agnostic, so it cannot be reduced in parallel or combined across
+        restart segments — register `m*v` and `m` and divide when reading.
+        """
+        return []
+
+    @computed_field
+    @property
+    def scale_factor_expressions(self) -> ExpressionDict:
+        """mesh-motion scale factor a(t) + its derivative a_dot(t) as a TRACED expression pair,
+        evaluated exactly in the rust time loop (no linearization, no python in the loop). override
+        in a subclass returning `graph.compile([a, a_dot]).serialize_motion()`, with
+        `a_dot = a.diff(variable('t'))` (autodiff). default {} = no expression motion (static / the
+        legacy linear scale_factor callable)."""
         return {}
 
     # =========================================================================
@@ -442,6 +806,43 @@ class SimbiProblem(BaseModel):
     @property
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
         return []
+
+    @computed_field
+    @property
+    def bonded_assembly(self) -> Optional[BondedAssembly]:
+        return None
+
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        """mass-transport tracer count: deterministic mass-weighted seeding;
+        accepted finite-volume mass transfers update authoritative cell or
+        reservoir ownership. checkpoints also carry derived positions for
+        visualization. 0 = none."""
+        return 0
+
+    @computed_field
+    @property
+    def tracer_scheme(self) -> TracerScheme:
+        """passive tracer realization: discrete, ito2, or ito3."""
+        return TracerScheme.DISCRETE
+
+    def tracer_cohort(self) -> Optional[GasStateGenerator]:
+        """initial-material provenance: one non-negative integer cohort per
+        interior cell in the same traversal order as the gas state. labels are
+        immutable on tracers; injected material uses the reserved label 65535."""
+        return None
+
+    # =========================================================================
+    # passive scalar (override in subclass)
+    # =========================================================================
+    def passive_scalar(self) -> Optional[GasStateGenerator]:
+        """the passive-scalar (dye) initial condition: a generator yielding one
+        chi value per interior cell, axis-0-fastest (the same traversal as the
+        gas state generator), or None for an undyed run. the dye advects with
+        the mass flux and appears as the `chi` dataset in checkpoints, with
+        `chi_dens` derivable in the viz."""
+        return None
 
     # =========================================================================
     # abstract method - must be implemented by subclass
@@ -471,8 +872,27 @@ class SimbiProblem(BaseModel):
 
         # resolution: "256,256" -> (256, 256)
         if "resolution" in data and isinstance(data["resolution"], str):
-            parts = data["resolution"].split(",")
-            data["resolution"] = tuple(int(p.strip()) for p in parts)
+            raw = data["resolution"]
+            try:
+                data["resolution"] = tuple(
+                    int(p.strip()) for p in raw.split(",")
+                )
+            except ValueError:
+                raise ValueError(
+                    f"resolution: expected comma-separated integers "
+                    f"(e.g., 256,256), got {raw!r}"
+                ) from None
+
+        # pad a SHORT resolution to the field's declared tuple arity with singleton
+        # trailing axes: a 2d input (1024,1024) satisfies a 3-component field as
+        # (1024,1024,1), so a 2d problem stored as a flat 3d slab (the mhd
+        # convention, nz=1) need not spell out the unused axis.
+        # an OVER-long input is left for validation to reject with a clear message.
+        if "resolution" in data and isinstance(data["resolution"], tuple):
+            arity = cls._tuple_field_arity("resolution")
+            res = data["resolution"]
+            if arity is not None and len(res) < arity:
+                data["resolution"] = res + (1,) * (arity - len(res))
 
         # bounds: "[[0,1],[0,1]]" -> [[0, 1], [0, 1]]
         if "bounds" in data and isinstance(data["bounds"], str):
@@ -517,18 +937,20 @@ class SimbiProblem(BaseModel):
             bc_str = data["boundary_conditions"]
             if "," in bc_str:
                 data["boundary_conditions"] = [
-                    BoundaryCondition[bc.strip().upper()]
+                    _to_enum(BoundaryCondition, bc.strip(), "boundary_conditions")
                     for bc in bc_str.split(",")
                 ]
             else:
-                data["boundary_conditions"] = BoundaryCondition[
-                    bc_str.strip().upper()
-                ]
+                data["boundary_conditions"] = _to_enum(
+                    BoundaryCondition, bc_str.strip(), "boundary_conditions"
+                )
 
         # enum fields: convert string to enum
         enum_fields = {
             "solver": Solver,
+            "ct_method": CtMethod,
             "coord_system": CoordSystem,
+            "spacetime": Spacetime,
             "regime": Regime,
             "reconstruction": Reconstruction,
             "timestepping": TimeStepping,
@@ -541,7 +963,9 @@ class SimbiProblem(BaseModel):
 
         for field_name, enum_type in enum_fields.items():
             if field_name in data and isinstance(data[field_name], str):
-                data[field_name] = enum_type[data[field_name].upper()]
+                data[field_name] = _to_enum(
+                    enum_type, data[field_name], field_name
+                )
 
         # path fields: convert string to Path
         path_fields = ["data_directory", "checkpoint_file"]
@@ -553,7 +977,7 @@ class SimbiProblem(BaseModel):
 
     @model_validator(mode="after")
     def _coerce_refinement_types(self) -> SimbiProblem:
-        """convert refinement_ratios to np.uint64 for c++ backend."""
+        """convert refinement_ratios to np.uint64 for the rust backend."""
         if self.refinement_ratios:
             object.__setattr__(
                 self,
@@ -591,18 +1015,51 @@ class SimbiProblem(BaseModel):
             and not self.locally_isothermal
         ):
             raise ValueError(
-                "ambient_sound_speed must be positive for isothermal simulations "
-                "unless locally_isothermal is True"
+                "isothermal runs require a positive sound_speed (set "
+                "`sound_speed=...`), unless locally_isothermal is True (then "
+                "cs^2(x) is derived per cell from the initial pressure profile)"
+            )
+        if not self.isothermal and self.adiabatic_index is None:
+            raise ValueError(
+                "energy-bearing (non-isothermal) regimes require an "
+                "adiabatic_index (set `adiabatic_index=...`)"
             )
         return self
 
     @model_validator(mode="after")
     def _validate_plm_theta(self) -> SimbiProblem:
         """validate plm theta parameter."""
-        if self.reconstruction == Reconstruction.PLM and not (
-            0.0 < self.plm_theta <= 2.0
+        if (
+            self.reconstruction == Reconstruction.PLM
+            and self.limiter == Limiter.MINMOD
+            and not (0.0 < self.plm_theta <= 2.0)
         ):
-            raise ValueError("plm_theta must be in (0, 2] when using PLM")
+            raise ValueError(
+                "plm_theta must be in (0, 2] when using PLM with the minmod limiter"
+            )
+        # the van leer limiter is spelled theta = -1 ONLY at the execution-dict
+        # boundary (runner.py); the validated model keeps the user's positive
+        # compression so the field's own gt=0 constraint holds on every path a
+        # model round-trips (assignment validation, checkpoint restore).
+        return self
+
+    @model_validator(mode="after")
+    def _validate_geometric_spacing(self) -> SimbiProblem:
+        """validate each geometric cell-width ratio."""
+        for axis in range(1, 4):
+            spacing = getattr(self, f"x{axis}_spacing")
+            ratio = getattr(self, f"x{axis}_spacing_ratio")
+            if spacing == CellSpacing.GEOMETRIC:
+                if not math.isfinite(ratio) or ratio <= 0.0:
+                    raise ValueError(
+                        f"x{axis}_spacing_ratio must be positive and finite "
+                        f"for geometric spacing"
+                    )
+            elif ratio != 1.0:
+                raise ValueError(
+                    f"x{axis}_spacing_ratio is only valid when "
+                    f"x{axis}_spacing='geometric'"
+                )
         return self
 
     def validate_refinement_config(self) -> None:
@@ -614,6 +1071,28 @@ class SimbiProblem(BaseModel):
         """
         if not self.refinement_enabled:
             return
+
+        # mesh refinement is cartesian + uniform-spacing only: the coarse-fine prolong/restrict
+        # transfer is geometry-agnostic (equal index-based sub-cells), correct solely for
+        # uniform-volume cells. a curvilinear grid (variable r^2 / r cell volumes) or a non-linear
+        # axis (unequal sub-cells) would get silently-wrong transfers.
+        if self.coord_system != CoordSystem.CARTESIAN:
+            raise ValueError(
+                "mesh refinement is cartesian-only (the coarse-fine transfer ignores curvilinear "
+                f"cell volumes); got coord_system={self.coord_system.value}"
+            )
+        nonlinear = [
+            f"x{ax}"
+            for ax, sp in enumerate(
+                (self.x1_spacing, self.x2_spacing, self.x3_spacing), start=1
+            )
+            if sp != CellSpacing.LINEAR
+        ]
+        if nonlinear:
+            raise ValueError(
+                "mesh refinement requires uniform (linear) cell spacing (the coarse-fine transfer "
+                f"assumes equal sub-cells); non-linear axes: {', '.join(nonlinear)}"
+            )
 
         if self.refinement_regions is None:
             raise ValueError(
@@ -643,16 +1122,28 @@ class SimbiProblem(BaseModel):
                     f"refinement_region[{ii}] has {len(region)} coords, expected {expected_coords}"
                 )
 
-        if self.refinement_subcycling_mode == SubCycleMode.MANUAL:
-            if len(self.refinement_substeps) != expected_levels:
-                raise ValueError(
-                    "refinement_substeps must match refinement_max_levels - 1 for manual mode"
-                )
-            # insert a single substep for the base level
-            object.__setattr__(
-                self,
-                "refinement_substeps",
-                [np.uint64(1)] + self.refinement_substeps,
+        # the backend subcycles at a FIXED refinement ratio: level l advances 2^l times per root
+        # step, and the root step is min over levels of (that level's own cfl limit) * 2^l, so every
+        # level lands inside its own cfl. neither an adaptive substep count nor a hand-specified one
+        # is implemented — `refinement_subcycling_mode` and `refinement_substeps` reach no backend
+        # code at all.
+        #
+        # refused rather than ignored. a config that declares ADAPTIVE and silently receives the
+        # fixed schedule invites reasoning built on a knob that does nothing, and the two are not
+        # equivalent: under the fixed schedule the ROOT is throttled by the finest level's
+        # requirement, taking around twenty times more steps than its own cfl would need on a deep
+        # gravitational ladder. that is a bounded cost (the finest level dominates the work either
+        # way, so an ideal schedule saves order twenty percent) but it is not nothing, and it is not
+        # what the declaration says.
+        if self.refinement_subcycling_mode in (
+            SubCycleMode.ADAPTIVE,
+            SubCycleMode.MANUAL,
+        ):
+            raise NotImplementedError(
+                f"refinement_subcycling_mode={self.refinement_subcycling_mode.value!r} is not "
+                "implemented: the backend subcycles level l exactly 2^l times per root step, and "
+                "the mode reaches no backend code. use SubCycleMode.STANDARD (or NONE) to select "
+                "the implemented fixed-ratio schedule."
             )
 
         if self.refinement_mode == RefinementMode.ADAPTIVE:
@@ -662,14 +1153,20 @@ class SimbiProblem(BaseModel):
 
     def setup(self) -> None:
         """
-        override to compute dynamic fields before validation.
+        override to compute dynamic fields from other parameters.
 
-        this hook is called automatically during model construction, before
-        validation runs. use it to compute fields like bounds, resolution,
-        or refinement_regions based on other parameters.
+        this hook runs at the END of model validation (the last after-validator),
+        so every declared field has already been validated when it executes. a
+        field this hook computes (bounds, refinement_regions, ...) must therefore
+        be declared Optional with a None default — a required field with no value
+        fails validation before setup ever runs. assignments made here re-validate
+        against the field's own constraints (ge/gt/le), and the cross-field checks
+        re-run once setup returns.
 
-        if you override this method in a subclass, call super().setup() first
-        to ensure the full setup chain executes:
+        a subclass override must call super().setup() first so the full setup
+        chain executes:
+
+            bounds: Annotated[Optional[list], ProblemParam(None, ...)]
 
             def setup(self) -> None:
                 super().setup()
@@ -677,6 +1174,20 @@ class SimbiProblem(BaseModel):
                 self.refinement_regions = self._calculate_regions()
         """
         self.__setup_base_reached = True
+
+    def summary(self) -> list[tuple[str, str, str]]:
+        """
+        override to report DERIVED quantities (bondi radius, expected rates,
+        computed grid facts, ...) as (group, label, value) rows. the runner
+        collects these once, after setup(), into the live dashboard's grouped
+        problem-setup panel alongside the declared parameters.
+
+        this is the config's one reporting hook: never print from __del__ —
+        a destructor fires on garbage-collection timing, on every transient
+        instantiation (discovery, validation, tests), and races the live
+        dashboard for the terminal.
+        """
+        return []
 
     @model_validator(mode="after")
     def _finalize(self) -> SimbiProblem:
@@ -686,6 +1197,9 @@ class SimbiProblem(BaseModel):
         do not override this method. override setup() instead.
         """
         self.__setup_base_reached = False
+        # field assignments inside setup() validate individually (the field-only
+        # __setattr__ check); the explicit validator re-runs restore full cross-field
+        # consistency once every setup mutation has landed.
         self.setup()
 
         if not self.__setup_base_reached:
@@ -695,6 +1209,10 @@ class SimbiProblem(BaseModel):
                 stacklevel=2,
             )
 
+        self._coerce_refinement_types()
+        self._enforce_order_settings()
+        self._validate_isothermal()
+        self._validate_plm_theta()
         self.validate_refinement_config()
         return self
 
@@ -712,13 +1230,14 @@ class SimbiProblem(BaseModel):
                 continue
 
             metadata = get_param_metadata(field_info)
-            if not metadata.cli:
+            if not cls._field_is_cli(field_name):
                 continue
 
             cli_name = metadata.cli_name or field_name.replace("_", "-")
+            help_text = field_info.description or f"set {field_name}"
             kwargs: dict[str, Any] = {
                 "dest": field_name,
-                "help": field_info.description or f"set {field_name}",
+                "help": help_text.replace("%", "%%"),
             }
 
             if field_info.default is not None and field_info.default is not ...:
@@ -730,6 +1249,47 @@ class SimbiProblem(BaseModel):
                 group.add_argument(f"--{cli_name}", **kwargs)
             except argparse.ArgumentError:
                 pass  # already registered
+
+    @classmethod
+    def _field_is_cli(cls, field_name: str) -> bool:
+        """whether a field is cli-exposed, inheriting the flag across the mro.
+
+        a core knob declared `cli=True` in a base class (e.g., `solver`,
+        `reconstruction`, `cfl_number`) stays exposed even when a subclass
+        overrides the field ONLY to change its default — the common config
+        pattern `solver: Annotated[Solver, ProblemParam(Solver.HLLC)]` would
+        otherwise silently drop `--solver` (the override replaces the base's
+        Annotated metadata wholesale, losing `cli=True`). the child's default /
+        type / help still win; only the cli exposure is inherited.
+        """
+        for klass in cls.__mro__:
+            fields = getattr(klass, "model_fields", None)
+            if not fields or field_name not in fields:
+                continue
+            if get_param_metadata(fields[field_name]).cli:
+                return True
+        return False
+
+    @classmethod
+    def _tuple_field_arity(cls, field_name: str) -> Optional[int]:
+        """the fixed arity of a tuple-typed field, or None when it is variadic
+        (`tuple[int, ...]`) or not a tuple. resolves across the mro so a subclass
+        that re-declares the field is honored. used to pad a short resolution
+        input to the declared number of axes.
+        """
+        from typing import get_args, get_origin
+
+        for klass in cls.__mro__:
+            fields = getattr(klass, "model_fields", None)
+            if not fields or field_name not in fields:
+                continue
+            ann = fields[field_name].annotation
+            if get_origin(ann) is tuple:
+                args = get_args(ann)
+                if args and Ellipsis not in args:
+                    return len(args)
+            return None
+        return None
 
     @classmethod
     def _add_type_info(cls, kwargs: dict[str, Any], field_info: Any) -> None:
@@ -763,11 +1323,29 @@ class SimbiProblem(BaseModel):
         parser = argparse.ArgumentParser(add_help=False)
         cls.setup_cli(parser)
 
-        # parse into existing namespace (if provided)
-        parsed, _ = parser.parse_known_args(argv, namespace)
+        # parse into existing namespace (if provided). REJECT unrecognized flags; a typo'd
+        # or unsupported flag must fail loudly here, since silently ignoring it would run
+        # with the default and mislead the user.
+        parsed, extras = parser.parse_known_args(argv, namespace)
+        if extras:
+            raise ConfigError(
+                f"unrecognized argument(s): {' '.join(extras)}\n"
+                f"run `simbi run <config> --help` to list the supported flags."
+            )
         if parsed is None:
             raise ValueError("failed to parse cli arguments for problem")
-        return cls.from_namespace(parsed)
+        # record which flags the user EXPLICITLY passed: a second parse with every
+        # default suppressed leaves only the argv-provided dests in the namespace.
+        # the checkpoint merge reads this to tell a demanded override apart from a
+        # class default that merely differs from the checkpoint.
+        explicit_parser = argparse.ArgumentParser(add_help=False)
+        cls.setup_cli(explicit_parser)
+        for action in explicit_parser._actions:
+            action.default = argparse.SUPPRESS
+        explicit_ns, _ = explicit_parser.parse_known_args(argv)
+        problem = cls.from_namespace(parsed)
+        problem._cli_explicit = set(vars(explicit_ns))
+        return problem
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> SimbiProblem:
@@ -778,7 +1356,14 @@ class SimbiProblem(BaseModel):
                 value = getattr(namespace, field_name)
                 if value is not None:
                     data[field_name] = value
-        return cls(**data)
+        try:
+            return cls(**data)
+        except ValidationError as exc:
+            # convert pydantic's raw traceback into a clinical, actionable report
+            # the cli prints without a stack trace.
+            raise ConfigError(
+                _humanize_validation_error(cls.__name__, exc)
+            ) from None
 
     # =========================================================================
     # checkpoint support
@@ -786,7 +1371,7 @@ class SimbiProblem(BaseModel):
     def get_checkpoint_immutable_fields(self) -> set[str]:
         """get field names that cannot be overridden when loading from checkpoint."""
         immutable = set()
-        for field_name, field_info in self.model_fields.items():
+        for field_name, field_info in type(self).model_fields.items():
             metadata = get_param_metadata(field_info)
             if not metadata.checkpoint_safe:
                 immutable.add(field_name)
@@ -795,7 +1380,7 @@ class SimbiProblem(BaseModel):
     def get_checkpoint_safe_fields(self) -> set[str]:
         """get field names that can be overridden when loading from checkpoint."""
         safe = set()
-        for field_name, field_info in self.model_fields.items():
+        for field_name, field_info in type(self).model_fields.items():
             metadata = get_param_metadata(field_info)
             if metadata.checkpoint_safe:
                 safe.add(field_name)

@@ -38,16 +38,16 @@ from typing import Any, Optional, Sequence, Union
 from pydantic import ValidationError
 
 from .components.interface import ComponentProps
-from .registry import get_props_class, get_props_registry
+from .props_registry import PROPS_REGISTRY, get_props_class
 
 # type alias for raw config dict
 ConfigDict = dict[str, dict[str, Any]]
 
 
-def _coerce_value(value: str) -> Union[bool, int, float, str, tuple, list]:
+def _coerce_value(value: str) -> Union[bool, int, float, str]:
     """
     Coerce a string value to its appropriate python type.
-    Handles booleans, integers, floats, tuples, lists, and strings.
+    Handles booleans, integers, floats, and strings.
     """
     lower = value.lower()
 
@@ -60,17 +60,6 @@ def _coerce_value(value: str) -> Union[bool, int, float, str, tuple, list]:
     # none/null
     if lower in ("none", "null", ""):
         return None  # type: ignore
-
-    # tuple/list literals — safe parse via ast.literal_eval
-    if (value.startswith("(") and value.endswith(")")) or (
-        value.startswith("[") and value.endswith("]")
-    ):
-        import ast
-
-        try:
-            return ast.literal_eval(value)
-        except (ValueError, SyntaxError):
-            pass
 
     # try numeric types
     try:
@@ -131,53 +120,25 @@ def _set_nested(d: dict, key: str, value: Any) -> None:
     d[parts[-1]] = value
 
 
-def _split_file_prefix(token: str) -> tuple[int | None, str]:
+def parse_overrides(overrides: Sequence[str]) -> ConfigDict:
     """
-    detect an optional N: file-index prefix.
+    Parse a sequence of override strings into a config dict.
 
-    returns (file_index, remainder) where file_index is None for global
-    overrides. component names never start with a digit so the split is
-    unambiguous.
+    Args:
+        overrides: list of "component.field=value" strings
+
+    Returns:
+        dict mapping component names to field dicts
     """
-    colon = token.find(":")
-    if colon < 1:
-        return None, token
-    prefix = token[:colon]
-    if prefix.isdigit():
-        return int(prefix), token[colon + 1 :]
-    return None, token
-
-
-def parse_overrides(
-    overrides: Sequence[str],
-) -> tuple[ConfigDict, dict[int, ConfigDict]]:
-    """
-    parse a sequence of override strings into global and per-file config dicts.
-
-    supports two forms:
-        "component.field=value"        — global (applies to all files)
-        "N:component.field=value"      — per-file (applies to file N only)
-
-    returns:
-        (global_config, per_file_config)
-    """
-    global_config: ConfigDict = {}
-    per_file: dict[int, ConfigDict] = {}
+    config: ConfigDict = {}
 
     for override in overrides:
-        file_idx, remainder = _split_file_prefix(override)
-        component, field, value = _parse_override(remainder)
+        component, field, value = _parse_override(override)
+        if component not in config:
+            config[component] = {}
+        _set_nested(config[component], field, value)
 
-        if file_idx is None:
-            target = global_config
-        else:
-            target = per_file.setdefault(file_idx, {})
-
-        if component not in target:
-            target[component] = {}
-        _set_nested(target[component], field, value)
-
-    return global_config, per_file
+    return config
 
 
 def load_config_file(path: Union[str, Path]) -> ConfigDict:
@@ -278,6 +239,23 @@ def validate_props(component: str, config: dict[str, Any]) -> ComponentProps:
     """
     props_cls = get_props_class(component)
 
+    # name unknown keys up front with a close-match suggestion; pydantic's
+    # extra=forbid rejects them without one.
+    known = set(props_cls.model_fields)
+    unknown = [k for k in config if k not in known]
+    if unknown:
+        import difflib
+
+        parts = []
+        for k in unknown:
+            close = difflib.get_close_matches(k, known, n=1)
+            hint = f" (did you mean '{close[0]}'?)" if close else ""
+            parts.append(f"'{k}'{hint}")
+        raise ValueError(
+            f"unknown {component} prop(s): {', '.join(parts)};"
+            f" known props: {sorted(known)}"
+        )
+
     try:
         return props_cls(**config)
     except ValidationError as e:
@@ -291,19 +269,34 @@ def validate_props(component: str, config: dict[str, Any]) -> ComponentProps:
 def load_component_props(
     config_path: Optional[Union[str, Path]] = None,
     overrides: Optional[Sequence[str]] = None,
-) -> tuple[dict[str, ComponentProps], dict[int, ConfigDict]]:
+) -> dict[str, ComponentProps]:
     """
-    load and validate component props from config file and/or cli overrides.
+    Load and validate component props from config file and/or cli overrides.
 
-    returns:
-        (validated_global_props, per_file_raw_dicts)
+    Args:
+        config_path: optional path to yaml/json config file
+        overrides: optional list of "component.field=value" cli overrides
 
-        per-file dicts are left raw — validated at render time via
-        resolve_per_file_props, matching the grid panel_overrides pattern.
+    Returns:
+        dict mapping component names to validated props instances
+
+    Raises:
+        FileNotFoundError: if config file doesn't exist
+        ValueError: if config format is invalid
+        ValidationError: if props validation fails
+
+    Examples:
+        # file only
+        props = load_component_props("viz.yaml")
+
+        # overrides only
+        props = load_component_props(overrides=["polygon.cmap=inferno"])
+
+        # file + overrides
+        props = load_component_props("viz.yaml", ["polygon.cmap=inferno"])
     """
     file_config: ConfigDict = {}
-    global_cli: ConfigDict = {}
-    per_file: dict[int, ConfigDict] = {}
+    cli_config: ConfigDict = {}
 
     # load file config
     if config_path:
@@ -311,25 +304,31 @@ def load_component_props(
 
     # parse cli overrides
     if overrides:
-        global_cli, per_file = parse_overrides(overrides)
+        cli_config = parse_overrides(overrides)
 
     # merge configs (cli wins)
-    merged = merge_configs(file_config, global_cli)
+    merged = merge_configs(file_config, cli_config)
 
-    # extract grid section (not a component — handled separately)
-    merged.pop("grid", None)
-
-    # validate and instantiate global props
+    # validate and instantiate
     props: dict[str, ComponentProps] = {}
     errors: list[str] = []
 
     for component, config in merged.items():
-        if component not in get_props_registry():
-            continue
+        if component not in PROPS_REGISTRY:
+            # accepting an unknown component name would silently drop EVERY override
+            # under it (qaud.cmap=inferno), so it raises with a close-match suggestion.
+            import difflib
+
+            close = difflib.get_close_matches(component, PROPS_REGISTRY, n=1)
+            hint = f" (did you mean '{close[0]}'?)" if close else ""
+            raise ValueError(
+                f"unknown props component '{component}'{hint}; valid components: "
+                + ", ".join(sorted(PROPS_REGISTRY))
+            )
 
         try:
             props[component] = validate_props(component, config)
-        except (ValidationError, TypeError) as e:
+        except (ValidationError, TypeError, ValueError) as e:
             errors.append(f"{component}: {e}")
 
     if errors:
@@ -338,78 +337,29 @@ def load_component_props(
             + "\n".join(f"  - {e}" for e in errors)
         )
 
-    return props, per_file
+    return props
 
 
-def load_grid_config(
+def load_theme_config(
     config_path: Optional[Union[str, Path]] = None,
-) -> Optional[dict[str, Any]]:
+    overrides: Optional[Sequence[str]] = None,
+) -> dict[str, Any]:
     """
-    extract the grid section from a config file.
+    Load and return validated theme props (if present) using load_component_props.
 
-    returns the raw grid dict (with keys like shared_colorbar, auto_label,
-    panels) or None if no grid section exists.
+    This convenience wrapper focuses on the `theme` key and returns the validated
+    ThemeProps instance (pydantic model) when found, otherwise returns an empty dict.
+
+    It delegates parsing, coercion and validation to load_component_props so CLI
+    overrides and config files are handled consistently.
     """
-    if not config_path:
-        return None
+    # nothing to do if no source provided
+    if not config_path and not overrides:
+        return {}
 
-    file_config = load_config_file(config_path)
-    return file_config.get("grid", None)
-
-
-def get_props_for_component(
-    component_name: str,
-    loaded_props: dict[str, ComponentProps],
-    defaults: Optional[dict[str, Any]] = None,
-) -> ComponentProps:
-    """
-    Get props for a specific component, with fallback to defaults.
-
-    Args:
-        component_name: name of the component (e.g., "polygon")
-        loaded_props: dict from load_component_props()
-        defaults: optional default values to use if not in loaded_props
-
-    Returns:
-        props instance for the component
-    """
-    key = component_name.lower().replace("-", "_")
-
-    if key in loaded_props:
-        return loaded_props[key]
-
-    # fall back to defaults or empty props
-    props_cls = get_props_class(key)
-    return props_cls(**(defaults or {}))
-
-
-def resolve_per_file_props(
-    base_props: Optional[dict[str, ComponentProps]],
-    per_file_overrides: Optional[dict[int, dict]],
-    file_idx: int,
-) -> dict[str, ComponentProps]:
-    """merge base props with per-file overrides for a single file index."""
-    result = dict(base_props) if base_props else {}
-
-    if not per_file_overrides or file_idx not in per_file_overrides:
-        return result
-
-    overrides = per_file_overrides[file_idx]
-    for comp_name, comp_overrides in overrides.items():
-        if comp_name in ("label", "file", "slice", "xlims", "ylims"):
-            continue
-        if comp_name in result:
-            existing = result[comp_name]
-            merged = {**existing.model_dump(), **comp_overrides}
-            result[comp_name] = type(existing)(**merged)
-        else:
-            try:
-                props_cls = get_props_class(comp_name)
-                result[comp_name] = props_cls(**comp_overrides)
-            except KeyError:
-                pass
-
-    return result
+    # reuse existing loader which merges file + overrides and validates props
+    loaded = load_component_props(config_path, overrides)
+    return loaded.get("theme", {})
 
 
 def generate_example_config() -> str:
@@ -425,7 +375,7 @@ def generate_example_config() -> str:
         "",
     ]
 
-    for name, props_cls in sorted(get_props_registry().items()):
+    for name, props_cls in sorted(PROPS_REGISTRY.items()):
         lines.append(f"{name}:")
 
         # get field info from pydantic model

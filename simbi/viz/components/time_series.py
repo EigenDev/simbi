@@ -34,7 +34,7 @@ class TimeSeriesPlotProps(ComponentProps):
 
     label: Optional[str] = None
     linestyle: str = "-"
-    linewidth: float = 1.0
+    linewidth: float = 2.0
     marker: Optional[str] = None
     marker_size: float = 6.0
     alpha: float = 0.6
@@ -88,11 +88,9 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         return self._initialized
 
     def update(self, props: TimeSeriesPlotProps) -> None:
+        # render() recreates every line artist from the props, so storing them
+        # is the whole update
         self.props = props
-        # In a full impl, this would update styles or rebuild lines
-        pass
-
-    _LINESTYLES = ("-", "--", "-.", ":")
 
     def _get_labels(self, num_lines: int) -> list[str]:
         """Get labels for one or more lines."""
@@ -104,9 +102,10 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
 
         if num_lines == 1:
             labels = [base_label]
+        elif self.data.body_names and len(self.data.body_names) == num_lines:
+            labels = [f"${name}$" for name in self.data.body_names]
         else:
-            # per-body lines are unlabeled to keep the legend clean
-            labels = ["_nolegend_"] * num_lines
+            labels = [f"{base_label}_{i}" for i in range(num_lines)]
         return labels
 
     def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
@@ -136,45 +135,20 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
 
         all_rendered_lines: List[Line2D] = []
 
-        # per-body lines get reduced alpha so totals stand out
-        line_alpha = (
-            self.props.alpha * 0.45 if num_lines > 1 else self.props.alpha
-        )
-
         for i in range(num_lines):
             line_values = values_2d[:, i]
             line_label = labels[i]
             norm = self.props.normalization or 1.0
-            ls = self._LINESTYLES[i % len(self._LINESTYLES)]
             main_line = self.ax.plot(
                 times,
                 line_values / norm,
                 label=line_label,
                 linewidth=self.props.linewidth,
-                linestyle=ls,
-                alpha=line_alpha,
+                alpha=self.props.alpha,
             )[0]
             if norm != 1:
                 self.ax.axhline(1.0, color="black", linestyle="--", alpha=0.3)
             all_rendered_lines.append(main_line)
-
-        # render percentile bands if present
-        if data.bands is not None:
-            p_lo, p_hi = data.bands
-            norm = self.props.normalization or 1.0
-            color = (
-                all_rendered_lines[-1].get_color()
-                if all_rendered_lines
-                else "C0"
-            )
-            self.ax.fill_between(
-                times,
-                p_lo / norm,
-                p_hi / norm,
-                alpha=0.2,
-                color=color,
-                label="10th-90th percentile",
-            )
 
             # --- Render Decorators (Moving Avg / Trend) ---
             if self.props.show_moving_average:

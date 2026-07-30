@@ -11,14 +11,15 @@
 # =============================================================================
 from __future__ import annotations
 
-import dataclasses
 import importlib
 import os
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from simbi.types.bodies import body_payload
 from simbi.types.input import BoundaryCondition
+
 from simbi.types.typing import (
     GasStateFunction,
     GasStateGenerator,
@@ -32,24 +33,75 @@ if TYPE_CHECKING:
 # =============================================================================
 # execution dict conversion
 # =============================================================================
+def _format_param_value(v: Any) -> Optional[str]:
+    """render a custom-param value for the dashboard, or None to skip (callables / complex objects)."""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, float):
+        return f"{v:.4g}"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, str):
+        return v if len(v) <= 32 else v[:29] + "..."
+    if (
+        isinstance(v, (list, tuple))
+        and 0 < len(v) <= 4
+        and all(isinstance(x, (int, float, bool)) for x in v)
+    ):
+        return "[" + ", ".join(_format_param_value(x) or "?" for x in v) + "]"
+    return None
+
+
+def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
+    """the config author's OWN params (subclass fields beyond the SimbiProblem base), for the live
+    dashboard's grouped 'problem setup' panel. each row is [group, humanized name, value]; the group
+    comes from `ProblemParam(group=...)` (default 'Parameters')."""
+    from .problem import SimbiProblem
+    from .param import get_param_metadata
+
+    base_fields = set(SimbiProblem.model_fields)
+    rows: list[list[str]] = []
+    for fname, finfo in type(problem).model_fields.items():
+        if fname in base_fields:
+            continue
+        formatted = _format_param_value(getattr(problem, fname, None))
+        if formatted is None:
+            continue
+        group = get_param_metadata(finfo).group or "Parameters"
+        rows.append([group, fname.replace("_", " "), formatted])
+    # the config's DERIVED quantities (the summary() hook): same panel, own
+    # groups — the declared dials and the numbers computed from them side by
+    # side, rendered by the dashboard.
+    for group, label, value in problem.summary():
+        rows.append([str(group), str(label), str(value)])
+    return rows
+
+
 def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
-    convert problem config to dict for C++ backend.
+    convert problem config to dict for the rust backend.
 
     this produces the exact format expected by backend.run_simulation().
     """
     import warnings
 
-    # silence pydantic serialization warnings for numpy types (needed for pybind11)
-    warnings.filterwarnings(
-        "ignore",
-        message=".*Pydantic serializer warnings.*",
-        category=UserWarning,
-        module="pydantic.main",
-    )
+    # silence the benign pydantic serialization warnings for numpy scalar types (e.g. np.uint64
+    # cell counts) crossing into the rust backend. the warning is emitted from
+    # `pydantic._internal._serializers` (a module filter on `pydantic.main` would miss it), so
+    # match by message across all modules and scope it to the dump so nothing else is suppressed.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*[Pp]ydantic serializer warnings.*",
+            category=UserWarning,
+        )
+        # get all model fields
+        model_dict = problem.model_dump()
 
-    # get all model fields
-    model_dict = problem.model_dump()
+    _validate_expression_payloads(model_dict)
+
+    # the problem's class name — shown in the rust run dashboard header.
+    model_dict["name"] = type(problem).__name__
 
     # ensure data_directory is string with trailing slash
     data_dir = model_dict.get("data_directory", "data/")
@@ -58,6 +110,9 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     if not data_dir.endswith("/"):
         data_dir += "/"
     model_dict["data_directory"] = data_dir
+    checkpoint_file = model_dict.get("checkpoint_file")
+    if isinstance(checkpoint_file, Path):
+        model_dict["checkpoint_file"] = str(checkpoint_file)
 
     # add computed fields (honor explicit problem attributes, then derive sensible defaults)
     computed_fields = [
@@ -73,10 +128,14 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         "ambient_sound_speed",
         "shakura_sunyaev_alpha",
         "viscosity",
+        "resistivity",
     ]
     for field in computed_fields:
         if hasattr(problem, field):
             model_dict[field] = getattr(problem, field)
+
+    # the config author's own params, grouped, for the live dashboard's problem-setup panel.
+    model_dict["custom_params"] = _collect_custom_params(problem)
 
     # normalize regime to a lowercase string and put back into model_dict
     regime = model_dict.get("regime")
@@ -101,14 +160,6 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         ),
     )
 
-    # derive isothermal from adiabatic_index (gamma) if not explicitly provided
-    gamma_val = model_dict.get("adiabatic_index", model_dict.get("gamma", None))
-    try:
-        if gamma_val is not None:
-            model_dict.setdefault("isothermal", float(gamma_val) == 1.0)
-    except Exception:
-        # leave isothermal absent if gamma cannot be parsed
-        pass
 
     # ensure dimensionality exists (prefer explicit dimensionality, else infer from resolution)
     if (
@@ -137,24 +188,18 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
             nvars += 1
         model_dict["nvars"] = nvars
 
-    # add body system if present
-    body_system = problem.body_system
-    if body_system and dataclasses.is_dataclass(body_system):
-        # use custom serialization if available (for proper c++ factory format)
-        if hasattr(body_system, "to_dict"):
-            model_dict["body_system"] = body_system.to_dict()
-        else:
-            model_dict["body_system"] = dataclasses.asdict(body_system)
-    elif not body_system:
-        model_dict.pop("body_system", None)
-
-    # add immersed bodies if present
-    immersed = problem.immersed_bodies
-    if immersed:
-        model_dict["immersed_bodies"] = [
-            dataclasses.asdict(b) if dataclasses.is_dataclass(b) else b
-            for b in immersed
-        ]
+    # bodies: model_dump carries the raw computed-field values; replace them with
+    # the backend wire from the single serialization SSOT (simbi.types.bodies).
+    model_dict.pop("body_system", None)
+    model_dict.pop("immersed_bodies", None)
+    model_dict.pop("bonded_assembly", None)
+    model_dict.update(
+        body_payload(
+            problem.body_system,
+            problem.immersed_bodies,
+            getattr(problem, "bonded_assembly", None),
+        )
+    )
 
     # process bounds to separate x1, x2, x3 bounds
     bounds = problem.bounds
@@ -178,7 +223,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         if isinstance(value, Path):
             model_dict[key] = str(value)
 
-    # nullify callables (c++ has own implementations)
+    # nullify callables (the backend carries its own implementations)
     for key, value in list(model_dict.items()):
         if callable(value):
             model_dict[key] = None
@@ -195,12 +240,193 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     return model_dict
 
 
+def _validate_census_payloads(model_dict: dict[str, Any]) -> None:
+    """reject malformed census registrations before rust.
+
+    a census carries no `kind` (there is no conservation law to wrap), so it is
+    checked on its own terms: a name, a reduce op the backend implements, and one
+    label per accumulator. a binning that reaches the grid malformed has already
+    cost a queue slot; one that reaches it SILENTLY wrong is worse, because an
+    under-covering census reads exactly like a physics result.
+    """
+    seen: set[str] = set()
+    for index, payload in enumerate(model_dict.get("census_expressions", ()) or ()):
+        field = f"census_expressions[{index}]"
+        if not isinstance(payload, dict):
+            raise ValueError(f"{field} must be a serialized census dictionary")
+        for key in ("name", "values", "value_names", "op", "nodes"):
+            if key not in payload:
+                raise ValueError(
+                    f"{field} is missing `{key}`; use Census(...).serialize() instead "
+                    "of serialize()"
+                )
+        name = str(payload["name"])
+        if name in seen:
+            raise ValueError(
+                f"{field} reuses the census name {name!r}; each names its own output "
+                "group"
+            )
+        seen.add(name)
+
+        op = str(payload["op"]).lower()
+        if op not in {"add", "min", "max"}:
+            raise ValueError(
+                f"{field} has unknown reduce op {op!r} (expected add, min or max). a "
+                "mean or variance is not order-agnostic; register the sums and divide "
+                "when reading"
+            )
+        values = payload["values"]
+        names = payload["value_names"]
+        if not isinstance(values, list) or not isinstance(names, list):
+            raise ValueError(f"{field} must contain `values` and `value_names` lists")
+        if not values:
+            raise ValueError(f"{field} registers no values")
+        if len(values) != len(names):
+            raise ValueError(
+                f"{field} has {len(values)} value expressions against {len(names)} "
+                "labels"
+            )
+        for axis_index, axis in enumerate(payload.get("axes", ()) or ()):
+            edges = axis.get("edges")
+            if not isinstance(edges, list) or len(edges) < 2:
+                raise ValueError(
+                    f"{field} axis {axis_index} needs at least 2 edges to define a bin"
+                )
+
+
+def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
+    """reject backend-invalid expression wires before rust."""
+    _validate_census_payloads(model_dict)
+    source_payloads = [
+        (f"source_expressions[{index}]", payload)
+        for index, payload in enumerate(model_dict.get("source_expressions", ()))
+        if payload
+    ]
+
+    boundary_fields = (
+        "bx1_inner_expressions",
+        "bx1_outer_expressions",
+        "bx2_inner_expressions",
+        "bx2_outer_expressions",
+        "bx3_inner_expressions",
+        "bx3_outer_expressions",
+    )
+    payloads = source_payloads + [
+        (field, model_dict.get(field))
+        for field in (*boundary_fields, "scale_factor_expressions")
+    ]
+    for field, payload in payloads:
+        if not payload:
+            continue
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"{field} must be a serialized expression dictionary"
+            )
+        if "kind" not in payload:
+            raise ValueError(
+                f"{field} is missing `kind`; use serialize_source(), "
+                "serialize_boundary(), or serialize_motion() instead of serialize()"
+            )
+        outputs = payload.get("outputs")
+        if not isinstance(outputs, list):
+            raise ValueError(f"{field} must contain an `outputs` list")
+
+        kind = str(payload["kind"]).lower()
+        dim = int(payload.get("dim", model_dict.get("dimensionality", 1)))
+        has_energy = not bool(model_dict.get("isothermal", False))
+        if field.startswith("source_expressions["):
+            known_kinds = {
+                "force",
+                "rotating_frame",
+                "cooling",
+                "relax",
+                "sponge",
+                "inject",
+                "raw",
+            }
+            if kind not in known_kinds:
+                raise ValueError(
+                    f"{field} has unknown source kind {kind!r}"
+                )
+            if model_dict.get("is_relativistic", False) and kind in {
+                "force",
+                "rotating_frame",
+                "cooling",
+                "relax",
+                "sponge",
+            }:
+                raise ValueError(
+                    f"{field} kind={kind!r} bakes a Newtonian conservation law "
+                    "and is invalid for a relativistic regime; use raw or inject"
+                )
+            if kind == "cooling" and not has_energy:
+                raise ValueError(
+                    f"{field} cooling requires an energy equation"
+                )
+            if kind == "rotating_frame":
+                coord_system = model_dict.get("coord_system", "")
+                coord_value = getattr(coord_system, "value", coord_system)
+                if str(coord_value).lower() != "cartesian":
+                    raise ValueError(
+                        f"{field} rotating_frame requires cartesian coordinates"
+                    )
+                if dim not in {2, 3}:
+                    raise ValueError(
+                        f"{field} rotating_frame requires dim 2 or 3"
+                    )
+                if len(outputs) != 3:
+                    raise ValueError(
+                        f"{field} rotating_frame requires "
+                        "[omega, origin_x, origin_y]"
+                    )
+            if kind == "raw":
+                target = payload.get("target")
+                if target not in {"den", "mom", "nrg"}:
+                    raise ValueError(
+                        f"{field} raw source requires target den, mom, or nrg"
+                    )
+                if target == "nrg" and not has_energy:
+                    raise ValueError(
+                        f"{field} raw target nrg requires an energy equation"
+                    )
+            expected = {
+                "force": dim,
+                "cooling": 1,
+                "relax": 1 + dim,
+                "sponge": (3 if has_energy else 2) + dim,
+                "inject": (2 if has_energy else 1) + dim,
+            }.get(kind)
+            if kind == "raw":
+                expected = dim if target == "mom" else 1
+            if expected is not None and len(outputs) != expected:
+                raise ValueError(
+                    f"{field} kind={kind!r} has {len(outputs)} outputs; "
+                    f"expected {expected} for dim={dim}"
+                )
+        elif field in boundary_fields:
+            if kind != "dirichlet":
+                raise ValueError(
+                    f"{field} must use kind='dirichlet', got {kind!r}"
+                )
+            expected = 1 + dim + int(has_energy)
+            if model_dict.get("is_mhd", False):
+                expected += dim
+            if len(outputs) != expected:
+                raise ValueError(
+                    f"{field} has {len(outputs)} outputs; expected {expected} "
+                    f"primitive values for dim={dim}"
+                )
+
+
 def _process_boundary_conditions(
     boundary_conditions: str | Sequence[str],
     effective_dim: int,
 ) -> list[str]:
     """process and normalize boundary conditions."""
     if isinstance(boundary_conditions, str):
+        return [boundary_conditions] * (2 * effective_dim)
+    # a single non-list bc (a lone Neumann/Robin gradient wall) applies to every face.
+    if not isinstance(boundary_conditions, (list, tuple)):
         return [boundary_conditions] * (2 * effective_dim)
 
     bcs = list(boundary_conditions)
@@ -232,42 +458,66 @@ def _is_mhd_generator(gen: Any) -> bool:
     return not callable(gen) and len(gen) == 4
 
 
-def _get_primitive_iterator(problem: SimbiProblem) -> GasStateGenerator:
-    """get fresh primitive state iterator from problem."""
-    initial_state = problem.initial_primitive_state()
-
-    if _is_mhd_generator(initial_state):
-        gas_gen_func = initial_state[0]
-        return gas_gen_func()
-    else:
-        gas_gen_func: GasStateFunction = initial_state
-        return gas_gen_func()
-
-
-def _get_bfield_iterators(
+def _get_iterators(
     problem: SimbiProblem,
-) -> list[StaggeredBFieldGenerator]:
-    """get fresh b-field iterators for mhd, or empty list for hydro."""
+) -> tuple[GasStateGenerator, list[StaggeredBFieldGenerator]]:
+    """the gas iterator + the staggered-B iterators (empty for hydro), from ONE
+    initial_primitive_state() call. the one-call contract matters: a STOCHASTIC
+    initial condition invoked twice hands the gas and the magnetic field
+    different random draws — silently inconsistent data unless the config
+    happens to fix its rng seed."""
     initial_state = problem.initial_primitive_state()
 
     if _is_mhd_generator(initial_state):
-        _, bx_gen, by_gen, bz_gen = initial_state
-        return [bx_gen(), by_gen(), bz_gen()]
-
-    return []
+        gas_gen_func, bx_gen, by_gen, bz_gen = initial_state
+        return gas_gen_func(), [bx_gen(), by_gen(), bz_gen()]
+    gas_gen_func: GasStateFunction = initial_state
+    return gas_gen_func(), []
 
 
 # =============================================================================
 # backend loading
 # =============================================================================
+def _enable_gpu_page_migration() -> None:
+    """make managed allocations device-resident on amd.
+
+    fields are allocated as unified/managed memory, which only migrates onto the gpu
+    when the device can fault on an absent page. that mechanism is XNACK, and it is
+    disabled by default on gfx90a (MI250X). without it a managed allocation stays
+    host-resident for the life of the run and every kernel access crosses the host
+    bus instead of hitting hbm -- a ~24x throughput loss on a memory-bound stencil,
+    with no error and no warning. the amd runtime reads this variable once when it
+    initializes, so it must be set before the gpu extension is imported.
+
+    nvidia ignores the variable entirely and page-migrates on fault unconditionally,
+    so setting it is inert there. an explicit value from the environment is left
+    alone, which keeps the disabling case reachable.
+    """
+    os.environ.setdefault("HSA_XNACK", "1")
+
+
 def _load_backend(compute_mode: str) -> Optional[ModuleType]:
-    """load the appropriate backend module."""
-    lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
+    """load the appropriate backend extension. a MISSING extension (never built for this
+    mode) returns None -> the caller's demo mode (config inspection, CI without a build). an
+    extension that EXISTS but fails to load -- typically a GPU runtime version mismatch
+    between build and run, surfacing as an undefined symbol -- raises: silently demoting a
+    scheduled GPU job to a config dump wastes the whole allocation."""
+    lib_mode = "cpu" if compute_mode == "cpu" else "gpu"
+    if lib_mode == "gpu":
+        _enable_gpu_page_migration()
     try:
         return importlib.import_module(f"simbi.libs.{lib_mode}_ext")
-    except ImportError as e:
-        print(f"warning: could not load {lib_mode} backend: {e}")
+    except ModuleNotFoundError as e:
+        print(f"warning: {lib_mode} backend not built ({e}); entering demo mode")
         return None
+    except ImportError as e:
+        raise RuntimeError(
+            f"the {lib_mode} backend is built but failed to load: {e}\n"
+            f"this is almost always a GPU runtime version mismatch between build and run -- "
+            f"load the SAME ROCm/CUDA module the extension was built against (e.g. the exact "
+            f"`rocm/<version>` from the session where the build + a test run succeeded), so "
+            f"the HIP/HSA (or CUDA/NVRTC) runtime versions agree."
+        ) from e
 
 
 def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
@@ -291,18 +541,85 @@ def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
 # =============================================================================
 # main entry point
 # =============================================================================
+def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
+    """validate a complete run without allocating its grid or writing output."""
+    errors = _validate_generator(problem)
+    if errors:
+        raise ValueError(f"generator validation failed: {errors}")
+
+    exec_dict = to_execution_dict(problem)
+    prim_iterator, bfield_iterators = _get_iterators(problem)
+    _check_first_tuple(problem, prim_iterator)
+    for name, iterator in zip(("Bx", "By", "Bz"), bfield_iterators):
+        _check_first_scalar(type(problem).__name__, name, iterator)
+    chi_field = problem.passive_scalar()
+    if chi_field is not None:
+        _check_first_scalar(type(problem).__name__, "passive scalar", chi_field)
+    cohort_field = problem.tracer_cohort()
+    if cohort_field is not None:
+        _check_first_scalar(type(problem).__name__, "tracer cohort", cohort_field)
+
+    backend = _load_backend(compute_mode)
+    if backend is None:
+        raise RuntimeError(
+            f"{compute_mode} backend is required for production Rust validation"
+        )
+    backend.validate_simulation(sim_info=exec_dict)
+    # the registered binned reductions, reported alongside the validation because every number in
+    # them is fixed at registration and each one decides a cost paid for the whole job. the report is
+    # a COURTESY: the backend has already returned its verdict, so a malformed payload surfaces here
+    # as a note on the report and leaves that verdict standing.
+    from ..expression.census import describe as describe_censuses
+
+    try:
+        print(describe_censuses(getattr(problem, "census_expressions", ())))
+    except Exception as exc:  # noqa: BLE001 - a report may not overturn a passed validation
+        print(f"census report unavailable: {type(exc).__name__}: {exc}")
+    print(f"{type(problem).__name__}: validation passed")
+
+
+def _check_first_scalar(problem_name: str, field_name: str, iterator: Any) -> float:
+    """peek one scalar generator value and require it to be numeric and finite."""
+    import math
+
+    try:
+        raw = next(iterator)
+    except StopIteration:
+        raise ValueError(
+            f"{problem_name}.{field_name}: generator yielded nothing"
+        ) from None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{problem_name}.{field_name}: generator values must be numeric: {exc}"
+        ) from None
+    if not math.isfinite(value):
+        raise ValueError(
+            f"{problem_name}.{field_name}: first value must be finite, got {value}"
+        )
+    return value
+
+
 def run(
     problem: SimbiProblem,
     compute_mode: str = "cpu",
     validate: bool = False,
+    live_monitor: bool = False,
+    max_steps: int = 0,
 ) -> None:
     """
     run a simulation with the given problem configuration.
 
     args:
         problem: the problem configuration
-        compute_mode: "cpu", "omp", or "gpu"
+        compute_mode: "cpu" or "gpu"
         validate: if True, validate generator output before running
+        live_monitor: if True, write a read-only snapshot each cadence so
+            `simbi attach <data_directory>` can monitor a headless run
+        max_steps: stop after this many steps (0 = run to end_time); the final
+            checkpoint is written either way — a bounded run is a truncated
+            but otherwise ordinary run (smoke tests, profiling probes)
 
     example:
         >>> from simbi.simulation import SimbiProblem, ProblemParam, run
@@ -330,7 +647,8 @@ def run(
     if not data_dir.exists():
         data_dir.mkdir(parents=True, exist_ok=True)
 
-    # validate generator if requested
+    # deep generator validation is opt-in: it consumes fresh iterators. the
+    # zero-cost first-tuple contract check always runs.
     if validate:
         errors = _validate_generator(problem)
         if errors:
@@ -338,6 +656,10 @@ def run(
 
     # convert to execution dict
     exec_dict = to_execution_dict(problem)
+    exec_dict["live_monitor"] = live_monitor
+    if max_steps < 0:
+        raise ValueError(f"max_steps must be >= 0, got {max_steps}")
+    exec_dict["max_steps"] = max_steps
 
     # configure gpu if needed
     gpu_blocks = None
@@ -352,12 +674,20 @@ def run(
             print(f"  {key}: {value}")
         return
 
-    # print simulation info
-    _print_simulation_info(exec_dict, gpu_blocks)
+    # forward gpu block dims to the backend. the run dashboard — problem setup,
+    # live benchmarks, progress, messages — is rendered by the rust backend
+    # (symbi_display::Table), so no python-side summary is printed.
+    if gpu_blocks is not None:
+        exec_dict["gpu_block_dims"] = tuple(gpu_blocks)
 
-    # get fresh iterators
-    prim_iterator = _get_primitive_iterator(problem)
-    bfield_iterators = _get_bfield_iterators(problem)
+    # get fresh iterators — ONE initial_primitive_state() call for both, so a
+    # stochastic IC seeds gas and B from the same draw.
+    prim_iterator, bfield_iterators = _get_iterators(problem)
+    # first-tuple contract check, always on: one tuple costs nothing and catches
+    # the classic generator-contract violations (calling gen() where gen itself
+    # must be passed, wrong tuple arity, NaN or non-positive density/pressure)
+    # with a message naming the contract.
+    prim_iterator = _check_first_tuple(problem, prim_iterator)
 
     # get scale factor functions
     scale_factor = problem.scale_factor or (lambda t: 1.0)
@@ -370,7 +700,91 @@ def run(
         sim_info=exec_dict,
         a=scale_factor,
         adot=scale_factor_derivative,
+        chi_field=problem.passive_scalar(),
+        cohort_field=problem.tracer_cohort(),
     )
+
+
+def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasStateGenerator:
+    """peek the generator's first yielded tuple, validate the contract, and
+    return an iterator that replays it: `initial_primitive_state` must return a
+    zero-argument callable (or the 4-tuple of them for MHD) whose iterator
+    yields per-cell numeric tuples (rho, v.., p) with finite entries and
+    positive density (and pressure, when the regime carries energy)."""
+    import itertools
+
+    name = type(problem).__name__
+    try:
+        first = next(it)
+    except StopIteration:
+        raise ValueError(
+            f"{name}.initial_primitive_state: the gas generator yielded nothing — "
+            "it must yield one (rho, v.., p) tuple per cell"
+        ) from None
+    except TypeError as exc:
+        raise ValueError(
+            f"{name}.initial_primitive_state: expected an ITERATOR of per-cell "
+            f"tuples; check that the config returns the generator function itself "
+            f"(not gen()) or vice versa at the call boundary: {exc}"
+        ) from None
+    # where the regime fixes the width exactly, pin it: the reader maps the tuple
+    # positionally, so a too-long tuple silently shifts a trailing field (e.g.
+    # pressure) into an ignored slot without erroring. regimes whose width is
+    # not uniquely determined (isothermal's optional p, relativistic hydro's
+    # chart-dependent velocity dof) return None and get a lower-bound check.
+    if not hasattr(first, "__len__"):
+        raise ValueError(
+            f"{name}.initial_primitive_state: each yield must be a (rho, v.., p) "
+            f"sequence, got a scalar {first!r}"
+        )
+    arity_fn = getattr(problem, "expected_primitive_arity", lambda: None)
+    expected = arity_fn()
+    if expected is not None:
+        arity, signature = expected
+        if len(first) != arity:
+            raise ValueError(
+                f"{name}.initial_primitive_state: each yielded tuple must have "
+                f"EXACTLY {arity} entries {signature} for a "
+                f"{problem.dimensionality}d {problem.regime} run — got "
+                f"{len(first)}: {first!r}. mhd always carries the full 3-velocity "
+                f"even in 2.5d; pure hydro carries one velocity per spatial "
+                f"dimension. a longer tuple silently shifts the trailing field "
+                f"(e.g. pressure) into an ignored slot."
+            )
+    else:
+        # velocities are never optional: every regime carries at least one velocity
+        # per spatial dimension (curvilinear/relativistic charts may carry MORE —
+        # transverse components — which is why this is a floor).
+        # only the trailing pressure is optional, and only for isothermal.
+        isothermal = getattr(problem, "isothermal", False)
+        ndim = getattr(problem, "dimensionality", 1)
+        min_len = 1 + ndim + (0 if isothermal else 1)
+        shape = "(rho, v..)" if isothermal else "(rho, v.., p)"
+        if len(first) < min_len:
+            raise ValueError(
+                f"{name}.initial_primitive_state: each yield must be a {shape} "
+                f"sequence of >= {min_len} numbers for a {ndim}d run, got {first!r}"
+            )
+    try:
+        vals = [float(v) for v in first]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name}.initial_primitive_state: non-numeric entry in the first "
+            f"yielded tuple {first!r}: {exc}"
+        ) from None
+    import math
+
+    if any(not math.isfinite(v) for v in vals):
+        raise ValueError(
+            f"{name}.initial_primitive_state: non-finite entry in the first "
+            f"yielded tuple {tuple(vals)}"
+        )
+    if vals[0] <= 0.0:
+        raise ValueError(
+            f"{name}.initial_primitive_state: the first cell's density is "
+            f"{vals[0]} — density must be positive"
+        )
+    return itertools.chain([first], it)
 
 
 def _validate_generator(
@@ -380,6 +794,8 @@ def _validate_generator(
     try:
         initial_state = problem.initial_primitive_state()
 
+        expected = problem.expected_primitive_arity()
+
         if _is_mhd_generator(initial_state):
             gas_gen_func, bx_gen, by_gen, bz_gen = initial_state
             gas_iter = gas_gen_func()
@@ -388,8 +804,13 @@ def _validate_generator(
                 values = next(gas_iter)
                 if not hasattr(values, "__len__"):
                     return f"generator must yield sequences, got {type(values)}"
-                if len(values) < 5:
-                    return f"mhd generator must yield at least 5 values, got {len(values)}"
+                if expected is not None and len(values) != expected[0]:
+                    return (
+                        f"mhd generator must yield exactly {expected[0]} values "
+                        f"{expected[1]}, got {len(values)}"
+                    )
+                if expected is None and len(values) < 4:
+                    return f"mhd generator must yield at least 4 values, got {len(values)}"
                 try:
                     [float(v) for v in values]
                 except (ValueError, TypeError) as e:
@@ -411,12 +832,21 @@ def _validate_generator(
             gas_gen_func: GasStateFunction = initial_state
             gas_iter = gas_gen_func()
 
-            expected_min = problem.dimensionality + 2
+            # isothermal carries no mandatory pressure (min rho + dim velocities);
+            # an energy regime adds pressure (min rho + dim velocities + p).
+            expected_min = problem.dimensionality + (
+                1 if getattr(problem, "isothermal", False) else 2
+            )
             for _ in range(num_samples):
                 values = next(gas_iter)
                 if not hasattr(values, "__len__"):
                     return f"generator must yield sequences, got {type(values)}"
-                if len(values) < expected_min:
+                if expected is not None and len(values) != expected[0]:
+                    return (
+                        f"generator must yield exactly {expected[0]} values "
+                        f"{expected[1]}, got {len(values)}"
+                    )
+                if expected is None and len(values) < expected_min:
                     return f"generator must yield at least {expected_min} values, got {len(values)}"
                 try:
                     [float(v) for v in values]
@@ -429,34 +859,3 @@ def _validate_generator(
         return f"generator exhausted after {num_samples} samples"
     except Exception as e:
         return f"unexpected error: {e}"
-
-
-def _print_simulation_info(
-    exec_dict: dict[str, Any],
-    gpu_blocks: Optional[tuple[int, int, int]] = None,
-) -> None:
-    """print simulation parameters."""
-    # defer to existing print function if available
-    try:
-        from simbi.functional.helpers import print_progress
-        from simbi.reader.rich_summary import print_rich_simulation_parameters
-
-        params = exec_dict
-        params["gpu_block_dims"] = gpu_blocks
-        print_rich_simulation_parameters(params)
-        print_progress()  # articificial progress bar for startup
-    except ImportError:
-        # fallback to simple print
-        print("=" * 60)
-        print("simulation parameters:")
-        print("=" * 60)
-        for key in [
-            "resolution",
-            "regime",
-            "coord_system",
-            "end_time",
-            "cfl_number",
-        ]:
-            if key in exec_dict:
-                print(f"  {key}: {exec_dict[key]}")
-        print("=" * 60)

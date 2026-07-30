@@ -1,7 +1,68 @@
 from __future__ import annotations
 
+import enum
 import math
-from typing import Any, Callable, Optional, Set, TypeVar, Union
+from typing import Any, Callable, Optional, Sequence, Set, TypeVar, Union
+
+
+class SourceKind(str, enum.Enum):
+    """the conservation LAW the rust framework wraps a user source field in.
+    typo-proof front for the `kind` string crossing into rust's `SourceConfig`
+    (str subclass -> serializes to its `.value`). FORCE/COOLING/RELAX are the
+    safe primitive-lifted constructors; RAW writes conserved components directly
+    to ONE slot (the regime-agnostic escape hatch). INJECT writes the FULL
+    conserved vector [den, mom_0..mom_{D-1}, nrg] additively from one config — a
+    mass+momentum+energy deposition (jet/wind) a single-slot RAW cannot express;
+    like RAW it supplies conserved components, so it is valid on relativistic/MHD.
+    SPONGE is the full conserved-state relaxation (buffer zone): it relaxes den,
+    mom, AND nrg toward a reference conserved state, where RELAX relaxes only the
+    velocity (density-preserving drag). ROTATING_FRAME takes
+    [omega, origin_x, origin_y] and applies the Newtonian Coriolis and centrifugal
+    force for constant rotation about the positive z axis."""
+
+    FORCE = "force"
+    ROTATING_FRAME = "rotating_frame"
+    COOLING = "cooling"
+    RELAX = "relax"
+    SPONGE = "sponge"
+    INJECT = "inject"
+    RAW = "raw"
+
+
+class ReductionOp(str, enum.Enum):
+    """how a census combines the cells that land in one bin.
+
+    the accumulated object must be a commutative monoid — associative and
+    order-agnostic — or it cannot be reduced in parallel, blocked, or combined across
+    restart segments. ADD gives moments, histograms, mass budgets and fluxes; MIN and
+    MAX give per-bin extrema.
+
+    mean, variance, dispersion and percentile are deliberately absent. they are not
+    monoids, they are FUNCTIONS OF SUMS: register `m*v` and `m` and divide in the
+    reader. an api offering variance directly would compute `<v^2> - <v>^2`, which
+    loses most of its significant digits whenever the mean dominates the dispersion —
+    register `m*(v - v_ref)^2` against a known reference instead. a product is absent
+    because it overflows to zero or infinity at any realistic cell count.
+    """
+
+    ADD = "add"
+    MIN = "min"
+    MAX = "max"
+
+
+class ConservedField(str, enum.Enum):
+    """conserved slot a `kind=RAW` source targets (`target` field)."""
+
+    DENSITY = "den"
+    MOMENTUM = "mom"
+    ENERGY = "nrg"
+
+
+class TableBounds(str, enum.Enum):
+    """out-of-bounds behavior for an immutable one-dimensional table."""
+
+    CLAMP = "clamp"
+    ZERO = "zero"
 
 # type defs for clarity
 NodeId = int
@@ -56,9 +117,30 @@ __all__ = [
     "sgn",
 ]
 
+# "phi" is the azimuth (x3) only: in 3d spherical (r, theta, phi) it must not
+# alias x2 (theta). a 2d-polar azimuthal coordinate is written "x2" or "theta".
 X1_ALIASES = ["x", "r", "x1"]
-X2_ALIASES = ["y", "theta", "x2", "phi"]
+X2_ALIASES = ["y", "theta", "x2"]
 X3_ALIASES = ["z", "phi", "x3"]
+
+# per-cell FLUID-STATE leaves — let a source read the local state, so the physics
+# (not just the position/time) is in the user's hands: e.g., cooling ~ rho^2,
+# velocity drag ~ -k*vel. these map to the rust `VARIABLE_RHO/VEL{1,2,3}/PRESSURE`
+# ops (symbi-hydro::expr_bridge lowers them to the per-cell rho / vel_k / pre reads).
+# NOTE regime validity is the user's responsibility: `pressure` on an isothermal
+# regime (no energy) has no `pre` field and is rejected at lower time.
+RHO_ALIASES = ["rho", "density"]
+PRE_ALIASES = ["pre", "pressure", "p"]
+VEL1_ALIASES = ["vel1", "vx", "v1"]
+VEL2_ALIASES = ["vel2", "vy", "v2"]
+VEL3_ALIASES = ["vel3", "vz", "v3"]
+
+# the cell's lab-frame volume measure, the natural weight for an extensive quantity in a
+# binned reduction. it is the measure the finite-volume update itself uses, so a mass sum
+# `rho*dV` stays correct on a curvilinear grid, where the measure is
+# r^2 sin(theta) dr dtheta dphi rather than dx^3. reduction weight only: a source term is a
+# per-unit-volume density and is rejected if it references this leaf.
+DV_ALIASES = ["dv", "cell_volume", "volume"]
 
 
 class ExprGraph:
@@ -258,6 +340,101 @@ class Expr:
             result = f(result)
         return result
 
+    def diff(self, var: "Expr") -> "Expr":
+        """symbolic derivative d(self)/d(var), built into the same graph (forward chain rule with
+        memoization on shared subexpressions). `var` must be a variable() leaf (e.g., variable('t'));
+        matching is by NAME, so every leaf of that name differentiates to 1.
+
+        comparisons / mod raise (non-differentiable — they can only legitimately appear in a branch
+        CONDITION, never in a smooth a(t)). abs and select differentiate per-branch, which is correct
+        away from the kink / branch boundary; the backend's finite-difference cross-check is what
+        guards those cases, so a wrong derivative there fails loudly at setup rather than silently."""
+        g = self._graph
+        vdef = g.get_node(var._node_id)
+        if vdef is None or vdef[0] != "variable":
+            raise ValueError("diff: `var` must be a variable() leaf")
+        vname = vdef[2]["name"]
+        cache: dict[NodeId, NodeId] = {}
+
+        def kid(nid: NodeId) -> Expr:
+            return Expr(g, nid)
+
+        def d(nid: NodeId) -> Expr:
+            if nid in cache:
+                return Expr(g, cache[nid])
+            op, ins, attrs = g.get_node(nid)  # type: ignore[misc]
+            c = [kid(i) for i in ins]
+            # the conditional differentiates PER BRANCH: the condition passes
+            # through untouched (comparisons are not differentiable and must not
+            # be recursed into), so it is handled before the eager child pass.
+            if op == "if_then_else":
+                res = Expr(g, g.add_node(op, ins[0], d(ins[1])._node_id, d(ins[2])._node_id))
+                cache[nid] = res._node_id
+                return res
+            dc = [d(i) for i in ins]
+            two = constant(2.0, g)
+            one = constant(1.0, g)
+            if op in ("constant", "parameter"):
+                res = constant(0.0, g)
+            elif op == "variable":
+                res = constant(1.0 if attrs["name"] == vname else 0.0, g)
+            elif op == "add":
+                res = dc[0] + dc[1]
+            elif op == "subtract":
+                res = dc[0] - dc[1]
+            elif op == "multiply":
+                res = dc[0] * c[1] + c[0] * dc[1]
+            elif op == "divide":
+                res = (dc[0] * c[1] - c[0] * dc[1]) / (c[1] * c[1])
+            elif op == "power":
+                edef = g.get_node(ins[1])
+                if edef is not None and edef[0] == "constant":  # constant exponent: n*a^(n-1)*da
+                    n = float(edef[2]["value"])
+                    res = constant(n, g) * (c[0] ** constant(n - 1.0, g)) * dc[0]
+                else:  # general: a^b * (db*ln(a) + b*da/a)
+                    res = (c[0] ** c[1]) * (dc[1] * log(c[0]) + c[1] * dc[0] / c[0])
+            elif op == "negate":
+                res = -dc[0]
+            elif op == "sqrt":
+                res = dc[0] / (two * sqrt(c[0]))
+            elif op == "abs":
+                res = (c[0] / kid(nid)) * dc[0]
+            elif op == "exp":
+                res = kid(nid) * dc[0]
+            elif op == "log":
+                res = dc[0] / c[0]
+            elif op == "log10":
+                res = dc[0] / (c[0] * constant(math.log(10.0), g))
+            elif op == "sin":
+                res = cos(c[0]) * dc[0]
+            elif op == "cos":
+                res = -sin(c[0]) * dc[0]
+            elif op == "tan":
+                res = dc[0] / (cos(c[0]) ** two)
+            elif op == "asin":
+                res = dc[0] / sqrt(one - c[0] ** two)
+            elif op == "acos":
+                res = -dc[0] / sqrt(one - c[0] ** two)
+            elif op == "atan":
+                res = dc[0] / (one + c[0] ** two)
+            elif op == "atan2":  # atan2(y, x): (x*dy - y*dx)/(x^2 + y^2)
+                res = (c[1] * dc[0] - c[0] * dc[1]) / (c[0] * c[0] + c[1] * c[1])
+            elif op == "sinh":
+                res = cosh(c[0]) * dc[0]
+            elif op == "cosh":
+                res = sinh(c[0]) * dc[0]
+            elif op == "tanh":
+                res = (one - kid(nid) ** two) * dc[0]
+            else:
+                raise ValueError(
+                    f"diff: op '{op}' is not differentiable (comparisons/mod belong in a branch "
+                    f"condition, not in a smooth scale factor a(t))"
+                )
+            cache[nid] = res._node_id
+            return res
+
+        return d(self._node_id)
+
 
 # factory functions
 def constant(value: float, graph: Optional[ExprGraph] = None) -> Expr:
@@ -276,6 +453,39 @@ def parameter(idx: int, graph: Optional[ExprGraph] = None) -> Expr:
     """Create a parameter expression."""
     g = graph or ExprGraph()
     return Expr(g, g.add_node("parameter", param_idx=idx))
+
+
+def density(graph: Optional[ExprGraph] = None) -> Expr:
+    """the per-cell density rho (a fluid-state leaf for state-dependent sources)."""
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name="rho"))
+
+
+def velocity(axis: int, graph: Optional[ExprGraph] = None) -> Expr:
+    """the per-cell velocity component `vel[axis]` (0-indexed: 0->vx, 1->vy, 2->vz)."""
+    if axis not in (0, 1, 2):
+        raise ValueError(f"velocity axis must be 0, 1, or 2, got {axis}")
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name=f"vel{axis + 1}"))
+
+
+def pressure(graph: Optional[ExprGraph] = None) -> Expr:
+    """the per-cell pressure (energy-bearing regimes only; rejected on isothermal)."""
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name="pre"))
+
+
+def cell_volume(graph: Optional[ExprGraph] = None) -> Expr:
+    """the cell's lab-frame volume measure dV, the weight for an extensive quantity.
+
+    this is the measure the finite-volume update itself uses, so `density() * cell_volume()`
+    is the cell mass on a curvilinear grid as well as a cartesian one. valid in a binned
+    reduction only; a source term referencing it is rejected, because a source is a
+    per-unit-volume density and weighting it by the measure would make the deposited
+    amount depend on the resolution.
+    """
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name="dv"))
 
 
 # math functions
@@ -494,9 +704,221 @@ def where(condition: Expr, true_case: Expr, false_case: Expr) -> Expr:
     return if_then_else(condition, true_case, false_case)
 
 
-def map_expr(f: Callable[[Expr], Expr], exprs: list[Expr]) -> list[Expr]:
-    """Map a function over expressions."""
-    return [f(expr) for expr in exprs]
+def tabulated_1d(
+    coordinate: Expr,
+    coordinates: Sequence[float],
+    values: Sequence[float],
+    *,
+    bounds: TableBounds | str,
+) -> Expr:
+    """piecewise-linear immutable field evaluated at `coordinate`.
+
+    samples must be finite, equal-length, and strictly increasing. `bounds` is
+    mandatory: `clamp` returns the nearest endpoint and `zero` returns zero.
+    the table lowers to the ordinary constant/comparison/select graph, so host
+    and device execution use the same backend program.
+    """
+    xs = tuple(float(value) for value in coordinates)
+    ys = tuple(float(value) for value in values)
+    if len(xs) != len(ys):
+        raise ValueError(
+            f"tabulated_1d coordinate/value lengths differ: {len(xs)} != {len(ys)}"
+        )
+    if len(xs) < 2:
+        raise ValueError("tabulated_1d requires at least two samples")
+    if not all(math.isfinite(value) for value in (*xs, *ys)):
+        raise ValueError("tabulated_1d samples must be finite")
+    if any(right <= left for left, right in zip(xs, xs[1:])):
+        raise ValueError("tabulated_1d coordinates must be strictly increasing")
+    try:
+        bounds_mode = bounds if isinstance(bounds, TableBounds) else TableBounds(bounds)
+    except ValueError as exc:
+        raise ValueError(
+            "tabulated_1d bounds must be 'clamp' or 'zero'"
+        ) from exc
+
+    return _tabulated_1d_expr_values(
+        coordinate,
+        xs,
+        tuple(constant(value, coordinate.graph) for value in ys),
+        bounds_mode,
+    )
+
+
+def _tabulated_1d_expr_values(
+    coordinate: Expr,
+    coordinates: tuple[float, ...],
+    values: tuple[Expr, ...],
+    bounds: TableBounds,
+) -> Expr:
+    """linear interpolation over expression-valued samples."""
+    graph = coordinate.graph
+    segments: list[Expr] = []
+    for left_x, right_x, left_y, right_y in zip(
+        coordinates, coordinates[1:], values, values[1:]
+    ):
+        x0 = constant(left_x, graph)
+        fraction = (coordinate - x0) / (right_x - left_x)
+        segments.append(left_y + fraction * (right_y - left_y))
+
+    interior = segments[-1]
+    for upper_x, segment in reversed(
+        list(zip(coordinates[1:-1], segments[:-1]))
+    ):
+        interior = where(coordinate < constant(upper_x, graph), segment, interior)
+
+    outside_low = (
+        values[0] if bounds is TableBounds.CLAMP else constant(0.0, graph)
+    )
+    outside_high = (
+        values[-1] if bounds is TableBounds.CLAMP else constant(0.0, graph)
+    )
+    return where(
+        coordinate < constant(coordinates[0], graph),
+        outside_low,
+        where(
+            coordinate > constant(coordinates[-1], graph),
+            outside_high,
+            interior,
+        ),
+    )
+
+
+def tabulated_2d(
+    coordinate_x: Expr,
+    coordinate_y: Expr,
+    coordinates_x: Sequence[float],
+    coordinates_y: Sequence[float],
+    values: Sequence[Sequence[float]],
+    *,
+    bounds: TableBounds | str,
+) -> Expr:
+    """bilinear immutable field on a rectilinear two-dimensional table."""
+    if coordinate_x.graph is not coordinate_y.graph:
+        raise ValueError("tabulated_2d coordinates must belong to the same graph")
+    xs = tuple(float(value) for value in coordinates_x)
+    ys = tuple(float(value) for value in coordinates_y)
+    rows = tuple(tuple(float(value) for value in row) for row in values)
+    if len(xs) < 2 or len(ys) < 2:
+        raise ValueError("tabulated_2d requires at least two samples per axis")
+    if len(rows) != len(ys) or any(len(row) != len(xs) for row in rows):
+        raise ValueError(
+            "tabulated_2d values must have shape "
+            "(len(coordinates_y), len(coordinates_x))"
+        )
+    flat_values = tuple(value for row in rows for value in row)
+    if not all(math.isfinite(value) for value in (*xs, *ys, *flat_values)):
+        raise ValueError("tabulated_2d samples must be finite")
+    if any(right <= left for left, right in zip(xs, xs[1:])) or any(
+        right <= left for left, right in zip(ys, ys[1:])
+    ):
+        raise ValueError("tabulated_2d coordinates must be strictly increasing")
+    try:
+        bounds_mode = bounds if isinstance(bounds, TableBounds) else TableBounds(bounds)
+    except ValueError as exc:
+        raise ValueError(
+            "tabulated_2d bounds must be 'clamp' or 'zero'"
+        ) from exc
+
+    graph = coordinate_x.graph
+    row_fields = tuple(
+        _tabulated_1d_expr_values(
+            coordinate_x,
+            xs,
+            tuple(constant(value, graph) for value in row),
+            bounds_mode,
+        )
+        for row in rows
+    )
+    return _tabulated_1d_expr_values(
+        coordinate_y,
+        ys,
+        row_fields,
+        bounds_mode,
+    )
+
+
+def tabulated_3d(
+    coordinate_x: Expr,
+    coordinate_y: Expr,
+    coordinate_z: Expr,
+    coordinates_x: Sequence[float],
+    coordinates_y: Sequence[float],
+    coordinates_z: Sequence[float],
+    values: Sequence[Sequence[Sequence[float]]],
+    *,
+    bounds: TableBounds | str,
+) -> Expr:
+    """trilinear immutable field on a rectilinear three-dimensional table."""
+    if not (
+        coordinate_x.graph is coordinate_y.graph
+        and coordinate_x.graph is coordinate_z.graph
+    ):
+        raise ValueError("tabulated_3d coordinates must belong to the same graph")
+    xs = tuple(float(value) for value in coordinates_x)
+    ys = tuple(float(value) for value in coordinates_y)
+    zs = tuple(float(value) for value in coordinates_z)
+    planes = tuple(
+        tuple(tuple(float(value) for value in row) for row in plane)
+        for plane in values
+    )
+    if len(xs) < 2 or len(ys) < 2 or len(zs) < 2:
+        raise ValueError("tabulated_3d requires at least two samples per axis")
+    if (
+        len(planes) != len(zs)
+        or any(len(plane) != len(ys) for plane in planes)
+        or any(len(row) != len(xs) for plane in planes for row in plane)
+    ):
+        raise ValueError(
+            "tabulated_3d values must have shape "
+            "(len(coordinates_z), len(coordinates_y), len(coordinates_x))"
+        )
+    flat_values = tuple(
+        value for plane in planes for row in plane for value in row
+    )
+    if not all(
+        math.isfinite(value) for value in (*xs, *ys, *zs, *flat_values)
+    ):
+        raise ValueError("tabulated_3d samples must be finite")
+    if (
+        any(right <= left for left, right in zip(xs, xs[1:]))
+        or any(right <= left for left, right in zip(ys, ys[1:]))
+        or any(right <= left for left, right in zip(zs, zs[1:]))
+    ):
+        raise ValueError("tabulated_3d coordinates must be strictly increasing")
+    try:
+        bounds_mode = bounds if isinstance(bounds, TableBounds) else TableBounds(bounds)
+    except ValueError as exc:
+        raise ValueError(
+            "tabulated_3d bounds must be 'clamp' or 'zero'"
+        ) from exc
+
+    graph = coordinate_x.graph
+    plane_fields = []
+    for plane in planes:
+        row_fields = tuple(
+            _tabulated_1d_expr_values(
+                coordinate_x,
+                xs,
+                tuple(constant(value, graph) for value in row),
+                bounds_mode,
+            )
+            for row in plane
+        )
+        plane_fields.append(
+            _tabulated_1d_expr_values(
+                coordinate_y,
+                ys,
+                row_fields,
+                bounds_mode,
+            )
+        )
+    return _tabulated_1d_expr_values(
+        coordinate_z,
+        zs,
+        tuple(plane_fields),
+        bounds_mode,
+    )
 
 
 def floor(expr: Expr) -> Expr:
@@ -596,7 +1018,7 @@ class CompiledExpr:
             elif op == "divide":
                 denominator = values[input_ids[1]]
                 if denominator == 0.0:
-                    values[node_id] = 0.0  # we handle division by zero
+                    values[node_id] = 0.0  # division by zero yields 0.0
                 else:
                     values[node_id] = values[input_ids[0]] / denominator
             elif op == "le":
@@ -625,7 +1047,7 @@ class CompiledExpr:
             elif op == "sqrt":
                 val = values[input_ids[0]]
                 if val < 0.0:
-                    values[node_id] = 0.0  # we handle negative sqrt
+                    values[node_id] = 0.0  # negative argument yields 0.0
                 else:
                     values[node_id] = math.sqrt(val)
             elif op == "sin":
@@ -712,11 +1134,11 @@ class CompiledExpr:
         # return output values
         return [values[out_id] for out_id in self._output_ids]
 
-    def serialize(self) -> dict[str, object]:
-        """Serialize the compiled expression for C++ evaluation."""
+    def _serialize_nodes(self) -> dict[str, object]:
+        """serialize graph nodes for the typed wire-format methods."""
         expressions: list[dict[str, Any]] = []
 
-        # map from our internal node ids to serialized indices
+        # map from internal node ids to serialized indices
         node_map: dict[NodeId, int] = {}
 
         for node_id in self._eval_order:
@@ -732,14 +1154,29 @@ class CompiledExpr:
             if op == "constant":
                 expressions.append({"op": "CONSTANT", "value": attrs["value"]})
             elif op == "variable":
-                if attrs["name"] in X1_ALIASES:
+                name = attrs["name"]
+                if name in X1_ALIASES:
                     expressions.append({"op": "VARIABLE_X1"})
-                elif attrs["name"] in X2_ALIASES:
+                elif name in X2_ALIASES:
                     expressions.append({"op": "VARIABLE_X2"})
-                elif attrs["name"] in X3_ALIASES:
+                elif name in X3_ALIASES:
                     expressions.append({"op": "VARIABLE_X3"})
-                elif attrs["name"] == "t":
+                elif name == "t":
                     expressions.append({"op": "VARIABLE_T"})
+                elif name in RHO_ALIASES:
+                    expressions.append({"op": "VARIABLE_RHO"})
+                elif name in VEL1_ALIASES:
+                    expressions.append({"op": "VARIABLE_VEL1"})
+                elif name in VEL2_ALIASES:
+                    expressions.append({"op": "VARIABLE_VEL2"})
+                elif name in VEL3_ALIASES:
+                    expressions.append({"op": "VARIABLE_VEL3"})
+                elif name in PRE_ALIASES:
+                    expressions.append({"op": "VARIABLE_PRESSURE"})
+                elif name in DV_ALIASES:
+                    expressions.append({"op": "VARIABLE_DV"})
+                else:
+                    raise ValueError(f"unknown variable '{name}'")
             elif op == "parameter":
                 expressions.append(
                     {"op": "PARAMETER", "param_idx": attrs["param_idx"]}
@@ -1060,6 +1497,15 @@ class CompiledExpr:
         # map output indices
         output_indices = [node_map[out_id] for out_id in self._output_ids]
 
+        # unary ops emit a `right: -1` "no operand" sentinel; the rust NodeDesc index
+        # fields are Option<usize> and reject -1. drop any -1 index key so the absent
+        # field deserializes to None (the correct "no operand"). value (a float) is
+        # never an index, so a legitimate -1.0 constant is untouched.
+        for node in expressions:
+            for key in ("left", "right", "condition", "true_case", "false_case"):
+                if node.get(key) == -1:
+                    del node[key]
+
         max_param_idx = -1
         for node_id in self._eval_order:
             node_def = self._graph.get_node(node_id)
@@ -1072,4 +1518,128 @@ class CompiledExpr:
             "expressions": expressions,
             "output_indices": output_indices,
             "param_count": max_param_idx + 1,
+        }
+
+    def serialize_source(
+        self,
+        kind: "SourceKind | str",
+        dim: int,
+        *,
+        params: "list[float] | tuple[float, ...] | None" = None,
+        region: int | None = None,
+        target: "ConservedField | str | None" = None,
+    ) -> dict[str, object]:
+        """serialize to the rust `SourceConfig` wire format consumed by
+        symbi-expr (`load.rs::SourceConfig::from_json`) and lowered by
+        symbi-hydro's `build_user_source`:
+          kind   -- 'force' | 'rotating_frame' | 'cooling' | 'relax' | 'sponge' |
+                    'inject' | 'raw' (law wrap)
+          dim    -- spatial dimensionality (force needs `dim` accel outputs,
+                    cooling 1, relax 1+dim; sponge [kappa, den_ref, dim*mom_ref,
+                    nrg_ref] = 3+dim on energy regimes, 2+dim on iso; inject
+                    [den, dim*mom, nrg] = 2+dim on energy regimes, 1+dim on iso)
+          params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...);
+                    for sponge on an energy regime, params=[inv_gm1] = 1/(gamma-1)
+          region -- optional node index of a chi(x) mask folded into the source
+          target -- for kind='raw' only: the conserved slot ('den'|'mom'|'nrg')
+        """
+        base = self._serialize_nodes()
+        # normalize the enums to their canonical rust strings at the boundary.
+        kind_str = kind.value if isinstance(kind, SourceKind) else str(kind)
+        cfg: dict[str, object] = {
+            "kind": kind_str,
+            "dim": int(dim),
+            "outputs": base["output_indices"],
+            "params": [float(p) for p in (params or [])],
+            "nodes": base["expressions"],
+        }
+        if region is not None:
+            cfg["region"] = int(region)
+        if target is not None:
+            cfg["target"] = (
+                target.value if isinstance(target, ConservedField) else str(target)
+            )
+        return cfg
+
+    def serialize_census(
+        self,
+        name: str,
+        *,
+        axes: "Sequence[tuple[str, Sequence[float]]]",
+        value_names: "Sequence[str]",
+        op: "ReductionOp | str" = "add",
+        params: "Sequence[float] | None" = None,
+        sample_interval: "float | None" = None,
+        accumulate: bool = False,
+        cadence: object = "root_step",
+    ) -> dict[str, object]:
+        """serialize to the rust `CensusConfig` wire format consumed by symbi-expr and
+        lowered by symbi-hydro's `build_census_expressions`.
+
+        the compiled outputs must be the bin-axis coordinates FIRST, in `axes` order,
+        then the accumulator values in `value_names` order — the order
+        `Census.serialize` assembles them in. compiling them together is the point:
+        a subexpression an axis and a value share (a radius, its logarithm) is written
+        once and evaluated once per cell.
+        """
+        base = self._serialize_nodes()
+        out = base["output_indices"]
+        n_axes = len(axes)
+        if len(out) != n_axes + len(value_names):
+            raise ValueError(
+                f"census '{name}': compiled {len(out)} outputs for {n_axes} axes and "
+                f"{len(value_names)} values"
+            )
+        op_str = op.value if isinstance(op, ReductionOp) else str(op)
+        return {
+            "name": name,
+            "axes": [
+                {"name": axis_name, "expr": out[ii], "edges": [float(e) for e in edges]}
+                for ii, (axis_name, edges) in enumerate(axes)
+            ],
+            "values": out[n_axes:],
+            "value_names": [str(v) for v in value_names],
+            "op": op_str,
+            "params": [float(p) for p in (params or [])],
+            "sample_interval": None if sample_interval is None else float(sample_interval),
+            "accumulate": bool(accumulate),
+            "cadence": getattr(cadence, "value", cadence),
+            "nodes": base["expressions"],
+        }
+
+    def serialize_boundary(self, dim: int) -> dict[str, object]:
+        """serialize a DRIVEN (Dirichlet) boundary prescription to the rust
+        `SourceConfig` wire format (`kind="dirichlet"`). the compiled outputs must
+        be the COMPLETE primitive state in order:
+          hydro: [rho, vel_0..vel_{dim-1}, (pre)]
+          mhd:   [rho, vel_0..vel_{dim-1}, (pre), B_0..B_{dim-1}]
+        `dim` is the VECTOR component count (= the regime DOF: 2.5D MHD -> 3). the
+        rust side splits these into the den/mom/nrg/bcell ghost-fill slots. for a
+        purely toroidal injection set the in-plane B to 0 and the out-of-plane
+        component to B_phi (cell-centered, div-free by axisymmetry)."""
+        base = self._serialize_nodes()
+        return {
+            "kind": "dirichlet",
+            "dim": int(dim),
+            "outputs": base["output_indices"],
+            "params": [],
+            "nodes": base["expressions"],
+        }
+
+    def serialize_motion(self) -> dict[str, object]:
+        """serialize a scale-factor MOTION law to the rust mesh-motion wire. the compiled outputs
+        MUST be exactly `[a(t), a_dot(t)]` in that order (a_dot is typically `a.diff(variable('t'))`).
+        NO conservation-law wrap (unlike `serialize_source`) — the two scalar-in-`t` expressions are
+        lowered to a `BuiltSource` and evaluated every step; the backend finite-difference-checks
+        `a_dot` against `a` at setup before running, so an inconsistent derivative fails loudly."""
+        base = self._serialize_nodes()
+        out = base["output_indices"]
+        if len(out) != 2:
+            raise ValueError(f"motion expects exactly 2 outputs [a, a_dot], got {len(out)}")
+        return {
+            "kind": "motion",
+            "dim": 1,  # unused by the motion path (a(t) is a scalar), required by the SourceConfig wire
+            "outputs": out,
+            "params": [],
+            "nodes": base["expressions"],
         }

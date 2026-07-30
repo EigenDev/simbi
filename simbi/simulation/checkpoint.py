@@ -2,7 +2,7 @@
 # checkpoint.py
 #
 # checkpoint loading and config merging for simbi simulations.
-# the actual state data is loaded by C++ - python just handles metadata
+# the actual state data is loaded by the rust backend - python just handles metadata
 # and config merging with checkpoint_safe field validation.
 #
 # usage:
@@ -12,166 +12,41 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, get_args
+from typing import TYPE_CHECKING, Any, get_args
 
 from simbi.reader import read_simulation
-from simbi.types.bodies import (
-    BinaryComponentConfig,
-    BinaryConfig,
-    Body,
-    BodyCapability,
-    BodySystemConfig,
-    GravitationalSystemConfig,
-    ImmersedBodyConfig,
-)
 from simbi.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
+    Limiter,
     Metadata,
     Reconstruction,
     Regime,
     Solver,
     TimeStepping,
+    normalize_regime,
 )
 
 if TYPE_CHECKING:
     from .problem import SimbiProblem
 
 
-def _has_capability(
-    body_capability: BodyCapability, capability: BodyCapability
-) -> bool:
-    """check if body has a specific capability."""
-    return bool(body_capability & capability)
-
-
-def _bodies_to_system(
-    bodies_group: dict[str, Any] | None,
-    bodies: dict[str, Body] | None,
-) -> list[ImmersedBodyConfig] | GravitationalSystemConfig | None:
-    """
-    parse body system configuration from checkpoint data.
-
-    handles binary systems and individual immersed bodies.
-    """
-    if not bodies or not bodies_group:
-        return None
-
-    system_name = bodies_group.get("system_name", "individual")
-
-    if "binary" in system_name:
-        binary_params = bodies_group["binary_params"]
-        body1 = bodies.get("body_0")
-        body2 = bodies.get("body_1")
-
-        if not body1 or not body2:
-            raise ValueError("binary system requires both bodies")
-        if body1.accretion is None or body2.accretion is None:
-            raise ValueError("binary bodies must have accretion info")
-        if body1.gravitational is None or body2.gravitational is None:
-            raise ValueError("binary bodies must have gravitational info")
-
-        return GravitationalSystemConfig(
-            prescribed_motion=True,
-            reference_frame=bodies_group["reference_frame"],
-            system_type="binary",
-            binary_config=BinaryConfig(
-                semi_major=binary_params["semi_major"],
-                eccentricity=binary_params["eccentricity"],
-                mass_ratio=body2.mass / body1.mass if body1.mass != 0 else 0.0,
-                total_mass=body1.mass + body2.mass,
-                components=[
-                    BinaryComponentConfig(
-                        mass=body1.mass,
-                        radius=body1.radius,
-                        is_an_accretor=_has_capability(
-                            body1.capabilities, BodyCapability.ACCRETION
-                        ),
-                        softening_length=body1.gravitational.softening_length,
-                        two_way_coupling=False,
-                        sink_rate=body1.accretion.sink_rate,
-                        sink_delta=body1.accretion.sink_delta,
-                        accretion_radius=body1.accretion.accretion_radius,
-                        total_accreted_mass=body1.accretion.total_accreted_mass,
-                        position=body1.position,
-                        velocity=body1.velocity,
-                    ),
-                    BinaryComponentConfig(
-                        mass=body2.mass,
-                        radius=body2.radius,
-                        is_an_accretor=_has_capability(
-                            body2.capabilities, BodyCapability.ACCRETION
-                        ),
-                        softening_length=body2.gravitational.softening_length,
-                        two_way_coupling=False,
-                        sink_rate=body2.accretion.sink_rate,
-                        sink_delta=body2.accretion.sink_delta,
-                        accretion_radius=body2.accretion.accretion_radius,
-                        total_accreted_mass=body2.accretion.total_accreted_mass,
-                        position=body2.position,
-                        velocity=body2.velocity,
-                    ),
-                ],
-            ),
-        )
-
-    # individual bodies
-    return [
-        ImmersedBodyConfig(
-            capability=body.capabilities,
-            mass=body.mass,
-            radius=body.radius,
-            position=body.position,
-            velocity=body.velocity,
-            two_way_coupling=False,
-            force=(0.0, 0.0, 0.0),
-            gravitational=body.gravitational,
-            accretion=body.accretion,
-            elastic=body.elastic,
-            deformable=body.deformable,
-            rigid=body.rigid,
-        )
-        for body in bodies.values()
-    ]
-
-
 def load_checkpoint_metadata(
     checkpoint_path: Path,
-) -> tuple[Metadata, Optional[BodySystemConfig], tuple[int, ...]]:
+) -> tuple[Metadata, tuple[int, ...]]:
     """
     load metadata from checkpoint file.
 
     returns:
-        tuple of (metadata, body_system_config, mesh_shape)
+        tuple of (metadata, mesh_shape)
     """
     data = read_simulation(str(checkpoint_path), unpad=False)
-
-    # extract system info from body_collection if present
-    system_info = None
-    if data.body_collection:
-        system_info = {
-            "system_name": data.body_collection.system_name,
-            "reference_frame": data.body_collection.reference_frame,
-            "binary_params": data.body_collection.binary_params
-            if hasattr(data.body_collection, "binary_params")
-            else None,
-        }
-
-    body_system = _bodies_to_system(
-        system_info,
-        {
-            f"body_{i}": body
-            for i, body in enumerate(data.body_collection.bodies)
-        }
-        if data.body_collection
-        else None,
-    )
 
     # also need mesh shape for resolution calculation
     mesh_shape = data.mesh.shape if hasattr(data, "mesh") else (1, 1, 1)
 
-    return data.metadata, body_system, mesh_shape
+    return data.metadata, mesh_shape
 
 
 def metadata_to_config_dict(
@@ -187,28 +62,49 @@ def metadata_to_config_dict(
         metadata: checkpoint metadata
         mesh_shape: mesh shape from data.mesh.shape (includes ghost zones)
     """
-    resolution = tuple(mesh_shape)
+    # mesh_shape is in STORAGE order (x_n, ..., x2, x1) — REVERSED, matching the bounds/spacing
+    # `[::-1]` the parser applies. un-reverse to the forward (x1, x2, x3) the config expects, and pad
+    # a lower-dimensional run (2D / 2.5D) up to the 3-tuple resolution field with trailing 1s.
+    resolution = tuple(int(n) for n in reversed(tuple(mesh_shape)))
+    resolution = resolution + (1,) * (3 - len(resolution))
+
+    # a checkpoint may carry a legacy regime slug (srhd, srmhd); map it to the current name so the
+    # run restarts cleanly.
+    regime_str = normalize_regime(str(metadata.regime))
 
     config = {
         "resolution": resolution,
         "start_time": float(metadata.time),
         "adiabatic_index": float(metadata.gamma),
         "coord_system": CoordSystem(metadata.coord_system),
-        "regime": Regime(metadata.regime),
+        "regime": Regime(regime_str),
         "solver": Solver(metadata.solver),
         "reconstruction": Reconstruction(metadata.reconstruction),
         "timestepping": TimeStepping(metadata.timestepping),
-        "plm_theta": float(metadata.plm_theta),
         "cfl_number": float(metadata.cfl),
         "checkpoint_index": int(metadata.checkpoint_index),
+    }
+
+    # the backend stores the KERNEL spelling of the limiter choice: plm_theta < 0
+    # means van leer (the model field itself is constrained to (0, 2], so the raw
+    # -1 must map back to the limiter selection).
+    if float(metadata.plm_theta) < 0.0:
+        config["limiter"] = Limiter.VAN_LEER
+    else:
+        config["plm_theta"] = float(metadata.plm_theta)
+
+    config.update({
         "checkpoint_interval": float(metadata.checkpoint_interval),
         "x1_spacing": CellSpacing(metadata.x1_spacing),
+        "x1_spacing_ratio": float(getattr(metadata, "x1_spacing_ratio", 1.0)),
         "x2_spacing": CellSpacing(metadata.x2_spacing),
+        "x2_spacing_ratio": float(getattr(metadata, "x2_spacing_ratio", 1.0)),
         "x3_spacing": CellSpacing(metadata.x3_spacing),
+        "x3_spacing_ratio": float(getattr(metadata, "x3_spacing_ratio", 1.0)),
         "boundary_conditions": [
             BoundaryCondition(b) for b in metadata.boundary_conditions
         ],
-    }
+    })
 
     # amr fields if present
     if metadata.level_dts:
@@ -225,6 +121,22 @@ def metadata_to_config_dict(
     return config
 
 
+def _values_agree(a: Any, b: Any) -> bool:
+    """order- and container-insensitive equality for the restart conflict check:
+    a CLI tuple must match a checkpoint list, an enum its value string, a numpy
+    scalar its python twin. false only for a REAL disagreement."""
+    av = getattr(a, "value", a)
+    bv = getattr(b, "value", b)
+    if isinstance(av, (list, tuple)) and isinstance(bv, (list, tuple)):
+        return len(av) == len(bv) and all(_values_agree(x, y) for x, y in zip(av, bv))
+    if isinstance(av, float) or isinstance(bv, float):
+        try:
+            return float(av) == float(bv)
+        except (TypeError, ValueError):
+            return False
+    return av == bv
+
+
 def merge_with_checkpoint(
     problem: SimbiProblem,
     checkpoint_path: Path,
@@ -235,8 +147,9 @@ def merge_with_checkpoint(
     - checkpoint_safe=True fields: user value is kept
     - checkpoint_safe=False fields: checkpoint value is used
 
-    raises ValueError if user tries to override an immutable field
-    with a different value.
+    raises ConfigError if the user EXPLICITLY passed a flag for an immutable
+    field with a value that disagrees with the checkpoint (a class default that
+    differs is not an override — the checkpoint wins silently).
 
     args:
         problem: user-provided problem configuration
@@ -245,9 +158,7 @@ def merge_with_checkpoint(
     returns:
         new problem instance with merged configuration
     """
-    metadata, body_system, mesh_shape = load_checkpoint_metadata(
-        checkpoint_path
-    )
+    metadata, mesh_shape = load_checkpoint_metadata(checkpoint_path)
     checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
 
     # get field classifications
@@ -305,6 +216,19 @@ def merge_with_checkpoint(
             adapter = TypeAdapter(annotation)
             return adapter.validate_python(value)
         except (ValidationError, TypeError):
+            # a lower-dimensional run restores from the 3-padded checkpoint
+            # resolution (nx, 1, 1): trailing 1s carry no information, so a
+            # scalar field takes the leading entry.
+            if (
+                isinstance(value, (list, tuple))
+                and len(value) > 1
+                and all(v == 1 for v in value[1:])
+            ):
+                try:
+                    adapter = TypeAdapter(annotation)
+                    return adapter.validate_python(value[0])
+                except (ValidationError, TypeError):
+                    pass
             # validation failed - try unwrapping sequences
             if isinstance(value, (list, tuple)):
                 # if all elements are identical, extract first
@@ -323,6 +247,13 @@ def merge_with_checkpoint(
                         pass
             return value
 
+    # the flags the user EXPLICITLY chose: from_cli records the argv-provided
+    # dests; a directly-constructed problem carries the same fact in
+    # model_fields_set. a class default that merely differs from the checkpoint
+    # is NOT an override — the checkpoint wins silently.
+    cli_explicit = getattr(problem, "_cli_explicit", None)
+    explicit = cli_explicit if cli_explicit is not None else problem.model_fields_set
+
     for field_name, field_info in type(problem).model_fields.items():
         user_value = normalize_value(getattr(problem, field_name))
 
@@ -331,15 +262,41 @@ def merge_with_checkpoint(
 
             if field_name in immutable_fields:
                 # must use checkpoint value, but coerce to field's expected type
-                merged_data[field_name] = coerce_to_field_type(
-                    checkpoint_value, field_info
-                )
+                coerced = coerce_to_field_type(checkpoint_value, field_info)
+                # an EXPLICIT user demand for a different value on an immutable
+                # field cannot be honored — refuse loudly; silently running the
+                # checkpoint's setting under the user's flag would hide the conflict.
+                if field_name in explicit and not _values_agree(user_value, coerced):
+                    from .problem import ConfigError
+
+                    raise ConfigError(
+                        f"'{field_name}' cannot be changed on restart: the checkpoint "
+                        f"was written with {coerced!r} but the command line asks for "
+                        f"{user_value!r}. drop the flag to continue the run as "
+                        f"recorded, or start a fresh run (no --checkpoint) to change it."
+                    )
+                merged_data[field_name] = coerced
             else:
                 # user can override
                 merged_data[field_name] = user_value
         else:
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
+
+    # RESUME at the checkpoint's physical time. start_time is the
+    # sim clock (sim.time): a restart must continue from where the checkpoint left off, regardless
+    # of what the config (or its validators) set start_time to. the LOG-checkpoint anchor is a
+    # SEPARATE field (checkpoint_log_anchor) so the cadence stays fixed across the restart.
+    if "start_time" in checkpoint_config:
+        merged_data["start_time"] = checkpoint_config["start_time"]
+
+    # the checkpoint INDEX is resume state: the next dump must continue the
+    # monotonic numbering from where the run stopped (chkpt.030 -> chkpt.031), so force it from the
+    # checkpoint like start_time. it is checkpoint_safe (serializable, user-visible), so the generic
+    # field merge would otherwise reset it to the config default 0 and re-number every restart from
+    # zero — silently overwriting the earlier checkpoints on disk.
+    if "checkpoint_index" in checkpoint_config:
+        merged_data["checkpoint_index"] = checkpoint_config["checkpoint_index"]
 
     # special handling for end_time: allow extending
     if "end_time" in safe_fields:
@@ -364,47 +321,5 @@ def merge_with_checkpoint(
                     v.item() if hasattr(v, "dtype") else v for v in value
                 ]
 
-    # boundary_conditions special handling - convert single string to list
-    # checkpoint has list, but some problem classes may expect single value or vice versa
-    if "boundary_conditions" in merged_data:
-        bcs = merged_data["boundary_conditions"]
-        # if it's already a list of strings, keep it
-        # pydantic will handle Union[BoundaryCondition, Sequence[BoundaryCondition]]
-        pass
-
     # create new instance with merged config
     return type(problem)(**merged_data)
-
-
-def validate_checkpoint_compatibility(
-    problem: SimbiProblem,
-    checkpoint_path: Path,
-) -> list[str]:
-    """
-    check if problem config is compatible with checkpoint.
-
-    returns list of error messages (empty if compatible).
-    """
-    errors = []
-    metadata, _, mesh_shape = load_checkpoint_metadata(checkpoint_path)
-    checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
-    immutable_fields = problem.get_checkpoint_immutable_fields()
-
-    for field_name in immutable_fields:
-        if field_name not in checkpoint_config:
-            continue
-
-        user_value = getattr(problem, field_name)
-        checkpoint_value = checkpoint_config[field_name]
-
-        # skip if user didn't explicitly set (using default)
-        if user_value == problem.model_fields[field_name].default:
-            continue
-
-        if user_value != checkpoint_value:
-            errors.append(
-                f"{field_name}: user={user_value}, checkpoint={checkpoint_value} "
-                f"(field is checkpoint_safe=False)"
-            )
-
-    return errors

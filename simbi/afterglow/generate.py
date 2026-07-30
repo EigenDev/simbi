@@ -1,17 +1,49 @@
 # =============================================================================
 # generate.py
 #
-# generate photon events from hydro snapshots using compiled C++ backend.
-# uses rad_hydro extension module (compiled via meson from bindings/binding.cpp)
+# workflow for generating photon events from hydro snapshots.
+# - loads each checkpoint via the simbi reader
+# - maps it to the rust event-generator contract (inputs.build_afterglow_inputs)
+# - calls the symbi-afterglow rust binding (cpu_ext) to generate + transfer photons
+# - writes the lab-frame catalog to HDF5 (postprocess.read_photon_events schema)
+#
+# a grb afterglow observation integrates emission over the EQUAL-ARRIVAL-TIME surface,
+# which draws from a RANGE of emission epochs -- so the catalog must span an ARRAY of
+# snapshots. each snapshot emits over the lab-time interval it REPRESENTS (its
+# trapezoidal share of the snapshot-time axis); weighting by
+# the represented interval is what makes the stacked snapshots tile the blast's history.
+# a single snapshot has no interval to tile with -- it is one t_em slice.
+# usage:
+#  generate_from_files(["s0.h5", "s1.h5", ...], "events.h5", scale_model="blandford-mckee")
 # =============================================================================
 
 from typing import List, Optional
-from typing import Optional as Opt
 
-import numpy as np
 
-from .mesh_expansion import expand_to_3d, validate_field_dict
-from .scale_config import load_scale_config, scale_config_t
+def _snapshot_emission_durations(times: List[float]) -> List[float]:
+    """the lab-time interval each snapshot REPRESENTS, as composite-trapezoid quadrature
+    weights over the (sorted) snapshot times: w_0 = (t_1 - t_0)/2, w_{N-1} =
+    (t_{N-1} - t_{N-2})/2, interior w_i = (t_{i+1} - t_{i-1})/2. summing power * w_i over
+    snapshots approximates the integral of power over the covered epoch [t_0, t_{N-1}].
+    a single snapshot has no neighbor -> returns [0.0] (caller substitutes a fallback)."""
+    n = len(times)
+    if n == 1:
+        return [0.0]
+    w = [0.0] * n
+    w[0] = 0.5 * (times[1] - times[0])
+    w[-1] = 0.5 * (times[-1] - times[-2])
+    for ii in range(1, n - 1):
+        w[ii] = 0.5 * (times[ii + 1] - times[ii - 1])
+    return w
+
+
+def _read_snapshot_time(path: str) -> float:
+    """the lab-frame simulation time [code units] of a checkpoint, read WITHOUT loading
+    fields (just the `metadata/time` attribute)."""
+    import h5py
+
+    with h5py.File(path, "r") as f:
+        return float(f["metadata"].attrs["time"])
 
 
 def generate_from_files(
@@ -24,287 +56,130 @@ def generate_from_files(
     p: float = 2.5,
     theta_obs: float = 0.0,
     z: float = 0.0,
-    d_L: Optional[float] = None,
+    d_L: float = 1e28,
     apply_mcrt: bool = False,
     include_scattering: bool = True,
-    hydro_type: str = "SRHD",
-    scale_config: Opt[scale_config_t] = None,
-    n_theta: int = 32,
-    n_phi: int = 16,
+    scale_model: str = "blandford-mckee",
+    qscales: Optional[dict] = None,
 ) -> None:
     """
-    generate photon events from hydro checkpoint files.
+    generate photon events from an ARRAY of hydro checkpoint files.
 
     workflow:
-        1. load hydro data from checkpoint(s)
-        2. call C++ event generation (via rad_hydro module)
-        3. optionally apply MCRT
-        4. write events to HDF5
+        1. read each snapshot's lab time -> the interval it represents (trapezoid weight)
+        2. load hydro data from each checkpoint
+        3. call the rust event generator (each snapshot emits over its represented interval)
+        4. optionally apply monte carlo radiative transfer
+        5. merge + write the catalog to HDF5
 
     args:
-        files: list of checkpoint files
+        files: checkpoint files spanning the blast evolution (one snapshot is NOT an afterglow)
         output: output HDF5 filename
-        max_events: maximum number of events to generate
+        max_events: maximum number of events to generate (split across files)
         photons_per_cell: sampling density (0=auto)
         eps_e: electron energy fraction
         eps_b: magnetic field energy fraction
         p: electron distribution power-law index
-        theta_obs: observer angle [radians]
+        theta_obs: observer angle [radians] (vestigial: the catalog is angle-INDEPENDENT;
+            the line of sight is chosen at REDUCTION, in skymap/lightcurve)
         z: redshift
-        d_L: luminosity distance [cm] (auto from z if None)
+        d_L: luminosity distance [cm]
         apply_mcrt: apply monte carlo radiative transfer
         include_scattering: include thomson scattering in MCRT
-        hydro_type: "SRHD" or "SRMHD"
-        scale_config: scale configuration (auto-loads "grb_standard" if None)
-        n_theta: number of theta zones for 1D/2D mesh expansion
-        n_phi: number of phi zones for 1D/2D mesh expansion
+        scale_model: named code->cgs scale model (used only when `qscales` is not supplied)
+        qscales: explicit code->cgs factors (from a SystemManifest); overrides scale_model
     """
-    try:
-        from ..libs import rad_hydro
-    except ImportError as e:
-        raise ImportError(
-            "rad_hydro extension not found. ensure meson build completed successfully.\n"
-            "run: meson setup build && ninja -C build"
-        ) from e
-
+    # imported here to avoid a circular import (libs pulls the compiled extension).
+    from ..libs import cpu_ext as rad_hydro
     from ..reader import read_simulation
-    from .helpers import get_dL
+    from .inputs import build_fields, build_mesh, build_qscales
 
-    # load scale configuration
-    if scale_config is None:
-        scale_config = load_scale_config("grb_standard")
-        print(f"using default scale config: {scale_config.name}")
+    if not files:
+        raise ValueError("no checkpoint files supplied")
 
-    scales = scale_config
+    # code->cgs factors: an explicit manifest wins, else build from the named model.
+    if qscales is None:
+        qscales = build_qscales(scale_model)
 
-    # auto luminosity distance from redshift
-    if d_L is None:
-        d_L = get_dL(z).value
-
-    # validate hydro type
-    if hydro_type not in ["SRHD", "SRMHD"]:
-        raise ValueError(
-            f"hydro_type must be 'SRHD' or 'SRMHD', got '{hydro_type}'"
+    # SORT the snapshots by lab time and weight each by the interval it REPRESENTS, so the
+    # stacked emission tiles the blast history (a single emit-duration = the tiny CFL dt would
+    # under-count and mis-weight). a lone snapshot has no interval -> warn; the EATS integral
+    # over epochs is undefined from one t_em slice.
+    files = sorted(files, key=_read_snapshot_time)
+    times = [_read_snapshot_time(f) for f in files]
+    durations = _snapshot_emission_durations(times)
+    if len(files) == 1:
+        print(
+            "  WARNING: a single snapshot is not a grb afterglow -- the equal-arrival-time\n"
+            "  surface integrates emission over a RANGE of epochs. supply an array of\n"
+            "  snapshots spanning the blast evolution. falling back to the CFL dt for now."
         )
 
-    # prepare simulation conditions dict
+    # the microphysics + observer block is file-independent; dt / adiabatic_index /
+    # current_time are overwritten per snapshot.
     sim_cond = {
-        "dt": 0.0,  # filled from checkpoint
+        "dt": 0.0,
         "theta_obs": theta_obs,
-        "adiabatic_index": 4.0 / 3.0,  # filled from checkpoint
-        "current_time": 0.0,  # filled from checkpoint
+        "adiabatic_index": 4.0 / 3.0,
+        "current_time": 0.0,
         "p": p,
         "z": z,
         "eps_e": eps_e,
         "eps_b": eps_b,
         "d_L": d_L,
-        "nus": [1e9],  # placeholder frequency
-        "hydro_type": hydro_type,
+        "nus": [1e9],
     }
 
-    qscales = {
-        "time_scale": scales.time_scale,
-        "length_scale": scales.length_scale,
-        "rho_scale": scales.rho_scale,
-        "pre_scale": scales.pre_scale,
-        "v_scale": scales.v_scale,
-    }
-
-    all_events = []
-    n_files = len(files)
-
-    print(f"generating photon events from {n_files} checkpoint(s)...")
-    print(f"  max_events: {max_events}")
-    print(f"  eps_e: {eps_e}, eps_b: {eps_b}, p: {p}")
-    print(f"  observer angle: {np.degrees(theta_obs):.1f} deg")
-    print(f"  hydro type: {hydro_type}")
-    print(f"  MCRT: {'enabled' if apply_mcrt else 'disabled'}")
-    print()
+    # the rust binding returns an opaque PhotonEvents handle; catalogs from multiple
+    # files are merged into the first handle via its `extend` method (no python list).
+    catalog = None
 
     for idx, file in enumerate(files):
-        print(f"[{idx + 1}/{n_files}] processing {file}...")
+        print(f"processing {file} ({idx + 1}/{len(files)})...")
 
-        # read checkpoint
         data = read_simulation(file)
+        fields = build_fields(data)
+        mesh = build_mesh(data)
 
-        # determine dimensionality first
-        data_dim = int(data.metadata.dimensions)
+        # emission duration = the lab-time interval this snapshot represents; a lone snapshot
+        # (duration 0) falls back to the CFL dt so it still produces SOMETHING (with the warning).
+        emit_dt = durations[idx] if durations[idx] > 0.0 else data.metadata.dt
+        sim_cond["dt"] = emit_dt
+        sim_cond["adiabatic_index"] = data.metadata.gamma
+        sim_cond["current_time"] = data.metadata.time
 
-        # extract fields needed for radiation: rho, gamma_beta, pressure
-        # C++ code expects fields in order: [rho, gamma_beta, pressure]
-        fields = {}
-
-        # density
-        fields["rho"] = np.ascontiguousarray(
-            data.get_field("rho"), dtype=np.float64
-        )
-
-        # four-velocity magnitude (gamma*beta)
-        try:
-            fields["gamma_beta"] = np.ascontiguousarray(
-                data.get_field("gamma_beta"), dtype=np.float64
-            )
-        except KeyError:
-            # fallback: compute from velocity components
-            # gamma_beta = lorentz * beta = sqrt(v^2 / (1 - v^2))
-            v1 = data.get_field("v1")
-            try:
-                v2 = (
-                    data.get_field("v2") if data_dim >= 2 else np.zeros_like(v1)
-                )
-            except (KeyError, IndexError):
-                v2 = np.zeros_like(v1)
-            try:
-                v3 = (
-                    data.get_field("v3") if data_dim >= 3 else np.zeros_like(v1)
-                )
-            except (KeyError, IndexError):
-                v3 = np.zeros_like(v1)
-
-            vsq = v1**2 + v2**2 + v3**2
-            gamma = 1.0 / np.sqrt(1.0 - vsq)
-            beta = np.sqrt(vsq)
-            fields["gamma_beta"] = np.ascontiguousarray(
-                gamma * beta, dtype=np.float64
-            )
-
-        # pressure
-        fields["p"] = np.ascontiguousarray(
-            data.get_field("p"), dtype=np.float64
-        )
-
-        # validate fields
-        validate_field_dict(fields)
-
-        # build initial mesh dict
-        mesh = {
-            "x1": np.ascontiguousarray(
-                0.5 * (data.mesh.x1v[:-1] + data.mesh.x1v[1:]), dtype=np.float64
-            ),
-        }
-        if data_dim >= 2:
-            mesh["x2"] = np.ascontiguousarray(
-                0.5 * (data.mesh.x2v[:-1] + data.mesh.x2v[1:]), dtype=np.float64
-            )
-        if data_dim >= 3:
-            mesh["x3"] = np.ascontiguousarray(
-                0.5 * (data.mesh.x3v[:-1] + data.mesh.x3v[1:]), dtype=np.float64
-            )
-
-        # expand to 3D spherical coordinates using geometry-aware mapping
-        coord_system = data.metadata.coord_system.lower()
-        original_dim = data_dim
-        fields, mesh = expand_to_3d(
-            fields=fields,
-            mesh=mesh,
-            coord_system=coord_system,
-            dimensions=data_dim,
-            n_theta=n_theta,  # polar zones for expansion
-            n_phi=n_phi,  # azimuthal zones for expansion
-        )
-
-        # after expansion, mesh is always 3D (has x1, x2, x3)
-        expanded_dim = 3 if original_dim < 3 else original_dim
-
-        # update sim conditions from checkpoint
-        sim_cond["dt"] = float(data.metadata.dt)
-        sim_cond["adiabatic_index"] = float(data.metadata.gamma)
-        sim_cond["current_time"] = float(data.metadata.time)
-
-        # distribute max_events across files
-        max_events_this_file = max_events // n_files
-        if idx < (max_events % n_files):
-            max_events_this_file += 1
-
-        # call C++ event generation
-        # use expanded_dim so C++ uses the full 3D mesh coordinates
         events = rad_hydro.generate_photon_events(
             sim_cond=sim_cond,
             qscales=qscales,
             fields=fields,
             mesh=mesh,
-            data_dim=expanded_dim,
-            max_events=max_events_this_file,
+            max_events=max_events // len(files),
             photons_per_cell=photons_per_cell,
         )
+        print(f"  generated {len(events)} photons")
 
-        n_generated = len(events)
-        print(f"  generated {n_generated} photon events")
-
-        # apply MCRT if requested
-        if apply_mcrt and n_generated > 0:
-            print(f"  applying MCRT (scattering={include_scattering})...")
+        if apply_mcrt:
             rad_hydro.monte_carlo_radiative_transfer(
-                events=events,
+                events,
                 sim_cond=sim_cond,
                 qscales=qscales,
                 fields=fields,
                 mesh=mesh,
-                data_dim=expanded_dim,
                 include_scattering=include_scattering,
                 include_pair_production=False,
             )
+            n_absorbed = events.n_absorbed
+            print(f"  MCRT: {n_absorbed} absorbed, {events.n_surviving} surviving")
 
-            # count absorbed photons
-            n_absorbed = sum(1 for e in events if e.absorbed)
-            n_surviving = n_generated - n_absorbed
-            print(
-                f"  MCRT complete: {n_absorbed} absorbed, {n_surviving} surviving"
-            )
+        if catalog is None:
+            catalog = events
+        else:
+            catalog.extend(events)
 
-        all_events.extend(events)
+    if catalog is None:
+        raise ValueError("no checkpoint files supplied")
 
-    print()
-    print(f"total events generated: {len(all_events)}")
-
-    if len(all_events) == 0:
-        print("WARNING: no events generated, not writing output file")
-        return
-
-    # write to HDF5
+    print(f"\ntotal events: {len(catalog)}")
     print(f"writing events to {output}...")
-    rad_hydro.write_photon_events(output, all_events, sim_cond, qscales)
-    print("done!")
-
-
-def read_events(filename: str):
-    """
-    read photon events from HDF5 file.
-
-    returns:
-        (events_list, metadata_dict)
-
-    example:
-        >>> events, meta = read_events("photons.h5")
-        >>> print(f"loaded {len(events)} events")
-        >>> print(f"observer angle: {np.degrees(meta['theta_obs']):.1f} deg")
-    """
-    try:
-        from ..libs import rad_hydro
-    except ImportError as e:
-        raise ImportError(
-            "rad_hydro extension not found. ensure meson build completed successfully."
-        ) from e
-
-    return rad_hydro.read_photon_events(filename)
-
-
-def read_metadata(filename: str):
-    """
-    read metadata from HDF5 file without loading event data.
-
-    returns:
-        metadata_dict
-
-    example:
-        >>> meta = read_metadata("photons.h5")
-        >>> print(f"file contains {meta['n_events']} events")
-    """
-    try:
-        from ..libs import rad_hydro
-    except ImportError as e:
-        raise ImportError(
-            "rad_hydro extension not found. ensure meson build completed successfully."
-        ) from e
-
-    return rad_hydro.read_photon_event_metadata(filename)
+    rad_hydro.write_photon_events(output, catalog, sim_cond, qscales)
+    print("done")

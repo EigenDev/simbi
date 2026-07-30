@@ -26,22 +26,15 @@ class CoordinateProfileProps(ComponentProps):
     label: Optional[str] = None
     color: Optional[str] = None
     linestyle: str = "-"
-    linewidth: float = 1.0
+    linewidth: float = 2.0
     normalization: float = 1
-    x_normalization: float = 1
-    rbeg: float = 0.0  # Reference line start radius
-    rend: float = 0.5  # Reference line end radius
+    rbeg: float = 0.2  # reference line start radius
+    rend: float = 0.5  # reference line end radius
 
-    # broken power-law fit overlay
+    # analysis-specific formatting
     show_reference_lines: bool = True
-    reference_fields: tuple[str, ...] = ("rho",)
-
-    # bondi reference line overlay
-    show_bondi: bool = False
-    bondi_gamma: Optional[float] = None
-    bondi_rho_inf: float = 1.0
-    bondi_cs_inf: float = 1.0
-    bondi_total_mass: float = 1.0
+    x_scale: str = "linear"
+    y_scale: str = "linear"
 
 
 class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
@@ -70,7 +63,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
 
     def update(self, props: CoordinateProfileProps) -> None:
         self.props = props
-        # We would re-render if props change
+        # prop changes are applied on the next render
         pass
 
     def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
@@ -81,21 +74,17 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         if data.ndim != 1:
             raise ValueError("CoordinateProfileComponent expects 1D FieldData.")
 
-        r_bins = data.domain[0] / self.props.x_normalization
+        r_bins = data.domain[0]
         values = data.values
         _, field_str = stripped_field_name(data.name)
         norm = self.props.normalization
-        line_label = self.props.label if self.props.label else field_str
-        # --- Render Main Line ---
+        # --- render main line ---
         good_bins = ~np.isnan(values)
-        plot_kwargs: dict = {"label": line_label}
-        if self.props.color:
-            plot_kwargs["color"] = self.props.color
         if self._main_line is None:
             self._main_line = self.ax.plot(
                 r_bins[good_bins],
                 values[good_bins] / norm,
-                **plot_kwargs,
+                label=field_str,
             )[0]
         else:
             self._main_line.set_data(
@@ -103,185 +92,54 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
             )
 
         if norm != 1:
-            # if plotting a negative normalized quantity, we need to
-            # account for whether the horizontal line is -1 or 1
+            # for a negatively normalized quantity the reference horizontal
+            # line sits at -1
             norm_loc = 1.0 if np.all(values / norm > 0) else -1.0
             self.ax.axhline(
                 norm_loc, color="gray", linestyle="--", linewidth=0.5
             )
 
-        # --- Bondi Reference Lines ---
-        if self.props.show_bondi and self.props.bondi_gamma is not None:
-            field_base_name, _ = stripped_field_name(data.name)
-            self._draw_bondi_reference(r_bins, field_base_name)
-
-        # --- Apply Special Formatting ---
-        self._format_axes(r_bins, values, data.name, style)
+        # --- apply special formatting ---
+        self._format_axes(r_bins, values, data.name)
         # return a RenderResult so the Figure/Formatter can inspect artists and metadata
         return RenderResult(
             artists={"line": self._main_line, "refs": self._ref_lines},
             metadata={"label": field_str},
         )
 
-    def _format_axes(
-        self, r_bins: Array, values: Array, field_name: str, style: FigureConfig
-    ):
-        """apply analysis-specific formatting."""
-        self.ax.set_xscale(style.xscale)
-        self.ax.set_yscale(style.yscale)
-        self.ax.spines["top"].set_visible(False)
-        self.ax.spines["right"].set_visible(False)
+    def _format_axes(self, r_bins: Array, values: Array, field_name: str):
+        """Apply analysis-specific formatting."""
+        self.ax.set_xscale(self.props.x_scale)
+        self.ax.set_yscale(self.props.y_scale)
         field_base_name, field_str = stripped_field_name(field_name)
 
-        self.ax.set_xlabel(
-            r"$\tilde{r}$" if self.props.x_normalization != 1 else "$r$"
-        )
+        self.ax.set_xlabel("$r$")
+        # self.ax.set_ylabel(field_str)
 
-        if (
-            self.props.show_reference_lines
-            and field_base_name in self.props.reference_fields
-        ):
-            good_bins = ~np.isnan(values)
-            r_ref = r_bins[good_bins]
-            val_ref = values[good_bins]
-            positive = (r_ref > 0) & (val_ref > 0)
+        # add reference lines
+        if self.props.show_reference_lines:
+            # self.ax.axvline(50.0, color="gray", linestyle="--", linewidth=0.5)
+            # add power-law reference for density
+            if field_base_name == "rho":
+                good_bins = ~np.isnan(values)
+                r_ref = r_bins[good_bins]
+                val_ref = values[good_bins]
 
-            if np.sum(positive) >= 6:
-                self._fit_broken_power_law(
-                    r_ref[positive],
-                    val_ref[positive],
-                    field_base_name,
-                )
+                # find a good anchor point for the reference line
+                ref_beg_idx = np.argmax(r_ref > 2)
+                ref_end_idx = np.argmax(r_ref > 30)
+                if ref_beg_idx > 0:
+                    norm = val_ref[ref_beg_idx] / (r_ref[ref_beg_idx] ** (-1.5))
+                    ref_vals = norm * (r_ref ** (-1.5))
 
-    def _fit_broken_power_law(
-        self,
-        rp: Array,
-        vp: Array,
-        field_base_name: str,
-    ) -> None:
-        """fit a 2-segment broken power law in [rbeg, rend], draw the result."""
-        # interpolate full data onto a dense log-uniform grid,
-        # then restrict to [rbeg, rend] for both fitting and drawing
-        r_lo = max(rp[0], self.props.rbeg) if self.props.rbeg > 0 else rp[0]
-        r_hi = min(rp[-1], self.props.rend) if self.props.rend > 0 else rp[-1]
-        if r_hi <= r_lo:
-            return
-
-        n_resample = 200
-        lr_full = np.log(rp)
-        lv_full = np.log(vp)
-
-        # dense log-uniform grid in [r_lo, r_hi]
-        lr = np.linspace(np.log(r_lo), np.log(r_hi), n_resample)
-        lv = np.interp(lr, lr_full, lv_full)
-
-        # scan break points
-        min_seg = 5
-        best_ssr = np.inf
-        best_break = n_resample // 2
-        for kk in range(min_seg, n_resample - min_seg):
-            s1, i1 = np.polyfit(lr[:kk], lv[:kk], 1)
-            s2, i2 = np.polyfit(lr[kk:], lv[kk:], 1)
-            r1 = lv[:kk] - (s1 * lr[:kk] + i1)
-            r2 = lv[kk:] - (s2 * lr[kk:] + i2)
-            ssr = np.sum(r1**2) + np.sum(r2**2)
-            if ssr < best_ssr:
-                best_ssr = ssr
-                best_break = kk
-
-        r_break = np.exp(lr[best_break])
-
-        # fit each segment on the resampled grid
-        s1, i1 = np.polyfit(lr[:best_break], lv[:best_break], 1)
-        s2, i2 = np.polyfit(lr[best_break:], lv[best_break:], 1)
-
-        print(f"[{field_base_name}] broken power law:")
-        print(f"  inner slope: {s1:.3f}  (r < {r_break:.2f})")
-        print(f"  outer slope: {s2:.3f}  (r > {r_break:.2f})")
-
-        # draw lines offset slightly above data for visibility
-        offset = 1.3
-        n_draw = 100
-        r_inner = np.geomspace(r_lo, r_break, n_draw)
-        r_outer = np.geomspace(r_break, r_hi, n_draw)
-        y_inner = offset * np.exp(i1) * r_inner**s1
-        y_outer = offset * np.exp(i2) * r_outer**s2
-
-        line_inner = self.ax.plot(
-            r_inner,
-            y_inner,
-            linestyle="--",
-            linewidth=1,
-            color="gray",
-        )[0]
-        line_outer = self.ax.plot(
-            r_outer,
-            y_outer,
-            linestyle="--",
-            linewidth=1,
-            color="gray",
-        )[0]
-        self._ref_lines.extend([line_inner, line_outer])
-
-        # annotate above midpoint of each segment
-        mid_inner = len(r_inner) // 2
-        self.ax.annotate(
-            rf"$r^{{{s1:.2f}}}$",
-            xy=(r_inner[mid_inner], y_inner[mid_inner]),
-            xytext=(0, 12),
-            textcoords="offset points",
-            fontsize=10,
-            ha="center",
-            va="bottom",
-        )
-        mid_outer = len(r_outer) // 2
-        self.ax.annotate(
-            rf"$r^{{{s2:.2f}}}$",
-            xy=(r_outer[mid_outer], y_outer[mid_outer]),
-            xytext=(0, 12),
-            textcoords="offset points",
-            fontsize=10,
-            ha="center",
-            va="bottom",
-        )
-
-        self.ax.axvline(r_break, color="gray", linestyle=":", linewidth=0.8)
-
-    def _draw_bondi_reference(
-        self, r_bins: Array, field_base_name: str
-    ) -> None:
-        """overlay analytic bondi profile for the current field."""
-        from simbi.analysis.bondi import bondi_profiles
-
-        bondi_fields = {"rho", "cs", "vr"}
-        if field_base_name not in bondi_fields:
-            return
-
-        # use un-normalized radii for the physics computation
-        r_phys = r_bins * self.props.x_normalization
-        valid = r_phys > 0
-        if not np.any(valid):
-            return
-
-        profiles = bondi_profiles(
-            r_phys[valid],
-            self.props.bondi_gamma,
-            self.props.bondi_total_mass,
-            self.props.bondi_rho_inf,
-            self.props.bondi_cs_inf,
-        )
-
-        ref_vals = profiles[field_base_name]
-        line = self.ax.plot(
-            r_bins[valid],
-            ref_vals / self.props.normalization,
-            linestyle=":",
-            alpha=0.5,
-            color="gray",
-            linewidth=1,
-            label="_nolegend_",
-        )[0]
-        self._ref_lines.append(line)
+                    ref_line = self.ax.plot(
+                        r_ref[ref_beg_idx:ref_end_idx],
+                        ref_vals[ref_beg_idx:ref_end_idx] * 1.5,
+                        linestyle="--",
+                        color="red",
+                        label=r"$r^{-3/2}$",
+                    )[0]
+                    self._ref_lines.append(ref_line)
 
     def cleanup(self) -> None:
         if hasattr(self, "ax"):

@@ -1,0 +1,26 @@
+[package]
+name = "symbi-hydro"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-geometry = { path = "../symbi-geometry" }
+symbi-expr = { path = "../symbi-expr" }
+symbi-ir = { path = "../symbi-ir" }
+symbi-jit = { path = "../symbi-jit" }
+symbi-xpu = { path = "../symbi-xpu", optional = true }
+
+[features]
+default = []
+# enable runtime-jit launch for `GpuSourceKernel` (nvrtc on cuda, hiprtc on hip). requires
+# gpu hardware at test/runtime; the `GpuSourceKernel` itself (source emission) compiles without.
+gpu = ["symbi-xpu/gpu", "dep:symbi-xpu"]
+cuda = ["gpu", "symbi-xpu/cuda", "dep:symbi-xpu"]
+hip = ["gpu", "symbi-xpu/hip", "dep:symbi-xpu"]
+
+[dev-dependencies]
+hdf5-metno = "0.12"
+
+[lints]
+workspace = true

@@ -40,7 +40,7 @@ class Result(Generic[T, E]):
         if not (is_ok ^ is_err):
             raise ValueError("Result must have exactly one of value or error")
 
-        # use object.__setattr__ because we're frozen
+        # the dataclass is frozen, so field assignment goes through object.__setattr__
         object.__setattr__(self, "_is_ok", is_ok)
 
     @property

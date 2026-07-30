@@ -30,8 +30,9 @@ class MeshAdapter:
         comoving_xmin, comoving_xmax = self._mesh.dims[axis]
         global_cells = self._mesh.global_cells[axis]
         spacing_type = self._mesh.spacing_types[axis]
+        spacing_ratio = self._mesh.spacing_ratios[axis]
 
-        # if we have owned_domain, compute actual patch bounds
+        # when owned_domain is provided, compute actual patch bounds
         if self._owned_domain is not None:
             # owned_domain indices in global coordinate system
             start_idx = self._owned_domain[0][axis]  # owned_start
@@ -53,15 +54,35 @@ class MeshAdapter:
         if spacing_type == "linear":
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
         elif spacing_type == "log":
-            coords_comoving = np.logspace(
-                np.log10(xmin), np.log10(xmax), ncells + 1
-            )
+            coords_comoving = np.logspace(np.log10(xmin), np.log10(xmax), ncells + 1)
+        elif spacing_type == "geometric":
+            indices = np.arange(ncells + 1, dtype=float)
+            if abs(spacing_ratio - 1.0) < 1.0e-12:
+                fractions = indices / ncells
+            else:
+                fractions = np.expm1(indices * np.log(spacing_ratio)) / np.expm1(
+                    ncells * np.log(spacing_ratio)
+                )
+            coords_comoving = xmin + (xmax - xmin) * fractions
         else:
             # default to linear
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
 
-        # apply scale factor for moving mesh: r_phys = a(t) * r_comoving
-        coords_physical = coords_comoving * self._mesh.scale_factor_a
+        # apply the moving-mesh scale factor. homologous expansion scales LENGTH axes only, never
+        # angles (theta/phi). this MUST match the writer (symbi-sim checkpoint.rs) and the volume
+        # jacobian (symbi-geometry block.rs). x1 (radial) is the last storage axis; in the reader's
+        # storage order z is axis 0 for cylindrical (r, phi, z).
+        metric = getattr(self._mesh, "metric", "cartesian").lower()
+        radial_axis = self._mesh.ndim - 1
+        if "cartesian" in metric:
+            scales_this_axis = True  # isotropic: every axis is a length
+        elif "cylindrical" in metric:
+            # (r, phi, z): r and z scale; phi (the middle axis) does not. 2D assumes (r, z).
+            scales_this_axis = axis == radial_axis or axis == 0
+        else:  # spherical / default curvilinear: only the radial axis scales
+            scales_this_axis = axis == radial_axis
+        scale = self._mesh.scale_factor_a if scales_this_axis else 1.0
+        coords_physical = coords_comoving * scale
 
         self._coords_cache[axis] = coords_physical
         return coords_physical
@@ -156,14 +177,11 @@ class SimData:
         """check if AMR is present."""
         return self._checkpoint.has_refinement
 
-    @property
-    def body_collection(self):
-        """access bodies (if present)."""
-        return self._checkpoint.bodies
-
     def hierarchy(self):
         """access AMR hierarchy info."""
-        return self._checkpoint.hierarchy
+        # the checkpoint reader exposes level count and per-level partitions, not the
+        # box tree, so there is no hierarchy object to hand back
+        return None
 
     def list_derived_fields(self) -> list[str]:
         """return sorted list of available derived field names."""
@@ -187,7 +205,6 @@ class SimData:
             return set(self._derived_names)
 
         partition = level_data.partitions[0]
-        halo = level_data.mesh.halo_radius
 
         base_names = set(partition.hydro.primitives.keys())
 
@@ -219,14 +236,6 @@ class SimData:
         # single partition case
         if level_data.num_partitions == 1:
             partition = level_data.partitions[0]
-            owned = partition.owned_domain
-            global_shape = level_data.mesh.global_cells
-
-            # check if this is a refined level (owned != full domain)
-            is_refined_subset = not all(
-                owned.start[ii] == 0 and owned.fin[ii] == global_shape[ii]
-                for ii in range(owned.ndim)
-            )
 
             # get field data
             field_data = None

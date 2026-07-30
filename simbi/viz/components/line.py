@@ -24,7 +24,7 @@ class LinePlotProps(ComponentProps):
     """Properties for a *single* line plot component."""
 
     label: Optional[str] = None
-    linewidth: float = 1.0
+    linewidth: float = 2.0
     marker: Optional[str] = None
     marker_size: float = 6.0
     alpha: float = 1.0
@@ -63,7 +63,7 @@ def _update_line_style(
     if label is not None:
         line.set_label(label)  # label is already formatted
 
-    line.set_linewidth(style.get("linewidth", 1.0))
+    line.set_linewidth(style.get("linewidth", 2.0))
     line.set_alpha(style.get("alpha", 1.0))
     line.set_marker(style.get("marker", ""))
     line.set_markersize(style.get("markersize", 6.0))
@@ -137,12 +137,12 @@ class LinePlotComponent(Component):
                 level_label = get_field_str(level_label)
 
         if self._line is None:
-            # First render: create the line
+            # first render: create the line
             self._line = ax.plot(
                 x_data, y_data, label=level_label, **line_style
             )[0]
         else:
-            # Animation update: set new data and style
+            # animation update: set new data and style
             _update_line_data(self._line, x_data, y_data)
             _update_line_style(self._line, line_style, level_label)
 

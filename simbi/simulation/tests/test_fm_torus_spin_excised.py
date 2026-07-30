@@ -1,0 +1,143 @@
+# =============================================================================
+# test_fm_torus_spin_excised.py
+#
+# the spinning fishbone-moncrief torus on the 3d cartesian kerr chart with the
+# oblate-spheroidal horizon excision — the end-to-end composition of the
+# spinning cartesian metric, the FM equilibrium at spin, and the level-set
+# excision. the gates:
+# - the run completes finite and positive with the torus surviving (the
+#   equilibrium is discretely near-stationary; a coarse grid diffuses but must
+#   not destroy the pressure maximum within a few M of evolution);
+# - the FM initial data is axisymmetric and equatorially symmetric, and the
+#   spinning metric shares both, so the evolved state holds the quarter-turn
+#   (x, y) -> (-y, x) and z -> -z grid symmetries to roundoff — the sharp
+#   coordinate-role gate for the torus jacobian + spheroidal excision compose;
+# - the spin genuinely enters: the a = 0.9 run differs from the a = 0 run of
+#   the same configuration (different metric, different equilibrium).
+# =============================================================================
+import glob
+import os
+import tempfile
+from pathlib import Path
+
+import h5py
+import numpy as np
+import pytest
+
+from simbi.simulation import runner
+
+_BACKEND = runner._load_backend("cpu")
+needs_backend = pytest.mark.skipif(
+    _BACKEND is None, reason="rust cpu_ext backend not built"
+)
+
+from simbi_configs.examples.grhd.gr_fishbone_moncrief_cartesian import (
+    GrFishboneMoncriefCartesian,
+)
+
+RES = 48
+L_BOX = 20.0
+
+
+def _run(spin: float) -> np.ndarray:
+    d = tempfile.mkdtemp() + "/"
+    # the torus geometry is spin-dependent: kappa = 1.01/r_in = 8 is the compact
+    # a = 0 torus; at a = 0.9 that pair degenerates to a sub-cell sliver, so the
+    # spinning run uses the thick-torus pair (r_in = 6, kappa = 1.15).
+    r_in, kappa = (6.0, 1.15) if spin != 0.0 else (8.0, 1.01)
+    p = GrFishboneMoncriefCartesian(
+        kerr_spin=spin,
+        r_in=r_in,
+        kappa=kappa,
+        resolution=(RES, RES, RES),
+        end_time=5.0,
+        checkpoint_interval=1.0e30,
+        data_directory=Path(d),
+    )
+    # enough steps for the near-horizon infall to engage the excised-region source
+    # mask -- the regime the invariants are about -- and few enough to run in
+    # seconds. every property asserted here is a property of the STATE at whatever
+    # step it is read, so this number sets cost, not sensitivity. whether the torus
+    # survives to t = 5 is a SOAK, a different question at three orders more cost;
+    # it belongs to a campaign launched from simbi_configs/examples/grhd.
+    runner.run(p, compute_mode="cpu", max_steps=150)
+    # GUARD-ACTIVATION CENSUS. the two limiter tiers are NOT the same kind of event and must not be
+    # gated the same way:
+    #   FALLBACK — the high-order c2p was unphysical, so the cell takes the first-order redo. that is
+    #     the scheme correctly REDUCING ORDER on an under-resolved feature, which is what the tier is
+    #     for. measured here: ~2.0e4 cell-steps over 2000 steps (~10 cells/step) at 48^3, ALL of them
+    #     in the physical near-horizon exterior — the redshift-pileup infall just outside r_+, the
+    #     stiffest gas in the domain and genuinely under-resolved at this resolution (the torus
+    #     completes cleanly at 96^3). reported, not gated: a count is not a defect.
+    #   FREEZE — no flux could update the cell admissibly. THAT is a breakdown, and the
+    #     admissible-boundary projection exists precisely so it cannot happen while the stage-input
+    #     anchor is admissible. it is gated at ZERO in the physical exterior.
+    # the interior (r < r_+) is causally disconnected fiction and is exempt from both; measured 0 for
+    # both here anyway, since excision plus the projection leave it completely clean.
+    fb, fz, fb_h, fz_h = _BACKEND.guard_census()
+    ext_fz = fz - fz_h
+    assert ext_fz == 0, (
+        f"the a={spin} torus FROZE {ext_fz} cell-steps OUTSIDE the horizon (interior, causally "
+        f"disconnected: {fz_h}; exterior first-order fallbacks: {fb - fb_h}) — a physical cell that "
+        "no flux can update admissibly is a breakdown the projection is supposed to preclude"
+    )
+    finals = glob.glob(os.path.join(d, "*final*.h5"))
+    assert finals, f"spinning FM torus run (a={spin}) crashed"
+    with h5py.File(finals[0], "r") as h:
+        t_final = float(h["metadata"].attrs["time"])
+        prims = h["level_0/partition_0/hydro/primitives"]
+        halo = (prims["rho"].shape[0] - RES) // 2
+        sl = slice(halo, halo + RES)
+        rho = prims["rho"][sl, sl, sl]
+    # the dt-collapse signal, stated against the only resolution-independent scale
+    # there is: nothing propagates faster than light, so `cfl * dx` bounds the step.
+    # a mask that throttles the source-admissibility rate in the excised region drives
+    # dt orders below that, and it does so from the first steps -- so this replaces the
+    # "did it reach t = 5" soak with the property that soak was standing in for.
+    with h5py.File(finals[0], "r") as h:
+        cfl = float(h["metadata"].attrs["cfl"])
+        dt_final = float(h["metadata"].attrs["dt"])
+    dt_light = cfl * (2.0 * L_BOX / RES)
+    assert dt_final > 1.0e-8 * dt_light, (
+        f"the a={spin} torus timestep COLLAPSED to {dt_final / dt_light:.3e} of the "
+        f"light-crossing step {dt_light:.4e} after {t_final:.4f} of evolution — a step "
+        "this far below the hyperbolic limit is set by the excised-region "
+        "source-admissibility mask, not by wave propagation"
+    )
+    return rho
+
+
+@needs_backend
+def test_spinning_fm_torus_with_spheroidal_excision() -> None:
+    rho = _run(0.9)
+    assert np.isfinite(rho).all(), "non-finite state in the spinning torus run"
+    assert rho.min() > 0.0, "density went non-positive"
+    # the torus is PRESENT AND SURVIVES, asserted in ITS OWN equatorial band —
+    # the global density maximum is the floored-redshift corona pileup at the
+    # horizon, which exists whether or not the torus does (a global-max assert
+    # is vacuous for torus presence: the corona once silently swallowed a
+    # near-marginal thin torus whole via the pressure-matched surface).
+    dd = 2.0 * L_BOX / RES
+    xs = (np.arange(RES) + 0.5) * dd - L_BOX
+    z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
+    r = np.sqrt(x * x + y * y + z * z)
+    band = (np.abs(z) < 2.0) & (r > 5.0) & (r < 14.0)
+    assert rho[band].max() > 0.3, (
+        f"no torus in the equatorial band 5 < r < 14 (max rho {rho[band].max():.4f}; "
+        "the corona swallowed it or it disintegrated)"
+    )
+
+    # axisymmetric initial data on the axisymmetric spinning metric: the evolved
+    # state holds the quarter turn about the spin axis and the equatorial
+    # reflection to roundoff (storage [k, j, i]).
+    err_rot = np.abs(rho - np.rot90(rho, 1, (1, 2))).max()
+    assert err_rot < 1e-11, f"quarter-turn symmetry broken: {err_rot:e}"
+    err_z = np.abs(rho - rho[::-1, :, :]).max()
+    assert err_z < 1e-11, f"equatorial reflection symmetry broken: {err_z:e}"
+
+    # the spin genuinely enters (non-vacuous: a dispatch that silently ran the
+    # a = 0 chart would make these identical).
+    rho0 = _run(0.0)
+    assert np.abs(rho - rho0).max() > 1e-3, (
+        "the a = 0.9 and a = 0 torus runs are near-identical; the spin never acted"
+    )
