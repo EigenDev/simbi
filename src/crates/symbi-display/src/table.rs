@@ -81,7 +81,6 @@ pub struct Table {
     tab: usize,
     /// vertical scroll offset for the active tab (used by the tall config panel; reset on tab switch).
     scroll: u16,
-    paused: bool,
     frame: u64,
     m_step: u64,
     m_t: f64,
@@ -163,7 +162,6 @@ impl Table {
             regime: String::new(),
             tab: 0,
             scroll: 0,
-            paused: false,
             frame: 0,
             m_step: 0,
             m_t: 0.0,
@@ -268,12 +266,6 @@ impl Table {
     /// the physics-regime badge shown in the live stat strip (e.g. "RHD").
     pub fn set_regime(&mut self, regime: &str) {
         self.regime = regime.to_string();
-    }
-
-    /// paused state for the stat-strip indicator (amber "paused" vs green
-    /// "integrating"); the driver parks the integrator, this only reflects it.
-    pub fn set_paused(&mut self, paused: bool) {
-        self.paused = paused;
     }
 
     /// the courant number and its nominal stability ceiling, for the CFL gauge.
@@ -401,7 +393,9 @@ impl Table {
             app_title: self.title.clone(),
             regime: self.regime.clone(),
             attached: String::new(),
-            paused: self.paused,
+            // the render thread overwrites this from the live `Controls` at draw time: a
+            // parked producer publishes no frames, so its own copy would always read stale.
+            paused: false,
             frame: self.frame,
             t: self.m_t,
             step: self.m_step,

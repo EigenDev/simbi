@@ -75,7 +75,8 @@ fn build() -> Sim {
 
 fn sample_ms(n_values: usize, reps: usize) -> f64 {
     let sim = build();
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     sub.c2p(&sim.store);
     let mut sim = sim;
     sim.store.censuses.push(RegisteredCensus::new(
@@ -122,9 +123,16 @@ fn a_census_sample_is_a_fraction_of_the_step_it_rides_on() {
     println!(
         "[{} profile, {N} cells] hydro step {step:.4} ms, census sample {census:.4} ms => census \
          is {pct:.1}% of a step",
-        if cfg!(debug_assertions) { "debug" } else { "release" }
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
     );
-    assert!(step > 0.0 && census > 0.0, "one of the two did not register on the clock");
+    assert!(
+        step > 0.0 && census > 0.0,
+        "one of the two did not register on the clock"
+    );
 }
 
 #[test]
@@ -138,7 +146,11 @@ fn the_census_cost_tracks_the_graph_not_the_accumulator_count() {
     // hydro step" claim has to be made against a release build or it means nothing.
     println!(
         "census over {N} cells [{} profile]: 1 accumulator {one:.4} ms, 8 accumulators {eight:.4} ms",
-        if cfg!(debug_assertions) { "debug" } else { "release" }
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
     );
 
     // the premise: both must be resolvable above timer noise, or the ratio below is meaningless.
@@ -182,7 +194,10 @@ fn the_scratch_is_allocated_once_and_reused_across_samples() {
             .census_scratch_pooled(&sim.store.censuses, 0)
             .expect("host-resident sim has pooled scratch");
         (
-            f.values.iter().map(|v| v.view().at([0]) as *const f64 as usize).collect::<Vec<_>>(),
+            f.values
+                .iter()
+                .map(|v| v.view().at([0]) as *const f64 as usize)
+                .collect::<Vec<_>>(),
             f.segment.view().at([0]) as *const f64 as usize,
         )
     };
@@ -235,7 +250,11 @@ fn a_reused_scratch_carries_nothing_from_the_previous_sample() {
     }
     sim.time += 1.0;
     symbi_substrate::census_sample::sample_censuses(&mut sim);
-    let after = *sim.store.censuses[0].history.values().last().expect("second sample");
+    let after = *sim.store.censuses[0]
+        .history
+        .values()
+        .last()
+        .expect("second sample");
 
     assert!(
         (after / before - 3.0).abs() < 1.0e-12,
@@ -262,13 +281,24 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
     let sp = sim.geom.interior.spaces[0].clone();
     let mid = sp.lo + (sp.hi - sp.lo) / 2;
     let span = |lo, hi| {
-        symbi_algebra::Domain::new([symbi_algebra::Space { name: sp.name, lo, hi }])
+        symbi_algebra::Domain::new([symbi_algebra::Space {
+            name: sp.name,
+            lo,
+            hi,
+        }])
     };
 
     // uncovered first, which is what leaves a live bucket in every cell of the scratch.
-    let full = symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, None);
+    let full =
+        symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, None);
     let half = span(mid, sp.hi);
-    let masked = symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, Some(&half));
+    let masked = symbi_substrate::census_sample::level_partials(
+        &sim,
+        &sim.store.censuses,
+        0,
+        None,
+        Some(&half),
+    );
 
     let (total, part) = (full[0].0[0], masked[0].0[0]);
     assert!(
@@ -280,7 +310,13 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
     // and the complement closes it: the two halves must sum back to the whole, so the masked
     // sample dropped exactly the covered volume rather than an arbitrary amount.
     let outer = span(sp.lo, mid);
-    let other = symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, Some(&outer));
+    let other = symbi_substrate::census_sample::level_partials(
+        &sim,
+        &sim.store.censuses,
+        0,
+        None,
+        Some(&outer),
+    );
     let sum = part + other[0].0[0];
     assert!(
         (sum / total - 1.0).abs() < 1.0e-12,

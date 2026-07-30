@@ -55,9 +55,13 @@ fn run(excision_radius: f64) -> (Vec<f64>, Vec<f64>) {
 /// the two is the identity there.
 fn run_on(excision_radius: f64, log_radial: bool) -> ((Vec<f64>, Vec<f64>), Vec<f64>) {
     let dr = (R_MAX - R_MIN) / N as f64;
-    let builder = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKS { mass: MASS })
-        .cells([N])
-        .origin([R_MIN]);
+    let builder = Sim::build(
+        Rhd,
+        IdealGas { gamma: GAMMA },
+        SchwarzschildKS { mass: MASS },
+    )
+    .cells([N])
+    .origin([R_MIN]);
     let log_slope = (R_MAX / R_MIN).log10() / N as f64;
     // NOTE the deliberate mismatch: `spacing` carries the LINEAR cell width while the axis map is
     // logarithmic. that is the state the config front end actually produces — the map is the
@@ -94,14 +98,7 @@ fn run_on(excision_radius: f64, log_radial: bool) -> ((Vec<f64>, Vec<f64>), Vec<
     let mut pre = Vec::with_capacity(N);
     for c in sim.geom.interior.iter() {
         rho.push(*sim.fields.prim.rho.view().at(c));
-        pre.push(
-            *sim.fields
-                .prim
-                .pre_field()
-                .expect("prim.pre")
-                .view()
-                .at(c),
-        );
+        pre.push(*sim.fields.prim.pre_field().expect("prim.pre").view().at(c));
     }
     let r_used: Vec<f64> = if log_radial {
         (0..N)

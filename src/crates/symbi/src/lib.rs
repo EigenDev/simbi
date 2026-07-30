@@ -33,6 +33,7 @@ pub use dispatch::{
     DomainForEach, KernelInfo, parallel_reduce_1d, parallel_reduce_2d, parallel_reduce_3d,
 };
 pub use symbi_algebra::*;
+pub use symbi_exec;
 pub use symbi_geometry;
 pub use symbi_grid;
 pub use symbi_hydro;

@@ -322,8 +322,7 @@ mod tests {
                         // the bound is tight and the discriminant is smallest.
                         for sign in [-1.0_f64, 1.0] {
                             let vn = sign * (gamma_nn * v_sq).sqrt();
-                            let (sl, sr) =
-                                rhd_speeds_from_vn_gr(cs_sq, vn, v_sq, gamma_nn, alpha);
+                            let (sl, sr) = rhd_speeds_from_vn_gr(cs_sq, vn, v_sq, gamma_nn, alpha);
                             assert!(
                                 sl.is_finite() && sr.is_finite() && sl <= sr,
                                 "fan not real at gamma_nn={gamma_nn} alpha={alpha} \

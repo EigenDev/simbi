@@ -398,14 +398,8 @@ pub fn rmhd_source_admissible_time<S: Scalar>(
 
     // the inward-source certificate: `q` of the SOURCE VECTOR (no baryon component, no magnetic
     // component — the geometric source touches neither) together with an admissible far endpoint.
-    let (q_source, _) = rmhd_admissible_residuals(
-        S::ZERO,
-        &s_dot,
-        e_dot,
-        &Tensor::zeros(),
-        gm_inv,
-        gm,
-    );
+    let (q_source, _) =
+        rmhd_admissible_residuals(S::ZERO, &s_dot, e_dot, &Tensor::zeros(), gm_inv, gm);
     let unbounded = q_source.cmp_gt(S::ZERO) & ok_at(S::from_f64(SOURCE_RAY_FAR));
 
     let mut lo = S::ZERO;

@@ -602,12 +602,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || {}, // newtonian: no admissible-boundary projection (keeps the freeze parachute)
             // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
             sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
-            || {},             // hydro: no induction flux
-            || {},             // hydro: no cell B to restore
-            || {},             // hydro: no induction flux
+            || {},                                                // hydro: no induction flux
+            || {},                                                // hydro: no cell B to restore
+            || {},                                                // hydro: no induction flux
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
-            || {},             // hydro: no CT re-sync
-            false,             // no projection tier below the freeze; keep the parachute
+            || {},                                                // hydro: no CT re-sync
+            false, // no projection tier below the freeze; keep the parachute
         )
     }
 

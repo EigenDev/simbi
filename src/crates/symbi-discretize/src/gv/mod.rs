@@ -51,9 +51,9 @@ use super::coords::{Coords, Spacetime, Spacing};
 // the byte-identical public path `gv::NAME` for every builder lib.rs + downstream crates reach
 // (the split is purely organizational — no api change).
 mod c2p;
+pub mod census_map;
 mod ct_emf;
 mod flux;
-pub mod census_map;
 pub(crate) mod geometry;
 mod ghost;
 mod godunov;

@@ -20,10 +20,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use symbi_algebra::OrderedNumeric;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
 use symbi_ir::algebra::Scalar;
-use symbi_algebra::OrderedNumeric;
 use symbi_sim::census::CensusEvaluator;
 use symbi_sim::state::FieldStore;
 use symbi_xpu::MemorySpace;
@@ -127,9 +127,9 @@ where
             ExecPolicy::Cover(block) => entry.kernel.run_cover_raw(
                 &grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases,
             ),
-            ExecPolicy::Whole => entry.kernel.run_parallel_raw(
-                &grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases,
-            ),
+            ExecPolicy::Whole => entry
+                .kernel
+                .run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases),
         }
     }
     true

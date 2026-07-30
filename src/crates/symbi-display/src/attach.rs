@@ -56,7 +56,7 @@ pub fn run_attach(rundir: &Path, poll_ms: u64) -> io::Result<()> {
 
     // the file exists: take over the screen and stream it.
     let mut screen = ScreenGuard::enter();
-    let mut dash = match LiveDashboard::spawn() {
+    let mut dash = match LiveDashboard::spawn_read_only() {
         Some(d) => d,
         None => {
             screen.leave();

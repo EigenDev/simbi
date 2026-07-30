@@ -51,7 +51,8 @@ fn swirl_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
 fn zero_mass_ks_cfl_equals_flat_cfl() {
     let dx = 1.0 / N as f64;
 
-    type GrSim = SimState<Rmhd, 3, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+    type GrSim =
+        SimState<Rmhd, 3, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
     let mut sim_gr = GrSim::build(
         Rmhd,
         IdealGas { gamma: GAMMA },

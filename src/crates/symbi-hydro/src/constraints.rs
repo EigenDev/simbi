@@ -377,10 +377,7 @@ where
 /// in this orientation `t = 0` is the anchor and `t = 1` the candidate, so the most restrictive
 /// member is the SMALLEST theta. an empty family retains the candidate whole.
 pub fn joint_theta<S: Scalar>(thetas: &[Option<S>]) -> S {
-    thetas
-        .iter()
-        .flatten()
-        .fold(S::ONE, |acc, &t| acc.min(t))
+    thetas.iter().flatten().fold(S::ONE, |acc, &t| acc.min(t))
 }
 
 /// the ANCHOR FEASIBILITY residual: the least constraint residual at `t = 0`.
@@ -457,7 +454,8 @@ where
                 }
                 _ => None,
             };
-            let Some(cm) = constraint.residual(&state(0.5 * (a.0 + b.0), mid_mom, mid_nrg, mid_mag))
+            let Some(cm) =
+                constraint.residual(&state(0.5 * (a.0 + b.0), mid_mom, mid_nrg, mid_mag))
             else {
                 continue;
             };
@@ -660,7 +658,10 @@ mod tests {
         assert!((theta - 2.0 / 3.0).abs() < 1e-12, "theta = {theta}");
         // and the projected state sits ON the boundary, not past it.
         let residual = floor.residual(&blend(theta)).expect("applicable");
-        assert!(residual.abs() < 1e-12, "residual {residual:e} off the boundary");
+        assert!(
+            residual.abs() < 1e-12,
+            "residual {residual:e} off the boundary"
+        );
     }
 
     #[test]
@@ -867,7 +868,10 @@ mod tests {
         };
         // neutral / slack configurations: on, applicable, never binding.
         for (name, r) in [
-            ("temperature_floor", TemperatureFloor { f_min: 0.0 }.residual(&live)),
+            (
+                "temperature_floor",
+                TemperatureFloor { f_min: 0.0 }.residual(&live),
+            ),
             (
                 "magnetization_ceiling",
                 MagnetizationCeiling {
@@ -875,13 +879,21 @@ mod tests {
                 }
                 .residual(&live),
             ),
-            ("density_floor", DensityFloor { den_min: 0.0 }.residual(&live)),
+            (
+                "density_floor",
+                DensityFloor { den_min: 0.0 }.residual(&live),
+            ),
         ] {
             let v = r.unwrap_or_else(|| {
-                panic!("{name} configured slack reported INAPPLICABLE; a config value must not be \
-                        able to masquerade as structural absence")
+                panic!(
+                    "{name} configured slack reported INAPPLICABLE; a config value must not be \
+                        able to masquerade as structural absence"
+                )
             });
-            assert!(v > 0.0, "{name} slack residual should be comfortably positive, got {v:e}");
+            assert!(
+                v > 0.0,
+                "{name} slack residual should be comfortably positive, got {v:e}"
+            );
         }
         // only genuine structural absence yields None, and it does so regardless of configuration.
         let isothermal = ConstraintState {
@@ -910,15 +922,24 @@ mod tests {
         let s = samples();
         for &f_min in &[0.0_f64, 1e-12, 1e-6, 1e-2, 1.0, 1e3] {
             let v = concavity_violation(&TemperatureFloor { f_min }, &s, &gm, &gi);
-            assert!(v.abs() <= 1e-12, "temperature_floor bends at f_min={f_min:e}: {v:e}");
+            assert!(
+                v.abs() <= 1e-12,
+                "temperature_floor bends at f_min={f_min:e}: {v:e}"
+            );
         }
         for &sigma_max in &[0.0_f64, 1e-3, 1.0, 50.0, 1e6, 1e12] {
             let v = concavity_violation(&MagnetizationCeiling { sigma_max }, &s, &gm, &gi);
-            assert!(v.abs() <= 1e-12, "magnetization_ceiling bends at sigma_max={sigma_max:e}: {v:e}");
+            assert!(
+                v.abs() <= 1e-12,
+                "magnetization_ceiling bends at sigma_max={sigma_max:e}: {v:e}"
+            );
         }
         for &den_min in &[0.0_f64, 1e-12, 1e-4, 1.0, 1e3] {
             let v = concavity_violation(&DensityFloor { den_min }, &s, &gm, &gi);
-            assert!(v.abs() <= 1e-12, "density_floor bends at den_min={den_min:e}: {v:e}");
+            assert!(
+                v.abs() <= 1e-12,
+                "density_floor bends at den_min={den_min:e}: {v:e}"
+            );
         }
     }
 
@@ -990,7 +1011,10 @@ mod tests {
             &DensityFloor { den_min: 1e-8 },
         ];
         let mut ledger = ConstraintLedger::new(&family);
-        assert!(!ledger.entries[0].model_term, "temperature floor is numerical");
+        assert!(
+            !ledger.entries[0].model_term,
+            "temperature floor is numerical"
+        );
         assert!(ledger.entries[1].model_term, "density floor models vacuum");
 
         ledger.book(0, 0.0, 4.0e-7); // truncation-driven energy injection

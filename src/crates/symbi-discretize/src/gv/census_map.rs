@@ -80,9 +80,8 @@ pub fn census_map_gv<A: CensusAxis>(
             .or_insert_with(|| Gv::scalar(pname).node());
     }
 
-    let out = with_trace(|t| {
-        symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &env)
-    });
+    let out =
+        with_trace(|t| symbi_hydro::source_spec::splice_built_source_into(built, t.graph(), &env));
     let n_axes = bin_axes.len();
     assert_eq!(
         out.len(),
@@ -131,9 +130,8 @@ fn segment_marker_traced<A: CensusAxis>(bin_axes: &[A], coords: &[Gv], n_segment
     for (axis, &x) in bin_axes.iter().zip(coords) {
         let edges = axis.edges();
         let n_bins = edges.len() - 1;
-        all_in_range = all_in_range
-            & x.cmp_ge(Gv::from_f64(edges[0]))
-            & x.cmp_le(Gv::from_f64(edges[n_bins]));
+        all_in_range =
+            all_in_range & x.cmp_ge(Gv::from_f64(edges[0])) & x.cmp_le(Gv::from_f64(edges[n_bins]));
         let mut count = Gv::ZERO;
         for &edge in edges {
             count = count + Gv::select(x.cmp_ge(Gv::from_f64(edge)), Gv::ONE, Gv::ZERO);

@@ -659,13 +659,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     );
                 }
             },
-            None,              // no body-evolved freeze parachute (no rhd body source)
-            || {},             // hydro: no induction flux
-            || {},             // hydro: no cell B to restore
-            || {},             // hydro: no induction flux
+            None,  // no body-evolved freeze parachute (no rhd body source)
+            || {}, // hydro: no induction flux
+            || {}, // hydro: no cell B to restore
+            || {}, // hydro: no induction flux
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
-            || {},             // hydro: no CT re-sync
-            false,             // no projection tier below the freeze; keep the parachute
+            || {}, // hydro: no CT re-sync
+            false, // no projection tier below the freeze; keep the parachute
         )
     }
 }

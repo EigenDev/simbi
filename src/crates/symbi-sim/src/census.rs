@@ -301,8 +301,8 @@ impl CensusSpec {
             .map(|a| BinAxis::new(a.name.clone(), a.edges.clone()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("census '{}': {e}", cfg.name))?;
-        let cadence = Cadence::from_tag(&cfg.cadence)
-            .map_err(|e| format!("census '{}': {e}", cfg.name))?;
+        let cadence =
+            Cadence::from_tag(&cfg.cadence).map_err(|e| format!("census '{}': {e}", cfg.name))?;
         Ok(
             Self::new(cfg.name.clone(), axes, cfg.value_names.clone(), op)?
                 .every(cfg.sample_interval)?
@@ -407,7 +407,9 @@ pub fn segment_marker_generic<S: Scalar>(axes: &[BinAxis], coords: &[S], n_segme
         }
         // count >= 1 on any in-range x, so `count - 1` is the index of the last edge at or
         // below it; the clamp keeps the outer edge in the final bin.
-        let bin = (count - S::ONE).min(S::from_f64((n_bins - 1) as f64)).max(S::ZERO);
+        let bin = (count - S::ONE)
+            .min(S::from_f64((n_bins - 1) as f64))
+            .max(S::ZERO);
         flat = flat * S::from_f64(n_bins as f64) + bin;
     }
     S::select(all_in_range, flat, S::from_f64(n_segments as f64))
@@ -1149,8 +1151,7 @@ mod tests {
         // meant to be reduced and simply fell outside the edges, which is a shortfall to report
         // rather than a cell that was never part of the reduction.
         assert!(
-            spec.segment_marker(&[0.5, 50.0])
-                < spec.n_segments() as u32 + SEGMENT_EXCLUDED_OFFSET
+            spec.segment_marker(&[0.5, 50.0]) < spec.n_segments() as u32 + SEGMENT_EXCLUDED_OFFSET
         );
     }
 
@@ -1262,7 +1263,10 @@ mod generic_binning_tests {
     fn a_value_on_the_outer_edge_lands_in_the_last_bin() {
         let axes = vec![BinAxis::new("a", vec![0.0, 1.0, 2.0]).unwrap()];
         let sp = spec(axes.clone());
-        assert_eq!(segment_marker_generic::<f64>(&axes, &[2.0], sp.n_segments()), 1.0);
+        assert_eq!(
+            segment_marker_generic::<f64>(&axes, &[2.0], sp.n_segments()),
+            1.0
+        );
         // and just past it is dropped, not folded back in.
         assert_eq!(
             segment_marker_generic::<f64>(&axes, &[2.0 + 1.0e-9], sp.n_segments()),

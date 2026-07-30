@@ -665,8 +665,7 @@ mod source_collection_tests {
                                 {"op":"MOD","left":0,"right":1}] }"#
                 .to_string(),
         }];
-        let error =
-            lower_configured_censuses(&censuses).expect_err("unsupported op was accepted");
+        let error = lower_configured_censuses(&censuses).expect_err("unsupported op was accepted");
         assert!(error.contains("census_expressions[3] lower:"), "{error}");
     }
 
@@ -676,8 +675,7 @@ mod source_collection_tests {
             origin: "census_expressions[2]".to_string(),
             json: "{".to_string(),
         }];
-        let error =
-            lower_configured_censuses(&censuses).expect_err("malformed json was accepted");
+        let error = lower_configured_censuses(&censuses).expect_err("malformed json was accepted");
         assert!(error.contains("census_expressions[2] parse:"), "{error}");
     }
 
@@ -689,8 +687,7 @@ mod source_collection_tests {
             census_payload("census_expressions[0]", "shells"),
             census_payload("census_expressions[1]", "shells"),
         ];
-        let error =
-            lower_configured_censuses(&censuses).expect_err("duplicate name was accepted");
+        let error = lower_configured_censuses(&censuses).expect_err("duplicate name was accepted");
         assert!(error.contains("reuses the census name 'shells'"), "{error}");
     }
 
@@ -1597,7 +1594,11 @@ fn configured_ito_order(
 /// the run actually carry them. without it a census validates, reports no error, and records
 /// nothing — a checkpoint with no census group is indistinguishable from a run that never
 /// registered one.
-fn attach_configured_censuses<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
+fn attach_configured_censuses<
+    const D: usize,
+    const DOF: usize,
+    Mem: symbi::symbi_xpu::MemorySpace,
+>(
     store: &mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
     cfg: &Config,
 ) -> Result<(), String> {
@@ -2335,6 +2336,11 @@ where
                 }
                 let mut view = table.diagnostic_view();
                 view.field_count = bundle.len();
+                // the snapshot is the ONLY channel an attached viewer has, so the solver's
+                // own pause state has to travel in it: the viewer cannot reach these
+                // controls and must not invent a badge from its local keys. a batch run is
+                // off-tty, has no controls at all, and therefore reports integrating.
+                view.paused = dash.as_ref().is_some_and(|d| d.controls().paused());
                 let _ = symbi_display::snapshot::Snapshot {
                     view,
                     fields: bundle,
@@ -2495,7 +2501,41 @@ where
     }
     table.exit_frame(ExitKind::Success, &summary);
     dump_profile_if_enabled(root.iteration, n_zones);
+    dump_dispatch_profile_if_enabled();
     Ok(())
+}
+
+/// dump the dispatch micro-profile to stderr when `SYMBI_DISPATCH_PROF` is set. the
+/// accumulators are written only under that variable, so a zero call count means it was
+/// unset and there is nothing to report.
+///
+/// the question it answers: of the per-call cost in the AMR transfer path, how much is the
+/// registry NAME LOOKUP (a wide match over kernel names) against the kernel execution
+/// itself. a lookup share rivalling execution says the dispatch is the cost rather than the
+/// arithmetic, which is a scheduling problem and not a numerics one.
+fn dump_dispatch_profile_if_enabled() {
+    let (calls, lookup_ns, exec_ns) = symbi::symbi_exec::policy::report_dispatch_profile();
+    let total = (lookup_ns + exec_ns) as f64;
+    if calls == 0 || total <= 0.0 {
+        return;
+    }
+    let row = |label: &str, ns: u64| {
+        eprintln!(
+            "  {label:<18} {:>8.1} ms  ({:>4.1}%)   {:.0} ns/call",
+            ns as f64 / 1e6,
+            100.0 * ns as f64 / total,
+            ns as f64 / calls as f64,
+        );
+    };
+    eprintln!("\n--- dispatch overhead over {calls} calls (SYMBI_DISPATCH_PROF) ---");
+    row("registry lookup", lookup_ns);
+    row("kernel execution", exec_ns);
+    eprintln!(
+        "  {:<18} {:>8.1} ms  ({:.0} ns/call)\n",
+        "TOTAL",
+        total / 1e6,
+        total / calls as f64
+    );
 }
 
 /// dump the accumulated per-phase wall-time profile to stderr when `SYMBI_PROFILE` is set (the

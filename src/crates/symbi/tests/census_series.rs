@@ -126,7 +126,10 @@ fn one_sample_lands_per_accepted_step() {
         sim.iteration as usize,
         "one sample per accepted step"
     );
-    assert!(history.len() > 4, "the run must take several steps to mean anything");
+    assert!(
+        history.len() > 4,
+        "the run must take several steps to mean anything"
+    );
     assert_eq!(history.n_segments(), 4);
     assert_eq!(history.n_values(), 2);
     assert_eq!(history.values().len(), history.len() * 4 * 2);
@@ -188,10 +191,7 @@ fn each_sample_conserves_the_total_mass_across_its_shells() {
 
 #[test]
 fn the_series_reaches_the_checkpoint_with_its_edges_and_labels() {
-    let dir = std::env::temp_dir().join(format!(
-        "simbi_census_series_{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("simbi_census_series_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join("census.h5");
 
@@ -207,9 +207,7 @@ fn the_series_reaches_the_checkpoint_with_its_edges_and_labels() {
     )
     .expect("checkpoint write");
 
-    let tree = symbi_io::Hdf5Backend
-        .read(&path)
-        .expect("checkpoint read");
+    let tree = symbi_io::Hdf5Backend.read(&path).expect("checkpoint read");
     // the registrations nest under one `census` group, each under its own name.
     let group = tree
         .find_group("census")
@@ -217,10 +215,12 @@ fn the_series_reaches_the_checkpoint_with_its_edges_and_labels() {
         .find_group("shells")
         .expect("the census must be written under its registered name");
 
-    let attr_u64 = |k: &str| -> u64 { match group.find_attr(k) {
-        Some(symbi_io::Attr::U64(v)) => *v,
-        other => panic!("attr {k}: {other:?}"),
-    } };
+    let attr_u64 = |k: &str| -> u64 {
+        match group.find_attr(k) {
+            Some(symbi_io::Attr::U64(v)) => *v,
+            other => panic!("attr {k}: {other:?}"),
+        }
+    };
     let attr_str = |k: &str| match group.find_attr(k) {
         Some(symbi_io::Attr::Str(v)) => v.clone(),
         other => panic!("attr {k}: {other:?}"),
@@ -233,7 +233,11 @@ fn the_series_reaches_the_checkpoint_with_its_edges_and_labels() {
     // the size of the compiled per-cell graph: what a census actually costs.
     assert!(attr_u64("node_count") > 0);
 
-    let ds = |k: &str| group.find_dataset(k).unwrap_or_else(|| panic!("dataset {k}"));
+    let ds = |k: &str| {
+        group
+            .find_dataset(k)
+            .unwrap_or_else(|| panic!("dataset {k}"))
+    };
     assert_eq!(ds("time").shape, vec![n_samples]);
     assert_eq!(ds("values").shape, vec![n_samples, 4, 2]);
     assert_eq!(ds("dropped").shape, vec![n_samples]);
@@ -248,4 +252,3 @@ fn the_series_reaches_the_checkpoint_with_its_edges_and_labels() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
-

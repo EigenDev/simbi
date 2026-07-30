@@ -162,8 +162,7 @@ fn host(case: &Case) -> (f64, f64) {
         sigma_max: SIGMA_MAX,
     };
     let density = DensityFloor { den_min: DEN_MIN };
-    let family: Vec<&dyn StateConstraint<f64>> =
-        vec![&g, &temperature, &magnetization, &density];
+    let family: Vec<&dyn StateConstraint<f64>> = vec![&g, &temperature, &magnetization, &density];
     let thetas = constraint_thetas(&family, &blend, 20);
     let theta = joint_theta(&thetas);
     let mut binding = -1.0;

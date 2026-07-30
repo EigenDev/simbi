@@ -8,8 +8,8 @@ use super::*;
 use symbi_algebra::Matrix;
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
-    SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
+    SchwarzschildKSCylindrical,
 };
 use symbi_ir::dual::Dual;
 

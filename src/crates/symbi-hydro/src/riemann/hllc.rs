@@ -450,13 +450,15 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                         ShockwaveLimiter::Standard | ShockwaveLimiter::Quirk => S::branch(
                             a_star.cmp_ge(vface),
                             || {
-                                let us =
-                                    rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
+                                let us = rhd_star_state(
+                                    prim_l, &u_l, a_l, a_star, p_star, nhat, &metric,
+                                );
                                 f_l + (us - u_l) * a_l - us * vface
                             },
                             || {
-                                let us =
-                                    rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
+                                let us = rhd_star_state(
+                                    prim_r, &u_r, a_r, a_star, p_star, nhat, &metric,
+                                );
                                 f_r + (us - u_r) * a_r - us * vface
                             },
                         ),
@@ -489,8 +491,10 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                         // TRANSVERSE motion — reintroducing exactly the contamination that keying on
                         // the face-normal component removes.
                         ShockwaveLimiter::Fleischmann => {
-                            let cs_l = crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
-                            let cs_r = crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
+                            let cs_l =
+                                crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
+                            let cs_r =
+                                crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
                             let vn_l = prim_l.vel.dot(nhat);
                             let vn_r = prim_r.vel.dot(nhat);
                             let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r);
@@ -1042,7 +1046,10 @@ mod tests {
         let cs_r = eos.sound_speed(r.rho, r.pre);
         let (s_l, s_r, s_star) =
             wave_properties(l.rho, r.rho, l.pre, r.pre, 5.0, 5.0, cs_l, cs_r, 1.4);
-        assert!(s_l >= 0.0, "the left state must be supersonic, got S_L = {s_l}");
+        assert!(
+            s_l >= 0.0,
+            "the left state must be supersonic, got S_L = {s_l}"
+        );
         let us = star_state(&l, &u_l, s_l, s_star, l.rho * (s_l - 5.0), &nhat);
         assert!(
             (us.den - u_l.den).abs() > 1.0e-3,
@@ -1482,7 +1489,6 @@ mod tests {
         }
     }
 
-
     // =========================================================================
     // the relativistic extension of HLLC-LM
     // =========================================================================
@@ -1504,26 +1510,52 @@ mod tests {
         // if it failed, the reduced-dissipation flux would not be a modification of HLLC at all: it
         // would be a different, inconsistent solver whose error would look like ordinary numerical
         // dissipation.
-        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let eos = IdealGas {
+            gamma: 4.0 / 3.0f64,
+        };
         let n = Tensor::new([1.0, 0.0]);
         let regime = crate::rhd::Rhd;
         let metric = SpatialMetric::flat();
         let cases = [
             (
                 "mildly relativistic",
-                Prim { rho: 1.0, vel: Tensor::new([0.2, 0.0]), pre: 1.0 },
-                Prim { rho: 0.5, vel: Tensor::new([-0.1, 0.0]), pre: 0.4 },
+                Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.2, 0.0]),
+                    pre: 1.0,
+                },
+                Prim {
+                    rho: 0.5,
+                    vel: Tensor::new([-0.1, 0.0]),
+                    pre: 0.4,
+                },
             ),
             (
                 // the grid-aligned shock: vanishing NORMAL velocity, relativistic transverse motion.
                 "vanishing normal velocity, relativistic transverse",
-                Prim { rho: 1.0, vel: Tensor::new([1.0e-6, 0.99]), pre: 1.0 },
-                Prim { rho: 1.2, vel: Tensor::new([-1.0e-6, 0.99]), pre: 1.1 },
+                Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([1.0e-6, 0.99]),
+                    pre: 1.0,
+                },
+                Prim {
+                    rho: 1.2,
+                    vel: Tensor::new([-1.0e-6, 0.99]),
+                    pre: 1.1,
+                },
             ),
             (
                 "strong jump",
-                Prim { rho: 10.0, vel: Tensor::new([0.4, 0.3]), pre: 20.0 },
-                Prim { rho: 0.1, vel: Tensor::new([-0.3, 0.1]), pre: 0.05 },
+                Prim {
+                    rho: 10.0,
+                    vel: Tensor::new([0.4, 0.3]),
+                    pre: 20.0,
+                },
+                Prim {
+                    rho: 0.1,
+                    vel: Tensor::new([-0.3, 0.1]),
+                    pre: 0.05,
+                },
             ),
         ];
         for (name, l, r) in cases {
@@ -1577,22 +1609,48 @@ mod tests {
         // identity, so any disagreement is a defect in the central form rather than the intended
         // reduction. covers both the subsonic fan (where the star flux applies) and the supersonic
         // fans (where the upwind flux does).
-        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let eos = IdealGas {
+            gamma: 4.0 / 3.0f64,
+        };
         let n = Tensor::new([1.0, 0.0]);
         let cases = [
             // subsonic fan, normal mach well above the limit
             (
-                Prim { rho: 1.0, vel: Tensor::new([0.3, 0.1]), pre: 1.0 },
-                Prim { rho: 0.6, vel: Tensor::new([0.2, -0.1]), pre: 0.5 },
+                Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.3, 0.1]),
+                    pre: 1.0,
+                },
+                Prim {
+                    rho: 0.6,
+                    vel: Tensor::new([0.2, -0.1]),
+                    pre: 0.5,
+                },
             ),
             // left-supersonic and right-supersonic
             (
-                Prim { rho: 1.0, vel: Tensor::new([0.99, 0.0]), pre: 0.01 },
-                Prim { rho: 1.2, vel: Tensor::new([0.99, 0.0]), pre: 0.02 },
+                Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([0.99, 0.0]),
+                    pre: 0.01,
+                },
+                Prim {
+                    rho: 1.2,
+                    vel: Tensor::new([0.99, 0.0]),
+                    pre: 0.02,
+                },
             ),
             (
-                Prim { rho: 1.0, vel: Tensor::new([-0.99, 0.0]), pre: 0.01 },
-                Prim { rho: 1.2, vel: Tensor::new([-0.99, 0.0]), pre: 0.02 },
+                Prim {
+                    rho: 1.0,
+                    vel: Tensor::new([-0.99, 0.0]),
+                    pre: 0.01,
+                },
+                Prim {
+                    rho: 1.2,
+                    vel: Tensor::new([-0.99, 0.0]),
+                    pre: 0.02,
+                },
             ),
         ];
         for (l, r) in cases {
@@ -1625,9 +1683,19 @@ mod tests {
         // problem is at Ma ~ 0 while its acoustic wave speeds stay at O(c_s). classical HLLC then
         // applies dissipation proportional to c_s to a face whose flow is nearly at rest — the
         // scaling failure that drives the carbuncle.
-        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
-        let l = Prim { rho: 1.0, vel: Tensor::new([1.0e-6, 0.99]), pre: 1.0 };
-        let r = Prim { rho: 1.2, vel: Tensor::new([-1.0e-6, 0.99]), pre: 1.1 };
+        let eos = IdealGas {
+            gamma: 4.0 / 3.0f64,
+        };
+        let l = Prim {
+            rho: 1.0,
+            vel: Tensor::new([1.0e-6, 0.99]),
+            pre: 1.0,
+        };
+        let r = Prim {
+            rho: 1.2,
+            vel: Tensor::new([-1.0e-6, 0.99]),
+            pre: 1.1,
+        };
         let across = Tensor::new([1.0, 0.0]);
         let along = Tensor::new([0.0, 1.0]);
 
@@ -1680,7 +1748,9 @@ mod tests {
         // the earlier gates cannot see this. they sit either far below the limit (where both
         // definitions give a tiny phi) or far above it (where both give one). only a state placed
         // BETWEEN the two thresholds separates them.
-        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let eos = IdealGas {
+            gamma: 4.0 / 3.0f64,
+        };
         let n = Tensor::new([1.0, 0.0]);
         let (rho, pre) = (1.0f64, 10.0f64);
         let cs_rel = crate::rhd::sound_speed_sq(&eos, rho, pre).sqrt();
@@ -1698,8 +1768,16 @@ mod tests {
             vn / cs_newt
         );
 
-        let l = Prim { rho, vel: Tensor::new([vn, 0.0]), pre };
-        let r = Prim { rho: rho * 1.05, vel: Tensor::new([vn, 0.0]), pre: pre * 1.05 };
+        let l = Prim {
+            rho,
+            vel: Tensor::new([vn, 0.0]),
+            pre,
+        };
+        let r = Prim {
+            rho: rho * 1.05,
+            vel: Tensor::new([vn, 0.0]),
+            pre: pre * 1.05,
+        };
         let std = hllc_rhd(&eos, &l, &r, &n, 0.0, ShockwaveLimiter::Standard);
         let lm = hllc_rhd(&eos, &l, &r, &n, 0.0, ShockwaveLimiter::Fleischmann);
         let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(b.abs()).max(1.0e-30);
@@ -1723,7 +1801,9 @@ mod tests {
         // the trap in porting the scaling. the newtonian sound speed omits the specific enthalpy,
         // and on a relativistic gas it exceeds the speed of light — so a mach number built on it is
         // low by that factor and pushes faces onto the ramp that belong at phi = 1.
-        let eos = IdealGas { gamma: 4.0 / 3.0f64 };
+        let eos = IdealGas {
+            gamma: 4.0 / 3.0f64,
+        };
         let (rho, pre) = (1.0f64, 1.0f64);
         let newtonian = (4.0 / 3.0 * pre / rho).sqrt();
         let relativistic = crate::rhd::sound_speed_sq(&eos, rho, pre).sqrt();
@@ -1737,7 +1817,11 @@ mod tests {
         );
         // the acoustic wave speeds of a state at rest ARE +/- cs, which pins which of the two the
         // solver actually uses.
-        let at_rest = Prim { rho, vel: Tensor::new([0.0, 0.0]), pre };
+        let at_rest = Prim {
+            rho,
+            vel: Tensor::new([0.0, 0.0]),
+            pre,
+        };
         let (a_l, a_r) =
             crate::rhd::Rhd.extremal_speeds(&eos, &at_rest, &at_rest, &Tensor::new([1.0, 0.0]));
         assert!(

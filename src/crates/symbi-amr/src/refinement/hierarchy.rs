@@ -1354,8 +1354,8 @@ where
     /// restart is only meaningful when level `i` occupies the same region regardless of the total
     /// depth, which is a property of a refinement schedule rather than of this code.
     pub fn restore_from_checkpoint(&mut self, path: &str) -> Result<usize, String> {
-        let stored = symbi_sim::checkpoint::checkpoint_level_count(path)
-            .map_err(|e| format!("{e}"))?;
+        let stored =
+            symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
         if stored > self.levels.len() {
             return Err(format!(
                 "checkpoint '{path}' carries {stored} refinement level(s) but this run builds {}. \
@@ -1453,7 +1453,8 @@ where
         for dd in 0..DOF {
             inject(&parent.fields.cons.mom[dd], &fine.fields.cons.mom[dd]);
         }
-        if let (Some(pn), Some(fnn)) = (parent.fields.cons.nrg_field(), fine.fields.cons.nrg_field())
+        if let (Some(pn), Some(fnn)) =
+            (parent.fields.cons.nrg_field(), fine.fields.cons.nrg_field())
         {
             inject(pn, fnn);
         }
@@ -1649,11 +1650,7 @@ where
                 symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
             }
             let time = self.levels[0].state.time;
-            symbi_substrate::census_sample::record_samples(
-                &mut self.levels[0].state,
-                time,
-                totals,
-            );
+            symbi_substrate::census_sample::record_samples(&mut self.levels[0].state, time, totals);
         }
 
         let root = &mut self.levels[0];

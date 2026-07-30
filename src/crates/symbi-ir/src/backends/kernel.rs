@@ -620,9 +620,7 @@ pub fn render_field_segmented_reduction(
     ));
     // the segment view carries the same host-packed layout as a value view; only the
     // element type differs, and the index formulas read lo/strides alone.
-    out.push_str(
-        "",
-    );
+    out.push_str("");
     out.push_str(&segmented_atomic_helpers(op, precision));
 
     // ---- signature ----
@@ -698,9 +696,7 @@ pub fn render_field_segmented_reduction(
     ));
     // a cell EXCLUDED (covered by finer data, inside a body mask, a ghost) is skipped silently; a
     // cell that was to be reduced and fell outside the declared edges is a shortfall and counted.
-    out.push_str(&format!(
-        "        if (seg > {n_segments}u) continue;\n"
-    ));
+    out.push_str(&format!("        if (seg > {n_segments}u) continue;\n"));
     out.push_str(&format!(
         "        if (seg == {n_segments}u) {{ n_dropped += 1ull; continue; }}\n"
     ));

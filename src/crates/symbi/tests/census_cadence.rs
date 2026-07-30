@@ -91,7 +91,10 @@ fn a_declared_interval_samples_far_less_often_than_every_step() {
         steps > 20,
         "the run took only {steps} step(s); too few for a cadence to be visible"
     );
-    assert_eq!(steps, paced_steps, "the cadence must not change the evolution");
+    assert_eq!(
+        steps, paced_steps,
+        "the cadence must not change the evolution"
+    );
     assert_eq!(
         every_step as u64, steps,
         "with no interval a census samples every step ({every_step} samples, {steps} steps)"
@@ -119,7 +122,11 @@ fn a_declared_interval_samples_far_less_often_than_every_step() {
     }
     // the first sample is the initial state: a census that waited one interval would omit the one
     // row a reader can check against the problem's own setup.
-    assert!(times[0] <= interval, "the initial state was not sampled (first at {})", times[0]);
+    assert!(
+        times[0] <= interval,
+        "the initial state was not sampled (first at {})",
+        times[0]
+    );
 }
 
 #[test]

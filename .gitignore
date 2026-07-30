@@ -9,12 +9,11 @@ simbi/libs/
 *.cpubak
 *.egg-info/
 data/
-manuscripts/
+notes/
 docs/
 science
 scratch/
 movies/
-deprecated/
 literature/
 scripts/
 simbi/tools/extras/*

@@ -64,7 +64,8 @@ fn build(cfg: &CensusConfig) -> Sim {
             pre: 0.5,
         })
         .build();
-    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
     sub.c2p(&sim.store);
     let mut sim = sim;
     sim.store.censuses.push(RegisteredCensus::new(
@@ -176,7 +177,11 @@ fn the_accumulated_row_carries_the_span_it_covers() {
 
     let history = &sim.store.censuses[0].history;
     assert_eq!(history.n_samples(), [6]);
-    assert_eq!(history.t_start(), [0.0], "the first sample was taken at t = 0");
+    assert_eq!(
+        history.t_start(),
+        [0.0],
+        "the first sample was taken at t = 0"
+    );
     assert_eq!(
         history.time()[0],
         2.5,

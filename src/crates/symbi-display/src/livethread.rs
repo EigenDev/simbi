@@ -102,6 +102,29 @@ impl Controls {
     }
 }
 
+/// which side owns the pause state the badge reports.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PauseSource {
+    /// in-process: the space key toggles `Controls` and the integrator parks on that flag,
+    /// so the live value is authoritative and the badge reads it at draw time. a parked
+    /// producer publishes NOTHING, which is exactly why its published copy cannot be used.
+    LocalControls,
+    /// read-only attach: the solver is a different process, reachable only through the
+    /// snapshot it writes. its pause state travels in the published view and no local key
+    /// can change it, so the badge reports what the solver reported. a batch solver runs
+    /// off-tty with no `Controls` at all and therefore reports never being paused.
+    PublishedView,
+}
+
+/// the ui state the render thread owns between frames, applied to each received view.
+struct RenderOwned {
+    tab: usize,
+    scroll: u16,
+    frame: u64,
+    cmap_idx: usize,
+    log_scale: bool,
+}
+
 /// handle to the render thread + its shared control flags.
 pub struct LiveDashboard {
     tx: SyncSender<Frame>,
@@ -114,6 +137,17 @@ impl LiveDashboard {
     /// spawn the render thread. `ScreenGuard` must already have entered the alt
     /// screen. returns `None` off a tty (the caller renders synchronously/headless).
     pub fn spawn() -> Option<LiveDashboard> {
+        Self::spawn_with(PauseSource::LocalControls)
+    }
+
+    /// spawn for read-only `simbi attach`: the pause badge comes from the published view
+    /// and the pause / step / checkpoint keys are inert, since they cannot reach the
+    /// solver process.
+    pub fn spawn_read_only() -> Option<LiveDashboard> {
+        Self::spawn_with(PauseSource::PublishedView)
+    }
+
+    fn spawn_with(pause_source: PauseSource) -> Option<LiveDashboard> {
         if !terminal::is_tty() {
             return None;
         }
@@ -123,7 +157,7 @@ impl LiveDashboard {
         let handle = thread::spawn({
             let controls = Arc::clone(&controls);
             let running = Arc::clone(&running);
-            move || render_loop(rx, controls, running)
+            move || render_loop(rx, controls, running, pause_source)
         });
         Some(LiveDashboard {
             tx,
@@ -170,9 +204,41 @@ impl Drop for LiveDashboard {
     }
 }
 
+/// write the ui state the RENDER THREAD owns into a received view, just before drawing:
+/// tab, scroll offset, spinner frame, the paused badge, and the colormap.
+///
+/// the paused badge belongs here rather than in the published view because a paused run
+/// PUBLISHES NOTHING — the producer parks its integrator and stops sending frames, so a
+/// producer-side copy of the flag would read "integrating" for exactly as long as the run
+/// is paused. reading `Controls` at draw time makes the badge track the state the space
+/// key actually toggles.
+fn apply_render_owned_state(
+    v: &mut live::DiagnosticView,
+    controls: &Controls,
+    owned: RenderOwned,
+    pause_source: PauseSource,
+) {
+    let n = live::tab_names(v.blocks_per_level.len() > 1).len();
+    v.tab = owned.tab.min(n.saturating_sub(1));
+    v.config_scroll = owned.scroll;
+    v.frame = owned.frame;
+    if pause_source == PauseSource::LocalControls {
+        v.paused = controls.paused();
+    }
+    if let Some(field) = v.field.as_mut() {
+        field.cmap = COLORMAPS[owned.cmap_idx];
+        field.log_scale = owned.log_scale;
+    }
+}
+
 /// the render thread body: draw the latest published snapshot at ~30 fps and route
 /// keys. owns the ratatui terminal for its lifetime; no other thread touches it.
-fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<AtomicBool>) {
+fn render_loop(
+    rx: Receiver<Frame>,
+    controls: Arc<Controls>,
+    running: Arc<AtomicBool>,
+    pause_source: PauseSource,
+) {
     let mut terminal = match Terminal::new(CrosstermBackend::new(io::stdout())) {
         Ok(t) => t,
         Err(_) => return,
@@ -217,13 +283,21 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                         .unwrap_or(0);
                     scroll = (scroll + 1).min(cap);
                 }
-                Key::Char(' ') => {
+                // pause / step / checkpoint act on the LOCAL integrator. under read-only
+                // attach there is none, so they stay inert rather than moving a flag no
+                // solver reads -- a local toggle would otherwise paint a paused badge over
+                // a run that is still integrating.
+                Key::Char(' ') if pause_source == PauseSource::LocalControls => {
                     let p = controls.paused.load(Ordering::SeqCst);
                     controls.paused.store(!p, Ordering::SeqCst);
                 }
                 Key::Char('q') | Key::Esc => controls.quit.store(true, Ordering::SeqCst),
-                Key::Char('s') => controls.step_once.store(true, Ordering::SeqCst),
-                Key::Char('w') => controls.force_cp.store(true, Ordering::SeqCst),
+                Key::Char('s') if pause_source == PauseSource::LocalControls => {
+                    controls.step_once.store(true, Ordering::SeqCst)
+                }
+                Key::Char('w') if pause_source == PauseSource::LocalControls => {
+                    controls.force_cp.store(true, Ordering::SeqCst)
+                }
                 // c: cycle colormap (render-side, no solver round-trip).
                 Key::Char('c') => cmap_idx = (cmap_idx + 1) % COLORMAPS.len(),
                 // l: toggle log10 colormap normalization (render-side) — fields
@@ -275,19 +349,80 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                 v.field = Some(fields[idx].clone());
                 v.field_count = fields.len();
             }
-            // inject the render-thread-owned ui state (tab / spinner / paused badge /
-            // colormap).
-            let n = live::tab_names(v.blocks_per_level.len() > 1).len();
-            v.tab = tab.min(n.saturating_sub(1));
-            v.config_scroll = scroll;
-            v.frame = frame;
-            v.paused = controls.paused.load(Ordering::SeqCst);
-            if let Some(field) = v.field.as_mut() {
-                field.cmap = COLORMAPS[cmap_idx];
-                field.log_scale = log_scale;
-            }
+            let owned = RenderOwned {
+                tab,
+                scroll,
+                frame,
+                cmap_idx,
+                log_scale,
+            };
+            apply_render_owned_state(v, &controls, owned, pause_source);
             let _ = terminal.draw(|f| live::render(f, v));
         }
         frame = frame.wrapping_add(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owned() -> RenderOwned {
+        RenderOwned {
+            tab: 0,
+            scroll: 0,
+            frame: 0,
+            cmap_idx: 0,
+            log_scale: false,
+        }
+    }
+
+    #[test]
+    fn an_in_process_badge_follows_the_live_controls_not_the_published_view() {
+        // the badge is fed at DRAW time from `Controls`, which is the state the space key
+        // toggles and the integrator parks on. a published view carries no pause state, so
+        // a renderer trusting the view would read "integrating" throughout a pause -- and
+        // the absence of any producer calling a setter would look like a badge never wired.
+        let mut view = crate::table::Table::new("badge probe", false).diagnostic_view();
+        assert!(
+            !view.paused,
+            "an in-process view must not claim to carry pause state"
+        );
+
+        let controls = Controls::default();
+        apply_render_owned_state(&mut view, &controls, owned(), PauseSource::LocalControls);
+        assert!(!view.paused, "an unpaused run must render as integrating");
+
+        controls.paused.store(true, Ordering::SeqCst);
+        apply_render_owned_state(&mut view, &controls, owned(), PauseSource::LocalControls);
+        assert!(
+            view.paused,
+            "a paused run must render the paused badge even though the view said otherwise"
+        );
+    }
+
+    #[test]
+    fn an_attached_badge_reports_the_solver_state_and_ignores_local_keys() {
+        // read-only attach: the solver is another process and the snapshot is the only
+        // channel. a local key cannot pause it, so a locally-set flag must NOT reach the
+        // badge -- otherwise pressing space paints "paused" over a run that is still
+        // integrating, which is the whole failure this separation exists to prevent.
+        let mut view = crate::table::Table::new("attach probe", false).diagnostic_view();
+        let controls = Controls::default();
+        controls.paused.store(true, Ordering::SeqCst);
+        apply_render_owned_state(&mut view, &controls, owned(), PauseSource::PublishedView);
+        assert!(
+            !view.paused,
+            "a local pause must not reach the badge of a remote run"
+        );
+
+        // and the solver's own reported state is preserved rather than overwritten.
+        view.paused = true;
+        let idle = Controls::default();
+        apply_render_owned_state(&mut view, &idle, owned(), PauseSource::PublishedView);
+        assert!(
+            view.paused,
+            "the solver reported paused; the badge must keep it"
+        );
     }
 }

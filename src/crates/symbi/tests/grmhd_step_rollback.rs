@@ -112,7 +112,10 @@ fn kerr_sim() -> KerrSim {
         .set_initial(|[x, y, z]| swirl_prim(x, y, z))
         .seed_faces(|axis, [x, y, z]| {
             if axis == 0 {
-                B0 / symbi_geometry::Metric::<f64, 3>::sqrt_det_gamma(&metric, Tensor::new([x, y, z]))
+                B0 / symbi_geometry::Metric::<f64, 3>::sqrt_det_gamma(
+                    &metric,
+                    Tensor::new([x, y, z]),
+                )
             } else {
                 0.0
             }
@@ -158,9 +161,22 @@ fn rejecting_a_step_restores_the_full_magnetized_entry_state() {
     let rolled = dump_state(&sim);
 
     let labels = [
-        "cons.den", "cons.mom_0", "cons.mom_1", "cons.mom_2", "cons.nrg", "prim.rho", "prim.vel_0",
-        "prim.vel_1", "prim.vel_2", "prim.pre", "bcell_0", "bcell_1", "bcell_2", "bface_0",
-        "bface_1", "bface_2",
+        "cons.den",
+        "cons.mom_0",
+        "cons.mom_1",
+        "cons.mom_2",
+        "cons.nrg",
+        "prim.rho",
+        "prim.vel_0",
+        "prim.vel_1",
+        "prim.vel_2",
+        "prim.pre",
+        "bcell_0",
+        "bcell_1",
+        "bcell_2",
+        "bface_0",
+        "bface_1",
+        "bface_2",
     ];
     assert_eq!(labels.len(), entry.len());
     for (kk, label) in labels.iter().enumerate() {

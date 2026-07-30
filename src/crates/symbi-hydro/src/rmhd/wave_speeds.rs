@@ -883,7 +883,8 @@ mod tests {
     // compute-all-paths tax is gone. run: cargo test -p symbi-hydro --release
     //   cubic_resolvent_select_tax_wallclock -- --ignored --nocapture
     #[test]
-    #[ignore]
+    #[ignore = "wall-clock A/B; timing is not a deterministic assertion. run with --release \
+                --ignored --nocapture"]
     fn cubic_resolvent_select_tax_wallclock() {
         use std::hint::black_box;
         use std::time::Instant;

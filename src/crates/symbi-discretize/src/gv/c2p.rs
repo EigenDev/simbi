@@ -6,8 +6,8 @@
 
 use super::*;
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
-    SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
+    SchwarzschildKSCylindrical,
 };
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 

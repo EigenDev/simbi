@@ -6,8 +6,8 @@
 
 use super::*;
 use symbi_geometry::{
-    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
-    SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
+    KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
+    SchwarzschildKSCylindrical,
 };
 use symbi_hydro::RmhdGr;
 use symbi_hydro::rhd::RhdGr;
@@ -1351,7 +1351,9 @@ pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, Fiel
 /// RHD HLLC-LM face flux — the mignone-bodo star states with the acoustic dissipation scaled down
 /// at low local mach number. differs from `rhd_hllc_flux_gv` only in the limiter it selects; the
 /// scaling is a property of the riemann solver, so the traced kernel is the same body.
-pub fn rhd_hllc_lm_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_hllc_lm_flux_gv<const D: usize>(
+    dir: u8,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
     let flux = hllc_rhd(

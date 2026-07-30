@@ -402,10 +402,8 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
             for &ndim in dims {
                 for dir in 0..ndim {
                     checked += 1;
-                    let name = format!(
-                        "{prefix}_face_flux{}_{ndim}d_{dir}",
-                        solver.kernel_suffix()
-                    );
+                    let name =
+                        format!("{prefix}_face_flux{}_{ndim}d_{dir}", solver.kernel_suffix());
                     if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
                         missing.push(format!("{solver:?} on {regime:?}: {name}"));
                     }
@@ -428,4 +426,3 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
         missing.join("\n  ")
     );
 }
-
