@@ -15,7 +15,7 @@
 mod harness;
 use harness::{KernelRun, Out};
 
-use symbi_discretize::{Coords, body_feedback_gv, body_source_gv};
+use symbi_discretize::{Coords, body_evolved_probe_gv, body_feedback_gv, body_source_gv};
 
 const NX: usize = 6;
 const NY: usize = 5;
@@ -80,6 +80,12 @@ fn run(sink0: f64, den_in: f64, m0_in: f64, m1_in: f64, nrg_in: f64) -> Out {
             ("mom_0", m0_in),
             ("mom_1", m1_in),
             ("nrg", nrg_in),
+            // the body is evaluated at the stage input; driven directly with no prior flux
+            // update, the stage input is the bound state itself.
+            ("us_den", den_in),
+            ("us_mom_0", m0_in),
+            ("us_mom_1", m1_in),
+            ("us_nrg", nrg_in),
         ])
         .scalars(&body_scalars(sink0))
         .run()
@@ -91,8 +97,17 @@ fn rel(a: f64, b: f64) -> f64 {
 
 #[test]
 fn body_source_gravity_only_matches_analytic() {
-    // sink=0 -> accretion off; only gravity acts. the finite kick adds the
-    // kinetic energy carried by its new momentum, leaving internal energy fixed.
+    // sink=0 -> accretion off; only gravity acts.
+    //
+    // this pass is an ADDITIVE source: the explicit scheme it feeds evaluates the flux
+    // divergence and every source at the stage input and sums them into one convex update, and
+    // the stage weights then reconstruct the second-order part of the work. so the energy the
+    // pass contributes is the work rate `m.g` alone, at the state the force was evaluated at, and
+    // the `0.5 rho |g|^2 dt^2` that closes a STANDALONE kick would be double-counted here.
+    //
+    // the standalone form still exists and still carries that term — see
+    // `a_standalone_body_kick_leaves_internal_energy_exactly_fixed`, which is the contract the
+    // FOFC freeze parachute relies on.
     let out = run(0.0, 2.0, 0.0, 0.0, 5.0);
     for i in 0..NX {
         for j in 0..NY {
@@ -116,15 +131,11 @@ fn body_source_gravity_only_matches_analytic() {
                 rel(out.get(c, "mom_1_new"), DT * 2.0 * gy) < 1e-12,
                 "mom1 ({i},{j})"
             );
-            let mom_x = DT * 2.0 * gx;
-            let mom_y = DT * 2.0 * gy;
-            let kinetic = 0.5 * (mom_x * mom_x + mom_y * mom_y) / 2.0;
+            // the momentum at which the work is evaluated is the stage input's, which is zero
+            // here, so the additive energy contribution `dt * m.g` vanishes identically.
+            let work = DT * (0.0 * gx + 0.0 * gy);
             let nrg_new = out.get(c, "nrg_new");
-            assert!(rel(nrg_new, 5.0 + kinetic) < 1e-12, "nrg ({i},{j})");
-            assert!(
-                rel(nrg_new - kinetic, 5.0) < 1e-12,
-                "gravity changed internal energy ({i},{j})"
-            );
+            assert!(rel(nrg_new, 5.0 + work) < 1e-12, "nrg ({i},{j})");
         }
     }
 }
@@ -151,13 +162,13 @@ fn body_source_accretion_matches_spec() {
             let r_eff3 = (r_dist2 + SOFT0 * SOFT0).powf(1.5);
             let r_mag = r_dist2.sqrt();
 
-            // gravity is an additive momentum + energy source; the DRAIN then scales EVERY
-            // conserved component by f = exp(-drain_rate*dt).
+            // gravity is an additive momentum + energy source, contributing the work rate
+            // `m.g` at the state the force was evaluated at; the DRAIN then scales EVERY
+            // conserved component by f = exp(-drain_rate*dt). the second-order work term that
+            // closes a standalone kick is the stage weights' job, not this pass's.
             let g = [-M0 * rvec[0] / r_eff3, -M0 * rvec[1] / r_eff3];
             let mom_grav = [m0_in + DT * den_in * g[0], m1_in + DT * den_in * g[1]];
-            let g2 = g[0] * g[0] + g[1] * g[1];
-            let nrg_grav =
-                nrg_in + DT * (m0_in * g[0] + m1_in * g[1]) + 0.5 * den_in * g2 * DT * DT;
+            let nrg_grav = nrg_in + DT * (m0_in * g[0] + m1_in * g[1]);
             let chi = 0.5 * (1.0 - ((r_mag - RACC0) / min_w).tanh());
             let drain_rate = chi * SINK0.min(cs / min_w);
             let f = (-drain_rate * DT).exp();
@@ -277,4 +288,55 @@ fn body_feedback_matches_spec() {
             }
         }
     }
+}
+
+#[test]
+fn a_standalone_body_kick_leaves_internal_energy_exactly_fixed() {
+    // the contract the FOFC freeze parachute relies on. a frozen cell's entire update is the
+    // stage input evolved by the body source, so that kick has to be self-consistent on its own:
+    // the momentum gains `rho g dt`, the kinetic energy that momentum implies gains
+    // `m.g dt + 0.5 rho |g|^2 dt^2`, and the energy must be credited exactly that or the internal
+    // energy `e = E - |m|^2/2rho` moves. it is one-signed when it moves, so it accumulates.
+    //
+    // this is NOT the contract of the additive `body_source_gv` pass above, which contributes the
+    // work rate alone and lets the stage weights supply the rest. both forms exist on purpose.
+    let (den_in, m0_in, m1_in, nrg_in) = (2.0_f64, 0.6_f64, -0.4_f64, 5.0_f64);
+    let out = KernelRun::new(body_evolved_probe_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
+        .grid([NX, NY])
+        .fields(&[
+            ("den", den_in),
+            ("mom_0", m0_in),
+            ("mom_1", m1_in),
+            ("nrg", nrg_in),
+        ])
+        .scalars(&body_scalars(0.0))
+        .run();
+
+    let e_in = nrg_in - 0.5 * (m0_in * m0_in + m1_in * m1_in) / den_in;
+    let mut kicked = false;
+    for i in 0..NX {
+        for j in 0..NY {
+            let c = [i, j];
+            let (d, m0, m1, n) = (
+                out.get(c, "den_new"),
+                out.get(c, "mom_0_new"),
+                out.get(c, "mom_1_new"),
+                out.get(c, "nrg_new"),
+            );
+            if (m0 - m0_in).abs() > 1e-9 || (m1 - m1_in).abs() > 1e-9 {
+                kicked = true;
+            }
+            let e_out = n - 0.5 * (m0 * m0 + m1 * m1) / d;
+            assert!(
+                rel(e_out, e_in) < 1e-12,
+                "the standalone kick moved internal energy at ({i},{j}): {e_in} -> {e_out}"
+            );
+        }
+    }
+    // NON-VACUITY: gravity has to have actually kicked the momentum, or an unchanged internal
+    // energy says only that nothing happened.
+    assert!(
+        kicked,
+        "no cell's momentum changed; the body exerted no force and this law is vacuous"
+    );
 }

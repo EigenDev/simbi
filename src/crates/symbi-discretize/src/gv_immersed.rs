@@ -241,15 +241,25 @@ fn body_contribution(
     }
 }
 
-/// FORWARD source: `cons += dt * (S_grav + S_accretion)`, generic over coordinate system.
-/// reads cons (den/mom/nrg) in place; declares dt/gamma + per-axis grid scalars + the MAX_SOURCE_BODIES
-/// body params (resolved by name at dispatch). returns the in-place conserved writes.
-/// per-cell body-evolved ADIABATIC conserved state: `(den, mom, nrg)` -> the state after `dt *` the
-/// forward immersed-body source (gravity + accretion sink) over all `n_bodies` slots. a PURE
-/// function of the cell state in registers (NO field reads / writes), so it composes into ANY kernel
-/// that already holds the conserved state — the standalone body pass AND the FOFC freeze parachute
-/// — with no materialized buffer. declares `dt` / `gamma` + the per-body scalars via
-/// `body_contribution`; unused body slots contribute zero.
+/// per-cell body-evolved ADIABATIC conserved state as a STANDALONE forward kick: `(den, mom, nrg)`
+/// -> the state after `dt *` the immersed-body source (gravity + accretion sink) over all
+/// `n_bodies` slots, with the gravity half exact to second order in `dt` by construction.
+///
+/// the energy carries `0.5 rho |g|^2 dt^2` explicitly, which is what makes the ISOLATED kick
+/// preserve internal energy exactly: momentum gains `rho g dt`, so the kinetic energy it implies
+/// gains `m.g dt + 0.5 rho |g|^2 dt^2`, and the energy is credited exactly that. this is the right
+/// operator for a consumer that applies the whole kick to one state and takes the result as the
+/// answer — the FOFC freeze parachute, which evolves the stage input and uses it as that cell's
+/// entire update.
+///
+/// it is the WRONG operator to apply on top of a state some other operator has already advanced.
+/// composing an exact flux update with an exact source update sequentially is first order in `dt`
+/// however accurately either half is integrated, and the residue is one-signed in the internal
+/// energy. a consumer that runs after the flux divergence wants [`body_applied_gv`].
+///
+/// a PURE function of the cell state in registers (NO field reads / writes), so it composes into
+/// any kernel that already holds the conserved state with no materialized buffer. declares
+/// `dt` / `gamma` + the per-body scalars via `body_contribution`; unused body slots contribute zero.
 pub(crate) fn body_evolved_gv(
     den: Gv,
     mom: &[Gv],
@@ -312,6 +322,85 @@ pub(crate) fn body_evolved_gv(
     (den_new, mom_new, nrg_new, f)
 }
 
+/// the immersed-body operator for a consumer that runs AFTER the flux divergence: the body
+/// contribution is evaluated at `src` (the stage input) and applied to `dst` (the flux-advanced
+/// conserved state).
+///
+/// splitting the evaluation point from the application point is what makes this composable. an
+/// explicit scheme advances `cons = a0 u_n + ac (cons - dt div F + dt S)`, in which the flux and
+/// the source are BOTH evaluated at the stage input and summed into one convex update. applying a
+/// complete source operator on top of an already-flux-advanced state is a different scheme —
+/// sequential composition — and it is first order in `dt` no matter how accurately either half is
+/// integrated. the residue lands in the internal energy `e = E - |m|^2/2rho` with a fixed sign,
+/// so it accumulates rather than averaging out, and no increase in Runge-Kutta order removes it
+/// because every stage repeats the same composition.
+///
+/// two consequences for the form below, both differences from [`body_evolved_gv`]:
+///
+/// - the gravity force, the gravity work and the drain rate all read `src`, so the source is the
+///   one the stage's flux was evaluated against.
+/// - the energy carries `m.g dt` and NOT the `0.5 rho |g|^2 dt^2` second-order term. that term
+///   belongs to a standalone kick; here the stage weights reconstruct it, and adding it explicitly
+///   would double-count it.
+///
+/// the accretion drain is unchanged: `f = exp(-rate dt)` still multiplies the whole conserved
+/// vector, which is exact for the relaxation it solves and positivity-preserving for any `dt`
+/// regardless of the state it acts on. gravity accelerates, then the mask drains.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn body_applied_gv(
+    dst_den: Gv,
+    dst_mom: &[Gv],
+    dst_nrg: Gv,
+    src_den: Gv,
+    src_mom: &[Gv],
+    src_nrg: Gv,
+    dt: Gv,
+    gamma: Gv,
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (Gv, Vec<Gv>, Gv, Gv) {
+    let inv_dt = Gv::ONE / dt;
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) = cell_scaffold(
+        coords, ndim, ncomp, axes, gamma, src_den, src_mom, src_nrg,
+    );
+
+    let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
+    let mut total_rate = Gv::ZERO;
+    for b in 0..n_bodies {
+        let bc = body_contribution(
+            b, ndim, &cart_axes, &cell_cart, &vel_cart, src_den, cs, min_w, inv_dt,
+        );
+        let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
+        for comp in 0..ncomp {
+            d_mom[comp] = d_mom[comp] + src_den * g_phys[comp];
+        }
+        total_rate = total_rate + bc.drain_rate;
+    }
+
+    // the work rate `rho (v . g)` at the state the force was evaluated at, so the momentum source
+    // and the energy source describe the same acceleration acting on the same gas.
+    let mut gravity_work = Gv::ZERO;
+    for comp in 0..ncomp {
+        gravity_work = gravity_work + src_mom[comp] * d_mom[comp] / src_den;
+    }
+
+    let f = Gv::cond(
+        total_rate.cmp_gt(Gv::ZERO),
+        || crate::ibm::drain_factor(total_rate, dt),
+        || Gv::ONE,
+    );
+    let den_new = dst_den * f;
+    let mom_new: Vec<Gv> = (0..ncomp)
+        .map(|comp| (dst_mom[comp] + dt * d_mom[comp]) * f)
+        .collect();
+    let nrg_new = (dst_nrg + dt * gravity_work) * f;
+    (den_new, mom_new, nrg_new, f)
+}
+
 pub fn body_source_gv(
     n_bodies: usize,
     coords: Coords,
@@ -328,8 +417,16 @@ pub fn body_source_gv(
         .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    let (den_new, mom_new, nrg_new, drain) = body_evolved_gv(
-        den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
+    // this pass runs after the godunov stage has advanced `cons`, so the body contribution is
+    // evaluated at the STAGE INPUT — the state the stage's flux divergence was also evaluated at —
+    // and applied to the advanced `cons`.
+    let us_den = Gv::field("us_den", FieldRef::ustage_den());
+    let us_mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+        .collect();
+    let us_nrg = Gv::field("us_nrg", FieldRef::ustage_nrg());
+    let (den_new, mom_new, nrg_new, drain) = body_applied_gv(
+        den, &mom, nrg, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
     );
 
     let mut writes = vec![(
@@ -656,8 +753,14 @@ pub fn body_source_iso_gv(
         .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
     let pre = Gv::field("pre", FieldRef::PrimPre);
-    let (den_new, mom_new) =
-        body_evolved_iso_gv(den, &mom, pre, dt, n_bodies, coords, ndim, ncomp, axes);
+    // evaluated at the stage input, applied to the godunov-advanced cons — see `body_applied_gv`.
+    let us_den = Gv::field("us_den", FieldRef::ustage_den());
+    let us_mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+        .collect();
+    let (den_new, mom_new) = body_applied_iso_gv(
+        den, &mom, us_den, &us_mom, pre, dt, n_bodies, coords, ndim, ncomp, axes,
+    );
 
     let mut writes = vec![(
         "den_new".to_string(),
@@ -718,6 +821,99 @@ pub(crate) fn body_evolved_iso_gv(
     let den_new = den * f;
     let mom_new: Vec<Gv> = (0..ncomp)
         .map(|comp| (mom[comp] + dt * d_mom[comp]) * f)
+        .collect();
+    (den_new, mom_new)
+}
+
+/// host-testable trace of the STANDALONE body kick [`body_evolved_gv`], which reaches production
+/// only inlined into the FOFC freeze parachute where no kernel boundary exposes it. reads and
+/// writes cons; the law it carries is that the kick leaves internal energy exactly fixed, because
+/// the energy it credits is exactly the kinetic energy its own momentum update implies.
+pub fn body_evolved_probe_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let gamma = Gv::scalar("gamma");
+    let den = Gv::field("den", FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .collect();
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let (den_new, mom_new, nrg_new, _drain) = body_evolved_gv(
+        den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
+    );
+    let mut writes = vec![(
+        "den_new".to_string(),
+        FieldRef::cons_den().into(),
+        den_new.node(),
+    )];
+    for (comp, m) in mom_new.iter().enumerate() {
+        writes.push((
+            format!("mom_{comp}_new"),
+            FieldRef::cons_mom(comp as u8).into(),
+            m.node(),
+        ));
+    }
+    writes.push((
+        "nrg_new".to_string(),
+        FieldRef::cons_nrg().into(),
+        nrg_new.node(),
+    ));
+    (end_trace(), writes)
+}
+
+/// the isothermal twin of [`body_applied_gv`]: the body contribution is evaluated at `src` (the
+/// stage input) and applied to `dst` (the flux-advanced conserved state). there is no energy
+/// equation here, so the entropy the adiabatic form loses has nowhere to show up — but the
+/// momentum source is subject to the same composition: a complete source operator applied on top
+/// of an already-advanced state is a sequential composition, first order in `dt` at any
+/// Runge-Kutta order. evaluating it alongside the flux keeps the isothermal and adiabatic bodies
+/// the same discrete operator.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn body_applied_iso_gv(
+    dst_den: Gv,
+    dst_mom: &[Gv],
+    src_den: Gv,
+    src_mom: &[Gv],
+    src_pre: Gv,
+    dt: Gv,
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (Gv, Vec<Gv>) {
+    let inv_dt = Gv::ONE / dt;
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let (coord3, cell_cart, vel_cart, min_w, cs) =
+        cell_scaffold_iso(coords, ndim, ncomp, axes, src_den, src_mom, src_pre);
+
+    let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
+    let mut total_rate = Gv::ZERO;
+    for b in 0..n_bodies {
+        let bc = body_contribution(
+            b, ndim, &cart_axes, &cell_cart, &vel_cart, src_den, cs, min_w, inv_dt,
+        );
+        let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
+        for comp in 0..ncomp {
+            d_mom[comp] = d_mom[comp] + src_den * g_phys[comp];
+        }
+        total_rate = total_rate + bc.drain_rate;
+    }
+
+    let f = Gv::cond(
+        total_rate.cmp_gt(Gv::ZERO),
+        || (Gv::ZERO - total_rate * dt).exp(),
+        || Gv::ONE,
+    );
+    let den_new = dst_den * f;
+    let mom_new: Vec<Gv> = (0..ncomp)
+        .map(|comp| (dst_mom[comp] + dt * d_mom[comp]) * f)
         .collect();
     (den_new, mom_new)
 }

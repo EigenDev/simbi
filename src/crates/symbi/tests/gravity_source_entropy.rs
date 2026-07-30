@@ -39,6 +39,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
+use symbi::regimes::substrate_kernels::FusedSourceBinding;
 use symbi_ib::{Body, BodyCollection};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -243,9 +244,14 @@ fn a_hydrostatic_atmosphere_holds_its_entropy_at_every_field_strength() {
             "the gravitational source destroyed entropy at GM = {gm}: min K/K0 = \
              {worst:.12} after {steps} steps, on an isentropic atmosphere in exact \
              hydrostatic balance whose exact evolution is to stand still. mass and total \
-             energy can be perfectly conserved while this drifts -- the residue of an \
-             inconsistent `S_nrg = rho a . v` against the momentum kick lands in the \
-             internal energy, one-signed, every step, and scales with the local acceleration"
+             energy can be perfectly conserved while this drifts, so the conserved totals \
+             will not show it. what remains here is TIMESTEP-INDEPENDENT and identical \
+             through the immersed-body and the additive source paths (see \
+             `the_body_and_additive_sources_agree_and_carry_no_timestep_bias`), which \
+             excludes the source-composition bias and points at the discrete hydrostatic \
+             balance: the finite-volume pressure gradient and the cell-centered gravity \
+             source cancel only to truncation order, and the residual drives a flow that \
+             the exact solution does not have"
         );
     }
 }
@@ -286,4 +292,71 @@ fn a_gravitational_source_does_not_destroy_entropy() {
          while this drifts -- the residue of an inconsistent `S_nrg = rho a . v` against \
          the momentum kick lands in the internal energy, one-signed, every step"
     );
+}
+
+/// the immersed-body source and the additive source deliver the SAME gravity, so they must
+/// produce the same state — and neither may carry a timestep-dependent entropy bias.
+///
+/// a source operator applied on top of an already-flux-advanced state composes sequentially with
+/// the flux, which is first order in `dt` however accurately either half is integrated, and leaks
+/// internal energy one-signed every stage. raising the Runge-Kutta order does not help, because
+/// every stage repeats the same composition — so the signature is a deficit that tracks `dt` at
+/// fixed cell width and is common to every integrator. evaluating both the flux and the source at
+/// the stage input removes it.
+///
+/// the two clauses are independent. equality alone would pass if BOTH paths shared the bias;
+/// timestep-independence alone would pass if they were independently clean but disagreed.
+#[test]
+fn the_body_and_additive_sources_agree_and_carry_no_timestep_bias() {
+    const CFLS: [f64; 3] = [0.4, 0.2, 0.1];
+    for gm in [1.0, 10.0, 100.0] {
+        let mut body_k = Vec::new();
+        for cfl in CFLS {
+            let mut body = hydrostatic_atmosphere_ts(gm, N, cfl, Timestepping::Rk2);
+            let kb = Kset::new(GAMMA, cfl, &body.geom.allocated);
+            evolve(&mut body, &kb, T_HYDRO).expect("body evolve failed");
+
+            let mut add = hydrostatic_atmosphere_full(gm, N, cfl, Timestepping::Rk2, false);
+            let ka = Kset::new(GAMMA, cfl, &add.geom.allocated).with_additive_source(
+                FusedSourceBinding::new(
+                    "point_mass_grav",
+                    &[("gm", gm), ("xm_0", -R_OFFSET), ("eps", SOFTENING)],
+                ),
+            );
+            evolve(&mut add, &ka, T_HYDRO).expect("additive evolve failed");
+
+            let (kb_min, ka_min) = (worst_entropy_ratio(&body), worst_entropy_ratio(&add));
+            println!("GM = {gm:>6}  cfl = {cfl:>5}:  body {kb_min:.9}  additive {ka_min:.9}");
+
+            // NON-VACUITY: gravity has to be doing enough work for either clause to bite. at
+            // GM = 1 the atmosphere is already 1.5x denser at the inner edge than the outer.
+            let contrast = hydrostatic_density(1.0, gm) / hydrostatic_density(1.0 + R_OFFSET, gm);
+            assert!(
+                contrast > 1.4,
+                "at GM = {gm} the atmosphere is nearly uniform (contrast {contrast:.3}); \
+                 gravity does no compressive work and both clauses are vacuous"
+            );
+            assert!(
+                (kb_min - ka_min).abs() < 1.0e-12,
+                "the same gravity gave different answers through the two source paths at \
+                 GM = {gm}, cfl = {cfl}: body {kb_min:.12}, additive {ka_min:.12}. both \
+                 evaluate the body contribution at the stage input and apply it to the \
+                 flux-advanced state, so they are the same discrete operator"
+            );
+            body_k.push(kb_min);
+        }
+        // the timestep clause. a sequential composition leaks in proportion to `dt`, so a 4x
+        // change in `dt` would move this by a comparable factor; a purely spatial residual does
+        // not move at all. the bound is far tighter than the bias it excludes -- before the
+        // stage-input evaluation this spread was 8.8e-2 to 1.1e-2 at GM = 100.
+        let spread = body_k
+            .iter()
+            .fold(0.0_f64, |a, k| a.max((k - body_k[0]).abs()));
+        assert!(
+            spread < 1.0e-5,
+            "the entropy floor moved by {spread:.3e} across a 4x timestep change at GM = {gm} \
+             ({body_k:?}). the body source is composing with the flux update rather than being \
+             evaluated alongside it, and the residue accumulates one-signed every stage"
+        );
+    }
 }

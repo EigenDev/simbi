@@ -222,6 +222,8 @@ fn fofc_freeze_preserves_body_gravity() {
                 .view_mut()
                 .set(c, if frozen_band(r) { -1.0 } else { 1.0 });
         }
+        // u_stage is seeded above, so the stage input is captured by hand here.
+        s.mark_stage_input_captured();
         s
     };
 
@@ -338,6 +340,8 @@ fn fofc_freeze_preserves_body_gravity_iso() {
                 .view_mut()
                 .set(c, if frozen_band(r) { -1.0 } else { 1.0 });
         }
+        // u_stage is seeded above, so the stage input is captured by hand here.
+        s.mark_stage_input_captured();
         s
     };
 
@@ -808,7 +812,11 @@ fn curvilinear_central_gravity_is_radial() {
 
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
-    sub.body_source(&sim, 0.01); // direct forward source (no hydro kernels needed)
+    // the body source evaluates its contribution at the stage input, so capture it first —
+    // this is the order the stage pipeline runs, minus the hydro kernels this law does not need.
+    sub.snapshot_stage(&sim);
+    sim.mark_stage_input_captured();
+    sub.body_source(&sim, 0.01);
 
     let mut checked = 0usize;
     for c in sim.geom.interior.iter() {
@@ -963,6 +971,10 @@ fn spherical_central_gravity_is_radial() {
 
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sim.geom.allocated);
+    // the body source evaluates its contribution at the stage input, so capture it first —
+    // this is the order the stage pipeline runs, minus the hydro kernels this law does not need.
+    sub.snapshot_stage(&sim);
+    sim.mark_stage_input_captured();
     sub.body_source(&sim, 0.01);
 
     let mut checked = 0usize;

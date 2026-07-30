@@ -1838,6 +1838,9 @@ pub struct FieldStore<
     /// seeded store would find zeros and no error, so anything that consumes primitives
     /// outside the evolve loop checks this first.
     pub primitives_recovered: std::sync::atomic::AtomicBool,
+    /// whether the stage-input snapshot holds a captured state rather than the zeros it was
+    /// allocated with. a source evaluated against zeros contributes nothing and says nothing.
+    pub stage_input_captured: std::sync::atomic::AtomicBool,
 
     // ---- time state ----
     pub time: f64,
@@ -1934,8 +1937,32 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// record that the stage-input snapshot now holds this stage's input state. the snapshot
+    /// phase calls this, and so does the driver when it elides the copy because `u_n` already
+    /// holds it.
+    #[inline]
+    pub fn mark_stage_input_captured(&self) {
+        self.stage_input_captured
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// whether the stage input has been captured at least once. false on a freshly allocated
+    /// store, where the snapshot buffer is still zeros — and a source that evaluates its
+    /// contribution there computes `rho = 0`, i.e. no force at all, silently.
+    #[inline]
+    pub fn has_stage_input(&self) -> bool {
+        self.stage_input_captured
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     #[inline]
     pub fn stage_input(&self) -> &ConsFieldsGeneric<NDIM, DOF, Mem, Sc> {
+        debug_assert!(
+            self.has_stage_input(),
+            "the stage input was read before any stage captured it, so it is still zeros. a \
+             source evaluated there sees rho = 0 and contributes NOTHING, silently. drive this \
+             through the stage pipeline, or call `snapshot_stage` first"
+        );
         if self
             .workspace
             .stage_input_is_un
@@ -2415,6 +2442,7 @@ where
                 // seeding writes the conserved state; the primitives stay meaningless
                 // until the recovery has run.
                 primitives_recovered: std::sync::atomic::AtomicBool::new(false),
+                stage_input_captured: std::sync::atomic::AtomicBool::new(false),
                 censuses: Vec::new(),
                 time: 0.0,
                 dt: 0.0,

@@ -80,7 +80,17 @@ fn run_iso(sink0: f64, den: f64, m0: f64, m1: f64) -> Out {
     let pre = CS * CS * den; // prim.pre = cs^2 * rho
     KernelRun::new(body_source_iso_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
         .grid([NX, NY])
-        .fields(&[("den", den), ("mom_0", m0), ("mom_1", m1), ("pre", pre)])
+        .fields(&[
+            ("den", den),
+            ("mom_0", m0),
+            ("mom_1", m1),
+            ("pre", pre),
+            // the body is evaluated at the stage input; driven directly with no prior flux
+            // update, the stage input is the bound state itself.
+            ("us_den", den),
+            ("us_mom_0", m0),
+            ("us_mom_1", m1),
+        ])
         .scalars(&iso_scalars(sink0))
         .run()
 }
@@ -101,7 +111,16 @@ fn iso_gravity_matches_adiabatic_exactly() {
     let iso = run_iso(0.0, den, m0, m1);
     let adia = KernelRun::new(body_source_gv(2, Coords::Cartesian, 2, 2, &[0, 1], false))
         .grid([NX, NY])
-        .fields(&[("den", den), ("mom_0", m0), ("mom_1", m1), ("nrg", 5.0)])
+        .fields(&[
+            ("den", den),
+            ("mom_0", m0),
+            ("mom_1", m1),
+            ("nrg", 5.0),
+            ("us_den", den),
+            ("us_mom_0", m0),
+            ("us_mom_1", m1),
+            ("us_nrg", 5.0),
+        ])
         .scalars(&adiabatic_scalars(0.0))
         .run();
     for i in 0..NX {

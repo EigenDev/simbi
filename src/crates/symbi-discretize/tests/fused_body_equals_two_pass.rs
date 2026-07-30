@@ -161,6 +161,11 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     let mut body_scalars: Vec<(&str, f64)> = vec![("dt", ac * DT)];
     body_scalars.extend(geom_and_body_scalars());
 
+    // the body pass evaluates its contribution at the STAGE INPUT and applies it to the
+    // godunov-advanced state, so both are bound: `den`/`mom_*`/`nrg` carry the godunov output,
+    // `us_*` the state the stage began from — the same values this test handed the godunov
+    // kernel. the fused sweep reads that stage input straight out of its own registers, which is
+    // what the two kernels have to agree about.
     let out_body = KernelRun::new(body_source_gv(1, Coords::Cartesian, 2, 2, &[0, 1], false))
         .grid(GRID)
         .compute_window(WLO, WSIZE)
@@ -168,6 +173,10 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
         .field_with("mom_0", move |c| m0_buf[flat(c)])
         .field_with("mom_1", move |c| m1_buf[flat(c)])
         .field_with("nrg", move |c| nrg_buf[flat(c)])
+        .field_with("us_den", move |_| rho)
+        .field_with("us_mom_0", move |_| mom[0])
+        .field_with("us_mom_1", move |_| mom[1])
+        .field_with("us_nrg", move |_| nrg)
         .scalars(&body_scalars)
         .run();
 

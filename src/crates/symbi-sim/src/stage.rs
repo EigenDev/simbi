@@ -189,7 +189,12 @@ pub const STAGE_PIPELINE: &[Phase] = &[
     Phase {
         name: "body_source",
         kind: PhaseKind::BodySource,
-        reads: FieldSet::CONS.or(FieldSet::PRIM),
+        // USTAGE because the body contribution is evaluated at the stage input, the state this
+        // stage's flux divergence was also evaluated at, and applied to the advanced CONS. an
+        // explicit scheme sums the flux and every source over one state; evaluating a complete
+        // source operator on an already-advanced state composes them sequentially instead, which
+        // is first order in dt at any Runge-Kutta order.
+        reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE),
         writes: FieldSet::CONS,
         gate: Gate::Bodies,
     },
@@ -295,6 +300,11 @@ where
     sim.workspace
         .stage_input_is_un
         .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
+    if stage_input_is_un {
+        // the elided copy: `u_n` already holds this stage's input, so the snapshot is captured
+        // without the phase running.
+        sim.mark_stage_input_captured();
+    }
 
     // arm the stage-local write audit for the duration of this stage. the fluxes and per-cell wave
     // speeds carry nothing across a stage boundary — whatever a previous stage left in them
@@ -320,7 +330,13 @@ where
             ph.name,
         );
         match ph.kind {
-            PhaseKind::SnapshotStage => prof("snapshot_stage", || kernels.snapshot_stage(sim)),
+            PhaseKind::SnapshotStage => prof("snapshot_stage", || {
+                // marked BEFORE the copy: the snapshot resolves its own destination buffer
+                // through `stage_input()`, so the flag has to hold by the time it runs. this
+                // phase is the statement that this stage's input is captured.
+                sim.mark_stage_input_captured();
+                kernels.snapshot_stage(sim);
+            }),
             PhaseKind::WaveSpeeds => kernels.wave_speeds(sim),
             PhaseKind::Flux => {
                 for dd in 0..D {

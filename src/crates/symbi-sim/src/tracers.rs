@@ -1623,6 +1623,7 @@ mod tests {
         for coord in sim.geom.interior.iter() {
             sim.fields.cons.den.view_mut().set(coord, 1.0);
             sim.workspace.u_stage.den.view_mut().set(coord, 1.0);
+            sim.mark_stage_input_captured();
         }
         let geometry = sim.geom.block_geometry(Cartesian);
         begin_ito_transport_store(&mut sim, &geometry).unwrap();
@@ -2218,6 +2219,7 @@ mod tests {
             .unwrap();
         for coord in sim.geom.interior.iter() {
             sim.workspace.u_stage.den.view_mut().set(coord, 1.0);
+            sim.mark_stage_input_captured();
         }
         let left = [sim.geom.interior.spaces[0].lo];
         let right = [left[0] + 1];
@@ -2340,6 +2342,7 @@ mod tests {
             .unwrap();
         let cell = [sim.geom.interior.spaces[0].lo];
         sim.workspace.u_stage.den.view_mut().set(cell, 1.0);
+        sim.mark_stage_input_captured();
         sim.fields.cons.den.view_mut().set(cell, 1.2);
         sim.dt = 0.5;
         sim.tracers = Some(TracerSet {
@@ -2382,6 +2385,7 @@ mod tests {
             .unwrap();
         let cell = [sim.geom.interior.spaces[0].lo];
         sim.workspace.u_stage.den.view_mut().set(cell, 1.0);
+        sim.mark_stage_input_captured();
         sim.fields.cons.den.view_mut().set(cell, 0.8);
         sim.dt = 0.5;
         sim.tracers = Some(TracerSet::seed_stratified(&[([0.0], [1.0])], &[100], 0.01));

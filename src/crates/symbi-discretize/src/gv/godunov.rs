@@ -1273,22 +1273,33 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         with_sources(combine(u_n_nrg, stage), &contribs.nrg)
     });
 
-    // immersed-body wrap. the body is a POST-combine operator `(cons_g + ac_dt*S_grav)*f` with
-    // `f = exp(-drain*ac_dt)`, reading the godunov+source-combined state. that is exactly the
-    // two-pass execution order (godunov -> source_apply -> body_source, every stage at weight
-    // ac*dt), so the fused sweep stays bit-identical to plain godunov followed by the standalone
-    // `body_source` pass: storing cons_g to an f64 buffer and reading it back is exact, so the
-    // register-resident cons_g the body reads here equals the memory value the two-pass body reads.
-    // gravity is additive but the accretion drain is multiplicative, so neither rides the additive
-    // `contribs` accumulation — the body wraps the final nodes. adiabatic (energy) only; the iso
-    // body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
+    // immersed-body wrap: `(cons_g + ac_dt*S_grav(cons))*f` with `f = exp(-drain*ac_dt)`. the body
+    // contribution is evaluated at the STAGE INPUT — `rho`/`mom`/`nrg`, which is what this kernel
+    // reads `cons` as — and applied to the flux-combined `cons_g`. an explicit scheme evaluates
+    // the flux divergence and every source at one state and sums them into one convex update;
+    // evaluating the body at the combined state instead would compose two operators sequentially,
+    // which is first order in dt at any Runge-Kutta order and leaks internal energy one-signed
+    // every stage.
+    //
+    // that is exactly the two-pass execution order (godunov -> source_apply -> body_source, every
+    // stage at weight ac*dt), so the fused sweep stays bit-identical to plain godunov followed by
+    // the standalone `body_source` pass: storing cons_g to an f64 buffer and reading it back is
+    // exact, so the register-resident cons_g the body reads here equals the memory value the
+    // two-pass body reads. gravity is additive but the accretion drain is multiplicative, so
+    // neither rides the additive `contribs` accumulation — the body wraps the final nodes.
+    // adiabatic (energy) only; the iso body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
     let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
         if let Some(nrg_in) = nrg_g {
             let gamma = Gv::scalar("gamma");
-            let (den_b, mom_b, nrg_b, _drain) = crate::gv_immersed::body_evolved_gv(
+            // the stage input, re-bound: these hash-cons to the same nodes the flux read.
+            let us_nrg = Gv::field("nrg", FieldRef::cons_nrg());
+            let (den_b, mom_b, nrg_b, _drain) = crate::gv_immersed::body_applied_gv(
                 rho_g,
                 &mom_g,
                 nrg_in,
+                rho,
+                &mom,
+                us_nrg,
                 ac_dt,
                 gamma,
                 n_bodies,
@@ -1300,9 +1311,11 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
             (den_b, mom_b, Some(nrg_b))
         } else {
             let pre = Gv::field("prim_pre", FieldRef::PrimPre);
-            let (den_b, mom_b) = crate::gv_immersed::body_evolved_iso_gv(
+            let (den_b, mom_b) = crate::gv_immersed::body_applied_iso_gv(
                 rho_g,
                 &mom_g,
+                rho,
+                &mom,
                 pre,
                 ac_dt,
                 n_bodies,
