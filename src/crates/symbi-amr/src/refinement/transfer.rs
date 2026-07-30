@@ -447,6 +447,12 @@ pub fn restrict_cons<const D: usize, const DOF: usize, Mem: MemorySpace>(
     if let (Some(fnrg), Some(cnrg)) = (fine.nrg_field(), coarse.nrg_field()) {
         restrict_cell_field(fnrg, cnrg, coverage);
     }
+    // the conserved dye `D_chi = rho chi` is a volume-extensive density like the others, so the
+    // same volume-weighted average carries it. omitting it would leave the covered coarse cells
+    // holding the dye they had before the fine level ran.
+    if let (Some(fchi), Some(cchi)) = (fine.chi_field(), coarse.chi_field()) {
+        restrict_cell_field(fchi, cchi, coverage);
+    }
 }
 
 /// the coarse-fine halo slabs of the staggered face field bface[d] in absolute

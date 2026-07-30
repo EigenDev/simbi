@@ -932,6 +932,13 @@ where
                 &last.state.geom.allocated,
                 last.state.fields.prim.pre_field().is_some(),
             )?);
+            // the dye concentration is time-interpolated onto the fine coarse-fine ghosts like the
+            // rest of the primitive state, so the parent's step-start copy has to carry it.
+            if last.state.fields.prim.chi_field().is_some() {
+                let alloc = last.state.geom.allocated.clone();
+                last.prim_old.as_mut().unwrap().alloc_chi(&alloc)?;
+                last.prim_lerp.as_mut().unwrap().alloc_chi(&alloc)?;
+            }
             if let Some(pmhd) = last.state.fields.mhd.as_ref() {
                 last.bcell_old = Some(array_field_zeros(&last.state.geom.allocated)?);
                 // per-component staggered domains (face axis + transverse halo).
@@ -2392,6 +2399,23 @@ where
                 self.prolong_order,
                 alpha,
             );
+            // the dye rides the same time-interpolated prolongation as the rest of the primitive
+            // state. it sits outside the swept pass because that pass carries a positional
+            // component count (rho, DOF velocities, optional pressure) sized by its scratch.
+            if let (Some(chi_old), Some(pchi), Some(fchi)) = (
+                prim_old.chi_field(),
+                parent.state.fields.prim.chi_field(),
+                fine.state.fields.prim.chi_field(),
+            ) {
+                prolong_field(
+                    chi_old,
+                    pchi,
+                    fchi,
+                    slab,
+                    self.prolong_order,
+                    alpha,
+                );
+            }
             // mhd: the cell-centered B ghosts feed the fine reconstruction +
             // the boundary-edge UCT emf. the fine OWNED bface needs no
             // prolongation (the fine CT evolves its own boundary faces, and
@@ -2509,6 +2533,9 @@ fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     }
     if let (Some(p), Some(pp)) = (prim.pre_field(), po.pre_field()) {
         copy_field(p, pp);
+    }
+    if let (Some(c), Some(pc)) = (prim.chi_field(), po.chi_field()) {
+        copy_field(c, pc);
     }
     if let (Some(mhd), Some(bo)) = (lvl.state.fields.mhd.as_ref(), lvl.bcell_old.as_ref()) {
         for dd in 0..NDIM {

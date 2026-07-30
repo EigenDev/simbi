@@ -69,5 +69,9 @@ harness = false
 name = "tracer_overhead_bench"
 harness = false
 
+[[bench]]
+name = "dye_overhead_bench"
+harness = false
+
 [lints]
 workspace = true
