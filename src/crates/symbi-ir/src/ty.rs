@@ -47,7 +47,7 @@ impl TensorTy {
 
 impl std::fmt::Display for TensorTy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Tensor<element, [d0, d1, …]>
+        // Tensor<element, [d0, d1, ...]>
         write!(f, "Tensor<{}, [", self.element)?;
         for (i, d) in self.shape.iter().enumerate() {
             if i > 0 {
