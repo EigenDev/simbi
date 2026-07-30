@@ -33,6 +33,7 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
     dispatch_named, geom_scalar, scalars_for,
+    motion_scalar,
     dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_c2p_status,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
     dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source, dispatch_gradient_boundaries,
@@ -567,6 +568,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         if !sim.has_passive_scalar() {
             return;
         }
+        // the dye divergence divides by the PHYSICAL cell width, so its geom scalars resolve
+        // through the same motion-aware path the gas godunov uses: on a homologously expanding
+        // mesh `dx` carries a(t) on the expanding axes, and the comoving width would be short by
+        // exactly that factor. reproduces the raw linear (x_lo, dx) bit-identically on a static grid.
+        let (x_lo_k, dx_k) = crate::regimes::substrate_kernels::kernel_geom(
+            &sim.geom.x_lo,
+            &sim.geom.dx,
+            &sim.geom.maps,
+            sim.geom.coords,
+            sim.motion.a,
+        );
         let name = format!("chi_godunov_{D}d");
         let scalars = scalars_for(&name, |bind| {
             let ScalarBind::Ref(sref) = bind else {
@@ -576,7 +588,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 ScalarRef::Dt => dt,
                 ScalarRef::A0 => a0,
                 ScalarRef::Ac => ac,
-                other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
+                other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
+                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
                     .unwrap_or_else(|| panic!("chi_godunov: unexpected scalar {other:?}")),
             })
         });

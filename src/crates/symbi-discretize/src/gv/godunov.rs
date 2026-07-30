@@ -1975,7 +1975,11 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)
     let dt = Gv::scalar("dt");
     let a0 = Gv::scalar("a0");
     let ac = Gv::scalar("ac");
-    let new = a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim));
+    // the homologous-mesh dilution `-mesh_hdil * D_chi` rides every conserved law, and the dye is
+    // one: expansion dilutes `D_chi = rho chi` exactly as it dilutes `rho`, leaving the
+    // concentration invariant. the static binding `mesh_hdil = 0` subtracts an exact zero.
+    let h_dil = Gv::scalar("mesh_hdil");
+    let new = a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim) - dt * (h_dil * dchi));
     let writes = vec![(
         "chi_new".to_string(),
         FieldRef::cons_chi().into(),

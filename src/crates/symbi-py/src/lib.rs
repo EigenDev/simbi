@@ -6631,15 +6631,12 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.coord_system
             ));
         }
-        // gpus > 1 seeds the dye per tile and the halo exchange carries prim.chi across cuts.
-        // refinement carries it too: the fine level allocates its own slots, the concentration
-        // prolongs onto coarse-fine ghosts and restricts back, and the interface dye flux is
-        // materialized so the flux register refluxes it alongside mass. immersed bodies carry it
-        // through the penalize drain, which scales the conserved dye by the same factor as the
-        // density. the moving-mesh remap still does not.
-        if cfg.mesh_motion {
-            return Err("passive_scalar does not support mesh motion yet".to_string());
-        }
+        // every grid feature carries the dye now. gpus > 1 seeds it per tile and the halo exchange
+        // moves prim.chi across cuts; refinement allocates fine-level slots, prolongs the
+        // concentration onto coarse-fine ghosts, restricts it back, and refluxes the materialized
+        // interface dye flux alongside mass; immersed bodies drain it by the same factor as the
+        // density; and a homologously expanding mesh dilutes `D_chi` exactly as it dilutes `rho`,
+        // leaving the concentration invariant.
         // gradient (neumann / robin) faces carry the dye at zero normal derivative, the scalar
         // reading of the per-variable prescription the registry holds for the prim state.
         //

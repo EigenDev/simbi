@@ -738,7 +738,7 @@ refused loudly when it falls outside the table, though it saves you a round trip
 | alpha-disk viscosity | cartesian 2D, and it needs a central immersed body |
 | resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |
 | refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and runs on its own — immersed bodies and mesh motion are separate paths |
-| passive scalar | Newtonian cartesian, base grid only, standalone |
+| passive scalar | Newtonian and isothermal, cartesian. carries through refinement, immersed bodies, mesh motion, and multi-GPU |
 | tracers | flat cartesian (refinement is fine) |
 | horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is refused on purpose — that slice is a black *string*, and the staircased excision circle seeds a growing m = 4 mode |
 
