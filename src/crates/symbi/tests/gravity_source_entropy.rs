@@ -153,7 +153,7 @@ fn hydrostatic_density(r: f64, gm: f64) -> f64 {
     (a * (gm / r + c)).powf(1.0 / (GAMMA - 1.0))
 }
 
-fn hydrostatic_atmosphere_at(gm: f64, cells: usize, cfl: f64) -> Sim {
+fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) -> Sim {
     let ic = move |x: [f64; 1]| {
         let rho = hydrostatic_density(x[0] + R_OFFSET, gm);
         Prim {
@@ -170,6 +170,7 @@ fn hydrostatic_atmosphere_at(gm: f64, cells: usize, cfl: f64) -> Sim {
         // instead drain the stratified column and manufacture a real flow.
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
         .cfl(cfl)
+        .timestepping(ts)
         .allocate()
         .expect("sim construction failed")
         .set_initial(ic)
@@ -193,7 +194,7 @@ fn a_hydrostatic_atmosphere_holds_its_entropy_at_every_field_strength() {
     // single weak-field case cannot see.
     let mut worsts = Vec::new();
     for gm in [0.1, 1.0, 10.0, 100.0] {
-        let mut sim = hydrostatic_atmosphere_at(gm, N, CFL);
+        let mut sim = hydrostatic_atmosphere_ts(gm, N, CFL, Timestepping::Rk2);
         let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated);
         evolve(&mut sim, &kernels, T_HYDRO).expect("evolve failed");
 

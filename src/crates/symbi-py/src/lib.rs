@@ -97,7 +97,14 @@ struct Config {
     plm_theta: f64,
     dlogt: f64,
     viscosity: f64,
+    /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key.
+    /// deliberately NOT `alpha`: that is a generic name a problem may use for its own quantity
+    /// (a wave amplitude, a slope), and reading it here would switch on a viscosity nobody asked
+    /// for. see `bare_alpha_key`.
     alpha: f64,
+    /// whether the config carried a bare `alpha` key. only used to refuse the ambiguous case
+    /// loudly: a viscous regime with `alpha` but no `viscosity_alpha` cannot be interpreted.
+    bare_alpha_key: bool,
     resistivity: f64,
     // horizon-excision sphere radius about the chart origin (cartesian kerr-schild,
     // 2d or 3d); 0 disables excision. must sit inside the horizon r_+ = 2M.
@@ -1015,7 +1022,8 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
         viscosity: get_f64_or(dict, "viscosity", 0.0),
-        alpha: get_f64_or(dict, "alpha", 0.0),
+        alpha: get_f64_or(dict, "viscosity_alpha", 0.0),
+        bare_alpha_key: dict.get_item("alpha").ok().flatten().is_some(),
         resistivity: get_f64_or(dict, "resistivity", 0.0),
         excision_radius: get_f64_or(dict, "excision_radius", 0.0),
         excision_rho_scale: 1.0,
@@ -6677,6 +6685,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         cfg.regime.as_str(),
         "newtonian" | "isothermal" | "nmhd" | "imhd"
     );
+    alpha_key_verdict(&cfg.regime, cfg.bare_alpha_key, cfg.alpha)?;
     if viscous_regime && (cfg.viscosity > 0.0 || cfg.alpha > 0.0) {
         // the shear operator is a face-centered stencil over at least two grid axes; there is no
         // 1d instance (a single-axis shear has no transverse gradient to diffuse).
@@ -7636,6 +7645,66 @@ fn run_simulation(
     // gets real parallelism (and python stays responsive).
     py.allow_threads(|| dispatch_and_run(&cfg, &prims, &bfields))
         .map_err(PyRuntimeError::new_err)
+}
+
+/// whether a config's `alpha`-key spelling is unambiguous.
+///
+/// `alpha` used to be read as the shakura-sunyaev coefficient straight off the config dict, which
+/// collides with problems that use the name for their own quantity — a wave amplitude, a slope.
+/// the coefficient now comes from `viscosity_alpha`, and a leftover bare `alpha` is only a problem
+/// where it could plausibly have meant viscosity: on a regime whose kernel set DISPATCHES a
+/// viscous operator, with no `viscosity_alpha` to disambiguate it. guessing there is silent either
+/// way — read it as viscosity and a transport term appears uninvited, ignore it and one silently
+/// vanishes — so the ambiguous case is refused and the config is asked to say which it meant.
+fn alpha_key_verdict(regime: &str, bare_alpha_key: bool, viscosity_alpha: f64) -> Result<(), String> {
+    let viscous_regime = matches!(regime, "newtonian" | "isothermal" | "nmhd" | "imhd");
+    if viscous_regime && bare_alpha_key && viscosity_alpha == 0.0 {
+        return Err(format!(
+            "the config declares a bare `alpha` field on regime '{regime}', which dispatches \
+             viscosity. `alpha` is no longer read as the shakura-sunyaev coefficient, because the \
+             name collides with problems that use it for their own quantity. rename it to \
+             `viscosity_alpha` if it IS the alpha-disk coefficient; if it means something else, \
+             declare `viscosity_alpha` explicitly (0.0 for no alpha viscosity) to say so."
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod alpha_key_tests {
+    use super::alpha_key_verdict;
+
+    // the ambiguous case: a viscous regime carrying the old spelling and nothing to disambiguate.
+    #[test]
+    fn a_bare_alpha_on_a_viscous_regime_is_refused() {
+        for regime in ["newtonian", "isothermal", "nmhd", "imhd"] {
+            assert!(
+                alpha_key_verdict(regime, true, 0.0).is_err(),
+                "{regime} accepted an ambiguous bare `alpha`"
+            );
+        }
+    }
+
+    // the relativistic regimes dispatch no viscous operator, so `alpha` there cannot have meant
+    // the coefficient. this is the case that would have refused the isentropic-wave problem,
+    // whose `alpha` is a wave amplitude.
+    #[test]
+    fn a_bare_alpha_on_a_nonviscous_regime_is_fine() {
+        for regime in ["rhd", "rmhd"] {
+            assert!(
+                alpha_key_verdict(regime, true, 0.0).is_ok(),
+                "{regime} refused an `alpha` it could never have read as viscosity"
+            );
+        }
+    }
+
+    // declaring the namespaced key resolves the ambiguity, whatever the bare one meant.
+    #[test]
+    fn viscosity_alpha_disambiguates() {
+        assert!(alpha_key_verdict("newtonian", true, 0.05).is_ok());
+        assert!(alpha_key_verdict("newtonian", false, 0.05).is_ok());
+        assert!(alpha_key_verdict("newtonian", false, 0.0).is_ok());
+    }
 }
 
 fn validate_config_preflight(cfg: &Config) -> Result<(), String> {

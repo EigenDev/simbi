@@ -77,7 +77,7 @@ class DittmannSingleDisk(SimbiProblem):
             "(v_r = -3 nu / 2r). 0 = inviscid (numerical-viscosity-only).",
         ),
     ]
-    alpha: Annotated[
+    viscosity_alpha: Annotated[
         float,
         ProblemParam(
             0.0,
