@@ -40,6 +40,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection};
+use symbi::regimes::substrate_kernels::FusedSourceBinding;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -153,7 +154,7 @@ fn hydrostatic_density(r: f64, gm: f64) -> f64 {
     (a * (gm / r + c)).powf(1.0 / (GAMMA - 1.0))
 }
 
-fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) -> Sim {
+fn hydrostatic_atmosphere_full(gm: f64, cells: usize, cfl: f64, ts: Timestepping, with_body: bool) -> Sim {
     let ic = move |x: [f64; 1]| {
         let rho = hydrostatic_density(x[0] + R_OFFSET, gm);
         Prim {
@@ -162,7 +163,7 @@ fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) 
             pre: k0() * rho.powf(GAMMA),
         }
     };
-    Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+    let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([cells])
         .spacing([1.0 / cells as f64])
         // a reflecting wall exerts no work on gas at rest, so the exact hydrostatic state is
@@ -174,8 +175,9 @@ fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) 
         .allocate()
         .expect("sim construction failed")
         .set_initial(ic)
-        .build()
-        .with_bodies(BodyCollection::new().add(Body::gravitational(
+        .build();
+    if with_body {
+        sim.with_bodies(BodyCollection::new().add(Body::gravitational(
             0,
             Tensor::new([-R_OFFSET]),
             Tensor::zeros(),
@@ -183,6 +185,13 @@ fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) 
             1.0e-3,
             SOFTENING,
         )))
+    } else {
+        sim
+    }
+}
+
+fn hydrostatic_atmosphere_ts(gm: f64, cells: usize, cfl: f64, ts: Timestepping) -> Sim {
+    hydrostatic_atmosphere_full(gm, cells, cfl, ts, true)
 }
 
 #[test]

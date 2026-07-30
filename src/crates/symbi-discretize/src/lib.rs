@@ -88,7 +88,7 @@ pub use gv_refinement::{
     refine_restrict_face_gv, refine_restrict_gv,
 };
 pub use gv_viscous::{
-    OrthoPlane25, viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d,
+    OrthoPlane25, viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d, viscous_adiabatic_alpha_gv_3d,
     viscous_adiabatic_alpha_ortho_gv, viscous_adiabatic_gv, viscous_adiabatic_gv_2p5d,
     viscous_adiabatic_gv_3d, viscous_adiabatic_ortho_gv, viscous_iso_alpha_gv,
     viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv, viscous_iso_gv_2p5d,

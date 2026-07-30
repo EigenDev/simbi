@@ -6715,16 +6715,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     .to_string(),
             );
         }
-        // the one hole in the matrix: the adiabatic alpha operator has 2d and 2.5d cartesian
-        // instances and curvilinear 2d/3d ones, but no cartesian 3d twin.
-        let iso_family = cfg.regime.contains("iso") || cfg.regime == "imhd";
-        if cfg.alpha > 0.0 && cfg.dims == 3 && cfg.coord_system == "cartesian" && !iso_family {
-            return Err(format!(
-                "alpha-disk viscosity on a 3d cartesian grid is baked for the isothermal regime \
-                 only; got '{}'. use a curvilinear chart, drop to 2d, or use a constant nu",
-                cfg.regime
-            ));
-        }
     }
     if cfg.resistivity > 0.0 {
         if !cfg.regime.contains("mhd") {

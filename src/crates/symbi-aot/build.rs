@@ -2851,6 +2851,9 @@ fn main() {
         emit_gv(&out_dir, "viscous_adiabatic_alpha_2d", 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_adiabatic_alpha_gv_2p5d();
         emit_gv(&out_dir, "viscous_adiabatic_alpha_2d_dof3", 2, &k, &writes);
+        // the 3D cartesian twin: local-cs nu about the cylindrical radius, with the heating.
+        let (k, writes) = symbi_discretize::viscous_adiabatic_alpha_gv_3d();
+        emit_gv(&out_dir, "viscous_adiabatic_alpha_3d", 3, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_gv();
         emit_gv(
             &out_dir,

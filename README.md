@@ -735,7 +735,7 @@ refused loudly when it falls outside the table, though it saves you a round trip
 | `HLLC` / `HLLC_LM` | Newtonian hydro, RHD, and both MHD regimes (the ones carrying a contact wave). `HLLC_LM` is Newtonian + RHD |
 | `HLLD` | the MHD regimes |
 | viscosity | adiabatic and isothermal, on every chart: cartesian, cylindrical, and spherical, in 2D, 2.5D (3-component on a 2-axis grid), and 3D. `RHD` accepts the coefficient and silently ignores it |
-| alpha-disk viscosity | the same charts as constant-nu viscosity, and it needs a central immersed body. cartesian 3D is baked for the isothermal regime only |
+| alpha-disk viscosity | the same charts as constant-nu viscosity, and it needs a central immersed body |
 | resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |
 | refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and runs on its own — immersed bodies and mesh motion are separate paths |
 | passive scalar | Newtonian and isothermal, cartesian. carries through refinement, immersed bodies, mesh motion, and multi-GPU |
@@ -750,7 +750,7 @@ and `r_+`.
 
 Two dissipative terms sit on top of the ideal solvers, both off by default (coefficient zero):
 
-- `viscosity` — a Navier-Stokes shear viscosity. Give it a constant, or switch on the alpha-disk law (nu ~ alpha c_s H) for accretion-disk setups
+- `viscosity` — a Navier-Stokes shear viscosity. Give it a constant, or set `viscosity_alpha` for the alpha-disk law (nu ~ alpha c_s H) in accretion-disk setups. The coefficient is spelled `viscosity_alpha` rather than `alpha` so it cannot be confused with a problem's own quantity of that name
 - `resistivity` — Ohmic resistivity for the MHD regimes; the field diffuses while constrained transport keeps div B at machine zero
 
 ### Static mesh refinement

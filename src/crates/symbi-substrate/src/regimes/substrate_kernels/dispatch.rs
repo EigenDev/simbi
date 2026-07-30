@@ -1435,13 +1435,13 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     let name: String = match geom.coords {
         symbi_geometry::Geometry::Cartesian if has_energy => {
             assert!(
-                D == 2,
-                "adiabatic alpha viscosity is baked for cartesian 2D"
+                D == 2 || D == 3,
+                "adiabatic alpha viscosity is baked for cartesian 2D/3D"
             );
             if DOF == 3 && D == 2 {
                 "viscous_adiabatic_alpha_2d_dof3".to_string()
             } else {
-                "viscous_adiabatic_alpha_2d".to_string()
+                format!("viscous_adiabatic_alpha_{D}d")
             }
         }
         symbi_geometry::Geometry::Cartesian => {

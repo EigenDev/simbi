@@ -579,6 +579,74 @@ fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
 /// z-offset from the body does NOT enter `Omega_k = sqrt(GM/R^3)`. hence `nu(x,y)
 /// = alpha c_s^2 / Omega_k(R)` is z-invariant (a cylinder of constant nu about the
 /// rotation axis), face-averaged so the flux divergence stays conservative.
+/// the alpha-viscosity ADIABATIC operator, 3D cartesian: `nu(x) = alpha cs^2(x) / Omega_k(R)`
+/// with the LOCAL sound speed `cs^2 = gamma p / rho` read per stencil cell, and the keplerian
+/// frequency set by the CYLINDRICAL radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` about the
+/// rotation axis — the vertical offset does not enter `Omega_k`.
+///
+/// unlike the isothermal 3D twin, nu here is NOT z-invariant: `Omega_k` is, but the local `cs^2`
+/// varies with height through the stratified pressure and density, so every stencil cell carries
+/// its own nu. carries the viscous heating onto the total energy, like the other adiabatic forms.
+pub fn viscous_adiabatic_alpha_gv_3d() -> (GvKernel, Writes) {
+    const NDIM: u8 = 3;
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let alpha = Gv::scalar("alpha");
+    let gamma = Gv::scalar("gamma");
+    let gm = Gv::scalar("body_0_mass");
+    let dx = Gv::scalar("dx_0");
+    let dy = Gv::scalar("dx_1");
+    let dz = Gv::scalar("dx_2");
+    let bx = Gv::scalar("body_0_pos_0");
+    let by = Gv::scalar("body_0_pos_1");
+
+    let (vst, rst) = prim_stencil_3d();
+
+    let geo = cell_geometry_gv(
+        Coords::Cartesian,
+        &vec![Spacing::Uniform; NDIM as usize],
+        &(0..NDIM as usize).collect::<Vec<_>>(),
+        NDIM as usize,
+    );
+    let (cx, cy) = (geo.centroid[0], geo.centroid[1]);
+
+    let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
+    for kk in 0..3usize {
+        for jj in 0..3usize {
+            for ii in 0..3usize {
+                let off = [ii as i32 - 1, jj as i32 - 1, kk as i32 - 1];
+                let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
+                let cs2 = gamma * pre / rho;
+                let x = cx + Gv::from_f64(ii as f64 - 1.0) * dx;
+                let y = cy + Gv::from_f64(jj as f64 - 1.0) * dy;
+                let (rx, ry) = (x - bx, y - by);
+                let r = (rx * rx + ry * ry).sqrt();
+                nust[kk][jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
+            }
+        }
+    }
+
+    let (dmom, dnrg) =
+        symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+    let mut writes: Writes = Vec::new();
+    for c in 0..3usize {
+        let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+        writes.push((
+            format!("mom_out_{c}"),
+            FieldRef::cons_mom(c as u8).into(),
+            (mom_c + dmom[c]).node(),
+        ));
+    }
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    writes.push((
+        "nrg_out".to_string(),
+        FieldRef::cons_nrg().into(),
+        (nrg + dnrg).node(),
+    ));
+    (end_trace(), writes)
+}
+
 pub fn viscous_iso_alpha_gv_3d() -> (GvKernel, Writes) {
     const NDIM: u8 = 3;
     begin_trace();
