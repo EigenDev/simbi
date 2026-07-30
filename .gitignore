@@ -47,3 +47,7 @@ target/
 # Automatically added by dev.py
 build*/
 __pycache__/
+
+# vhs output: upload the gif to github rather than committing it
+assets/*.gif
+assets/*.mp4
