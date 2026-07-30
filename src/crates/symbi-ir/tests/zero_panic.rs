@@ -1,8 +1,8 @@
 // =============================================================================
 // zero_panic.rs
 //
-// the algebraic / primitives core files MUST contain NO `panic!`, `.unwrap()`, or
-// `.expect(` in production code. admitted panics live only at I/O / driver boundaries
+// the algebraic core MUST contain NO `panic!`, `.unwrap()`, or `.expect(` in
+// production code. admitted panics live only at I/O / driver boundaries
 // (config parse, NVRTC compile, HDF5 write) — those happen in other files. these are the
 // substrate constitution and they are zero-panic by invariant.
 //
@@ -15,10 +15,9 @@
 
 #[test]
 fn zero_panic_in_constitution_files() {
-    let files = [
-        ("src/algebra.rs", "algebra"),
-        ("src/primitives.rs", "primitives"),
-    ];
+    // a listed file that cannot be read is itself a violation, so this list rots loudly
+    // rather than silently covering nothing.
+    let files = [("src/algebra.rs", "algebra")];
 
     let forbidden_patterns = ["panic!", ".unwrap()", ".expect("];
     let mut violations: Vec<String> = Vec::new();

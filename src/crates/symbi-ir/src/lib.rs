@@ -55,11 +55,6 @@ pub mod kernel_id;
 pub mod support;
 pub mod support_infer;
 
-// Layer 0 universal primitives — categorical structures over the substrate:
-// variance (re-exported), Scope/Scoped (multi-rank discipline), LinearSpace
-// (opt-in algebraic structure), Geometry (metric-bearing manifold).
-pub mod primitives;
-
 // ───── re-exports — the IR surface at the crate root.
 
 // the ABI vocabulary lives in `symbi-abi`; re-exported here so downstream callers

@@ -5,7 +5,6 @@
 // as box-drawn terminal tables. one Schema feeds:
 //   - `symbi_io::Hdf5Backend` (production checkpoint)
 //   - `symbi_io::JsonBackend` (introspection)
-//   - `symbi_io::TreeDisplay`  (ASCII tree)
 //   - `symbi_display::render_metadata` / `render_tree_buf` (this file —
 //     framed, column-aligned tables suitable for the live-monitor UI).
 //

@@ -6,7 +6,6 @@
 //
 //   - `Hdf5Backend`  — production checkpoint files
 //   - `JsonBackend`  — schema introspection (`schema_json`)
-//   - `TreeDisplay`  — terminal pretty-print
 //   - `symbi-display`-side table renderer (via `Tree::iter_attrs`)
 //
 // the writer and reader walk the SAME Tree — no parallel mirror code, no
@@ -22,13 +21,11 @@
 //   - backend.rs     : `IoBackend` trait
 //   - hdf5.rs        : `Hdf5Backend` (production)
 //   - json.rs        : `schema_json` (introspection)
-//   - display.rs     : `TreeDisplay` (terminal ASCII tree)
 //   - field_layout.rs: `RegimeSpec`-driven canonical naming
 // =============================================================================
 
 pub mod attr;
 pub mod backend;
-pub mod display;
 pub mod error;
 pub mod field_layout;
 pub mod hdf5;
@@ -37,7 +34,6 @@ pub mod tree;
 
 pub use attr::{Attr, Metadata};
 pub use backend::IoBackend;
-pub use display::{TreeBufDisplay, TreeDisplay, display_tree_buf};
 pub use error::{IoError, Result};
 pub use field_layout::{component_count, dataset_name, iter_components};
 pub use hdf5::Hdf5Backend;
