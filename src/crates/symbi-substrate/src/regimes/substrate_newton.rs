@@ -483,9 +483,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
         }
         // the dye concentration ghost band: a true scalar (reflect sign +1)
-        // through the field-agnostic single-scalar pullback.
+        // through the field-agnostic single-scalar pullback. gradient faces resolve to a
+        // zero-derivative copy here, since a prescribed normal derivative is a per-primitive-variable
+        // quantity and the dye carries none.
         if let Some(chi) = sim.fields.prim.chi_field() {
-            crate::regimes::mhd_substrate::flag_ghost_fill(sim, chi);
+            crate::regimes::mhd_substrate::flag_ghost_fill(
+                sim,
+                chi,
+                crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries),
+            );
         }
     }
 

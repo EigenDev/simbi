@@ -6645,10 +6645,14 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     .to_string(),
             );
         }
-        if !cfg.driven_exprs.is_empty() || !cfg.gradient_bcs.is_empty() {
+        // gradient (neumann / robin) faces carry the dye at zero normal derivative, the scalar
+        // reading of the per-variable prescription the registry holds for the prim state. driven
+        // faces still need an explicit dye value: injected fluid carries a concentration the
+        // interior cannot supply.
+        if !cfg.driven_exprs.is_empty() {
             return Err(
-                "passive_scalar with driven/gradient boundaries is not wired yet (no dye \
-                 prescription on those faces)"
+                "passive_scalar with driven boundaries is not wired yet (injected fluid needs an \
+                 explicit dye prescription on those faces)"
                     .to_string(),
             );
         }

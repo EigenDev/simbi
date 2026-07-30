@@ -72,6 +72,32 @@ pub fn to_bc_array<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; 
     })
 }
 
+/// the same table for a lone advected scalar carried alongside the prim state (the dye
+/// concentration), which has no entry in the per-variable gradient registry and no slot in the
+/// driven DAG's prim writes.
+///
+/// gradient faces become OUTFLOW rather than skip: a prescribed normal derivative applies per
+/// primitive variable, and a scalar with no prescription has `dchi/dn = 0`, which is exactly the
+/// nearest-interior copy the outflow map performs. leaving them skipped instead would hand the
+/// sweep an unwritten ghost band.
+///
+/// driven faces stay SKIPPED: the dye of injected fluid is independent of the interior state, so it
+/// is prescribed by the driven pass from an explicit `chi` slot. coarse-fine faces stay skipped for
+/// the usual reason -- the refinement prolongation owns them.
+pub fn to_bc_array_scalar<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; D] {
+    std::array::from_fn(|ax| {
+        let conv = |bt: BoundaryType| match bt {
+            BoundaryType::Periodic => BcType::Periodic,
+            BoundaryType::Outflow => BcType::Outflow,
+            BoundaryType::Reflect => BcType::Reflect,
+            BoundaryType::CoarseFine => BcType::Skip,
+            BoundaryType::Driven(_) => BcType::Skip,
+            BoundaryType::Neumann(_) | BoundaryType::Robin(_) => BcType::Outflow,
+        };
+        [conv(boundaries.lo(ax)), conv(boundaries.hi(ax))]
+    })
+}
+
 // =============================================================================
 // GhostFillDriver: region analysis + per-axis map parameters
 // =============================================================================

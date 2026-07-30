@@ -29,6 +29,7 @@ use symbi_xpu::MemorySpace;
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
+use symbi_grid::ghost::BcType;
 use crate::regimes::substrate_kernels::{
     ScalarBind, Solver, body_scalar, dispatch_fields_each, dispatch_named, expect_kernel,
     geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug,
@@ -166,20 +167,24 @@ pub(crate) fn shift_magnetic_energy<const D: usize, Mem, Sc>(
     }
 }
 
-/// fill the ghost band of a single 0/1 flag scalar field via the lattice pullback
+/// fill the ghost band of a single scalar field via the lattice pullback
 /// (`scalar_ghost_fill_{D}d`) with reflect sign +1 (a true scalar copies on a reflect wall):
-/// periodic wraps to the opposite interior, reflect/outflow copy the nearest interior. gives the
-/// FOFC fallback flag boundary-consistent ghosts, so a face straddling the periodic wrap takes ONE
-/// first-order decision from both sides and the flux splice stays conservative there. drives over the
-/// cell-centered (allocated, interior) domain pair.
+/// periodic wraps to the opposite interior, reflect/outflow copy the nearest interior. drives over
+/// the cell-centered (allocated, interior) domain pair.
+///
+/// the caller supplies the face map, because the two scalars carried alongside the prim state want
+/// different treatment on the faces an external pass owns. the FOFC fallback flag takes the prim
+/// table, so a face straddling the periodic wrap takes ONE first-order decision from both sides and
+/// the flux splice stays conservative. the dye takes the scalar table, where a gradient face is a
+/// zero-derivative copy rather than a skip.
 pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     flag: &Field<Sc, D, Mem>,
+    bc: [[BcType; 2]; D],
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let bc = to_bc_array::<D>(&sim.boundaries);
     let name = format!("scalar_ghost_fill_{D}d");
     let (flo, fext, fvol) = field_layout(flag);
     GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(

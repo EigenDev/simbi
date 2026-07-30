@@ -255,3 +255,78 @@ fn robin_boundary_solves_the_mixed_relation() {
     }
     assert!(checked > 0, "no x_lo ghost-band cells found to check");
 }
+
+// the dye concentration carries no entry in the per-variable gradient registry, so a gradient face
+// resolves it at zero normal derivative: the ghost band copies the boundary-adjacent interior cell.
+// the interior dye varies along x, so a copy of the edge cell is distinguishable from any
+// extrapolation, and the band is poisoned before the fill so an UNWRITTEN band fails here rather
+// than passing on stale data.
+#[test]
+fn gradient_face_carries_the_dye_at_zero_normal_derivative() {
+    const POISON: f64 = -7.0;
+    let boundaries = Boundaries::<2>::per_axis([
+        [BoundaryType::Neumann(0), BoundaryType::Outflow],
+        [BoundaryType::Periodic, BoundaryType::Periodic],
+    ]);
+    let sim = Sim::build(Newtonian, IdealGas { gamma: 1.4 }, Cartesian)
+        .cells([8, 8])
+        .bounds([0.0, 0.0], [1.0, 1.0])
+        .boundaries(boundaries)
+        .finish()
+        .unwrap()
+        .with_passive_scalar()
+        .expect("chi alloc");
+
+    let pre_f = sim.fields.prim.pre_field().unwrap();
+    let chi_f = sim.fields.prim.chi_field().unwrap();
+    for c in sim.geom.interior.iter() {
+        sim.fields.prim.rho.view_mut().set(c, RHO);
+        sim.fields.prim.vel[0].view_mut().set(c, VX);
+        sim.fields.prim.vel[1].view_mut().set(c, 0.0);
+        pre_f.view_mut().set(c, PRE);
+        // a dye ramp along x: the edge column and its inward neighbour differ, so a copy of the
+        // edge is separable from an extrapolation through the interior slope.
+        chi_f.view_mut().set(c, 0.1 + 0.25 * c[0] as f64);
+    }
+    // poison every cell outside the interior, so an unwritten ghost band is visible.
+    for c in sim.geom.allocated.iter() {
+        if !sim.geom.interior.contains(c) {
+            chi_f.view_mut().set(c, POISON);
+        }
+    }
+
+    let (sub, id) = sim
+        .substrate()
+        .with_gradient_boundary(GradientBc::Neumann(Q.to_vec()));
+    assert_eq!(id, 0, "first registration is id 0 (matches Neumann(0))");
+
+    sub.ghost_fill(&sim);
+
+    let x_lo = sim.geom.interior.spaces[0].lo;
+    let edge_slope = 0.25;
+    let mut checked = 0;
+    for c in sim.geom.allocated.iter() {
+        // the x_lo ghost band, transverse-interior only (corners belong to the other faces).
+        if c[0] >= x_lo || c[1] < sim.geom.interior.spaces[1].lo || c[1] >= sim.geom.interior.spaces[1].hi
+        {
+            continue;
+        }
+        let mut edge = c;
+        edge[0] = x_lo;
+        let got = *chi_f.view().at(c);
+        let want = *chi_f.view().at(edge);
+        assert!(
+            (got - POISON).abs() > 1e-12,
+            "x_lo dye ghost at {c:?} was never written (still poisoned)"
+        );
+        assert!(
+            (got - want).abs() < 1e-12,
+            "x_lo dye ghost at {c:?}: {got} != edge {want} (zero normal derivative)"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no x_lo ghost-band cells found to check");
+    // the premise: the interior dye genuinely varies along x, so the copy above is a real
+    // constraint rather than an identity that any fill would satisfy.
+    assert!(edge_slope > 0.0, "dye ramp is flat; the gate is vacuous");
+}

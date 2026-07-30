@@ -596,7 +596,11 @@ where
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
     // must take ONE first-order decision from both of its cells, else the splice re-creates the very
     // non-conservation it exists to remove.
-    crate::regimes::mhd_substrate::flag_ghost_fill(sim, flag);
+    crate::regimes::mhd_substrate::flag_ghost_fill(
+        sim,
+        flag,
+        crate::kernels::support::to_bc_array::<D>(&sim.boundaries),
+    );
 
     let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
     // save the HIGH-ORDER fluxes before the first-order redo overwrites the live buffers. the
