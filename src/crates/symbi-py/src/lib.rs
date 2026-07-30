@@ -6665,6 +6665,83 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // mass-transport tracers consume the accepted finite-volume density flux.
     // curvilinear decomposition and mesh motion still require explicit
     // material-volume geometry in the decomposed driver.
+    // NON-IDEAL TRANSPORT. the baked matrix is narrower than the config surface, so an
+    // unsupported chart would otherwise surface mid-run as an unbaked-kernel panic rather than a
+    // config-time refusal — a worse failure than the loud startup rejection every other capability
+    // gets. the accepted sets below mirror `gen_viscous` / `gen_resistive` in symbi-aot/build.rs.
+    // scoped to the regimes whose kernel sets actually DISPATCH a viscous operator. the
+    // relativistic regimes accept the coefficient and ignore it, and `alpha` is a bare config key
+    // that other problems legitimately use for their own meaning (a wave amplitude, say), so
+    // keying the refusal on the value alone would reject configs that never asked for viscosity.
+    let viscous_regime = matches!(
+        cfg.regime.as_str(),
+        "newtonian" | "isothermal" | "nmhd" | "imhd"
+    );
+    if viscous_regime && (cfg.viscosity > 0.0 || cfg.alpha > 0.0) {
+        // the shear operator is a face-centered stencil over at least two grid axes; there is no
+        // 1d instance (a single-axis shear has no transverse gradient to diffuse).
+        if cfg.dims < 2 {
+            return Err(format!(
+                "viscosity needs a 2d or 3d grid (the shear stencil has no transverse axis in 1d); \
+                 got dims = {}",
+                cfg.dims
+            ));
+        }
+        if !matches!(
+            cfg.coord_system.as_str(),
+            "cartesian" | "cylindrical" | "axis_cylindrical" | "planar_cylindrical" | "spherical"
+        ) {
+            return Err(format!(
+                "viscosity is baked for the cartesian, cylindrical, and spherical charts; got \
+                 coord_system = '{}'",
+                cfg.coord_system
+            ));
+        }
+        // the alpha law reads Omega_K from the central body's mass, so a body must exist to
+        // define it. `alpha` without one silently divides by a mass that was never set.
+        if cfg.alpha > 0.0 && cfg.bodies.is_empty() {
+            return Err(
+                "alpha-disk viscosity reads the keplerian frequency from immersed body 0; the \
+                 config declares no bodies"
+                    .to_string(),
+            );
+        }
+        // the one hole in the matrix: the adiabatic alpha operator has 2d and 2.5d cartesian
+        // instances and curvilinear 2d/3d ones, but no cartesian 3d twin.
+        let iso_family = cfg.regime.contains("iso") || cfg.regime == "imhd";
+        if cfg.alpha > 0.0 && cfg.dims == 3 && cfg.coord_system == "cartesian" && !iso_family {
+            return Err(format!(
+                "alpha-disk viscosity on a 3d cartesian grid is baked for the isothermal regime \
+                 only; got '{}'. use a curvilinear chart, drop to 2d, or use a constant nu",
+                cfg.regime
+            ));
+        }
+    }
+    if cfg.resistivity > 0.0 {
+        if !cfg.regime.contains("mhd") {
+            return Err(format!(
+                "resistivity is an MHD operator (the eta*J edge EMF); got regime '{}'",
+                cfg.regime
+            ));
+        }
+        if cfg.dims < 2 {
+            return Err(format!(
+                "resistivity needs a 2d or 3d grid (the edge EMF curl has no transverse axis in \
+                 1d); got dims = {}",
+                cfg.dims
+            ));
+        }
+        if !matches!(
+            cfg.coord_system.as_str(),
+            "cartesian" | "cylindrical" | "axis_cylindrical" | "planar_cylindrical" | "spherical"
+        ) {
+            return Err(format!(
+                "resistivity is baked for the cartesian, cylindrical, and spherical charts; got \
+                 coord_system = '{}'",
+                cfg.coord_system
+            ));
+        }
+    }
     if cfg.n_tracers > 0 {
         if !matches!(cfg.tracer_scheme.as_str(), "discrete" | "ito2" | "ito3") {
             return Err(format!(
