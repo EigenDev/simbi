@@ -29,7 +29,6 @@ use crate::state::{Cons, Prim};
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::{Scalar, Selectable};
 
-
 // =============================================================================
 // newtonian HLLC — toro section 9.5.2 adaptive estimates + fleischmann LM.
 // =============================================================================
@@ -149,6 +148,7 @@ fn star_state<S: Scalar, const D: usize>(
     let mom_star = prim.vel.scale(den_star) + nhat.scale(den_star * (s_star - vn));
     let nrg_star = den_star * (u_k.nrg / prim.rho + (s_star - vn) * (s_star + prim.pre / chi_k));
     Cons {
+        chi: Default::default(),
         den: den_star,
         mom: mom_star,
         nrg: nrg_star,
@@ -352,6 +352,7 @@ fn rhd_star_state<S: Scalar, const D: usize>(
     let es = fac * (ee * (a - vn) + p_star * a_star - prim.pre * vn);
     // rhd convention: nrg = tau = e - D.
     Cons {
+        chi: Default::default(),
         den: ds,
         mom: ms,
         nrg: es - ds,
@@ -602,6 +603,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                         let btrans_side = metric.project_transverse(&prim_side.mag, nhat);
                         let us_null = MhdCons {
                             hydro: Cons {
+                                chi: Default::default(),
                                 den: ds,
                                 mom: nhat.scale(mn_null) + umtrans.scale(vs),
                                 nrg: es_null - ds,
@@ -623,6 +625,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                         .scale(cfac);
                         let us_nn = MhdCons {
                             hydro: Cons {
+                                chi: Default::default(),
                                 den: ds,
                                 mom: nhat.scale(mn_nn) + mtrans,
                                 nrg: es_nn - ds,
@@ -749,6 +752,7 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
             ((s_k - un_k) * e_k - pt_k * un_k + pt_star * s_m + bn * (vdb_k - vdb_s)) / smk_s;
         let u_star = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: rho_star,
                 mom: v_star.scale(rho_star),
                 nrg: e_star,

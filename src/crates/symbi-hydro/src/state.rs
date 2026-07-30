@@ -16,7 +16,7 @@
 //   let cons = prim.to_conserved(&eos);  // newtonian convenience
 // =============================================================================
 
-use crate::energy::{Adiabatic, EnergyModel, EnergySlot, IsoModel};
+use crate::energy::{Adiabatic, DyeModel, EnergyModel, EnergySlot, IsoModel, Undyed};
 use crate::eos::Eos;
 use std::ops::{Add, Mul, Neg, Sub};
 use symbi_algebra::{FieldElement, Tensor};
@@ -27,7 +27,7 @@ use symbi_ir::algebra::Scalar;
 /// conservative variables parameterized by energy model.
 /// adiabatic: nrg is S (real energy). isothermal: nrg is Zero<S> (ZST).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
+pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic, X: DyeModel = Undyed> {
     pub den: S,
     /// momentum density. INVARIANT: PHYSICAL (orthonormal-frame) components, `rho*V_a` with
     /// `V_a = h_a v^a` — the frame the conservation form is written in. it is left
@@ -38,6 +38,12 @@ pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     /// `vector_to_cartesian`); a `.raw()` there is the audited escape hatch.
     pub mom: Tensor<S, D>,
     pub nrg: E::Slot<S>,
+    /// the conserved passive scalar `D_chi = rho chi`. zero-sized unless the run carries a dye, so
+    /// an undyed state is byte-identical to one without the slot. it lives HERE, in the conserved
+    /// vector, so that any operation rebuilding a conserved state has to say what happens to the
+    /// dye — a mass drain that forgets it would otherwise raise the concentration of the gas it
+    /// leaves behind, silently and only on whichever code path did the forgetting.
+    pub chi: X::Slot<S>,
 }
 
 /// primitive variables parameterized by energy model.
@@ -121,6 +127,7 @@ impl<S: Scalar, const D: usize, E: EnergyModel> PrimG<S, D, E> {
 impl<S: Scalar, const D: usize, E: EnergyModel> ConsG<S, D, E> {
     pub fn zero() -> Self {
         ConsG {
+            chi: Default::default(),
             den: S::ZERO,
             mom: Tensor::zeros(),
             nrg: E::Slot::<S>::zero(),
@@ -140,7 +147,12 @@ impl<S: Scalar, const D: usize> Prim<S, D> {
         let mom = self.vel.scale(rho);
         let v2 = self.vel.dot(&self.vel);
         let nrg = eos.conserved_energy(rho, v2, self.pre);
-        Cons { den: rho, mom, nrg }
+        Cons {
+            chi: Default::default(),
+            den: rho,
+            mom,
+            nrg,
+        }
     }
 }
 
@@ -224,7 +236,7 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for PrimG<S, D, E> {
 
 // ---- arithmetic on ConsG (for flux differencing) ----
 
-impl<S: Scalar, const D: usize, E: EnergyModel> Add for ConsG<S, D, E> {
+impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> Add for ConsG<S, D, E, X> {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
@@ -232,11 +244,12 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Add for ConsG<S, D, E> {
             den: self.den + rhs.den,
             mom: self.mom + rhs.mom,
             nrg: self.nrg.add(rhs.nrg),
+            chi: self.chi.add(rhs.chi),
         }
     }
 }
 
-impl<S: Scalar, const D: usize, E: EnergyModel> Sub for ConsG<S, D, E> {
+impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> Sub for ConsG<S, D, E, X> {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self {
@@ -244,11 +257,12 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Sub for ConsG<S, D, E> {
             den: self.den - rhs.den,
             mom: self.mom - rhs.mom,
             nrg: self.nrg.sub(rhs.nrg),
+            chi: self.chi.sub(rhs.chi),
         }
     }
 }
 
-impl<S: Scalar, const D: usize, E: EnergyModel> Neg for ConsG<S, D, E> {
+impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> Neg for ConsG<S, D, E, X> {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
@@ -256,11 +270,12 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Neg for ConsG<S, D, E> {
             den: -self.den,
             mom: -self.mom,
             nrg: self.nrg.neg(),
+            chi: self.chi.neg(),
         }
     }
 }
 
-impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for ConsG<S, D, E> {
+impl<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel> Mul<S> for ConsG<S, D, E, X> {
     type Output = Self;
     #[inline]
     fn mul(self, s: S) -> Self {
@@ -268,6 +283,7 @@ impl<S: Scalar, const D: usize, E: EnergyModel> Mul<S> for ConsG<S, D, E> {
             den: self.den * s,
             mom: self.mom.scale(s),
             nrg: self.nrg.scale(s),
+            chi: self.chi.scale(s),
         }
     }
 }
@@ -281,6 +297,7 @@ where
     #[inline]
     fn select(m: S::Mask, yes: Self, no: Self) -> Self {
         ConsG {
+            chi: Default::default(),
             den: <S as Scalar>::select(m, yes.den, no.den),
             mom: <Tensor<S, D> as symbi_ir::algebra::Selectable<S>>::select(m, yes.mom, no.mom),
             nrg: EnergySlot::select_mask(m, yes.nrg, no.nrg),
@@ -400,11 +417,13 @@ mod tests {
     #[test]
     fn cons_arithmetic() {
         let a = Cons::<f64, 2> {
+            chi: Default::default(),
             den: 1.0,
             mom: Tensor::new([2.0, 3.0]),
             nrg: 4.0,
         };
         let b = Cons::<f64, 2> {
+            chi: Default::default(),
             den: 0.5,
             mom: Tensor::new([1.0, 0.5]),
             nrg: 2.0,
@@ -485,6 +504,7 @@ mod tests {
         let eos = crate::eos::Isothermal { cs: 0.0 }; // global cs irrelevant
         let local_cs_sq = 9.0; // local sound speed squared
         let cons = Cons {
+            chi: Default::default(),
             den: 2.0,
             mom: Tensor::new([1.0]),
             nrg: local_cs_sq,
@@ -562,11 +582,13 @@ mod tests {
     #[test]
     fn iso_consg_arithmetic() {
         let a = ConsG::<f64, 2, IsoModel> {
+            chi: Default::default(),
             den: 1.0,
             mom: Tensor::new([2.0, 3.0]),
             nrg: Zero::default(),
         };
         let b = ConsG::<f64, 2, IsoModel> {
+            chi: Default::default(),
             den: 0.5,
             mom: Tensor::new([1.0, 0.5]),
             nrg: Zero::default(),

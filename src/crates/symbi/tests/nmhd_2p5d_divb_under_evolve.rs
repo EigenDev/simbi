@@ -179,6 +179,7 @@ fn nmhd_2p5d_orszag_tang_preserves_divb_evolves_bz() {
         let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
         let cons = symbi_hydro::mhd_state::MhdCons::<f64, 3> {
             hydro: Cons {
+                chi: Default::default(),
                 den: *sim.fields.cons.den.view().at(c),
                 mom: Tensor::new([
                     *sim.fields.cons.mom[0].view().at(c),

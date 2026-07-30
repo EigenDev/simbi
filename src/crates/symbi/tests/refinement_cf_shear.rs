@@ -236,6 +236,7 @@ fn nmhd_shear_tangent_to_cf_faces_stays_bounded() {
                 s.fields.cons.scatter(
                     c,
                     Cons {
+                        chi: Default::default(),
                         den: cons.den,
                         mom: cons.mom,
                         nrg: cons.nrg,
@@ -305,6 +306,7 @@ fn rmhd_shear_tangent_to_cf_faces_stays_bounded() {
                 s.fields.cons.scatter(
                     c,
                     Cons {
+                        chi: Default::default(),
                         den: cons.den,
                         mom: cons.mom,
                         nrg: cons.nrg,

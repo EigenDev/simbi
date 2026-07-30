@@ -884,7 +884,14 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let sfx = geom_suffix(sim.geom.coords, DOF, D);
-    let name = format!("body_source{sfx}_{D}d");
+    // the dyed twin drains `cons.chi` by the same factor it drains `cons.den`, so a sink swallows
+    // gas and its dye together and the surviving concentration is unchanged.
+    let dye = if sim.has_passive_scalar() {
+        "_dyed"
+    } else {
+        ""
+    };
+    let name = format!("body_source{sfx}{dye}_{D}d");
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
     // the kernel reads no prim.pre; pass cons.den as the (unused) pre override.
     dispatch_named(
@@ -1866,8 +1873,8 @@ fn shaped_penalize_gv(
     Vec<(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)>,
 ) {
     match (has_energy, spin) {
-        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape),
-        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape),
+        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape, false),
+        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape, false),
         (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape),
         (false, true) => {
             symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape)
@@ -2320,15 +2327,17 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // reproduces the KernelId name exactly. only the drain is baked off-chart.
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
+        // a dyed run selects the twin that also drains `cons.chi`; the adiabatic surfaces only.
+        let dye = if sim.has_passive_scalar() { "_dyed" } else { "" };
         let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => {
-                penalize_name("penalize_drain", coords_g, D, &geom.axes)
+                penalize_name(&format!("penalize_drain{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Drain, false) => {
                 penalize_name("penalize_drain_iso", coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
-                penalize_name("penalize_porous", coords_g, D, &geom.axes)
+                penalize_name(&format!("penalize_porous{dye}"), coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, false) => {
                 penalize_name("penalize_porous_iso", coords_g, D, &geom.axes)
@@ -2337,7 +2346,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 penalize_name("penalize_torque_free_iso", coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => {
-                penalize_name("penalize_torque_free", coords_g, D, &geom.axes)
+                penalize_name(&format!("penalize_torque_free{dye}"), coords_g, D, &geom.axes)
             }
         };
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
@@ -2401,6 +2410,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         }
         if let Some(nrg) = nrg {
             outputs.push(nrg);
+        }
+        // the dyed kernel writes the drained `cons.chi` immediately after the energy slot, so it
+        // binds in that position; the plain kernel emits no such write and binds nothing here.
+        if let Some(chi) = sim.fields.cons.chi_field() {
+            outputs.push(chi);
         }
         for s in scratch[..n_delta + n_torque + D].iter() {
             outputs.push(s);

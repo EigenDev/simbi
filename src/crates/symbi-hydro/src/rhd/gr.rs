@@ -104,6 +104,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         let p = self.valencia_parts(eos, prim);
         let ehat = self.alpha * p.tau + (self.alpha - S::ONE) * p.den - self.shift.dot(&p.mom);
         Cons {
+            chi: Default::default(),
             den: self.sqrt_gamma * p.den,
             mom: p.mom.scale(self.sqrt_gamma),
             nrg: self.sqrt_gamma * ehat,
@@ -119,6 +120,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         // position, so this is exact and the inversion below is the unchanged Valencia recovery.
         let inv_dens = S::ONE / self.sqrt_gamma;
         let cons = Cons {
+            chi: Default::default(),
             den: cons.den * inv_dens,
             mom: cons.mom.scale(inv_dens),
             nrg: cons.nrg * inv_dens,
@@ -139,6 +141,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         // newton on (D, S_i, tau) — the recovery physics never sees the energy re-split.
         let tau = (cons.nrg + (S::ONE - self.alpha) * dd + self.shift.dot(&cons.mom)) / self.alpha;
         let cons_tau = Cons {
+            chi: Default::default(),
             den: dd,
             mom: cons.mom,
             nrg: tau,
@@ -176,6 +179,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
         let un = u_sp.dot(nhat);
         let sqrt_neg_g = self.alpha * self.sqrt_gamma;
         Cons {
+            chi: Default::default(),
             den: self.sqrt_gamma * parts.den * vt,
             mom: (parts.mom.scale(vt) + nhat.scale(self.alpha * prim.pre)).scale(self.sqrt_gamma),
             nrg: S::ZERO - sqrt_neg_g * un * (parts.rho_h * u_t + prim.rho),

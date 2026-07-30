@@ -99,7 +99,7 @@ fn iso_gravity_matches_adiabatic_exactly() {
     // adiabatic: cs = sqrt(gamma*(gamma-1)*e_int) ... easiest: pick nrg s.t. p matches.
     // for gravity-only the den/mom update is cs-independent, so any nrg works.
     let iso = run_iso(0.0, den, m0, m1);
-    let adia = KernelRun::new(body_source_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
+    let adia = KernelRun::new(body_source_gv(2, Coords::Cartesian, 2, 2, &[0, 1], false))
         .grid([NX, NY])
         .fields(&[("den", den), ("mom_0", m0), ("mom_1", m1), ("nrg", 5.0)])
         .scalars(&adiabatic_scalars(0.0))

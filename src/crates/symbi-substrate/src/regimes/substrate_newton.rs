@@ -341,7 +341,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // (plain godunov + the separate `apply_runtime_source` pass). gated host+f64; the source's
         // own pass is skipped in `source_apply` under the SAME predicate. geo = Hydro{inertial:true}
         // matches the AOT `adiabatic` godunov (geo_source), so the two-pass fallback is exact.
-        if self.fuse_runtime {
+        // a dyed run stays OFF the fused body path: the fused godunov carries den/mom/nrg only,
+        // so folding the body in there would drain mass without its dye and raise the concentration
+        // of the gas left behind. fusion is a launch-count optimization, not semantics, so the
+        // two-pass body kernels (which have dyed twins) carry a dye correctly at a small cost.
+        if self.fuse_runtime && !sim.has_passive_scalar() {
             let geo = GeoSource::Hydro { inertial: true };
             match &self.runtime_source {
                 Some(rs) => {
@@ -677,6 +681,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             // when the fused path is live (same predicate godunov_stage used), the source already
             // rode inside the godunov launch — skip the separate pass to avoid double-counting.
             if self.fuse_runtime
+                && !sim.has_passive_scalar()
                 && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, true)
                     .is_some()
             {
@@ -690,7 +695,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // when the fused stage carried the immersed body inside godunov (one launch), running the
         // standalone pass here would double-apply it. same predicate + geo the godunov stage used —
         // via the user-source fused kernel, or the body-only fused kernel when there is no user source.
-        if self.fuse_runtime {
+        if self.fuse_runtime && !sim.has_passive_scalar() {
             let geo = GeoSource::Hydro { inertial: true };
             let absorbed = match &self.runtime_source {
                 Some(rs) => body_fused_in(sim, rs, geo, true),

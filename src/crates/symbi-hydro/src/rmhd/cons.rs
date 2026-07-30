@@ -510,6 +510,7 @@ mod tests {
         let eos = IdealGas { gamma: 2.0 };
         let cons = MhdCons::<f64, 3> {
             hydro: crate::state::Cons {
+                chi: Default::default(),
                 den: 0.2499729,
                 mom: Tensor::new([0.2358797, -0.5587815, 0.0]),
                 nrg: 1.047524,
@@ -678,7 +679,12 @@ mod tests {
         let mom = prim.vel.scale(rho_h_w2 + bsq) - prim.mag.scale(vdb);
         let nrg = rho_h_w2 + bsq - p_tot - den;
         MhdCons {
-            hydro: crate::state::Cons { den, mom, nrg },
+            hydro: crate::state::Cons {
+                chi: Default::default(),
+                den,
+                mom,
+                nrg,
+            },
             mag: prim.mag,
         }
     }

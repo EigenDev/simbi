@@ -315,6 +315,7 @@ fn rhd_c2p_kernel_equals_host_at_baked_count() {
         let host = rhd_recover::<f64, 1>(
             &eos,
             &Cons {
+                chi: Default::default(),
                 den: d,
                 mom: Tensor::new([s]),
                 nrg: tau,
@@ -402,6 +403,7 @@ fn rmhd_c2p_kernel_equals_host_at_baked_count() {
         // host: rmhd_recover at S = f64, at the kernel's baked count.
         let cons = MhdCons::<f64, 3> {
             hydro: Cons {
+                chi: Default::default(),
                 den: d,
                 mom: Tensor::new(s),
                 nrg: tau,

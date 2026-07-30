@@ -64,14 +64,14 @@ fn shaped_porous_penalize_nvrtc_compiles_3d() {
     // Dual-autodiff normal, in the body-local frame.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_3d", 3, &k, &w);
 }
 
 #[test]
 fn shaped_porous_penalize_nvrtc_compiles_2d() {
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.6, 1.0]);
-    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_2d", 2, &k, &w);
 }
 
@@ -80,7 +80,7 @@ fn shaped_porous_penalize_nvrtc_compiles_2p5d() {
     // dof = 3 on a 2d grid (2.5d): the out-of-plane momentum channel rides the
     // same shaped kernel and must lower to CUDA.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.6, 1.0]);
-    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 3, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 3, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_2p5d", 2, &k, &w);
 }
 
@@ -90,9 +90,9 @@ fn shaped_penalize_nvrtc_compiles_curvilinear() {
     // coordinate centroid to Cartesian first (centroid_to_cartesian +
     // vector_from_cartesian). that path must lower to CUDA for the r-phi wall gate.
     let shape = SdfExpr::<f64, 3>::sphere([0.0, 0.0, 0.0], 0.35);
-    let (k, w) = penalize_porous_gv_shaped(Coords::Cylindrical, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cylindrical, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_cyl", 2, &k, &w);
-    let (k, w) = penalize_porous_gv_shaped(Coords::Spherical, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Spherical, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_sph", 2, &k, &w);
 }
 
@@ -101,7 +101,7 @@ fn spinning_penalize_nvrtc_compiles() {
     // the spinning wall: the mask is rotated by R(angle) built from Gv cos/sin and
     // the surface velocity carries omega x r. cos/sin lower to libdevice.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]);
-    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
     nvrtc_ok("shaped_penalize_cuda_spin", 2, &k, &w);
     let (k, w) = penalize_porous_iso_gv_spinning(Coords::Cartesian, 2, 2, &shape);
     nvrtc_ok("shaped_penalize_cuda_spin_iso", 2, &k, &w);

@@ -195,6 +195,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, Adiabatic> {
+                chi: Default::default(),
                 den: host_in.0[c],
                 mom: Tensor::new([host_in.1[c], host_in.2[c]]),
                 nrg: host_in.3[c],
@@ -355,6 +356,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, IsoModel> {
+                chi: Default::default(),
                 den: host_in.0[c],
                 mom: Tensor::new([host_in.1[c], host_in.2[c]]),
                 nrg: Default::default(),
@@ -514,6 +516,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, IsoModel> {
+                chi: Default::default(),
                 den: host_in.0[c],
                 mom: Tensor::new([host_in.1[c], host_in.2[c]]),
                 nrg: Default::default(),
@@ -696,6 +699,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, IsoModel> {
+                chi: Default::default(),
                 den: den0[c],
                 mom: Tensor::new([mx0[c], my0[c]]),
                 nrg: Default::default(),
@@ -896,6 +900,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, IsoModel> {
+                chi: Default::default(),
                 den: den0[c],
                 mom: Tensor::new([mx0[c], my0[c]]),
                 nrg: Default::default(),
@@ -1100,6 +1105,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, Adiabatic> {
+                chi: Default::default(),
                 den: host_in.0[c],
                 mom: Tensor::new([host_in.1[c], host_in.2[c]]),
                 nrg: host_in.3[c],
@@ -1402,6 +1408,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
         for ii in 0..N {
             let c = ii + jj * N;
             let cons = ConsG::<f64, 2, IsoModel> {
+                chi: Default::default(),
                 den: den[c],
                 mom: Tensor::new([mx[c], my[c]]),
                 nrg: Default::default(),

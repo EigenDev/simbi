@@ -128,8 +128,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         }
                     }
                 }));
-                let mut face =
-                    ConsFieldsGeneric::zeros_with_energy(&face_domain, has_energy)?;
+                let mut face = ConsFieldsGeneric::zeros_with_energy(&face_domain, has_energy)?;
                 if has_dye {
                     face.alloc_chi(&face_domain)?;
                 }
@@ -475,7 +474,8 @@ mod tests {
             lo: 0,
             hi: 5,
         }]);
-        let touching = FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true, false).unwrap();
+        let touching =
+            FluxRegister::<1, 1, HostMemory>::new(&coverage, &interior, true, false).unwrap();
         assert!(touching.faces[0].is_none() && touching.faces[1].is_some());
     }
 

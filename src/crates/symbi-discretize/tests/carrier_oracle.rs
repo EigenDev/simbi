@@ -101,6 +101,7 @@ fn adiabatic_c2p_matches_native_carrier() {
         mom[0] = 0.3 + 0.1 * x;
         mom[1] = -0.15 + 0.05 * x;
         Cons {
+            chi: Default::default(),
             den: 1.2 + 0.2 * x,
             mom,
             nrg: 2.0 + 0.3 * x,
@@ -208,6 +209,7 @@ fn iso_c2p_matches_native_carrier() {
         mom[0] = 0.3 + 0.1 * x;
         mom[1] = -0.12 + 0.04 * x;
         Cons {
+            chi: Default::default(),
             den: 1.2 + 0.2 * x,
             mom,
             nrg: 0.5 + 0.05 * x,

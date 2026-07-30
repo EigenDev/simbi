@@ -159,6 +159,7 @@ fn nmhd_rotor_cyl_rz_preserves_divb_winds_field_stays_physical() {
     for c in sim.geom.interior.iter() {
         let cons = MhdCons::<f64, 3> {
             hydro: Cons {
+                chi: Default::default(),
                 den: *sim.fields.cons.den.view().at(c),
                 mom: Tensor::new([
                     *sim.fields.cons.mom[0].view().at(c),

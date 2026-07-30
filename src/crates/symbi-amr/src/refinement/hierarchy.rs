@@ -2416,14 +2416,7 @@ where
                 parent.state.fields.prim.chi_field(),
                 fine.state.fields.prim.chi_field(),
             ) {
-                prolong_field(
-                    chi_old,
-                    pchi,
-                    fchi,
-                    slab,
-                    self.prolong_order,
-                    alpha,
-                );
+                prolong_field(chi_old, pchi, fchi, slab, self.prolong_order, alpha);
             }
             // mhd: the cell-centered B ghosts feed the fine reconstruction +
             // the boundary-edge UCT emf. the fine OWNED bface needs no

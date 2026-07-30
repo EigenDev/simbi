@@ -39,7 +39,6 @@ impl Default for ShockwaveLimiter {
     }
 }
 
-
 /// the local mach number of a face's Riemann problem: `max(|u_L/c_L|, |u_R/c_R|)` where `u` is the
 /// velocity component ALONG THE FACE NORMAL and `c` the sound speed.
 ///

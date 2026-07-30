@@ -213,6 +213,7 @@ fn fill_ot<S: ExecutionSpace, Mem: MemorySpace>(sim: &MhdSim<S, Mem>) {
         sim.fields.cons.scatter(
             c,
             Cons {
+                chi: Default::default(),
                 den: cons.den,
                 mom: cons.mom,
                 nrg: cons.nrg,

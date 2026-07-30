@@ -73,7 +73,7 @@ fn body_scalars(sink0: f64) -> Vec<(&'static str, f64)> {
 // nrg_new) are out-of-place so they read back the post-update cons.* per cell.
 // `sink0` lets the gravity-only case disable accretion.
 fn run(sink0: f64, den_in: f64, m0_in: f64, m1_in: f64, nrg_in: f64) -> Out {
-    KernelRun::new(body_source_gv(2, Coords::Cartesian, 2, 2, &[0, 1]))
+    KernelRun::new(body_source_gv(2, Coords::Cartesian, 2, 2, &[0, 1], false))
         .grid([NX, NY])
         .fields(&[
             ("den", den_in),

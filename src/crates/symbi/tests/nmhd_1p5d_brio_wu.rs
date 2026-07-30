@@ -71,6 +71,7 @@ fn recover(sim: &Sim, c: [isize; 1]) -> (f64, f64) {
     let cnrg = sim.fields.cons.nrg_field().unwrap();
     let cons = MhdCons::<f64, 3> {
         hydro: Cons {
+            chi: Default::default(),
             den: *sim.fields.cons.den.view().at(c),
             mom: Tensor::new([
                 *sim.fields.cons.mom[0].view().at(c),

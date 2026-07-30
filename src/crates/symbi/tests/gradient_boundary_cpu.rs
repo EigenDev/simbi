@@ -307,7 +307,9 @@ fn gradient_face_carries_the_dye_at_zero_normal_derivative() {
     let mut checked = 0;
     for c in sim.geom.allocated.iter() {
         // the x_lo ghost band, transverse-interior only (corners belong to the other faces).
-        if c[0] >= x_lo || c[1] < sim.geom.interior.spaces[1].lo || c[1] >= sim.geom.interior.spaces[1].hi
+        if c[0] >= x_lo
+            || c[1] < sim.geom.interior.spaces[1].lo
+            || c[1] >= sim.geom.interior.spaces[1].hi
         {
             continue;
         }

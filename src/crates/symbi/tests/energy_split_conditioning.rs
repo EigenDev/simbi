@@ -88,7 +88,12 @@ fn a_single_ill_conditioned_cell_is_reported_over_a_quiescent_domain() {
 
     // spike one interior cell to a large momentum at fixed total energy: internal energy
     // becomes a small remainder there and nowhere else.
-    let target = sim.geom.interior.iter().nth(N / 2).expect("an interior cell");
+    let target = sim
+        .geom
+        .interior
+        .iter()
+        .nth(N / 2)
+        .expect("an interior cell");
     let e_tot = *sim.fields.cons.nrg.as_ref().expect("nrg").view().at(target);
     let rho = *sim.fields.cons.den.view().at(target);
     // choose |m| so the recovered internal energy is 1e-4 of the total -> ratio 9999.

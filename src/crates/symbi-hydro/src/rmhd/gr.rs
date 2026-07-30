@@ -156,7 +156,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
         let nrg = rhw2 + bsq - p_tot - den;
 
         MhdCons {
-            hydro: Cons { den, mom, nrg },
+            hydro: Cons {
+                chi: Default::default(),
+                den,
+                mom,
+                nrg,
+            },
             mag: prim.mag,
         }
     }
@@ -213,6 +218,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
 
         MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: cons.den * vn,
                 mom: cons.mom.scale(vn) + nhat.scale(p_tot) - b_lo.scale(bn / ww),
                 nrg: (cons.nrg + p_tot) * vn - vdb * bn,

@@ -159,6 +159,46 @@ impl EnergyModel for IsoModel {
     const HAS_ENERGY: bool = false;
 }
 
+// ---- dye slot ----
+
+/// compile-time marker for the passive scalar (dye), the run-level opt-in that rides in the
+/// conserved vector as `D_chi = rho chi`. it reuses [`EnergySlot`] for its storage operations:
+/// that trait is an optional-scalar slot, and nothing in `zero / add / scale / value` is specific
+/// to energy.
+///
+/// the point of putting the dye in the conserved state rather than carrying it alongside is that
+/// EVERY operation which changes mass must change `D_chi` in proportion. expressed as a slot, an
+/// operation that rebuilds a conserved state cannot omit the dye without failing to compile —
+/// where a hand-wired dye can be, and has been, silently dropped by one path out of several.
+///
+/// orthogonal to [`EnergyModel`]: `D_chi = rho chi` involves no energy, so an isothermal run
+/// carries a dye exactly as an adiabatic one does.
+pub trait DyeModel: Copy + 'static {
+    /// the storage type for the conserved dye. S when a dye is carried, Zero<S> when not.
+    type Slot<S: Scalar>: EnergySlot<S>;
+
+    /// whether fields should allocate dye storage.
+    const HAS_DYE: bool;
+}
+
+/// a run carrying a passive scalar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Dyed;
+
+impl DyeModel for Dyed {
+    type Slot<S: Scalar> = S;
+    const HAS_DYE: bool = true;
+}
+
+/// a run with no passive scalar: the slot is zero-sized and every operation on it is a no-op.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Undyed;
+
+impl DyeModel for Undyed {
+    type Slot<S: Scalar> = Zero<S>;
+    const HAS_DYE: bool = false;
+}
+
 // =============================================================================
 // tests
 // =============================================================================
@@ -217,5 +257,43 @@ mod tests {
     fn energy_model_has_energy() {
         assert!(Adiabatic::HAS_ENERGY);
         assert!(!IsoModel::HAS_ENERGY);
+    }
+}
+
+#[cfg(test)]
+mod dye_slot_tests {
+    use super::*;
+    use crate::state::ConsG;
+
+    // the undyed slot must cost nothing: a conserved state without a dye has to be byte-identical
+    // to one that never had the field, or every hydro kernel pays for a feature it does not use.
+    #[test]
+    fn undyed_conserved_state_is_free() {
+        assert_eq!(std::mem::size_of::<<Undyed as DyeModel>::Slot<f64>>(), 0);
+        assert_eq!(
+            std::mem::size_of::<ConsG<f64, 3, Adiabatic, Undyed>>(),
+            std::mem::size_of::<f64>() * 5, // den + 3 momenta + nrg
+        );
+    }
+
+    #[test]
+    fn dyed_conserved_state_carries_one_more_scalar() {
+        assert_eq!(std::mem::size_of::<<Dyed as DyeModel>::Slot<f64>>(), 8);
+        assert_eq!(
+            std::mem::size_of::<ConsG<f64, 3, Adiabatic, Dyed>>(),
+            std::mem::size_of::<ConsG<f64, 3, Adiabatic, Undyed>>() + 8,
+        );
+    }
+
+    // the dye is orthogonal to the energy model: an isothermal run carries one just as an
+    // adiabatic run does, because `D_chi = rho chi` involves no energy.
+    #[test]
+    fn isothermal_can_carry_a_dye() {
+        assert_eq!(
+            std::mem::size_of::<ConsG<f64, 2, IsoModel, Dyed>>(),
+            std::mem::size_of::<f64>() * 4, // den + 2 momenta + chi, no energy
+        );
+        assert!(Dyed::HAS_DYE);
+        assert!(!Undyed::HAS_DYE);
     }
 }

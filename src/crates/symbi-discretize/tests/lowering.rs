@@ -406,6 +406,7 @@ fn immersed_kernels_lower() {
             ndim,
             ndim,
             &axes,
+            false,
         ))
         .grid(vec![8usize; ndim])
         .assert_lowers();
@@ -417,9 +418,16 @@ fn immersed_kernels_lower() {
         (Coords::Spherical, 3),
     ] {
         let axes: Vec<usize> = (0..ndim).collect();
-        KernelRun::new(body_source_gv(MAX_SOURCE_BODIES, coords, ndim, ndim, &axes))
-            .grid(vec![8usize; ndim])
-            .assert_lowers();
+        KernelRun::new(body_source_gv(
+            MAX_SOURCE_BODIES,
+            coords,
+            ndim,
+            ndim,
+            &axes,
+            false,
+        ))
+        .grid(vec![8usize; ndim])
+        .assert_lowers();
     }
     // body feedback: every geometry, ndim 2 + 3.
     for &cc in &[Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {

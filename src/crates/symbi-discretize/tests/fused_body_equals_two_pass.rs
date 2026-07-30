@@ -161,7 +161,7 @@ fn body_oracle(a0: f64, ac: f64, stage: &str) {
     let mut body_scalars: Vec<(&str, f64)> = vec![("dt", ac * DT)];
     body_scalars.extend(geom_and_body_scalars());
 
-    let out_body = KernelRun::new(body_source_gv(1, Coords::Cartesian, 2, 2, &[0, 1]))
+    let out_body = KernelRun::new(body_source_gv(1, Coords::Cartesian, 2, 2, &[0, 1], false))
         .grid(GRID)
         .compute_window(WLO, WSIZE)
         .field_with("den", move |c| den_buf[flat(c)])

@@ -6613,13 +6613,17 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     }
     // the passive scalar (dye) rides the uni-grid cartesian NEWTONIAN path: the chi
     // kernels are baked cartesian, the drain/wall
-    // penalization does not carry the dye, and a driven face has no dye
-    // prescription. every other combination fails loud — a silently undyed or
-    // wrongly-dyed run reads as valid science.
+    // every unwired combination fails loud — a silently undyed or wrongly-dyed run reads as
+    // valid science.
     if !cfg.chi_ic.is_empty() {
+        // the conserved dye is a slot on the conserved state, orthogonal to the energy slot, so
+        // an isothermal run is TYPED for a dye. what it lacks is baked kernels: the isothermal
+        // penalize family has no dyed twin, so an isothermal sink would drain mass and leave the
+        // dye behind, concentrating it in the surviving gas.
         if cfg.regime != "newtonian" {
             return Err(format!(
-                "passive_scalar is wired for the newtonian regime; got '{}'",
+                "passive_scalar is wired for the newtonian regime; got '{}' (the isothermal \
+                 penalize kernels carry no dye yet)",
                 cfg.regime
             ));
         }
@@ -6629,23 +6633,14 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                 cfg.coord_system
             ));
         }
-        // gpus > 1 is wired: the decomposed hydro build seeds the dye per tile and the halo
-        // exchange carries prim.chi across cuts. refinement and
-        // mesh motion are not — the fine-level prolong and the moving-mesh remap do not carry
-        // the dye yet.
-        // refinement carries the dye: the fine level allocates its own slots, the concentration
+        // gpus > 1 seeds the dye per tile and the halo exchange carries prim.chi across cuts.
+        // refinement carries it too: the fine level allocates its own slots, the concentration
         // prolongs onto coarse-fine ghosts and restricts back, and the interface dye flux is
-        // materialized so the flux register refluxes it alongside mass. mesh motion still remaps
-        // without it.
+        // materialized so the flux register refluxes it alongside mass. immersed bodies carry it
+        // through the penalize drain, which scales the conserved dye by the same factor as the
+        // density. the moving-mesh remap still does not.
         if cfg.mesh_motion {
             return Err("passive_scalar does not support mesh motion yet".to_string());
-        }
-        if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
-            return Err(
-                "passive_scalar with immersed bodies is not wired yet (the drain/wall \
-                 penalization does not carry the dye)"
-                    .to_string(),
-            );
         }
         // gradient (neumann / robin) faces carry the dye at zero normal derivative, the scalar
         // reading of the per-variable prescription the registry holds for the prim state.

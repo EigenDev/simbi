@@ -84,7 +84,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         let nrg = rhw2 + bsq - p_tot - den;
 
         MhdCons {
-            hydro: Cons { den, mom, nrg },
+            hydro: Cons {
+                chi: Default::default(),
+                den,
+                mom,
+                nrg,
+            },
             mag: prim.mag,
         }
     }
@@ -111,6 +116,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         let nrg = alpha * c.nrg + (alpha - S::ONE) * c.den - shift.dot(&c.mom);
         MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: c.den,
                 mom: c.mom,
                 nrg,
@@ -145,6 +151,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
 
         MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: cons.den * vn,
                 mom: cons.mom.scale(vn) + nhat.scale(p_tot) - b_mu.scale(bn / ww),
                 nrg: cons.mom.dot(nhat) - cons.den * vn,
@@ -281,6 +288,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let cons = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: -1.0,
                 mom: Tensor::new([0.0, 0.0, 0.0]),
                 nrg: 1.0,

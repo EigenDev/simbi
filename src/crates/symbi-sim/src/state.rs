@@ -233,6 +233,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     #[inline]
     pub fn gather(&self, coord: [isize; NDIM]) -> Cons<Sc, DOF> {
         Cons {
+            chi: Default::default(),
             den: *self.den.view().at(coord),
             mom: Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
             nrg: self.nrg.as_ref().map_or(Sc::ZERO, |f| *f.view().at(coord)),
@@ -257,6 +258,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     #[inline]
     pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> ConsG<Sc, DOF, E> {
         ConsG {
+            chi: Default::default(),
             den: *self.den.view().at(coord),
             mom: Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
             nrg: E::Slot::<Sc>::from_scalar(
@@ -3401,6 +3403,7 @@ mod tests {
         .unwrap();
 
         let val = Cons {
+            chi: Default::default(),
             den: 1.5,
             mom: Tensor::new([0.3, -0.2]),
             nrg: 2.5,

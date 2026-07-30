@@ -53,7 +53,12 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
         let rhw2 = prim.rho * hh * ww * ww;
         let mom = prim.vel.scale(rhw2);
         let nrg = rhw2 - prim.pre - den;
-        Cons { den, mom, nrg }
+        Cons {
+            chi: Default::default(),
+            den,
+            mom,
+            nrg,
+        }
     }
 
     #[inline]
@@ -91,6 +96,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
         let vn = prim.vel.dot(nhat);
         let mn = cons.mom.dot(nhat); // normal momentum
         Cons {
+            chi: Default::default(),
             den: cons.den * vn,
             mom: cons.mom.scale(vn) + nhat.scale(prim.pre),
             // rhd energy flux: S_n - D * v_n = mn - D * vn

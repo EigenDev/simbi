@@ -20,7 +20,7 @@ fn shaped_porous_penalize_jit_compiles_on_host() {
     // Dual-autodiff normal, in the body-local frame.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape, false);
     let compiled = symbi_jit::compile_gv_kernel(&kernel, &writes, 3);
     assert!(
         compiled.is_ok(),
@@ -33,7 +33,7 @@ fn shaped_porous_penalize_jit_compiles_on_host() {
 fn shaped_porous_penalize_jit_compiles_2d() {
     // a 2d run (r-z / x-y): the kernel is 3D internally but the active dims are 2.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.6, 1.0]);
-    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
     assert!(symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok());
 }
 
@@ -42,14 +42,14 @@ fn shaped_porous_penalize_jit_compiles_2p5d() {
     // dof = 3 on a 2d grid (2.5d mhd): the out-of-plane momentum channel rides the same
     // shaped kernel and must stay inside the JIT subset.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.6, 1.0]);
-    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 3, &shape);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 3, &shape, false);
     assert!(symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok());
 }
 
 #[test]
 fn capped_cylinder_penalize_jit_compiles_on_host() {
     let shape = SdfExpr::<f64, 3>::capped_cylinder([0.0, 0.0, 0.0], 0.4, 0.8);
-    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&kernel, &writes, 3).is_ok(),
         "the capped-cylinder penalize kernel is outside the JIT subset",
@@ -66,7 +66,7 @@ fn shaped_rotated_penalize_jit_compiles() {
         [0.0, 0.0, 1.0],
     ];
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]).rotated(tilt);
-    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok(),
         "the rotated shaped penalize kernel is outside the JIT subset",
@@ -79,12 +79,12 @@ fn shaped_penalize_jit_compiles_curvilinear() {
     // coordinate centroid to Cartesian first. that path (centroid_to_cartesian +
     // vector_from_cartesian) must lie in the JIT subset for a shaped body.
     let shape = SdfExpr::<f64, 3>::cuboid([1.5, 0.0, 0.0], [0.3, 0.3, 0.3]);
-    let (k, w) = penalize_porous_gv_shaped(Coords::Spherical, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Spherical, 2, 2, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(),
         "spherical shaped kernel not JIT-able"
     );
-    let (k, w) = penalize_porous_gv_shaped(Coords::Cylindrical, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cylindrical, 2, 2, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(),
         "cylindrical shaped kernel not JIT-able"
@@ -102,7 +102,7 @@ fn spinning_penalize_jit_compiles() {
     // angle), and the surface velocity carries omega x r. both the adiabatic and iso kernels must
     // JIT — cos/sin are in the cranelift subset.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]);
-    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape);
+    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
     assert!(
         symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(),
         "adiabatic spinning kernel not JIT-able"
@@ -135,12 +135,12 @@ fn shaped_penalize_jit_compiles_f32() {
     use symbi_ir::emit::Precision::F32;
     let csg = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &csg);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &csg, false);
     assert!(
         symbi_jit::compile_gv_kernel_prec(&k, &w, 3, F32).is_ok(),
         "f32 shaped kernel outside the JIT subset"
     );
-    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &csg);
+    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &csg, false);
     assert!(
         symbi_jit::compile_gv_kernel_prec(&k, &w, 2, F32).is_ok(),
         "f32 spinning shaped kernel not JIT-able"

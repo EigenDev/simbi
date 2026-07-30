@@ -45,6 +45,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
     #[inline]
     fn to_conserved(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
         ConsG {
+            chi: Default::default(),
             den: prim.rho,
             mom: prim.vel.scale(prim.rho),
             nrg: Zero::default(),
@@ -73,6 +74,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
         let vn = prim.vel.dot(nhat);
         let pre = eos.pressure(prim.rho, S::ZERO);
         ConsG {
+            chi: Default::default(),
             den: prim.rho * vn,
             mom: prim.vel.scale(prim.rho * vn) + nhat.scale(pre),
             nrg: Zero::default(),
@@ -143,11 +145,13 @@ mod tests {
     #[test]
     fn iso_cons_arithmetic() {
         let a = IsoCons::<f64, 2> {
+            chi: Default::default(),
             den: 1.0,
             mom: Tensor::new([2.0, 3.0]),
             nrg: Zero::default(),
         };
         let b = IsoCons::<f64, 2> {
+            chi: Default::default(),
             den: 0.5,
             mom: Tensor::new([1.0, 0.5]),
             nrg: Zero::default(),
@@ -326,6 +330,7 @@ mod tests {
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let cons = IsoCons {
+            chi: Default::default(),
             den: -1.0,
             mom: Tensor::new([2.0]),
             nrg: Zero::default(),
@@ -343,6 +348,7 @@ mod tests {
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let cons = IsoCons {
+            chi: Default::default(),
             den: 0.0,
             mom: Tensor::new([1.0]),
             nrg: Zero::default(),

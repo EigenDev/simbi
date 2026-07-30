@@ -26,7 +26,7 @@
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::{Embedded, Physical, Tensor};
 use symbi_geometry::{Cylindrical, CylindricalRPhi, DiagonalMetric, Metric, Spherical};
-use symbi_hydro::energy::Adiabatic;
+use symbi_hydro::energy::{Adiabatic, Dyed};
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
@@ -477,6 +477,7 @@ pub fn penalize_drain_gv(
     ndim: usize,
     dof: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     assert!(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
@@ -539,7 +540,14 @@ pub fn penalize_drain_gv(
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, Adiabatic> {
+    let cons = ConsG::<Gv, 3, Adiabatic, Dyed> {
+        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+        chi: if has_dye {
+            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        },
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -580,6 +588,15 @@ pub fn penalize_drain_gv(
         symbi_ir::FieldRef::cons_nrg().into(),
         out.nrg.node(),
     ));
+    // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
+    // same drain factor to both, so the concentration of the surviving gas is unchanged.
+    if has_dye {
+        writes.push((
+            "chi_out".to_string(),
+            symbi_ir::FieldRef::cons_chi().into(),
+            out.chi.node(),
+        ));
+    }
     writes.push((
         "pen_mass".to_string(),
         "pen_0_mass".into(),
@@ -629,8 +646,9 @@ pub fn penalize_porous_gv(
     ndim: usize,
     dof: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, dof, None, false, axes)
+    penalize_porous_inner(coords, ndim, dof, None, false, axes, has_dye)
 }
 
 /// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
@@ -642,8 +660,9 @@ pub fn penalize_porous_gv_shaped(
     ndim: usize,
     dof: usize,
     shape: &SdfExpr<f64, 3>,
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, dof, Some(shape), false, &[0, 1, 2][..ndim])
+    penalize_porous_inner(coords, ndim, dof, Some(shape), false, &[0, 1, 2][..ndim], has_dye)
 }
 
 /// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
@@ -655,8 +674,9 @@ pub fn penalize_porous_gv_spinning(
     ndim: usize,
     dof: usize,
     shape: &SdfExpr<f64, 3>,
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, dof, Some(shape), true, &[0, 1, 2][..ndim])
+    penalize_porous_inner(coords, ndim, dof, Some(shape), true, &[0, 1, 2][..ndim], has_dye)
 }
 
 fn penalize_porous_inner(
@@ -666,6 +686,7 @@ fn penalize_porous_inner(
     shape: Option<&SdfExpr<f64, 3>>,
     spin: bool,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     assert!(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
@@ -795,7 +816,14 @@ fn penalize_porous_inner(
         inv_eta_t: k_eta_t * rate_scale,
     }
     .contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, Adiabatic> {
+    let cons = ConsG::<Gv, 3, Adiabatic, Dyed> {
+        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+        chi: if has_dye {
+            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        },
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -831,6 +859,15 @@ fn penalize_porous_inner(
         symbi_ir::FieldRef::cons_nrg().into(),
         out.nrg.node(),
     ));
+    // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
+    // same drain factor to both, so the concentration of the surviving gas is unchanged.
+    if has_dye {
+        writes.push((
+            "chi_out".to_string(),
+            symbi_ir::FieldRef::cons_chi().into(),
+            out.chi.node(),
+        ));
+    }
     writes.push((
         "pen_mass".to_string(),
         "pen_0_mass".into(),
@@ -948,6 +985,7 @@ pub fn penalize_torque_free_iso_gv(
     let mut acc = Relax::<Gv, 3>::none();
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
+        chi: Default::default(),
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1158,6 +1196,7 @@ fn penalize_porous_iso_inner(
     }
     .contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
+        chi: Default::default(),
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1222,6 +1261,7 @@ pub fn penalize_torque_free_gv(
     ndim: usize,
     dof: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     assert!(
         (1..=3).contains(&ndim),
@@ -1293,7 +1333,14 @@ pub fn penalize_torque_free_gv(
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, Adiabatic> {
+    let cons = ConsG::<Gv, 3, Adiabatic, Dyed> {
+        // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
+        // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
+        chi: if has_dye {
+            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
+        } else {
+            Gv::ZERO
+        },
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1329,6 +1376,15 @@ pub fn penalize_torque_free_gv(
         symbi_ir::FieldRef::cons_nrg().into(),
         out.nrg.node(),
     ));
+    // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
+    // same drain factor to both, so the concentration of the surviving gas is unchanged.
+    if has_dye {
+        writes.push((
+            "chi_out".to_string(),
+            symbi_ir::FieldRef::cons_chi().into(),
+            out.chi.node(),
+        ));
+    }
     writes.push((
         "pen_mass".to_string(),
         "pen_0_mass".into(),
@@ -1415,6 +1471,7 @@ pub fn penalize_drain_iso_gv(
     let mut acc = Relax::<Gv, 3>::none();
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
+        chi: Default::default(),
         den,
         mom: Tensor::new(std::array::from_fn(
             |a| if a < dof { mom[a] } else { Gv::ZERO },
@@ -1485,7 +1542,7 @@ mod shaped_tests {
     fn shaped_porous_kernel_bakes_geometry_and_keeps_position_runtime() {
         let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
             .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-        let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
+        let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape, false);
         assert!(
             !kernel.graph.has_errors(),
             "shaped porous kernel traced with graph errors"
@@ -1511,7 +1568,7 @@ mod shaped_tests {
     // the unshaped path is the sphere: `body_0_racc` IS a runtime scalar (the AOT kernel).
     #[test]
     fn unshaped_porous_kernel_reads_the_runtime_radius() {
-        let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3, 3, &[0, 1, 2]);
+        let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
         assert!(kernel.scalar_params.iter().any(|p| p == "body_0_racc"));
     }
 }

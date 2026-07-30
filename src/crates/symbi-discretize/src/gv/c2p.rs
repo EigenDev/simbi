@@ -30,6 +30,7 @@ pub fn adiabatic_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, 
     // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> {
+        chi: Default::default(),
         den,
         mom: Tensor::new(mom_arr),
         nrg,
@@ -86,6 +87,7 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
     // the cs2 is the separate prescribed field, fed through the compute struct's nrg slot.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> {
+        chi: Default::default(),
         den,
         mom: Tensor::new(mom_arr),
         nrg: cs2,
@@ -157,6 +159,7 @@ pub fn rhd_c2p_gv<const D: usize>(
     // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> {
+        chi: Default::default(),
         den,
         mom: Tensor::new(mom_arr),
         nrg,
@@ -329,6 +332,7 @@ where
     let mom_t = Tensor::new(mom).scale(inv_dens);
     let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
     let cons = Cons::<Gv, D> {
+        chi: Default::default(),
         den,
         mom: mom_t,
         nrg: tau,
@@ -379,6 +383,7 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
     // the SINGLE-SOURCE physics at the tracing carrier (3-component RMHD state).
     let cons = MhdCons::<Gv, 3> {
         hydro: Cons {
+            chi: Default::default(),
             den,
             mom: Tensor::new(mom),
             nrg,
@@ -533,6 +538,7 @@ pub fn rmhd_c2p_gr_gv(
     let tau = (nrg + (Gv::ONE - alpha) * den + beta.dot(&mom_t)) / alpha;
     let cons = MhdCons::<Gv, 3> {
         hydro: Cons {
+            chi: Default::default(),
             den,
             mom: mom_t,
             nrg: tau,
@@ -588,6 +594,7 @@ pub fn nmhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 
     let cons = MhdCons::<Gv, 3> {
         hydro: Cons {
+            chi: Default::default(),
             den,
             mom: Tensor::new(mom),
             nrg,
@@ -637,6 +644,7 @@ pub fn imhd_c2p_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 
     let cons = IsoMhdCons::<Gv, 3> {
         hydro: ConsG {
+            chi: Default::default(),
             den,
             mom: Tensor::new(mom),
             nrg: Zero::default(),

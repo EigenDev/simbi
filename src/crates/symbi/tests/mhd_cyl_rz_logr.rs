@@ -119,6 +119,7 @@ fn recover(sim: &Sim, c: [isize; 2]) -> (f64, f64) {
                 *sim.fields.cons.mom[2].view().at(c),
             ]),
             nrg: *cnrg.view().at(c),
+            chi: Default::default(),
         },
         mag: Tensor::new([
             *mhd.bcell[0].view().at(c),

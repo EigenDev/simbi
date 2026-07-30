@@ -331,7 +331,7 @@ pub fn fofc_select_with_body_gv(
     let (b_den, b_mom, b_nrg, usb_ok) = if has_energy {
         let gamma = Gv::scalar("gamma");
         let us_nrg = Gv::field("us_nrg", "us_nrg");
-        let (b_den, b_mom, b_nrg) = crate::gv_immersed::body_evolved_gv(
+        let (b_den, b_mom, b_nrg, _drain) = crate::gv_immersed::body_evolved_gv(
             us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
         );
         // GUARD: the parachute must itself be physical. rho = den (newtonian, W = 1); the adiabatic
@@ -1285,7 +1285,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
     let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
         if let Some(nrg_in) = nrg_g {
             let gamma = Gv::scalar("gamma");
-            let (den_b, mom_b, nrg_b) = crate::gv_immersed::body_evolved_gv(
+            let (den_b, mom_b, nrg_b, _drain) = crate::gv_immersed::body_evolved_gv(
                 rho_g,
                 &mom_g,
                 nrg_in,

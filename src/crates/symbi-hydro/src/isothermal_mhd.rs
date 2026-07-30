@@ -91,6 +91,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
     fn to_conserved(&self, _eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
         IsoMhdCons {
             hydro: ConsG {
+                chi: Default::default(),
                 den: prim.rho,
                 mom: prim.vel.scale(prim.rho),
                 nrg: Zero::default(),
@@ -120,6 +121,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {
         let rho_vn = prim.rho * vn;
         IsoMhdCons {
             hydro: ConsG {
+                chi: Default::default(),
                 den: rho_vn,
                 mom: prim.vel.scale(rho_vn) + nhat.scale(p_tot) - prim.mag.scale(bn),
                 nrg: Zero::default(),

@@ -71,6 +71,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Newtonian {
         let vn = prim.vel.dot(nhat); // normal velocity
         let cons = prim.to_conserved(eos);
         Cons {
+            chi: Default::default(),
             den: cons.den * vn,
             mom: cons.mom.scale(vn) + nhat.scale(prim.pre),
             nrg: (cons.nrg + prim.pre) * vn,
@@ -243,6 +244,7 @@ mod tests {
         let regime = Newtonian;
         let eos = IdealGas { gamma: 1.4 };
         let cons = Cons {
+            chi: Default::default(),
             den: -1.0,
             mom: Tensor::new([0.0]),
             nrg: 1.0,
@@ -264,6 +266,7 @@ mod tests {
         let eos = IdealGas { gamma: 1.4 };
         // huge kinetic energy, small thermal -> negative pressure.
         let cons = Cons {
+            chi: Default::default(),
             den: 1.0,
             mom: Tensor::new([100.0]),
             nrg: 1.0,

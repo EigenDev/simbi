@@ -255,6 +255,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let regime = Rhd;
         let cons = Cons {
+            chi: Default::default(),
             den: -1.0,
             mom: Tensor::new([0.0]),
             nrg: 1.0,
@@ -274,6 +275,7 @@ mod tests {
         let regime = Rhd;
         // huge momentum, tiny density+energy -> superluminal or negative pressure
         let cons = Cons {
+            chi: Default::default(),
             den: 1e-14,
             mom: Tensor::new([100.0]),
             nrg: 1e-14,
@@ -296,6 +298,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         // s_mag = 10 >> d + tau = 1.1 => out of cone (tau + d < sqrt(d^2 + s_mag^2)).
         let cons: Cons<f64, 1> = Cons {
+            chi: Default::default(),
             den: 1.0,
             mom: Tensor::new([10.0]),
             nrg: 0.1,

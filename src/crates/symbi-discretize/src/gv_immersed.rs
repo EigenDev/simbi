@@ -261,7 +261,7 @@ pub(crate) fn body_evolved_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (Gv, Vec<Gv>, Gv) {
+) -> (Gv, Vec<Gv>, Gv, Gv) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
@@ -305,7 +305,11 @@ pub(crate) fn body_evolved_gv(
         .map(|comp| (mom[comp] + dt * d_mom[comp]) * f)
         .collect();
     let nrg_new = (nrg + dt * gravity_work + Gv::from_f64(0.5) * dt * dt * force_sq / den) * f;
-    (den_new, mom_new, nrg_new)
+    // `f` is returned so a dyed run can drain the conserved dye by the SAME factor. a sink removes
+    // gas together with the dye dissolved in it, leaving the concentration of what remains
+    // untouched: `D_chi = rho chi` scales exactly as `rho` does. recomputing the factor at the
+    // call site would duplicate the per-cell mask and rate, so it is handed out instead.
+    (den_new, mom_new, nrg_new, f)
 }
 
 pub fn body_source_gv(
@@ -314,6 +318,7 @@ pub fn body_source_gv(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
+    has_dye: bool,
 ) -> (GvKernel, Writes) {
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -323,7 +328,7 @@ pub fn body_source_gv(
         .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-    let (den_new, mom_new, nrg_new) = body_evolved_gv(
+    let (den_new, mom_new, nrg_new, drain) = body_evolved_gv(
         den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes,
     );
 
@@ -344,6 +349,16 @@ pub fn body_source_gv(
         FieldRef::cons_nrg().into(),
         nrg_new.node(),
     ));
+    // the dye drains with the mass it is dissolved in, so the concentration the surviving gas
+    // carries is unchanged. gravity never enters: it accelerates, it does not remove dye.
+    if has_dye {
+        let chi = Gv::field("chi", FieldRef::cons_chi());
+        writes.push((
+            "chi_new".to_string(),
+            FieldRef::cons_chi().into(),
+            (chi * drain).node(),
+        ));
+    }
     (end_trace(), writes)
 }
 

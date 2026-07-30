@@ -44,7 +44,7 @@
 // =============================================================================
 
 use symbi_algebra::Tensor;
-use symbi_hydro::energy::{EnergyModel, EnergySlot};
+use symbi_hydro::energy::{DyeModel, EnergyModel, EnergySlot};
 use symbi_hydro::state::ConsG;
 use symbi_ir::algebra::Scalar;
 
@@ -250,14 +250,14 @@ impl<S: Scalar> Property<S> {
 /// (`U_old - U_new` integrated over the cell) — the single rule that makes
 /// gas+body conservation of mass, momentum, and energy machine-exact for
 /// every property stack, including drag work landing on the body.
-pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel>(
-    cons: &ConsG<S, D, E>,
+pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
+    cons: &ConsG<S, D, E, X>,
     relax: &Relax<S, D>,
     normal: Tensor<S, D>,
     dt: S,
     volume: S,
     idx: usize,
-) -> (ConsG<S, D, E>, BodyDelta<S, D>) {
+) -> (ConsG<S, D, E, X>, BodyDelta<S, D>) {
     let half = S::from_f64(0.5);
     let f_rho = (-(relax.lambda_rho * dt)).exp();
     let g_n = S::ONE - (-(relax.lambda_un * dt)).exp();
@@ -312,6 +312,11 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel>(
         den: den_new,
         mom: mom_new,
         nrg: nrg_new,
+        // the sink removes gas together with the dye dissolved in it, so the conserved dye takes
+        // the SAME factor the density does and the concentration of the surviving gas is
+        // unchanged. the wall channels above move momentum and heat, never mass, so they leave the
+        // dye alone. `absorbed` below therefore books the accreted dye alongside the accreted mass.
+        chi: cons.chi.scale(f_rho),
     };
     let absorbed = *cons - updated;
     let mut delta = BodyDelta::new(idx);
@@ -335,6 +340,7 @@ mod tests {
         let e_int = 1.7;
         let nrg = den * (e_int + 0.5 * v.dot(&v));
         ConsG {
+            chi: Default::default(),
             den,
             mom: v.scale(den),
             nrg,
@@ -562,6 +568,7 @@ mod tests {
         let den = 3.0;
         let e_int = 1.1;
         let cons: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -586,6 +593,7 @@ mod tests {
         // torque even for the standard sink -- the booked torque is physical.
         let u_rad = Tensor::new([-0.5, 0.0]);
         let cons_r: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u_rad.scale(den),
             nrg: den * (e_int + 0.5 * u_rad.dot(&u_rad)),
@@ -608,6 +616,7 @@ mod tests {
         let den = 3.0;
         let e_int = 1.1;
         let cons: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -655,6 +664,7 @@ mod tests {
         let den = 4.0;
         let e_int = 1.0;
         let cons: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -703,6 +713,7 @@ mod tests {
         // `0 * finite = 0`, avoiding the `0 * inf = NaN` pathology.
         let u = Tensor::new([0.3, 0.7]);
         let cons: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -726,6 +737,7 @@ mod tests {
         // 1.65 << the 1e4 cap (inert) -> torque-free is EXACT.
         let u2 = Tensor::new([0.3, 0.8]);
         let cons2: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u2.scale(den),
             nrg: den * (e_int + 0.5 * u2.dot(&u2)),
@@ -757,6 +769,7 @@ mod tests {
         let u = Tensor::new([0.1, 0.6]); // radial + azimuthal
         let (den, e_int, dt) = (3.0, 1.0, 1.0);
         let cons: Cons2 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -900,6 +913,7 @@ mod tests {
         let u = base.u_solid + omega_cross(&base.omega, &x_rel);
         let e_int = 1.3;
         let cons: Cons3 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -931,6 +945,7 @@ mod tests {
         let u = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7;
         let cons: Cons3 = ConsG {
+            chi: Default::default(),
             den,
             mom: u.scale(den),
             nrg: den * (e_int + 0.5 * u.dot(&u)),
@@ -1000,6 +1015,7 @@ mod tests {
     #[test]
     fn iso_regime_has_no_energy_channel() {
         let cons: ConsG<f64, 2, IsoModel> = ConsG {
+            chi: Default::default(),
             den: 1.4,
             mom: Tensor::new([0.7, -0.3]),
             nrg: Default::default(),

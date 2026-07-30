@@ -135,6 +135,7 @@ mod tests {
         let e_int = 1.7; // specific internal energy
         let nrg = den * (e_int + 0.5 * v.dot(&v));
         ConsG {
+            chi: Default::default(),
             den,
             mom: v.scale(den),
             nrg,
@@ -271,6 +272,7 @@ mod tests {
                 let dist = 2.0 * i as f64;
                 let rho = scale * (1.0 + 1.0 / (1.0 + dist));
                 let cons = ConsG::<f64, 3, Adiabatic> {
+                    chi: Default::default(),
                     den: rho,
                     mom: Tensor::new([0.1 * rho, 0.0, 0.0]),
                     nrg: 2.0 * rho,

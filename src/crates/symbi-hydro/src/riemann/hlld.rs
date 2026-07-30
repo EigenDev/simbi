@@ -358,6 +358,7 @@ pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
     );
     MhdCons {
         hydro: Cons {
+            chi: Default::default(),
             den: fhat.hydro.den * e_dd,
             mom: metric.lower(&e.mul_vec(&fhat.hydro.mom)).scale(e_dd),
             nrg: fhat.hydro.nrg * e_dd,
@@ -532,6 +533,7 @@ where
         let ma = va.scale(ea + p_final) - ba.scale(vdba);
         let ua = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: da,
                 mom: ma,
                 nrg: ea - da,
@@ -576,6 +578,7 @@ where
     let mc = vc.scale(ec + p_final) - bc.scale(vdbc);
     let ut = MhdCons {
         hydro: Cons {
+            chi: Default::default(),
             den: dc,
             mom: mc,
             nrg: ec - dc,
@@ -837,6 +840,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
             ((s_k - un_k) * e_k - pt_k * un_k + pt_star * s_m + bn * (vdb_k - vdb_s)) / smk_s;
         let u_star = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: rho_star,
                 mom: v_star.scale(rho_star),
                 nrg: e_star,
@@ -880,6 +884,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let e_ss_r = us_r.nrg + sqrt_rr * (vs_r.dot(&bs_r) - vdb_ss) * sgn;
     let uss_l = MhdCons {
         hydro: Cons {
+            chi: Default::default(),
             den: rs_l,
             mom: v_ss.scale(rs_l),
             nrg: e_ss_l,
@@ -888,6 +893,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     };
     let uss_r = MhdCons {
         hydro: Cons {
+            chi: Default::default(),
             den: rs_r,
             mom: v_ss.scale(rs_r),
             nrg: e_ss_r,
@@ -1299,6 +1305,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let mk_cons = |mv: Tensor<S, D>, bs: Tensor<S, D>| -> IsoMhdCons<S, D> {
         IsoMhdCons {
             hydro: ConsG {
+                chi: Default::default(),
                 den: rho_s,
                 mom: nhat.scale(mx_hll) + mv,
                 nrg: Zero::default(),

@@ -337,6 +337,7 @@ mod tests {
     fn test_mhd_cons_arithmetic() {
         let u: MhdCons<f64, 3> = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: 1.0,
                 mom: Tensor::new([2.0, 0.0, 0.0]),
                 nrg: 5.0,
@@ -354,6 +355,7 @@ mod tests {
     fn test_mhd_cons_flux_differencing() {
         let u_l: MhdCons<f64, 3> = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: 1.0,
                 mom: Tensor::new([1.0, 0.0, 0.0]),
                 nrg: 3.0,
@@ -362,6 +364,7 @@ mod tests {
         };
         let u_r: MhdCons<f64, 3> = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: 0.5,
                 mom: Tensor::new([0.5, 0.0, 0.0]),
                 nrg: 1.5,

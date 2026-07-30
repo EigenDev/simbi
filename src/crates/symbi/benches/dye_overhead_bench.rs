@@ -92,7 +92,8 @@ fn run(n: usize, dyed: bool) -> (f64, u64) {
     evolve(&mut sim, &kernels, WARM_TIME).expect("dye benchmark warmup failed");
     let first_iteration = sim.iteration;
     let start = Instant::now();
-    evolve(&mut sim, &kernels, WARM_TIME + TIMED_TIME).expect("dye benchmark timed evolution failed");
+    evolve(&mut sim, &kernels, WARM_TIME + TIMED_TIME)
+        .expect("dye benchmark timed evolution failed");
     (
         start.elapsed().as_secs_f64(),
         sim.iteration - first_iteration,

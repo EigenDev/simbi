@@ -53,6 +53,7 @@ pub fn nmhd_recover<S: Scalar, const D: usize>(
     let half = S::from_f64(0.5);
     let bsq = cons.mag.dot(&cons.mag);
     let hydro_cons = Cons {
+        chi: Default::default(),
         den: cons.den,
         mom: cons.mom,
         nrg: cons.nrg - half * bsq,
@@ -98,6 +99,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
         let hydro = prim.hydro.to_conserved(eos);
         MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: hydro.den,
                 mom: hydro.mom,
                 nrg: hydro.nrg + half * bsq,
@@ -146,6 +148,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for NewtonianMhd {
         let cons = self.to_conserved(eos, prim);
         MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: cons.den * vn,
                 mom: cons.mom.scale(vn) + nhat.scale(p_tot) - prim.mag.scale(bn),
                 nrg: (cons.nrg + p_tot) * vn - bn * vdotb,
@@ -293,6 +296,7 @@ mod tests {
         let eos = IdealGas { gamma: 1.4 };
         let cons = MhdCons {
             hydro: Cons {
+                chi: Default::default(),
                 den: 1.0,
                 mom: Tensor::new([0.0, 0.0, 0.0]),
                 nrg: 1.0,

@@ -63,7 +63,14 @@ fn expect_ball(support: &Option<Support>, what: &str, center: &[f64], radius: f6
 
 #[test]
 fn sphere_kernels_derive_the_declared_ball() {
+    // the adiabatic builders take the dye flag; the isothermal ones do not carry a dye yet.
     macro_rules! check {
+        ($what:literal, $f:ident) => {{
+            let (k, _) = $f(Coords::Cartesian, 2, 2, &[0, 1], false);
+            expect_ball(&k.output_support, $what, &POS[..2], RACC + PAD);
+        }};
+    }
+    macro_rules! check_iso {
         ($what:literal, $f:ident) => {{
             let (k, _) = $f(Coords::Cartesian, 2, 2, &[0, 1]);
             expect_ball(&k.output_support, $what, &POS[..2], RACC + PAD);
@@ -72,18 +79,18 @@ fn sphere_kernels_derive_the_declared_ball() {
     check!("drain", penalize_drain_gv);
     check!("porous", penalize_porous_gv);
     check!("torque_free", penalize_torque_free_gv);
-    check!("torque_free_iso", penalize_torque_free_iso_gv);
-    check!("porous_iso", penalize_porous_iso_gv);
-    check!("drain_iso", penalize_drain_iso_gv);
+    check_iso!("torque_free_iso", penalize_torque_free_iso_gv);
+    check_iso!("porous_iso", penalize_porous_iso_gv);
+    check_iso!("drain_iso", penalize_drain_iso_gv);
     // 2.5d (dof 3 on a 2d grid) shares the in-plane ball.
-    let (k, _) = penalize_drain_gv(Coords::Cartesian, 2, 3, &[0, 1]);
+    let (k, _) = penalize_drain_gv(Coords::Cartesian, 2, 3, &[0, 1], false);
     expect_ball(&k.output_support, "drain 2.5d", &POS[..2], RACC + PAD);
     // 3d.
-    let (k, _) = penalize_drain_gv(Coords::Cartesian, 3, 3, &[0, 1, 2]);
+    let (k, _) = penalize_drain_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
     expect_ball(&k.output_support, "drain 3d", &POS, RACC + PAD);
     // the (r, z) axisymmetric section: the on-axis mask region IS a coordinate
     // ball (identity embedding), so the sphere mask carries its ball there too.
-    let (k, _) = penalize_drain_gv(Coords::Cylindrical, 2, 3, &[0, 2]);
+    let (k, _) = penalize_drain_gv(Coords::Cylindrical, 2, 3, &[0, 2], false);
     expect_ball(&k.output_support, "drain rz", &POS[..2], RACC + PAD);
 }
 
@@ -109,7 +116,7 @@ fn shaped_kernel_derives_the_shape_bounding_ball() {
     let shape = SdfExpr::<f64, 3>::cuboid([0.3, 0.0, 0.0], [0.5, 0.3, 0.2])
         .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
     let (lc, lr) = shape.bounding_ball().expect("bounded shape");
-    let (k, _) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape);
+    let (k, _) = penalize_porous_gv_shaped(Coords::Cartesian, 2, 2, &shape, false);
     expect_ball(
         &k.output_support,
         "shaped static",
@@ -130,7 +137,7 @@ fn spinning_kernel_derives_the_position_centered_swept_ball() {
         lc_norm > 0.0,
         "the offset shape must have an off-center bounding ball"
     );
-    let (k, _) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape);
+    let (k, _) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &shape, false);
     expect_ball(
         &k.output_support,
         "shaped spinning",
@@ -145,7 +152,7 @@ fn curvilinear_kernels_derive_no_ball() {
     // coordinate ball, so the derivation must refuse — dispatch already runs
     // the whole interior off-cartesian.
     for coords in [Coords::Cylindrical, Coords::Spherical] {
-        let (k, _) = penalize_drain_gv(coords, 2, 2, &[0, 1]);
+        let (k, _) = penalize_drain_gv(coords, 2, 2, &[0, 1], false);
         assert!(
             k.output_support.is_none(),
             "{coords:?}: a curvilinear kernel must not carry a cartesian ball"

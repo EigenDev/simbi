@@ -29,12 +29,12 @@ use symbi_xpu::MemorySpace;
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
-use symbi_grid::ghost::BcType;
 use crate::regimes::substrate_kernels::{
     ScalarBind, Solver, body_scalar, dispatch_fields_each, dispatch_named, expect_kernel,
     geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug,
 };
 use symbi_algebra::Domain;
+use symbi_grid::ghost::BcType;
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::FieldStore;
 
