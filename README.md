@@ -24,6 +24,8 @@
 </div>
 
 ---
+<img width="1200" height="760" alt="sedov" src="https://github.com/user-attachments/assets/13c35423-117d-4521-b479-2b047574d96c" />
+
 
 ## Overview
 
