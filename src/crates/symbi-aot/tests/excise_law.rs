@@ -20,11 +20,16 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_hydro::state::Prim;
-use symbi_ib::excise::onion_pass_count;
 
 const N: usize = 24;
 const X_LO: f64 = -0.6;
 const DX: f64 = 0.05;
+/// the fill passes the excise dispatch runs per step. the fill is pointwise -- every excised
+/// cell is set to the vacuum floor from its own state, reading no neighbor -- so one pass fills
+/// the region and repeating it reproduces the same field. both the compiled chain and the f64
+/// reference below run this count, which is what makes their comparison bitwise.
+const EXCISE_PASSES: usize = 1;
+
 const R_EXC: f64 = 0.35;
 const MASS: f64 = 0.3;
 const GAMMA: f64 = 4.0 / 3.0;
@@ -166,7 +171,7 @@ fn run_compiled(g: &mut Grid) {
         vec![0.0; n2],
         vec![0.0; n2],
     ];
-    for _ in 0..onion_pass_count(R_EXC, DX) {
+    for _ in 0..EXCISE_PASSES {
         {
             let inputs = [
                 CpuField::from_layout(&g.rho, &lo, &ext),
@@ -247,9 +252,8 @@ fn run_compiled(g: &mut Grid) {
 fn run_reference(g: &mut Grid) {
     // the vacuum-floor sink: every excised cell is frozen at the cold c2p-safe vacuum the kernel
     // writes (rho = RHO_VAC, v = 0, p = PRE_VAC — the same scalars bound into the compiled
-    // dispatch). live cells are untouched. the pass count is retained (the write is idempotent)
-    // so the sweep structure matches the compiled dispatch.
-    for _ in 0..onion_pass_count(R_EXC, DX) {
+    // dispatch). live cells are untouched. the pass loop mirrors the compiled dispatch's.
+    for _ in 0..EXCISE_PASSES {
         for jj in 1..(N - 1) as isize {
             for ii in 1..(N - 1) as isize {
                 // the excision mask at this cell: the a = 0 kerr-schild radius equals the euclidean
