@@ -79,10 +79,24 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// magnetic field), which is precisely when a shock drives `r` past `h0`. so `mu_+` must be
 /// computed for the general case.
 ///
-/// `f_a` is smooth and strictly increasing with `f_a(0) = -1 < 0` and `f_a(1) >= 0` for ANY state
-/// (the `rbar_sq` under the sqrt is non-negative), so bisection on `[0, 1]` always brackets its
-/// root. returning the UPPER end guarantees the result is `>= root(f_a) = mu_+`, hence
-/// `f(result) >= 0` and a valid straddle `f(0) < 0 <= f(result)` for the master false-position.
+/// the search runs on `[0, 1]` with no escalation of the upper end, which is exact here for two
+/// reasons, both gated:
+///
+/// - `f_a(0) = -1` identically. at `mu = 0` the factor `x = 1/(1 + mu b^2)` is 1 and
+///   `rbar_sq = r^2`, so `f_a(0) = 0 * sqrt(1 + r^2) - 1`, independent of the state.
+/// - `f_a(1) >= 0` whenever `(r.b)^2 >= 0`. for `mu >= 0` and `b^2 >= 0` the factor `x` lies in
+///   `(0, 1]`, so both terms of `rbar_sq = r^2 x^2 + mu x (1 + x) (r.b)^2` are non-negative and
+///   `sqrt(1 + rbar_sq(1)) >= 1`. the recovery supplies that hypothesis by SQUARING the
+///   metric-free pairing `r_i h^i`; the signed pairing of an anti-aligned field would drive
+///   `rbar_sq` negative and put `f_a(1)` below zero.
+///
+/// so `[0, 1]` straddles the root for every admissible state. the enthalpy bound `h0 = 1` is what
+/// makes the paper's interval `(0, 1/h0]` equal to `(0, 1]`; carrying a general `h0` would need the
+/// second bound re-derived on `[0, 1/h0]`.
+///
+/// `f_a` is smooth and strictly increasing, and returning the UPPER end guarantees the result is
+/// `>= root(f_a) = mu_+`, hence `f(result) >= 0` and a valid straddle `f(0) < 0 <= f(result)` for
+/// the master false-position.
 fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
     let half = S::from_f64(0.5);
     let eps = S::from_f64(CONVERGENCE_TOL);
@@ -267,7 +281,7 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
 
     let prim = rmhd_recover(eos, cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
 
-    // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
+    // post-hoc diagnostics on the raw recovered state (the shared RHD/RMHD c2p contract).
     let v_sq = prim.vel.dot(&prim.vel);
     let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
     if code.is_ok() {
@@ -393,6 +407,96 @@ mod tests {
                 "f_a not increasing through mu_+ for r={r}"
             );
         }
+    }
+
+    /// the `(bee_sq, rdb_sq, r)` invariant lattice a conserved state can present to the bracket,
+    /// spanning unmagnetized to `b^2 = 1e8` and static to `r = 1e8`. `rdb_sq = (r.b)^2` obeys
+    /// cauchy-schwarz, `(r.b)^2 <= r^2 b^2`, so the aligned end of each row is the largest value
+    /// the pairing can reach; the fractions walk from perpendicular (0) to fully aligned.
+    fn admissible_bracket_invariants() -> Vec<(f64, f64, f64)> {
+        let mut out = Vec::new();
+        for bee_sq in [0.0, 1e-12, 1e-3, 1.0, 1e3, 1e8] {
+            for r in [0.0, 1e-8, 1e-3, 1.0, 10.0, 1e3, 1e8] {
+                let aligned = r * r * bee_sq;
+                for frac in [0.0, 0.25, 0.5, 1.0] {
+                    out.push((bee_sq, frac * aligned, r));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_unit_interval_brackets_the_auxiliary_root_for_every_admissible_state() {
+        // `find_mu_plus` searches [0, 1] directly. the published algorithm instead escalates its
+        // upper end (`mu_upper *= 2`) until the auxiliary turns non-negative; that escalation is
+        // unreachable at h0 = 1, and this is the gate on why.
+        //
+        //   f_a(mu) = mu sqrt(1 + rbar_sq(mu)) - 1,   x(mu) = 1/(1 + mu b^2),
+        //   rbar_sq(mu) = r^2 x^2 + mu x (1 + x) (r.b)^2.
+        //
+        // at mu = 0, x = 1 and rbar_sq = r^2, so f_a(0) = -1 for every state. for mu >= 0 and
+        // b^2 >= 0, x lies in (0, 1], so both terms of rbar_sq are non-negative whenever
+        // (r.b)^2 >= 0, giving f_a(1) = sqrt(1 + rbar_sq(1)) - 1 >= 0. an f_a(1) < 0 anywhere on
+        // this lattice IS the condition the escalation exists to handle, and would mean the
+        // bracket can open below the root and admit the spurious superluminal branch.
+        for (bee_sq, rdb_sq, r) in admissible_bracket_invariants() {
+            let at_zero = kkc_fmu49::<f64>(0.0, bee_sq, rdb_sq, r);
+            assert_eq!(
+                at_zero, -1.0,
+                "f_a(0) must be exactly -1 (b^2={bee_sq}, (r.b)^2={rdb_sq}, r={r})"
+            );
+            let at_one = kkc_fmu49::<f64>(1.0, bee_sq, rdb_sq, r);
+            assert!(
+                at_one >= 0.0,
+                "f_a(1) < 0 demands escalation above the [0, 1] bracket \
+                 (b^2={bee_sq}, (r.b)^2={rdb_sq}, r={r}): {at_one}"
+            );
+        }
+    }
+
+    #[test]
+    fn find_mu_plus_returns_a_straddle_preserving_bracket_inside_the_unit_interval() {
+        // the property the master solve consumes: the returned value is at or above the f_a root
+        // (so f_master there is non-negative and the straddle holds) and at or below 1 (so the
+        // search never left the interval the endpoint signs justify). the zero-momentum state
+        // r = 0 saturates it exactly -- f_a(mu) = mu - 1 there, root at mu = 1 -- so the unit
+        // interval is tight, not merely sufficient.
+        for (bee_sq, rdb_sq, r) in admissible_bracket_invariants() {
+            let mu_plus = find_mu_plus::<f64>(bee_sq, rdb_sq, r);
+            assert!(
+                mu_plus > 0.0 && mu_plus <= 1.0,
+                "mu_+ left (0, 1] (b^2={bee_sq}, (r.b)^2={rdb_sq}, r={r}): {mu_plus}"
+            );
+            let f_at = kkc_fmu49::<f64>(mu_plus, bee_sq, rdb_sq, r);
+            assert!(
+                f_at >= 0.0,
+                "mu_+ is below the f_a root, so the master straddle is lost \
+                 (b^2={bee_sq}, (r.b)^2={rdb_sq}, r={r}): f_a={f_at}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signed_field_momentum_pairing_would_open_the_bracket_below_the_root() {
+        // the (r.b)^2 >= 0 hypothesis is load-bearing rather than incidental, and the recovery
+        // supplies it by squaring the metric-free pairing r_i h^i. feeding the SIGNED pairing of
+        // an anti-aligned field drives rbar_sq negative and f_a(1) below zero -- the exact
+        // condition under which [0, 1] no longer brackets. this gate fails if a refactor ever
+        // hands the bracket the pairing itself, which on any shock with an anti-aligned normal
+        // field would otherwise degrade silently into the spurious-root selection.
+        let (bee_sq, r) = (1.0, 1.0);
+        let pairing = -1.0_f64; // r.b < 0: field anti-aligned with the momentum
+        let signed = kkc_fmu49::<f64>(1.0, bee_sq, pairing, r);
+        assert!(
+            signed < 0.0,
+            "the signed pairing must break the unit bracket for this gate to have force: {signed}"
+        );
+        let squared = kkc_fmu49::<f64>(1.0, bee_sq, pairing * pairing, r);
+        assert!(
+            squared >= 0.0,
+            "squaring the pairing must restore the bracket: {squared}"
+        );
     }
 
     #[test]
