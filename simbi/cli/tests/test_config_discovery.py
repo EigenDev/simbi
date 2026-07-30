@@ -86,3 +86,75 @@ def test_is_config_file_recognizes_a_subclass_of_an_imported_base(tmp_path: Path
         "print(BaseCfg.__name__)\n"
     )
     assert not _is_config_file(helper)
+
+
+# =============================================================================
+# which ROOTS get searched (the above covers what is a config once a root is walked)
+#
+# discovery used to locate the checkout through a `gitrepo_home.txt` marker written
+# beside the package -- except nothing ever wrote it and it was gitignored, so a fresh
+# install fell back to a cwd-local `simbi_configs/` and just reported fewer problems.
+# run from anywhere but the checkout root and the shipped library was invisible, with no
+# error to explain it. the roots are derived now rather than recorded.
+# =============================================================================
+import os
+
+from simbi.cli.actions import config_roots, get_available_configs
+
+_CHECKOUT_CONFIGS = Path(__file__).resolve().parents[3] / "simbi_configs"
+
+
+def test_bundled_configs_are_found_from_an_unrelated_directory(tmp_path, monkeypatch):
+    # the regression, exactly: an empty cwd carrying no simbi_configs/ of its own.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SIMBI_CONFIG_PATH", raising=False)
+    assert not (tmp_path / "simbi_configs").exists()
+    assert get_available_configs(), (
+        "no configs discovered from a directory with no local simbi_configs/ -- the "
+        "shipped library is invisible to `simbi run` outside the checkout"
+    )
+
+
+def test_a_cwd_local_directory_is_also_searched(tmp_path, monkeypatch):
+    # the other half: drop a simbi_configs/ beside you and your own problems become
+    # name-addressable without passing a path.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SIMBI_CONFIG_PATH", raising=False)
+    local = tmp_path / "simbi_configs"
+    local.mkdir()
+    assert local.resolve() in {r.resolve() for r in config_roots()}
+
+
+def test_the_env_var_takes_priority(tmp_path, monkeypatch):
+    # SIMBI_CONFIG_PATH is the explicit override, so it comes first: a user pointing at
+    # their own library must not have the shipped one shadow it.
+    monkeypatch.chdir(tmp_path)
+    mine = tmp_path / "mine"
+    mine.mkdir()
+    monkeypatch.setenv("SIMBI_CONFIG_PATH", str(mine))
+    roots = config_roots()
+    assert roots and roots[0].resolve() == mine.resolve(), f"roots were {roots}"
+
+
+def test_missing_roots_are_skipped_rather_than_raising(tmp_path, monkeypatch):
+    # discovery runs on every `simbi run`, so an absent root must never be what kills the
+    # command -- which is also why the old marker failed silently instead of loudly.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "SIMBI_CONFIG_PATH",
+        os.pathsep.join([str(tmp_path / "nope"), str(tmp_path / "also-nope")]),
+    )
+    for root in config_roots():
+        assert root.is_dir(), f"{root} does not exist but was returned as a root"
+    get_available_configs()  # must not raise
+
+
+def test_the_checkout_sibling_is_among_the_roots(tmp_path, monkeypatch):
+    # what replaced the marker: the package sits at <checkout>/simbi and the configs at
+    # <checkout>/simbi_configs, so the location is a relative fact about the layout and
+    # needs nothing written at install time.
+    if not _CHECKOUT_CONFIGS.is_dir():
+        return
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SIMBI_CONFIG_PATH", raising=False)
+    assert _CHECKOUT_CONFIGS.resolve() in {r.resolve() for r in config_roots()}

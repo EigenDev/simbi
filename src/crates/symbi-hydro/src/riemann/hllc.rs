@@ -4,7 +4,7 @@
 // the HLLC three-wave riemann solvers — one function per regime, all
 // rotationally and dimensionally invariant (nhat-parametrized, generic over
 // `S: Scalar` and `const D: usize`). a `ShockwaveLimiter` parameter
-// selects the variant (Standard / Fleischmann LM / Quirk-fallback); the
+// selects the variant (Standard / Fleischmann LM); the
 // relativistic regimes ignore it.
 //
 //   newtonian  `hllc`       — toro eq 10.37-10.39 star state, +/- fleischmann LM.
@@ -17,7 +17,7 @@
 // =============================================================================
 
 use super::hlle::hlle;
-use crate::dissipation::{ShockwaveLimiter, adaptive_phi, quirk_strong_shock};
+use crate::dissipation::{ShockwaveLimiter, adaptive_phi};
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::newtonian::Newtonian;
@@ -29,17 +29,6 @@ use crate::state::{Cons, Prim};
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::{Scalar, Selectable};
 
-/// the Quirk fallback gate shared by every regime — `D > 1` AND
-/// `shock_smoother == Quirk`. the `D > 1` half is a compile-time check
-/// (`const D: usize` is fixed per monomorphization, so the dead branch
-/// drops at codegen for D = 1), the `if constexpr (rank > 1)` guard.
-/// the `Quirk` half is runtime, but at S = Gv trace time `shock_smoother`
-/// is fixed by the host that built the trace, so the match below
-/// monomorphizes too — no per-cell smoother branch leaks into the kernel.
-#[inline]
-fn quirk_gate_active<const D: usize>(shock_smoother: ShockwaveLimiter) -> bool {
-    D > 1 && matches!(shock_smoother, ShockwaveLimiter::Quirk)
-}
 
 // =============================================================================
 // newtonian HLLC — toro section 9.5.2 adaptive estimates + fleischmann LM.
@@ -172,9 +161,6 @@ fn star_state<S: Scalar, const D: usize>(
 /// `shock_smoother`:
 ///   - `Standard`     — plain HLLC.
 ///   - `Fleischmann`  — symmetric flux (fleischmann eq 11) with adaptive phi.
-///   - `Quirk`        — in `D > 1`, falls back to HLLE per-cell when
-///                      `quirk_strong_shock` fires (relative pressure jump
-///                      exceeds `QUIRK_THRESHOLD`).
 pub fn hllc<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
@@ -183,28 +169,12 @@ pub fn hllc<S: Scalar, const D: usize>(
     vface: S,
     shock_smoother: ShockwaveLimiter,
 ) -> Cons<S, D> {
-    let regime = Newtonian;
-
-    // Quirk fallback to HLLE — `D > 1` is a compile-time const guard, the
-    // `Quirk` arm matches at host build time; per-cell mask via
-    // `quirk_strong_shock` picks HLLE for shocked faces, HLLC for everything
-    // else. the early-return lives in the `constexpr if (rank > 1)` guard.
-    if quirk_gate_active::<D>(shock_smoother) {
-        let mask = quirk_strong_shock(prim_l.pre, prim_r.pre);
-        return S::branch(
-            mask,
-            || hlle(&regime, eos, prim_l, prim_r, nhat, vface),
-            || hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, ShockwaveLimiter::Standard),
-        );
-    }
-
     hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, shock_smoother)
 }
 
 /// the newtonian HLLC body — Standard / Fleischmann star-state dispatch,
-/// no Quirk handling (the outer `hllc` already routed Quirk + strong-shock
 /// cells to HLLE before reaching this point). callable directly for
-/// regression diff harnesses that want to bypass the Quirk gate.
+/// regression diff harnesses.
 #[inline]
 fn hllc_newtonian_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -238,7 +208,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
         // standard HLLC: branchless three-way dispatch on the signal speeds.
         // the upwind side uses its OWN star state (toro 10.21); supersonic
         // states pass through with the ALE `vface` correction.
-        ShockwaveLimiter::Standard | ShockwaveLimiter::Quirk => S::branch(
+        ShockwaveLimiter::Standard => S::branch(
             s_l.cmp_ge(vface),
             || f_l - u_l * vface,
             || {
@@ -389,7 +359,7 @@ fn rhd_star_state<S: Scalar, const D: usize>(
 }
 
 /// HLLC for special-relativistic hydrodynamics (mignone-bodo 2005). ONE
-/// function for all dimensions and directions. honors the `Quirk` fallback in `D > 1` and the
+/// function for all dimensions and directions. honors the
 /// `Fleischmann` low-mach acoustic-dissipation scaling.
 pub fn hllc_rhd<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -399,24 +369,10 @@ pub fn hllc_rhd<S: Scalar, const D: usize>(
     vface: S,
     shock_smoother: ShockwaveLimiter,
 ) -> Cons<S, D> {
-    let regime = crate::rhd::Rhd;
-
-    // Quirk fallback — same shape as the newtonian gate. the carrier-
-    // generic mask routes per cell at S = Gv; at S = f64 it's a bool short-circuit.
-    if quirk_gate_active::<D>(shock_smoother) {
-        let mask = quirk_strong_shock(prim_l.pre, prim_r.pre);
-        return S::branch(
-            mask,
-            || hlle(&regime, eos, prim_l, prim_r, nhat, vface),
-            || hllc_rhd_body(eos, prim_l, prim_r, nhat, vface, shock_smoother),
-        );
-    }
-
     hllc_rhd_body(eos, prim_l, prim_r, nhat, vface, shock_smoother)
 }
 
-/// the RHD HLLC body (no Quirk gate). split out so the outer function can
-/// route Quirk + strong-shock cells to HLLE without re-emitting the body.
+/// the RHD HLLC body, split out so the outer function can wrap it without re-emitting it.
 #[inline]
 fn hllc_rhd_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
@@ -447,7 +403,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                     let (a_star, p_star) =
                         rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
                     match shock_smoother {
-                        ShockwaveLimiter::Standard | ShockwaveLimiter::Quirk => S::branch(
+                        ShockwaveLimiter::Standard => S::branch(
                             a_star.cmp_ge(vface),
                             || {
                                 let us = rhd_star_state(
@@ -531,7 +487,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
 /// builds on the HLL intermediate state, solves a quadratic for the contact
 /// speed `a_star`, branches on whether the normal B-field is null. ONE
 /// function for all dimensions and directions. carrier-generic over `S`.
-/// honors the `Quirk` fallback in `D > 1`; Fleischmann LM does not apply to relativistic
+/// Fleischmann LM does not apply to relativistic
 /// regimes (treated as Standard if requested). reads the pressure jump
 /// from the hydro half of the MHD primitive (`prim_l.hydro.pre`).
 pub fn hllc_rmhd<S: Scalar, const D: usize>(
@@ -541,24 +497,14 @@ pub fn hllc_rmhd<S: Scalar, const D: usize>(
     prim_r: &MhdPrim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
-    shock_smoother: ShockwaveLimiter,
+    // taken for signature uniformity with the hydro solvers; the magnetized HLLC has no
+    // low-mach variant, so there is no flavor to select.
+    _shock_smoother: ShockwaveLimiter,
 ) -> MhdCons<S, D> {
-    // Quirk fallback. RMHD's primitive nests hydro inside MhdPrim, so the
-    // pressure for the detector lives at `prim_l.hydro.pre`.
-    if quirk_gate_active::<D>(shock_smoother) {
-        let mask = quirk_strong_shock(prim_l.hydro.pre, prim_r.hydro.pre);
-        return S::branch(
-            mask,
-            || hlle(regime, eos, prim_l, prim_r, nhat, vface),
-            || hllc_rmhd_body(regime, eos, prim_l, prim_r, nhat, vface),
-        );
-    }
-
     hllc_rmhd_body(regime, eos, prim_l, prim_r, nhat, vface)
 }
 
-/// the RMHD HLLC body (no Quirk gate). split out so the outer function can
-/// route Quirk + strong-shock cells to HLLE without re-emitting the body.
+/// the RMHD HLLC body, split out so the outer function can wrap it without re-emitting it.
 fn hllc_rmhd_body<S: Scalar, const D: usize>(
     regime: &Rmhd,
     eos: &impl Eos<S>,
@@ -705,24 +651,17 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
 // (that is HLLD's job). consistent (F(U,U) == F(U)); physicality-gated to HLLE.
 // =============================================================================
 
-/// the Newtonian ideal-MHD HLLC flux. `shock_smoother` enables the D>1 Quirk
-/// strong-shock fallback to HLLE (matching the other regimes' HLLC).
+/// the Newtonian ideal-MHD HLLC flux.
 pub fn hllc_newtonian<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
-    shock_smoother: ShockwaveLimiter,
+    // taken for signature uniformity with the hydro solvers; the magnetized HLLC has no
+    // low-mach variant, so there is no flavor to select.
+    _shock_smoother: ShockwaveLimiter,
 ) -> MhdCons<S, D> {
-    if quirk_gate_active::<D>(shock_smoother) {
-        let mask = quirk_strong_shock(prim_l.hydro.pre, prim_r.hydro.pre);
-        return S::branch(
-            mask,
-            || hlle(&NewtonianMhd, eos, prim_l, prim_r, nhat, vface),
-            || hllc_nmhd_body(eos, prim_l, prim_r, nhat, vface),
-        );
-    }
     hllc_nmhd_body(eos, prim_l, prim_r, nhat, vface)
 }
 
@@ -1080,105 +1019,6 @@ mod tests {
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
-    }
-
-    #[test]
-    fn hllc_quirk_is_a_noop_in_1d() {
-        // the Quirk fallback is gated on `D > 1` (`if constexpr (rank > 1)`).
-        // in 1D the gate fires `false` AT COMPILE TIME and the standard HLLC
-        // body runs — so Quirk and Standard must be bit-identical even on a
-        // strong-shock 1D problem (sod). protects against regression in the
-        // const-generic D > 1 guard.
-        let eos = IdealGas { gamma: 1.4 };
-        let prim_l = Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0]),
-            pre: 1.0,
-        };
-        let prim_r = Prim {
-            rho: 0.125,
-            vel: Tensor::new([0.0]),
-            pre: 0.1,
-        };
-        let nhat = Tensor::unit(0);
-        let f_std = hllc(
-            &eos,
-            &prim_l,
-            &prim_r,
-            &nhat,
-            0.0,
-            ShockwaveLimiter::Standard,
-        );
-        let f_quirk = hllc(&eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Quirk);
-        assert!(approx(f_std.den, f_quirk.den));
-        assert!(approx(f_std.mom[0], f_quirk.mom[0]));
-        assert!(approx(f_std.nrg, f_quirk.nrg));
-    }
-
-    #[test]
-    fn hllc_quirk_smooth_state_2d_matches_standard() {
-        // a smooth (uniform) 2D state has zero pressure jump — the
-        // `quirk_strong_shock` detector returns false and the standard HLLC
-        // body runs. Quirk must match Standard in this regime.
-        let eos = IdealGas { gamma: 1.4 };
-        let prim = Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.3, -0.1]),
-            pre: 1.0,
-        };
-        let nhat = Tensor::unit(0);
-        let f_std = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
-        let f_quirk = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Quirk);
-        assert!(approx(f_std.den, f_quirk.den));
-        assert!(approx(f_std.mom[0], f_quirk.mom[0]));
-        assert!(approx(f_std.mom[1], f_quirk.mom[1]));
-        assert!(approx(f_std.nrg, f_quirk.nrg));
-    }
-
-    #[test]
-    fn hllc_quirk_strong_shock_2d_falls_back_to_hlle() {
-        // a strong pressure jump in 2D triggers the Quirk detector — the flux
-        // MUST equal the HLLE flux on that face. this is the actual
-        // safety guarantee Quirk provides: carbuncle-prone shocks take the
-        // dissipative two-wave solver; the contact-resolving three-wave
-        // solver is bypassed.
-        let eos = IdealGas { gamma: 1.4 };
-        let prim_l = Prim {
-            rho: 1.0,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 1.0,
-        };
-        let prim_r = Prim {
-            rho: 0.125,
-            vel: Tensor::new([0.0, 0.0]),
-            pre: 0.1,
-        };
-        let nhat = Tensor::unit(0);
-        let regime = Newtonian;
-        let f_quirk = hllc(&eos, &prim_l, &prim_r, &nhat, 0.0, ShockwaveLimiter::Quirk);
-        let f_hlle = hlle(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
-        assert!(
-            approx(f_quirk.den, f_hlle.den),
-            "Quirk strong shock must equal HLLE: {} vs {}",
-            f_quirk.den,
-            f_hlle.den
-        );
-        assert!(approx(f_quirk.mom[0], f_hlle.mom[0]));
-        assert!(approx(f_quirk.mom[1], f_hlle.mom[1]));
-        assert!(approx(f_quirk.nrg, f_hlle.nrg));
-    }
-
-    #[test]
-    fn quirk_strong_shock_detector_threshold() {
-        // direct test of the detector — fires when `|pr - pl| / min(pl, pr) > 1e-4`.
-        use crate::dissipation::quirk_strong_shock;
-        // exact threshold: 1e-4 relative jump (1.0 vs 1.0001) — just at the line.
-        assert!(!quirk_strong_shock::<f64>(1.0, 1.00005)); // 5e-5 < 1e-4, no shock
-        assert!(quirk_strong_shock::<f64>(1.0, 1.0002)); // 2e-4 > 1e-4, shock
-        // sod-class jump (1.0 vs 0.1) is firmly a shock — 9x relative.
-        assert!(quirk_strong_shock::<f64>(1.0, 0.1));
-        // symmetric — pl/pr swap doesn't change the verdict.
-        assert!(quirk_strong_shock::<f64>(0.1, 1.0));
     }
 
     #[test]

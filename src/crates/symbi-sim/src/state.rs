@@ -2660,6 +2660,24 @@ pub struct ConservationDiag {
     /// max Lorentz factor W = 1/sqrt(1 - v^2) over the interior; None for
     /// non-relativistic regimes (where v is unbounded and W is undefined).
     pub max_w: Option<f64>,
+    /// max over the interior of the kinetic-to-internal energy ratio carried by the
+    /// CONSERVED state, `(|m|^2 / 2 rho) / (E - |m|^2 / 2 rho)`.
+    ///
+    /// this is the CONDITIONING of the energy split. recovering internal energy from the
+    /// total is the subtraction `e = E - |m|^2 / 2 rho`, so at a ratio R the result is a
+    /// `1/(1 + R)` fraction of the operands and roughly `log10(R)` significant digits are
+    /// lost every time it is evaluated. an ordinary mach-M flow sits at
+    /// `gamma (gamma - 1) M^2 / 2` (about 56 at M = 10, gamma = 5/3), so large values mean
+    /// a cold, kinetically dominated flow rather than a bug by themselves.
+    ///
+    /// it is reported because the associated failure is SILENT and self-reinforcing: an
+    /// under-recovered internal energy cools the gas, which raises the ratio, which
+    /// worsens the next inversion. it also hides from the timestep, since the collapsing
+    /// internal energy keeps the sound speed small and the CFL comfortable.
+    ///
+    /// None for relativistic regimes, whose c2p is a bracketed root-find rather than this
+    /// subtraction, and for isothermal ones, which carry no energy field at all.
+    pub max_ke_over_eint: Option<f64>,
 }
 
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
@@ -2745,11 +2763,42 @@ where
             None
         };
 
+        // the energy split's conditioning, from the CONSERVED state, since that is the
+        // pair the c2p subtraction actually operates on. cells with a non-positive
+        // recovered internal energy are already unphysical and are left to the c2p
+        // diagnostics rather than contributing an inverted ratio here.
+        let max_ke_over_eint = if <R as Regime<f64, D>>::SPEC.is_relativistic {
+            None
+        } else {
+            nrg.as_ref().map(|nv| {
+                let mom: [_; DOF] = std::array::from_fn(|k| self.fields.cons.mom[k].view());
+                let mut worst = 0.0_f64;
+                for c in self.geom.interior.iter() {
+                    let rho = *den.at(c);
+                    if rho <= 0.0 {
+                        continue;
+                    }
+                    let mut m_sq = 0.0_f64;
+                    for m in mom.iter() {
+                        let mk = *m.at(c);
+                        m_sq += mk * mk;
+                    }
+                    let ke = 0.5 * m_sq / rho;
+                    let e_int = *nv.at(c) - ke;
+                    if e_int > 0.0 {
+                        worst = worst.max(ke / e_int);
+                    }
+                }
+                worst
+            })
+        };
+
         Some(ConservationDiag {
             mass,
             energy: nrg.map(|_| energy),
             div_b,
             max_w,
+            max_ke_over_eint,
         })
     }
 

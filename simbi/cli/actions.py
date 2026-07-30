@@ -207,20 +207,31 @@ def _find_configs(root: Path) -> list[Path]:
     return found
 
 
+def config_roots() -> list[Path]:
+    """the directories searched for problem configs, in priority order.
+
+    - `SIMBI_CONFIG_PATH`, a colon-separated list, if you want to point simbi at your own
+      library from anywhere;
+    - the `simbi_configs` that ships beside the package, which exists for a source checkout
+      or an editable install and simply is not there for a plain wheel;
+    - a `simbi_configs` in the current directory (real or symlinked), which is how you make
+      your own configs name-addressable without passing a path.
+
+    Anything missing is skipped, so discovery never dies on a layout it does not recognize.
+    """
+    roots: list[Path] = []
+    env = os.environ.get("SIMBI_CONFIG_PATH", "")
+    roots.extend(Path(p).expanduser() for p in env.split(os.pathsep) if p)
+    # `simbi/cli/actions.py` -> the package -> the checkout that contains it.
+    roots.append(Path(__file__).resolve().parent.parent.parent / "simbi_configs")
+    roots.append(Path("simbi_configs"))
+    return [r for r in roots if r.is_dir()]
+
+
 def get_available_configs():
-    # the repo's bundled configs plus a cwd-local `simbi_configs` (real or
-    # symlinked), deduplicated by resolved path so the same file isn't listed
-    # twice when invoked from the repo root. the repo-home marker is written at
-    # install time; an install without it (or an unreadable marker) degrades to
-    # cwd-local discovery so no command dies with a traceback.
-    roots = [Path("simbi_configs")]
-    try:
-        marker = Path(__file__).resolve().parent.parent / "gitrepo_home.txt"
-        githome = marker.read_text().strip()
-        if githome:
-            roots.insert(0, Path(githome).resolve() / "simbi_configs")
-    except OSError:
-        pass
+    # deduplicated by resolved path, so the same file is not listed twice when a root is
+    # a symlink to another or when you invoke this from the checkout itself.
+    roots = config_roots()
     configs: list[Path] = []
     seen: set[Path] = set()
     for root in roots:

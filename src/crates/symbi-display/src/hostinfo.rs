@@ -83,10 +83,10 @@ pub fn cpu_count() -> usize {
         .unwrap_or(1)
 }
 
-/// threads the run is configured to use: OMP_NUM_THREADS / NTHREADS if set (the
-/// dashboard driver honors these), else the logical cpu count.
+/// threads the run is configured to use: `RAYON_NUM_THREADS` if set, else the logical
+/// cpu count. the cpu path fans kernels out over rayon, so that is the knob that binds.
 pub fn thread_count() -> usize {
-    for var in ["OMP_NUM_THREADS", "NTHREADS", "RAYON_NUM_THREADS"] {
+    for var in ["RAYON_NUM_THREADS"] {
         if let Ok(n) = std::env::var(var) {
             if let Ok(n) = n.trim().parse::<usize>() {
                 if n > 0 {

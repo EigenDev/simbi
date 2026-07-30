@@ -2,7 +2,7 @@
 // dissipation_carrier_oracle.rs
 //
 // unit + carrier-equivalence coverage for the adaptive-dissipation detectors in
-// `symbi_hydro::dissipation` (quirk_strong_shock, adaptive_phi, local_mach).
+// `symbi_hydro::dissipation` (adaptive_phi, local_mach).
 // these are carrier-generic over `S: Scalar` and used in the HLLC riemann path, so each one
 // needs a Gv-equivalence test that ALSO renders to device source.
 //
@@ -21,7 +21,7 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
-use symbi_hydro::dissipation::{QUIRK_THRESHOLD, adaptive_phi, local_mach, quirk_strong_shock};
+use symbi_hydro::dissipation::{adaptive_phi, local_mach};
 use symbi_hydro::state::Prim;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -158,59 +158,6 @@ fn close(a: f64, b: f64, what: &str) {
     assert!(
         rel < 1e-12,
         "{what}: f64 {a} != gv-interp {b} (rel {rel:e})"
-    );
-}
-
-// =============================================================================
-// quirk_strong_shock — fires when |pr - pl| / min(pl, pr) > QUIRK_THRESHOLD.
-// returns S::Mask; at f64 that is bool. BOTH sides of the threshold are exercised
-// (1e-4) plus the symmetry pr<->pl, the boundary, and the smooth no-fire case.
-// =============================================================================
-
-#[test]
-fn quirk_strong_shock_f64_branches() {
-    // strong jump: huge pressure ratio -> fires.
-    assert!(quirk_strong_shock::<f64>(1.0, 100.0));
-    assert!(quirk_strong_shock::<f64>(100.0, 1.0)); // symmetric: |pr-pl|/min picks the small one
-
-    // smooth: equal pressures -> jump 0 -> does NOT fire.
-    assert!(!quirk_strong_shock::<f64>(1.0, 1.0));
-
-    // straddle the threshold. with p_min = 1, jump = |pr - pl|.
-    // pr = 1 + 2e-4 -> jump/min = 2e-4 > 1e-4 -> fires.
-    assert!(quirk_strong_shock::<f64>(1.0, 1.0 + 2.0 * QUIRK_THRESHOLD));
-    // pr = 1 + 0.5e-4 -> jump/min = 0.5e-4 < 1e-4 -> does NOT fire.
-    assert!(!quirk_strong_shock::<f64>(1.0, 1.0 + 0.5 * QUIRK_THRESHOLD));
-
-    // the boundary itself is strict-greater: exactly == threshold does NOT fire.
-    assert!(!quirk_strong_shock::<f64>(1.0, 1.0 + QUIRK_THRESHOLD));
-}
-
-#[test]
-fn quirk_strong_shock_carrier_equivalence() {
-    // mask -> scalar via select(mask, 1, 0) so the trace returns a single carrier node.
-    let probe = |pl: f64, pr: f64| {
-        let want = f64::select(quirk_strong_shock::<f64>(pl, pr), 1.0, 0.0);
-        let got = gv_eval(
-            |p| Gv::select(quirk_strong_shock::<Gv>(p[0], p[1]), Gv::ONE, Gv::ZERO),
-            &["pl", "pr"],
-            &[pl, pr],
-        );
-        close(want, got, &format!("quirk_strong_shock({pl},{pr})"));
-    };
-    // both branches of the select must be driven across calls.
-    probe(1.0, 100.0); // fires
-    probe(1.0, 1.0); // smooth
-    probe(1.0, 1.0 + 2.0 * QUIRK_THRESHOLD); // just over
-    probe(1.0, 1.0 + 0.5 * QUIRK_THRESHOLD); // just under
-    probe(50.0, 2.0); // reversed strong
-}
-
-#[test]
-fn quirk_strong_shock_lowers() {
-    assert_lowers(
-        |p| Gv::select(quirk_strong_shock::<Gv>(p[0], p[1]), Gv::ONE, Gv::ZERO),
-        &["pl", "pr"],
     );
 }
 

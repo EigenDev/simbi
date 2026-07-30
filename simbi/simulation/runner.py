@@ -502,7 +502,7 @@ def _load_backend(compute_mode: str) -> Optional[ModuleType]:
     extension that EXISTS but fails to load -- typically a GPU runtime version mismatch
     between build and run, surfacing as an undefined symbol -- raises: silently demoting a
     scheduled GPU job to a config dump wastes the whole allocation."""
-    lib_mode = "cpu" if compute_mode in ["cpu", "omp"] else "gpu"
+    lib_mode = "cpu" if compute_mode == "cpu" else "gpu"
     if lib_mode == "gpu":
         _enable_gpu_page_migration()
     try:
@@ -613,7 +613,7 @@ def run(
 
     args:
         problem: the problem configuration
-        compute_mode: "cpu", "omp", or "gpu"
+        compute_mode: "cpu" or "gpu"
         validate: if True, validate generator output before running
         live_monitor: if True, write a read-only snapshot each cadence so
             `simbi attach <data_directory>` can monitor a headless run

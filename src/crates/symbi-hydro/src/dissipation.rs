@@ -27,16 +27,10 @@ use symbi_ir::algebra::Scalar;
 ///   - `Fleischmann`  — newtonian only: HLLC + fleischmann et al. (2020)
 ///                      adaptive-phi low-mach correction. relativistic
 ///                      regimes ignore (no relativistic LM correction).
-///   - `Quirk`        — RESERVED. falls back to HLLE in 2D+ when the
-///                      `quirk_strong_shock` detector fires. the detector
-///                      and threshold are not yet implemented; the variant
-///                      is enumerated so a future patch lands without API
-///                      churn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShockwaveLimiter {
     Standard,
     Fleischmann,
-    Quirk,
 }
 
 impl Default for ShockwaveLimiter {
@@ -45,29 +39,6 @@ impl Default for ShockwaveLimiter {
     }
 }
 
-/// relative pressure-jump threshold for the Quirk strong-shock detector.
-/// `QUIRK_THRESHOLD = 1e-4`.
-pub const QUIRK_THRESHOLD: f64 = 1e-4;
-
-/// Quirk strong-shock detector — fires when the relative pressure jump
-/// across the face exceeds `QUIRK_THRESHOLD`:
-///
-/// ```text
-///   bool quirk_strong_shock(real pl, real pr) {
-///       return |pr - pl| / min(pl, pr) > QUIRK_THRESHOLD;
-///   }
-/// ```
-///
-/// returns `Self::Mask` so the carrier-generic
-/// dispatch via `S::branch` works uniformly at S = f64 (host bool) and
-/// S = Gv (graph mask). callers gate the HLLC -> HLLE fallback on this
-/// mask; the gate is meaningful only in `D > 1` (1D doesn't carbuncle).
-#[inline]
-pub fn quirk_strong_shock<S: Scalar>(p_l: S, p_r: S) -> S::Mask {
-    let jump = (p_r - p_l).abs();
-    let p_min = p_l.min(p_r);
-    (jump / p_min).cmp_gt(S::from_f64(QUIRK_THRESHOLD))
-}
 
 /// the local mach number of a face's Riemann problem: `max(|u_L/c_L|, |u_R/c_R|)` where `u` is the
 /// velocity component ALONG THE FACE NORMAL and `c` the sound speed.
@@ -106,7 +77,7 @@ pub const MACH_LIMIT: f64 = 0.1;
 /// opposite of what the scheme is for — every competing shock-stable HLLC variant stabilizes by
 /// adding dissipation somewhere, and the point of this one is that it removes it instead. Where a
 /// strong shock genuinely needs a more dissipative flux, that is the job of a solver fallback
-/// (`ShockwaveLimiter::Quirk`), not of a term buried in the low-mach scaling.
+/// a separate solver fallback, not a term buried in the low-mach scaling.
 #[inline]
 pub fn adaptive_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S) -> S {
     let half_pi = S::from_f64(std::f64::consts::FRAC_PI_2);

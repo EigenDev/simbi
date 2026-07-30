@@ -152,13 +152,6 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
 
 def _configure_environment(args: Namespace) -> None:
     """configure environment variables for simulation."""
-    if hasattr(args, "nthreads") and args.nthreads:
-        os.environ["OMP_NUM_THREADS"] = str(args.nthreads)
-        os.environ["NTHREADS"] = str(args.nthreads)
-
-    if args.compute_mode == "omp":
-        os.environ["USE_OMP"] = "1"
-
     # gpu block dims are set by RegisterGPUBlockDimensions action
 
 
