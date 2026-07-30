@@ -20,7 +20,7 @@ cuda = ["gpu", "symbi-xpu/cuda", "dep:symbi-xpu"]
 hip = ["gpu", "symbi-xpu/hip", "dep:symbi-xpu"]
 
 [dev-dependencies]
-hdf5-metno = "0.12"
+hdf5-metno = { version = "0.12", features = ["static"] }
 
 [lints]
 workspace = true

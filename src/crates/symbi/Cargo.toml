@@ -36,7 +36,7 @@ symbi-discretize = { path = "../symbi-discretize" }
 symbi-jit = { path = "../symbi-jit" }
 symbi-display = { path = "../symbi-display" }
 symbi-io = { path = "../symbi-io" }
-hdf5-metno = "0.12"
+hdf5-metno = { version = "0.12", features = ["static"] }
 rayon = "1"
 # stack-resident small vectors for the per-dispatch buffer-layout list (bounded
 # by buffer count), so `dispatch_fields_each` doesn't heap-allocate per call.
@@ -48,7 +48,7 @@ smallvec = "1"
 symbi-xpu = { path = "../symbi-xpu" }
 
 [dev-dependencies]
-hdf5-metno = "0.12"
+hdf5-metno = { version = "0.12", features = ["static"] }
 symbi-display = { path = "../symbi-display" }
 
 # zone-cycle throughput benches (Mzcps). custom main(), so harness = false.

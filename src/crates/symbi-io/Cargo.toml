@@ -13,8 +13,10 @@ symbi-hydro = { path = "../symbi-hydro" }
 symbi-grid = { path = "../symbi-grid" }
 # Domain (the iteration shape behind every Field).
 symbi-algebra = { path = "../symbi-algebra" }
-# the per-backend writers; HDF5 is the production checkpoint format.
-hdf5-metno = "0.12"
+# the per-backend writers; HDF5 is the production checkpoint format. `static` compiles the
+# bundled HDF5 C sources instead of probing for a system install, which keeps the checkpoint
+# format pinned to one library version across every machine the code builds on.
+hdf5-metno = { version = "0.12", features = ["static"] }
 
 [lints]
 workspace = true
