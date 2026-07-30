@@ -34,16 +34,18 @@ A quick note on what this is these days: SIMBI started life as a C++ code and wa
 
 **What you get:**
 - Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
-- Spacetime as its own axis: hand the relativistic regimes a Minkowski, Schwarzschild, or horizon-penetrating Kerr-Schild metric the same way you would pick a coordinate system
+- Spacetime as its own axis: hand the relativistic regimes a Minkowski or horizon-penetrating Kerr-Schild metric (nonspinning or Kerr) the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA CUDA and AMD ROCm/HIP devices, with kernels compiled on the fly for the active accelerator
 - High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant, see [Fleischmann et al. 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches (still working on strengthening this. Maybe I'll switch to [Zalesak and friends](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf) at some point).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
 - A rich immersed-boundary method: point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls of *any* constructive solid geometry (CSG) shape (spheres, boxes, unions/intersections) with no-penetration / no-slip porous surfaces. Bodies can be one-way (prescribed motion) or **two-way coupled** — the gas reaction force and torque then drive the body's full rigid-body dynamics: translation, plus rotation about an arbitrary axis via Euler's equations with a principal-moment inertia tensor, so an asymmetric body tumbles and precesses. Spinning walls drag the gas at omega x r, the gas <-> body energy exchange conserves total energy, and every body reports force / torque / accretion diagnostics. I took [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin)'s class during my time as a graduate student at NYU,
 and I loved it so much that I thought it'd be cool to introduce it into my code! 
-- Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is excised and refilled by a causal one-way onion sweep, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
+- Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is frozen at a cold vacuum, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
 - Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
+- In-situ binned reductions (a "census"): declare shell profiles as expressions and the run reduces them on the device each cadence, straight into the checkpoint — handy when you want a scaling law rather than a pile of snapshots
+- Lagrangian tracer particles that ride along with the flow, across refinement levels and multi-GPU cuts too
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
@@ -51,7 +53,7 @@ and I loved it so much that I thought it'd be cool to introduce it into my code!
 > CUDA and HIP are peer production backends generated from the same kernel
 definitions. Multi-*node* decomposition is the next step on the roadmap;
 single-node multi-GPU already runs today.
-I don't have a science problem that needs it at this time, so it prob won't be added for 
+I don't have a science problem that needs multi-node at this time, so it prob won't be added for 
 quite a while.
 ---
 
@@ -92,7 +94,7 @@ uv pip install .
 uv run simbi run marti-muller --mode cpu --resolution 400
 
 # look at the result
-uv run simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
+uv run simbi plot data/400.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --fields rho v p
 ```
 You can also save a bunch of time by doing `source .venv/bin/activate` and you'll remain in the 
 simbi environment you created when you ran `uv venv`. 
@@ -101,8 +103,8 @@ Got an NVIDIA or AMD accelerator? Select its production backend through the
 project helper:
 
 ```bash
-./dev.py install --cuda
-./dev.py install --hip
+uv sync --no-install-project   # puts maturin in the venv; dev.py needs it
+./dev.py install --cuda        # or --hip for AMD; they're alternatives, not a sequence
 uv run simbi run marti-muller --mode gpu --resolution 1024
 ```
 
@@ -146,7 +148,7 @@ uv pip install ".[visual,cli]"
 From here on, prefix commands with `uv run` and you are always using the right environment:
 
 ```bash
-uv run simbi run sedov --mode cpu --resolution 256
+uv run simbi run sedov --mode cpu
 ```
 
 Just want the `simbi` command on your PATH without thinking about environments? Since it is a CLI tool, this is the slick option:
@@ -180,7 +182,7 @@ After activating `.venv`, invoke Python tools directly:
 
 ```bash
 python -m pytest
-simbi run sedov --mode cpu --resolution 256
+simbi run sedov --mode cpu
 ```
 
 If the environment is not activated, suppress uv's automatic synchronization so it
@@ -188,7 +190,7 @@ does not rebuild the project:
 
 ```bash
 uv run --no-sync pytest
-uv run --no-sync simbi run sedov --mode cpu --resolution 256
+uv run --no-sync simbi run sedov --mode cpu
 ```
 
 Run `uv sync --no-install-project` again after dependency changes. Run
@@ -205,7 +207,13 @@ NVIDIA or HIP for AMD:
 ./dev.py install --hip
 ```
 
-The CPU and GPU extensions coexist as separate modules (`cpu_ext` and `gpu_ext`), so you can keep both installed and pick the backend at run time with `--mode cpu`, `--mode omp` (OpenMP-threaded CPU, size it with `--nthreads N`), or `--mode gpu`.
+The CPU and GPU extensions coexist as separate modules (`cpu_ext` and `gpu_ext`), so you can keep
+both installed and pick the backend at run time with `--mode cpu` or `--mode gpu`. The CPU path
+threads with rayon, so size it with `RAYON_NUM_THREADS` if you want to pin it.
+
+If you build a GPU backend into a fresh clone, pass `--with-cpu` to keep a CPU extension around too;
+otherwise `--mode cpu` finds nothing and drops into demo mode. `--cuda` and `--hip` are alternatives,
+not a sequence — the second one overwrites the first's `gpu_ext`.
 
 ### Cleaning up
 
@@ -244,10 +252,10 @@ simbi run <problem> --info
 simbi run --configs
 
 # point it at your own config file
-simbi run simbi_configs/examples/kh.py --mode cpu --resolution 512
+simbi run simbi_configs/examples/newtonian/kh.py --mode cpu --resolution 512
 
 # pick up where a previous run left off
-simbi run <problem> --checkpoint data/checkpoint.h5
+simbi run <problem> --checkpoint data/128x128.chkpt.000_400.h5
 ```
 
 The CLI tries to be a good roommate: config names match with or without kebab-case, a
@@ -257,9 +265,10 @@ it lists both and asks.
 **Options you will reach for:**
 - `--mode cpu|gpu` sets the execution backend
 - `--resolution N`, `--resolution N,M`, or `--resolution N,M,K` sets the grid. Comma is required for 2D and 3D.
-- `--adiabatic-index` is the ratio of specific heats
 - `--end-time` is when to stop
 - `--data-directory` is where the output goes
+- `--validate` builds and checks the whole config without allocating a grid or writing anything — run this before you queue a job
+- `--checkpoint-interval` and `--diagnostic-interval` set the output cadences (in natural units, independent of each other)
 - `--live` writes a read-only snapshot each cadence so `simbi attach <data_dir>` can watch from elsewhere
 
 **When you want to know where the time goes:**
@@ -276,16 +285,16 @@ wall time and I/O time separately, and quotes throughput over pure integration t
 
 ```bash
 # plot a few fields from a checkpoint
-simbi plot data/checkpoint.h5 --setup "Problem Name" --field rho v p
+simbi plot data/128x128.chkpt.000_400.h5 --setup "Problem Name" --fields rho v p
 
-# include immersed body diagnostics
-simbi plot data/checkpoint.h5 --bodies
+# draw the immersed bodies on top (silhouette at the evolved pose; cartesian only)
+simbi plot data/128x128.chkpt.000_400.h5 --fields rho --draw-bodies
 
 # stitch a stack of checkpoints into an animation
-simbi plot data/*.h5 --animate --field rho
+simbi plot data/*.h5 --animate --fields rho
 
 # get a starter config to customize
-simbi plot --generate-config
+simbi plot data/*.h5 --generate-config
 ```
 
 ### Afterglow analysis
@@ -296,21 +305,116 @@ Turn hydro snapshots into synthetic observables:
 # build a photon event catalog from the snapshots
 simbi afterglow generate data/*.h5 --output events.h5 --max-events 1000000
 
-# observer lightcurve
-simbi afterglow lightcurve events.h5 --observer-angle 0.1 --frequencies 1e9 1e14 1e18
+# observer lightcurve (angle in DEGREES; the frequencies live in the observer yaml,
+# which is auto-discovered next to the data or passed with --observer)
+simbi afterglow lightcurve events.h5 --observer-angle 6.0
 
-# sky intensity map
-simbi afterglow skymap events.h5 --observer-time 1e5
+# sky intensity map (--time is in DAYS)
+simbi afterglow skymap events.h5 --time 1.0
 
 # polarization evolution
-simbi afterglow polarization events.h5 --observer-angle 0.1
+simbi afterglow polarization events.h5 --observer-angle 6.0
 
 # spectrum
-simbi afterglow spectrum events.h5 --observer-time 1e5
+simbi afterglow spectrum events.h5 --time 1.0
 
 # sweep the observer time into a sky-map movie
 simbi afterglow movie events.h5 --output skymap.mp4
 ```
+
+### Checkpoints, restarts, and the live view
+
+Checkpoints are named `<res>.chkpt.<time>.h5` — resolution as the per-axis interior counts joined
+with `x`, then the sim time with the decimal rendered as `_` and zero-padded so a directory listing
+sorts chronologically. So `128x128.chkpt.000_400.h5`, `64x64x64.chkpt.009_000.h5`. Instead of a
+time you may see `final` (clean finish), `interrupted` (Ctrl-C, a scheduler eviction, or `q` in the
+TUI), or `crashed` (the solver gave up). All three are restartable, which is the point — a wall-clock
+kill on a cluster still leaves you something to resume from.
+
+> Heads up if you glob: `*.chkpt.final*.h5` only exists after a clean finish. A job killed at the
+> wall-clock limit leaves `interrupted`, so a downstream script keyed on `final` quietly finds
+> nothing.
+
+Resuming with `--checkpoint` picks up the sim clock and the checkpoint numbering, so you get
+`031, 032, ...` rather than stomping on earlier files. `end_time` becomes the larger of yours and
+the checkpoint's, so you can extend a run but not shorten it. Fields marked `checkpoint_safe=True`
+you can override on the command line; if you pass a flag that *isn't* safe and it conflicts, the run
+refuses with a `ConfigError` instead of quietly picking one.
+
+One thing to know: the `body_diagnostics` and census series inside a checkpoint cover the current
+run segment only and start empty again after a restart. Stitch the segments offline.
+
+Each checkpoint carries `metadata` (time, dt, iteration, gamma, cfl, regime, spacetime, solver,
+spacing, ...) plus a `level_<N>` group per refinement level holding the primitives and conserved
+state, and — when the run has them — `bodies`, `body_diagnostics`, `tracers`, and `census/<name>`.
+Immersed-body runs also append a plain-text `diagnostics.dat` (time, position, velocity, force,
+torque, mass, accreted mass, accretion rate per body) if you set `--diagnostic-interval`; it's off
+by default.
+
+**Live TUI keys:** `space` pause, `s` single-step, `w` checkpoint now, `q`/`Esc` quit (writes an
+`interrupted` checkpoint), `Tab`/arrows to move between panels, `f` cycle field, `c` cycle colormap,
+`l` toggle log color, `o` cycle the 3D slice plane, `+`/`-` zoom about the center.
+
+`simbi attach <data_dir>` gives you the same view of a headless run over a shared filesystem — it
+polls the snapshot `--live` writes, no sockets involved. It's read-only by design, so `f`/`c`/`l`
+and the panel keys work (the snapshot ships every field) but pause/step/checkpoint do not reach the
+solver. It needs the run to still be going: the snapshot is removed when the run ends.
+
+### In-situ profiles (census)
+
+Sometimes what you want out of a run is a scaling, not a picture, and dumping a thousand full
+snapshots to get it is silly. A census is a binned reduction: you declare the bin axes and what to
+accumulate as expressions, and the run reduces them on the device every cadence and tucks the result
+into each checkpoint. No snapshot needed.
+
+```python
+from simbi import expression as expr
+
+@computed_field
+@property
+def census_expressions(self) -> list[ExpressionDict]:
+    g = expr.ExprGraph()
+    x1, x2, x3 = (expr.variable(v, g) for v in ("x1", "x2", "x3"))
+    r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3)
+    vx, vy, vz = (expr.velocity(ii, g) for ii in (0, 1, 2))
+    v_r = (x1 * vx + x2 * vy + x3 * vz) / r
+    rho, dv = expr.density(g), expr.cell_volume(g)
+    m = rho * dv
+    return [
+        expr.Census(
+            name="shells",
+            axes=[expr.BinAxis("r", r, expr.log_edges(1e-3, 1.0, 64))],
+            values={"volume": dv, "mass": m, "mass_vr": m * v_r},
+            op=expr.ReductionOp.ADD,
+            sample_interval=0.05,
+            cadence=expr.Cadence.PER_LEVEL_STEP,
+        ).serialize()
+    ]
+```
+
+Note that you only ever accumulate sums. That's deliberate: sums merge cleanly across refinement
+levels, across decomposed tiles, and across restart segments, whereas a mean does not. So the reader
+forms means and variances as ratios of sums when you ask for them:
+
+```python
+from simbi.reader import census_names, read_census
+
+census_names("run.chkpt.final.h5")     # ('shells',)
+c = read_census("run.chkpt.final.h5", "shells")
+c.bin_centers(0)                       # the radial axis
+c.favre("mass_vr", "mass")             # mass-weighted <v_r> per shell
+c.assert_fully_binned()                # loud if cells fell outside the bins
+```
+
+Every row carries its level, sample count, time span, and a `dropped` count — cells that fell
+outside the bins. Worth watching, since a census that quietly under-covers its domain looks a lot
+like real structure. `PER_LEVEL_STEP` samples each refinement level on its own clock, which is
+usually what you want: root-step sampling under-resolves the innermost shells, and those are often
+the ones you're fitting a slope to.
+
+One gotcha: the history covers a single run segment and starts empty again on a restart. So for a
+restart chain, grab the last checkpoint of each segment and stitch them offline (accumulating rows
+combine as a count-weighted sum via `n_samples`).
 
 ### Offline analysis
 
@@ -406,23 +510,49 @@ class KelvinHelmholtz(SimbiProblem):
 | `checkpoint_safe=True` | Allow overriding it when resuming from a checkpoint |
 | `description="..."` | Help text for the CLI |
 | `ge=`, `le=`, `gt=`, `lt=` | Validation bounds |
+| `cli_name="..."` | Override the derived kebab-case flag name |
+| `group="..."` | Section label in the live dashboard's setup panel |
+
+Note that `cli=True` is opt-in per field, and that includes `resolution` and `adiabatic_index` — a
+config only gets `--resolution` if it declares it. `simbi run <problem> --info` tells you which flags
+a given problem actually exposes.
+
+### Deriving fields from other fields
+
+If a parameter depends on another one, compute it in `setup()`. Declare the derived field
+`Optional[...] = None` and fill it in there — and call `super().setup()`:
+
+```python
+bondi_radius: Annotated[Optional[float], ProblemParam(None)] = None
+
+def setup(self) -> None:
+    super().setup()
+    self.bondi_radius = self.central_mass / self.sound_speed**2
+```
+
+There's also `summary()`, which returns `(group, label, value)` rows that show up in the live
+dashboard's setup panel — handy for the derived numbers you'd otherwise print by hand.
 
 ### Source terms
 
 Add gravity or custom hydro sources as expression graphs:
 
 ```python
-import simbi
+from simbi import expression as expr
 
 @computed_field
 @property
-def gravity_source_expressions(self):
-    graph = simbi.Expr.Graph()
-    x_comp = simbi.Expr.constant(0.0, graph)
-    y_comp = simbi.Expr.constant(-0.1, graph)  # constant downward gravity
-    terms = graph.compile([x_comp, y_comp])
-    return terms.serialize()
+def source_expressions(self) -> list[ExpressionDict]:
+    graph = expr.ExprGraph()
+    x_comp = expr.constant(0.0, graph)
+    y_comp = expr.constant(-0.1, graph)      # constant downward gravity
+    compiled = graph.compile([x_comp, y_comp])
+    return [compiled.serialize_source(expr.SourceKind.FORCE, dim=2)]
 ```
+
+`FORCE` is one of several kinds — there's also `ROTATING_FRAME`, `COOLING`, `RELAX`, `SPONGE`,
+`INJECT`, and `RAW`, and `serialize_source` takes `params=` (runtime scalars), `region=` (a mask
+folded in), and `target=`. See `newtonian/rt.py` and `newtonian/ordered_sources.py`.
 
 ### Immersed bodies
 
@@ -525,7 +655,6 @@ Relativity in SIMBI lives in the *spacetime*: you select it by layering a `Space
 relativistic regime, and the geometry supplies the metric the fluid evolves on:
 
 - `MINKOWSKI` — flat, i.e. plain special relativity
-- `SCHWARZSCHILD` — a static central mass
 - `SCHWARZSCHILD_KS` — nonspinning Schwarzschild in horizon-penetrating
   Kerr-Schild coordinates; gas crosses r = 2M without drama
 - `KERR_KS` — spinning Kerr in horizon-penetrating Kerr-Schild coordinates
@@ -537,32 +666,34 @@ handed a different metric.
 
 Point a horizon-penetrating chart (`SCHWARZSCHILD_KS` or `KERR_KS`) at a black hole and you can actually
 *swallow* it. Set `excision_radius` to a radius inside the horizon (above the metric-guard radius
-M/2, so around 0.7 r_+) and the cells inside are excised every step: their primitives are
-overwritten by a causal, outward one-way "onion" sweep and their conserved state is rebuilt from
-the local metric, so nothing unphysical leaks back out across the horizon and the accretion-rate
-certificate stays well-posed — no coordinate singularity to babysit. It works for hydro and MHD
-(the staggered magnetic faces stay constrained-transport-owned), for spinning (`KERR_KS`) horizons,
-on the GPU, and across the multi-GPU decomposed path.
+M/2, so around 0.7 r_+) and every step the cells inside get frozen at a cold vacuum floor, with
+their conserved state rebuilt from the local metric. The exterior gas rarefies in and nothing comes
+back out, so the accretion-rate certificate stays well-posed and there's no coordinate singularity
+to babysit. Works for hydro and MHD (the staggered magnetic faces stay constrained-transport-owned),
+for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decomposed path.
 
 ### Coordinate systems
 
 - `CARTESIAN`, the usual x, y, z
 - `SPHERICAL`, r, theta, phi
-- `CYLINDRICAL`, r, phi, z
-- `AXIS_CYLINDRICAL`, cylindrical with axis symmetry
-- `PLANAR_CYLINDRICAL`, 2D cylindrical in the r-phi plane
+- `CYLINDRICAL` and `AXIS_CYLINDRICAL`, which in 2D both mean the r-z plane (they're the same metric; watch out, the default plane is r-z, not r-phi)
+- `PLANAR_CYLINDRICAL`, if you want the r-phi plane instead
 
 ### Numerical methods
 
 **Riemann solvers:**
 - `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
-- `HLLC`, HLL with a contact wave (hydrodynamics), Toro's adaptive pressure estimates evaluated lazily — a smooth cell never pays for the shock estimate
-- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC
+- `HLLC`, HLL with a contact wave, Toro's adaptive pressure estimates evaluated lazily — a smooth cell never pays for the shock estimate. Works on the MHD regimes too (HLLC flux + HLL edge EMF); it's the *isothermal* regimes that can't take it, since they have no contact wave
+- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC, for both Newtonian and relativistic hydro
 - `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
 
 **Grid spacing:**
 - `LINEAR`, uniform spacing
-- `LOGARITHMIC`, log spacing, handy for spherical setups
+- `LOG`, log spacing, handy for spherical setups
+- `GEOMETRIC`, a graded mesh: each cell is a fixed ratio bigger than the last, so you can pack
+  resolution against one boundary (or both) without paying for it across the whole domain. Set the
+  growth per axis with `x1_spacing_ratio` / `x2_spacing_ratio` / `x3_spacing_ratio` (and pick the
+  spacing itself with `x1_spacing` and friends); see `geometric_boundaries.py` for the shape of it.
 
 **Boundary conditions:**
 - `PERIODIC`, wrap around
@@ -570,8 +701,11 @@ on the GPU, and across the multi-GPU decomposed path.
 - `OUTFLOW`, zero gradient
 - `DYNAMIC`, user-defined expressions
 
+There are also two dataclass boundaries you can drop into the per-face list alongside those:
+`Neumann` (prescribed gradient) and `Robin` (mixed `a*U + b*dU/dn = c`), per primitive variable.
+
 **Time integration:**
-- `EULER`, forward Euler
+- `RK1`, forward Euler (`EULER` also parses, as an alias)
 - `RK2`, second-order SSP Runge-Kutta (Berger-Colella subcycling under refinement)
 - `RK3`, third-order SSP Runge-Kutta
 
@@ -581,13 +715,34 @@ on the GPU, and across the multi-GPU decomposed path.
 
 Either way, div B stays at machine zero by construction — the curl-of-EMF update carries
 a symbolic proof of div(curl) = 0 in the test suite, and bug-injection tests keep the
-proof honest.
+proof valid.
 
 **A few extras:**
-- `plm_theta`, the PLM reconstruction parameter (0 to 2, default 1.5; 0 gives you piecewise-constant)
-- `use_quirk_smoothing`, [Quirk 1994](https://onlinelibrary.wiley.com/doi/abs/10.1002/fld.1650180603)'s carbuncle fix
+- `plm_theta`, the PLM reconstruction parameter (must be > 0 and <= 2, default 1.5). For piecewise-constant use `reconstruction=PCM` or `--order 1`
+- `reconstruction` picks `PCM` or `PLM`, and `limiter` picks `MINMOD` or `VAN_LEER` (van Leer is the smooth harmonic one and ignores `plm_theta`). `Limiter` lives at `simbi.types.input`, not `simbi.types`
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
+
+### What runs where
+
+Not every feature is baked for every chart and regime. These are all refused loudly at startup
+rather than silently doing the wrong thing, but it saves you a crash to know up front:
+
+| Feature | Where it works |
+|---|---|
+| `HLLC` / `HLLC_LM` | everything except the isothermal regimes (no contact wave). `HLLC_LM` is Newtonian + RHD |
+| `HLLD` | the MHD regimes |
+| viscosity | Newtonian and MHD, cartesian 2D/3D and curvilinear 2D. Silently a no-op on `RHD` |
+| alpha-disk viscosity | cartesian 2D, and it needs a central immersed body |
+| resistivity | cartesian 2.5D/3D, cylindrical r-z and r-phi, spherical r-theta |
+| refinement | cartesian with `LINEAR` spacing. MHD refinement is 3D cartesian only, and won't combine with immersed bodies or mesh motion |
+| passive scalar | Newtonian cartesian, no refinement / mesh motion / bodies |
+| tracers | flat cartesian (refinement is fine) |
+| horizon excision | 3D cartesian, or 1D/2D spherical. 2D cartesian is refused on purpose — that slice is a black *string*, and the staircased excision circle seeds a growing m = 4 mode |
+
+For a GR run you'll also want `schwarzschild_mass` and, on Kerr, `kerr_spin` (with `|a| <= M`).
+`excision_radius` isn't a base field — declare it on your own subclass, and keep it between `M/2`
+and `r_+`.
 
 ### Non-ideal transport
 
@@ -602,9 +757,10 @@ Two dissipative terms sit on top of the ideal solvers, both off by default (coef
 # turn refinement on
 refinement_enabled: Annotated[bool, ProblemParam(True)]
 refinement_max_levels: Annotated[int, ProblemParam(3)]
+# each region is a FLAT list of 2*ndim floats: [x_lo, x_hi, y_lo, y_hi, ...]
 refinement_regions: Annotated[
-    list[list[tuple[float, float]]],
-    ProblemParam([[(-0.1, 0.1), (-0.1, 0.1)], [(-0.05, 0.05), (-0.05, 0.05)]]),
+    list[list[float]],
+    ProblemParam([[-0.1, 0.1, -0.1, 0.1], [-0.05, 0.05, -0.05, 0.05]]),
 ]
 refinement_ratios: Annotated[list[int], ProblemParam([2, 2])]
 refinement_subcycling_mode: Annotated[
@@ -613,9 +769,10 @@ refinement_subcycling_mode: Annotated[
 ```
 
 **Subcycling modes:**
-- `NONE`, every level advances on the same timestep
-- `STANDARD`, subcycle by the refinement ratio
-- `MANUAL`, you specify substeps per level
+- `STANDARD` / `NONE`, the fixed-ratio schedule: level `l` takes `2^l` steps per root step, and the
+  root step is picked so every level stays inside its own CFL. These two are the same thing.
+- `ADAPTIVE` / `MANUAL` are not implemented yet. They raise `NotImplementedError` at validation
+  instead of quietly handing you the fixed schedule.
 
 ---
 
@@ -627,12 +784,19 @@ The compute backend is a Cargo workspace of small, focused crates. The interesti
 
 The compiler layer earns its keep: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of expensive conditional branches (a `where(...)` in your source expressions becomes a real branch when the arms are worth skipping), and a cost-gated select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code. The guiding rule, enforced by the graph itself: only compute what you actually need.
 
-A few load-bearing pieces:
+A few core pieces:
 
 - **`symbi-ir`** holds the kernel IR, graph passes, and CPU/CUDA/HIP code generation
 - **`symbi-hydro`** is the physics: regimes, equations of state, and the Riemann solvers
 - **`symbi-jit`** is the Cranelift JIT for runtime-authored kernels (your Python source expressions)
-- **`symbi-sim`** owns the simulation state and the kernel-native evolution driver
+- **`symbi`** is the top crate: the builder API and the single-grid `evolve` driver
+- **`symbi-sim`** is the hub everything orbits — simulation state, checkpoint I/O, the census, tracers, and the decomposed driver. It sits *below* the integrator on purpose, so nothing in it depends upward
+- **`symbi-discretize`** is where the carrier-generic physics actually gets traced into the IR
+- **`symbi-aot`** bakes those traced kernels at build time
+- **`symbi-exec`** is the CPU executor and its cache-blocked cover
+- **`symbi-expr`** compiles the source expressions you write in Python (this is where the strength reduction lives)
+- **`symbi-geometry`** holds the metrics and charts — the whole `Spacetime` axis
+- **`symbi-io`** does the HDF5 checkpoints, and **`symbi-display`** is the live TUI
 - **`symbi-substrate`** assembles the per-regime kernel sets (flux, c2p, godunov, cfl, ghost fill)
 - **`symbi-amr`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
 - **`symbi-ib`** is the immersed-body layer: body state, motion, and accretion ledgers
@@ -650,43 +814,54 @@ On speed (one machine, one problem class, double precision): the 3D Newtonian li
 
 ## Example Configurations
 
-There are 60-odd ready-to-run configs in `simbi_configs/examples/`. A sampler:
+There are 68 ready-to-run configs under `simbi_configs/examples/`, sorted into `newtonian/`,
+`srhd/`, `srmhd/`, `isothermal/`, `grhd/`, `grmhd/`, and `ibm/`. A sampler:
 
 The `Run with` column is the slug you pass to `simbi run` (the file stem with underscores swapped
-for dashes; underscores also work).
+for dashes; underscores also work). You never need the directory — the CLI finds it by name.
 
 | Example | Run with | What it is |
 |---------|----------|------------|
-| `sod.py` | `sod` | Newtonian shock tube |
-| `marti_muller.py` | `marti-muller` | SRHD shock tube (1D and 3D variants) |
-| `kh.py` | `kh` | Kelvin-Helmholtz instability |
-| `rt.py` | `rt` | Rayleigh-Taylor instability (with gravity) |
-| `sedov.py` | `sedov` | Sedov-Taylor explosion (spherical) |
-| `thermal_bomb.py` | `thermal-bomb` | Thermal bomb (2D and 3D variants) |
-| `magnetic_blast.py` | `magnetic-blast` | MHD blast wave |
-| `magnetic_shock_tube.py` | `magnetic-shock-tube` | 1D MHD shock |
-| `rmhd_orszag_tang.py` | `rmhd-orszag-tang` | SRMHD Orszag-Tang vortex (Newtonian, isothermal, and resistive variants also ship) |
-| `kepler.py` | `kepler` | Keplerian disk with a central mass |
-| `bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
-| `uniform_sphere.py` | `uniform-sphere` | Uniform sphere with homologous mesh expansion |
-| `quad_shocktube.py` | `quad-shocktube` | 2D multi-region shock |
-| `ordered_sources.py` | `ordered-sources` | Ordered density, momentum, and energy source composition |
-| `rotating_sponge.py` | `rotating-sponge` | Rotating-frame forces composed with an outer sponge |
-| `tabulated_source_1d.py` | `tabulated-source-1d` | Piecewise-linear tabulated energy source |
-| `tabulated_source_2d.py` | `tabulated-source-2d` | Bilinear tabulated energy source |
-| `geometric_boundaries.py` | `geometric-boundaries` | Geometric cell concentration at either boundary |
-| `decomposed_tabulated_geometric.py` | `decomposed-tabulated-geometric` | Geometric mesh and tabulated source on one or several devices |
-| `gr_fishbone_moncrief.py` | `gr-fishbone-moncrief` | GRHD Fishbone-Moncrief torus over nearly the full meridional domain |
-| `gr_fishbone_moncrief_cartesian.py` | `gr-fishbone-moncrief-cartesian` | Pole-free 3D Cartesian Kerr-Schild torus |
-| `gr_fishbone_moncrief_mhd.py` | `gr-fishbone-moncrief-mhd` | Spinning-hole GRMHD torus with a divergence-free MRI seed field |
-| `gr_fishbone_moncrief_mhd_cartesian.py` | `gr-fishbone-moncrief-mhd-cartesian` | Pole-free 3D Cartesian GRMHD torus |
-| `gr_kerr_dragging.py` | `gr-kerr-dragging` | Kerr frame dragging of a weak magnetic field |
+| `newtonian/sod.py` | `sod` | Newtonian shock tube |
+| `srhd/marti_muller.py` | `marti-muller` | SRHD shock tube (1D and 3D variants) |
+| `newtonian/kh.py` | `kh` | Kelvin-Helmholtz instability |
+| `newtonian/rt.py` | `rt` | Rayleigh-Taylor instability (with gravity) |
+| `newtonian/sedov.py` | `sedov` | Sedov-Taylor explosion (spherical) |
+| `newtonian/linear_wave.py` | `linear-wave` | Linear wave convergence — the benchmark behind the throughput number above |
+| `srhd/thermal_bomb.py` | `thermal-bomb` | Thermal bomb (2D and 3D variants) |
+| `srmhd/magnetic_blast.py` | `magnetic-blast` | MHD blast wave |
+| `srmhd/magnetic_shock_tube.py` | `magnetic-shock-tube` | 1D MHD shock |
+| `srmhd/rmhd_orszag_tang.py` | `rmhd-orszag-tang` | SRMHD Orszag-Tang vortex (Newtonian, isothermal, and resistive variants also ship) |
+| `newtonian/field_loop.py` | `field-loop` | Advected field loop — the constrained-transport regression |
+| `newtonian/quirk.py` | `quirk` | Odd-even decoupling — run it with `--solver hllc` and `hllc_lm` and diff |
+| `isothermal/kepler.py` | `kepler` | Keplerian disk with a central mass |
+| `newtonian/bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
+| `newtonian/refined_blast.py` | `refined-blast` | Static mesh refinement on a blast wave |
+| `newtonian/traced_kh.py` | `traced-kh` | Lagrangian tracer particles riding a KH billow |
+| `newtonian/dyed_kh.py` | `dyed-kh` | Passive scalar (dye) advection |
+| `newtonian/viscous_shear.py` | `viscous-shear` | Navier-Stokes shear viscosity |
+| `newtonian/resistive_orszag_tang.py` | `resistive-orszag-tang` | Ohmic resistivity in MHD |
+| `ibm/tumbling_body.py` | `tumbling-body` | Two-way coupled rigid body: tumbles and precesses |
+| `ibm/rubble_wind.py` | `rubble-wind` | Bonded rubble-pile fragments in a wind |
+| `ibm/magnetized_sink.py` | `magnetized-sink` | Accreting sink with Ohmic magnetic coupling |
+| `isothermal/dittmann_single_disk.py` | `dittmann-single-disk` | Torque-free sink in a disk |
+| `newtonian/uniform_sphere.py` | `uniform-sphere` | Uniform sphere with homologous mesh expansion |
+| `srhd/quad_shocktube.py` | `quad-shocktube` | 2D multi-region shock |
+| `newtonian/ordered_sources.py` | `ordered-sources` | Ordered density, momentum, and energy source composition |
+| `newtonian/rotating_sponge.py` | `rotating-sponge` | Rotating-frame forces composed with an outer sponge |
+| `newtonian/tabulated_source_1d.py` | `tabulated-source-1d` | Piecewise-linear tabulated energy source |
+| `newtonian/geometric_boundaries.py` | `geometric-boundaries` | Graded (geometric) mesh concentrating cells at a boundary |
+| `newtonian/decomposed_tabulated_geometric.py` | `decomposed-tabulated-geometric` | Geometric mesh and tabulated source on one or several devices |
+| `grhd/gr_fishbone_moncrief.py` | `gr-fishbone-moncrief` | GRHD Fishbone-Moncrief torus over nearly the full meridional domain |
+| `grhd/gr_fishbone_moncrief_cartesian.py` | `gr-fishbone-moncrief-cartesian` | Pole-free 3D Cartesian Kerr-Schild torus |
+| `grmhd/gr_fishbone_moncrief_mhd.py` | `gr-fishbone-moncrief-mhd` | Spinning-hole GRMHD torus with a divergence-free MRI seed field |
+| `grmhd/gr_kerr_dragging.py` | `gr-kerr-dragging` | Kerr frame dragging of a weak magnetic field |
 
 Run any of them:
 
 ```bash
-uv run simbi run sedov --mode gpu --resolution 256
-uv run simbi run kepler --mode cpu --resolution 128 128
+uv run simbi run sedov --mode gpu
+uv run simbi run kepler --mode cpu --resolution 128,128
 ```
 
 ---
@@ -775,10 +950,11 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 ---
 
 ## Acknowledgements
-SIMBI was developed at the Center for Cosmology and Paricle Physics at New York University, and the author thanks the CCPP group for their support and feedback. The author also thanks the following people for their contributions to the project:
+SIMBI was developed at the Center for Cosmology and Paricle Physics (CCPP) at New York University, and I thank the CCPP group for their support and feedback. I also thanks
+the following people for their contributions to the project:
 - **Andrew Macfadyen** (NYU) for his mentorship and guidance on the project.
 - **Jonathan Zrake** (Clemson University) for his intellectual feedback on the endeavor.
-- **Jim Stone** (Institure for Advanced Study) for his feedback on the MHD implementation and pointing me towards the robust conserved to primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
+- **Jim Stone** (Institute for Advanced Study) for his feedback on the MHD implementation and pointing me towards the robust conserved to primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
 - **Romain Teyssier** (Princeton University) for his willingness to talk shop with me. Especially during my embarkment towards mesh refinement.
 ---
 

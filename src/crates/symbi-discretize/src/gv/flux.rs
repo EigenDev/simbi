@@ -1282,7 +1282,7 @@ pub fn rmhd_flux_gr_gv(
 // builder per regime (newtonian, RHD, RMHD) mirroring the HLLE builder shape:
 // same PLM reconstruction, same scalar tail (gamma, theta), same write manifest.
 // the riemann solver is the only structural difference. defaulted to the
-// Standard shock-smoother arm at trace time — quirk/fleischmann are host-time
+// Standard shock-smoother arm at trace time — fleischmann is host-time
 // dispatch knobs not exposed through the substrate yet.
 // =============================================================================
 

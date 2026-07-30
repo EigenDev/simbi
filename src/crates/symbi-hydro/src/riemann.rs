@@ -10,7 +10,7 @@
 //   hlle  (hlle.rs)  regime-generic 2-wave solver, any Regime. GPU-traceable.
 //   hllc  (hllc.rs)  3-wave (contact-resolving): newtonian / rhd / rmhd, one
 //                    function per regime; newtonian takes a `ShockwaveLimiter`
-//                    (Standard / Fleischmann LM / Quirk-fallback).
+//                    (Standard / Fleischmann LM).
 //   hlld  (hlld.rs)  5-wave RMHD (fast/alfven/contact), host-only secant iter.
 //
 // usage:

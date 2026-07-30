@@ -38,10 +38,11 @@ class CoordSystem(str, ExtendedEnum):
 
 class Spacetime(str, ExtendedEnum):
     # the background spacetime, orthogonal to the spatial coord_system and the regime.
-    # minkowski is flat (every existing run); schwarzschild selects the GR metric
-    # (lapse / densitization / GR-wavespeed kernels) on a spherical grid.
+    # minkowski is flat (every existing run); the curved charts select the GR metric
+    # (lapse / densitization / GR-wavespeed kernels). every curved chart here is
+    # HORIZON-PENETRATING: the areal schwarzschild chart is not evolvable, since its
+    # coordinate singularity at r = 2M puts the horizon outside the domain by construction.
     MINKOWSKI = "minkowski"
-    SCHWARZSCHILD = "schwarzschild"
     # ingoing kerr-schild: the same physical schwarzschild vacuum in a HORIZON-PENETRATING chart
     # (regular across r = 2M) — the shift-advection-flux + KS densitization/wavespeed kernels.
     SCHWARZSCHILD_KS = "schwarzschild_ks"

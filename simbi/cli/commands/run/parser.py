@@ -119,12 +119,11 @@ def setup_parser(subparsers) -> None:
         "--mode",
         help="execution mode",
         default="cpu",
-        choices=["cpu", "omp", "gpu"],
+        choices=["cpu", "gpu"],
         dest="compute_mode",
     )
     mode_group.add_argument("--cpu", action=ComputeModeAction, const="cpu")
     mode_group.add_argument("--gpu", action=ComputeModeAction, const="gpu")
-    mode_group.add_argument("--omp", action=ComputeModeAction, const="omp")
 
     # checkpoint
     checkpoint_group = run_parser.add_argument_group("checkpoint")

@@ -98,9 +98,6 @@ class Quirk(SimbiProblem):
     solver: Annotated[
         Solver, ProblemParam(Solver.HLLC, description="numerical solver")
     ]
-    use_quirk_smoothing: Annotated[
-        bool, ProblemParam(True, cli=True, description="enable quirk smoothing")
-    ]
 
     # simulation control
     end_time: Annotated[
@@ -142,9 +139,11 @@ class Quirk(SimbiProblem):
             computed_end = 330.0 if self.mach_mode == "low" else 100.0
             self.end_time = computed_end
 
-        smoothing_dir = "smoothing" if self.use_quirk_smoothing else "raw"
+        # the carbuncle comparison is HLLC against HLLC-LM: the low-mach variant scales the
+        # acoustic dissipation down toward the advective, which is what keeps a grid-aligned
+        # shock from decoupling. run both and diff the shock front.
         self.data_directory = Path(
-            f"data/quirk/{smoothing_dir}/{self.mach_mode}_mach"
+            f"data/quirk/{self.solver.value}/{self.mach_mode}_mach"
         )
         return self
 

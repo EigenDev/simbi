@@ -2026,6 +2026,9 @@ where
     // `paused` parks the integrator (no step) while keeping the ui live; `user_quit`
     // requests a graceful stop, handled exactly like a caught signal.
     let mut user_quit = false;
+    // the energy-split warning fires at most once per run; see the check at the
+    // conservation-diagnostic site.
+    let mut ke_split_warned = false;
 
     let callback = |h: &Hierarchy<R, D, DOF, M, E, S, Mem, K>| {
         let st = &h.levels[0].state;
@@ -2256,6 +2259,28 @@ where
             // on device-resident gpu runs). cheap once per benchmark cadence.
             if let Some(cd) = st.conservation_diag() {
                 table.push_conservation(cd.mass, cd.energy, cd.div_b, cd.max_w);
+                // the energy split's conditioning. recovering internal energy from the total
+                // is a subtraction whose operands exceed the result by this ratio, so the
+                // inversion sheds about log10(ratio) digits each time. an ordinary mach-M
+                // flow sits near gamma(gamma-1)M^2/2 -- about 56 at M = 10 -- so the warning
+                // threshold is set well above any merely supersonic run and marks a cold,
+                // kinetically dominated flow whose internal energy is poorly conditioned.
+                // reported ONCE per run: the failure is a slow drift, not a per-step event,
+                // and a message board that repeats it every cadence buries everything else.
+                if let Some(ratio) = cd.max_ke_over_eint
+                    && ratio > KE_OVER_EINT_WARN
+                    && !ke_split_warned
+                {
+                    ke_split_warned = true;
+                    table.post_warning(&format!(
+                        "energy split ill-conditioned: max KE/e_int = {ratio:.3e}. internal \
+                         energy is a 1/{:.0} fraction of the total, so c2p sheds ~{:.1} digits \
+                         per inversion and any entropy loss it causes is silent (a cooling gas \
+                         keeps the sound speed, and the timestep, comfortable)",
+                        1.0 + ratio,
+                        ratio.log10(),
+                    ));
+                }
             }
             // machine card: this (compute) node's hostname / cores and the run's
             // resident memory vs the node's physical ram. rss grows, so re-sample
@@ -2513,6 +2538,15 @@ where
 /// registry NAME LOOKUP (a wide match over kernel names) against the kernel execution
 /// itself. a lookup share rivalling execution says the dispatch is the cost rather than the
 /// arithmetic, which is a scheduling problem and not a numerics one.
+/// the KE/e_int ratio above which the energy split is reported as ill-conditioned.
+///
+/// an ordinary mach-M flow carries `gamma (gamma - 1) M^2 / 2`, which is about 56 at
+/// M = 10 and 500 at M = 30 for gamma = 5/3, so this sits above any merely supersonic run
+/// and marks a COLD, kinetically dominated one. at this ratio the recovered internal
+/// energy is a 0.1 percent fraction of the total and c2p sheds ~3 significant digits per
+/// inversion.
+const KE_OVER_EINT_WARN: f64 = 1.0e3;
+
 fn dump_dispatch_profile_if_enabled() {
     let (calls, lookup_ns, exec_ns) = symbi::symbi_exec::policy::report_dispatch_profile();
     let total = (lookup_ns + exec_ns) as f64;
@@ -4860,8 +4894,6 @@ macro_rules! hydro_dispatch {
                         (d, c, $cfg.spacetime.as_str()),
                         (3, "cartesian", "schwarzschild_ks")
                             | (3, "cartesian", "kerr_ks")
-                            | (1, "spherical", "schwarzschild")
-                            | (2, "spherical", "schwarzschild")
                             | (1, "spherical", "schwarzschild_ks")
                             | (2, "spherical", "kerr_ks")
                             | (2, "spherical", "schwarzschild_ks")
@@ -5858,9 +5890,7 @@ macro_rules! mhd_dispatch {
                 if $cfg.spacetime != "minkowski"
                     && !matches!(
                         (d, c, $cfg.spacetime.as_str()),
-                        (1, "spherical", "schwarzschild")
-                            | (1, "spherical", "schwarzschild_ks")
-                            | (2, "spherical", "schwarzschild")
+                        (1, "spherical", "schwarzschild_ks")
                             | (2, "spherical", "kerr_ks")
                             | (3, "cartesian", "schwarzschild_ks")
                             | (3, "cartesian", "kerr_ks")
