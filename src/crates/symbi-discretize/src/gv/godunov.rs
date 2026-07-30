@@ -522,6 +522,10 @@ struct FusedContribs {
     /// (`WriteMode::Assign`) MHD `bcell` slot. unused (empty) for hydro and for the
     /// accumulate (godunov source) path — the conservation-law lifts never target B.
     mag: Vec<Vec<NodeId>>,
+    /// the dye concentration prescription, ONLY for a driven-boundary (`WriteMode::Assign`)
+    /// `chi` slot: injected fluid carries a concentration the interior cannot supply. empty for
+    /// the accumulate path, where the dye moves by the mass flux alone and takes no source.
+    chi: Vec<NodeId>,
 }
 
 /// fused-source splice helper. requires an ACTIVE Gv trace
@@ -555,6 +559,7 @@ fn splice_fused_sources_to_contribs(
             mom: vec![Vec::new(); ncomp],
             nrg: Vec::new(),
             mag: vec![Vec::new(); ncomp],
+            chi: Vec::new(),
         };
     }
 
@@ -614,6 +619,7 @@ fn splice_fused_sources_to_contribs(
         mom: vec![Vec::new(); ncomp],
         nrg: Vec::new(),
         mag: vec![Vec::new(); ncomp],
+        chi: Vec::new(),
     };
     for (target_field, built) in sources {
         let mut name_to_node = shared_params.clone();
@@ -676,6 +682,17 @@ fn splice_fused_sources_to_contribs(
                 for k in 0..ncomp {
                     out.mag[k].push(spliced[k]);
                 }
+            }
+            // dye prescription (driven boundary): one scalar concentration for the injected fluid.
+            // Assign mode only — the dye has no source term, it rides the mass flux.
+            "chi" => {
+                assert_eq!(
+                    spliced.len(),
+                    1,
+                    "splice_fused_sources: chi overlay must emit 1 scalar, got {}",
+                    spliced.len()
+                );
+                out.chi.push(spliced[0]);
             }
             other => panic!("splice_fused_sources: unsupported target_field {other:?}"),
         }
@@ -1451,6 +1468,12 @@ fn apply_dag_core_gv(
                 contribs.mag.iter().all(|m| m.is_empty()),
                 "accumulate (godunov source) path does not support a `bcell` target",
             );
+            // the dye is advected by the mass flux and carries no source term, so a chi contrib
+            // here is a mis-routed prescription. fail loud rather than drop it silently.
+            debug_assert!(
+                contribs.chi.is_empty(),
+                "accumulate (godunov source) path does not support a `chi` target",
+            );
             writes
         }
         WriteMode::Assign => {
@@ -1499,6 +1522,16 @@ fn apply_dag_core_gv(
                         contribs.mag[k][0],
                     ));
                 }
+            }
+            // the dye of injected fluid. absent for an undyed prescription (no chi slot -> empty
+            // bucket), in which case the face's dye ghosts stay whatever the scalar pullback left.
+            if !contribs.chi.is_empty() {
+                assert_eq!(
+                    contribs.chi.len(),
+                    1,
+                    "Assign: prim.chi needs exactly one source DAG"
+                );
+                writes.push(("chi".to_string(), FieldRef::PrimChi.into(), contribs.chi[0]));
             }
             writes
         }

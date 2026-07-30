@@ -225,3 +225,84 @@ fn iso_mhd_driven_inflow_prescribes_the_ghost_state() {
     }
     assert!(checked > 0, "no x_lo ghost cells found to check");
 }
+
+// a driven face prescribes the dye of the fluid it injects, as a trailing output after the prim
+// state. the interior is undyed and the ghost band is poisoned beforehand, so the prescribed
+// concentration can come from neither a copy of the interior nor a leftover value.
+#[test]
+fn driven_inflow_prescribes_the_injected_dye() {
+    const CHI_IN: f64 = 0.6;
+    const POISON: f64 = -7.0;
+    let boundaries = Boundaries::<2>::per_axis([
+        [BoundaryType::Driven(0), BoundaryType::Outflow],
+        [BoundaryType::Periodic, BoundaryType::Periodic],
+    ]);
+    let sim = Sim::build(Newtonian, IdealGas { gamma: 1.4 }, Cartesian)
+        .cells([8, 8])
+        .bounds([0.0, 0.0], [1.0, 1.0])
+        .boundaries(boundaries)
+        .finish()
+        .unwrap()
+        .with_passive_scalar()
+        .expect("chi alloc");
+    sim.seed_cells(|_| Prim {
+        rho: 1.0,
+        vel: Tensor::new([0.0, 0.0]),
+        pre: 1.0,
+    });
+    let chi_f = sim.fields.prim.chi_field().expect("prim chi");
+    // interior undyed; everything outside it poisoned.
+    for c in sim.geom.allocated.iter() {
+        let v = if sim.geom.interior.contains(c) {
+            0.0
+        } else {
+            POISON
+        };
+        chi_f.view_mut().set(c, v);
+    }
+
+    // [rho=2, vel_0=1, vel_1=0, pre=3, chi=CHI_IN] — the prim state plus the trailing dye.
+    let json = r#"{
+        "kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3, 4], "params": [],
+        "nodes": [ {"op":"CONSTANT","value":2.0}, {"op":"CONSTANT","value":1.0},
+                   {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":3.0},
+                   {"op":"CONSTANT","value":0.6} ]
+    }"#;
+    let cfg = SourceConfig::from_json(json).expect("parse");
+    let built = build_boundary_dag(&cfg, &NEWTONIAN_SPEC).expect("driven boundary with dye");
+    assert!(
+        built.iter().any(|(slot, _)| slot == "chi"),
+        "the trailing output must lower to a chi prescription, got slots {:?}",
+        built.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>()
+    );
+    let (sub, _) = sim
+        .substrate()
+        .with_driven_boundary(built, cfg.params.clone());
+
+    sub.ghost_fill(&sim);
+
+    let mut checked = 0usize;
+    for c in sim.geom.allocated.iter() {
+        let x = sim.geom.cell_coord(c);
+        if x[0] >= 0.0 || x[1] <= 0.0 || x[1] >= 1.0 {
+            continue;
+        }
+        let got = *chi_f.view().at(c);
+        assert!(
+            (got - POISON).abs() > 1e-12,
+            "x_lo dye ghost at {c:?} was never written (still poisoned)"
+        );
+        assert!(
+            (got - CHI_IN).abs() < 1e-12,
+            "x_lo dye ghost at {c:?}: {got} != prescribed {CHI_IN}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no x_lo ghost-band cells found to check");
+    // the premise: the prescribed dye differs from the undyed interior, so a copy of the interior
+    // would fail the assertion above rather than sneak through.
+    assert!(
+        CHI_IN.abs() > 1e-12,
+        "prescribed dye equals the interior; the gate cannot separate prescription from copy"
+    );
+}

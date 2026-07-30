@@ -165,8 +165,19 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
                         mhd.bcell[k].view_mut().set(c, Sc::from_f64(s[k]));
                     }
                 }
+                // the dye of injected fluid: a concentration the interior cannot supply, so a
+                // driven face prescribes it outright rather than copying an edge cell.
+                "chi" => sim
+                    .fields
+                    .prim
+                    .chi_field()
+                    .expect("boundary 'chi' on a run that carries no passive scalar")
+                    .view_mut()
+                    .set(c, Sc::from_f64(s[0])),
                 other => {
-                    panic!("boundary dag: unsupported slot '{other}' (den | mom | nrg | bcell)")
+                    panic!(
+                        "boundary dag: unsupported slot '{other}' (den | mom | nrg | bcell | chi)"
+                    )
                 }
             }
         }

@@ -680,6 +680,17 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
 ///   `1 (rho) + d (vel) + has_energy (pre) + is_mhd*d (cell B)` where `d = cfg.dim` is the vector
 ///   component count (= DOF). a partial prescription is rejected.
 /// (the `dim == sim DOF` cross-check is the const-generic dispatch's, where DOF is known.)
+/// the number of outputs a driven-boundary prescription carries for `spec` at vector-component
+/// count `d`: the complete primitive state, `rho` + `d` velocities + pressure (energy regimes) +
+/// `d` cell-B components (MHD). a run carrying the passive scalar appends exactly one more, the dye
+/// concentration of the injected fluid, so its prescription has arity `n + 1`.
+///
+/// the single definition of that count: `build_boundary_dag` validates against it, and the config
+/// layer sizes its dye requirement from it.
+pub fn boundary_prim_arity(spec: &crate::regime_spec::RegimeSpec, d: usize) -> usize {
+    1 + d + usize::from(spec.has_energy) + if spec.is_mhd { d } else { 0 }
+}
+
 pub fn build_boundary_dag(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
@@ -693,12 +704,16 @@ pub fn build_boundary_dag(
     // div-compatible (=0 for a purely toroidal field); they are NOT a CT face prescription
     // here, so no tangential-EMF sub-problem — that constraint only applies to
     // a prescribed POLOIDAL (in-plane face) field, which this does not provide.
-    let n_mag = if spec.is_mhd { d } else { 0 };
-    let n_prim = 1 + d + usize::from(spec.has_energy) + n_mag;
-    if cfg.outputs.len() != n_prim {
+    let n_prim = boundary_prim_arity(spec, d);
+    // a run carrying the passive scalar prescribes ONE more output, the dye concentration of the
+    // injected fluid, appended after the prim state. optional here because the dye is a run-level
+    // opt-in the regime spec cannot see; the config layer is what knows whether a dye is allocated
+    // and so what rejects a driven face that omits it.
+    let has_dye = cfg.outputs.len() == n_prim + 1;
+    if cfg.outputs.len() != n_prim && !has_dye {
         return Err(format!(
             "driven boundary must prescribe the full prim state [rho, vel_0..vel_{}{}{}]: outputs.len() \
-             = {}, expected {n_prim}",
+             = {}, expected {n_prim} (or {} with a trailing dye concentration)",
             d.saturating_sub(1),
             if spec.has_energy { ", pre" } else { "" },
             if spec.is_mhd {
@@ -707,6 +722,7 @@ pub fn build_boundary_dag(
                 String::new()
             },
             cfg.outputs.len(),
+            n_prim + 1,
         ));
     }
     // split the user DAG into per-slot prescriptions: den <- rho, mom <- the d-vector vel,
@@ -729,6 +745,10 @@ pub fn build_boundary_dag(
             "bcell".to_string(),
             lower(&reduced_outputs[next..next + d])?,
         ));
+        next += d;
+    }
+    if has_dye {
+        out.push(("chi".to_string(), lower(&reduced_outputs[next..next + 1])?));
     }
     Ok(out)
 }

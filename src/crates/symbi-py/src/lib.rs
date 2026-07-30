@@ -6646,15 +6646,28 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             );
         }
         // gradient (neumann / robin) faces carry the dye at zero normal derivative, the scalar
-        // reading of the per-variable prescription the registry holds for the prim state. driven
-        // faces still need an explicit dye value: injected fluid carries a concentration the
-        // interior cannot supply.
-        if !cfg.driven_exprs.is_empty() {
-            return Err(
-                "passive_scalar with driven boundaries is not wired yet (injected fluid needs an \
-                 explicit dye prescription on those faces)"
-                    .to_string(),
-            );
+        // reading of the per-variable prescription the registry holds for the prim state.
+        //
+        // a driven face has to say more than that. it prescribes the state of fluid entering the
+        // domain, and the dye of that fluid is independent of everything inside, so no local rule
+        // recovers it. a prescription that stops at the prim state leaves the dye ghost band on
+        // that face written by nobody, which reads downstream as clean inflow rather than as a
+        // missing boundary condition. require the extra output instead.
+        for (id, json) in cfg.driven_exprs.iter().enumerate() {
+            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                .map_err(|e| format!("driven boundary {id}: expression parse: {e}"))?;
+            let want = symbi_hydro::expr_bridge::boundary_prim_arity(
+                &symbi_hydro::regime_spec::NEWTONIAN_SPEC,
+                bcfg.dim,
+            ) + 1;
+            if bcfg.outputs.len() != want {
+                return Err(format!(
+                    "driven boundary {id} prescribes {} outputs, but a run carrying a passive \
+                     scalar needs {want}: the full prim state plus a trailing dye concentration \
+                     for the injected fluid",
+                    bcfg.outputs.len(),
+                ));
+            }
         }
     }
     // mass-transport tracers consume the accepted finite-volume density flux.
