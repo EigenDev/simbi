@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-commit hook
+#
+# refuse to commit a SYMLINK.
+#
+# a symlink is stored in the tree as its target STRING, under mode 120000. an
+# absolute target resolves only on the machine that made it; a relative one
+# resolves only if the thing it points at is laid out identically. either way the
+# checkout on another machine -- a collaborator's, a cluster's -- gets a dangling
+# path rather than the data, and the failure surfaces far from the cause.
+#
+# `.gitignore` cannot express this: its patterns match names and paths, never file
+# type, so each symlink otherwise has to be named individually and stays correct
+# only until someone adds another one.
+#
+# link the tree in from outside the repository and ignore the link by name if a
+# working copy genuinely needs it (`simbi_configs/science` is the one such case).
+#
+# to bypass (emergencies only):
+#   git commit --no-verify
+# =============================================================================
+
+set -u
+
+# `--raw` prints the destination mode in field 2; 120000 is git's mode for a
+# symbolic link. filtered to additions and modifications, so removing one is fine.
+links=$(git diff --cached --raw --diff-filter=AM | awk '$2 == "120000" { print $NF }')
+
+if [ -n "$links" ]; then
+    echo "pre-commit: refusing to commit symlink(s):" >&2
+    printf '  %s\n' $links >&2
+    cat >&2 <<'EOF'
+
+a symlink commits its TARGET PATH, not the thing it points at, so the checkout on
+any other machine gets a dangling link. keep the link on disk and add its path to
+.gitignore instead, or commit the real files.
+
+  git restore --staged <path>     drop it from this commit
+  git commit --no-verify          override, if you are certain
+EOF
+    exit 1
+fi
+
+exit 0
