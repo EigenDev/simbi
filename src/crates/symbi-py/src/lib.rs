@@ -3435,6 +3435,57 @@ mod diagnostics_tests {
         assert!(coll.get(0).two_way_coupling);
     }
 
+    // the softening FAMILY must survive `build_bodies` on BOTH capability arms. an accreting body
+    // and a bare gravitating one are constructed by different branches, and each carries a
+    // softening length that means a different field: plummer is below newtonian at every radius
+    // (0.354 of it at r = h), compact is exactly newtonian outside h. a body that lost the
+    // selector would silently run plummer, weakening gravity across the whole domain rather than
+    // only within h -- a systematic bias in any measurement that fits a power law in radius.
+    #[test]
+    fn build_bodies_carries_the_softening_family_on_every_capability() {
+        let body = |capability: u64, softening_kind: f64| {
+            let params = vec![BodyParams {
+                capability,
+                mass: 1.0,
+                radius: 0.1,
+                position: vec![0.0, 0.0],
+                velocity: vec![0.0, 0.0],
+                softening: 0.05,
+                softening_kind,
+                accretion_radius: 0.2,
+                sink_rate: 0.5,
+                porosity: None,
+                k_eta_n: 0.0,
+                k_eta_t: 0.0,
+                torque_free_xi: None,
+                inertia: 0.0,
+                no_slip: true,
+                shape_json: None,
+                omega: 0.0,
+                spin_axis: [0.0, 0.0, 1.0],
+                inertia_principal: [0.0, 0.0, 0.0],
+                two_way_coupling: false,
+                magnetic_resistivity: None,
+            }];
+            *build_bodies::<2>(&params, None).get(0)
+        };
+
+        // capability 2 = ACCRETION, 1 = GRAVITATIONAL: the two arms of the construction branch.
+        for capability in [2, 1] {
+            assert_eq!(
+                body(capability, 1.0).softening_kind(),
+                Some(symbi_ib::SofteningKind::Compact.as_scalar()),
+                "capability {capability}: a compact-softened body was built as plummer, so its \
+                 field is below newtonian everywhere instead of exact outside the softening length"
+            );
+            assert_eq!(
+                body(capability, 0.0).softening_kind(),
+                Some(symbi_ib::SofteningKind::Plummer.as_scalar()),
+                "capability {capability}: the default softening family is not plummer"
+            );
+        }
+    }
+
     // REGRESSION: a gravitational binary (`body_system.binary_config`) must build TWO orbiting
     // accretors with the prescribed Keplerian orbit attached -- the `body_system` payload was being
     // dropped (parse_bodies read only `immersed_bodies`), yielding zero bodies.

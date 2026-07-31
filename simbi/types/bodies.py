@@ -52,6 +52,31 @@ def _config_error(message: str) -> Exception:
     return ConfigError(message)
 
 
+# the softening FAMILY vocabulary, shared by every config that carries a softening length so the
+# two spellings cannot drift apart between body kinds.
+#
+# "plummer" is a genuine extended profile, and its field sits BELOW newtonian at every radius
+# (0.354 of it at r = h, reaching 0.99 only past r = 5h). a length chosen to keep the field finite
+# near a body therefore biases gravity across the entire domain, which a measurement fitting a
+# power law in radius reads as a shifted exponent.
+#
+# "compact" truncates the source at the softening length: the enclosed mass is complete outside it,
+# so the field there is the bare point mass to the last bit and only the interior is regularized.
+SOFTENING_KINDS = ("plummer", "compact")
+
+
+def _validate_softening_kind(kind: str) -> None:
+    """reject an unrecognized softening family at the config layer. the backend resolves anything
+    other than "compact" to plummer, so an unchecked spelling runs silently on the other field."""
+    if kind not in SOFTENING_KINDS:
+        raise ValueError(
+            f"softening_kind {kind!r} is not one of {SOFTENING_KINDS}. "
+            "'plummer' is an extended profile whose field is below newtonian at every "
+            "radius; 'compact' is exactly newtonian outside the softening length and "
+            "regularized only within it."
+        )
+
+
 @dataclass(frozen=True)
 class BinaryComponentConfig:
     mass: float
@@ -65,9 +90,15 @@ class BinaryComponentConfig:
     velocity: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     total_accreted_mass: float = 0.0
+    # which family `softening_length` parameterizes; see SOFTENING_KINDS.
+    softening_kind: str = "plummer"
+
+    def __post_init__(self) -> None:
+        _validate_softening_kind(self.softening_kind)
 
     def to_body_config(self) -> dict:
-        """convert to format expected by c++ factory with nested property dicts."""
+        """the backend wire for one binary component: top-level mass / radius / kinematics plus
+        the nested `gravitational` and `accretion` property groups the rust body parser reads."""
         config = {
             "mass": self.mass,
             "radius": self.radius,
@@ -77,8 +108,14 @@ class BinaryComponentConfig:
             "two_way_coupling": self.two_way_coupling,
         }
 
-        # all binary components have gravitational properties
-        config["gravitational"] = {"softening_length": self.softening_length}
+        # all binary components have gravitational properties. the key set here must match the one
+        # `GravitationalProperties` emits for a standalone body: both are read by the same backend
+        # lookup, so a key present on one path and absent on the other resolves to a silent default
+        # rather than an error.
+        config["gravitational"] = {
+            "softening_length": self.softening_length,
+            "softening_kind": self.softening_kind,
+        }
 
         # add accretion properties if this component is an accretor
         if self.is_an_accretor:
@@ -147,29 +184,14 @@ class GravitationalSystemConfig(BodySystemConfig):
 @dataclass(frozen=True)
 class GravitationalProperties:
     softening_length: float
-    # which family `softening_length` parameterizes.
-    #
-    # "plummer" is a real extended profile: its field is BELOW newtonian at every radius
-    # (0.354 at r = h, needing r > 5h to reach 0.99), so a length chosen for regularity
-    # near the body biases the field across the whole domain. correct for a genuinely
-    # extended mass; wrong for a point accretor.
-    #
-    # "compact" truncates the source at `softening_length`: outside it the field is the
-    # bare point mass to the last bit, and only the interior is regularized. this is the
-    # one to use when the softening exists solely to keep the field finite where a sink
-    # has thinned the gas -- set the length to the accretion radius and the measurement
-    # outside it is untouched.
+    # which family `softening_length` parameterizes; see SOFTENING_KINDS. "compact" is the one to
+    # use when the softening exists solely to keep the field finite where a sink has thinned the
+    # gas -- set the length to the accretion radius and the flow outside it feels the exact point
+    # mass.
     softening_kind: str = "plummer"
 
     def __post_init__(self) -> None:
-        allowed = ("plummer", "compact")
-        if self.softening_kind not in allowed:
-            raise ValueError(
-                f"softening_kind {self.softening_kind!r} is not one of {allowed}. "
-                "'plummer' is an extended profile whose field is below newtonian at every "
-                "radius; 'compact' is exactly newtonian outside softening_length and "
-                "regularized only within it."
-            )
+        _validate_softening_kind(self.softening_kind)
 
 
 @dataclass(frozen=True)

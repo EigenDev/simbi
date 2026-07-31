@@ -70,6 +70,28 @@ def _fast_linker_flag():
     return None
 
 
+def _rustc_deployment_target():
+    """the macos version rustc compiles for by default, as a string, or None off macos / when
+    rustc cannot be asked. this is the number the C dependencies have to agree with: `cc`
+    otherwise stamps its objects with the version of the machine doing the building, while rustc
+    stamps the arch's floor (11.0 on apple silicon, 10.12 on intel), and the linker reports every
+    object that disagrees. asking rustc keeps the two in step across architectures and toolchain
+    updates instead of pinning a literal that is right for one of them."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        out = subprocess.run(
+            ["rustc", "--print", "deployment-target"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # the reply is a single `MACOSX_DEPLOYMENT_TARGET=11.0` assignment.
+    return out.strip().partition("=")[2] or None
+
+
 def _build_jobs() -> int:
     """parallel rustc jobs, capped so a wide-but-RAM-poor machine is not OOM-killed: the
     monomorphized crates here peak near 4 GB per rustc, so bound jobs by total_ram / 4 as
@@ -99,14 +121,15 @@ def venv_env() -> dict:
         env["VIRTUAL_ENV"] = sys.prefix
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
 
-    # the C dependencies (hdf5) are compiled by the `cc` crate, which defaults their macho
-    # LC_BUILD_VERSION `minos` to the RUNNING os when MACOSX_DEPLOYMENT_TARGET is unset, while
-    # maturin pins rustc to 11.0 -- the arm64 wheel tag's floor. the resulting artifact claims
-    # macos 11 while carrying objects that demand the build host's version, which the linker
-    # reports per object file. setting the variable makes cc emit -mmacosx-version-min=11.0 so
-    # the C half agrees with the tag the wheel already advertises.
-    if sys.platform == "darwin":
-        env.setdefault("MACOSX_DEPLOYMENT_TARGET", "11.0")
+    # hdf5 is vendored and built from C source, and the `cc` crate stamps those objects'
+    # macho LC_BUILD_VERSION `minos` with the RUNNING os version when MACOSX_DEPLOYMENT_TARGET
+    # is unset, while rustc stamps the target arch's floor. the artifact then claims a floor its
+    # own C half does not honor, and the linker says so once per object file. binding the
+    # variable to rustc's own answer makes cc emit a matching -mmacosx-version-min.
+    if "MACOSX_DEPLOYMENT_TARGET" not in env:
+        deployment_target = _rustc_deployment_target()
+        if deployment_target:
+            env["MACOSX_DEPLOYMENT_TARGET"] = deployment_target
 
     if env.get("SIMBI_NO_BUILD_TUNING") == "1":
         return env
