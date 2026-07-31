@@ -20,6 +20,40 @@ set -u
 
 workspace="src"
 
+# ---------------------------------------------------------------------------
+# authorship guard
+#
+# authorship denotes accountability for the code, which an automated tool
+# cannot hold; tooling credit lives in README.md instead. a machine co-author
+# trailer additionally registers the address in the forge's contributor graph.
+#
+# a merge that pulls a pre-rewrite lineage back alongside a rewritten one
+# silently restores such a trailer, so the invariant is checked against every
+# commit reachable from the tip being pushed rather than only new commits.
+# ---------------------------------------------------------------------------
+trailer_re='^[[:space:]]*co-authored-by:.*(claude|anthropic)'
+
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    # all-zero local sha means the ref is being deleted; nothing to inspect
+    case "$local_sha" in
+        *[!0]*) ;;
+        *) continue ;;
+    esac
+
+    offender=$(git rev-list --max-count=1 -i -E --grep="$trailer_re" "$local_sha")
+    if [ -n "$offender" ]; then
+        echo "push rejected: machine co-author trailer reachable from $local_sha"
+        echo ""
+        git log -1 --format='  %h %s' "$offender"
+        git log -1 --format='%B' "$offender" | grep -iE "$trailer_re" | sed 's/^/    /'
+        echo ""
+        echo "this usually means a merge restored pre-rewrite history."
+        echo "reset onto the rewritten lineage instead of merging into it:"
+        echo "  git fetch origin && git reset --hard origin/<branch>"
+        exit 1
+    fi
+done
+
 echo "running pre-push build check..."
 echo "========================================"
 
