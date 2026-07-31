@@ -242,3 +242,136 @@ fn the_entropy_deficit_does_not_grow_with_refinement_depth() {
         deficit[3]
     );
 }
+
+
+// =============================================================================
+// gravity across a refinement ladder
+// =============================================================================
+
+/// the gravitating mass sits one domain-width left of `x = 0`, so the gas at `x` feels a bare
+/// point mass at radius `x + 1` and the domain covers `r` in `[1, 2]` with no singularity.
+const G_OFFSET: f64 = 1.0;
+const GM: f64 = 100.0;
+/// the reference entropy of the gravitational atmosphere. the isentropic bump above uses
+/// `K0 = 1`; this profile is built on the same constant.
+const T_GRAV: f64 = 0.5;
+
+/// the isentropic atmosphere in hydrostatic balance against `GM`, from the bernoulli invariant
+/// `gamma K0/(gamma-1) rho^(gamma-1) - GM/r = const`, normalized to `rho = 1` at the outer edge.
+fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
+    let r = x[0] + G_OFFSET;
+    let a = (GAMMA - 1.0) / (GAMMA * K0);
+    let c = 1.0 / a - GM / (1.0 + G_OFFSET);
+    let rho = (a * (GM / r + c)).powf(1.0 / (GAMMA - 1.0));
+    Prim {
+        rho,
+        vel: symbi_algebra::Tensor::new([0.0]),
+        pre: K0 * rho.powf(GAMMA),
+    }
+}
+
+fn build_gravity(
+    regions: &[RefinementRegion<1>],
+) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N])
+        .spacing([1.0 / N as f64])
+        // a reflecting wall exerts no work on gas at rest, so the hydrostatic state is a fixed
+        // point of the boundary as well as of the interior.
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(hydrostatic)
+        .build();
+    let ck = kset(&coarse);
+    let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, kset)
+        .unwrap()
+        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            symbi_algebra::Tensor::new([-G_OFFSET]),
+            symbi_algebra::Tensor::zeros(),
+            GM,
+            1.0e-3,
+            0.0,
+        )));
+    for lvl in 1..hier.levels.len() {
+        hier.levels[lvl].state.seed_cells(hydrostatic);
+    }
+    hier
+}
+
+#[test]
+fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
+    // what a deep ladder must not do is ACCUMULATE. level `l` subcycles `2^l` times per root
+    // step, so if each coarse-fine interface shed entropy into the level below it, an eight-level
+    // production ladder would carry eight interfaces' worth and the deficit would deepen with
+    // every rung added.
+    //
+    // it does not. each level's deficit is set by that level's own cell width and is unchanged by
+    // how many finer levels sit above it, and the FINEST level -- the one resolving the flow --
+    // holds the floor. the deficit that the coarser levels do carry sits AT the patch edge (on a
+    // root grid with the level-1 patch at [0.3, 0.7], the minimum lands at x = 0.707, one cell
+    // outside it): the coarse-fine ghost fill interpolates the CONSERVED state, which has no
+    // reason to preserve the discrete cancellation between the pressure gradient and the gravity
+    // source, so the interface behaves like any other boundary that cannot hold hydrostatic
+    // equilibrium exactly.
+    let mut coarsest = Vec::new();
+    let mut finest = Vec::new();
+    for levels in 1..=4usize {
+        let mut hier = build_gravity(&nested(levels));
+        assert_eq!(hier.levels.len(), levels, "asked for {levels} levels");
+        hier.evolve(T_GRAV).unwrap();
+
+        let mut per_level = Vec::new();
+        for level in hier.levels.iter() {
+            let st = &level.state;
+            let rho = st.fields.prim.rho.view();
+            let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+            let cells: Vec<_> = st.geom.interior.iter().collect();
+            // skip the wall band: a reflecting boundary mirrors the state but NOT the
+            // gravitational source, so it cannot hold the equilibrium the interior holds.
+            let skip = cells.len() / 5;
+            let mut worst = f64::INFINITY;
+            for c in cells.iter().skip(skip).take(cells.len() - 2 * skip) {
+                let r = *rho.at(*c);
+                if r > 0.0 {
+                    worst = worst.min(*pre.at(*c) / r.powf(GAMMA) / K0);
+                }
+            }
+            per_level.push(worst);
+        }
+        println!(
+            "levels={levels}  root_steps={:>5}  min K/K0: {:?}",
+            hier.levels[0].state.iteration,
+            per_level.iter().map(|k| format!("{k:.7}")).collect::<Vec<_>>()
+        );
+        coarsest.push(per_level[0]);
+        finest.push(*per_level.last().unwrap());
+    }
+
+    // NON-VACUITY: the deepest ladder has to have actually built the levels it was asked for and
+    // stepped them, or "no compounding" is a statement about a run that did nothing.
+    assert_eq!(coarsest.len(), 4, "the sweep did not complete");
+
+    // the finest level -- the one that resolves the flow, and the only one production reads a
+    // profile off -- holds the floor at every depth.
+    for (i, k) in finest.iter().enumerate() {
+        assert!(
+            *k > 1.0 - 1.0e-4,
+            "at {} level(s) the finest level lost entropy: min K/K0 = {k:.9}",
+            i + 1
+        );
+    }
+    // and the root level's deficit does not deepen as rungs are added above it: interfaces do
+    // not stack. compare every refined case against the two-level one.
+    for (i, k) in coarsest.iter().enumerate().skip(2) {
+        assert!(
+            (k - coarsest[1]).abs() < 1.0e-5,
+            "the root level's entropy moved from {:.9} at 2 levels to {k:.9} at {} levels; \
+             coarse-fine interfaces are compounding down the ladder",
+            coarsest[1],
+            i + 1
+        );
+    }
+}
