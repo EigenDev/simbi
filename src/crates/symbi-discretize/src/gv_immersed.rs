@@ -207,15 +207,16 @@ fn body_contribution(
 ) -> BodyContributionGv {
     let mass = Gv::scalar(&format!("body_{b}_mass"));
     let soft = Gv::scalar(&format!("body_{b}_soft"));
+    let soft_kind = Gv::scalar(&format!("body_{b}_softkind"));
     let bpos = body_vec3(b, ndim, cart_axes, "pos");
 
     // r_vec = cell_cart - body_pos; r_mag = |r_vec| (for the drain mask).
     let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
     let r_mag = (sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2])).sqrt();
 
-    // softened gravity g = -mass * r_vec / r_eff^3 — the carrier-generic form, proven conservative
-    // (g = -grad phi) + bounded in the well-posedness suite (`ibm.rs`).
-    let g = crate::ibm::softened_gravity(rvec, mass, soft);
+    // the body's gravitational field, family selected by `softkind` — the carrier-generic form,
+    // proven conservative (g = -grad phi) + bounded in the well-posedness suite (`ibm.rs`).
+    let g = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
 
     // the well-posed DRAIN rate: chi * min(sink, cs/dx), the mollified mask chi =
     // 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) times the sound-crossing-capped sink. `sink_rate`
@@ -480,9 +481,10 @@ pub fn body_feedback_grav_gv(coords: Coords, ndim: usize, axes: &[usize]) -> (Gv
     let dv = Gv::ONE / geo.inv_volume;
     let mass = Gv::scalar("body_0_mass");
     let soft = Gv::scalar("body_0_soft");
+    let soft_kind = Gv::scalar("body_0_softkind");
     let bpos = body_vec3(0, ndim, &cart_axes, "pos");
     let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
-    let g = crate::ibm::softened_gravity(rvec, mass, soft);
+    let g = crate::ibm::body_gravity(rvec, mass, soft, soft_kind);
     let mut writes: Writes = Vec::new();
     for ax in 0..ndim {
         let fc = -(den * g[cart_axes[ax]]) * dv;

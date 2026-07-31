@@ -27,7 +27,7 @@ pub mod penalize;
 pub mod sdf;
 pub mod shell_flux;
 
-pub use body::{Body, BodyKind, BodySpec, MagneticSpec, SurfaceSpec};
+pub use body::{SofteningKind, Body, BodyKind, BodySpec, MagneticSpec, SurfaceSpec};
 pub use body_delta::BodyDelta;
 pub use bond::{
     Bond, BondMaterial, ExternalLoad, FragmentPhysics, advance_bonded, bond_potential_energy,

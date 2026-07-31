@@ -147,6 +147,29 @@ class GravitationalSystemConfig(BodySystemConfig):
 @dataclass(frozen=True)
 class GravitationalProperties:
     softening_length: float
+    # which family `softening_length` parameterizes.
+    #
+    # "plummer" is a real extended profile: its field is BELOW newtonian at every radius
+    # (0.354 at r = h, needing r > 5h to reach 0.99), so a length chosen for regularity
+    # near the body biases the field across the whole domain. correct for a genuinely
+    # extended mass; wrong for a point accretor.
+    #
+    # "compact" truncates the source at `softening_length`: outside it the field is the
+    # bare point mass to the last bit, and only the interior is regularized. this is the
+    # one to use when the softening exists solely to keep the field finite where a sink
+    # has thinned the gas -- set the length to the accretion radius and the measurement
+    # outside it is untouched.
+    softening_kind: str = "plummer"
+
+    def __post_init__(self) -> None:
+        allowed = ("plummer", "compact")
+        if self.softening_kind not in allowed:
+            raise ValueError(
+                f"softening_kind {self.softening_kind!r} is not one of {allowed}. "
+                "'plummer' is an extended profile whose field is below newtonian at every "
+                "radius; 'compact' is exactly newtonian outside softening_length and "
+                "regularized only within it."
+            )
 
 
 @dataclass(frozen=True)

@@ -149,6 +149,34 @@ pub struct BodySpec {
     pub magnetic: MagneticSpec,
 }
 
+/// which softened-gravity family a body's `softening` length parameterizes.
+///
+/// the distinction is SUPPORT, not smoothness. `Plummer` is a real extended profile whose field
+/// `[1 + (h/r)^2]^{-3/2}` is below Newtonian at EVERY radius — 0.354 at `r = h`, and it needs
+/// `r > 5h` to reach 0.99 — so a length chosen for regularity near the body biases the field
+/// through the whole domain. `Compact` truncates the source at `h` instead: outside it the field
+/// is the bare point mass to the last bit, so `h` may be set to whatever radius the flow is not
+/// asked to resolve without touching the measurement outside it.
+///
+/// use `Plummer` for a genuinely extended mass. use `Compact` for a point accretor, where the
+/// softening exists only to keep the field finite where the sink has thinned the gas.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SofteningKind {
+    #[default]
+    Plummer,
+    Compact,
+}
+
+impl SofteningKind {
+    /// the wire encoding carried to the traced kernel as `body_{idx}_softkind`.
+    pub fn as_scalar(self) -> f64 {
+        match self {
+            SofteningKind::Plummer => 0.0,
+            SofteningKind::Compact => 1.0,
+        }
+    }
+}
+
 /// a physical body embedded in the simulation grid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body<S: Scalar, const D: usize> {
@@ -161,6 +189,9 @@ pub struct Body<S: Scalar, const D: usize> {
     pub radius: S,
     pub two_way_coupling: bool,
     pub kind: BodyKind<S>,
+    /// which family [`Body::softening`] parameterizes. defaults to `Plummer`, which keeps every
+    /// body constructed before this existed bit-identical.
+    pub softening_kind: SofteningKind,
     /// the surface-coupling stack: the hydrodynamic surface physics (`spec.surface`)
     /// and the magnetic coupling (`spec.magnetic`). kinematics stay on `kind`; this
     /// picks the baked kernel.
@@ -200,6 +231,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             radius,
             two_way_coupling: false,
             kind,
+            softening_kind: SofteningKind::default(),
             spec: BodySpec::default(),
             orientation: [
                 [S::ONE, S::ZERO, S::ZERO],
@@ -542,6 +574,17 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             BodyKind::Planet { softening, .. } => Some(softening),
             _ => None,
         }
+    }
+
+    /// the softening family as its wire scalar, or None for a body that exerts no gravity.
+    pub fn softening_kind(&self) -> Option<f64> {
+        self.softening().map(|_| self.softening_kind.as_scalar())
+    }
+
+    /// declare the softening family (fluent; the default is `Plummer`).
+    pub fn with_softening_kind(mut self, kind: SofteningKind) -> Self {
+        self.softening_kind = kind;
+        self
     }
 
     /// accretion radius, or None if the body has no accretion capability.

@@ -40,6 +40,10 @@ use crate::scalar_param::MeshScalar;
 pub enum BodyScalar {
     Mass,
     Soft,
+    /// which softened-gravity family `soft` parameterizes: `0` = Plummer (a real extended
+    /// profile, never exactly Newtonian at any radius), `1` = COMPACT (exactly Newtonian
+    /// outside `soft`, regular within). carried as a scalar so one baked kernel serves both.
+    SoftKind,
     Racc,
     Sink,
     Delta,
@@ -57,6 +61,7 @@ impl BodyScalar {
         match self {
             BodyScalar::Mass => "mass".to_string(),
             BodyScalar::Soft => "soft".to_string(),
+            BodyScalar::SoftKind => "softkind".to_string(),
             BodyScalar::Racc => "racc".to_string(),
             BodyScalar::Sink => "sink".to_string(),
             BodyScalar::Delta => "delta".to_string(),
@@ -83,6 +88,7 @@ impl BodyScalar {
         match field {
             "mass" => Some(BodyScalar::Mass),
             "soft" => Some(BodyScalar::Soft),
+            "softkind" => Some(BodyScalar::SoftKind),
             "racc" => Some(BodyScalar::Racc),
             "sink" => Some(BodyScalar::Sink),
             "delta" => Some(BodyScalar::Delta),
@@ -315,6 +321,7 @@ mod tests {
             for field in [
                 BodyScalar::Mass,
                 BodyScalar::Soft,
+                BodyScalar::SoftKind,
                 BodyScalar::Racc,
                 BodyScalar::Sink,
                 BodyScalar::Delta,

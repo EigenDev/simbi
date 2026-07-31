@@ -220,6 +220,7 @@ pub(crate) fn body_scalar<const D: usize>(
         _ => {
             return match field {
                 BodyScalar::Soft | BodyScalar::Racc | BodyScalar::Delta => 1.0,
+                BodyScalar::SoftKind => 0.0,
                 _ => 0.0,
             };
         }
@@ -236,6 +237,9 @@ pub(crate) fn body_scalar<const D: usize>(
             }
         }
         BodyScalar::Soft => body.softening().unwrap_or(1.0),
+        // an inactive or non-gravitating slot carries mass = 0, so the family it names is
+        // immaterial; Plummer is the historical default and keeps those slots bit-identical.
+        BodyScalar::SoftKind => body.softening_kind().unwrap_or(0.0),
         // the penalization mask radius: the accretor's accretion radius or the rigid
         // body's physical radius; 1.0 for a body with no mask (never penalized).
         BodyScalar::Racc => body.mask_radius().unwrap_or(1.0),

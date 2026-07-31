@@ -198,6 +198,7 @@ struct BodyParams {
     position: Vec<f64>,
     velocity: Vec<f64>,
     softening: f64,
+    softening_kind: f64,
     accretion_radius: f64,
     sink_rate: f64,
     /// the porous-surface dial: None keeps the pure drain.
@@ -1274,6 +1275,15 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             .and_then(|x| x.extract().ok())
             .unwrap_or(false);
         let softening = sub_f64(b, "gravitational", "softening_length", 0.0);
+        // the family selector rides as a string so a config reads as physics, not a flag.
+        // the vocabulary is validated on the python side (`GravitationalProperties`), which is
+        // where a typo can be reported against the line that wrote it.
+        let softening_kind =
+            if sub_str(b, "gravitational", "softening_kind", "plummer") == "compact" {
+                1.0
+            } else {
+                0.0
+            };
         let accretion_radius = sub_f64(b, "accretion", "accretion_radius", 0.0);
         let sink_rate = sub_f64(b, "accretion", "sink_rate", 0.0);
         let porosity = sub_f64_opt(b, "accretion", "porosity");
@@ -1312,6 +1322,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             position: v("position"),
             velocity: v("velocity"),
             softening,
+            softening_kind,
             accretion_radius,
             sink_rate,
             porosity,
@@ -1398,6 +1409,13 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
             position: vec![pos[0], pos[1]],
             velocity: vec![vel[0], vel[1]],
             softening: sub_f64(c, "gravitational", "softening_length", 0.0),
+            softening_kind: if sub_str(c, "gravitational", "softening_kind", "plummer")
+                == "compact"
+            {
+                1.0
+            } else {
+                0.0
+            },
             accretion_radius: sub_f64(c, "accretion", "accretion_radius", 0.0),
             sink_rate: sub_f64(c, "accretion", "sink_rate", 0.0),
             porosity: sub_f64_opt(c, "accretion", "porosity"),
@@ -1420,6 +1438,18 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
 /// `gravitational` / `accretion`), returning `default` when absent or null.
 fn sub_f64(body: &Bound<'_, PyDict>, group: &str, key: &str, default: f64) -> f64 {
     sub_f64_opt(body, group, key).unwrap_or(default)
+}
+
+/// the string twin of `sub_f64`: a nested `body[group][key]` string, or `default` when the
+/// group or key is absent. used by selectors that name a physical model rather than set a number.
+fn sub_str(body: &Bound<'_, PyDict>, group: &str, key: &str, default: &str) -> String {
+    body.get_item(group)
+        .ok()
+        .flatten()
+        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|gd| gd.get_item(key).ok().flatten())
+        .and_then(|val| val.extract::<String>().ok())
+        .unwrap_or_else(|| default.to_string())
 }
 
 /// like `sub_f64` but absent / null / non-numeric is `None` — for dials whose
@@ -3072,6 +3102,14 @@ fn build_bodies<const D: usize>(
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
+        // the softening FAMILY, applied after the capability branch so neither arm can miss it.
+        // an accreting body and a bare gravitating one both carry a softening length, and both
+        // need to say which field that length describes.
+        let body = body.with_softening_kind(if b.softening_kind > 0.5 {
+            symbi_ib::SofteningKind::Compact
+        } else {
+            symbi_ib::SofteningKind::Plummer
+        });
         // a magnetized sink: the body dissipates the field threading it (MHD runs only; a no-op on B
         // for a hydro/None body). applied on top of the surface stack.
         let body = match b.magnetic_resistivity {

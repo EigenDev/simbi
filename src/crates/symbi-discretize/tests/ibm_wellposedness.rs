@@ -41,7 +41,10 @@
 // run: cargo test -p symbi-discretize --test ibm_wellposedness
 // =============================================================================
 
-use symbi_discretize::ibm::{drain_factor, drain_rate, softened_gravity, softened_potential};
+use symbi_discretize::ibm::{
+    compact_gravity, compact_potential, drain_factor, drain_rate, softened_gravity,
+    softened_potential,
+};
 use symbi_ir::dual::Dual;
 
 // the analytic bound constant C = 2/(3 sqrt 3) from THEOREM 3.
@@ -205,6 +208,124 @@ fn softened_gravity_is_bounded_by_softening() {
             assert!(
                 (peak - bound).abs() <= 1e-9 * bound,
                 "bound not tight: peak |g|={peak}, bound={bound}",
+            );
+        }
+    }
+}
+
+// THEOREM 5 — the compact field is conservative: g = -grad phi, by autodiff on the real potential,
+// across the match radius rather than only away from it.
+#[test]
+fn compact_gravity_is_conservative_grad_of_potential() {
+    let bpos = [0.13_f64, -0.27, 0.41];
+    sweep(|mass, h, r, frac| {
+        let dir = {
+            let d = [0.6, -0.5 + 0.3 * frac, 0.62];
+            let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            [d[0] / n, d[1] / n, d[2] / n]
+        };
+        let pos = [
+            bpos[0] + r * dir[0],
+            bpos[1] + r * dir[1],
+            bpos[2] + r * dir[2],
+        ];
+        let rvec_f = [pos[0] - bpos[0], pos[1] - bpos[1], pos[2] - bpos[2]];
+        let g = compact_gravity(rvec_f, mass, h);
+        for j in 0..3 {
+            let rvec: [Dual<f64>; 3] = std::array::from_fn(|i| {
+                let p = if i == j {
+                    Dual::variable(pos[i])
+                } else {
+                    Dual::constant(pos[i])
+                };
+                p - Dual::constant(bpos[i])
+            });
+            let dphi = compact_potential(rvec, Dual::constant(mass), Dual::constant(h)).tangent;
+            assert!(
+                (g[j] + dphi).abs() < 1.0e-9 * (1.0 + g[j].abs()),
+                "compact field is not -grad phi at r = {r}, h = {h}, axis {j}: \
+                 g = {}, -dphi = {}",
+                g[j],
+                -dphi
+            );
+        }
+    });
+}
+
+// THEOREM 6 — COMPACT SUPPORT. outside the match radius the field is the BARE point mass, to the
+// last bit. this is the property a Plummer sphere cannot have at any softening length, and it is
+// what lets `h` be chosen for regularity near the body without biasing a power law measured
+// outside it.
+#[test]
+fn the_compact_field_is_exactly_newtonian_outside_the_match_radius() {
+    let mut checked = 0usize;
+    for &mass in &[0.3_f64, 1.0, 7.5] {
+        for &h in &[0.02_f64, 0.1, 0.5] {
+            for k in 1..60 {
+                let r = h * (1.0 + 0.05 * k as f64); // strictly outside
+                let rvec = [r * 0.6, r * -0.8, 0.0]; // |rvec| = r exactly
+                let g = compact_gravity(rvec, mass, h);
+                // the oracle is the BARE point mass evaluated through the same arithmetic:
+                // `softened_gravity` at zero softening recovers |rvec| by the identical
+                // `sqrt(dot)` and cubes it identically. comparing against a separately-formed
+                // `-mass/r^3` would only measure how the norm round-trips, not the model.
+                let want = softened_gravity(rvec, mass, 0.0);
+                for i in 0..3 {
+                    assert_eq!(
+                        g[i].to_bits(),
+                        want[i].to_bits(),
+                        "compact field differs from the point mass at r/h = {}: {} vs {}",
+                        r / h,
+                        g[i],
+                        want[i]
+                    );
+                }
+                assert_eq!(
+                    compact_potential(rvec, mass, h).to_bits(),
+                    softened_potential(rvec, mass, 0.0).to_bits(),
+                    "compact potential differs from -M/r at r/h = {}",
+                    r / h
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 400, "the sweep covered only {checked} points");
+
+    // NON-VACUITY: a Plummer sphere at the same length is NOT the point mass anywhere -- this is
+    // the bias the compact form removes, and it must be large enough here to be worth removing.
+    let (mass, h) = (1.0_f64, 0.1_f64);
+    for &mult in &[1.0_f64, 2.0, 5.0] {
+        let r = h * mult;
+        let rvec = [r, 0.0, 0.0];
+        let ratio = softened_gravity(rvec, mass, h)[0] / (-mass / (r * r));
+        let exact = compact_gravity(rvec, mass, h)[0] / (-mass / (r * r));
+        println!("  r = {mult} h:  plummer/newton = {ratio:.4}   compact/newton = {exact:.4}");
+        assert!(
+            ratio < 0.995,
+            "plummer at r = {mult} h is already indistinguishable from newton ({ratio}); the \
+             compact form would be solving nothing"
+        );
+    }
+}
+
+// THEOREM 7 — the peak field is bounded by the match radius alone, at 1.242 mass/h^2 (attained at
+// r = sqrt(5/9) h). resolution-independent, unlike a Plummer accurate at `h`, whose peak grows as
+// 1/eps^2 and takes the timestep with it.
+#[test]
+fn the_compact_field_peaks_at_a_bounded_resolution_independent_value() {
+    for &mass in &[0.3_f64, 1.0, 7.5] {
+        for &h in &[0.02_f64, 0.1, 0.5] {
+            let mut peak = 0.0_f64;
+            for k in 0..4000 {
+                let r = h * 2.0 * k as f64 / 4000.0;
+                let rvec = [r, 0.0, 0.0];
+                peak = peak.max(compact_gravity(rvec, mass, h)[0].abs());
+            }
+            let want = 1.2417_f64 * mass / (h * h); // (5/2)u - (3/2)u^3 maximized at u^2 = 5/9
+            assert!(
+                (peak - want).abs() < 2.0e-3 * want,
+                "peak |g| = {peak:.6e} at mass {mass}, h {h}; expected {want:.6e}"
             );
         }
     }
