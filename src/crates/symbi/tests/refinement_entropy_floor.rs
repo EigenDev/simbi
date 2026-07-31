@@ -270,12 +270,14 @@ fn hydrostatic(x: [f64; 1]) -> Prim<f64, 1> {
     }
 }
 
-fn build_gravity(
+fn build_gravity_ord(
     regions: &[RefinementRegion<1>],
+    ncells: usize,
+    ord: ProlongOrder,
 ) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
     let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([N])
-        .spacing([1.0 / N as f64])
+        .cells([ncells])
+        .spacing([1.0 / ncells as f64])
         // a reflecting wall exerts no work on gas at rest, so the hydrostatic state is a fixed
         // point of the boundary as well as of the interior.
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
@@ -285,7 +287,7 @@ fn build_gravity(
         .set_initial(hydrostatic)
         .build();
     let ck = kset(&coarse);
-    let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Ppm, kset)
+    let hier = Hierarchy::with_refinement(coarse, ck, regions, ord, kset)
         .unwrap()
         .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
             0,
@@ -299,6 +301,19 @@ fn build_gravity(
         hier.levels[lvl].state.seed_cells(hydrostatic);
     }
     hier
+}
+
+fn build_gravity_at(
+    regions: &[RefinementRegion<1>],
+    ncells: usize,
+) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+    build_gravity_ord(regions, ncells, ProlongOrder::Ppm)
+}
+
+fn build_gravity(
+    regions: &[RefinementRegion<1>],
+) -> Hierarchy<Newtonian, 1, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, Kset> {
+    build_gravity_at(regions, N)
 }
 
 #[test]
@@ -374,4 +389,45 @@ fn a_refinement_ladder_does_not_compound_the_gravitational_entropy_error() {
             i + 1
         );
     }
+}
+
+#[test]
+fn scratch_restriction_vs_register() {
+    // do the COVERED region (written by restriction, away from the patch edge) and the EDGE
+    // (written by the flux register) shrink at the SAME rate? same rate means one root cause and
+    // one well-balanced fix; different rates mean two independent defects and fixing the register
+    // alone would leave the other behind looking like a partial success.
+    //
+    // fixed real step count at every resolution: the end time scales with dx.
+    let (mut cov, mut edge) = (Vec::new(), Vec::new());
+    for n in [64usize, 128, 256] {
+        let mut hier = build_gravity_at(&nested(2), n);
+        hier.evolve(20.0 * CFL / (n as f64 * 6.0)).unwrap();
+        let st = &hier.levels[0].state;
+        let rho = st.fields.prim.rho.view();
+        let pre = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+        let cells: Vec<_> = st.geom.interior.iter().collect();
+        let (mut c, mut e) = (0.0_f64, 0.0_f64);
+        for (i, cc) in cells.iter().enumerate() {
+            let x = (i as f64 + 0.5) / cells.len() as f64;
+            let d = (*pre.at(*cc) / rho.at(*cc).powf(GAMMA) / K0 - 1.0).abs();
+            // covered by the level-1 patch [0.3, 0.7], held clear of both its edges
+            if (0.34..0.62).contains(&x) {
+                c = c.max(d);
+            }
+            // the patch edge, where the register writes
+            if (0.66..0.74).contains(&x) {
+                e = e.max(d);
+            }
+        }
+        println!(
+            "N={n:>4}: {:>3} steps   covered(restriction) = {c:.4e}   edge(register) = {e:.4e}",
+            st.iteration
+        );
+        cov.push(c);
+        edge.push(e);
+    }
+    let ord = |v: &[f64]| -> Vec<f64> { v.windows(2).map(|w| (w[0] / w[1]).log2()).collect() };
+    println!("  covered orders: {:?}", ord(&cov));
+    println!("  edge    orders: {:?}", ord(&edge));
 }

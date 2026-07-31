@@ -403,29 +403,63 @@ fn the_body_and_additive_sources_agree_and_carry_no_timestep_bias() {
 }
 
 #[test]
-fn the_discrete_balance_is_exact_on_the_equilibrium_profile() {
-    // the sharpest form of the law, and the one that needs no measurement window at all: a
-    // scheme whose discrete flux gradient does not cancel its discrete gravity source leaves an
-    // entropy error in the FIRST flux/source pair, before any dynamics exist to blame. one step
-    // on the analytic equilibrium either lands on `K = K0` or it does not.
-    for gm in [0.1, 1.0, 10.0, 100.0] {
-        let mut sim = hydrostatic_atmosphere_ts(gm, 512, 0.4, Timestepping::Rk2);
-        let k = Kset::new(GAMMA, 0.4, &sim.geom.allocated);
-        evolve(&mut sim, &k, 1.0e-12).expect("evolve failed");
-        assert_eq!(sim.iteration, 1, "the probe must take exactly one step");
+fn the_hydrostatic_residue_converges_at_third_order() {
+    // how well the discrete flux gradient cancels the discrete gravity source, measured on the
+    // analytic equilibrium whose exact evolution is to stand still.
+    //
+    // this is NOT exactness. a genuinely well-balanced scheme leaves the discrete equilibrium at
+    // ROUND-OFF whatever the resolution; this one leaves a residue that shrinks with `dx`, so the
+    // balance is a convergence property rather than an identity. holding the STEP COUNT fixed and
+    // varying `dx` is what separates the two: flat-at-round-off would mean balanced, and a clean
+    // power means merely consistent.
+    //
+    // a `tend` at or below one CFL step is useless here — `evolve` clamps `dt` to the remaining
+    // time, so it takes one degenerate step of that size and measures nothing. the end time below
+    // scales with `dx` precisely so every resolution takes the SAME number of real steps.
+    const STEPS: f64 = 20.0;
+    for gm in [1.0, 100.0] {
+        let mut residue = Vec::new();
+        for n in [128usize, 256, 512] {
+            let mut sim = hydrostatic_atmosphere_ts(gm, n, CFL, Timestepping::Rk2);
+            let k = Kset::new(GAMMA, CFL, &sim.geom.allocated);
+            evolve(&mut sim, &k, STEPS * CFL / (n as f64 * 6.0)).expect("evolve failed");
 
-        let worst = worst_entropy_ratio(&sim);
-        println!("GM = {gm:>6}: min K/K0 after one step = {worst:.12}");
-        // NON-VACUITY: gravity has to be steep enough for a balance failure to have somewhere to
-        // show. at GM = 0.1 the atmosphere is only 5 percent denser at the inner edge; the
-        // sweep's upper end carries a factor of 200.
-        let contrast = hydrostatic_density(1.0, gm) / hydrostatic_density(1.0 + R_OFFSET, gm);
-        assert!(contrast > 1.04, "GM = {gm} is too flat to test a balance");
-        assert!(
-            (worst - 1.0).abs() < 1.0e-11,
-            "the discrete balance is not exact at GM = {gm}: min K/K0 = {worst:.12} after a \
-             single step on the analytic hydrostatic profile, whose exact evolution is to stand \
-             still. the flux gradient and the gravity source are not cancelling"
-        );
+            let rho = sim.fields.prim.rho.view();
+            let pre = sim.fields.prim.pre.as_ref().expect("adiabatic").view();
+            let cells: Vec<_> = sim.geom.interior.iter().collect();
+            let skip = (WALL_SKIP * cells.len() as f64) as usize;
+            let mut worst = 0.0_f64;
+            for c in cells.iter().skip(skip).take(cells.len() - 2 * skip) {
+                let r = *rho.at(*c);
+                worst = worst.max((*pre.at(*c) / r.powf(GAMMA) / k0() - 1.0).abs());
+            }
+            println!("GM = {gm:>6}  N = {n:>4}: {:>3} steps  |K/K0 - 1| = {worst:.4e}", sim.iteration);
+            // NON-VACUITY: a clamped `dt` would make this measure nothing at all.
+            assert!(
+                sim.iteration >= 4,
+                "only {} step(s) at N = {n}; the end time collapsed onto the timestep and this \
+                 measures nothing",
+                sim.iteration
+            );
+            assert!(
+                worst > 1.0e-13,
+                "the residue at N = {n} is at round-off ({worst:.3e}); the ratio below carries \
+                 no information"
+            );
+            residue.push(worst);
+        }
+        let orders: Vec<f64> = residue
+            .windows(2)
+            .map(|w| (w[0] / w[1]).log2())
+            .collect();
+        println!("  observed orders: {orders:?}");
+        for p in &orders {
+            assert!(
+                *p > 2.5,
+                "the hydrostatic residue converges at order {p:.3} at GM = {gm} \
+                 ({residue:?}); the balance between the flux gradient and the gravity source is \
+                 degrading faster than the scheme's own accuracy"
+            );
+        }
     }
 }
