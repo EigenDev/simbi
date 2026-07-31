@@ -22,6 +22,17 @@ const DX: f64 = 0.05;
 const POS: [f64; 2] = [0.11, -0.07];
 const RACC: f64 = 0.15;
 const C_DRAIN: f64 = 1.0;
+/// the accretor mass. chosen so the FREE-FALL floor binds: with `RACC = 0.15` the free-fall rate
+/// `sqrt(MASS/RACC^3)` is 34.4 against a sound-crossing rate `CS/(C_DRAIN*DX)` of about 20, so
+/// these oracles exercise the floor arm rather than passing through the sound-crossing arm and
+/// leaving the new path unchecked.
+const MASS: f64 = 4.0;
+
+/// the f64 twin of the kernel's `spherical_drain_rate`: the faster of the sound-crossing rate and
+/// free fall at the mask radius. takes the radius explicitly -- the cases here use several.
+fn drain_rate_floor(sound_rate: f64, racc: f64) -> f64 {
+    sound_rate.max((MASS / (racc * racc * racc)).sqrt())
+}
 const DT: f64 = 0.008;
 const GAMMA: f64 = 1.4;
 
@@ -118,6 +129,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             "body_0_pos_0" => POS[0],
             "body_0_pos_1" => POS[1],
             "body_0_racc" => RACC,
+            "body_0_mass" => MASS,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -209,7 +221,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             let ch = chi(sphere.dist(x), DX);
             let mom_sq = cons.mom.dot(&cons.mom);
             let cs = symbi_ib::drain::sound_speed_from_cons(cons.den, mom_sq, cons.nrg, GAMMA);
-            let inv_tau = cs / (C_DRAIN * DX);
+            let inv_tau = drain_rate_floor(cs / (C_DRAIN * DX), RACC);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -293,6 +305,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             "body_0_pos_0" => POS[0],
             "body_0_pos_1" => POS[1],
             "body_0_racc" => RACC,
+            "body_0_mass" => MASS,
             "c_a2" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
@@ -363,7 +376,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             };
             let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
             let ch = chi(sphere.dist([mid(ii), mid(jj)]), DX);
-            let inv_tau = CS / (C_DRAIN * DX);
+            let inv_tau = drain_rate_floor(CS / (C_DRAIN * DX), RACC);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -444,6 +457,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             "body_0_pos_0" => CENTER[0],
             "body_0_pos_1" => CENTER[1],
             "body_0_racc" => RACC_C,
+                "body_0_mass" => MASS,
             "c_a2" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
@@ -523,7 +537,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             };
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
-            let inv_tau = CS / (C_DRAIN * min_w);
+            let inv_tau = drain_rate_floor(CS / (C_DRAIN * min_w), RACC_C);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),
@@ -630,6 +644,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 "body_0_pos_0" => CENTER[0],
                 "body_0_pos_1" => CENTER[1],
                 "body_0_racc" => RACC_C,
+                "body_0_mass" => MASS,
                 "body_0_vel_0" => VEL[0],
                 "body_0_vel_1" => VEL[1],
                 "c_a2" => 0.0,
@@ -706,7 +721,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
             };
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
-            let inv_tau = CS / (C_DRAIN * min_w);
+            let inv_tau = drain_rate_floor(CS / (C_DRAIN * min_w), RACC_C);
             // the physical-frame normal: Cartesian r_hat rotated into the ortho basis.
             let xrel = [xc[0] - CENTER[0], xc[1] - CENTER[1]];
             let r = (xrel[0] * xrel[0] + xrel[1] * xrel[1]).sqrt();
@@ -838,6 +853,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 "body_0_pos_0" => POS[0],
                 "body_0_pos_1" => POS[1],
                 "body_0_racc" => RACC,
+            "body_0_mass" => MASS,
                 "body_0_vel_0" => VEL[0],
                 "body_0_vel_1" => VEL[1],
                 "c_a2" => 0.0,
@@ -907,7 +923,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
             };
             let x = [mid(ii), mid(jj)];
             let ch = chi(sphere.dist(x), DX);
-            let inv_tau = CS / (C_DRAIN * DX);
+            let inv_tau = drain_rate_floor(CS / (C_DRAIN * DX), RACC);
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
             let r = x_rel.dot(&x_rel).sqrt();
             let normal = x_rel.scale(1.0 / r.max(1e-300));
@@ -1031,6 +1047,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 "body_0_pos_0" => POS[0],
                 "body_0_pos_1" => POS[1],
                 "body_0_racc" => RACC,
+            "body_0_mass" => MASS,
                 "body_0_vel_0" => VEL[0],
                 "body_0_vel_1" => VEL[1],
                 "c_a2" => 0.0,
@@ -1115,7 +1132,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
             let ch = chi(sphere.dist(x), DX);
             let mom_sq = cons.mom.dot(&cons.mom);
             let cs = symbi_ib::drain::sound_speed_from_cons(cons.den, mom_sq, cons.nrg, GAMMA);
-            let inv_tau = cs / (C_DRAIN * DX);
+            let inv_tau = drain_rate_floor(cs / (C_DRAIN * DX), RACC);
             let rate_scale = cs / DX;
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
             let r = x_rel.dot(&x_rel).sqrt();
@@ -1268,6 +1285,7 @@ fn iso_porous_reduces_to_iso_drain_at_p1() {
             "body_0_pos_0" => POS[0],
             "body_0_pos_1" => POS[1],
             "body_0_racc" => RACC,
+            "body_0_mass" => MASS,
             "body_0_vel_0" => 0.05,
             "body_0_vel_1" => -0.03,
             "c_a2" => 0.0,
@@ -1322,6 +1340,7 @@ fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
             "body_0_pos_0" => POS[0],
             "body_0_pos_1" => POS[1],
             "body_0_racc" => RACC,
+            "body_0_mass" => MASS,
             "body_0_vel_0" => 0.05,
             "body_0_vel_1" => -0.03,
             other => panic!("unexpected '{other}'"),
@@ -1386,6 +1405,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
             "body_0_pos_0" => CENTER[0],
             "body_0_pos_1" => CENTER[1],
             "body_0_racc" => RACC_C,
+                "body_0_mass" => MASS,
             "c_a2" => 0.0,
             other => panic!("unexpected '{other}'"),
         }
@@ -1415,7 +1435,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
             };
             let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
             let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
-            let inv_tau = CS / (C_DRAIN * min_w);
+            let inv_tau = drain_rate_floor(CS / (C_DRAIN * min_w), RACC_C);
             let kin = BodyKin::<f64, 2> {
                 u_solid: Tensor::zeros(),
                 omega: Tensor::zeros(),

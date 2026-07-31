@@ -270,6 +270,33 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
 /// a symmetric body (sphere, symmetric CSG). everything dynamical (translation, gravity, the
 /// omega x r wall velocity, the torque moment arm `x - center`) is referenced to the COM, so an
 /// asymmetric mass distribution would offset the MASK PLACEMENT alone.
+/// the drain rate for a SPHERICAL accretor: the faster of the sound-crossing timescale and the
+/// FREE-FALL rate at the mask radius, `sqrt(GM / r_acc^3)`.
+///
+/// the sound-crossing form `c_s / (c_drain dx)` is a convergence dial on the premise that the
+/// SONIC SURFACE sets the emergent rate, so any sufficiently fast drain gives the same answer.
+/// that premise has a precondition — the mask must sit inside the sonic surface — and the Bondi
+/// sonic radius is `(5 - 3 gamma)/4 R_B`, which is IDENTICALLY ZERO at `gamma = 5/3`. there is no
+/// sonic surface to set the rate, so the dial stops being a dial and starts being the boundary
+/// condition.
+///
+/// the free-fall floor restores the intent. gas cannot cross the mask faster than free fall, so a
+/// rate at or above `sqrt(GM/r_acc^3)` removes it within one crossing at ANY refinement depth,
+/// where the sound-crossing form drifts: `(c_s/dx) / Omega_ff ~ sqrt(r_acc)`, falling from 1.56 at
+/// six levels to 0.75 at fourteen — the accretor becomes measurably less absorbing the more it is
+/// resolved.
+///
+/// taking the MAXIMUM is safe by the original premise: where the sonic surface does set the rate,
+/// draining faster is a no-op, and where it does not, this is the rate that means "perfect
+/// absorber". the drain is an exact exponential, non-expansive with no CFL condition, so there is
+/// no stability ceiling to respect.
+fn spherical_drain_rate(sound_rate: Gv) -> Gv {
+    let mass = Gv::scalar("body_0_mass");
+    let racc = Gv::scalar("body_0_racc");
+    let omega_ff = (mass / (racc * racc * racc)).sqrt();
+    Gv::cond(sound_rate.cmp_gt(omega_ff), || sound_rate, || omega_ff)
+}
+
 fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> SdfExpr<Gv, 3> {
     match shape {
         None => SdfExpr::<Gv, 3>::Sphere {
@@ -529,7 +556,12 @@ pub fn penalize_drain_gv(
         mom_sq = mom_sq + *m * *m;
     }
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let sound_rate = signal_speed(cs) / (c_drain * min_w);
+    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
+    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    // this kernel is the sphere path by construction (no shape parameter), so the floor
+    // always applies.
+    let inv_tau = spherical_drain_rate(sound_rate);
 
     // the property stack: [Drain]. contribute at Gv, then
     // the SAME integrator that runs at f64.
@@ -740,7 +772,14 @@ fn penalize_porous_inner(
         mom_sq = mom_sq + *m * *m;
     }
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let sound_rate = signal_speed(cs) / (c_drain * min_w);
+    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
+    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    let inv_tau = if shape.is_none() {
+        spherical_drain_rate(sound_rate)
+    } else {
+        sound_rate
+    };
     let rate_scale = signal_speed(cs) / min_w;
 
     // the outward surface normal in the cell's PHYSICAL frame (the cartesian normal rotated into
@@ -951,7 +990,12 @@ pub fn penalize_torque_free_iso_gv(
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     tag_body_mask(&chi, coords, ndim, axes, None, false);
-    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let sound_rate = signal_speed(cs) / (c_drain * min_w);
+    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
+    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    // this kernel is the sphere path by construction (no shape parameter), so the floor
+    // always applies.
+    let inv_tau = spherical_drain_rate(sound_rate);
 
     // the outward surface normal in the cell's PHYSICAL frame: the cartesian
     // r_hat from the body center rotated into the orthonormal basis (identity on
@@ -1144,7 +1188,14 @@ fn penalize_porous_iso_inner(
     };
     let chi = symbi_ib::sdf::chi(sdf.dist(x), min_w);
     tag_body_mask(&chi, coords, ndim, axes, shape, spin);
-    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let sound_rate = signal_speed(cs) / (c_drain * min_w);
+    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
+    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    let inv_tau = if shape.is_none() {
+        spherical_drain_rate(sound_rate)
+    } else {
+        sound_rate
+    };
     let rate_scale = signal_speed(cs) / min_w;
 
     // sphere normal r_hat (guarded), or the CSG SDF gradient for a shaped wall (see the adiabatic
@@ -1339,7 +1390,12 @@ pub fn penalize_torque_free_gv(
         mom_sq = mom_sq + *m * *m;
     }
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let sound_rate = signal_speed(cs) / (c_drain * min_w);
+    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
+    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    // this kernel is the sphere path by construction (no shape parameter), so the floor
+    // always applies.
+    let inv_tau = spherical_drain_rate(sound_rate);
 
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
     let r = x_rel.dot(&x_rel).sqrt();
@@ -1497,7 +1553,12 @@ pub fn penalize_drain_iso_gv(
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     tag_body_mask(&chi, coords, ndim, axes, None, false);
-    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let sound_rate = signal_speed(cs) / (c_drain * min_w);
+    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
+    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
+    // this kernel is the sphere path by construction (no shape parameter), so the floor
+    // always applies.
+    let inv_tau = spherical_drain_rate(sound_rate);
 
     let kin = BodyKin::<Gv, 3> {
         u_solid: Tensor::zeros(),

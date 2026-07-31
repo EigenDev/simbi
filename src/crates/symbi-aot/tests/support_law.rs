@@ -39,6 +39,8 @@ fn scalar_value(name: &str) -> f64 {
         "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
         "body_0_mass" => 1.0,
         "body_0_soft" => 0.05,
+        // 0 = plummer, the default family; this law is about mask SUPPORT, not the field.
+        "body_0_softkind" => 0.0,
         "body_0_pos_0" => BODY_POS[0],
         "body_0_pos_1" => BODY_POS[1],
         "body_0_racc" => RACC,

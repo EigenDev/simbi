@@ -99,6 +99,15 @@ def venv_env() -> dict:
         env["VIRTUAL_ENV"] = sys.prefix
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
 
+    # the C dependencies (hdf5) are compiled by the `cc` crate, which defaults their macho
+    # LC_BUILD_VERSION `minos` to the RUNNING os when MACOSX_DEPLOYMENT_TARGET is unset, while
+    # maturin pins rustc to 11.0 -- the arm64 wheel tag's floor. the resulting artifact claims
+    # macos 11 while carrying objects that demand the build host's version, which the linker
+    # reports per object file. setting the variable makes cc emit -mmacosx-version-min=11.0 so
+    # the C half agrees with the tag the wheel already advertises.
+    if sys.platform == "darwin":
+        env.setdefault("MACOSX_DEPLOYMENT_TARGET", "11.0")
+
     if env.get("SIMBI_NO_BUILD_TUNING") == "1":
         return env
 
