@@ -359,6 +359,12 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
         if ph == "ghost_fill" {
             expected.push("ghost_fill".to_string());
         }
+        // this sim carries bodies, and the immersed-body pass evaluates its contribution at
+        // the stage input, so the snapshot is gated on. the decomposed driver does not elide
+        // the stage-0 copy, so it materializes right after the per-step snapshot.
+        if ph == "snapshot" {
+            expected.push("snapshot_stage".to_string());
+        }
     }
 
     let rec_c = Recorder::new(false, false);

@@ -329,6 +329,109 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel, X: DyeModel>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// an ADIABATIC wall must not destroy entropy.
+    ///
+    /// `K = p / rho^gamma` is one-way for a gas with no heat sink: drag turns mechanical energy
+    /// into heat and nothing takes heat back out. the wall's three channels each respect that
+    /// separately, which is what makes the law assertable rather than approximate:
+    ///
+    /// - the mass channel is a uniform scaling `f_rho` of the whole conserved vector, which
+    ///   leaves the velocity untouched and sends `K -> f_rho^(1-gamma) K`. for `f_rho <= 1` and
+    ///   `gamma > 1` that is a RISE.
+    /// - the velocity channels move momentum toward the wall and book the difference between the
+    ///   exact kinetic-energy change and the work done on the wall as friction heat `Q >= 0`.
+    /// - the thermal channel carries heat toward `e_target`, and IS a reservoir: an isothermal
+    ///   wall absorbing drag dissipation legitimately lowers the gas entropy. so it is switched
+    ///   OFF here (`lambda_e = 0`), and the law is scoped to the adiabatic wall.
+    ///
+    /// swept over a lattice rather than a point, because the sign of `Q` is the whole claim and a
+    /// single sample cannot show it holds where `u`, `u_solid` and the normal are misaligned.
+    #[test]
+    fn an_adiabatic_wall_does_not_destroy_entropy() {
+        const GAMMA: f64 = 5.0 / 3.0;
+        let entropy = |c: &Cons3| {
+            let e_int = (c.nrg.value() - 0.5 * c.mom.dot(&c.mom) / c.den) / c.den;
+            (GAMMA - 1.0) * e_int * c.den / c.den.powf(GAMMA)
+        };
+
+        let mut checked = 0usize;
+        let mut moved = 0usize;
+        for den in [0.5, 2.5, 40.0] {
+            for e_int in [0.05, 1.7, 30.0] {
+                for u in [
+                    Tensor::new([0.0, 0.0, 0.0]),
+                    Tensor::new([0.3, -0.2, 0.1]),
+                    Tensor::new([-2.0, 1.5, 0.4]),
+                ] {
+                    for u_solid in [
+                        Tensor::new([0.0, 0.0, 0.0]),
+                        Tensor::new([0.5, 0.5, -0.5]),
+                        Tensor::new([-1.0, 0.0, 2.0]),
+                    ] {
+                        for (l_rho, l_un, l_ut) in [
+                            (0.0, 10.0, 0.0),
+                            (0.0, 0.0, 10.0),
+                            (3.0, 10.0, 10.0),
+                            (3.0, 1.0e3, 1.0e3),
+                        ] {
+                            for dt in [1.0e-4, 1.0e-2] {
+                                let cons = Cons3 {
+                                    chi: Default::default(),
+                                    den,
+                                    mom: u.scale(den),
+                                    nrg: (den * (e_int + 0.5 * u.dot(&u))).into(),
+                                };
+                                let relax = Relax {
+                                    lambda_rho: l_rho,
+                                    lambda_un: l_un,
+                                    lambda_ut: l_ut,
+                                    u_solid,
+                                    // the adiabatic wall: no thermal reservoir to lose heat to.
+                                    lambda_e: 0.0,
+                                    e_target: 0.0,
+                                    ut_growth_cap: f64::INFINITY,
+                                };
+                                // a normal deliberately misaligned with every velocity above, so
+                                // the normal/tangential split is exercised rather than degenerate.
+                                let n = Tensor::new([0.6, 0.8, 0.0]);
+                                let (out, _) = penalize_cell(&cons, &relax, n, dt, 1.0, 0);
+
+                                let (k_in, k_out) = (entropy(&cons), entropy(&out));
+                                assert!(
+                                    k_out.is_finite() && out.den > 0.0,
+                                    "penalization produced a non-finite state: den {} nrg {}",
+                                    out.den,
+                                    out.nrg.value()
+                                );
+                                assert!(
+                                    k_out >= k_in * (1.0 - 1.0e-12),
+                                    "an adiabatic wall destroyed entropy: K {k_in:.12e} -> \
+                                     {k_out:.12e} at den {den}, e_int {e_int}, u {u:?}, \
+                                     u_solid {u_solid:?}, lambdas ({l_rho}, {l_un}, {l_ut}), \
+                                     dt {dt}. drag dissipates and the mass channel scales \
+                                     uniformly; neither can take heat out of the gas"
+                                );
+                                checked += 1;
+                                if (k_out - k_in).abs() > 1.0e-9 * k_in {
+                                    moved += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // NON-VACUITY: the wall has to have actually done something on a real fraction of the
+        // lattice. a `Relax` that reduced to a no-op everywhere would satisfy the inequality
+        // trivially.
+        println!("adiabatic wall: {moved}/{checked} lattice points moved the entropy");
+        assert!(
+            moved * 4 > checked,
+            "only {moved} of {checked} lattice points changed K at all; the wall is close to a \
+             no-op over this lattice and the law is nearly vacuous"
+        );
+    }
     use crate::drain::drain_cell;
     use symbi_hydro::energy::{Adiabatic, IsoModel};
 

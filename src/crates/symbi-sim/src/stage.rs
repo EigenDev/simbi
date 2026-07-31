@@ -106,7 +106,8 @@ pub enum Gate {
     AdditiveSource,
     Bodies,
     Fofc,
-    AdditiveOrFofc,
+    /// every consumer of the stage-input snapshot.
+    StageInputConsumer,
     PassiveScalar,
 }
 
@@ -118,10 +119,12 @@ impl Gate {
             Gate::AdditiveSource => additive,
             Gate::Bodies => bodies,
             Gate::Fofc => fofc,
-            // the stage-input snapshot serves BOTH consumers: the additive
-            // source pass evaluates S at the stage input, and the FOFC
-            // first-order redo restarts from it.
-            Gate::AdditiveOrFofc => additive || fofc,
+            // the stage-input snapshot serves every source that evaluates against the state
+            // the stage began from, plus the FOFC first-order redo that restarts from it: the
+            // additive source pass, the immersed-body pass, and FOFC. an explicit scheme
+            // evaluates the flux divergence and every source at one state, so a body run
+            // without this snapshot would leave the body reading zeros and applying no force.
+            Gate::StageInputConsumer => additive || bodies || fofc,
             Gate::PassiveScalar => chi,
         }
     }
@@ -142,7 +145,7 @@ pub const STAGE_PIPELINE: &[Phase] = &[
         kind: PhaseKind::SnapshotStage,
         reads: FieldSet::CONS,
         writes: FieldSet::USTAGE,
-        gate: Gate::AdditiveOrFofc,
+        gate: Gate::StageInputConsumer,
     },
     Phase {
         name: "wave_speeds",
