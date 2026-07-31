@@ -1,0 +1,28 @@
+#!/bin/sh
+# =============================================================================
+# commit-msg
+#
+# strips machine-authorship trailers from commit messages.
+#
+# authorship in this repository denotes accountability for the code, which an
+# automated tool cannot hold. tooling credit lives in the README instead.
+#
+# removes:
+# - Co-authored-by: trailers naming an ai assistant or an @anthropic-ai address
+# - "Generated with <tool>" advertisement lines
+# - the trailing blank lines those leave behind
+#
+# usage:
+#  git config core.hooksPath .githooks
+# =============================================================================
+
+msg="$1"
+
+perl -i -ne '
+    next if /^\s*co-authored-by:.*(claude|anthropic|copilot|cursor|codex|gemini)/i;
+    next if /generated with .*(claude|anthropic|copilot|cursor|codex)/i;
+    print;
+' "$msg"
+
+# collapse the trailing blank lines left by a stripped trailer block
+perl -i -0pe 's/\n{2,}\z/\n/' "$msg"
