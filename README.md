@@ -810,7 +810,7 @@ A few design choices worth calling out. Fields are stored struct-of-arrays, whic
 
 The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the production CUDA and HIP paths share one kernel definition and diverge only in the small target-specific runtime and token mapping at the bottom.
 
-On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave at 256^3 sustains ~38 million zone-cycles per second on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, [AthenaK](https://github.com/IAS-Astrophysics/athenak) reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
+On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave solved to second order with the HLLE Riemann solver at 256^3 sustains ~38 million zone-cycles per second (MZCS) on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, [AthenaK](https://github.com/IAS-Astrophysics/athenak) reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
 
 ---
 
