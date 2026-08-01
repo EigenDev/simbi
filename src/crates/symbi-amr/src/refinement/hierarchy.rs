@@ -2601,6 +2601,12 @@ where
             .map(|level| save_gas_state(&level.state))
             .collect::<symbi_xpu::Result<Vec<_>>>()?;
 
+        // the copy above runs on the device queue while the seeding below writes the same fields
+        // from the host. field storage is unified memory, so both reach the same bytes, but a host
+        // write is not ordered against an in-flight kernel: without this barrier the copy could
+        // read cells the target had already overwritten and "restore" the run to the target it was
+        // asked to measure.
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         for level in &self.levels {
             level.state.seed_cells(&target);
         }
@@ -2763,6 +2769,9 @@ where
     /// rather than the scheme's, and mixing the two would measure neither.
     pub fn target_imbalance_norms(&self, pair: usize) -> Option<(Vec<f64>, Vec<f64>)> {
         const TRIM: isize = 2;
+        // the imbalance is written by device kernels and summed here on the host; the read is
+        // through unified memory and is not ordered against the queue on its own.
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         let coarse = self.levels.get(pair)?;
         let fine = self.levels.get(pair + 1)?;
         let coverage = coarse.coverage.as_ref()?;

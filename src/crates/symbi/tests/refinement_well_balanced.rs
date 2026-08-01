@@ -480,3 +480,74 @@ fn the_captured_imbalance_is_a_discrete_divergence() {
         mass_rate.abs() / scale
     );
 }
+
+/// the entropy `K = p / rho^gamma` against the `K0` the atmosphere was built with, over the cells
+/// this level actually contributes to the composite solution.
+///
+/// covered cells are excluded because they are not part of the solution: the finer level owns that
+/// volume and the restriction overwrites them every parent step. they also cannot match `K0` even
+/// in principle — the hierarchy-consistent target restricts the CONSERVED state, which is linear,
+/// while `p / rho^gamma` is not, so their entropy differs from `K0` at t = 0 by construction.
+fn worst_entropy_deviation(hier: &Hier, level: usize) -> f64 {
+    let lvl = &hier.levels[level];
+    let st = &lvl.state;
+    let rho = st.fields.prim.rho.view();
+    let pre = st.fields.prim.pre_field().unwrap().view();
+    st.geom
+        .interior
+        .iter()
+        .filter(|c| !lvl.coverage.as_ref().is_some_and(|cov| cov.contains(*c)))
+        .map(|c| (*pre.at(c) / rho.at(c).powf(GAMMA) - K0).abs() / K0)
+        .fold(0.0_f64, f64::max)
+}
+
+#[test]
+fn a_declared_target_stops_the_entropy_drift_at_the_interface() {
+    // the symptom that started this: a coarse-fine interface injects spurious momentum into a
+    // hydrostatic background, that kinetic energy thermalizes, and the entropy of a gas that
+    // should be exactly isentropic moves. the atmosphere is built with one `K0` everywhere, so
+    // `p / rho^gamma` is a direct readout with no reference solution to subtract.
+    //
+    // the t = 0 value is reported beside it because they answer different questions: what a
+    // scheme DOES to the entropy is the change, not the offset it started with.
+    println!("\nentropy deviation |K - K0|/K0, uncovered cells, after {STEPS} root steps");
+    println!("{:-<86}", "");
+
+    for levels in 1..=3usize {
+        let mut control = build(&nested(levels));
+        control.evolve_steps(STEPS).unwrap();
+
+        let mut hier = build_declared(&nested(levels));
+        hier.prime();
+        let initial: Vec<f64> = (0..levels).map(|ll| worst_entropy_deviation(&hier, ll)).collect();
+        hier.evolve_steps(STEPS).unwrap();
+
+        for ll in 0..levels {
+            let drifted = worst_entropy_deviation(&control, ll);
+            let held = worst_entropy_deviation(&hier, ll);
+            let moved = (held - initial[ll]).abs();
+            println!(
+                "levels={levels} level {ll}:  undeclared {drifted:.3e}  ->  declared {held:.3e}  \
+                 (t=0 {:.3e}, moved {moved:.3e})",
+                initial[ll]
+            );
+
+            // NON-VACUITY: without the declaration the entropy has to actually move, or there is
+            // no leak here for the declaration to close.
+            assert!(
+                drifted > 1.0e-9,
+                "level {ll} of the UNDECLARED {levels}-level run held its entropy to \
+                 {drifted:.3e}; there is no drift here to fix and this gate says nothing"
+            );
+            // the target is a fixed point of the scheme, so the state does not move and its
+            // entropy cannot either. what is asserted is the CHANGE, not the offset the
+            // hierarchy-consistent target starts with.
+            assert!(
+                moved < 1.0e-13,
+                "level {ll} of the {levels}-level run moved its entropy by {moved:.3e} while \
+                 sitting on its declared stationary target ({:.3e} -> {held:.3e})",
+                initial[ll]
+            );
+        }
+    }
+}
