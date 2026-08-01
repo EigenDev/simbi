@@ -1,4 +1,10 @@
 from .census import BinAxis, Cadence, Census, linear_edges, log_edges
+from .equilibrium import (
+    Equilibrium,
+    gradient,
+    isentropic_atmosphere,
+    isothermal_atmosphere,
+)
 from .dag_expression import (
     ConservedField,
     Expr,
@@ -50,6 +56,10 @@ from .dag_expression import (
 )
 
 __all__ = [
+    "Equilibrium",
+    "gradient",
+    "isentropic_atmosphere",
+    "isothermal_atmosphere",
     "Expr",
     "ExprGraph",
     "SourceKind",

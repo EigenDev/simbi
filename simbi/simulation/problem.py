@@ -531,6 +531,18 @@ class SimbiProblem(BaseModel):
     refinement_enabled: Annotated[
         bool, ProblemParam(False, description="enable mesh refinement")
     ]
+    # seeding from the declared stationary target rather than from a pointwise sample of it:
+    # cells covered by a finer level carry the RESTRICTION of the finer target, which is what
+    # the hierarchy's own restriction produces and re-produces every parent step. a pointwise
+    # sample sits a truncation-order distance off the state the well-balancing preserves, and
+    # that distance evolves like any other perturbation.
+    seed_from_equilibrium: Annotated[
+        bool,
+        ProblemParam(
+            False,
+            description="seed every level from the declared equilibrium target",
+        ),
+    ]
     refinement_max_levels: Annotated[
         int, ProblemParam(1, ge=1, description="max refinement levels")
     ]
@@ -783,6 +795,32 @@ class SimbiProblem(BaseModel):
         restart segments — register `m*v` and `m` and divide when reading.
         """
         return []
+
+    @computed_field
+    @property
+    def equilibrium_expressions(self) -> ExpressionDict:
+        """the run's STATIONARY TARGET state as a traced expression of position, which a
+        well-balanced scheme then holds exactly.
+
+        a steady state solves the continuum equations, not the discrete ones, so the scheme
+        leaves a residual at truncation order and gas seeded on an exact hydrostatic profile
+        starts moving — faster still across a coarse-fine interface, where the two grids
+        reduce the same exact solution to different face values. declaring the target lets
+        the backend measure that residual once per level and subtract it back at every
+        stage, which makes the target a fixed point to roundoff and costs no conservation.
+
+        override in a subclass returning
+        `graph.compile([rho, v1, ..., p]).serialize_equilibrium(dim=...)`, with the
+        primitive components in that order (no pressure on an isothermal regime). default
+        {} = no declared target, and the scheme behaves exactly as before.
+
+        THE DECLARED STATE MUST ACTUALLY BE STATIONARY. the backend holds whatever it is
+        given, so a state that is not an equilibrium would be frozen in place and the run
+        would report nothing. this is checked: the target's discrete imbalance has to shrink
+        under refinement, which truncation error does and a continuum residual does not, and
+        a target that fails is refused at setup.
+        """
+        return {}
 
     @computed_field
     @property

@@ -344,6 +344,13 @@ class Metadata:
     # the schwarzschild geometric mass M (G=c=1); 0 on a flat background.
     schwarzschild_mass: float = 0.0
 
+    # the stationary target the run is well-balanced against, as the serialized expression
+    # wire. it is not a field, so nothing else in the file records it, and a run resumed
+    # against a DIFFERENT target integrates different equations while looking identical from
+    # the outside. empty on runs that declare none and on checkpoints written before the
+    # attribute existed.
+    equilibrium_target: str = ""
+
     # amr fields
     level_dts: tuple[float, ...] = ()
     level_substeps: tuple[int, ...] = ()

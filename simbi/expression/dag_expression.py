@@ -1561,6 +1561,39 @@ class CompiledExpr:
             )
         return cfg
 
+    def serialize_equilibrium(
+        self,
+        dim: int,
+        *,
+        params: "Sequence[float] | None" = None,
+    ) -> dict[str, object]:
+        """serialize to the rust `EquilibriumConfig` wire format consumed by symbi-expr
+        (`load.rs::EquilibriumConfig::from_json`) and handed to
+        `Hierarchy::with_equilibrium_expression`.
+
+        this is a STATE, not a source: it carries no conservation law to be wrapped in and
+        no conserved slot to target. the compiled outputs are the primitive components
+        themselves, in the order `[rho, v1, ..., vN, p]` — one velocity component per
+        momentum degree of freedom, and the pressure omitted on an isothermal regime.
+
+        the state declared here is the one a well-balanced scheme holds EXACTLY: its
+        discrete imbalance is measured once per level and subtracted back at every stage.
+        it must therefore be a genuine steady state of the equations being solved — the
+        backend checks that its imbalance converges under refinement and refuses a state
+        whose does not, because well-balancing a non-equilibrium would freeze the run in
+        place with no error.
+
+          dim    -- spatial dimensionality of the grid
+          params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...)
+        """
+        base = self._serialize_nodes()
+        return {
+            "dim": int(dim),
+            "outputs": base["output_indices"],
+            "params": [float(p) for p in (params or [])],
+            "nodes": base["expressions"],
+        }
+
     def serialize_census(
         self,
         name: str,

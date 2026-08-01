@@ -78,4 +78,4 @@ pub use riemann::{
     hllc, hllc_newtonian, hllc_rhd, hllc_rmhd, hlld_isothermal, hlld_newtonian, hlld_rmhd, hlle,
 };
 pub use rmhd::{Rmhd, RmhdGr};
-pub use symbi_expr::{CensusAxisConfig, CensusConfig, SourceConfig};
+pub use symbi_expr::{CensusAxisConfig, CensusConfig, EquilibriumConfig, SourceConfig};

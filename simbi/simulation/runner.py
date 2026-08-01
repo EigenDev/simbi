@@ -294,9 +294,58 @@ def _validate_census_payloads(model_dict: dict[str, Any]) -> None:
                 )
 
 
+def _validate_equilibrium_payload(model_dict: dict[str, Any]) -> None:
+    """reject a malformed stationary-target wire before rust.
+
+    the target is a STATE, so it carries no `kind` and no conserved-slot `target` — what has
+    to be checked is that it supplies exactly the primitive components the regime evolves.
+    whether the state is genuinely stationary is a question about the equations, not about
+    the payload, and the backend answers it by refining.
+    """
+    payload = model_dict.get("equilibrium_expressions")
+    if not payload:
+        if model_dict.get("seed_from_equilibrium", False):
+            raise ValueError(
+                "seed_from_equilibrium is set but no equilibrium_expressions declares the "
+                "target to seed from"
+            )
+        return
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "equilibrium_expressions must be a serialized expression dictionary; use "
+            "serialize_equilibrium()"
+        )
+    outputs = payload.get("outputs")
+    if not isinstance(outputs, list):
+        raise ValueError("equilibrium_expressions must contain an `outputs` list")
+    if model_dict.get("is_mhd", False):
+        raise ValueError(
+            "equilibrium_expressions is unavailable on an mhd regime: a cell-centered "
+            "primitive cannot seed the staggered face field, so a magnetized target's "
+            "interface flux is undefined"
+        )
+
+    run_dim = int(model_dict.get("dimensionality", payload.get("dim", 1)))
+    dim = int(payload.get("dim", run_dim))
+    if dim != run_dim:
+        raise ValueError(
+            f"equilibrium_expressions was built for a {dim}-dimensional grid, but this run "
+            f"is {run_dim}-dimensional"
+        )
+    has_energy = not bool(model_dict.get("isothermal", False))
+    expected = 1 + dim + int(has_energy)
+    if len(outputs) != expected:
+        raise ValueError(
+            f"equilibrium_expressions has {len(outputs)} outputs; expected {expected} "
+            f"primitive components for dim={dim} — density, {dim} velocity component(s)"
+            + (", and pressure" if has_energy else " (isothermal: no pressure)")
+        )
+
+
 def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
     """reject backend-invalid expression wires before rust."""
     _validate_census_payloads(model_dict)
+    _validate_equilibrium_payload(model_dict)
     source_payloads = [
         (f"source_expressions[{index}]", payload)
         for index, payload in enumerate(model_dict.get("source_expressions", ()))

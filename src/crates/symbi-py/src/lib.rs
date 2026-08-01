@@ -163,6 +163,16 @@ struct Config {
     // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
     motion_json: Option<String>,
+    // the run's stationary target state in the rust `EquilibriumConfig` wire format, or None.
+    // when present the scheme measures the target's discrete imbalance once per level and
+    // subtracts it back every stage, which makes the target an exact fixed point instead of a
+    // state that drifts at truncation order — most visibly across a coarse-fine interface, where
+    // the two grids reduce the same exact solution to different face values.
+    equilibrium_json: Option<String>,
+    // whether to seed every level from that target before evolving. the state a refined hierarchy
+    // holds exactly has covered cells carrying the RESTRICTION of the finer target, which an
+    // independently sampled profile does not reproduce.
+    seed_from_equilibrium: bool,
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
     // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). lowered against each
     // regime's spec at sim build: every regime prescribes the full ghost primitive state; the
@@ -1102,6 +1112,13 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         // registered binned reductions, lowered at setup so a malformed one fails there.
         census_jsons: get_census_jsons(dict)?,
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
+        equilibrium_json: get_source_json(dict, "equilibrium_expressions")?,
+        seed_from_equilibrium: dict
+            .get_item("seed_from_equilibrium")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<bool>().ok())
+            .unwrap_or(false),
         driven_exprs,
         gradient_bcs,
         custom_params,
@@ -4182,6 +4199,24 @@ macro_rules! build_and_run_hydro {
             hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
+
+        // the run's STATIONARY TARGET, when one is declared: its discrete imbalance is measured
+        // once per level and added back at every stage, so the target becomes an exact fixed point
+        // rather than a state that drifts at truncation order. this runs AFTER the bodies attach
+        // because the imbalance is read off a real stage, and a gravitational body's source is
+        // half of the balance being measured.
+        if let Some(ref target) = cfg.equilibrium_json {
+            let declared = symbi_hydro::EquilibriumConfig::from_json(target)
+                .map_err(|e| format!("stationary target parse: {e}"))?;
+            hier = hier
+                .with_equilibrium_expression(&declared)
+                .map_err(|e| format!("stationary target: {e:?}"))?;
+            // a restart restores the checkpoint after this point, so a resumed run continues from
+            // its own state and the seed applies only to a fresh start.
+            if cfg.seed_from_equilibrium {
+                hier.seed_equilibrium();
+            }
+        }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -6578,6 +6613,27 @@ macro_rules! build_and_run_iso {
             }
         }
 
+        // the run's STATIONARY TARGET, when one is declared: its discrete imbalance is measured
+        // once per level and added back at every stage, so the target becomes an exact fixed point
+        // rather than a state that drifts at truncation order.
+        //
+        // this must follow EVERY input the target's flux is evaluated against, because the
+        // imbalance is read off a real stage: the immersed bodies, whose gravity is half of the
+        // balance being measured, and the per-cell cs^2(x) on the fine levels, which sets the
+        // sound speed the interface flux carries.
+        if let Some(ref target) = cfg.equilibrium_json {
+            let declared = symbi_hydro::EquilibriumConfig::from_json(target)
+                .map_err(|e| format!("stationary target parse: {e}"))?;
+            hier = hier
+                .with_equilibrium_expression(&declared)
+                .map_err(|e| format!("stationary target: {e:?}"))?;
+            // a restart restores the checkpoint after this point, so a resumed run continues from
+            // its own state and the seed applies only to a fresh start.
+            if cfg.seed_from_equilibrium {
+                hier.seed_equilibrium();
+            }
+        }
+
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -6933,6 +6989,14 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("initial_time", cfg.start_time)
         .with("time_unit", cfg.time_unit)
         .with("time_unit_label", cfg.time_unit_label.as_str())
+        // the stationary target the scheme is well-balanced against, verbatim. it is not a field,
+        // so nothing else in the file records it, and a run resumed against a DIFFERENT target
+        // integrates different equations while looking identical from the outside. an empty string
+        // records the ordinary case of no declared target.
+        .with(
+            "equilibrium_target",
+            cfg.equilibrium_json.as_deref().unwrap_or(""),
+        )
 }
 
 /// the integer-digit width for the time portion of a checkpoint name, sized

@@ -32,8 +32,8 @@ pub use dag::{Dag, Node, Payload};
 pub use eval::{Expression, evaluate};
 pub use linearize::{Instr, linearize, max_register};
 pub use load::{
-    CensusAxisConfig, CensusConfig, LoadError, NodeDesc, SourceConfig, load_expression,
-    nodes_from_descs,
+    CensusAxisConfig, CensusConfig, EquilibriumConfig, LoadError, NodeDesc, SourceConfig,
+    load_expression, nodes_from_descs,
 };
 pub use op::Op;
 pub use strength::strength_reduce;

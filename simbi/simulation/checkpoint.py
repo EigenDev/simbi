@@ -137,6 +137,56 @@ def _values_agree(a: Any, b: Any) -> bool:
     return av == bv
 
 
+def _assert_same_equilibrium_target(
+    problem: SimbiProblem, metadata: Metadata
+) -> None:
+    """refuse a restart whose declared stationary target differs from the one the checkpoint
+    was written with.
+
+    the target is not a field, so it leaves no trace in the file's data and a changed one is
+    invisible: the resumed run integrates different equations — a different imbalance is
+    subtracted at every stage, and a different state is held exactly — while every plot looks
+    the way it should. the ordinary immutable-field merge cannot catch this because the target
+    is a computed expression graph rather than a model field.
+
+    the comparison is structural, on the parsed payloads, so whitespace or key ordering from
+    two different json writers does not read as a physics change.
+    """
+    import json
+
+    from .problem import ConfigError
+
+    declared = getattr(problem, "equilibrium_expressions", {}) or {}
+    recorded_raw = getattr(metadata, "equilibrium_target", "") or ""
+    try:
+        recorded = json.loads(recorded_raw) if recorded_raw else {}
+    except json.JSONDecodeError:
+        recorded = {"unparsable": recorded_raw}
+
+    if declared == recorded:
+        return
+
+    if recorded and not declared:
+        raise ConfigError(
+            "this checkpoint was written with a declared stationary target and the config "
+            "now declares none. the run it resumes subtracted that target's imbalance at "
+            "every stage; continuing without it integrates different equations. restore the "
+            "`equilibrium_expressions` the run started with, or start a fresh run."
+        )
+    if declared and not recorded:
+        raise ConfigError(
+            "the config declares a stationary target but this checkpoint was written "
+            "without one. adding a target mid-run changes the equations being integrated. "
+            "start a fresh run to introduce it."
+        )
+    raise ConfigError(
+        "the declared stationary target differs from the one this checkpoint was written "
+        "with. the target sets which state the scheme holds exactly and which imbalance it "
+        "subtracts every stage, so resuming against a different one silently integrates "
+        "different equations. restore the original target, or start a fresh run."
+    )
+
+
 def merge_with_checkpoint(
     problem: SimbiProblem,
     checkpoint_path: Path,
@@ -282,6 +332,8 @@ def merge_with_checkpoint(
         else:
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
+
+    _assert_same_equilibrium_target(problem, metadata)
 
     # RESUME at the checkpoint's physical time. start_time is the
     # sim clock (sim.time): a restart must continue from where the checkpoint left off, regardless

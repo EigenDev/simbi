@@ -14,6 +14,8 @@
 //   hierarchy     — Hierarchy + LevelData + the berger-oliger subcycle driver
 //   transfer      — cf ghost slabs + prolong/restrict kernel dispatch
 //   flux_register — conservative reflux accumulator
+//   equilibrium   — the numerical flux of a stationary target, per level, so the reflux
+//                   differences DEVIATIONS from that target rather than the state itself
 //
 // usage:
 //  let mut hier = Hierarchy::with_refinement(sim, kernels, &regions, order, make)?;
@@ -21,12 +23,14 @@
 // =============================================================================
 
 pub mod emf_register;
+pub mod equilibrium;
 pub mod flux_register;
 pub mod hierarchy;
 pub mod tracer_interface;
 pub mod transfer;
 
 pub use emf_register::EmfRegister;
+pub use equilibrium::EquilibriumFlux;
 pub use flux_register::FluxRegister;
 pub use hierarchy::{
     FineSubgrid, Hierarchy, LevelData, RefinementRegion, evolve_hierarchy_decomposed, fine_subgrid,

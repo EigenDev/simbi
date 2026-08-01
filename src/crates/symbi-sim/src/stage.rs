@@ -12,7 +12,8 @@
 // driver-specific structure enters ONLY through `HookPoint` callbacks fired
 // between phases with no field borrow held: the hierarchy accumulates its
 // coarse/fine flux registers AfterFlux (sampling the high-order fluxes before
-// fofc may splice them) and re-prolongs coarse-fine ghosts BeforeGhostFill;
+// fofc may splice them), removes a declared stationary target's discrete
+// imbalance BeforeC2p, and re-prolongs coarse-fine ghosts BeforeGhostFill;
 // the decomposed loop's halo exchange + second ghost fill happen OUTSIDE the
 // fold (after it, per stage), which is its documented sequence delta.
 //
@@ -248,6 +249,11 @@ pub enum HookPoint {
     /// after chi_update, before ghost_fill: the hierarchy re-prolongs the
     /// coarse-fine ghost band at the time of the state entering the next stage.
     BeforeGhostFill,
+    /// after every source, before the conserved-to-primitive recovery: the last point at which
+    /// the stage-final conserved state can still be adjusted and have the primitives, the
+    /// admissibility redo, and the ghost band all follow from it. a well-balanced hierarchy
+    /// removes its stationary target's discrete imbalance HERE.
+    BeforeC2p,
 }
 
 #[derive(Clone, Copy)]
@@ -365,7 +371,10 @@ where
             PhaseKind::BodySource => prof("body_source", || {
                 kernels.body_source(sim, args.ac * args.dt)
             }),
-            PhaseKind::C2p => prof("c2p", || kernels.c2p(sim)),
+            PhaseKind::C2p => {
+                hook(HookPoint::BeforeC2p);
+                prof("c2p", || kernels.c2p(sim));
+            }
             PhaseKind::Fofc => {
                 if prof("fofc", || kernels.fofc(sim, args.dt, args.a0, args.ac, tag)) {
                     return StageOutcome::RetryStep;

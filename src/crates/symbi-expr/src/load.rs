@@ -344,6 +344,55 @@ impl SourceConfig {
     }
 }
 
+/// a STATIONARY TARGET state, as an expression of position: the PRIMITIVE vector a run declares
+/// its equilibrium to be, so that a well-balanced scheme can hold it exactly.
+///
+/// this is a state, not a source, so it carries no conservation law to be wrapped in and no
+/// conserved field to target — `outputs` are the primitive components themselves, in the order
+/// `[rho, v_0 .. v_{DOF-1}, p]`, with the pressure slot present exactly when the regime carries
+/// energy.
+///
+/// the target crosses the wire as an EXPRESSION rather than as sampled field data because it must
+/// be re-derivable at any resolution: a restart that adds a refinement level needs the target
+/// defined on cells that did not exist when the run began, and sampled data cannot supply them.
+///
+/// json shape:
+/// ```json
+/// { "dim": 1, "outputs": [4, 5, 6], "params": [100.0],
+///   "nodes": [ {"op":"VARIABLE_X1"}, ... ] }
+/// ```
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EquilibriumConfig {
+    /// spatial dimension of the grid the target is declared on.
+    pub dim: usize,
+    /// node indices of the primitive components: density, then one velocity component per momentum
+    /// degree of freedom, then pressure when the regime carries energy.
+    pub outputs: Vec<usize>,
+    /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
+    #[serde(default)]
+    pub params: Vec<f64>,
+    /// the flat, topologically-ordered DAG.
+    pub nodes: Vec<NodeDesc>,
+}
+
+impl EquilibriumConfig {
+    /// parse the python-emitted json.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    /// serialize back to json (round-trip / golden tests, and the checkpoint record that lets a
+    /// restart verify it is continuing the same target it started with).
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    /// build the VM `Expression` evaluated per cell centre at setup.
+    pub fn to_expression(&self) -> Result<Expression, LoadError> {
+        load_expression(&self.nodes, &self.outputs, &self.params)
+    }
+}
+
 /// one bin axis of a census: the expression giving the coordinate to bin on, and the edges
 /// that cut it. edges are explicit rather than a spacing rule, so log spacing, linear
 /// spacing and hand-chosen edges all cross the wire the same way.

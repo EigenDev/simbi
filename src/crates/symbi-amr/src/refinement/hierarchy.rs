@@ -40,6 +40,11 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 use symbi_grid::Field;
 
 use super::emf_register::EmfRegister;
+use super::equilibrium::{
+    EquilibriumFlux, accumulate as equilibrium_accumulate, imbalance_from_stage,
+    overwrite as equilibrium_overwrite, residual_norm, restore_gas_state, save_gas_state,
+    snapshot_flux,
+};
 use super::flux_register::FluxRegister;
 use super::tracer_interface::{
     InterfaceFace, InterfaceTransfer, interface_faces, interface_faces_with_layout,
@@ -59,9 +64,10 @@ use symbi_sim::driver::{
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::stage::{HookPoint, StageArgs, fold_stage};
 use symbi_sim::state::{
-    Boundaries, BoundaryType, FieldDecimation, FieldKind, FieldStore, PrimFieldsGeneric,
-    SimStateGeneric, Timestepping, array_field_zeros, axis_name,
+    Boundaries, BoundaryType, ConsFieldsGeneric, FieldDecimation, FieldKind, FieldStore,
+    PrimFieldsGeneric, SimStateGeneric, Timestepping, array_field_zeros, axis_name,
 };
+use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::substrate_seam::KernelSet;
 
 /// the refinement ratio. fixed at 2 (the transfer kernels are baked at 2 in
@@ -123,6 +129,23 @@ where
     /// ONE refined box per level (this is static refinement / SMR — no disjoint-cover
     /// `Vec<Domain>`, no clustering).
     pub coverage: Option<Domain<NDIM>>,
+    /// this level's numerical flux of the run's stationary target state, `F(qt)`, when the run
+    /// declares one. the flux registers subtract it from both sides of the coarse-fine
+    /// difference, so what is refluxed is the deviation from the target and a state sitting
+    /// exactly on the target accumulates nothing. per level, because the mismatch the register
+    /// would otherwise see IS the difference between the two grids' reconstructions of the same
+    /// exact solution.
+    pub flux_eq: Option<EquilibriumFlux<NDIM, DOF, Mem>>,
+    /// this level's discrete imbalance of that same target, `R = div_h F_h(qt) - s_h(qt)`, per
+    /// unit time and per cell. a steady state solves the CONTINUUM equations, so the scheme leaves
+    /// this residual at truncation order and an atmosphere seeded on the exact hydrostatic profile
+    /// starts moving. every stage adds it back, which makes the target an exact fixed point.
+    pub residual_eq: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
+    /// the target's own conserved state on this level — the reference the deviation is measured
+    /// from. covered cells hold the volume-weighted restriction of the finer level's target, not
+    /// an independent evaluation of the profile: the restriction the run performs every parent
+    /// step must leave the target where it found it.
+    pub cons_eq: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
 }
 
 // =============================================================================
@@ -830,6 +853,9 @@ where
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
+                flux_eq: None,
+                residual_eq: None,
+                cons_eq: None,
             }],
             injection_ledger: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
@@ -867,6 +893,9 @@ where
             bcell_old: None,
             bface_old: None,
             coverage: None,
+            flux_eq: None,
+            residual_eq: None,
+            cons_eq: None,
         }];
 
         for region in regions {
@@ -966,6 +995,9 @@ where
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
+                flux_eq: None,
+                residual_eq: None,
+                cons_eq: None,
             });
         }
 
@@ -1822,6 +1854,12 @@ where
         let mut hook = |hp: HookPoint| match hp {
             HookPoint::AfterFlux => {
                 prof("refine_flux_reg", || {
+                    // when the run declares a stationary target, the SAME accumulation runs a
+                    // second time on that target's flux with the weight negated, so the register
+                    // holds the coarse-fine mismatch of `F(Q) - F(qt)` rather than of `F(Q)`. a
+                    // state sitting on the target then accumulates zero, while the two grids'
+                    // reconstructions of the target itself — which differ, and which the plain
+                    // register would apply to the coarse cells as a force — cancel.
                     if has_finer {
                         let reg = &this.flux_registers[level];
                         if uniform_cartesian(&l.state) {
@@ -1835,6 +1873,14 @@ where
                                     dd,
                                     weights[ii] * dt,
                                 );
+                                if let Some(feq) = l.flux_eq.as_ref() {
+                                    reg.accumulate_coarse_uniform(
+                                        feq,
+                                        &l.state.geom.dx,
+                                        dd,
+                                        -weights[ii] * dt,
+                                    );
+                                }
                             }
                         } else {
                             if ii == 0 {
@@ -1848,6 +1894,9 @@ where
                                     dd,
                                     weights[ii] * dt,
                                 );
+                                if let Some(feq) = l.flux_eq.as_ref() {
+                                    reg.accumulate_coarse(feq, &geo, dd, -weights[ii] * dt);
+                                }
                             }
                         }
                     }
@@ -1861,6 +1910,14 @@ where
                                     dd,
                                     weights[ii] * dt,
                                 );
+                                if let Some(feq) = l.flux_eq.as_ref() {
+                                    reg.accumulate_fine_uniform(
+                                        feq,
+                                        &l.state.geom.dx,
+                                        dd,
+                                        -weights[ii] * dt,
+                                    );
+                                }
                             }
                         } else {
                             let geo = l.state.geom.block_geometry(l.state.physics.metric);
@@ -1872,6 +1929,9 @@ where
                                     weights[ii] * dt,
                                     RATIO,
                                 );
+                                if let Some(feq) = l.flux_eq.as_ref() {
+                                    reg.accumulate_fine(feq, &geo, dd, -weights[ii] * dt, RATIO);
+                                }
                             }
                         }
                         if l.state.has_tracers() {
@@ -1889,6 +1949,21 @@ where
                         }
                     }
                 });
+            }
+            HookPoint::BeforeC2p => {
+                // the ssp recombination leaves `a0*u_n + ac*(qt - dt R) = qt - ac dt R` when the
+                // stage input is the target, so adding `ac dt R` back returns the target exactly.
+                // the weights are the stage's own, so this holds at every stage of every scheme.
+                if let Some(res) = l.residual_eq.as_ref() {
+                    prof("refine_equilibrium", || {
+                        equilibrium_accumulate(
+                            res,
+                            &l.state.fields.cons,
+                            &l.state.geom.interior,
+                            ac * dt,
+                        );
+                    });
+                }
             }
             HookPoint::BeforeGhostFill => {
                 // c2p over the full allocated domain recomputed the coarse-fine
@@ -2466,6 +2541,328 @@ where
                 }
             }
         }
+    }
+}
+
+// =============================================================================
+// well-balancing against a stationary target
+// =============================================================================
+
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
+    Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>
+where
+    R: Regime<f64, NDIM> + Regime<f64, DOF> + Copy,
+    M: Metric<f64, NDIM> + Metric<f64, DOF> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+{
+    /// declare the run's stationary target state `qt`, making it an exact fixed point of the
+    /// refined scheme.
+    ///
+    /// a steady state solves the CONTINUUM equations, so on any grid the scheme leaves a residual
+    /// `R = div_h F_h(qt) - s_h(qt)` at truncation order, and an atmosphere seeded on the exact
+    /// hydrostatic profile starts moving. worse, `R` is grid-dependent, so the coarse-fine flux
+    /// register differences two unequal reconstructions of the SAME exact solution and applies the
+    /// difference to the coarse cells at the interface as a force. this captures both halves of
+    /// the cure: `F(qt)` per level, which the registers subtract from both sides of their
+    /// difference, and `R` per level, which every stage adds back.
+    ///
+    /// the target reaches the flux phase through the SAME preparation an evolving state does —
+    /// conserved-to-primitive recovery, coarse-fine prolongation, physical ghost fill — and `R` is
+    /// read off one explicit stage of the shared pipeline, so both quantities are what the scheme
+    /// genuinely produces when handed the target, ghost band and every source included.
+    ///
+    /// the target must be TIME-INDEPENDENT: both quantities are evaluated once here and reused
+    /// every stage of every step. each level's conserved and primitive state is left exactly as it
+    /// was found, so this may be called at any point after the initial condition is seeded.
+    pub fn with_equilibrium(
+        mut self,
+        target: impl Fn([f64; NDIM]) -> <R as Regime<f64, DOF>>::Prim,
+    ) -> symbi_xpu::Result<Self> {
+        for (ll, level) in self.levels.iter().enumerate() {
+            assert!(
+                level.state.fields.mhd.is_none(),
+                "level {ll}: a cell-centered primitive cannot seed the staggered face field, so a \
+                 magnetized target's interface flux is undefined"
+            );
+            assert!(
+                level.state.fields.cons.chi_field().is_none(),
+                "level {ll}: the passive scalar carries no declared target concentration, so its \
+                 interface flux has nothing to difference against"
+            );
+        }
+
+        let saved = self
+            .levels
+            .iter()
+            .map(|level| save_gas_state(&level.state))
+            .collect::<symbi_xpu::Result<Vec<_>>>()?;
+
+        for level in &self.levels {
+            level.state.seed_cells(&target);
+        }
+        // the target has to be HIERARCHY-CONSISTENT: a coarse target cell must equal the
+        // volume-weighted average of the fine target cells covering it, or the run's own
+        // restriction moves a level that was sitting on its target off it, twice per parent step.
+        // evaluating the analytic profile independently per level does not give that — the two
+        // differ at the profile's curvature — so the coarse target is DEFINED as the restriction
+        // of the fine one wherever a finer level exists.
+        for ll in (0..self.levels.len().saturating_sub(1)).rev() {
+            let (lo, hi) = self.levels.split_at(ll + 1);
+            let coarse = &lo[ll];
+            let fine = &hi[0];
+            restrict_cons(
+                &fine.state.fields.cons,
+                &coarse.state.fields.cons,
+                coarse.coverage.as_ref().unwrap(),
+            );
+        }
+        self.init_levels();
+
+        // the target's conserved state, held aside as the anchor the probe stage is differenced
+        // against.
+        let anchor = self
+            .levels
+            .iter()
+            .map(|level| save_gas_state(&level.state))
+            .collect::<symbi_xpu::Result<Vec<_>>>()?;
+
+        let mut flux_eq = Vec::with_capacity(self.levels.len());
+        let mut residual_eq = Vec::with_capacity(self.levels.len());
+        for (level, anchored) in self.levels.iter().zip(&anchor) {
+            level.kernels.wave_speeds(&level.state);
+            for dd in 0..NDIM {
+                level.kernels.flux(&level.state, dd);
+            }
+            flux_eq.push(snapshot_flux(&level.state)?);
+
+            // one forward-euler stage of the shared pipeline, evaluated entirely at the target:
+            // every flux and every source sees the target and no other state, so the advanced
+            // state is `qt - dt R` and the probe step cancels out of the quotient. the level's own
+            // cfl step is the scale that keeps that true — a far larger step drives the probe
+            // state unphysical and the response stops being linear, a far smaller one loses the
+            // difference `qt - advanced` to cancellation.
+            let probe_dt = level.kernels.cfl(&level.state);
+            assert!(
+                probe_dt.is_finite() && probe_dt > 0.0,
+                "the stationary target has no finite cfl step ({probe_dt:.3e}), so it cannot be \
+                 advanced to read off its imbalance"
+            );
+            let outcome = fold_stage(
+                &level.state,
+                &level.kernels,
+                StageArgs {
+                    dt: probe_dt,
+                    a0: 0.0,
+                    ac: 1.0,
+                    stage: 0,
+                    n_stages: 1,
+                    allow_elision: false,
+                },
+                &mut |_hp: HookPoint| {},
+            );
+            assert!(
+                outcome == symbi_sim::stage::StageOutcome::Accepted,
+                "the stationary target was rejected by the admissibility redo, so it is not a \
+                 state the scheme can carry"
+            );
+            // an inadmissible probe state means the update was clipped somewhere, and a clipped
+            // update is not `qt - dt R`: what would be read off is a limiter's response, not the
+            // scheme's imbalance.
+            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+            let err = scan_c2p_errors(&level.state);
+            assert!(
+                err.is_ok(),
+                "advancing the stationary target by one cfl step left an unrecoverable state \
+                 ({err}), so its imbalance cannot be read off a linear response"
+            );
+            residual_eq.push(imbalance_from_stage(
+                anchored.cons(),
+                &level.state.fields.cons,
+                &level.state.geom.allocated,
+                probe_dt,
+            )?);
+        }
+
+        for (level, state) in self.levels.iter().zip(&saved) {
+            restore_gas_state(&level.state, state);
+        }
+        for (((level, flux), residual), anchored) in self
+            .levels
+            .iter_mut()
+            .zip(flux_eq)
+            .zip(residual_eq)
+            .zip(anchor)
+        {
+            level.flux_eq = Some(flux);
+            level.residual_eq = Some(residual);
+            level.cons_eq = Some(anchored.into_cons());
+        }
+        self.assert_target_is_stationary();
+        Ok(self)
+    }
+
+    /// the declared target must actually BE a steady state of the equations being solved.
+    ///
+    /// nothing in the method checks this on its own: the imbalance is measured and subtracted
+    /// whatever it is, so a state that is merely asserted to be stationary gets held motionless and
+    /// the run reports no error while solving the wrong problem. that is this feature's sharpest
+    /// edge and it is silent.
+    ///
+    /// the discriminator is how the imbalance behaves under refinement. for a genuine steady state
+    /// `R` is pure truncation error, `C(x) dx^p`, so halving the cell width cuts its norm over a
+    /// fixed region by `2^p`. for a state that does not solve the equations, `R` converges to the
+    /// continuum residual, which knows nothing about the grid and does not fall at all. every level
+    /// pair measures this for free, over the region they both cover.
+    ///
+    /// the test is source-agnostic — gravity, rotation, the curvilinear geometric terms and any
+    /// user source all enter `R` through the stage that produced it.
+    fn assert_target_is_stationary(&self) {
+        for ll in 0..self.levels.len().saturating_sub(1) {
+            let Some((norm_coarse, norm_fine)) = self.target_imbalance_norms(ll) else {
+                continue;
+            };
+            // a component whose imbalance is already negligible against the largest one carries no
+            // information: its ratio is the quotient of two roundoff-level numbers. the balance is
+            // decided by the components that actually carry the imbalance.
+            let peak = norm_coarse.iter().fold(0.0_f64, |m, n| m.max(*n));
+            if peak == 0.0 {
+                continue;
+            }
+            for (cc, (nc, nf)) in norm_coarse.iter().zip(&norm_fine).enumerate() {
+                if *nc < 1.0e-6 * peak {
+                    continue;
+                }
+                let ratio = nc / nf.max(f64::MIN_POSITIVE);
+                assert!(
+                    ratio > 1.5,
+                    "the declared stationary target is not a steady state of these equations. \
+                     component {cc} of its discrete imbalance fell by only {ratio:.3} between \
+                     levels {ll} and {} (cell width halved), an apparent order of {:.2}; \
+                     truncation error would fall by at least 2. what does not shrink under \
+                     refinement is the CONTINUUM residual, so the declared state does not solve \
+                     the equations being integrated, and well-balancing it would hold the run \
+                     motionless in a state that is not an equilibrium",
+                    ll + 1,
+                    ratio.log2()
+                );
+            }
+        }
+    }
+
+    /// the volume-weighted L1 norm of the target's discrete imbalance, per conserved component,
+    /// measured on level `pair` and on level `pair + 1` over the SAME physical region — the raw
+    /// measurement behind the steady-state check, with no threshold applied.
+    ///
+    /// `None` when the two levels share too little interior to compare. the region is the coverage
+    /// trimmed by two coarse cells on every side: the fine level's outermost cells reconstruct
+    /// through prolonged coarse-fine ghosts, whose error converges at the prolongation's order
+    /// rather than the scheme's, and mixing the two would measure neither.
+    pub fn target_imbalance_norms(&self, pair: usize) -> Option<(Vec<f64>, Vec<f64>)> {
+        const TRIM: isize = 2;
+        let coarse = self.levels.get(pair)?;
+        let fine = self.levels.get(pair + 1)?;
+        let coverage = coarse.coverage.as_ref()?;
+
+        let inner = Domain::new(std::array::from_fn(|aa| {
+            let s = &coverage.spaces[aa];
+            Space {
+                name: s.name,
+                lo: s.lo + TRIM,
+                hi: s.hi - TRIM,
+            }
+        }));
+        if (0..NDIM).any(|aa| inner.spaces[aa].hi <= inner.spaces[aa].lo) {
+            return None;
+        }
+        let inner_fine = Domain::new(std::array::from_fn(|aa| {
+            let s = &inner.spaces[aa];
+            Space {
+                name: s.name,
+                lo: s.lo * RATIO as isize,
+                hi: s.hi * RATIO as isize,
+            }
+        }));
+
+        Some((
+            residual_norm(
+                coarse.residual_eq.as_ref()?,
+                &inner,
+                &coarse.state.geom.dx,
+            ),
+            residual_norm(fine.residual_eq.as_ref()?, &inner_fine, &fine.state.geom.dx),
+        ))
+    }
+
+    /// declare the stationary target as an EXPRESSION of position rather than as a closure.
+    ///
+    /// this is the form a configured run supplies, and the form that survives a restart: the
+    /// target is re-derived from the expression at whatever resolution the restarted hierarchy
+    /// has, so a restart that adds a refinement level gets a target on cells that did not exist
+    /// when the run began. sampled field data cannot supply those.
+    ///
+    /// the expression's outputs are the primitive components in order — density, one velocity
+    /// component per momentum degree of freedom, then pressure when the regime carries energy —
+    /// and are evaluated at each cell centre at time zero, because the target is stationary.
+    pub fn with_equilibrium_expression(
+        self,
+        config: &symbi_hydro::EquilibriumConfig,
+    ) -> symbi_xpu::Result<Self>
+    where
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        let has_energy = self.levels[0].state.fields.cons.has_energy();
+        let expected = 1 + DOF + usize::from(has_energy);
+        assert_eq!(
+            config.outputs.len(),
+            expected,
+            "the declared stationary target supplies {} primitive components; this run needs \
+             {expected} — density, {DOF} velocity component(s){}",
+            config.outputs.len(),
+            if has_energy {
+                ", and pressure"
+            } else {
+                " (no pressure: the regime carries no energy)"
+            }
+        );
+        assert_eq!(
+            config.dim, NDIM,
+            "the declared stationary target was built for a {}-dimensional grid, but this run is \
+             {NDIM}-dimensional",
+            config.dim
+        );
+        let expression = config
+            .to_expression()
+            .unwrap_or_else(|err| panic!("the declared stationary target does not load: {err:?}"));
+
+        self.with_equilibrium(|x| {
+            let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+            // a stationary target is evaluated once, at t = 0; it is the same state at every later
+            // time by definition.
+            let slots = expression.eval(at(0), at(1), at(2), 0.0);
+            <R as Regime<f64, DOF>>::Prim::from_slots(&slots)
+        })
+    }
+
+    /// seed every level's conserved state from the declared target.
+    ///
+    /// the target a refined hierarchy can hold exactly is not the pointwise profile: covered cells
+    /// carry the restriction of the finer level's target, because that is what the run's own
+    /// restriction produces and re-produces every parent step. a run seeded from the pointwise
+    /// profile therefore starts a truncation-order distance off the state the well-balancing
+    /// preserves, and that distance evolves like any other perturbation. build a perturbed initial
+    /// condition on top of this rather than beside it.
+    pub fn seed_equilibrium(&mut self) {
+        for (ll, level) in self.levels.iter().enumerate() {
+            let target = level.cons_eq.as_ref().unwrap_or_else(|| {
+                panic!("level {ll} has no declared stationary target to seed from")
+            });
+            equilibrium_overwrite(target, &level.state.fields.cons, &level.state.geom.allocated);
+        }
+        self.init_levels();
     }
 }
 

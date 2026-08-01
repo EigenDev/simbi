@@ -104,6 +104,35 @@ impl<S: Scalar, const D: usize, E: EnergyModel> SeedableCons<S, D> for ConsG<S, 
     }
 }
 
+/// build a primitive from its components laid out flat as `[rho, v_0 .. v_{D-1}, p]`, with the
+/// pressure entry present exactly when the energy model carries one.
+///
+/// this is the shape a primitive state takes when it crosses a wire that has no types — a
+/// configured stationary target arriving as a list of evaluated expressions, for instance — and
+/// the trait is what lets one reader serve every energy-bearing and energy-free regime.
+pub trait PrimFromSlots<S: Scalar, const D: usize> {
+    fn from_slots(slots: &[S]) -> Self;
+}
+
+impl<S: Scalar, const D: usize, E: EnergyModel> PrimFromSlots<S, D> for PrimG<S, D, E> {
+    #[inline]
+    fn from_slots(slots: &[S]) -> Self {
+        assert!(
+            slots.len() >= 1 + D,
+            "a {D}-dimensional primitive needs at least a density and {D} velocity component(s), \
+             got {}",
+            slots.len()
+        );
+        PrimG {
+            rho: slots[0],
+            vel: Tensor::new(std::array::from_fn(|k| slots[1 + k])),
+            // an energy-free regime supplies no pressure and its slot discards whatever it is
+            // handed, so the missing entry and a present one are the same state.
+            pre: E::Slot::<S>::from_scalar(slots.get(1 + D).copied().unwrap_or(S::ZERO)),
+        }
+    }
+}
+
 // ---- backward-compatible type aliases ----
 
 /// conservative variables (adiabatic). alias for ConsG<S, D, Adiabatic>.
