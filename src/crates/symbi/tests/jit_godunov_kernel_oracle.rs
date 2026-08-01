@@ -77,6 +77,12 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         ("dx_1", 0.25),
         ("x_lo_0", 0.0),
         ("x_lo_1", 0.0),
+        // 0 selects the uniform axis map, which is the mesh this oracle differences over; the
+        // kernel reads the selector on every chart so one kernel serves graded axes too.
+        ("map_kind_0", 0.0),
+        ("map_kind_1", 0.0),
+        ("map_param_0", 0.0),
+        ("map_param_1", 0.0),
         ("t", 0.0),
         ("p0", 0.5),
         ("p1", -0.3),

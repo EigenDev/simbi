@@ -658,6 +658,8 @@ mod tests {
                 "mesh_adot_0".to_string(),
                 "x_lo_0".to_string(),
                 "dx_0".to_string(),
+                "map_kind_0".to_string(),
+                "map_param_0".to_string(),
                 "mesh_vtrans_0".to_string(),
             ]
         );
@@ -705,6 +707,8 @@ mod tests {
                 "mesh_adot_0".to_string(),
                 "x_lo_0".to_string(),
                 "dx_0".to_string(),
+                "map_kind_0".to_string(),
+                "map_param_0".to_string(),
                 "mesh_vtrans_0".to_string(),
             ]
         );
@@ -743,6 +747,8 @@ mod tests {
                 "mesh_adot_0".to_string(),
                 "x_lo_0".to_string(),
                 "dx_0".to_string(),
+                "map_kind_0".to_string(),
+                "map_param_0".to_string(),
                 "mesh_vtrans_0".to_string(),
             ]
         );
@@ -1303,16 +1309,20 @@ mod tests {
             k.scalar_params,
             vec![
                 "gamma".to_string(),
-                "inv_dx_0".into(),
-                "inv_dx_1".into(),
-                "x_lo_0".into(),
-                "dx_0".into(),
-                "mesh_adot_0".into(),
-                "mesh_vtrans_0".into(),
-                "x_lo_1".into(),
-                "dx_1".into(),
-                "mesh_adot_1".into(),
-                "mesh_vtrans_1".into(),
+                "map_kind_0".to_string(),
+                "x_lo_0".to_string(),
+                "dx_0".to_string(),
+                "map_param_0".to_string(),
+                "inv_dx_0".to_string(),
+                "map_kind_1".to_string(),
+                "x_lo_1".to_string(),
+                "dx_1".to_string(),
+                "map_param_1".to_string(),
+                "inv_dx_1".to_string(),
+                "mesh_adot_0".to_string(),
+                "mesh_vtrans_0".to_string(),
+                "mesh_adot_1".to_string(),
+                "mesh_vtrans_1".to_string(),
             ]
         );
         let keys: Vec<&str> = k.field_inputs.iter().map(|(key, _)| key.as_str()).collect();
@@ -1410,9 +1420,21 @@ mod tests {
             k.scalar_params,
             vec![
                 "gamma".to_string(),
-                "inv_dx_0".into(),
-                "inv_dx_1".into(),
-                "inv_dx_2".into()
+                "map_kind_0".to_string(),
+                "x_lo_0".to_string(),
+                "dx_0".to_string(),
+                "map_param_0".to_string(),
+                "inv_dx_0".to_string(),
+                "map_kind_1".to_string(),
+                "x_lo_1".to_string(),
+                "dx_1".to_string(),
+                "map_param_1".to_string(),
+                "inv_dx_1".to_string(),
+                "map_kind_2".to_string(),
+                "x_lo_2".to_string(),
+                "dx_2".to_string(),
+                "map_param_2".to_string(),
+                "inv_dx_2".to_string(),
             ]
         );
         let keys: Vec<&str> = k.field_inputs.iter().map(|(key, _)| key.as_str()).collect();
@@ -1429,6 +1451,14 @@ mod tests {
             k.graph.errors()
         );
         // the magnetosonic bound has NO resolvent-cubic transcendentals.
+        //
+        // the trigonometric and hyperbolic family alone is a COMPLETE signature of the resolvent,
+        // even though the resolvent's depressed-cubic branch reaches its root through a cube root
+        // rather than through them: tracing materializes BOTH arms of every conditional, so a
+        // resolvent in this graph would carry its `acos`/`cos` and `acosh`/`cosh` branches
+        // alongside that cube root. `Pow` is therefore redundant here, and it is separately
+        // emitted by the axis map -- a logarithmic axis places its faces at `start*10^(i*slope)`
+        // -- so forbidding it would flag the GEOMETRY rather than the wave-speed physics.
         use symbi_ir::graph::ElementWiseOp as E;
         let expensive = [
             E::Sin,
@@ -1438,7 +1468,6 @@ mod tests {
             E::Cosh,
             E::Asinh,
             E::Acosh,
-            E::Pow,
         ];
         let has_transcendental = (0..k.graph.len()).any(|i| {
             matches!(&k.graph.node(NodeId(i as u32)).op,
@@ -1630,11 +1659,17 @@ mod tests {
             k.scalar_params,
             vec![
                 "dt".to_string(),
-                "a0".into(),
-                "ac".into(),
-                "mesh_hdil".into(),
-                "dx_0".into(),
-                "dx_1".into()
+                "a0".to_string(),
+                "ac".to_string(),
+                "mesh_hdil".to_string(),
+                "map_kind_0".to_string(),
+                "x_lo_0".to_string(),
+                "dx_0".to_string(),
+                "map_param_0".to_string(),
+                "map_kind_1".to_string(),
+                "x_lo_1".to_string(),
+                "dx_1".to_string(),
+                "map_param_1".to_string(),
             ],
         );
         assert_eq!(

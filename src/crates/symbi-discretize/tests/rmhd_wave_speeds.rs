@@ -195,22 +195,40 @@ fn run_map(inputs: &[(&str, Vec<f64>)], gamma: f64) -> Vec<f64> {
         built.0.scalar_params,
         vec![
             "gamma".to_string(),
-            "inv_dx_0".into(),
-            "inv_dx_1".into(),
-            "inv_dx_2".into()
+            "map_kind_0".to_string(),
+            "x_lo_0".to_string(),
+            "dx_0".to_string(),
+            "map_param_0".to_string(),
+            "inv_dx_0".to_string(),
+            "map_kind_1".to_string(),
+            "x_lo_1".to_string(),
+            "dx_1".to_string(),
+            "map_param_1".to_string(),
+            "inv_dx_1".to_string(),
+            "map_kind_2".to_string(),
+            "x_lo_2".to_string(),
+            "dx_2".to_string(),
+            "map_param_2".to_string(),
+            "inv_dx_2".to_string(),
         ],
-        "the gv map declares gamma + the cartesian-uniform inv_dx widths, in that order"
+        "the gv map declares gamma +, per axis, the runtime face-map selector and its \
+         parameters alongside the CFL inverse width"
     );
     let mut k = KernelRun::new(built).grid([n, 1, 1]);
     for (key, col) in inputs {
         let owned = col.clone();
         k = k.field_with(key, move |c| owned[c[0]]);
     }
+    // dx and inv_dx describe the same cell, so they are bound consistently: a unit width on
+    // every axis leaves lambda equal to the bare characteristic speed.
     k.scalars(&[
         ("gamma", gamma),
         ("inv_dx_0", 1.0),
         ("inv_dx_1", 1.0),
         ("inv_dx_2", 1.0),
+        ("dx_0", 1.0),
+        ("dx_1", 1.0),
+        ("dx_2", 1.0),
     ])
     .run()
     .values("lambda")

@@ -281,20 +281,27 @@ pub fn imhd_hlld_flux_gv(
 // =============================================================================
 
 /// the moving-mesh grid velocity at the face this thread owns:
-/// `vface = mesh_adot_{dir} * x_face + mesh_vtrans_{dir}` with the face
-/// coordinate `x_lo + i*dx` along sweep axis `dir` (the thread coordinate on a
-/// face domain IS the face index). the dispatch decides the semantics per
-/// instance: homologous binds `mesh_adot_{dir} = a_dot/a` with PHYSICAL geometry
-/// scalars (so vface = H * r, and zero on non-expanding curvilinear axes);
-/// uniform translation binds `mesh_vtrans_{dir} = a_dot` on axis 0. the static
-/// binding (both zero) traces arithmetic that is bit-identical to the
-/// static flux. the formula assumes uniform spacing — asserted at the
-/// evolve entry. the per-axis names are the SAME convention the wave-speed map
-/// uses, minted through `MeshScalar` so the trace and the dispatch cannot drift.
+/// `vface = mesh_adot_{dir} * x_face + mesh_vtrans_{dir}`, with the face coordinate taken
+/// through the SAME axis map the cell geometry uses (the thread coordinate on a face domain IS
+/// the face index). the dispatch decides the semantics per instance: homologous binds
+/// `mesh_adot_{dir} = a_dot/a` with PHYSICAL geometry scalars (so vface = H * r, and zero on
+/// non-expanding curvilinear axes); uniform translation binds `mesh_vtrans_{dir} = a_dot` on
+/// axis 0. the static binding (both zero) traces arithmetic that is bit-identical to the static
+/// flux. the per-axis names are the SAME convention the wave-speed map uses, minted through
+/// `MeshScalar` so the trace and the dispatch cannot drift.
+///
+/// the face position MUST come from `gv_axis_face_at`, not from a linear `x_lo + i*dx`. on a
+/// homologously expanding mesh the grid velocity is multiplied by the face AREA and differenced
+/// against the cell VOLUME, and both of those are built from the mapped faces. in spherical
+/// geometry that difference is an exact identity —
+///   div(rho vface) = [4 pi H rho r_hi^3 - 4 pi H rho r_lo^3] / [(4 pi/3)(r_hi^3 - r_lo^3)] = 3 H rho
+/// — which cancels the dilution term `mesh_hdil = 3 H` for ANY face positions, uniform or graded.
+/// the cancellation is therefore exact only while vface and the geometry agree on where the face
+/// IS; a linear position on a graded axis breaks it by the amount the two reconstructions differ,
+/// which grows with the grading.
 fn mesh_face_velocity_gv(dir: u8) -> Gv {
     let mesh_adot = Gv::scalar(&MeshScalar::Adot(dir).name());
-    let x_face =
-        Gv::scalar(&format!("x_lo_{dir}")) + Gv::coord(dir) * Gv::scalar(&format!("dx_{dir}"));
+    let x_face = crate::gv::geometry::gv_axis_face_at(dir as usize, Spacing::Uniform, 0);
     mesh_adot * x_face + Gv::scalar(&MeshScalar::Vtrans(dir).name())
 }
 

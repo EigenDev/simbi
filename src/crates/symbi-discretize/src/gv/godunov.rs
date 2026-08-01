@@ -457,7 +457,7 @@ pub fn godunov_mass_gv(
     let geo = (!is_cartesian_uniform(coords, spacing))
         .then(|| cell_geometry_gv(coords, spacing, axes, ndim as usize));
     let rho = Gv::field("rho", FieldRef::cons_den());
-    let rho_new = rho - dt * gv_divergence("mass_flux", ndim, &geo);
+    let rho_new = rho - dt * gv_divergence("mass_flux", ndim, &geo, spacing);
     let writes = vec![("rho_new".to_string(), "cons.den_new".into(), rho_new.node())];
     (end_trace(), writes)
 }
@@ -1198,7 +1198,7 @@ pub fn godunov_stage_gv_with_fused_built_and_geo_weight(
         if densitized {
             gv_divergence_coord(base, ndim, spacing)
         } else {
-            gv_divergence(base, ndim, &geo)
+            gv_divergence(base, ndim, &geo, spacing)
         }
     };
     let combine = |un: Gv, fe: Gv| a0 * un + ac * fe;
@@ -1889,7 +1889,9 @@ fn bcell_godunov_geom(
     if coords == Coords::Cartesian && spacetime == Spacetime::Minkowski {
         (
             None,
-            (0..ndim).map(|d| Gv::scalar(&format!("dx_{d}"))).collect(),
+            // per-CELL widths: an unmapped axis reduces to its `dx_d` scalar, a graded one
+            // differences its own faces.
+            (0..ndim).map(|d| gv_axis_width(d, spacing[d])).collect(),
         )
     } else {
         // axes maps grid axis -> coordinate (identity for sph/3d-cyl; [0,2] for cyl r-z) so the
@@ -1928,7 +1930,7 @@ fn bcell_godunov_geom(
 // the donor-cell chi flux divergence: sum_d (F_hi - F_lo)/dx_d, reading the STORED interface dye
 // flux `flux[d].chi` written by `chi_flux_gv`. same convention as the gas: the flux field at a cell
 // index holds the flux through that cell's LO face on axis d.
-fn chi_flux_div_gv(ndim: usize) -> Gv {
+fn chi_flux_div_gv(ndim: usize, spacing: &[Spacing]) -> Gv {
     let zero_off = vec![0i32; ndim];
     let mut div: Option<Gv> = None;
     for d in 0..ndim {
@@ -1938,7 +1940,7 @@ fn chi_flux_div_gv(ndim: usize) -> Gv {
         let path = FieldRef::ChiFlux(d as u8).name();
         let f_lo = gv_field_at(&key, &path, ndim, &zero_off);
         let f_hi = gv_field_at(&key, &path, ndim, &plus);
-        let term = (f_hi - f_lo) / Gv::scalar(&format!("dx_{d}"));
+        let term = (f_hi - f_lo) / gv_axis_width(d, spacing[d]);
         div = Some(match div {
             None => term,
             Some(a) => a + term,
@@ -1992,7 +1994,11 @@ pub fn chi_godunov_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)
     // one: expansion dilutes `D_chi = rho chi` exactly as it dilutes `rho`, leaving the
     // concentration invariant. the static binding `mesh_hdil = 0` subtracts an exact zero.
     let h_dil = Gv::scalar("mesh_hdil");
-    let new = a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim) - dt * (h_dil * dchi));
+    // face positions are selected at runtime by `map_kind_d`, so the bake-time spacing tag
+    // carries no information here and the widths come out per-cell on any mesh.
+    let spacing = vec![Spacing::Uniform; ndim];
+    let new =
+        a0 * chin + ac * (dchi - dt * chi_flux_div_gv(ndim, &spacing) - dt * (h_dil * dchi));
     let writes = vec![(
         "chi_new".to_string(),
         FieldRef::cons_chi().into(),

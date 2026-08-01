@@ -696,7 +696,7 @@ fn rmhd_wave_speed_map_matches_native_physics() {
         ("prim_b1", prim.mag[1]),
         ("prim_b2", prim.mag[2]),
     ])
-    .scalars(&[("gamma", RMHD_GAMMA), ("inv_dx_0", 1.0)])
+    .scalars(&[("gamma", RMHD_GAMMA), ("inv_dx_0", 1.0), ("dx_0", 1.0)])
     .run();
     out.expect([2], &[("lambda", want)], 1e-12);
 }
@@ -853,7 +853,7 @@ fn nmhd_wave_speed_map_matches_native_physics() {
         ("prim_b1", prim.mag[1]),
         ("prim_b2", prim.mag[2]),
     ])
-    .scalars(&[("gamma", NMHD_GAMMA), ("inv_dx_0", 1.0)])
+    .scalars(&[("gamma", NMHD_GAMMA), ("inv_dx_0", 1.0), ("dx_0", 1.0)])
     .run();
     out.expect([2], &[("lambda", want)], 1e-12);
 }

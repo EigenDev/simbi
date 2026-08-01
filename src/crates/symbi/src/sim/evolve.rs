@@ -87,13 +87,22 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
 {
-    // mesh motion is supported for single-grid uniform-spacing hydro:
-    // homologous expansion on any geometry (curvilinear scales the radial
-    // axis), and uniform translation on cartesian axis 0 (`a` is unused there
-    // and must stay 1). non-uniform maps, immersed bodies, and the mhd
-    // substrates require a comoving-field convention the kernels do not carry.
+    // mesh motion is supported for single-grid hydro: homologous expansion on any geometry
+    // (curvilinear scales the radial axis), and uniform translation on cartesian axis 0 (`a` is
+    // unused there and must stay 1). immersed bodies and the mhd substrates require a comoving-
+    // field convention the kernels do not carry.
     if sim.motion.a_dot != 0.0 || sim.motion.a != 1.0 {
-        assert!(sim.geom.maps.is_none(), "mesh motion: uniform spacing only");
+        // homologous expansion multiplies every coordinate by one a(t), so a graded axis stays
+        // graded with its ratios untouched -- `kernel_geom` scales the axis's face-0 START and
+        // leaves its shape parameter comoving, which for a log axis maps
+        // face(i) = start 10^(i s) -> a face(i). uniform TRANSLATION is a different motion: it
+        // shifts the axis rather than scaling it, and a shifted graded axis is not a rescaling of
+        // itself, so the comoving shape parameter no longer describes it.
+        assert!(
+            sim.motion.homologous || sim.geom.maps.is_none(),
+            "mesh motion: uniform translation needs uniform spacing (a translated graded axis is \
+             not a rescaling of itself)"
+        );
         if !sim.motion.homologous {
             assert!(
                 sim.motion.a == 1.0,

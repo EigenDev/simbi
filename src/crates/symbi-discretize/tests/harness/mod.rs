@@ -155,13 +155,22 @@ impl KernelRun {
             .map(|name| {
                 if let Some(&v) = self.scalars.get(name) {
                     v
-                } else if name.starts_with("map_kind_") || name.starts_with("map_param_") {
+                } else if name.starts_with("map_kind_")
+                    || name.starts_with("map_param_")
+                    || name.starts_with("x_lo_")
+                {
                     // spacing is a per-axis RUNTIME scalar: `map_kind_{ax}` selects the face map
                     // (0 = uniform, 1 = log, 2 = geometric cell widths) and `map_param_{ax}` carries
                     // that map's parameter (the grading ratio). every kernel that positions a face
                     // carries both even on a uniform grid, so default the unbound ones to 0 —
                     // map_kind 0 IS uniform, and the ratio is then unread. a graded- or log-axis
                     // test binds them explicitly.
+                    //
+                    // `x_lo_{ax}` reaches a width-differencing kernel only through the MAPPED arm
+                    // of that selector, which map_kind 0 does not take, so the axis origin is
+                    // unread on a uniform grid. a kernel that positions a cell absolutely (a
+                    // moving mesh, a curvilinear metric) reads it on every arm and its tests bind
+                    // it explicitly.
                     0.0
                 } else {
                     panic!("KernelRun: no value bound for scalar '{name}'")

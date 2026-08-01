@@ -101,21 +101,36 @@ pub fn imhd_wave_speed_map_gv(
 // slots never enter the graph (dead). the host reduces `lambda` by max -> dt = cfl/lambda_max.
 // =============================================================================
 
-/// the per-gridded-axis inverse PHYSICAL width `1/(h_d*width_d)` for the CFL — the Gv mirror
-/// of the retired `flux::cfl_inv_widths`. cartesian + uniform: the host's precomputed
-/// `inv_dx_d` scalar (one per gridded axis); curvilinear OR non-uniform: the per-cell width
-/// from the index (`cell_inv_phys_widths_gv`, so log zones + angular `h_d=r` are tracked). the
-/// regime never writes the width — it only supplies wave speeds — so it can never desync it.
+/// the per-gridded-axis inverse PHYSICAL width `1/(h_d*width_d)` for the CFL — the length a
+/// wave must cross in one step. curvilinear: the per-cell width from the index
+/// (`cell_inv_phys_widths_gv`, so log zones + angular `h_d=r` are tracked). the regime never
+/// writes the width — it only supplies wave speeds — so it can never desync it.
+///
+/// on cartesian every lame factor is 1, so the physical width IS the coordinate width, and
+/// WHICH width a cell has is a runtime property of the axis (`map_kind_d`) rather than a
+/// bake-time one. branching on the bake-time spacing instead would price `dt` off a single
+/// uniform width on a graded axis: too long a step where cells are narrow, which is a
+/// stability violation and not merely an inaccuracy. the uniform arm reads the host's
+/// precomputed reciprocal, so an unmapped run evaluates the identical expression it did
+/// before, and `map_kind` is per-launch-uniform so the branch never diverges across lanes.
 fn cfl_inv_widths_gv(coords: Coords, spacing: &[Spacing], axes: &[usize], ndim: usize) -> Vec<Gv> {
-    let uniform_cartesian =
-        coords == Coords::Cartesian && spacing.iter().all(|&s| s == Spacing::Uniform);
-    if uniform_cartesian {
-        (0..ndim)
-            .map(|d| Gv::scalar(&format!("inv_dx_{d}")))
-            .collect()
-    } else {
-        cell_inv_phys_widths_gv(coords, spacing, axes, ndim)
+    if coords != Coords::Cartesian {
+        return cell_inv_phys_widths_gv(coords, spacing, axes, ndim);
     }
+    (0..ndim)
+        .map(|d| {
+            let map_kind = Gv::scalar(&format!("map_kind_{d}"));
+            Gv::cond(
+                map_kind.cmp_gt(Gv::from_f64(0.5)),
+                || {
+                    let lo = gv_axis_face_at(d, spacing[d], 0);
+                    let hi = gv_axis_face_at(d, spacing[d], 1);
+                    Gv::ONE / (hi - lo)
+                },
+                || Gv::scalar(&format!("inv_dx_{d}")),
+            )
+        })
+        .collect()
 }
 
 /// the lambda write list every wave-speed map returns: one scratch output `lambda`.
@@ -132,14 +147,25 @@ fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
 /// (`face_at(0) + 1/2 dx = x_lo + (i + 1/2) dx`). single source shared by every wave-speed map.
 fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
     let half = Gv::from_f64(0.5);
-    match spacing[d] {
-        Spacing::Uniform => {
-            gv_axis_face_at(d, spacing[d], 0) + half * Gv::scalar(&format!("dx_{d}"))
-        }
-        Spacing::Log => {
-            (gv_axis_face_at(d, spacing[d], 0) * gv_axis_face_at(d, spacing[d], 1)).sqrt()
-        }
-    }
+    let lo = gv_axis_face_at(d, spacing[d], 0);
+    let hi = gv_axis_face_at(d, spacing[d], 1);
+    // each map's own center convention, selected at RUNTIME by `map_kind_d` so one kernel serves
+    // every spacing: the geometric mean on a logarithmic axis (the point that sits midway in
+    // log-space, where the arithmetic mean sits far outward and overestimates dt), the arithmetic
+    // mean of the bounding faces on a geometrically graded one, and the plain `face + dx/2` on an
+    // unmapped axis — which the face difference reproduces exactly, so a uniform run is unchanged.
+    let map_kind = Gv::scalar(&format!("map_kind_{d}"));
+    Gv::cond(
+        map_kind.cmp_gt(Gv::from_f64(1.5)),
+        || (lo + hi) * half,
+        || {
+            Gv::cond(
+                map_kind.cmp_gt(Gv::from_f64(0.5)),
+                || (lo * hi).sqrt(),
+                || lo + half * Gv::scalar(&format!("dx_{d}")),
+            )
+        },
+    )
 }
 
 /// trace the COMPLETE ideal-gas euler CFL wave-speed map at `S = Gv` — the newtonian regime
@@ -208,12 +234,11 @@ where
     };
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
     // mesh motion: the cfl signal speed is RELATIVE to the grid, `|s -+ v_g|`
-    // with per-axis `v_g = mesh_adot_d * x_centroid + mesh_vtrans_d`
-    // (uniform-spacing centroid; the dispatch binds the homologous hubble
-    // rate on expanding axes, the translation rate on axis 0, zero
+    // with per-axis `v_g = mesh_adot_d * x_centroid + mesh_vtrans_d`, the centroid taken from
+    // the axis map so a graded axis is evaluated at its own cell centers (the dispatch binds the
+    // homologous hubble rate on expanding axes, the translation rate on axis 0, zero
     // otherwise — the static binding makes v_g exactly zero, and `s - 0` /
     // `|s|` are bit-identical).
-    let half = Gv::from_f64(0.5);
     // GR coordinate CFL: the banyuls-font coordinate signal speed
     //   lambda_coord^c = alpha sqrt(gamma^{cc}) lambda^{SR} - beta^c.
     // for the det-g-flat family (schwarzschild, kerr-schild) the RADIAL factor alpha sqrt(gamma^{rr})
@@ -239,8 +264,12 @@ where
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
         let (sl, sr) = regime.wave_speeds_axis(&eos, &prim, axes[d]);
-        let xc = Gv::scalar(&format!("x_lo_{d}"))
-            + (Gv::coord(d as u8) + half) * Gv::scalar(&format!("dx_{d}"));
+        // the moving grid's local velocity `a_dot x_c + v_trans` has to be evaluated at the cell's
+        // OWN center. a graded axis places that center where its map does, not at
+        // `x_lo + (i + 1/2) dx` — reading the linear form there assigns each cell the velocity of
+        // a cell somewhere else, which grows outward with the grading and is a CFL violation
+        // rather than an inaccuracy.
+        let xc = gv_cell_center(d, spacing);
         let vg = Gv::scalar(&MeshScalar::Adot(d as u8).name()) * xc
             + Gv::scalar(&MeshScalar::Vtrans(d as u8).name());
         let base = (sl - vg).abs().max((sr - vg).abs()) * inv_w[d];

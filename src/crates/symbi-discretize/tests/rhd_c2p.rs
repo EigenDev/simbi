@@ -133,9 +133,12 @@ fn rhd_face_flux_1d_lowers_and_emits() {
             "mesh_adot_0",
             "x_lo_0",
             "dx_0",
-            "mesh_vtrans_0"
+            "map_kind_0",
+            "map_param_0",
+            "mesh_vtrans_0",
         ],
-        "the RHD flux takes gamma + the theta-MC limiter + the per-axis mesh-motion/geometry scalars",
+        "the RHD flux takes gamma + the theta-MC limiter + the per-axis mesh-motion and \
+         axis-map scalars",
     );
     assert!(
         src.contains(".sqrt()"),

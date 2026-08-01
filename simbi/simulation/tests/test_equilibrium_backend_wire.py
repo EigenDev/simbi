@@ -59,16 +59,34 @@ def _run(problem) -> None:
     runner.run(problem, compute_mode="cpu", max_steps=_MAX_STEPS)
 
 
+_SUSPECT = "may not be a steady state"
+
+
 @pytest.mark.simulation
-def test_the_correct_target_runs() -> None:
-    # the control. without this the rejection below could equally mean the config is broken.
+def test_the_correct_target_runs(capfd) -> None:
+    # the control, in both directions: without it the report below could equally mean the config
+    # is broken, and a diagnostic that fired on every target -- correct or not -- would carry no
+    # information at all.
     _run(RefinedAtmosphere())
+    assert _SUSPECT not in capfd.readouterr().err, (
+        "the backend flagged the atmosphere that IS in balance against the gravity the run "
+        "applies; a diagnostic that fires on a correct target cannot distinguish anything"
+    )
 
 
 @pytest.mark.simulation
-def test_a_target_that_is_not_a_steady_state_is_rejected_by_the_backend() -> None:
-    # the backend measures the target's imbalance on two levels and refuses it when it fails
-    # to shrink under refinement. reaching that check at all proves the target crossed the
-    # exec dict and was applied at the hierarchy build site.
-    with pytest.raises(BaseException, match="not a steady state"):
-        _run(HalfGravityTarget())
+def test_a_target_that_is_not_a_steady_state_is_reported_by_the_backend(capfd) -> None:
+    # the backend measures the target's imbalance on two levels and REPORTS -- never refuses --
+    # a component whose imbalance fails to shrink when the cell width halves. truncation error
+    # falls by at least 2 under refinement; a continuum residual does not.
+    #
+    # the report is advisory because the measurement cannot be both sound and complete: a target
+    # that is genuinely steady but sharply stratified carries its imbalance exactly where the grid
+    # fails to resolve it, so refusing on that evidence rejects correct equilibria for being
+    # steep. the run therefore completes, and the diagnostic firing is itself the proof that the
+    # target crossed the exec dict and was applied at the hierarchy build site.
+    _run(HalfGravityTarget())
+    assert _SUSPECT in capfd.readouterr().err, (
+        "a profile balancing half the gravity the run applies drew no warning; the stationarity "
+        "diagnostic is not reaching the declared target"
+    )

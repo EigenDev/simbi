@@ -33,14 +33,19 @@
 #   simbi plot ... --draw-horizon                          (the black-disk overlay)
 # =============================================================================
 
-import math
 from typing import Annotated
 
 from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi import ProblemParam, SimbiProblem
-from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver, Spacetime
+from simbi.types import (
+    BoundaryCondition,
+    CoordSystem,
+    Regime,
+    Solver,
+    Spacetime,
+)
 from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
@@ -50,48 +55,82 @@ class GrBondiCartesian(SimbiProblem):
 
     # physics
     adiabatic_index: Annotated[
-        float, ProblemParam(4.0 / 3.0, description="adiabatic index gamma (well-posed bondi needs gamma < 5/3)")
+        float,
+        ProblemParam(
+            4.0 / 3.0,
+            description="adiabatic index gamma (well-posed bondi needs gamma < 5/3)",
+        ),
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD_KS, description="cartesian kerr-schild background"),
+        ProblemParam(
+            Spacetime.SCHWARZSCHILD_KS,
+            description="cartesian kerr-schild background",
+        ),
     ]
     schwarzschild_mass: Annotated[
-        float, ProblemParam(1.0, cli=True, description="black-hole mass M (G=c=1); r_+ = 2M")
+        float,
+        ProblemParam(
+            1.0, cli=True, description="black-hole mass M (G=c=1); r_+ = 2M"
+        ),
     ]
     excision_radius: Annotated[
         float,
         ProblemParam(
-            -1.0, cli=True, description="excision radius; negative = auto (0.7 r_+), strictly inside the horizon"
+            -1.0,
+            cli=True,
+            description="excision radius; negative = auto (0.7 r_+), strictly inside the horizon",
         ),
     ]
     rho_ambient: Annotated[
-        float, ProblemParam(1.0, cli=True, description="ambient rest-mass density rho_inf")
+        float,
+        ProblemParam(
+            1.0, cli=True, description="ambient rest-mass density rho_inf"
+        ),
     ]
     p_ambient: Annotated[
-        float, ProblemParam(0.05, cli=True, description="ambient pressure (sets c_inf and r_bondi)")
+        float,
+        ProblemParam(
+            0.05,
+            cli=True,
+            description="ambient pressure (sets c_inf and r_bondi)",
+        ),
     ]
 
     # domain — a uniform cube [-L, L]^3 sized (L = domain_radius * r_bondi) to
     # contain the sonic surface and the bondi radius.
     resolution: Annotated[
         tuple[int, int, int],
-        ProblemParam((192, 192, 192), cli=True, description="grid resolution (nx, ny, nz)"),
+        ProblemParam(
+            (192, 192, 192),
+            cli=True,
+            description="grid resolution (nx, ny, nz)",
+        ),
     ]
     domain_radius: Annotated[
-        float, ProblemParam(3.0, cli=True, description="cube half-width in units of r_bondi")
+        float,
+        ProblemParam(
+            3.0, cli=True, description="cube half-width in units of r_bondi"
+        ),
     ]
     bounds: Annotated[
         list[tuple[float, float]] | None,
-        ProblemParam(None, description="domain bounds (computed from r_bondi at build)"),
+        ProblemParam(
+            None, description="domain bounds (computed from r_bondi at build)"
+        ),
     ]
     coord_system: Annotated[
-        CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="coordinate system")
+        CoordSystem,
+        ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.RHD, description="physics regime")]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.RHD, description="physics regime")
+    ]
     # the non-diagonal cartesian kerr-schild metric takes the fast-magnetosonic HLLE
     # fan; the diagonal-metric HLLD/HLLC wrappers do not apply.
-    solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="riemann solver")]
+    solver: Annotated[
+        Solver, ProblemParam(Solver.HLLE, description="riemann solver")
+    ]
     cfl_number: Annotated[float, ProblemParam(0.3, description="cfl number")]
     # all six cube faces are far-field: drive them to the ambient reservoir.
     boundary_conditions: Annotated[
@@ -104,7 +143,12 @@ class GrBondiCartesian(SimbiProblem):
 
     end_time: Annotated[
         float,
-        ProblemParam(300.0, cli=True, checkpoint_safe=True, description="simulation end time"),
+        ProblemParam(
+            300.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="simulation end time",
+        ),
     ]
 
     # =========================================================================

@@ -26,7 +26,7 @@ use super::binding::{bind_manifest, kernel_bindings, kernel_field_binds, resolve
 use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
-    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom,
+    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar,
     resolve_body_scalars, scalars_for,
 };
 use super::types::Solver;
@@ -1262,6 +1262,16 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
+    // the viscous stencils are 3-point CENTERED differences carrying ONE width per axis. on a
+    // graded axis that form is not merely evaluated at the wrong spacing -- a centered difference
+    // over unequal intervals is first-order, and the second derivative it feeds is inconsistent --
+    // so no per-cell width substitution recovers it. an unequal-spacing stencil is required.
+    assert!(
+        sim.geom.maps.is_none(),
+        "viscosity on a graded mesh: the shear stencil is a centered difference over a single \
+         per-axis width, which is inconsistent on non-uniform spacing; use uniform spacing or an \
+         unequal-spacing viscous stencil"
+    );
     let geom = &sim.geom;
     // cartesian uses the flat face-difference kernel (2D/3D); every curvilinear
     // chart routes through the ONE general orthogonal kernel (scale-factor form),
@@ -1415,6 +1425,16 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
+    // the viscous stencils are 3-point CENTERED differences carrying ONE width per axis. on a
+    // graded axis that form is not merely evaluated at the wrong spacing -- a centered difference
+    // over unequal intervals is first-order, and the second derivative it feeds is inconsistent --
+    // so no per-cell width substitution recovers it. an unequal-spacing stencil is required.
+    assert!(
+        sim.geom.maps.is_none(),
+        "viscosity on a graded mesh: the shear stencil is a centered difference over a single \
+         per-axis width, which is inconsistent on non-uniform spacing; use uniform spacing or an \
+         unequal-spacing viscous stencil"
+    );
     let im = sim
         .immersed
         .as_ref()
@@ -2578,7 +2598,8 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     let name = format!("{prefix}_godunov_stage_with_body_source{sfx}_{D}d");
-    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
     let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
     let scalars = scalars_for(&name, |bind| {
         let v: f64 = match bind {
@@ -2664,18 +2685,13 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // FACE POSITION through `gv_axis_face_at`, which — on a log-radial grid — needs the LOG-AWARE
     // kernel scalars (dx is the log slope), exactly as the shift/godunov dispatches. GR is static
     // mesh, so kernel_geom == physical_geom for the uniform case.
-    let (x_lo_phys, dx_phys) = if matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski)
-    {
-        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, a)
-    } else {
-        kernel_geom(
-            &sim.geom.x_lo,
-            &sim.geom.dx,
-            &sim.geom.maps,
-            sim.geom.coords,
-            a,
-        )
-    };
+    let (x_lo_phys, dx_phys) = kernel_geom(
+        &sim.geom.x_lo,
+        &sim.geom.dx,
+        &sim.geom.maps,
+        sim.geom.coords,
+        a,
+    );
     // the flux is a per-direction kernel; it declares the moving-mesh rate for
     // its sweep axis as `mesh_adot_{dir}` (via MeshScalar) — the SAME per-axis
     // convention + resolver the wave-speed and godunov dispatches use. no bespoke
@@ -2963,7 +2979,10 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     let name = format!("{prefix}_godunov_stage_with_{source_id}{sfx}_{D}d");
-    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
+    // map-aware: the kernel rebuilds face positions from (x_lo, dx, map kind), where `dx` is the
+    // log decade-slope on a log axis. `kernel_geom` returns `physical_geom` verbatim without maps.
+    let (x_lo_phys, dx_phys) =
+        kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         match bind {
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),

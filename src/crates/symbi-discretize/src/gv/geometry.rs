@@ -15,14 +15,17 @@ use symbi_geometry::{
 /// `sum_i (F_i[coord+e_i] - F_i[coord]) / dx_i`. `base` names the per-direction flux field
 /// (`{base}_{i}`, runtime `{base}[{i}]`) — `mass_flux` / `mom_flux_{k}` / `nrg_flux`. the lo
 /// read is the direct cell read, the hi a `+e_i` field_shifted (LoadAt); dt is the caller's.
-fn gv_divergence_cartesian(base: &str, ndim: u8) -> Gv {
+fn gv_divergence_cartesian(base: &str, ndim: u8, spacing: &[Spacing]) -> Gv {
     let mut acc: Option<Gv> = None;
     for ii in 0..ndim {
         let key = format!("{base}_{ii}");
         let rt = format!("{base}[{ii}]");
         let f_lo = Gv::field_shifted(&key, &rt, ndim, ii, 0); // == Gv::field (offset 0)
         let f_hi = Gv::field_shifted(&key, &rt, ndim, ii, 1);
-        let dx = Gv::scalar(&format!("dx_{ii}"));
+        // the width is the CELL's, not the axis's: a graded axis has no single `dx`, and
+        // differencing its faces over one would misplace the divergence everywhere the cell is
+        // not that width. `gv_axis_width` reduces to the `dx_i` scalar on an unmapped axis.
+        let dx = gv_axis_width(ii as usize, spacing[ii as usize]);
         let term = (f_hi - f_lo) / dx;
         acc = Some(match acc {
             None => term,
@@ -77,9 +80,14 @@ pub(crate) fn gv_divergence_coord(base: &str, ndim: u8, spacing: &[Spacing]) -> 
 
 /// the per-direction inverse divergence operator for `base`: cartesian-uniform `(F_hi -
 /// F_lo)/dx_i`, else the area-weighted `(1/V)(F_hi*A_hi - F_lo*A_lo)` from `geo`.
-pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) -> Gv {
+pub(crate) fn gv_divergence(
+    base: &str,
+    ndim: u8,
+    geo: &Option<CellGeometryGv>,
+    spacing: &[Spacing],
+) -> Gv {
     match geo {
-        None => gv_divergence_cartesian(base, ndim),
+        None => gv_divergence_cartesian(base, ndim, spacing),
         Some(g) => gv_divergence_weighted(base, ndim, g),
     }
 }

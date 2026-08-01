@@ -231,11 +231,20 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     // uniform face map `x_lo + i*dx` — what every test written before spacing
                     // became a runtime scalar means. a log-spacing test supplies `map_kind_{ax}`
                     // = 1 explicitly (its analytic expectations fail loudly if it forgets).
+                    //
+                    // `x_lo_{ax}` joins them because a kernel that only DIFFERENCES widths reads
+                    // the axis origin solely through the mapped arm of that selector, which the
+                    // uniform map does not take — so the origin is unread and any value serves. a
+                    // kernel that positions a cell absolutely (a moving mesh, a curvilinear
+                    // metric) reads it on every arm, and those tests bind it.
                     .or_else(|| {
                         matches!(
                             bind,
                             ScalarBind::Ref(
-                                ScalarRef::Mesh(_) | ScalarRef::MapKind(_) | ScalarRef::MapParam(_),
+                                ScalarRef::Mesh(_)
+                                    | ScalarRef::MapKind(_)
+                                    | ScalarRef::MapParam(_)
+                                    | ScalarRef::XLo(_),
                             )
                         )
                         .then_some(S::ZERO)
