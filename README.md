@@ -965,6 +965,7 @@ the following people for their contributions to the project:
 - **[Font 2007](https://ui.adsabs.harvard.edu/abs/2008LRR....11....7F/abstract)**: A review of numerical methods for relativistic (magento)-hydrodynamics. This paper is a great resource for understanding the different numerical methods that can be used to solve the equations of GENERAL relativistic hydrodynamics.
 - **[Andersson & Comer 2021](https://link.springer.com/article/10.1007/s41114-021-00031-6)**: A modern review on the general field of relavistic fluid dynamics. Super nice stuff with a great intro. Please check it out! 
 - **[Moseley et al. 2026](https://arxiv.org/abs/2604.23041)**: A modern technique for evolving Lagrangian tracer particles in an Eulerian fluid simulation. This is a very nice paper that I found to be very useful for my own work. Plus, I got to learn about it live from Romain Teyssier himself!
+- **[Berberich et al. 2021](https://www.sciencedirect.com/science/article/pii/S0045793021000244#section-cited-by)**: A modern and generic technique for well-balanced evolution that is equation of state independent.
 ---
 
 <div align="center">
