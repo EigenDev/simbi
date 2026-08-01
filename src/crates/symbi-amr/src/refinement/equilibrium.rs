@@ -148,14 +148,14 @@ pub fn imbalance_from_stage<const NDIM: usize, const DOF: usize, Mem: MemorySpac
     Ok(residual)
 }
 
-/// the L1 norm of each conserved component of a residual over `domain`, weighted by cell volume:
-/// `sum |R_i| V_i`, one entry per component in `comps` order.
+/// the volume-weighted L1 norm of each conserved component of a residual over `domain`:
+/// `sum |R_i| V_i`, one entry per component in component order.
 ///
-/// this is the quantity that says whether a declared target is a genuine steady state. the scheme
-/// leaves `R = div_h F_h(qt) - s_h(qt)`, which for a true steady state is pure truncation error,
-/// `C(x) dx^p`, so its L1 norm over a FIXED physical region falls by `2^p` when the cell width
-/// halves. a state that is not steady leaves the continuum residual itself, which does not depend
-/// on the grid at all and so does not fall.
+/// a bulk magnitude, for reporting how large an imbalance is. it is NOT the statistic that decides
+/// whether a target is stationary: a sum is dominated by wherever the imbalance happens to be
+/// largest, which for a target with an unresolved feature is a handful of cells that carry no
+/// information about the rest. that question is answered per cell — see
+/// `Hierarchy::target_imbalance_convergence`.
 pub fn residual_norm<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(
     residual: &ConsFieldsGeneric<NDIM, DOF, Mem>,
     domain: &Domain<NDIM>,
@@ -183,6 +183,14 @@ pub fn accumulate<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(
     for (s, d) in comps(src).into_iter().zip(comps(dst)) {
         dispatch_fields_each::<f64, Mem, NDIM>(name, domain, &[s], &[d], &shift[..NDIM], &[w]);
     }
+}
+
+/// the conserved components of a residual as a flat list, for a caller that walks them cell by
+/// cell rather than through a kernel. same order as every other component operation here.
+pub fn residual_components<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(
+    residual: &ConsFieldsGeneric<NDIM, DOF, Mem>,
+) -> Vec<&symbi_grid::Field<f64, NDIM, Mem>> {
+    comps(residual)
 }
 
 /// the conserved components as a flat list: den, mom[0..DOF], then energy when present. two lists

@@ -42,7 +42,7 @@ use symbi_grid::Field;
 use super::emf_register::EmfRegister;
 use super::equilibrium::{
     EquilibriumFlux, accumulate as equilibrium_accumulate, imbalance_from_stage,
-    overwrite as equilibrium_overwrite, residual_norm, restore_gas_state, save_gas_state,
+    overwrite as equilibrium_overwrite, residual_components, restore_gas_state, save_gas_state,
     snapshot_flux,
 };
 use super::flux_register::FluxRegister;
@@ -2707,7 +2707,7 @@ where
             level.residual_eq = Some(residual);
             level.cons_eq = Some(anchored.into_cons());
         }
-        self.assert_target_is_stationary();
+        self.report_target_stationarity();
         Ok(self)
     }
 
@@ -2726,50 +2726,94 @@ where
     ///
     /// the test is source-agnostic — gravity, rotation, the curvilinear geometric terms and any
     /// user source all enter `R` through the stage that produced it.
-    fn assert_target_is_stationary(&self) {
+    /// report how the declared target's discrete imbalance behaves under refinement.
+    ///
+    /// this is ADVISORY and never blocks. the deviation method itself carries no such check; it is
+    /// a diagnostic added here because declaring a state that is not stationary is a silent error
+    /// — the scheme holds whatever it is given, so the run reports nothing while solving the wrong
+    /// problem.
+    ///
+    /// it is advisory because it cannot be made both sound and complete. a genuine steady state's
+    /// imbalance is truncation error, which converges only where the grid RESOLVES the target; a
+    /// non-stationary state leaves the continuum residual, which converges nowhere. for a strongly
+    /// stratified target those two populations do not separate — the imbalance is large only where
+    /// the profile is steep, and steep is exactly where convergence cannot be demonstrated either
+    /// way. a check that refused on that basis would reject correct equilibria for being sharp,
+    /// which is the more damaging error: it blocks valid science, where a missed warning only
+    /// fails to catch a mistake the user can still find by other means.
+    ///
+    /// what it reports is therefore evidence, not a verdict. a median near 1 on cells that ARE
+    /// resolved is strong evidence the target does not solve these equations; anything else is
+    /// inconclusive.
+    fn report_target_stationarity(&self) {
         for ll in 0..self.levels.len().saturating_sub(1) {
-            let Some((norm_coarse, norm_fine)) = self.target_imbalance_norms(ll) else {
+            let Some(measured) = self.target_imbalance_convergence(ll) else {
                 continue;
             };
-            // a component whose imbalance is already negligible against the largest one carries no
-            // information: its ratio is the quotient of two roundoff-level numbers. the balance is
-            // decided by the components that actually carry the imbalance.
-            let peak = norm_coarse.iter().fold(0.0_f64, |m, n| m.max(*n));
-            if peak == 0.0 {
+            let table: Vec<String> = (0..measured.ratio.len())
+                .map(|cc| {
+                    format!(
+                        "[{cc}] ratio {:.3} scale {:.3e} cells {}",
+                        measured.ratio[cc], measured.scale[cc], measured.sampled[cc]
+                    )
+                })
+                .collect();
+            // no component with broadly distributed signal on resolved cells: nothing was
+            // measured. say so, because silence would otherwise read as "checked and clean".
+            if (0..measured.ratio.len()).all(|cc| measured.sampled[cc] < MIN_CONVERGENCE_SAMPLE) {
+                eprintln!(
+                    "note: the declared stationary target between levels {ll} and {} was not \
+                     checked. its imbalance is concentrated where the grid does not resolve it \
+                     ({} of {} overlapping cells resolved), so no component carries signal on \
+                     cells that could show convergence either way. this is expected for a sharply \
+                     stratified target and is NOT evidence of a problem; it is also not evidence \
+                     of correctness. every component: {}",
+                    ll + 1,
+                    measured.resolved,
+                    measured.considered,
+                    table.join("  ")
+                );
                 continue;
             }
-            for (cc, (nc, nf)) in norm_coarse.iter().zip(&norm_fine).enumerate() {
-                if *nc < 1.0e-6 * peak {
-                    continue;
-                }
-                let ratio = nc / nf.max(f64::MIN_POSITIVE);
-                assert!(
-                    ratio > 1.5,
-                    "the declared stationary target is not a steady state of these equations. \
-                     component {cc} of its discrete imbalance fell by only {ratio:.3} between \
-                     levels {ll} and {} (cell width halved), an apparent order of {:.2}; \
-                     truncation error would fall by at least 2. what does not shrink under \
-                     refinement is the CONTINUUM residual, so the declared state does not solve \
-                     the equations being integrated, and well-balancing it would hold the run \
-                     motionless in a state that is not an equilibrium",
+            let suspect = (0..measured.ratio.len()).any(|cc| {
+                measured.sampled[cc] >= MIN_CONVERGENCE_SAMPLE && measured.ratio[cc] <= 1.5
+            });
+            if suspect {
+                eprintln!(
+                    "warning: the declared stationary target may not be a steady state of these \
+                     equations. between levels {ll} and {}, a conserved component's discrete \
+                     imbalance did not shrink when the cell width halved, on cells where the grid \
+                     resolves the target. truncation error falls by at least 2; what does not fall \
+                     is the continuum residual. if that is so, well-balancing this state would \
+                     hold the run motionless in something that is not an equilibrium. \
+                     {} of {} overlapping cells resolved; every component: {}",
                     ll + 1,
-                    ratio.log2()
+                    measured.resolved,
+                    measured.considered,
+                    table.join("  ")
                 );
             }
         }
     }
 
-    /// the volume-weighted L1 norm of the target's discrete imbalance, per conserved component,
-    /// measured on level `pair` and on level `pair + 1` over the SAME physical region — the raw
-    /// measurement behind the steady-state check, with no threshold applied.
+    /// how the target's discrete imbalance behaves under refinement, measured PER CELL and reduced
+    /// with a median — the raw evidence behind the steady-state check, with no threshold applied.
+    ///
+    /// each coarse cell in the overlap is compared against the mean of its own children, so the
+    /// statistic is local. that is what makes it usable: a ratio of summed norms is dominated by
+    /// wherever the imbalance happens to be largest, and for a target with an unresolved feature —
+    /// the `1/r` cusp of a point-mass atmosphere at the centre of a refinement box, say — that is a
+    /// handful of cells whose error does not converge because neither grid resolves them. those
+    /// cells are real, and they say nothing about whether the declared state solves the equations.
+    /// a median over cells cannot be moved by them.
     ///
     /// `None` when the two levels share too little interior to compare. the region is the coverage
     /// trimmed by two coarse cells on every side: the fine level's outermost cells reconstruct
     /// through prolonged coarse-fine ghosts, whose error converges at the prolongation's order
     /// rather than the scheme's, and mixing the two would measure neither.
-    pub fn target_imbalance_norms(&self, pair: usize) -> Option<(Vec<f64>, Vec<f64>)> {
+    pub fn target_imbalance_convergence(&self, pair: usize) -> Option<ImbalanceConvergence> {
         const TRIM: isize = 2;
-        // the imbalance is written by device kernels and summed here on the host; the read is
+        // the imbalance is written by device kernels and read here on the host; the read goes
         // through unified memory and is not ordered against the queue on its own.
         symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         let coarse = self.levels.get(pair)?;
@@ -2787,23 +2831,82 @@ where
         if (0..NDIM).any(|aa| inner.spaces[aa].hi <= inner.spaces[aa].lo) {
             return None;
         }
-        let inner_fine = Domain::new(std::array::from_fn(|aa| {
-            let s = &inner.spaces[aa];
-            Space {
-                name: s.name,
-                lo: s.lo * RATIO as isize,
-                hi: s.hi * RATIO as isize,
-            }
-        }));
 
-        Some((
-            residual_norm(
-                coarse.residual_eq.as_ref()?,
-                &inner,
-                &coarse.state.geom.dx,
-            ),
-            residual_norm(fine.residual_eq.as_ref()?, &inner_fine, &fine.state.geom.dx),
-        ))
+        // the cells the question can be ASKED of. truncation error is a statement about a
+        // solution the grid resolves; where the target changes by a large factor across one cell
+        // the reconstruction is clipping rather than approximating, and its error carries no
+        // order. such cells are real and are corrected like any other — they are simply not
+        // evidence about whether the declared state solves the equations, so they are excluded
+        // from the statistic rather than allowed to set it.
+        let target = coarse.cons_eq.as_ref()?;
+        let den = target.den.view();
+        // a cell can only testify about convergence if the grid RESOLVES the target there: where
+        // the density turns over inside one width the reconstruction is clipping rather than
+        // approximating, and its error carries no order either way.
+        let resolved: Vec<[isize; NDIM]> = inner
+            .iter()
+            .filter(|c| {
+                let here = den.at(*c).abs().max(f64::MIN_POSITIVE);
+                (0..NDIM).all(|ax| {
+                    [-1isize, 1].iter().all(|step| {
+                        let mut nb = *c;
+                        nb[ax] += step;
+                        (den.at(nb) - den.at(*c)).abs() / here < RESOLVED_VARIATION
+                    })
+                })
+            })
+            .collect();
+
+        let coarse_comps = residual_components(coarse.residual_eq.as_ref()?);
+        let fine_comps = residual_components(fine.residual_eq.as_ref()?);
+
+        // the scale is the component's peak over the WHOLE overlap, not over the resolved subset.
+        // it sets what counts as real signal, and a floor derived from the quiet cells alone would
+        // admit their own roundoff as evidence.
+        let scale: Vec<f64> = coarse_comps
+            .iter()
+            .map(|field| {
+                let view = field.view();
+                inner.iter().map(|c| view.at(c).abs()).fold(0.0_f64, f64::max)
+            })
+            .collect();
+
+        let mut ratio = Vec::with_capacity(coarse_comps.len());
+        let mut sampled = Vec::with_capacity(coarse_comps.len());
+        for (cc, (cf, ff)) in coarse_comps.iter().zip(&fine_comps).enumerate() {
+            let (cv, fv) = (cf.view(), ff.view());
+            let mut ratios = Vec::new();
+            for c in &resolved {
+                let numerator = cv.at(*c).abs();
+                // a cell whose own imbalance is at roundoff has no convergence to report; its
+                // ratio would be noise over noise.
+                // resolved AND carrying signal. a cell whose residual is a millionth of this
+                // component's peak is reporting roundoff, and a median of such cells reads 1
+                // whatever the target is — indistinguishable from a genuine non-convergence.
+                if numerator < SIGNAL_FLOOR * scale[cc].max(f64::MIN_POSITIVE) {
+                    continue;
+                }
+                let mut child_sum = 0.0;
+                let mut children = 0usize;
+                for_each_child::<NDIM>(*c, RATIO, |fc| {
+                    child_sum += fv.at(fc).abs();
+                    children += 1;
+                });
+                let child_mean = child_sum / children as f64;
+                if child_mean > 0.0 {
+                    ratios.push(numerator / child_mean);
+                }
+            }
+            sampled.push(ratios.len());
+            ratio.push(median(&mut ratios));
+        }
+        Some(ImbalanceConvergence {
+            ratio,
+            scale,
+            sampled,
+            resolved: resolved.len(),
+            considered: inner.iter().count(),
+        })
     }
 
     /// declare the stationary target as an EXPRESSION of position rather than as a closure.
@@ -2878,6 +2981,70 @@ where
 // =============================================================================
 // helpers
 // =============================================================================
+
+/// how a declared stationary target's discrete imbalance behaves under one halving of the cell
+/// width, per conserved component.
+pub struct ImbalanceConvergence {
+    /// median over RESOLVED coarse cells of `|R_coarse(cell)| / mean |R_fine(its children)|`.
+    /// truncation error gives `2^p` (4 for a second-order scheme); a continuum residual gives 1.
+    pub ratio: Vec<f64>,
+    /// the largest single-cell `|R|` over the resolved cells — the scale below which a
+    /// component's ratios are quotients of roundoff and say nothing.
+    pub scale: Vec<f64>,
+    /// how many resolved cells carried enough signal to contribute a ratio, per component.
+    pub sampled: Vec<usize>,
+    /// how many cells the target is resolved on, out of `considered`.
+    pub resolved: usize,
+    /// how many cells the overlap offered before the resolution filter.
+    pub considered: usize,
+}
+
+/// the fewest cells a median may be taken over before it is a statistic rather than an accident.
+const MIN_CONVERGENCE_SAMPLE: usize = 8;
+
+/// the largest fractional change in the target's density across one cell for that cell to count as
+/// RESOLVED. beyond it a limited reconstruction is clipping rather than approximating and its
+/// error carries no order, so the cell cannot testify about convergence either way. a stratified
+/// atmosphere spread over its grid sits far below this; the cells it excludes are the ones where
+/// the profile turns over inside a single width — a `1/r` cusp at a box centre, typically.
+const RESOLVED_VARIATION: f64 = 0.25;
+
+/// the smallest share of a component's peak imbalance a cell must carry to vote on convergence.
+/// below it the cell reports roundoff, and a median of such cells reads 1 whatever the target is —
+/// which is exactly the value a genuinely non-stationary target gives, so admitting them makes the
+/// two indistinguishable.
+const SIGNAL_FLOOR: f64 = 1.0e-3;
+
+/// the median of `values`, or 0 when empty. sorts in place; the caller owns the buffer.
+fn median(values: &mut [f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        0.5 * (values[mid - 1] + values[mid])
+    } else {
+        values[mid]
+    }
+}
+
+/// visit the `ratio^D` fine cells covering one coarse cell. levels share absolute index space, so
+/// the children of coarse cell `c` start at `ratio * c`.
+fn for_each_child<const D: usize>(c: [isize; D], ratio: usize, mut f: impl FnMut([isize; D])) {
+    let base: [isize; D] = std::array::from_fn(|ax| c[ax] * ratio as isize);
+    let total = ratio.pow(D as u32);
+    for n in 0..total {
+        let mut child = base;
+        let mut rem = n;
+        for slot in child.iter_mut() {
+            *slot += (rem % ratio) as isize;
+            rem /= ratio;
+        }
+        f(child);
+    }
+}
+
 
 /// the per-stage EFFECTIVE flux weights of an ssp scheme: stage i's operator
 /// enters the step total with `ac_i * prod_{k>i} ac_k` (each later convex

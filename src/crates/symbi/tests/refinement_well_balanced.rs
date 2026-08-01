@@ -310,45 +310,86 @@ fn the_imbalance_of_a_true_steady_state_converges_under_refinement() {
     // behaves under refinement — truncation error falls with the cell width, the continuum
     // residual of a state that does not solve the equations does not fall at all.
     let real = build(&nested(2)).with_equilibrium(hydrostatic).unwrap();
-    let (coarse, fine) = real
-        .target_imbalance_norms(0)
+    let measured = real
+        .target_imbalance_convergence(0)
         .expect("levels 0 and 1 share an interior to compare over");
 
-    let peak = coarse.iter().fold(0.0_f64, |m, n| m.max(*n));
-    let ratios: Vec<String> = coarse
-        .iter()
-        .zip(&fine)
-        .map(|(c, f)| format!("{:.2}", c / f.max(f64::MIN_POSITIVE)))
-        .collect();
-    println!("\ntrue steady state, imbalance L1 coarse/fine by component: {ratios:?}");
+    let peak = measured.scale.iter().fold(0.0_f64, |m, s| m.max(*s));
+    let shown: Vec<String> = measured.ratio.iter().map(|r| format!("{r:.2}")).collect();
+    println!(
+        "\ntrue steady state, per-cell median imbalance ratio by component: {shown:?}  (sampled {:?})",
+        measured.sampled
+    );
 
     // NON-VACUITY: an imbalance already at zero would "converge" trivially. there has to be a real
-    // truncation error being measured.
+    // truncation error being measured, over enough cells for a median to mean anything.
     assert!(
         peak > 1.0e-6,
-        "the largest component of the imbalance is {peak:.3e}, indistinguishable from zero; the \
+        "the largest single-cell imbalance is {peak:.3e}, indistinguishable from zero; the \
          convergence measured below is a ratio of roundoff"
     );
-    for (cc, (c, f)) in coarse.iter().zip(&fine).enumerate() {
-        if *c < 1.0e-6 * peak {
+    for cc in 0..measured.ratio.len() {
+        if measured.scale[cc] < 1.0e-6 * peak {
             continue;
         }
-        let ratio = c / f.max(f64::MIN_POSITIVE);
         assert!(
-            ratio > 1.5,
-            "component {cc} of the TRUE steady state's imbalance fell by only {ratio:.3} when the \
-             cell width halved; the check that rejects a false equilibrium would reject this one"
+            measured.sampled[cc] >= 8,
+            "component {cc} contributed only {} cells to the median; that is an accident, not a \
+             statistic",
+            measured.sampled[cc]
+        );
+        assert!(
+            measured.ratio[cc] > 1.5,
+            "component {cc} of the TRUE steady state's imbalance fell by a median factor of only \
+             {:.3} per cell when the cell width halved; the check that rejects a false equilibrium \
+             would reject this one",
+            measured.ratio[cc]
         );
     }
 }
 
 #[test]
-#[should_panic(expected = "not a steady state")]
-fn a_declared_target_that_is_not_stationary_is_rejected() {
-    // the profile balances GM/2 while the body pulls with GM, so the continuum residual is
-    // rho*GM/2 — grid-independent, and therefore visible as an imbalance that does not converge.
-    // without this check the run would hold this state motionless and report nothing.
-    let _ = build(&nested(2)).with_equilibrium(hydrostatic_wrong_gravity);
+fn a_target_that_is_not_stationary_reads_as_non_converging() {
+    // the stationarity report is ADVISORY -- it never blocks, because for a strongly stratified
+    // target the imbalance lives only where the grid cannot resolve it and no threshold separates
+    // "steep" from "wrong" there. what it must still do is MEASURE correctly: a state that does
+    // not solve these equations leaves the continuum residual, which is grid-independent, so its
+    // ratio must sit at 1 on the cells where the grid does resolve the target.
+    //
+    // the profile below balances GM/2 while the body pulls with GM -- smooth, positive, monotone,
+    // and wrong by a constant in one term.
+    let hier = build(&nested(2))
+        .with_equilibrium(hydrostatic_wrong_gravity)
+        .expect("the report is advisory and must not refuse the build");
+    let measured = hier
+        .target_imbalance_convergence(0)
+        .expect("levels 0 and 1 overlap");
+    let shown: Vec<String> = measured.ratio.iter().map(|r| format!("{r:.3}")).collect();
+    println!("\nwrong-gravity target, per-component medians: {shown:?} (sampled {:?})", measured.sampled);
+
+    // momentum is the component the error lives in: the pressure gradient balances a different
+    // gravity than the one applied.
+    assert!(
+        measured.sampled[1] >= 8,
+        "only {} cells voted on momentum; too few to read",
+        measured.sampled[1]
+    );
+    assert!(
+        measured.ratio[1] <= 1.5,
+        "the WRONG target's momentum imbalance fell by {:.3} per cell, which reads as \
+         converging; the diagnostic can no longer tell a non-stationary state from a steep one",
+        measured.ratio[1]
+    );
+    // and the components that are NOT wrong must still converge, or the reading is not localizing
+    // anything -- it would flag every component of every target.
+    for cc in [0usize, 2] {
+        assert!(
+            measured.ratio[cc] > 1.5,
+            "component {cc} of the wrong-gravity target reads {:.3}; the error is in the \
+             momentum balance alone and the diagnostic should say so",
+            measured.ratio[cc]
+        );
+    }
 }
 
 /// the same atmosphere written as an expression DAG, in the wire form a configured run emits.
@@ -548,6 +589,303 @@ fn a_declared_target_stops_the_entropy_drift_at_the_interface() {
                  sitting on its declared stationary target ({:.3e} -> {held:.3e})",
                 initial[ll]
             );
+        }
+    }
+}
+
+#[test]
+#[ignore = "diagnostic: reports how the undeclared interface leak grows with step count"]
+fn the_interface_entropy_leak_grows_with_step_count() {
+    // whether an interface leak threatens a long science run is a question about its GROWTH,
+    // not its size after a fixed number of steps. a leak that saturates is a bounded offset; one
+    // that accumulates linearly reaches any tolerance eventually, and the only thing that decides
+    // which is measuring more than one duration.
+    println!("\nundeclared 2-level run: entropy deviation vs steps");
+    for steps in [20u64, 80, 320, 1280] {
+        let mut hier = build(&nested(2));
+        hier.evolve_steps(steps).unwrap();
+        let l0 = worst_entropy_deviation(&hier, 0);
+        let l1 = worst_entropy_deviation(&hier, 1);
+        println!(
+            "  steps={steps:>5}  level0 {l0:.4e}  level1 {l1:.4e}  \
+             (per step: {:.3e} / {:.3e})",
+            l0 / steps as f64,
+            l1 / steps as f64
+        );
+    }
+}
+
+#[test]
+fn the_fixed_point_survives_a_step_it_was_not_probed_at() {
+    // the imbalance is read off ONE stage of length `dt_probe`. if any part of what that stage
+    // does to the target is quadratic in dt — a gravitational kick that carries its own
+    // `0.5 rho |g|^2 dt^2` into the energy, for instance — then `R = (qt - advanced)/dt` picks up
+    // a term proportional to `dt_probe`, and the correction only cancels the stage exactly when
+    // the run takes that same step. clamping the run's dt away from the probe's is the direct test.
+    println!("\nfixed point vs the run's dt, 2 levels, {STEPS} steps");
+    for clamp in [0.0_f64, 0.5, 0.25, 0.1] {
+        let mut hier = build_declared(&nested(2));
+        if clamp > 0.0 {
+            // max_dt clamps the accepted step below the cfl value the target was probed at.
+            use symbi_sim::substrate_seam::KernelSet;
+            for level in &mut hier.levels {
+                let cfl_dt = level.kernels.cfl(&level.state);
+                level.state.max_dt = clamp * cfl_dt;
+            }
+        }
+        hier.evolve_steps(STEPS).unwrap();
+        let speeds: Vec<String> = (0..2).map(|ll| format!("{:.3e}", worst_speed(&hier, ll))).collect();
+        let label = if clamp == 0.0 { "cfl (= probe dt)".to_string() } else { format!("{clamp}x cfl") };
+        println!("  dt = {label:<18} max|v| {speeds:?}");
+        // the imbalance is read off ONE stage at the target's own cfl step. if any part of what
+        // that stage does were quadratic in dt, the correction would cancel only at that step and
+        // the fixed point would decay as the run's dt moved away from it.
+        for ll in 0..2 {
+            let speed = worst_speed(&hier, ll);
+            assert!(
+                speed < 1.0e-12,
+                "level {ll} moved at {speed:.3e} running at {label}, a step the target was not \
+                 probed at; the correction is step-dependent"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_declared_target_restores_the_entropy_floor() {
+    // entropy is one-way: K may rise and must never fall below its initial value. a single grid
+    // with gravity obeys that; adding a refinement level breaks it. this asks whether removing
+    // the background's discrete imbalance is enough to put the floor back.
+    const LONG: u64 = 956;
+    println!("\nmin K/K0 after {LONG} root steps (below 1 is entropy DESTROYED)");
+    for levels in 1..=3usize {
+        let mut control = build(&nested(levels));
+        control.evolve_steps(LONG).unwrap();
+        let mut hier = build_declared(&nested(levels));
+        hier.evolve_steps(LONG).unwrap();
+        let show = |h: &Hier| -> Vec<String> {
+            (0..levels)
+                .map(|ll| {
+                    let lvl = &h.levels[ll];
+                    let st = &lvl.state;
+                    let rho = st.fields.prim.rho.view();
+                    let pre = st.fields.prim.pre_field().unwrap().view();
+                    let m = st
+                        .geom
+                        .interior
+                        .iter()
+                        .filter(|c| !lvl.coverage.as_ref().is_some_and(|cv| cv.contains(*c)))
+                        .map(|c| *pre.at(c) / rho.at(c).powf(GAMMA) / K0)
+                        .fold(f64::INFINITY, f64::min);
+                    format!("{m:.7}")
+                })
+                .collect()
+        };
+        let (undeclared, declared) = (show(&control), show(&hier));
+        println!("  levels={levels}  undeclared {undeclared:?}");
+        println!("  levels={levels}  declared   {declared:?}");
+        for ll in 0..levels {
+            let before: f64 = undeclared[ll].parse().unwrap();
+            let after: f64 = declared[ll].parse().unwrap();
+            // NON-VACUITY: entropy has to actually be destroyed without the declaration, or
+            // there is no one-way law being violated here to restore.
+            assert!(
+                before < 1.0,
+                "level {ll} of the UNDECLARED {levels}-level run held K/K0 at {before:.7}; \
+                 nothing is destroying entropy here and this gate says nothing"
+            );
+            // entropy is ONE-WAY: K may rise and must never fall below the value the gas was
+            // built with. the target is a fixed point, so the state does not move and its
+            // entropy cannot -- the floor is exact, not approached.
+            assert!(
+                after >= 1.0,
+                "level {ll} of the {levels}-level run destroyed entropy while sitting on its \
+                 declared stationary target: min K/K0 = {after:.7}, below the one-way floor"
+            );
+        }
+    }
+}
+
+// =============================================================================
+// a target that is steady but STEEP
+//
+// the atmosphere above is spread across its grid. a point mass sitting INSIDE the refined box
+// makes a very different shape: the density turns over inside a single coarse cell near the
+// centre, and no level resolves it. that region is real and is corrected like any other, but its
+// error is a limiter clipping rather than a truncation, so it carries no order and cannot testify
+// about whether the declared state solves the equations.
+//
+// a convergence check that samples it anyway reports "does not converge" and REFUSES a perfectly
+// good equilibrium. this is that geometry, in one dimension.
+// =============================================================================
+
+/// softening length of the central body, in root cells. small enough that the density turns over
+/// inside one coarse cell near the centre — which is the point.
+const CUSP_SOFTENING: f64 = 0.75 / N as f64;
+const CUSP_GM: f64 = 2.0;
+
+/// the plummer potential the body actually applies: `phi = -GM/sqrt(r^2 + h^2)`.
+fn cusp_potential(x: [f64; 1]) -> f64 {
+    let r = x[0] - 0.5;
+    -CUSP_GM / (r * r + CUSP_SOFTENING * CUSP_SOFTENING).sqrt()
+}
+
+/// the isentropic atmosphere in balance against THAT potential, normalized at the wall.
+fn cusped_atmosphere(x: [f64; 1]) -> Prim<f64, 1> {
+    let scale = GAMMA * K0 / (GAMMA - 1.0);
+    let invariant = scale * 1.0f64.powf(GAMMA - 1.0) + cusp_potential([0.0]);
+    let rho = ((invariant - cusp_potential(x)) / scale).powf(1.0 / (GAMMA - 1.0));
+    Prim {
+        rho,
+        vel: symbi_algebra::Tensor::new([0.0]),
+        pre: K0 * rho.powf(GAMMA),
+    }
+}
+
+fn build_cusped(levels: usize) -> Hier {
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N])
+        .spacing([1.0 / N as f64])
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(cusped_atmosphere)
+        .build();
+    let ck = kset(&coarse);
+    let hier = Hierarchy::with_refinement(coarse, ck, &nested(levels), ProlongOrder::Ppm, kset)
+        .unwrap()
+        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            symbi_algebra::Tensor::new([0.5]),
+            symbi_algebra::Tensor::zeros(),
+            CUSP_GM,
+            0.0,
+            CUSP_SOFTENING,
+        )));
+    for lvl in 1..hier.levels.len() {
+        hier.levels[lvl].state.seed_cells(cusped_atmosphere);
+    }
+    hier
+}
+
+#[test]
+fn a_steady_target_with_an_unresolved_cusp_is_accepted() {
+    // NON-VACUITY: the cusp has to actually be unresolved, or this is the smooth case again.
+    let dx = 1.0 / N as f64;
+    let across = cusped_atmosphere([0.5 + 0.5 * dx]).rho / cusped_atmosphere([0.5 + 1.5 * dx]).rho;
+    println!("\ndensity ratio across one coarse cell at the cusp: {across:.2}x");
+    assert!(
+        across > 1.5,
+        "the density changes by only {across:.2}x across a coarse cell at the centre; this \
+         geometry no longer has an unresolved feature and the check below is the smooth case"
+    );
+
+    // the target IS a steady state of the field the body applies, so it must be accepted. the
+    // cells at the cusp cannot testify about convergence and must not be allowed to veto it.
+    let hier = build_cusped(2).with_equilibrium(cusped_atmosphere).unwrap();
+    let measured = hier
+        .target_imbalance_convergence(0)
+        .expect("levels 0 and 1 overlap");
+    println!(
+        "  resolved {} of {} overlapping cells; per-component medians {:?}",
+        measured.resolved,
+        measured.considered,
+        measured
+            .ratio
+            .iter()
+            .map(|r| format!("{r:.2}"))
+            .collect::<Vec<_>>()
+    );
+    // and the cusp has to have been EXCLUDED, or the acceptance came from somewhere else.
+    assert!(
+        measured.resolved < measured.considered,
+        "every one of the {} overlapping cells counted as resolved, so the cusp was never \
+         excluded and this test is not exercising the filter it exists for",
+        measured.considered
+    );
+}
+
+#[test]
+fn the_cusped_target_is_still_held_exactly() {
+    // acceptance is worthless if the correction does not then work. the same steep target must be
+    // a fixed point to roundoff, cusp included.
+    let mut hier = build_cusped(2).with_equilibrium(cusped_atmosphere).unwrap();
+    hier.seed_equilibrium();
+    let m0 = composite_mass(&hier);
+    hier.evolve_steps(STEPS).unwrap();
+    let m1 = composite_mass(&hier);
+    for ll in 0..2 {
+        let speed = worst_speed(&hier, ll);
+        println!("cusped target, level {ll}: max|v| {speed:.3e}");
+        assert!(
+            speed < 1.0e-12,
+            "level {ll} moved at {speed:.3e} while sitting on its declared cusped target"
+        );
+    }
+    let relative = ((m1 - m0) / m0).abs();
+    assert!(
+        relative < 1.0e-14,
+        "composite mass moved by {relative:.3e} on the cusped target"
+    );
+}
+
+#[test]
+fn a_correct_target_is_never_refused_however_steep() {
+    // the check must not reject an equilibrium for being sharp. as a target steepens its imbalance
+    // concentrates into cells the grid cannot resolve, and at some point there is nothing left to
+    // measure -- at which point the honest outcome is "unverified", never "wrong". a WRONG target
+    // stays detectable throughout, because its error is the continuum residual and that is present
+    // wherever the source is, including in the smooth cells.
+    println!("\ncorrect targets across a range of steepness (none may be refused)");
+    println!("{:>14} {:>15} {:>12}", "softening/dx", "rho ratio/cell", "verdict");
+    for soft_cells in [2.0_f64, 1.5, 1.0, 0.75, 0.5, 0.35] {
+        let soft = soft_cells / N as f64;
+        let dx = 1.0 / N as f64;
+        let phi = move |x: f64| -CUSP_GM / ((x - 0.5) * (x - 0.5) + soft * soft).sqrt();
+        let scale = GAMMA * K0 / (GAMMA - 1.0);
+        let invariant = scale + phi(0.0);
+        let dens = move |x: f64| ((invariant - phi(x)) / scale).powf(1.0 / (GAMMA - 1.0));
+        let across = dens(0.5 + 0.5 * dx) / dens(0.5 + 1.5 * dx);
+        let target = move |x: [f64; 1]| {
+            let r = dens(x[0]);
+            Prim { rho: r, vel: symbi_algebra::Tensor::new([0.0]), pre: K0 * r.powf(GAMMA) }
+        };
+        let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N]).spacing([dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+            .cfl(CFL).allocate().unwrap().set_initial(target).build();
+        let ck = kset(&coarse);
+        let hier = Hierarchy::with_refinement(coarse, ck, &nested(2), ProlongOrder::Ppm, kset)
+            .unwrap()
+            .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+                0, symbi_algebra::Tensor::new([0.5]), symbi_algebra::Tensor::zeros(),
+                CUSP_GM, 0.0, soft,
+            )));
+        for lvl in 1..hier.levels.len() { hier.levels[lvl].state.seed_cells(target); }
+
+        // NON-VACUITY: the target has to be genuinely steep, or this is the smooth case again.
+        assert!(
+            across > 1.3,
+            "the density changes by only {across:.2}x across a cell; not a steep target"
+        );
+        let accepted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            hier.with_equilibrium(target)
+        }));
+        match accepted {
+            Ok(Ok(h)) => {
+                let m = h.target_imbalance_convergence(0).unwrap();
+                let tested = m.sampled.iter().any(|&n| n >= 8);
+                println!(
+                    "{soft_cells:>14.2} {across:>15.2} {:>12}",
+                    if tested { "converged" } else { "unverified" }
+                );
+            }
+            _ => panic!(
+                "a CORRECT steady state at {across:.2}x density per cell was REFUSED; the check \
+                 is rejecting equilibria for being steep, which is the false positive it exists \
+                 to avoid"
+            ),
         }
     }
 }

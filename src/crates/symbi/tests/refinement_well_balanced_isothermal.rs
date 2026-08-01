@@ -206,16 +206,12 @@ fn the_captured_target_carries_no_energy_component() {
     }
 
     // and the imbalance that IS carried has to be real, or the absence above is trivial.
-    let (coarse, fine) = hier
-        .target_imbalance_norms(0)
+    let measured = hier
+        .target_imbalance_convergence(0)
         .expect("levels 0 and 1 share an interior to compare over");
-    let peak = coarse.iter().fold(0.0_f64, |m, n| m.max(*n));
-    let ratios: Vec<String> = coarse
-        .iter()
-        .zip(&fine)
-        .map(|(c, f)| format!("{:.2}", c / f.max(f64::MIN_POSITIVE)))
-        .collect();
-    println!("isothermal imbalance L1 coarse/fine by component: {ratios:?}");
+    let peak = measured.scale.iter().fold(0.0_f64, |m, s| m.max(*s));
+    let shown: Vec<String> = measured.ratio.iter().map(|r| format!("{r:.2}")).collect();
+    println!("isothermal per-cell median imbalance ratio by component: {shown:?}");
     assert!(
         peak > 1.0e-9,
         "the captured imbalance peaks at {peak:.3e}, indistinguishable from zero; there is \
@@ -223,9 +219,9 @@ fn the_captured_target_carries_no_energy_component() {
     );
     // density and momentum only: two components, not three.
     assert_eq!(
-        coarse.len(),
+        measured.ratio.len(),
         2,
         "an energy-free 1d regime has a density and one momentum component, got {}",
-        coarse.len()
+        measured.ratio.len()
     );
 }
