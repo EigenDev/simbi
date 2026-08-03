@@ -33,7 +33,7 @@ pub mod ibm;
 pub mod kernel_slug;
 pub mod lattice;
 
-pub use coords::{Coords, Spacetime, Spacing};
+pub use coords::{Coords, Recon, Spacetime, Spacing};
 // facade: the carrier types live in symbi-ir alongside Op + Graph. re-export them so the
 // builder return types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use gv::{

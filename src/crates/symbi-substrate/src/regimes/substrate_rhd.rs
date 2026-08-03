@@ -201,6 +201,17 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self.theta = theta;
         self
     }
+
+    /// evolution reconstruction selector. the rhd flux family is plm-only — no `_ppm`
+    /// kernel twins are baked for it — so this validates rather than stores; a shared
+    /// regime-generic build path may call it unconditionally.
+    pub fn reconstruction(self, recon: symbi_discretize::Recon) -> Self {
+        assert!(
+            recon == symbi_discretize::Recon::Plm,
+            "ppm reconstruction is baked for the newtonian adiabatic flux family only"
+        );
+        self
+    }
 }
 
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
@@ -216,6 +227,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.gamma,
             self.theta,
             self.solver,
+            symbi_discretize::Recon::Plm,
             false,
         );
     }
@@ -634,7 +646,19 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             &self.cfl_scratch,
             pre,
             &self.freeze_streak,
-            |dir| dispatch_flux(sim, pre, "rhd", dir, self.gamma, 0.0, Solver::Hlle, curved),
+            |dir| {
+                dispatch_flux(
+                    sim,
+                    pre,
+                    "rhd",
+                    dir,
+                    self.gamma,
+                    0.0,
+                    Solver::Hlle,
+                    symbi_discretize::Recon::Plm,
+                    curved,
+                )
+            },
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),

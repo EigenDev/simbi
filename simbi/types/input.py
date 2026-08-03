@@ -138,12 +138,19 @@ class TracerScheme(str, ExtendedEnum):
 class Reconstruction(str, ExtendedEnum):
     PCM = "pcm"
     PLM = "plm"
+    # piecewise parabolic (colella & woodward 1984 interfaces with the colella & sekora 2008
+    # extremum-preserving monotonization). newtonian adiabatic on a flat cartesian grid only;
+    # requires no slope limiter — `plm_theta` and `limiter` apply to PLM alone and are rejected
+    # if moved off their defaults alongside PPM. refined runs pair it with the quartic
+    # coarse-fine prolongation automatically, so refinement boundaries hold the interior order.
+    PPM = "ppm"
 
 
 class Limiter(str, ExtendedEnum):
     # the slope limiter for PLM reconstruction (mirrors the C++ LIMITER enum). MINMOD is the
     # theta-MC family parameterised by `plm_theta` (1 = pure minmod, 2 = MC); VAN_LEER is the smooth
-    # harmonic limiter (ignores plm_theta).
+    # harmonic limiter (ignores plm_theta). PPM carries its own monotonicity constraint and takes
+    # no limiter.
     MINMOD = "minmod"
     VAN_LEER = "vanleer"
 

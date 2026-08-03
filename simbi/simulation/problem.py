@@ -448,7 +448,11 @@ class SimbiProblem(BaseModel):
     order: Annotated[
         Optional[int],
         ProblemParam(
-            None, ge=1, le=2, cli=True, description="order of accuracy (1 or 2)"
+            None,
+            ge=1,
+            le=3,
+            cli=True,
+            description="order of accuracy (1=pcm/rk1, 2=plm/rk2, 3=ppm/rk3)",
         ),
     ]
     plm_theta: Annotated[
@@ -1040,8 +1044,11 @@ class SimbiProblem(BaseModel):
             elif self.order == 2:
                 object.__setattr__(self, "reconstruction", Reconstruction.PLM)
                 object.__setattr__(self, "timestepping", TimeStepping.RK2)
+            elif self.order == 3:
+                object.__setattr__(self, "reconstruction", Reconstruction.PPM)
+                object.__setattr__(self, "timestepping", TimeStepping.RK3)
             else:
-                raise ValueError("order must be 1 or 2")
+                raise ValueError("order must be 1, 2, or 3")
         return self
 
     @model_validator(mode="after")
@@ -1079,6 +1086,28 @@ class SimbiProblem(BaseModel):
         # boundary (runner.py); the validated model keeps the user's positive
         # compression so the field's own gt=0 constraint holds on every path a
         # model round-trips (assignment validation, checkpoint restore).
+        return self
+
+    @model_validator(mode="after")
+    def _validate_ppm(self) -> SimbiProblem:
+        """reject slope-limiter knobs alongside ppm rather than silently ignoring them."""
+        if self.reconstruction == Reconstruction.PPM:
+            # the monotonized parabola carries its own constraint; a plm_theta or
+            # limiter moved off its declared default would be dead configuration —
+            # surface that, never swallow it. (the config plumbing passes every field
+            # explicitly, so presence in model_fields_set cannot distinguish a user
+            # choice from a passthrough default; a changed VALUE can.)
+            fields = SimbiProblem.model_fields
+            stray = [
+                name
+                for name in ("plm_theta", "limiter")
+                if getattr(self, name) != fields[name].default
+            ]
+            if stray:
+                raise ValueError(
+                    f"{stray} apply to PLM reconstruction only; PPM carries its "
+                    "own monotonicity constraint and takes no slope limiter"
+                )
         return self
 
     @model_validator(mode="after")

@@ -23,6 +23,7 @@ use symbi_discretize::gv::{
     adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
 };
 use symbi_discretize::{
+    Recon,
     Coords, GeoSource, Spacetime, Spacing, adiabatic_c2p_gv, body_feedback_gv, body_source_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv, godunov_stage_gv,
     inertial_momentum_probe_gv, iso_c2p_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, rhd_c2p_gv,
@@ -81,7 +82,7 @@ fn flux_kernels_lower() {
     KernelRun::new(iso_flux_gv::<1>(0))
         .grid([8])
         .assert_lowers();
-    KernelRun::new(adiabatic_flux_gv::<1>(0))
+    KernelRun::new(adiabatic_flux_gv::<1>(0, Recon::Plm))
         .grid([8])
         .assert_lowers();
     KernelRun::new(rhd_flux_gv::<1>(0))
@@ -91,7 +92,7 @@ fn flux_kernels_lower() {
     KernelRun::new(iso_flux_gv::<2>(1))
         .grid([8, 8])
         .assert_lowers();
-    KernelRun::new(adiabatic_flux_gv::<2>(1))
+    KernelRun::new(adiabatic_flux_gv::<2>(1, Recon::Plm))
         .grid([8, 8])
         .assert_lowers();
     KernelRun::new(rhd_flux_gv::<2>(1))

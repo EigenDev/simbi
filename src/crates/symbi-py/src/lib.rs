@@ -3031,6 +3031,22 @@ fn build_theta(cfg: &Config) -> f64 {
     }
 }
 
+/// the evolution reconstruction selector for the kernel set. pcm rides the plm kernel
+/// at theta = 0 (see `build_theta`); ppm is its own baked kernel family.
+fn build_recon(cfg: &Config) -> symbi::Recon {
+    if cfg.reconstruction_name == "ppm" {
+        symbi::Recon::Ppm
+    } else {
+        symbi::Recon::Plm
+    }
+}
+
+/// allocated ghost width: the ppm face pair loads -3..+2 along the sweep, one cell
+/// beyond the plm default of 2.
+fn ghost_width(cfg: &Config) -> usize {
+    if cfg.reconstruction_name == "ppm" { 3 } else { 2 }
+}
+
 /// build a typed `BodyCollection<f64, D>` from the parsed params. an ACCRETION
 /// body becomes a black-hole sink (gravity + accretion onto the body);
 /// otherwise it is a fixed-potential gravitating mass. the `two_way_coupling`
@@ -3682,11 +3698,13 @@ mod diagnostics_tests {
     }
 }
 
-/// the coarse->fine prolongation order: ONE above the interior reconstruction
-/// (pcm -> plm, plm -> ppm), so refinement boundaries never drop a spatial order.
+/// the coarse->fine prolongation order: degree at least ONE above the interior
+/// reconstruction (pcm -> plm, plm -> ppm, ppm -> quartic), so refinement
+/// boundaries never drop a spatial order.
 fn prolong_order_for(reconstruction: &str) -> ProlongOrder {
     match reconstruction {
         "pcm" => ProlongOrder::Plm,
+        "ppm" => ProlongOrder::Quartic,
         _ => ProlongOrder::Ppm, // plm (the default) -> ppm
     }
 }
@@ -4001,6 +4019,7 @@ macro_rules! build_and_run_hydro {
             .cells(n)
             .origin(origin)
             .spacing(spacing)
+            .ghosts(ghost_width(cfg))
             .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
             .cfl(cfg.cfl)
@@ -4090,6 +4109,7 @@ macro_rules! build_and_run_hydro {
         let sub = sim
             .substrate()
             .theta(theta)
+            .reconstruction(build_recon(cfg))
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .with_viscosity(cfg.viscosity)
@@ -4141,10 +4161,13 @@ macro_rules! build_and_run_hydro {
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
             // the fine set carries the SAME non-ideal knobs as the base: the hierarchy
             // applies the viscous pass on the FINEST level only, so a fine set without
-            // nu would make the whole refined run silently inviscid.
+            // nu would make the whole refined run silently inviscid. the reconstruction
+            // is likewise per-level: a fine set left on plm under ppm evolution would
+            // silently evolve every refined region one order low.
             let ks = s
                 .substrate()
                 .theta(theta)
+                .reconstruction(build_recon(cfg))
                 .with_solver(solver)
                 .expect("fine-level kernel set")
                 .with_viscosity(cfg.viscosity)
@@ -5331,6 +5354,7 @@ macro_rules! build_and_run_mhd {
             .cells(n)
             .origin(origin)
             .spacing(spacing)
+            .ghosts(ghost_width(cfg))
             .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
             .cfl(cfg.cfl)
@@ -6938,6 +6962,34 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     }
     if !cfg.cohort_ic.is_empty() && cfg.n_tracers == 0 {
         return Err("tracer_cohort requires n_tracers > 0".to_string());
+    }
+    // ppm evolution reconstruction: baked for the flat cartesian newtonian ideal-gas
+    // family only. refinement is refused because the coarse-fine transfer has no
+    // prolongation one order above ppm — a refined run would silently lose an order at
+    // every level boundary inside the domain. decomposed (gpus > 1) waits on a ppm
+    // cut-equivalence gate. every unsupported combination refuses here, before any
+    // build, with the reason attached.
+    if cfg.reconstruction_name == "ppm" {
+        if cfg.regime != "newtonian" {
+            return Err(format!(
+                "ppm reconstruction is wired for the newtonian (adiabatic ideal-gas) \
+                 regime only; got '{}'",
+                cfg.regime
+            ));
+        }
+        if cfg.coord_system != "cartesian" || cfg.spacetime != "minkowski" {
+            return Err(format!(
+                "ppm reconstruction requires a flat cartesian chart; got ({}, {})",
+                cfg.coord_system, cfg.spacetime
+            ));
+        }
+        if cfg.n_gpus > 1 {
+            return Err(
+                "ppm reconstruction with gpus > 1 awaits the decomposed cut-equivalence \
+                 gate for the widened (-3..+2) exchange"
+                    .to_string(),
+            );
+        }
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),

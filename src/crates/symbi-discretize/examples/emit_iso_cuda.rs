@@ -16,7 +16,8 @@ use std::fs;
 
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
-    Coords, GeoSource, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv, godunov_mass_gv,
+    Coords, GeoSource, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
+    godunov_mass_gv,
     godunov_stage_gv, iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
     rhd_c2p_gv, rhd_flux_gv, snapshot_gv,
 };
@@ -70,7 +71,7 @@ fn main() {
     // the gv single source. iso (IsoNewtonian, no energy) + adiabatic (newtonian, energy).
     let (iso_f, iso_fw) = iso_flux_gv::<1>(0);
     emit_gv(&out, "iso_face_flux_1d", 1, iso_f, iso_fw);
-    let (adi_f, adi_fw) = adiabatic_flux_gv::<1>(0);
+    let (adi_f, adi_fw) = adiabatic_flux_gv::<1>(0, Recon::Plm);
     emit_gv(&out, "adiabatic_face_flux_1d", 1, adi_f, adi_fw);
 
     // c2p: the EOS closures (reciprocal multiply; adiabatic adds the energy term). both

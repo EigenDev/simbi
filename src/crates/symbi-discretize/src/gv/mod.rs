@@ -45,7 +45,7 @@ use symbi_ir::{FieldBind, FieldRef};
 // instantiate carrier-generic symbi-hydro physics at S = Gv and trace it into the IR.
 use symbi_ir::{Gv, GvKernel, MeshScalar, TileSpec, begin_trace, end_trace, with_trace};
 
-use super::coords::{Coords, Spacetime, Spacing};
+use super::coords::{Coords, Recon, Spacetime, Spacing};
 
 // submodule declarations: each category is its own file; the glob re-exports below preserve
 // the byte-identical public path `gv::NAME` for every builder lib.rs + downstream crates reach
@@ -133,6 +133,204 @@ pub(crate) fn plm_theta_from_stencil(qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, theta: G
     let left = qm1 + half * slope(qm2, qm1, q0);
     let right = q0 - half * slope(qm1, q0, qp1);
     (left, right)
+}
+
+/// monotonized ppm interface pair `(a_l, a_r)` for the cell holding `vc` (colella &
+/// woodward 1984): 4th-order interface values from the 5-cell stencil, clamped to the
+/// neighbor range (the raw stencil overshoots at discontinuities), flattened at a local
+/// extremum, with the sequential left-then-right overshoot correction — the right
+/// correction reads the corrected left value; diff/curv read the pre-correction
+/// interfaces. shared core of the ppm prolongation sub-cell average and the ppm
+/// evolution face pair, so coarse-fine transfer and evolution monotonize identically.
+pub(crate) fn ppm_cell_interfaces<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (S, S) {
+    let two = S::ONE + S::ONE;
+    // half is consumed by the prolongation's sub-cell average, not the interface pair;
+    // constructing it here keeps the traced node order of the prolongation kernel
+    // unchanged (hash-consed ids are assigned at first construction).
+    let _half = S::ONE / two;
+    let three = S::from_f64(3.0);
+    let six = S::from_f64(6.0);
+    let seven = S::from_f64(7.0);
+    let twelve_inv = S::ONE / S::from_f64(12.0);
+
+    let u_l = (seven * (vm1 + vc) - (vm2 + vp1)) * twelve_inv;
+    let u_r = (seven * (vc + vp1) - (vm1 + vp2)) * twelve_inv;
+
+    // clamp interface values to the neighbor range before monotonizing — the
+    // 4th-order stencil overshoots at discontinuities.
+    let u_l = u_l.max(vm1.min(vc)).min(vm1.max(vc));
+    let u_r = u_r.max(vc.min(vp1)).min(vc.max(vp1));
+
+    // monotonicity: flatten at a local extremum, else correct overshoots.
+    let extremum = ((u_r - vc) * (vc - u_l)).cmp_le(S::ZERO);
+    let diff = u_r - u_l;
+    let curv = six * (vc - (u_l + u_r) / two);
+    let a_l = S::select(
+        (diff * curv).cmp_gt(diff * diff),
+        three * vc - two * u_r,
+        u_l,
+    );
+    let a_r = S::select(
+        (diff * curv).cmp_lt(S::ZERO - diff * diff),
+        three * vc - two * a_l,
+        u_r,
+    );
+    let a_l = S::select(extremum, vc, a_l);
+    let a_r = S::select(extremum, vc, a_r);
+    (a_l, a_r)
+}
+
+/// extremum-preserving ppm interface pair (colella & sekora 2008): identical to
+/// `ppm_cell_interfaces` away from extrema (4th-order interfaces, neighbor-range clamp,
+/// sequential overshoot correction), but the cell holding a smooth extremum keeps a
+/// LIMITED parabola instead of flattening to a constant. flattening every smooth
+/// extremum caps the scheme's L1 convergence at second order — the crest cell injects
+/// an O(h^2) error stream each step — and in sustained turbulence, where velocity
+/// extrema fill the box, it is a first-order dissipation mechanism. the extremum
+/// parabola is rescaled by the limited second derivative: same-signed over the
+/// {left, centered, right, interface-implied} candidates -> scale by
+/// `min(|d2_faces|, 1.25 min(|d2_l|, |d2_c|, |d2_r|)) / |d2_faces|` (in [0, 1]);
+/// mixed signs (a genuine discontinuity or odd-even noise) -> zero, which IS the
+/// flatten, so shocked cells behave exactly as the cw84 form.
+fn ppm_cell_interfaces_ep<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S) -> (S, S) {
+    let two = S::ONE + S::ONE;
+    let half = S::ONE / two;
+    let three = S::from_f64(3.0);
+    let six = S::from_f64(6.0);
+    let seven = S::from_f64(7.0);
+    let twelve_inv = S::ONE / S::from_f64(12.0);
+    let mag = |x: S| x.max(S::ZERO - x);
+    let c_ep = S::from_f64(1.25);
+
+    let u_l = (seven * (vm1 + vc) - (vm2 + vp1)) * twelve_inv;
+    let u_r = (seven * (vc + vp1) - (vm1 + vp2)) * twelve_inv;
+
+    // an interface value OUTSIDE its neighbor-average range is legitimate on smooth
+    // data whenever the profile's extremum sits near the interface — the point value
+    // there exceeds both adjacent AVERAGES by O(h^2), so the plain neighbor-range
+    // clamp is itself a second-order error source. instead rebuild the out-of-range
+    // value from `u = (a_j + a_{j+1})/2 - d2/6` with the second derivative limited
+    // over the same-signed {interface-implied, left, right} candidates; mixed signs
+    // (a genuine jump) zero the curvature and leave the neighbor mean.
+    let iface = |am1: S, a0: S, ap1: S, ap2: S, u_raw: S| -> S {
+        let out = ((u_raw - a0) * (ap1 - u_raw)).cmp_lt(S::ZERO);
+        let d2 = three * (a0 - two * u_raw + ap1);
+        let d2_l = am1 - two * a0 + ap1;
+        let d2_r = a0 - two * ap1 + ap2;
+        let lim_mag = mag(d2).min(c_ep * mag(d2_l).min(mag(d2_r)));
+        let signed = S::select(d2.cmp_lt(S::ZERO), S::ZERO - lim_mag, lim_mag);
+        let lo = d2.min(d2_l).min(d2_r);
+        let hi = d2.max(d2_l).max(d2_r);
+        let lim = S::select(
+            lo.cmp_gt(S::ZERO),
+            signed,
+            S::select(hi.cmp_lt(S::ZERO), signed, S::ZERO),
+        );
+        let corrected = (a0 + ap1) * half - lim / six;
+        S::select(out, corrected, u_raw)
+    };
+    let u_l = iface(vm2, vm1, vc, vp1, u_l);
+    let u_r = iface(vm1, vc, vp1, vp2, u_r);
+
+    // the two-clause extremum test: face-implied ((u_r - a)(a - u_l) <= 0) OR
+    // cell-average ((a_{j+1} - a)(a - a_{j-1}) <= 0) — the second clause catches the
+    // cell whose extremum sits at an interface, where the face-implied product is
+    // merely zero-adjacent and the cw84 overshoot arm would inject an O(h^2) face.
+    let ext_faces = ((u_r - vc) * (vc - u_l)).cmp_le(S::ZERO);
+    let ext_cells = ((vp1 - vc) * (vc - vm1)).cmp_le(S::ZERO);
+    let one_if = |m: S::Mask| S::select(m, S::ONE, S::ZERO);
+    let extremum = (one_if(ext_faces) + one_if(ext_cells)).cmp_gt(S::ZERO);
+
+    // the non-extremum arm: the cw84 sequential overshoot correction.
+    let diff = u_r - u_l;
+    let curv = six * (vc - (u_l + u_r) / two);
+    let a_l = S::select(
+        (diff * curv).cmp_gt(diff * diff),
+        three * vc - two * u_r,
+        u_l,
+    );
+    let a_r = S::select(
+        (diff * curv).cmp_lt(S::ZERO - diff * diff),
+        three * vc - two * a_l,
+        u_r,
+    );
+
+    // the extremum arm: limited-second-derivative rescale of the face-implied parabola.
+    // the h^2 factors cancel in the ratio, so every d2 is an undivided difference.
+    let d2 = six * (u_l + u_r - two * vc);
+    let d2_c = vm1 - two * vc + vp1;
+    let d2_l = vm2 - two * vm1 + vc;
+    let d2_r = vc - two * vp1 + vp2;
+    let d2_min = d2.min(d2_c).min(d2_l).min(d2_r);
+    let d2_max = d2.max(d2_c).max(d2_l).max(d2_r);
+    let mag = |x: S| x.max(S::ZERO - x);
+    let c_ep = S::from_f64(1.25);
+    let d2_lim_mag = mag(d2).min(c_ep * mag(d2_l).min(mag(d2_c)).min(mag(d2_r)));
+    // |d2_lim| <= |d2| by construction, so the ratio lies in [0, 1]. a vanishing d2
+    // satisfies neither strict-sign test (d2_min <= 0 <= d2_max) and takes the zero
+    // arm; the denominator guard only keeps the unselected arm finite.
+    let denom = S::select(mag(d2).cmp_gt(S::ZERO), mag(d2), S::ONE);
+    let ratio = d2_lim_mag / denom;
+    let scale = S::select(
+        d2_min.cmp_gt(S::ZERO),
+        ratio,
+        S::select(d2_max.cmp_lt(S::ZERO), ratio, S::ZERO),
+    );
+    let e_l = vc + (u_l - vc) * scale;
+    let e_r = vc + (u_r - vc) * scale;
+
+    (
+        S::select(extremum, e_l, a_l),
+        S::select(extremum, e_r, a_r),
+    )
+}
+
+/// PPM reconstruct: the monotonized-parabola face pair from SIX stencil VALUES (offsets
+/// -3..+2 along the sweep). the face sits between cells -1 and 0: `left` is cell -1's
+/// corrected right-interface value, `right` is cell 0's corrected left-interface value.
+/// method-of-lines form — the parabola supplies face STATES for the riemann solver
+/// under an ssp-rk update; characteristic tracing belongs to the lagrangian-remap
+/// formulation and has no role here. values in, face pair out, so a reconstruction can
+/// run in a transformed variable exactly as `plm_theta_from_stencil` does. evolution
+/// uses the EXTREMUM-PRESERVING monotonization; the coarse-fine prolongation keeps the
+/// flatten-at-extremum form (`ppm_cell_interfaces`), whose conservative sub-cell
+/// averages are the safer transfer.
+pub(crate) fn ppm_from_stencil(qm3: Gv, qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, qp2: Gv) -> (Gv, Gv) {
+    let (_, left) = ppm_cell_interfaces_ep(qm3, qm2, qm1, q0, qp1);
+    let (right, _) = ppm_cell_interfaces_ep(qm2, qm1, q0, qp1, qp2);
+    (left, right)
+}
+
+/// the raw-field PPM wrapper mirroring `plm_theta_gv`: six shifted loads of `key`
+/// along the sweep, monotonized-parabola face pair out. no limiter parameter — ppm
+/// carries its own monotonicity constraint.
+pub(crate) fn ppm_gv(key: &str, runtime: impl Into<FieldBind>, ndim: u8, dir: u8) -> (Gv, Gv) {
+    let runtime = runtime.into();
+    let qm3 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -3);
+    let qm2 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -2);
+    let qm1 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -1);
+    let q0 = Gv::field_shifted(key, runtime.clone(), ndim, dir, 0);
+    let qp1 = Gv::field_shifted(key, runtime.clone(), ndim, dir, 1);
+    let qp2 = Gv::field_shifted(key, runtime, ndim, dir, 2);
+    ppm_from_stencil(qm3, qm2, qm1, q0, qp1, qp2)
+}
+
+/// raw-field reconstruction dispatch at the bake-time `Recon` choice: the plm family
+/// (runtime theta selects theta-MC / van leer / pcm-at-zero) or the ppm monotonized
+/// parabola (theta unused). identical contract across arms: shifted loads of `key`
+/// along the sweep in, face pair out.
+pub(crate) fn recon_gv(
+    key: &str,
+    runtime: impl Into<FieldBind>,
+    ndim: u8,
+    dir: u8,
+    theta: Gv,
+    recon: Recon,
+) -> (Gv, Gv) {
+    match recon {
+        Recon::Plm => plm_theta_gv(key, runtime, ndim, dir, theta),
+        Recon::Ppm => ppm_gv(key, runtime, ndim, dir),
+    }
 }
 
 // =============================================================================
@@ -638,7 +836,7 @@ mod tests {
         // carrier-generic riemann::hlle (-> Select branches). proves Gv::field_shifted +
         // symbi-hydro's hlle build a dispatchable face-flux kernel — no rhd_side-style
         // hand-written per-component U/F. manifest + writes match the substrate hlle_flux.
-        let (k, writes) = adiabatic_flux_gv::<1>(0);
+        let (k, writes) = adiabatic_flux_gv::<1>(0, Recon::Plm);
         assert_eq!(
             k.field_inputs
                 .iter()
@@ -1802,6 +2000,41 @@ mod tests {
             emit(&k_spec, &w_spec),
             emit(&k_built, &w_built),
             "lowered source drift"
+        );
+    }
+
+    /// the extremum-preserving interface pair at S = f64 on smooth data: fed exact cell
+    /// AVERAGES of sin(2 pi x), the corrected interfaces must converge to the profile's
+    /// interface point values at 4th order (the unlimited stencil's order), i.e. halving
+    /// h cuts the error ~16x. a limiter arm that engages spuriously on smooth data (or a
+    /// mis-centered stencil) shows up as a collapsed ratio here, independent of any
+    /// kernel emission or dispatch machinery.
+    #[test]
+    fn ppm_ep_interfaces_are_fourth_order_on_smooth_averages() {
+        let tau = std::f64::consts::TAU;
+        // exact cell average of sin over [x-h/2, x+h/2]
+        let avg = |x: f64, h: f64| (tau * x).sin() * (tau * h / 2.0).sin() / (tau * h / 2.0);
+        // max interface error over cells centered at x0 + k h, k in a period
+        let max_err = |h: f64| -> f64 {
+            let mut worst = 0.0_f64;
+            let n = (1.0 / h) as usize;
+            for kk in 0..n {
+                let xc = (kk as f64 + 0.5) * h;
+                let v: Vec<f64> = (-2..=2).map(|o| avg(xc + o as f64 * h, h)).collect();
+                let (a_l, a_r) = super::ppm_cell_interfaces_ep(v[0], v[1], v[2], v[3], v[4]);
+                worst = worst
+                    .max((a_l - (tau * (xc - h / 2.0)).sin()).abs())
+                    .max((a_r - (tau * (xc + h / 2.0)).sin()).abs());
+            }
+            worst
+        };
+        let e1 = max_err(1.0 / 64.0);
+        let e2 = max_err(1.0 / 128.0);
+        let ratio = e1 / e2;
+        assert!(
+            ratio > 12.0,
+            "extremum-preserving ppm interfaces are not ~4th order on smooth averages: \
+             err(1/64)={e1:.3e}, err(1/128)={e2:.3e}, ratio={ratio:.2} (expect ~16)"
         );
     }
 }

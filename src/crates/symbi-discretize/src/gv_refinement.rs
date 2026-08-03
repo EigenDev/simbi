@@ -47,6 +47,16 @@ pub enum ProlongOrder {
     /// piecewise parabolic with monotonicity (order 2), exact sub-cell averages
     /// (conservative by construction). stencil halfwidth 2.
     Ppm,
+    /// the exact degree-4 polynomial matching all five stencil cell averages
+    /// (order 4, conservative by construction — its cell-0 integral IS the
+    /// parent average), with the monotonized parabolic form as the fallback
+    /// wherever the undivided second differences change sign across the
+    /// stencil (a discontinuity; the raw quartic overshoots there). stencil
+    /// halfwidth 2, identical to ppm. serves an evolution reconstruction of
+    /// parabolic order: the coarse-fine ghost averages are O(h^5), so the
+    /// interface layer's flux-divergence order loss lands at O(h^4) locally
+    /// and the boundary cannot degrade the interior order.
+    Quartic,
 }
 
 impl ProlongOrder {
@@ -56,6 +66,7 @@ impl ProlongOrder {
             ProlongOrder::Pcm => 0,
             ProlongOrder::Plm => 1,
             ProlongOrder::Ppm => 2,
+            ProlongOrder::Quartic => 2,
         }
     }
 }
@@ -90,39 +101,11 @@ fn plm_interp<S: Scalar>(vm: S, vc: S, vp: S, frac: S) -> S {
 /// antiderivative difference times `ratio` — so the children average back to
 /// the parent exactly (conservation by construction).
 fn ppm_interp<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S, xi_lo: S, xi_hi: S, ratio: S) -> S {
+    let (a_l, a_r) = super::gv::ppm_cell_interfaces(vm2, vm1, vc, vp1, vp2);
     let two = S::ONE + S::ONE;
     let half = S::ONE / two;
     let three = S::from_f64(3.0);
     let six = S::from_f64(6.0);
-    let seven = S::from_f64(7.0);
-    let twelve_inv = S::ONE / S::from_f64(12.0);
-
-    let u_l = (seven * (vm1 + vc) - (vm2 + vp1)) * twelve_inv;
-    let u_r = (seven * (vc + vp1) - (vm1 + vp2)) * twelve_inv;
-
-    // clamp interface values to the neighbor range before monotonizing — the
-    // 4th-order stencil overshoots at discontinuities.
-    let u_l = u_l.max(vm1.min(vc)).min(vm1.max(vc));
-    let u_r = u_r.max(vc.min(vp1)).min(vc.max(vp1));
-
-    // monotonicity: flatten at a local extremum, else correct overshoots. the
-    // right correction reads the corrected left value (sequential dependency,
-    // matching the reference); diff/curv read the pre-correction interfaces.
-    let extremum = ((u_r - vc) * (vc - u_l)).cmp_le(S::ZERO);
-    let diff = u_r - u_l;
-    let curv = six * (vc - (u_l + u_r) / two);
-    let a_l = S::select(
-        (diff * curv).cmp_gt(diff * diff),
-        three * vc - two * u_r,
-        u_l,
-    );
-    let a_r = S::select(
-        (diff * curv).cmp_lt(S::ZERO - diff * diff),
-        three * vc - two * a_l,
-        u_r,
-    );
-    let a_l = S::select(extremum, vc, a_l);
-    let a_r = S::select(extremum, vc, a_r);
 
     // parabola u(xi) = a_l + xi*(a_r - a_l + (1-xi)*u6); the sub-cell average
     // is the antiderivative difference scaled by the refinement ratio.
@@ -133,6 +116,69 @@ fn ppm_interp<S: Scalar>(vm2: S, vm1: S, vc: S, vp1: S, vp2: S, xi_lo: S, xi_hi:
     let a_hi = xi_hi * (c1 + xi_hi * (c2 - xi_hi * c3));
     let a_lo = xi_lo * (c1 + xi_lo * (c2 - xi_lo * c3));
     (a_hi - a_lo) * ratio
+}
+
+/// the 1d quartic prolongation sub-cell AVERAGE over [xi_lo, xi_hi] (xi in [0,1]
+/// across the parent): the unique degree-4 polynomial whose cell averages match
+/// all five stencil values (the derivative of the degree-5 interpolant of the
+/// primitive function), integrated exactly — so the children average back to the
+/// parent exactly and the sub-cell averages are O(h^5) on smooth data, including
+/// at extrema (no clamp, no flatten). wherever the undivided second differences
+/// at cells -1, 0, +1 do not share a strict sign — a discontinuity inside the
+/// stencil, where the raw quartic rings — the value falls back to the
+/// monotonized parabolic average, so a shock crossing a refinement boundary sees
+/// the same bounded transfer as the ppm order.
+fn quartic_interp<S: Scalar>(
+    vm2: S,
+    vm1: S,
+    vc: S,
+    vp1: S,
+    vp2: S,
+    xi_lo: S,
+    xi_hi: S,
+    ratio: S,
+) -> S {
+    let two = S::ONE + S::ONE;
+    // p(xi) = c0 + c1 xi + c2 xi^2 + c3 xi^3 + c4 xi^4 on xi in [0, 1]:
+    // int_0^1 p = vc exactly; the other four averages integrate to zero weight.
+    let c0 = S::from_f64(-1.0 / 20.0) * vm2
+        + S::from_f64(9.0 / 20.0) * vm1
+        + S::from_f64(47.0 / 60.0) * vc
+        + S::from_f64(-13.0 / 60.0) * vp1
+        + S::from_f64(1.0 / 30.0) * vp2;
+    let c1 = S::from_f64(1.0 / 12.0) * vm2 + S::from_f64(-5.0 / 4.0) * vm1
+        + S::from_f64(5.0 / 4.0) * vc
+        + S::from_f64(-1.0 / 12.0) * vp1;
+    let c2 = S::from_f64(1.0 / 8.0) * vm2 + S::from_f64(1.0 / 4.0) * vm1 - vc
+        + S::from_f64(3.0 / 4.0) * vp1
+        + S::from_f64(-1.0 / 8.0) * vp2;
+    let c3 = S::from_f64(-1.0 / 6.0) * vm2 + S::from_f64(1.0 / 2.0) * vm1
+        + S::from_f64(-1.0 / 2.0) * vc
+        + S::from_f64(1.0 / 6.0) * vp1;
+    let c4 = S::from_f64(1.0 / 24.0) * vm2 + S::from_f64(-1.0 / 6.0) * vm1
+        + S::from_f64(1.0 / 4.0) * vc
+        + S::from_f64(-1.0 / 6.0) * vp1
+        + S::from_f64(1.0 / 24.0) * vp2;
+    // antiderivative difference over the sub-cell, scaled to an average.
+    let anti = |x: S| {
+        x * (c0
+            + x * (c1 / two
+                + x * (c2 / S::from_f64(3.0)
+                    + x * (c3 / S::from_f64(4.0) + x * c4 / S::from_f64(5.0)))))
+    };
+    let quartic = (anti(xi_hi) - anti(xi_lo)) * ratio;
+
+    let d2_l = vm2 - two * vm1 + vc;
+    let d2_c = vm1 - two * vc + vp1;
+    let d2_r = vc - two * vp1 + vp2;
+    let d2_min = d2_l.min(d2_c).min(d2_r);
+    let d2_max = d2_l.max(d2_c).max(d2_r);
+    let limited = ppm_interp(vm2, vm1, vc, vp1, vp2, xi_lo, xi_hi, ratio);
+    S::select(
+        d2_min.cmp_gt(S::ZERO),
+        quartic,
+        S::select(d2_max.cmp_lt(S::ZERO), quartic, limited),
+    )
 }
 
 // =============================================================================
@@ -647,6 +693,9 @@ pub fn refine_prolong_sweep_multi_gv(
             ProlongOrder::Ppm => ppm_interp(
                 vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
             ),
+            ProlongOrder::Quartic => quartic_interp(
+                vals[0], vals[1], vals[2], vals[3], vals[4], xi_lo, xi_hi, ratio_f,
+            ),
         };
         let dst_name = format!("dst_{k}");
         writes.push((dst_name.clone(), dst_name.into(), val.node()));
@@ -966,5 +1015,107 @@ fn prolong_eval(ctx: &ProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv {
             ctx.xi_hi[aa],
             ctx.ratio_f,
         ),
+        ProlongOrder::Quartic => quartic_interp(
+            vals[0],
+            vals[1],
+            vals[2],
+            vals[3],
+            vals[4],
+            ctx.xi_lo[aa],
+            ctx.xi_hi[aa],
+            ctx.ratio_f,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod quartic_interp_tests {
+    use super::quartic_interp;
+
+    // exact cell average of sin(tau x) over a width-h cell centered at x
+    fn avg(x: f64, h: f64) -> f64 {
+        let tau = std::f64::consts::TAU;
+        (tau * x).sin() * (tau * h / 2.0).sin() / (tau * h / 2.0)
+    }
+
+    /// smooth data: away from the sine's inflection cells — where the undivided
+    /// second differences change sign and the hybrid deliberately takes the
+    /// monotonized O(h^3) fallback (a per-parent switch, so sibling children
+    /// stay conservative) — the half-cell child averages converge at the
+    /// degree-4 fit's O(h^5), halving h cuts the error ~32x. the fallback set
+    /// must stay confined to the sign-change cells: a detector that widened
+    /// would silently drag the whole transfer to third order.
+    #[test]
+    fn children_are_fifth_order_on_smooth_averages_away_from_inflections() {
+        let sweep = |h: f64| -> (f64, usize) {
+            let n = (1.0 / h) as usize;
+            let mut worst = 0.0_f64;
+            let mut fallback_cells = 0usize;
+            for kk in 0..n {
+                let xc = (kk as f64 + 0.5) * h;
+                let v: Vec<f64> = (-2..=2).map(|o| avg(xc + o as f64 * h, h)).collect();
+                let d2 = [
+                    v[0] - 2.0 * v[1] + v[2],
+                    v[1] - 2.0 * v[2] + v[3],
+                    v[2] - 2.0 * v[3] + v[4],
+                ];
+                let d2_lo = d2.iter().cloned().fold(f64::INFINITY, f64::min);
+                let d2_hi = d2.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                if !(d2_lo > 0.0 || d2_hi < 0.0) {
+                    fallback_cells += 1;
+                    continue;
+                }
+                for (lo, hi) in [(0.0, 0.5), (0.5, 1.0)] {
+                    let got: f64 = quartic_interp(v[0], v[1], v[2], v[3], v[4], lo, hi, 2.0);
+                    let xa = xc - h / 2.0 + lo * h;
+                    let xb = xc - h / 2.0 + hi * h;
+                    let exact = avg((xa + xb) / 2.0, xb - xa);
+                    worst = worst.max((got - exact).abs());
+                }
+            }
+            (worst, fallback_cells)
+        };
+        let (e1, f1) = sweep(1.0 / 32.0);
+        let (e2, f2) = sweep(1.0 / 64.0);
+        // the sine has two inflections; each sign change straddles at most two cells.
+        assert!(
+            f1 <= 4 && f2 <= 4,
+            "the fallback detector fired on {f1}/{f2} cells; it must stay confined to \
+             the sign-change neighborhood of the two inflections"
+        );
+        let ratio = e1 / e2;
+        assert!(
+            ratio > 24.0,
+            "quartic children are not ~5th order away from inflections: \
+             err(1/32)={e1:.3e}, err(1/64)={e2:.3e}, ratio={ratio:.2} (expect ~32)"
+        );
+    }
+
+    /// conservation: the two half-cell children average back to the parent to
+    /// roundoff, on data arbitrary enough that nothing cancels by symmetry.
+    #[test]
+    fn children_conserve_the_parent_average() {
+        let v: [f64; 5] = [0.3, 1.7, 0.9, -0.4, 2.2];
+        let lo: f64 = quartic_interp(v[0], v[1], v[2], v[3], v[4], 0.0, 0.5, 2.0);
+        let hi: f64 = quartic_interp(v[0], v[1], v[2], v[3], v[4], 0.5, 1.0, 2.0);
+        let resid = (0.5 * (lo + hi) - v[2]).abs();
+        assert!(resid < 1e-14, "children do not conserve the parent: resid {resid:e}");
+    }
+
+    /// a jump inside the stencil mixes the second-difference signs: the value
+    /// must equal the monotonized parabolic fallback exactly (the raw quartic
+    /// rings by ~13% here and must never be emitted).
+    #[test]
+    fn falls_back_to_the_monotonized_parabola_at_a_jump() {
+        let v: [f64; 5] = [1.0, 1.0, 1.0, 0.1, 0.1];
+        for (lo, hi) in [(0.0, 0.5), (0.5, 1.0)] {
+            let got: f64 = quartic_interp(v[0], v[1], v[2], v[3], v[4], lo, hi, 2.0);
+            let ppm: f64 = super::ppm_interp(v[0], v[1], v[2], v[3], v[4], lo, hi, 2.0);
+            assert_eq!(
+                got.to_bits(),
+                ppm.to_bits(),
+                "jump stencil did not take the monotonized fallback"
+            );
+        }
     }
 }

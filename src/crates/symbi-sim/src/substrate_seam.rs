@@ -54,6 +54,16 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     fn flux(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>, dir: usize);
+
+    /// stencil halfwidth of the evolution face reconstruction along the sweep:
+    /// 2 for the plm family (pcm rides plm at theta = 0), 3 for ppm. the
+    /// coarse-fine transfer must prolong one order higher than the evolution
+    /// reconstruction or the boundary degrades the interior order; the widest
+    /// baked prolongation (the ppm sub-cell average) covers plm evolution only,
+    /// so a refinement hierarchy refuses any set reporting a reach above 2.
+    fn reconstruction_reach(&self) -> u8 {
+        2
+    }
     fn c2p(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
     // the SSP Shu-Osher stage update `cons = a0*u_n + ac*(cons - dt*div(F) + dt*S)`. one method
     // serves every explicit SSP scheme; the driver feeds the per-stage convex coefficients

@@ -18,7 +18,7 @@ use harness::{KernelRun, Out};
 
 use symbi_algebra::Tensor;
 use symbi_discretize::{
-    Coords, GvKernel, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
+    Coords, GvKernel, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
     adiabatic_hllc_flux_gv, imhd_c2p_gv, imhd_flux_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
     iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv, nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv,
     nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv, rhd_c2p_gv, rhd_flux_gr_gv, rhd_flux_gv,
@@ -449,7 +449,7 @@ fn adiabatic_flux_matches_native_physics() {
     };
     let eos = IdealGas { gamma: GAMMA };
     let f = symbi_hydro::newtonian::Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
-    let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0), &prim, GAMMA, 0);
+    let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -1089,7 +1089,7 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
         0.0,
         ShockwaveLimiter::Standard,
     );
-    let out = run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0), &prim, GAMMA, 0);
+    let out = run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -1229,7 +1229,7 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
 fn hllc_hlld_builders_render_to_cpu_and_cuda() {
     // the lowerability half of the carrier gate: every HLLC/HLLD builder
     // must emit non-empty CPU (rust) AND CUDA source. an unlowerable op panics here.
-    KernelRun::new(adiabatic_hllc_flux_gv::<2>(0))
+    KernelRun::new(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm))
         .grid([1, NSWEEP])
         .assert_lowers();
     KernelRun::new(rhd_hllc_flux_gv::<2>(0))
@@ -1337,7 +1337,7 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
     // Gv kernel: the SAME adiabatic flux on the per-cell series, evaluated on the f64
     // interpreter. the kernel reconstructs internally (the non-uniform input drives its
     // select-branches), so its output at FCELL must equal the f64 reference.
-    let out = KernelRun::new(adiabatic_flux_gv::<2>(0))
+    let out = KernelRun::new(adiabatic_flux_gv::<2>(0, Recon::Plm))
         .grid([NSWEEP, 1])
         .compute_window([FCELL as i32, 0], [1, 1])
         .field_with("prim_rho", move |c| rho[c[0]])

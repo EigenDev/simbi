@@ -28,12 +28,15 @@
 
 /// the reconstruction order of an AMR prolongation kernel — the ABI tag spelling
 /// (mirrors `symbi_discretize::ProlongOrder`, which lives a crate up; map at the
-/// dispatch boundary). pcm = piecewise-constant, plm = linear, ppm = parabolic.
+/// dispatch boundary). pcm = piecewise-constant, plm = linear, ppm = parabolic,
+/// quartic = the exact degree-4 fit to the 5-cell stencil (same coarse halfwidth
+/// as ppm) with a monotonized fallback at non-smooth cells.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProlongTag {
     Pcm,
     Plm,
     Ppm,
+    Quartic,
 }
 
 /// a kernel in the AMR-transfer / field-op family, addressed by its typed
@@ -207,6 +210,9 @@ impl KernelId {
                 (ProlongTag::Ppm, 1) => "refine_prolong_ppm_1d",
                 (ProlongTag::Ppm, 2) => "refine_prolong_ppm_2d",
                 (ProlongTag::Ppm, 3) => "refine_prolong_ppm_3d",
+                (ProlongTag::Quartic, 1) => "refine_prolong_quartic_1d",
+                (ProlongTag::Quartic, 2) => "refine_prolong_quartic_2d",
+                (ProlongTag::Quartic, 3) => "refine_prolong_quartic_3d",
                 (_, n) => panic!("KernelId::RefineProlong: ndim {n} out of range (expected 1..=3)"),
             },
             KernelId::RefineProlongMulti { order, ncomp, ndim } => match (order, ncomp, ndim) {
@@ -216,6 +222,8 @@ impl KernelId {
                 (ProlongTag::Plm, 5, 3) => "refine_prolong_plm_5c_3d",
                 (ProlongTag::Ppm, 4, 3) => "refine_prolong_ppm_4c_3d",
                 (ProlongTag::Ppm, 5, 3) => "refine_prolong_ppm_5c_3d",
+                (ProlongTag::Quartic, 4, 3) => "refine_prolong_quartic_4c_3d",
+                (ProlongTag::Quartic, 5, 3) => "refine_prolong_quartic_5c_3d",
                 (o, n, d) => panic!(
                     "KernelId::RefineProlongMulti: unsupported (order={o:?}, ncomp={n}, ndim={d}) \
                      — only 3D ncomp 4/5 are generated"
@@ -228,6 +236,8 @@ impl KernelId {
                 (ProlongTag::Plm, 5, 3) => "refine_prolong_1t_plm_5c_3d",
                 (ProlongTag::Ppm, 4, 3) => "refine_prolong_1t_ppm_4c_3d",
                 (ProlongTag::Ppm, 5, 3) => "refine_prolong_1t_ppm_5c_3d",
+                (ProlongTag::Quartic, 4, 3) => "refine_prolong_1t_quartic_4c_3d",
+                (ProlongTag::Quartic, 5, 3) => "refine_prolong_1t_quartic_5c_3d",
                 (o, n, d) => panic!(
                     "KernelId::RefineProlongMulti1t: unsupported (order={o:?}, ncomp={n}, ndim={d}) \
                      — only 3D ncomp 4/5 are generated"
@@ -293,6 +303,12 @@ impl KernelId {
                 (ProlongTag::Ppm, 0, 5, 3) => "refine_prolong_sw0_ppm_5c_3d",
                 (ProlongTag::Ppm, 1, 5, 3) => "refine_prolong_sw1_ppm_5c_3d",
                 (ProlongTag::Ppm, 2, 5, 3) => "refine_prolong_sw2_ppm_5c_3d",
+                (ProlongTag::Quartic, 0, 4, 3) => "refine_prolong_sw0_quartic_4c_3d",
+                (ProlongTag::Quartic, 1, 4, 3) => "refine_prolong_sw1_quartic_4c_3d",
+                (ProlongTag::Quartic, 2, 4, 3) => "refine_prolong_sw2_quartic_4c_3d",
+                (ProlongTag::Quartic, 0, 5, 3) => "refine_prolong_sw0_quartic_5c_3d",
+                (ProlongTag::Quartic, 1, 5, 3) => "refine_prolong_sw1_quartic_5c_3d",
+                (ProlongTag::Quartic, 2, 5, 3) => "refine_prolong_sw2_quartic_5c_3d",
                 (o, a, n, d) => panic!(
                     "KernelId::RefineProlongSweep: unsupported (order={o:?}, axis={a}, \
                          ncomp={n}, ndim={d}) — only 3D ncomp 4/5 are generated"

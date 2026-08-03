@@ -21,10 +21,21 @@ use symbi_aot::IR_BLOBS;
 use symbi_ir::prepared_from_ir;
 use symbi_ir::{AxisReach, stencil_reach};
 
-// the ghost halo every sim allocates (the SimBuilder default). the widest
-// stencil in the registry — plm reconstruction's -2..+1 fan on the flux axis —
-// fits exactly.
+// the ghost halo every sim allocates (the SimBuilder default). the plm
+// reconstruction's -2..+1 fan on the flux axis fits exactly.
 const NG: u32 = 2;
+
+// the halo a ppm sim must allocate: the monotonized-parabola face pair loads
+// -3..+2 along the sweep, so the `_ppm` kernel family contracts for one more
+// ghost cell than the plm default. dispatching a `_ppm` kernel into an ng = 2
+// allocation is refused at kernel-set construction.
+const NG_PPM: u32 = 3;
+
+/// the halo a kernel's name contracts for: the `_ppm` tag widens the law's
+/// bound; every other kernel holds the plm default.
+fn expected_ng(name: &str) -> u32 {
+    if name.contains("_ppm") { NG_PPM } else { NG }
+}
 
 // kernel-name families whose index expressions are runtime-directed rather
 // than fixed-offset stencils; unbounded reach is their design.
@@ -51,12 +62,13 @@ fn every_registered_kernel_fits_the_ghost_halo() {
     let mut violations = Vec::new();
     for (name, ir) in IR_BLOBS {
         let exempt = UNBOUNDED_BY_DESIGN.iter().any(|fam| name.contains(fam));
+        let ng = expected_ng(name);
         let report = stencil_reach(&prepared_from_ir(ir).scalarized);
         for (field, axes) in &report.per_field {
             for (axis, reach) in axes.iter().enumerate() {
                 match reach {
-                    AxisReach::Bounded(w) if *w > NG => violations.push(format!(
-                        "{name}: field '{field}' axis {axis} reaches {w} > ng = {NG}"
+                    AxisReach::Bounded(w) if *w > ng => violations.push(format!(
+                        "{name}: field '{field}' axis {axis} reaches {w} > ng = {ng}"
                     )),
                     AxisReach::Bounded(_) => {}
                     AxisReach::Unbounded if !exempt => violations.push(format!(
@@ -85,6 +97,25 @@ fn plm_face_flux_reach_is_two_on_the_flux_axis() {
         report.per_field["prim_rho"],
         vec![AxisReach::Bounded(2), AxisReach::Bounded(0)],
         "plm stencil reach on the axis-0 face flux",
+    );
+    assert!(report.unbounded().is_empty());
+}
+
+// the ppm counterpart: the -3..+2 parabola fan must be visible to the analysis
+// as reach exactly 3 on the sweep axis and 0 transverse — wider means a stencil
+// bug, narrower means the parabola quietly collapsed toward the linear fan.
+#[test]
+fn ppm_face_flux_reach_is_three_on_the_flux_axis() {
+    let blob = IR_BLOBS
+        .iter()
+        .find(|(name, _)| *name == "adiabatic_face_flux_ppm_2d_0")
+        .map(|(_, ir)| *ir)
+        .expect("adiabatic_face_flux_ppm_2d_0 missing from the registry");
+    let report = stencil_reach(&prepared_from_ir(blob).scalarized);
+    assert_eq!(
+        report.per_field["prim_rho"],
+        vec![AxisReach::Bounded(3), AxisReach::Bounded(0)],
+        "ppm stencil reach on the axis-0 face flux",
     );
     assert!(report.unbounded().is_empty());
 }

@@ -100,6 +100,92 @@ fn adiabatic_plm_rk2_second_order_hlle() {
     assert_second_order(Solver::Hlle, "HLLE");
 }
 
+// --- PPM: the same entropy wave under SSP-RK3. the extremum-preserving interfaces --------------
+// (colella & sekora 2008) are 4th-order on smooth data INCLUDING at the sine crest and trough —
+// both the flatten-at-extremum form and the plain neighbor-range interface clamp inject O(h^2)
+// there (the interface point value legitimately exceeds both adjacent cell averages when the
+// extremum sits near a face), and either one drags the whole scheme's L1 to second order. on
+// this pure-advection exact solution the L1 error tracks the interface order: measured ratios
+// 15.7-15.9 per halving at 32..256, cfl-independent (identical at cfl 0.05).
+/// the exact CELL AVERAGE of the entropy-wave density over a width-`h` cell centered at
+/// `x`: averaging `1 + A sin(2 pi x)` gives `1 + A sin(2 pi x) * sinc(pi h)`. the scheme
+/// evolves cell averages, and average vs center-point sample differ at O(h^2) — sampling
+/// the profile at centers would cap ANY measured convergence at second order, hiding a
+/// third-order scheme behind the initialization. momentum and energy are linear in rho at
+/// constant v and p, so building cons from this averaged rho is exact in every field.
+fn rho_exact_avg(x: f64, h: f64) -> f64 {
+    let sinc = (std::f64::consts::PI * h).sin() / (std::f64::consts::PI * h);
+    1.0 + AMP * (std::f64::consts::TAU * x).sin() * sinc
+}
+
+fn l1_after_one_period_ppm(n: usize, solver: Solver) -> f64 {
+    l1_ppm_at_cfl(n, solver, 0.4)
+}
+
+fn l1_ppm_at_cfl(n: usize, solver: Solver, cfl: f64) -> f64 {
+    let dx = 1.0 / n as f64;
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([n])
+        .spacing([dx])
+        .ghosts(3)
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(cfl)
+        .timestepping(Timestepping::Rk3)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(|[x]| Prim {
+            rho: rho_exact_avg(x, dx),
+            vel: Tensor::new([V]),
+            pre: P,
+        })
+        .build();
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, cfl, &sim.geom.allocated)
+            .with_solver(solver)
+            .expect("solver/regime mismatch")
+            .reconstruction(symbi_discretize::Recon::Ppm);
+    evolve(&mut sim, &sub, 1.0).expect("evolve failed");
+    let rho = &sim.fields.prim.rho;
+    let mut l1 = 0.0;
+    for c in sim.geom.interior.iter() {
+        let x = (c[0] as f64 + 0.5) * dx;
+        l1 += (*rho.view().at(c) - rho_exact_avg(x, dx)).abs() * dx;
+    }
+    l1
+}
+
+#[test]
+fn adiabatic_ppm_rk3_beats_second_order() {
+    let errs: Vec<f64> = [32, 64, 128, 256]
+        .iter()
+        .map(|&n| l1_after_one_period_ppm(n, Solver::Hllc))
+        .collect();
+    for w in errs.windows(2) {
+        eprintln!("PPM: ratio {:.2} (order ~{:.2})", w[0] / w[1], (w[0] / w[1]).log2());
+    }
+    let ratio = errs[1] / errs[2]; // 64 -> 128, matching the plm gate's pair
+    // the bound pins the measured 15.7-15.9: a drop to ~8 means the interfaces lost
+    // their 4th order at extrema (a re-introduced clamp or flatten), a drop to ~4
+    // means the parabola collapsed to the linear fan. both are defects this gate
+    // exists to catch, so the bound sits just under the measurement, not at the
+    // generic third-order floor.
+    assert!(
+        errs[2] < errs[1] && ratio > 12.0,
+        "ppm+rk3 lost interface order on the smooth wave — L1(64)={:.3e}, L1(128)={:.3e}, \
+         ratio={ratio:.2} (measured ~15.8; ~8 = extremum interfaces degraded; ~4 = \
+         parabola collapsed to plm)",
+        errs[1],
+        errs[2]
+    );
+    // ppm at n must also beat plm at n outright — the whole point of the wider stencil.
+    let plm = l1_after_one_period(128, Solver::Hllc);
+    assert!(
+        errs[2] < plm,
+        "ppm L1(128)={:.3e} is not below plm L1(128)={plm:.3e}",
+        errs[2]
+    );
+}
+
 // --- RHD (special-relativistic) — the SAME exact-solution trick, subluminal. -----------------
 // a uniform-p, uniform-v smooth density wave is an exact SRHD solution too: with no pressure
 // gradient the momentum/energy equations reduce to advection, and the conserved D = rho W (W const

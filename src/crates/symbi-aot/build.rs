@@ -36,7 +36,7 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
-    Coords, GeoSource, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
+    Coords, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
     body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, c2p_status_gv,
     chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
     fofc_emf_splice_gv, fofc_exterior_flag_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
@@ -323,6 +323,7 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         (ProlongTag::Pcm, ProlongOrder::Pcm),
         (ProlongTag::Plm, ProlongOrder::Plm),
         (ProlongTag::Ppm, ProlongOrder::Ppm),
+        (ProlongTag::Quartic, ProlongOrder::Quartic),
     ] {
         let (k, writes) = refine_prolong_gv(nd, 2, order);
         emit_gv(
@@ -839,8 +840,12 @@ fn gen_iso_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 // the adiabatic face flux: hlle_flux with the energy component (mass + momentum +
 // energy). same EOS-generic body as the iso flux, plus E = p/(gamma-1)+0.5*rho|v|^2
 // and F_E = (E+p)*vn.
-fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
-    let name = format!("adiabatic_face_flux{}_{ndim}d_{dir}", geom.suffix());
+fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: Recon) {
+    let name = format!(
+        "adiabatic_face_flux{}{}_{ndim}d_{dir}",
+        recon.suffix(),
+        geom.suffix()
+    );
     // the CARTESIAN adiabatic face flux is the gv single-source physics: PLM reconstruction
     // (a Gv stencil via field_shifted) composed with symbi-hydro's `riemann::hlle` at S=Gv
     // (adiabatic_flux_gv) — replacing the hand-written hlle_flux Expr builder + its
@@ -849,9 +854,9 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     // generalizes over ncomp + the axes mapping (the c2p pattern). numerically equiv (ULP).
     let (k, writes) = if geom.coords == Coords::Cartesian {
         match ndim {
-            1 => symbi_discretize::gv::adiabatic_flux_gv::<1>(dir),
-            2 => symbi_discretize::gv::adiabatic_flux_gv::<2>(dir),
-            3 => symbi_discretize::gv::adiabatic_flux_gv::<3>(dir),
+            1 => symbi_discretize::gv::adiabatic_flux_gv::<1>(dir, recon),
+            2 => symbi_discretize::gv::adiabatic_flux_gv::<2>(dir, recon),
+            3 => symbi_discretize::gv::adiabatic_flux_gv::<3>(dir, recon),
             _ => panic!("adiabatic_flux_gv: unsupported ndim {ndim}"),
         }
     } else {
@@ -859,6 +864,10 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
         assert!(
             geom.ncomp == 3 && ndim == 2,
             "non-cartesian adiabatic flux is only cyl r-z"
+        );
+        assert!(
+            recon == Recon::Plm,
+            "ppm face flux is baked for the cartesian adiabatic family only"
         );
         symbi_discretize::gv::adiabatic_flux_cyl_rz_gv(dir)
     };
@@ -1268,23 +1277,23 @@ fn gen_rmhd_face_flux(out_dir: &str, ndim: u8) {
 
 // ---- HLLC variants ---- the contact-resolving 3-wave Riemann solver. iso is
 // HLLE-only by physics (no contact wave). cartesian, one per (ndim, dir).
-fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("adiabatic_face_flux_hllc_{ndim}d_{dir}");
+fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
+    let name = format!("adiabatic_face_flux_hllc{}_{ndim}d_{dir}", recon.suffix());
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<3>(dir),
+        1 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<1>(dir, recon),
+        2 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<2>(dir, recon),
+        3 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<3>(dir, recon),
         _ => panic!("adiabatic_hllc_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("adiabatic_face_flux_hllc_lm_{ndim}d_{dir}");
+fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
+    let name = format!("adiabatic_face_flux_hllc_lm{}_{ndim}d_{dir}", recon.suffix());
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<3>(dir),
+        1 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<1>(dir, recon),
+        2 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<2>(dir, recon),
+        3 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<3>(dir, recon),
         _ => panic!("adiabatic_hllc_lm_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -3392,13 +3401,18 @@ fn main() {
         // one face flux per sweep dir (the reconstruction axis is baked).
         for dir in 0..ndim {
             gen_iso_face_flux(&out_dir, ndim, dir);
-            gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim));
+            gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Plm);
+            // the ppm twin of every cartesian adiabatic face flux: same riemann solver,
+            // wider (-3..+2) load stencil, `_ppm`-tagged kernel name.
+            gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Ppm);
             gen_rhd_face_flux(&out_dir, ndim, dir);
             // HLLC variants — contact-resolving 3-wave solver, available on every
             // regime that has a contact wave. iso is HLLE-only by physics. cartesian
             // only (curvilinear HLLC is unbaked).
-            gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir);
-            gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir);
+            gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Plm);
+            gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm);
+            gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Plm);
+            gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir);
             gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir);
         }
@@ -3481,7 +3495,7 @@ fn main() {
     gen_godunov_stage(&out_dir, 2, "adiabatic", true, cyl.clone(), None);
     gen_snapshot(&out_dir, 2, "adiabatic", true, cyl.clone());
     for dir in 0..2 {
-        gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone());
+        gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone(), Recon::Plm);
     }
     // the CYLINDRICAL NATURAL (DOF == NDIM) hydro family for ALL THREE regimes (iso /
     // adiabatic / rhd), at 1D (radial), 2D (r-phi disk plane), and 3D (r,phi,z) — the

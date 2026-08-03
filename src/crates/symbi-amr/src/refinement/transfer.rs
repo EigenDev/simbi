@@ -41,6 +41,9 @@ pub enum ProlongOrder {
     Plm,
     /// piecewise parabolic, monotonized sub-cell averages (order 2). halfwidth 2.
     Ppm,
+    /// exact degree-4 fit to the 5-cell stencil (order 4), monotonized-parabolic
+    /// fallback at non-smooth cells. halfwidth 2 — the ppm evolution partner.
+    Quartic,
 }
 
 impl ProlongOrder {
@@ -50,6 +53,22 @@ impl ProlongOrder {
             ProlongOrder::Pcm => 0,
             ProlongOrder::Plm => 1,
             ProlongOrder::Ppm => 2,
+            ProlongOrder::Quartic => 2,
+        }
+    }
+
+    /// polynomial degree of the smooth-data interpolant. the coarse-fine
+    /// invariant is expressed against this: the prolongation degree must
+    /// exceed the evolution reconstruction's stencil reach minus one (pcm
+    /// evolution -> plm prolong, plm -> ppm, ppm -> quartic), or the ghost
+    /// averages feed the fine reconstruction a lower-order error than its
+    /// own interior truncation and the boundary caps the interior order.
+    pub fn degree(self) -> u8 {
+        match self {
+            ProlongOrder::Pcm => 0,
+            ProlongOrder::Plm => 1,
+            ProlongOrder::Ppm => 2,
+            ProlongOrder::Quartic => 4,
         }
     }
 }
@@ -77,6 +96,7 @@ pub fn prolong_tag(order: ProlongOrder) -> ProlongTag {
         ProlongOrder::Pcm => ProlongTag::Pcm,
         ProlongOrder::Plm => ProlongTag::Plm,
         ProlongOrder::Ppm => ProlongTag::Ppm,
+        ProlongOrder::Quartic => ProlongTag::Quartic,
     }
 }
 

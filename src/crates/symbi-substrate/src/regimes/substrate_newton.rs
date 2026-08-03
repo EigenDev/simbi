@@ -125,6 +125,11 @@ pub struct AdiabaticSubstrateKernelSet<
     /// Riemann solver — HLLE (default, two-wave) or HLLC (contact-resolving).
     /// see [[Solver]]. tunable via `.with_solver(Solver::Hllc)`.
     pub solver: Solver,
+    /// evolution face reconstruction — the plm family (default; runtime theta
+    /// selects theta-MC / van leer / pcm-at-zero) or the ppm monotonized
+    /// parabola (`_ppm` kernels, -3..+2 stencil, requires an ng >= 3 allocation
+    /// and a uniform cartesian grid). tunable via `.reconstruction(Recon::Ppm)`.
+    pub recon: symbi_discretize::Recon,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
     /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
@@ -157,6 +162,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             boundary_dags: Vec::new(),
             gradient_bcs: Vec::new(),
             solver: Solver::Hlle,
+            recon: symbi_discretize::Recon::Plm,
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
             alpha: 0.0,
@@ -284,6 +290,17 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self.theta = theta;
         self
     }
+
+    /// select the evolution face reconstruction (plm family or ppm). fluent. ppm
+    /// dispatches the `_ppm` kernel twins: flat cartesian only, allocation ng >= 3
+    /// (`.ghosts(3)` at sim build); a refinement hierarchy requires the quartic
+    /// coarse-fine prolongation (ppm evolution -> quartic, the degree ladder).
+    /// theta is ignored under ppm — the parabola carries its own monotonicity
+    /// constraint.
+    pub fn reconstruction(mut self, recon: symbi_discretize::Recon) -> Self {
+        self.recon = recon;
+        self
+    }
 }
 
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
@@ -303,8 +320,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.gamma,
             self.theta,
             self.solver,
+            self.recon,
             false,
         );
+    }
+
+    fn reconstruction_reach(&self) -> u8 {
+        match self.recon {
+            symbi_discretize::Recon::Plm => 2,
+            symbi_discretize::Recon::Ppm => 3,
+        }
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -622,6 +647,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.freeze_streak,
             |dir| {
+                // the first-order redo: hlle at theta = 0 (pcm) on the plm kernel —
+                // the positivity-preserving fallback regardless of the evolution
+                // reconstruction, so ppm evolution shares the same redo path.
                 dispatch_flux(
                     sim,
                     pre,
@@ -630,6 +658,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     self.gamma,
                     0.0,
                     Solver::Hlle,
+                    symbi_discretize::Recon::Plm,
                     false,
                 )
             },

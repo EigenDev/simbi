@@ -2642,11 +2642,34 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     primary: f64,
     theta: f64,
     solver: Solver,
+    recon: symbi_discretize::Recon,
     rusanov: bool,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    // the ppm face pair loads -3..+2 along the sweep and is baked for the flat
+    // cartesian adiabatic family only; anything else must refuse here, loudly,
+    // before an unbaked-kernel panic or a garbage ghost read could occur.
+    if recon == symbi_discretize::Recon::Ppm {
+        assert!(
+            prefix == "adiabatic",
+            "ppm reconstruction is baked for the adiabatic (newtonian ideal-gas) flux only; \
+             the {prefix} flux family has no ppm twin"
+        );
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian
+                && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
+                && !rusanov,
+            "ppm reconstruction is baked for the flat cartesian chart only"
+        );
+        assert!(
+            sim.geom.ng >= 3,
+            "ppm reconstruction loads -3..+2 along the sweep but the allocated ghost \
+             width is {}; build the sim with .ghosts(3)",
+            sim.geom.ng
+        );
+    }
     // HLLD is MHD-only by physics — the magnetosonic + Alfven + contact wave structure needs the
     // magnetic field. the (solver, regime) matrix is now enforced at BIND time in `with_solver`
     // (every non-MHD substrate set validates `Solver::valid_for` before storing `solver`, and the
@@ -2672,7 +2695,8 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // slug (`rhd_face_flux{_schw|_ks}_{D}d_{dir}`), baked only for a curved spacetime. flat
     // (Minkowski) keeps the unsuffixed flux, so the slug is appended ONLY off-Minkowski.
     let sp_st_sfx = spacetime_slug(sim.geom.spacetime);
-    let name = format!("{prefix}_face_flux{solver_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
+    let recon_sfx = recon.suffix();
+    let name = format!("{prefix}_face_flux{solver_sfx}{recon_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
     // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
     // declaring theta on the kernel can never silently shift a positional arg here.

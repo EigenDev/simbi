@@ -1604,6 +1604,29 @@ where
     /// root's own cfl; level l subcycles RATIO^l times, so its limit enters
     /// scaled by RATIO^l.
     fn step_root(&mut self, t_final: f64) {
+        // the coarse-fine invariant: the prolongation's smooth-data polynomial degree
+        // must be at least the evolution reconstruction's stencil reach (= its degree
+        // plus one: pcm evolution -> plm prolong, plm -> ppm, ppm -> quartic). the
+        // prolonged ghost averages then carry error one order above the interior
+        // truncation, and the interface layer's flux-divergence order loss cannot
+        // degrade the interior order. a shallower prolongation would degrade it
+        // SILENTLY at every refinement boundary — refuse loudly instead. a
+        // single-level hierarchy has no coarse-fine boundary and carries any pairing.
+        if self.levels.len() > 1 {
+            for lvl in &self.levels {
+                assert!(
+                    lvl.kernels.reconstruction_reach() <= self.prolong_order.degree(),
+                    "evolution reconstruction reach {} exceeds the {:?} prolongation's \
+                     degree {}: the coarse-fine ghost averages would carry a lower-order \
+                     error than the interior truncation and the refinement boundary would \
+                     degrade the interior order; pair this reconstruction with a \
+                     higher-degree prolongation (ppm evolution -> quartic)",
+                    lvl.kernels.reconstruction_reach(),
+                    self.prolong_order,
+                    self.prolong_order.degree(),
+                );
+            }
+        }
         // the per-root-step wave-speed pass + global min reduction. instrumented because it is a
         // FULL-GRID read of prim on every level, once per step, and sits OUTSIDE the substage loop:
         // at a small domain / high step count it is a large fraction of the step that no per-phase

@@ -315,26 +315,30 @@ fn euler_reconstruct<const D: usize>(
     ndim: u8,
     dir: u8,
     coord_n: usize,
+    recon: Recon,
 ) -> (IdealGas<Gv>, Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
     // scalars first (manifest order [gamma, theta]); the free-theta theta-MC limiter is
     // regime-generic — theta == 1 reduces it EXACTLY to plain minmod (the hydro default).
+    // theta is registered on every recon arm so the scalar tail is uniform; the ppm
+    // parabola carries its own monotonicity constraint and never reads it.
     let gamma = Gv::scalar("gamma");
     let theta = Gv::scalar("theta");
-    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim, dir, theta);
+    let (rho_l, rho_r) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
     let mut vl = Vec::with_capacity(D);
     let mut vr = Vec::with_capacity(D);
     for k in 0..D {
-        let (l, r) = plm_theta_gv(
+        let (l, r) = recon_gv(
             &format!("prim_v{k}"),
             FieldRef::PrimVel(k as u8),
             ndim,
             dir,
             theta,
+            recon,
         );
         vl.push(l);
         vr.push(r);
     }
-    let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim, dir, theta);
+    let (pre_l, pre_r) = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
 
     let eos = IdealGas { gamma };
     let vl_arr: [Gv; D] = vl.try_into().expect("D velocity components");
@@ -392,13 +396,14 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     ndim: u8,
     dir: u8,
     coord_n: usize,
+    recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
 where
     R: Regime<Gv, D, Prim = Prim<Gv, D>, Cons = Cons<Gv, D>>,
 {
     begin_trace();
     // the SINGLE-SOURCE physics: reconstructed L/R primitives -> canonical HLLE.
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n);
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon);
     let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
@@ -407,8 +412,11 @@ where
 /// the adiabatic (ideal-gas newtonian euler) face flux — `euler_hlle_flux_gv` at the
 /// `Newtonian` regime. replaces the cartesian `hlle_flux(.., has_energy=true)` builder.
 /// cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
-pub fn adiabatic_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_hlle_flux_gv::<D, _>(&Newtonian, D as u8, dir, dir as usize)
+pub fn adiabatic_flux_gv<const D: usize>(
+    dir: u8,
+    recon: Recon,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    euler_hlle_flux_gv::<D, _>(&Newtonian, D as u8, dir, dir as usize, recon)
 }
 
 /// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
@@ -416,14 +424,14 @@ pub fn adiabatic_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, Fie
 /// axis 1 is the z coordinate). replaces the cyl r-z `hlle_flux` Expr builder.
 pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     let coord_n = [0usize, 2][dir as usize]; // (r, z) grid axes -> coordinates 0, 2
-    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n)
+    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm)
 }
 
 /// the RHD (special-relativistic euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
 /// regime (relativistic U/F/wave speeds via mignone-bodo). replaces the `rhd_hlle_flux`
 /// Expr builder + `rhd_side`. cartesian-only (rhd has no cyl r-z), ncomp == ndim == D.
 pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize)
+    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm)
 }
 
 /// the RHD face flux on a curved spacetime — the `_schw`/`_ks` GR path. PLM-reconstruct the
@@ -456,7 +464,7 @@ where
     // the gridded sweeps like any transverse component). the sweep NORMAL is coordinate `axes[dir]`.
     let ndim = axes.len();
     let (eos, left, right, nhat, vface) =
-        euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize]);
+        euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize], Recon::Plm);
     // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse GRIDDED coordinates at
     // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
     // slot (the axisymmetric phi) takes zero: the spherical metrics never read phi, and
@@ -1299,9 +1307,11 @@ pub fn rmhd_flux_gr_gv(
 /// (no contact wave -> HLLE-only).
 pub fn adiabatic_hllc_flux_gv<const D: usize>(
     dir: u8,
+    recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
+    let (eos, left, right, nhat, vface) =
+        euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
     let flux = hllc(
         &eos,
         &left,
@@ -1323,9 +1333,11 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
 /// (`S::select`), so the fleischmann arm traces at S = Gv just like the Standard arm.
 pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
+    recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
+    let (eos, left, right, nhat, vface) =
+        euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
     let flux = hllc(
         &eos,
         &left,
@@ -1342,7 +1354,7 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
 /// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
 pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm);
     let flux = hllc_rhd(
         &eos,
         &left,
@@ -1362,7 +1374,7 @@ pub fn rhd_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm);
     let flux = hllc_rhd(
         &eos,
         &left,

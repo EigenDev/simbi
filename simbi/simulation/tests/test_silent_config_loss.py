@@ -51,6 +51,32 @@ def test_vanleer_limiter_keeps_the_model_theta_positive():
     assert p.plm_theta > 0.0
 
 
+def test_ppm_rejects_stray_plm_knobs():
+    # ppm carries its own monotonicity constraint; a plm_theta or limiter moved off
+    # its default alongside ppm is dead configuration — rejected, never silently
+    # ignored. (a knob AT its default is indistinguishable from the passthrough and
+    # is inert either way, so it passes.)
+    with pytest.raises((ValidationError, ConfigError), match="PPM"):
+        GrBondiKS.from_cli(["--reconstruction", "ppm", "--plm-theta", "1.8"])
+    with pytest.raises((ValidationError, ConfigError), match="PPM"):
+        GrBondiKS.from_cli(["--reconstruction", "ppm", "--limiter", "vanleer"])
+
+
+def test_ppm_alone_is_accepted_by_the_model():
+    from simbi.types.input import Reconstruction
+
+    p = GrBondiKS.from_cli(["--reconstruction", "ppm"])
+    assert p.reconstruction == Reconstruction.PPM
+
+
+def test_order_three_maps_to_ppm_rk3():
+    from simbi.types.input import Reconstruction, TimeStepping
+
+    p = GrBondiKS.from_cli(["--order", "3"])
+    assert p.reconstruction == Reconstruction.PPM
+    assert p.timestepping == TimeStepping.RK3
+
+
 def test_negative_checkpoint_theta_maps_back_to_vanleer():
     # a checkpoint written by a van leer run stores the kernel spelling
     # plm_theta = -1; the restore path must recover the limiter selection.

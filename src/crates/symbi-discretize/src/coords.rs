@@ -54,6 +54,33 @@ pub enum Spacetime {
     KerrKS,
 }
 
+/// the evolution face reconstruction — a codegen-time choice. pcm and plm share one
+/// baked kernel (the runtime `theta` scalar selects: theta = 0 collapses the limited
+/// slope to piecewise-constant), so only stencil-width changes appear here: ppm widens
+/// the load stencil from -2..+1 to -3..+2 and is therefore a DISTINCT baked kernel.
+/// defaults to `Plm` (the theta-parameterized kernel), so existing builders need no
+/// annotation and their kernel names are unchanged.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Recon {
+    /// piecewise linear, runtime-theta limiter family (theta-MC / van leer / pcm at 0).
+    #[default]
+    Plm,
+    /// piecewise parabolic (colella & woodward 1984 monotonized interfaces) supplying
+    /// method-of-lines face states; carries its own monotonicity constraint, no theta.
+    Ppm,
+}
+
+impl Recon {
+    /// kernel-name suffix. the plm family keeps its unsuffixed names, so every
+    /// pre-existing baked kernel name is untouched by the reconstruction axis.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Recon::Plm => "",
+            Recon::Ppm => "_ppm",
+        }
+    }
+}
+
 impl Coords {
     /// project the codegen-time mirror onto the runtime `symbi_geometry::Geometry` — so the ONE
     /// shared kernel-name suffix protocol (`kernel_slug`) takes a single enum family for both the

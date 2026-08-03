@@ -326,6 +326,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             ISO_GAMMA,
             self.theta,
             Solver::Hlle,
+            symbi_discretize::Recon::Plm,
             false,
         );
     }
@@ -658,6 +659,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     ISO_GAMMA,
                     0.0,
                     Solver::Hlle,
+                    symbi_discretize::Recon::Plm,
                     false,
                 )
             },

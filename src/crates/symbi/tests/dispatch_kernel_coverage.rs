@@ -401,11 +401,25 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
             }
             for &ndim in dims {
                 for dir in 0..ndim {
-                    checked += 1;
-                    let name =
-                        format!("{prefix}_face_flux{}_{ndim}d_{dir}", solver.kernel_suffix());
-                    if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
-                        missing.push(format!("{solver:?} on {regime:?}: {name}"));
+                    // the reconstruction axis: the ppm twin exists for every solver the
+                    // NEWTONIAN matrix accepts (the runtime `.reconstruction(Ppm)` composes
+                    // with any adiabatic solver); every other regime is plm-only and its
+                    // dispatch refuses ppm before a name is formed.
+                    let recons: &[symbi_discretize::Recon] = if regime == RegimeKind::Newtonian {
+                        &[symbi_discretize::Recon::Plm, symbi_discretize::Recon::Ppm]
+                    } else {
+                        &[symbi_discretize::Recon::Plm]
+                    };
+                    for &recon in recons {
+                        checked += 1;
+                        let name = format!(
+                            "{prefix}_face_flux{}{}_{ndim}d_{dir}",
+                            solver.kernel_suffix(),
+                            recon.suffix()
+                        );
+                        if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
+                            missing.push(format!("{solver:?}/{recon:?} on {regime:?}: {name}"));
+                        }
                     }
                 }
             }
