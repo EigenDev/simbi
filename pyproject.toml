@@ -47,6 +47,9 @@ cli = ["rich-argparse"]
 dev = [
     "maturin>=1.7,<2",
     "patchelf; sys_platform == 'linux'",
+    # the test runner belongs in the declared set: `uv sync` prunes whatever is not, so an
+    # ad-hoc install of it silently disappears the next time the environment is resolved.
+    "pytest>=8",
 ]
 
 [project.scripts]

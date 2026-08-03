@@ -13,7 +13,13 @@ import h5py
 import numpy as np
 import pytest
 
-from simbi.reader.census import Census, CensusError, census_names, read_census
+from simbi.reader.census import (
+    Census,
+    CensusError,
+    census_names,
+    read_census,
+    read_census_series,
+)
 
 
 def _write(
@@ -290,3 +296,85 @@ def test_per_level_rows_are_selected_before_any_time_series_analysis(tmp_path):
     np.testing.assert_allclose(c.for_level(0).time_average("mass"), [1.0, 1.0, 1.0])
     with pytest.raises(CensusError, match="no rows from level 2"):
         c.for_level(2)
+
+
+# =============================================================================
+# joining a restart chain. the hazard is not the concatenation but the OVERLAP: a history is
+# never cleared within a process, so a later checkpoint of the same job repeats every row an
+# earlier one holds. an append would count those twice and the duplicates are undetectable
+# afterwards, because a repeated sample is numerically indistinguishable from a real one.
+# =============================================================================
+
+
+def test_series_join_does_not_double_count_a_superset(tmp_path):
+    # two checkpoints of ONE process: the second holds every row of the first plus more.
+    vals = np.arange(4 * 3 * 3, dtype=float).reshape(4, 3, 3)
+    early = _write(
+        tmp_path / "e.h5", times=(0.0, 1.0), dropped=(0, 0), values=vals[:2]
+    )
+    late = _write(
+        tmp_path / "l.h5",
+        times=(0.0, 1.0, 2.0, 3.0),
+        dropped=(0, 0, 0, 0),
+        values=vals,
+    )
+    joined = read_census_series([early, late], "shells")
+    assert joined.n_rows == 4, (
+        f"the join produced {joined.n_rows} rows from a 2-row file and its 4-row superset; "
+        "the shared rows were counted twice"
+    )
+    assert np.array_equal(joined.time, np.array([0.0, 1.0, 2.0, 3.0]))
+    assert np.array_equal(joined.values, vals)
+
+
+def test_series_join_is_idempotent_and_order_free(tmp_path):
+    a = _write(tmp_path / "a.h5", times=(0.0, 1.0))
+    b = _write(tmp_path / "b.h5", times=(2.0, 3.0))
+    once = read_census_series([a, b], "shells")
+    assert once.n_rows == 4  # genuinely disjoint segments DO concatenate
+    for paths in ([a, b, a, b], [b, a], [a, a, b]):
+        again = read_census_series(paths, "shells")
+        assert np.array_equal(again.time, once.time)
+        assert np.array_equal(again.values, once.values)
+
+
+def test_series_join_keys_on_level_not_time_alone(tmp_path):
+    # a per-level census samples several levels at the SAME time; keying on time alone would
+    # collapse them into one row and silently discard every level but one.
+    a = _write(
+        tmp_path / "a.h5", times=(0.0, 0.0, 1.0, 1.0), dropped=(0,) * 4, level=(0, 1, 0, 1)
+    )
+    joined = read_census_series([a], "shells")
+    assert joined.n_rows == 4, "rows from different levels at one time were merged"
+    assert joined.for_level(1).n_rows == 2
+
+
+def test_series_join_refuses_a_changed_registration(tmp_path):
+    a = _write(tmp_path / "a.h5", times=(0.0,), dropped=(0,))
+    b = _write(
+        tmp_path / "b.h5",
+        times=(1.0,),
+        dropped=(0,),
+        edges=(np.array([0.0, 1.5, 3.0]),),
+    )
+    with pytest.raises(CensusError, match="bins axis 0 differently"):
+        read_census_series([a, b], "shells")
+
+    c = _write(
+        tmp_path / "c.h5",
+        times=(1.0,),
+        dropped=(0,),
+        value_names=("mass", "mass_v", "mass_w"),
+    )
+    with pytest.raises(CensusError, match="accumulators"):
+        read_census_series([a, c], "shells")
+
+
+def test_series_join_refuses_an_accumulating_history(tmp_path):
+    # an accumulating row is a reduction over a span, so two rows may be disjoint segments to
+    # merge or one may contain the other -- (level, time) cannot tell those apart.
+    a = _write(
+        tmp_path / "a.h5", times=(1.0,), dropped=(0,), accumulated=True, n_samples=7
+    )
+    with pytest.raises(CensusError, match="accumulating"):
+        read_census_series([a, a], "shells")

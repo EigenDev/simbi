@@ -192,6 +192,18 @@ where
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
     pub crash: Option<CrashReport>,
 
+    /// cells within this radius of the origin are excluded from the STATIONARITY DIAGNOSTIC.
+    ///
+    /// a declared target is a steady state of the equations the stage pipeline applies. inside a
+    /// sink it is not: the drain removes mass and energy there, so the target's imbalance carries
+    /// the drain rather than truncation error and reports non-convergence however exact the target
+    /// is elsewhere. the well-balancing itself is unaffected — the correction is applied on every
+    /// cell — this only decides which cells are allowed to testify about convergence.
+    ///
+    /// `None` resolves to the largest accretion radius among the attached bodies, so a run with a
+    /// sink gets the exclusion without configuring anything, and a run without one excludes nothing.
+    pub equilibrium_mask_radius: Option<f64>,
+
     /// the previous step's RAW cfl-derived dt — the quantity the collapse guard compares against.
     /// the level's `state.dt` is the ACCEPTED dt, which the `t_final` clamp and an explicit-step
     /// rejection both shrink; comparing a fresh cfl estimate against it reports a "collapse" every
@@ -866,6 +878,7 @@ where
             tracer_root_global_cells,
             tracer_root_offset: [0; NDIM],
             crash: None,
+            equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
         }
     }
@@ -1042,6 +1055,7 @@ where
             tracer_root_global_cells: root_cells,
             tracer_root_offset: [0; NDIM],
             crash: None,
+            equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
         })
     }
@@ -1066,6 +1080,40 @@ where
         }
         self.assert_sinks_inside_finest();
         self
+    }
+
+    /// exclude cells within `radius` of the origin from the stationarity diagnostic.
+    ///
+    /// overrides the default, which is the largest accretion radius among the attached bodies.
+    /// pass `0.0` to consider every cell.
+    pub fn with_equilibrium_mask(mut self, radius: f64) -> Self {
+        self.equilibrium_mask_radius = Some(radius);
+        self
+    }
+
+    /// the radius the stationarity diagnostic ignores inside: the configured value, or the
+    /// largest accretion radius among the bodies, or zero when neither exists.
+    fn resolved_equilibrium_mask(&self) -> f64 {
+        if let Some(r) = self.equilibrium_mask_radius {
+            return r;
+        }
+        self.levels
+            .last()
+            .map(|level| {
+                level
+                    .state
+                    .immersed
+                    .as_ref()
+                    .map(|im| {
+                        im.bodies
+                            .bodies()
+                            .iter()
+                            .filter_map(|b| b.accretion_radius())
+                            .fold(0.0_f64, f64::max)
+                    })
+                    .unwrap_or(0.0)
+            })
+            .unwrap_or(0.0)
     }
 
     /// attach per-body immersed-boundary shapes to every level. rigid walls remain active on
@@ -2843,8 +2891,25 @@ where
         // a cell can only testify about convergence if the grid RESOLVES the target there: where
         // the density turns over inside one width the reconstruction is clipping rather than
         // approximating, and its error carries no order either way.
-        let resolved: Vec<[isize; NDIM]> = inner
+        // inside a sink the target is not a steady state of the applied equations -- the drain
+        // removes mass and energy there -- so those cells report the drain rather than truncation
+        // and would set the statistic from a region the declaration never claimed.
+        let mask = self.resolved_equilibrium_mask();
+        let geom = &coarse.state.geom;
+        let offered: Vec<[isize; NDIM]> = inner
             .iter()
+            .filter(|c| {
+                if mask <= 0.0 {
+                    return true;
+                }
+                let x = geom.cell_coord(*c);
+                let r2: f64 = (0..NDIM).map(|ax| x[ax] * x[ax]).sum();
+                r2 >= mask * mask
+            })
+            .collect();
+        let resolved: Vec<[isize; NDIM]> = offered
+            .iter()
+            .copied()
             .filter(|c| {
                 let here = den.at(*c).abs().max(f64::MIN_POSITIVE);
                 (0..NDIM).all(|ax| {
@@ -2905,7 +2970,7 @@ where
             scale,
             sampled,
             resolved: resolved.len(),
-            considered: inner.iter().count(),
+            considered: offered.len(),
         })
     }
 

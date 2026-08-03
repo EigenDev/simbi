@@ -22,6 +22,16 @@
 #   r = c.bin_centers(0)
 #   mdot = c.value("mass_flux")[-1]            # the last sample, shaped by the bin axes
 #   vr = c.favre("mass_vr", "mass")[-1]        # sum(m v) / sum(m), per bin
+#   c = read_census_series(sorted(glob("run/*.chkpt.*.h5")), "shells")   # across restarts
+#
+# WHY A SERIES READER EXISTS. a history covers ONE run segment: it lives in process memory and
+# starts empty when a run resumes from a checkpoint, so a campaign that requeues writes its
+# record in pieces. the pieces are NOT simply appended. within a single process the history is
+# never cleared, so a later checkpoint contains every row an earlier one does -- concatenating
+# two checkpoints from the same job would count their shared rows twice, and the duplicates are
+# invisible afterwards because a repeated sample looks exactly like a real one. the join is a
+# UNION keyed on (level, time), which is idempotent and therefore safe to run over whatever
+# subset of a run's checkpoints happens to be on disk.
 # =============================================================================
 
 from __future__ import annotations
@@ -33,7 +43,7 @@ import numpy as np
 
 Array = np.ndarray
 
-__all__ = ["Census", "CensusError", "read_census", "census_names"]
+__all__ = ["Census", "CensusError", "read_census", "read_census_series", "census_names"]
 
 
 class CensusError(Exception):
@@ -323,6 +333,88 @@ def read_census(path: str, name: str) -> Census:
         level=level,
         n_samples=n_folded,
         t_start=t_start,
+    )
+
+
+def read_census_series(paths, name: str) -> Census:
+    """one census joined across a chain of checkpoints, as a UNION over rows.
+
+    a history covers one run segment and restarts empty when a run resumes, so a requeued
+    campaign records its series in pieces. this joins them.
+
+    the join is a union keyed on (level, time), NOT a concatenation. within a single process the
+    history is never cleared, so a later checkpoint holds every row an earlier one holds; appending
+    would double-count the shared rows, and a duplicated sample is indistinguishable from a real
+    one once it is in the array. keying on (level, time) makes the join idempotent, so it may be
+    given every checkpoint of a run, any subset of them, or the same file twice.
+
+    every file must carry the SAME registration. a census whose bins or accumulators changed
+    describes different quantities under the same name, and joining those silently would produce a
+    profile assembled from two different measurements.
+    """
+    paths = list(paths)
+    if not paths:
+        raise CensusError("read_census_series needs at least one checkpoint path")
+    parts = [read_census(p, name) for p in paths]
+    head = parts[0]
+
+    if head.accumulated:
+        # an accumulating history folds its samples into one row per level, so a row records a
+        # reduction over a span rather than an instant. two such rows may be disjoint segments
+        # (combine them, count-weighted) or one may be a superset of the other (keep the larger) --
+        # and (level, time) does not separate those cases. refused rather than guessed.
+        raise CensusError(
+            f"census '{name}' is accumulating; a series join would have to combine whole-segment "
+            "reductions, which is a count-weighted merge rather than a union over rows. read the "
+            "segments individually and combine them with their own op."
+        )
+
+    for path, part in zip(paths[1:], parts[1:]):
+        for attr, what in (
+            ("value_names", "accumulators"),
+            ("axis_names", "bin axes"),
+            ("op", "reduction op"),
+            ("cadence", "sampling cadence"),
+        ):
+            if getattr(part, attr) != getattr(head, attr):
+                raise CensusError(
+                    f"census '{name}' in '{path}' declares {what} {getattr(part, attr)!r} but "
+                    f"'{paths[0]}' declares {getattr(head, attr)!r}; these are different "
+                    "measurements and cannot be joined."
+                )
+        for k, (a, b) in enumerate(zip(head.axis_edges, part.axis_edges)):
+            if a.shape != b.shape or not np.allclose(a, b, rtol=0.0, atol=0.0):
+                raise CensusError(
+                    f"census '{name}' in '{path}' bins axis {k} differently from '{paths[0]}'; "
+                    "the same bin index would mean a different interval in each file."
+                )
+
+    time = np.concatenate([p.time for p in parts])
+    values = np.concatenate([p.values for p in parts])
+    dropped = np.concatenate([p.dropped for p in parts])
+    has_level = all(p.level is not None for p in parts)
+    level = np.concatenate([p.level for p in parts]) if has_level else np.zeros(time.size, np.int64)
+    has_ns = all(p.n_samples is not None for p in parts)
+    n_samples = np.concatenate([p.n_samples for p in parts]) if has_ns else None
+    has_ts = all(p.t_start is not None for p in parts)
+    t_start = np.concatenate([p.t_start for p in parts]) if has_ts else None
+
+    # unique on (level, time). the times compare EXACTLY because a duplicated row is the same
+    # bytes written twice, not the same instant recomputed -- so no tolerance is needed, and
+    # introducing one would risk merging two genuinely distinct samples of a fine level.
+    keys = np.stack([level.astype(np.float64), time], axis=1)
+    _, keep = np.unique(keys, axis=0, return_index=True)
+    # chronological, level as the tiebreak, so the result reads as a time series
+    keep = keep[np.lexsort((level[keep], time[keep]))]
+
+    return replace(
+        head,
+        time=time[keep],
+        values=values[keep],
+        dropped=dropped[keep],
+        level=level[keep] if has_level else None,
+        n_samples=None if n_samples is None else n_samples[keep],
+        t_start=None if t_start is None else t_start[keep],
     )
 
 

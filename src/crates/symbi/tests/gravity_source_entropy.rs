@@ -463,3 +463,95 @@ fn the_hydrostatic_residue_converges_at_third_order() {
         }
     }
 }
+
+
+/// where in the column the entropy residue actually sits.
+///
+/// the sweep above measures a single worst value over the interior with the outer fifth of each
+/// side removed, so a residue confined to the wall band is invisible to it. this prints the whole
+/// profile: a residue at the reflecting edge is a boundary-operator property, one spread through
+/// the interior is the source or the flux, and the two call for different fixes.
+///
+/// run: cargo test -p symbi --test gravity_source_entropy -- --ignored profile --nocapture
+#[test]
+#[ignore = "diagnostic: the radial location of the hydrostatic entropy residue"]
+fn diagnose_entropy_residue_profile() {
+    for gm in [1.0, 10.0, 100.0] {
+        let mut sim = hydrostatic_atmosphere_ts(gm, N, CFL, Timestepping::Rk2);
+        let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated);
+        evolve(&mut sim, &kernels, T_HYDRO).expect("evolve failed");
+
+        let rho = sim.fields.prim.rho.view();
+        let pre = sim.fields.prim.pre.as_ref().expect("adiabatic").view();
+        let k0 = k0();
+        let cells: Vec<_> = sim.geom.interior.iter().collect();
+        let ratio: Vec<f64> = cells
+            .iter()
+            .map(|c| (pre.at(*c) / rho.at(*c).powf(GAMMA)) / k0)
+            .collect();
+
+        let n = ratio.len();
+        let worst_at = (0..n).min_by(|a, b| ratio[*a].total_cmp(&ratio[*b])).unwrap();
+        println!(
+            "\nGM = {gm}: {} cells, {} steps.  worst K/K0 = {:.9} at cell {} of {} \
+             ({:.0}% of the way in from the near wall)",
+            n, sim.iteration, ratio[worst_at], worst_at, n,
+            100.0 * worst_at as f64 / n as f64
+        );
+        let below: Vec<usize> = (0..n).filter(|i| ratio[*i] < 1.0 - 1.0e-9).collect();
+        println!(
+            "   cells below K0: {} of {}   indices {:?}",
+            below.len(),
+            n,
+            &below[..below.len().min(12)]
+        );
+        // the first and last twelve cells, then a coarse sample of the interior, so a wall
+        // residue and an interior one are told apart at a glance.
+        let show: Vec<usize> = (0..12)
+            .chain((12..n - 12).step_by((n / 8).max(1)))
+            .chain(n - 12..n)
+            .collect();
+        for i in show {
+            let mark = if ratio[i] < 1.0 - 1.0e-9 { "  <== below K0" } else { "" };
+            println!("     cell {i:4}  K/K0 = {:.9}{mark}", ratio[i]);
+        }
+    }
+}
+
+
+/// whether the residue accumulates or oscillates.
+///
+/// a source or flux defect deposits the same sign every step, so its worst value falls
+/// monotonically and its location stays put. an acoustic transient launched by the initial
+/// discretization instead moves, changes sign, and does not deepen: the column rings at its own
+/// sound-crossing rate. the two are distinguished by sampling the same run at several times.
+///
+/// run: cargo test -p symbi --test gravity_source_entropy -- --ignored accumul --nocapture
+#[test]
+#[ignore = "diagnostic: does the hydrostatic entropy residue accumulate or ring"]
+fn diagnose_entropy_residue_accumulates_or_rings() {
+    for gm in [1.0, 10.0] {
+        println!("\nGM = {gm}");
+        let mut sim = hydrostatic_atmosphere_ts(gm, N, CFL, Timestepping::Rk2);
+        let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated);
+        let k0 = k0();
+        for frac in 1..=8 {
+            let t_end = T_HYDRO * frac as f64 / 4.0;
+            evolve(&mut sim, &kernels, t_end).expect("evolve failed");
+            let rho = sim.fields.prim.rho.view();
+            let pre = sim.fields.prim.pre.as_ref().expect("adiabatic").view();
+            let cells: Vec<_> = sim.geom.interior.iter().collect();
+            let ratio: Vec<f64> = cells
+                .iter()
+                .map(|c| (pre.at(*c) / rho.at(*c).powf(GAMMA)) / k0)
+                .collect();
+            let n = ratio.len();
+            let at = (0..n).min_by(|a, b| ratio[*a].total_cmp(&ratio[*b])).unwrap();
+            let below = (0..n).filter(|i| ratio[*i] < 1.0 - 1.0e-9).count();
+            println!(
+                "   t = {:6.3}  steps {:6}  worst K/K0 = {:.9} at cell {:3}   cells below K0: {}",
+                t_end, sim.iteration, ratio[at], at, below
+            );
+        }
+    }
+}

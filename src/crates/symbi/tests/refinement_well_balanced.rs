@@ -889,3 +889,65 @@ fn a_correct_target_is_never_refused_however_steep() {
         }
     }
 }
+
+
+/// the stationarity diagnostic ignores the sink interior.
+///
+/// a declared target is a steady state of the equations the STAGE PIPELINE applies. inside an
+/// accreting body it is not: the drain removes mass and energy, so the target's imbalance there
+/// carries the drain rather than truncation error and reports non-convergence however exact the
+/// declaration is everywhere else. the cells are still CORRECTED like any other -- the exclusion
+/// decides only which cells testify about convergence.
+///
+/// the default comes from the bodies, so a run with a sink gets the exclusion without configuring
+/// it. the two clauses below are independent: that the default is nonzero, and that widening it
+/// actually removes cells from the statistic.
+#[test]
+fn the_stationarity_diagnostic_excludes_the_sink_interior() {
+    let hier = build(&nested(2)).with_equilibrium(hydrostatic).unwrap();
+    let wide = build(&nested(2))
+        .with_equilibrium(hydrostatic)
+        .unwrap()
+        // the level pair overlaps x in [0.4, 0.6], so this cuts the inner half of it
+        .with_equilibrium_mask(0.5);
+    let none = build(&nested(2))
+        .with_equilibrium(hydrostatic)
+        .unwrap()
+        .with_equilibrium_mask(0.0);
+
+    let base = hier
+        .target_imbalance_convergence(0)
+        .expect("levels 0 and 1 share an interior");
+    let masked = wide
+        .target_imbalance_convergence(0)
+        .expect("levels 0 and 1 share an interior");
+    let unmasked = none
+        .target_imbalance_convergence(0)
+        .expect("levels 0 and 1 share an interior");
+
+    println!(
+        "\ncells considered: default {} | mask 0.5 {} | mask 0 {}",
+        base.considered, masked.considered, unmasked.considered
+    );
+
+    // NON-VACUITY: the overlap has to offer cells at all, or every claim below is trivially true.
+    assert!(
+        unmasked.considered > 20,
+        "the level pair offered only {} cells; the exclusion cannot be shown to do anything",
+        unmasked.considered
+    );
+    assert!(
+        masked.considered < unmasked.considered,
+        "a 0.5 exclusion radius removed no cells ({} vs {}); the mask is not reaching the \
+         statistic",
+        masked.considered,
+        unmasked.considered
+    );
+    // this fixture carries a gravitating body with no accretion radius, so the DEFAULT resolves
+    // to zero and must agree with the explicit zero. a fixture with a sink would differ here,
+    // which is the behaviour the default exists to provide.
+    assert_eq!(
+        base.considered, unmasked.considered,
+        "with no accreting body the default exclusion must be zero, but it removed cells"
+    );
+}
