@@ -1,13 +1,13 @@
 # SIMBI
 
-```
-  ███████╗██╗███╗   ███╗██████╗ ██╗
-  ██╔════╝██║████╗ ████║██╔══██╗██║
-  ███████╗██║██╔████╔██║██████╔╝██║
-  ╚════██║██║██║╚██╔╝██║██╔══██╗██║
-  ███████║██║██║ ╚═╝ ██║██████╔╝██║
-  ╚══════╝╚═╝╚═╝     ╚═╝╚═════╝ ╚═╝
-```
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/simbi-dither-dark.png">
+  <img alt="SIMBI" src="docs/assets/simbi-dither-light.png" width="640">
+</picture>
+
+</div>
 
 <div align="center">
 
@@ -976,5 +976,4 @@ the following people for their contributions to the project:
 
 ---
 
-> Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool.
-On a finite postdoc clock, the developmental speed boost was insane. Sigh, drinking the koolaid sparingly...
+> Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool. "Et tu, Brute?"
