@@ -555,3 +555,99 @@ fn diagnose_entropy_residue_accumulates_or_rings() {
         }
     }
 }
+
+// =============================================================================
+// solver-family entropy probe on the sealed column
+// =============================================================================
+
+/// the same sealed stratified column, swept over the riemann-solver family. the
+/// stagnant strong-contrast column is the low-mach central-differencing limit of
+/// the HLLC-LM (fleischmann) anti-diffusive scaling — the regime a sealed
+/// accretor wall holds its masked cells in permanently. an entropy floor
+/// violation that appears ONLY on the low-mach arm localizes the production
+/// K < K_0 deficit to the flux, not the source or the wall ledger (both hold
+/// the floor on this exact setup under HLLE). production knobs: cfl 0.3, rk2.
+#[test]
+fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
+    use symbi::prelude::Solver;
+    let gm = 100.0;
+    let mut rows = Vec::new();
+    for (name, solver) in [
+        ("hlle", Solver::Hlle),
+        ("hllc", Solver::Hllc),
+        ("hllc_lm", Solver::HllcLm),
+    ] {
+        let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
+        let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
+            .with_solver(solver)
+            .expect("solver/regime mismatch");
+        evolve(&mut sim, &kernels, T_HYDRO).expect("evolve failed");
+        let worst = worst_entropy_ratio_away_from_walls(&sim, WALL_SKIP);
+        let vel = sim.fields.prim.vel[0].view();
+        let mut vmax = 0.0_f64;
+        for c in sim.geom.interior.iter() {
+            vmax = vmax.max(vel.at(c).abs());
+        }
+        println!(
+            "{name:>8}: min K/K0 = {worst:.12} (deficit {:.3e}), {} steps, max|v| = {vmax:.3e}",
+            (1.0 - worst).max(0.0),
+            sim.iteration
+        );
+        assert!(sim.iteration > 1000, "{name}: too few steps; the probe is vacuous");
+        rows.push((name, worst));
+    }
+    for (name, worst) in &rows {
+        assert!(
+            *worst > 1.0 - 1.0e-9,
+            "{name} destroyed entropy on the sealed stratified column: min K/K0 = {worst:.12} \
+             — the stagnant low-mach column is the regime a sealed (porosity 0) accretor wall \
+             holds its masked cells in, so a floor violation here reproduces the production \
+             mask-interior deficit at 1/10^5 the cost"
+        );
+    }
+}
+
+/// the low-mach arm's floor law with its precondition made explicit: the sealed
+/// stratified column holds `K >= K_0` under hllc_lm WHILE the fleischmann ramp is
+/// genuinely engaged — the residual velocities stay below the mach limit, so a pass
+/// cannot come from the ramp being inactive. before the compressibility-consistency
+/// clamp, this exact configuration lost 4.2e-4 of the floor at t = 2 (5.4e-4 at half
+/// the timestep — spatial anti-dissipation, not a source bias): the ramp cut the
+/// acoustic dissipation that damps the hydrostatic residual and the ringing
+/// undershot the adiabat. the clamp restores classical dissipation on faces whose
+/// pressure jump exceeds the incompressible `dp/p ~ gamma Ma^2` scale, which is
+/// every face of this column.
+#[test]
+fn the_clamped_low_mach_arm_holds_the_floor_with_the_ramp_engaged() {
+    use symbi::prelude::Solver;
+    let gm = 100.0;
+    let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
+    let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
+        .with_solver(Solver::HllcLm)
+        .expect("solver/regime mismatch");
+    evolve(&mut sim, &kernels, 2.0).expect("evolve failed");
+
+    // the precondition: the column's residual flow sits under the mach limit, so the
+    // ramp reduces the acoustic dissipation everywhere and the floor below is a
+    // statement about the CLAMPED scheme, not about the ramp never activating.
+    let rho = sim.fields.prim.rho.view();
+    let pre = sim.fields.prim.pre_field().expect("adiabatic pre").view();
+    let vel = sim.fields.prim.vel[0].view();
+    let mut max_mach = 0.0_f64;
+    for c in sim.geom.interior.iter() {
+        let cs = (GAMMA * *pre.at(c) / *rho.at(c)).sqrt();
+        max_mach = max_mach.max(vel.at(c).abs() / cs);
+    }
+    assert!(
+        max_mach < symbi_hydro::dissipation::MACH_LIMIT,
+        "the column's residual flow reached mach {max_mach:.3}; the ramp is not engaged \
+         and the floor law is vacuous"
+    );
+
+    let worst = worst_entropy_ratio_away_from_walls(&sim, WALL_SKIP);
+    assert!(
+        worst > 1.0 - 1.0e-9,
+        "the clamped low-mach arm destroyed entropy on the sealed column: min K/K0 = \
+         {worst:.12} with max residual mach {max_mach:.4}"
+    );
+}

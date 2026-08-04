@@ -63,15 +63,22 @@ fn gate_or_record(case: &str, bytes: &[u8]) {
     );
     let mut diff_count = 0usize;
     let mut first_lane = None;
+    let mut max_abs = 0.0_f64;
     for (ll, (a, b)) in base.chunks(8).zip(bytes.chunks(8)).enumerate() {
         if a != b {
             diff_count += 1;
             first_lane.get_or_insert(ll);
+            let (va, vb) = (
+                f64::from_le_bytes(a.try_into().unwrap()),
+                f64::from_le_bytes(b.try_into().unwrap()),
+            );
+            max_abs = max_abs.max((va - vb).abs());
         }
     }
     assert!(
         diff_count == 0,
-        "{case}: {diff_count} of {} f64 lanes differ from baseline (first at lane {})",
+        "{case}: {diff_count} of {} f64 lanes differ from baseline (first at lane {}, \
+         max |delta| = {max_abs:.3e})",
         bytes.len() / 8,
         first_lane.unwrap()
     );
@@ -138,6 +145,52 @@ fn plm_sod_1d_bit_identity() {
             .theta(THETA);
     evolve(&mut sim, &sub, 0.1).expect("evolve failed");
     gate_or_record("sod_1d_plm_hllc_rk2", &serialize_cons(&sim));
+}
+
+/// low-mach vortical flow under HLLC-LM (the fleischmann ramp with the
+/// compressibility-consistency clamp): at mach ~0.06 every face sits on the phi
+/// ramp, and this pin holds the low-dissipation arm byte-stable against future
+/// change. the clamp itself cannot be bit-inert in vortical flow — grid-aligned
+/// stagnation faces carry a finite neighbor-driven pressure jump at near-zero
+/// normal mach, where the ceiling-floored clamp contributes up to
+/// `jump / INCOMP_JUMP_CEIL` of extra phi; against the pure-ramp scheme this
+/// run's state moved by max |delta| = 7.4e-7 at t = 0.5, the measured footprint
+/// of that bounded activity. the LM benefit itself is gated behaviorally in
+/// `lm_clamp_laws.rs` (clamped LM stays strictly less dissipative than HLLC).
+#[test]
+fn hllc_lm_low_mach_vortex_bit_identity() {
+    const N: usize = 48;
+    const MACH: f64 = 0.06;
+    let dx = 1.0 / N as f64;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(|[x, y]| {
+            let tau = std::f64::consts::TAU;
+            // taylor-green cell: solenoidal, smooth, periodic; cs = 1 at this state
+            Prim {
+                rho: 1.0,
+                vel: Tensor::new([
+                    -MACH * (tau * y).sin() * (tau * x).cos(),
+                    MACH * (tau * x).sin() * (tau * y).cos(),
+                ]),
+                pre: 1.0 / GAMMA,
+            }
+        })
+        .build();
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &sim.geom.allocated)
+            .with_solver(Solver::HllcLm)
+            .expect("solver/regime mismatch")
+            .theta(THETA);
+    evolve(&mut sim, &sub, 0.5).expect("evolve failed");
+    gate_or_record("vortex_2d_plm_hllc_lm_rk2", &serialize_cons(&sim));
 }
 
 /// smooth 2d diagonal advection on a periodic box: the multi-dimensional sweep

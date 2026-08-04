@@ -143,14 +143,14 @@ fn names_with_gamma() -> Vec<&'static str> {
 /// states while exercising the same scalar interface the riemann solvers call.
 fn phi_of(l: &Prim<f64, D>, r: &Prim<f64, D>, n: &Tensor<f64, D>) -> f64 {
     let cs = |p: &Prim<f64, D>| (GAMMA * p.pre / p.rho).sqrt();
-    adaptive_phi(l.vel.dot(n), r.vel.dot(n), cs(l), cs(r))
+    adaptive_phi(l.vel.dot(n), r.vel.dot(n), cs(l), cs(r), l.pre, r.pre)
 }
 
 /// the same shape, carrier-generic, for the Gv lowering checks.
 fn phi_of_gv<S: symbi_hydro::Scalar>(p: &[S]) -> S {
     let (pl, pr, nh) = (prim_l(p), prim_r(p), nhat(p));
     let cs = |q: &Prim<S, D>| (p[10] * q.pre / q.rho).sqrt();
-    adaptive_phi(pl.vel.dot(&nh), pr.vel.dot(&nh), cs(&pl), cs(&pr))
+    adaptive_phi(pl.vel.dot(&nh), pr.vel.dot(&nh), cs(&pl), cs(&pr), pl.pre, pr.pre)
 }
 
 fn close(a: f64, b: f64, what: &str) {
@@ -261,15 +261,15 @@ fn adaptive_phi_f64_clamped_high_mach() {
 }
 
 #[test]
-fn adaptive_phi_is_the_sine_ramp_and_nothing_else() {
-    // `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)` — Fleischmann, Adami & Adams 2020 eq 24 — for
-    // its own sake, against the closed form at several mach numbers.
-    //
-    // the value of pinning it this tightly is that the scaling is the ONLY modulation of the
-    // acoustic dissipation. anything that raised phi back toward one — at a shock, at a contact
-    // discontinuity, in grid-aligned flow — would be adding dissipation, and the scheme exists to
-    // remove it. such a term would leave every other assertion in this file intact while quietly
-    // turning the solver back into classical HLLC.
+fn adaptive_phi_is_the_sine_ramp_on_pressure_uniform_faces() {
+    // `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)` — Fleischmann, Adami & Adams 2020 eq 24 —
+    // against the closed form at several mach numbers, on faces with NO pressure jump. there the
+    // compressibility-consistency clamp is an exact zero, so the ramp is the whole law and the
+    // scheme's low dissipation is fully realized: equal-pressure faces are the contact
+    // discontinuities and shock-transverse faces the reduction exists for, and nothing may add
+    // dissipation there. (faces whose pressure jump exceeds the incompressible `dp/p ~ gamma Ma^2`
+    // scale are OUTSIDE the ramp's derivation and are governed by the clamp — see the
+    // stratified-face tests below and the sealed-column entropy floor law in symbi.)
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
     let at = |ma: f64| {
@@ -301,7 +301,7 @@ fn adaptive_phi_is_the_sine_ramp_and_nothing_else() {
     let r = Prim::<f64, D> {
         rho: 2.0,
         vel: Tensor::new([1e-3, 0.0]),
-        pre: 1.005,
+        pre: 1.0,
     };
     let phi = phi_of(&l, &r, &n);
     // eq 25 takes the max over the two sides, each with its OWN sound speed — the denser side here
@@ -311,6 +311,69 @@ fn adaptive_phi_is_the_sine_ramp_and_nothing_else() {
     assert!(
         (phi - expect).abs() < 1e-12,
         "a contact discontinuity at Ma = {ma:.4e} gave phi = {phi}; eq 24 alone gives {expect}"
+    );
+}
+
+#[test]
+fn the_clamp_restores_dissipation_on_stratified_faces_and_only_there() {
+    // the compressibility-consistency clamp: the ramp's derivation assumes the incompressible
+    // fluctuation scaling `dp/p ~ gamma Ma^2`; a face whose pressure jump sits far above that
+    // scale at low mach is a stratified balance (dp/p ~ dx/H, mach-independent), where cutting
+    // the acoustic dissipation lets the hydrostatic residual ring and the entropy floor
+    // `K >= K_0` fails on a sealed column. measured regimes this separates: an accretor
+    // atmosphere carries dx/H = 0.075-0.25 per face at Ma ~ 0.025 (jump/scale ~ 100), while
+    // mach-0.06 taylor-green turbulence carries jump/scale ~ 0.05.
+    let n = Tensor::<f64, D>::unit(0);
+    let face = |pre_r: f64, ma: f64| {
+        let mk = |pre: f64| Prim::<f64, D> {
+            rho: 1.0,
+            vel: Tensor::new([ma * (GAMMA * 1.0_f64 / 1.0).sqrt(), 0.0]),
+            pre,
+        };
+        phi_of(&mk(1.0), &mk(pre_r), &n)
+    };
+    // a hydrostatic-scale jump at deep low mach: full classical dissipation restored.
+    assert_eq!(
+        face(1.05, 0.025),
+        1.0,
+        "a dp/p = 0.05 face at Ma 0.025 is two orders above the incompressible scale and \
+         must recover classical HLLC exactly"
+    );
+    // an incompressible-scale jump at the same mach: the clamp must lose to the ramp
+    // bit-for-bit — inert means the same float, which is what keeps a low-mach turbulence
+    // run byte-identical to the pure-ramp scheme.
+    let ma = 0.06;
+    let tiny_jump = 1.0 + 0.1 * GAMMA * ma * ma;
+    let ramp_only = face(1.0, ma);
+    assert_eq!(
+        face(tiny_jump, ma),
+        ramp_only,
+        "an incompressible-scale pressure fluctuation engaged the clamp; smooth subsonic \
+         turbulence would no longer be byte-stable"
+    );
+    // the clamp is dimensionless: rescaling both pressures together leaves phi unchanged —
+    // exactly wherever the clamp is saturated, and to rounding (the `p_l - p_r` subtraction
+    // re-rounds at each scale) on the ramp of the clamp itself.
+    let scaled = |s: f64, hi: f64| {
+        // the velocity rides each state's own sound speed so the mach number is held
+        // fixed while the pressure scale sweeps — otherwise the probe moves along the
+        // ramp and measures the mach dependence instead of the units dependence.
+        let mk = |pre: f64| Prim::<f64, D> {
+            rho: 1.0,
+            vel: Tensor::new([0.025 * (GAMMA * pre / 1.0).sqrt(), 0.0]),
+            pre,
+        };
+        phi_of(&mk(1.0 * s), &mk(hi * s), &n)
+    };
+    assert_eq!(
+        scaled(1.0, 1.05),
+        scaled(1e30, 1.05),
+        "pressure units leaked into the saturated clamp"
+    );
+    let (a, b) = (scaled(1.0, 1.005), scaled(1e30, 1.005));
+    assert!(
+        ((a - b) / a).abs() < 1e-12,
+        "pressure units leaked into the unsaturated clamp: {a} vs {b}"
     );
 }
 

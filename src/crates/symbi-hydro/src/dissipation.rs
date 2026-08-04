@@ -10,12 +10,14 @@
 // that mismatch drives the grid-aligned shock instability (the carbuncle). Scaling the acoustic
 // signal speeds by `phi(Ma_local)` removes the excess.
 //
-// the scaling is keyed on the FACE-NORMAL velocity component, and it is the only modulation of the
-// dissipation — see `adaptive_phi`.
+// the scaling is keyed on the FACE-NORMAL velocity component, floored by a
+// compressibility-consistency clamp on the face pressure jump: the low-mach reduction is valid
+// only under the incompressible fluctuation scaling `dp/p ~ gamma Ma^2`, and a face whose
+// pressure data contradicts that premise (a gravity-stratified balance, `dp/p ~ dx/H` at any
+// mach) recovers classical HLLC dissipation — see `adaptive_phi`.
 //
 // usage:
-//   let nhat = Tensor::unit(0);
-//   let phi = adaptive_phi(&prim_l, &prim_r, &nhat, gamma);
+//   let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r, p_l, p_r);
 // =============================================================================
 
 use symbi_ir::algebra::Scalar;
@@ -63,7 +65,28 @@ pub fn local_mach<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S) -> S {
 /// component is under a tenth of the local sound speed.
 pub const MACH_LIMIT: f64 = 0.1;
 
-/// the acoustic-dissipation scaling `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)`.
+/// margin of the compressibility-consistency clamp: the acoustic dissipation is restored once
+/// the face pressure jump exceeds `STRAT_MARGIN * Ma_local^2` relative pressure units — several
+/// times the `dp/p ~ gamma Ma^2` fluctuation scale of genuinely low-mach (incompressible-limit)
+/// flow, so smooth subsonic turbulence never engages it, while a gravity-stratified balance
+/// (`dp/p ~ dx/H` at any mach — two orders above the incompressible scale in an accretor
+/// atmosphere) restores classical HLLC exactly where the hydrostatic residual must be damped.
+pub const STRAT_MARGIN: f64 = 4.0;
+
+/// floor of the clamp's reference scale: the stagnation-pressure ceiling of ramp-active flow.
+/// the largest pressure structure a flow below `MACH_LIMIT` can build is the stagnation bump
+/// `dp/p ~ gamma Ma_limit^2 / 2 ~ 0.008`; a face jump above twice that cannot come from
+/// incompressible dynamics in the band where the ramp reduces dissipation, however small the
+/// face's own normal mach is. without this floor, a stagnation face inside a vortex (normal
+/// mach ~ 0, finite jump from the neighboring flow) would fire the clamp inside the very
+/// turbulence the low-mach scheme exists for.
+pub const INCOMP_JUMP_CEIL: f64 = 0.02;
+
+/// the acoustic-dissipation scaling: the fleischmann sine ramp, floored by the
+/// compressibility-consistency clamp,
+///
+///   `phi = max( sin(min(1, Ma/Ma_limit) * pi/2),
+///               min(1, (|dp|/p_min) / max(STRAT_MARGIN Ma^2, INCOMP_JUMP_CEIL)) )`.
 ///
 /// applied to the acoustic signal speeds `S_L` and `S_R` alone, so the acoustic dissipation falls
 /// off in proportion to the local flow speed rather than the sound speed, while the advective
@@ -71,18 +94,38 @@ pub const MACH_LIMIT: f64 = 0.1;
 /// derivative at the crossover, so a face drifting across `Ma_limit` does not see a kink in its
 /// flux; `phi = 1` recovers classical HLLC identically.
 ///
-/// nothing else modulates this. a detector that raised `phi` back toward one at shocks, at contact
-/// discontinuities, or in grid-aligned high-mach flow would be adding dissipation, which is the
-/// opposite of what the scheme is for — every competing shock-stable HLLC variant stabilizes by
-/// adding dissipation somewhere, and the point of this one is that it removes it instead. Where a
-/// strong shock genuinely needs a more dissipative flux, that is the job of a solver fallback
-/// a separate solver fallback, not a term buried in the low-mach scaling.
+/// the clamp enforces the ramp's own domain of validity. the low-mach reduction is derived under
+/// the incompressible-limit scaling `dp/p = O(gamma Ma^2)`; a gravity-stratified balance violates
+/// that premise categorically (`dp/p ~ dx/H`, mach-independent), and there the acoustic
+/// dissipation is exactly what damps the hydrostatic residual — removing it lets the residual
+/// ring dispersively and the entropy floor `K >= K_0` fails on a sealed stratified column (the
+/// regime a solid accretor surface holds its masked cells in). the clamp restores dissipation
+/// only up to classical HLLC, never beyond, and only where the pressure data contradicts the
+/// incompressible premise:
+///   - a contact discontinuity has no pressure jump, so the clamp NEVER fires there and the
+///     scheme's low contact dissipation is preserved by construction;
+///   - a face transverse to a grid-aligned shock sees near-uniform pressure along the front, so
+///     the shock-stability mechanism (the reason the ramp exists) is untouched;
+///   - shock/contact detectors that ADD dissipation beyond classical HLLC remain out of scope
+///     here — robustness at strong shocks is the job of a solver fallback, not this scaling.
 #[inline]
-pub fn adaptive_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S) -> S {
+pub fn adaptive_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S, p_l: S, p_r: S) -> S {
     let half_pi = S::from_f64(std::f64::consts::FRAC_PI_2);
     let ma = local_mach(vn_l, vn_r, cs_l, cs_r);
     let ratio = (ma / S::from_f64(MACH_LIMIT)).min(S::ONE);
-    (ratio * half_pi).sin()
+    let ramp = (ratio * half_pi).sin();
+    // relative face pressure jump against the largest jump an incompressible flow in the
+    // ramp-active band can present: the local `STRAT_MARGIN Ma^2` fluctuation scale, floored
+    // by the stagnation-pressure ceiling `INCOMP_JUMP_CEIL`. the floor is what keeps a
+    // grid-aligned stagnation face inside a low-mach vortex (face-normal mach ~ 0, finite
+    // neighbor-driven jump) from dividing by zero and firing the clamp inside legitimate
+    // turbulence — there the clamp stays bounded by `jump / INCOMP_JUMP_CEIL`, well under
+    // the ramp of any face that moves. a stratified balance exceeds BOTH scales and
+    // saturates the clamp to classical HLLC.
+    let jump = (p_l - p_r).abs() / p_l.min(p_r);
+    let scale = (S::from_f64(STRAT_MARGIN) * ma * ma).max(S::from_f64(INCOMP_JUMP_CEIL));
+    let clamp = (jump / scale).min(S::ONE);
+    ramp.max(clamp)
 }
 
 #[cfg(test)]
@@ -95,13 +138,13 @@ mod tests {
         // and the sound speed together must leave it unchanged. a formula that compared a velocity
         // against an absolute threshold would instead move with the units, making the solver's
         // dissipation depend on whether lengths are metres or parsecs.
-        let reference = adaptive_phi(0.03, 0.03, 1.0, 1.0);
+        let reference = adaptive_phi(0.03, 0.03, 1.0, 1.0, 1.0, 1.0);
         assert!(
             reference < 1.0,
             "this state must sit on the ramp for the invariance to be non-trivial, got {reference}"
         );
         for scale in [1e-100, 1e-3, 1.0, 1e3, 1e100] {
-            let got = adaptive_phi(0.03 * scale, 0.03 * scale, scale, scale);
+            let got = adaptive_phi(0.03 * scale, 0.03 * scale, scale, scale, 1.0, 1.0);
             // exact: `phi` divides the two before anything transcendental, and both scale
             // identically, so the quotient is bit-for-bit the same.
             assert_eq!(
@@ -116,18 +159,18 @@ mod tests {
         // eq 25 is a max over the two sides, each against its OWN sound speed. taking one side, or
         // an average, would let a face with one nearly-stagnant side reduce its dissipation while
         // the other side is moving — dissipation set by half the Riemann problem.
-        let hot = adaptive_phi(0.001, 0.5, 1.0, 1.0);
-        let both = adaptive_phi(0.5, 0.5, 1.0, 1.0);
+        let hot = adaptive_phi(0.001, 0.5, 1.0, 1.0, 1.0, 1.0);
+        let both = adaptive_phi(0.5, 0.5, 1.0, 1.0, 1.0, 1.0);
         assert_eq!(hot, both, "the moving side must set phi");
         assert_eq!(
-            adaptive_phi(0.5, 0.001, 1.0, 1.0),
+            adaptive_phi(0.5, 0.001, 1.0, 1.0, 1.0, 1.0),
             both,
             "and it must not matter which side it is"
         );
         // the sound speeds are per-side too: the colder side reaches the limit at a lower velocity.
-        let cold_right = adaptive_phi(0.01, 0.01, 1.0, 0.05);
+        let cold_right = adaptive_phi(0.01, 0.01, 1.0, 0.05, 1.0, 1.0);
         assert!(
-            cold_right > adaptive_phi(0.01, 0.01, 1.0, 1.0),
+            cold_right > adaptive_phi(0.01, 0.01, 1.0, 1.0, 1.0, 1.0),
             "a colder right state raises its own mach number and so raises phi"
         );
     }
@@ -138,8 +181,8 @@ mod tests {
         // crosses it one way or the other, and a signed ratio would make the scaling asymmetric
         // under a reflection of the grid.
         assert_eq!(
-            adaptive_phi(0.02, -0.03, 1.0, 1.0),
-            adaptive_phi(-0.02, 0.03, 1.0, 1.0)
+            adaptive_phi(0.02, -0.03, 1.0, 1.0, 1.0, 1.0),
+            adaptive_phi(-0.02, 0.03, 1.0, 1.0, 1.0, 1.0)
         );
         assert_eq!(local_mach(-0.05, 0.01, 1.0, 1.0), 0.05);
     }

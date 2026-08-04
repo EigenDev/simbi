@@ -260,7 +260,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                         let u_star_l = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
                         let u_star_r = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
 
-                        let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r);
+                        let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre);
                         let s_l_lm = phi * s_l;
                         let s_r_lm = phi * s_r;
 
@@ -454,7 +454,8 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                                 crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
                             let vn_l = prim_l.vel.dot(nhat);
                             let vn_r = prim_r.vel.dot(nhat);
-                            let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r);
+                            let phi =
+                                adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre);
 
                             let usl =
                                 rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
@@ -1530,15 +1531,24 @@ mod tests {
         let eos = IdealGas {
             gamma: 4.0 / 3.0f64,
         };
+        // a converging velocity perturbation along the front — velocities jump, pressure and
+        // density UNIFORM. pressure uniformity is the physical state along a shock front and the
+        // condition under which the low-mach reduction applies at all: a face-normal pressure
+        // jump far above the incompressible `dp/p ~ gamma Ma^2` scale is a stratified/acoustic
+        // structure, where the compressibility-consistency clamp restores classical dissipation
+        // instead. the velocity jump generates the wrongly-scaled term this scheme exists to
+        // remove — the momentum-flux dissipation `~ c_s rho du`, applied at O(c_s) to a face
+        // whose flow is nearly at rest — while HLLC's contact resolution already keeps the
+        // density channel clean.
         let l = Prim {
             rho: 1.0,
-            vel: Tensor::new([1.0e-6, 0.99]),
+            vel: Tensor::new([1.0e-3, 0.99]),
             pre: 1.0,
         };
         let r = Prim {
-            rho: 1.2,
-            vel: Tensor::new([-1.0e-6, 0.99]),
-            pre: 1.1,
+            rho: 1.0,
+            vel: Tensor::new([-1.0e-3, 0.99]),
+            pre: 1.0,
         };
         let across = Tensor::new([1.0, 0.0]);
         let along = Tensor::new([0.0, 1.0]);
@@ -1555,15 +1565,20 @@ mod tests {
         let std = hllc_rhd(&eos, &l, &r, &across, 0.0, ShockwaveLimiter::Standard);
         let lm = hllc_rhd(&eos, &l, &r, &across, 0.0, ShockwaveLimiter::Fleischmann);
 
-        // the density flux across a face whose normal velocity is ~1e-6 should be ~1e-6. classical
-        // HLLC produces far more than that, entirely from acoustic dissipation; the scaling must
-        // remove most of it.
+        // the exact momentum flux across this symmetric face is the uniform pressure plus a
+        // convective term of order rho du^2 ~ 1e-6; everything classical HLLC adds beyond that
+        // is acoustic dissipation `~ c_s rho du`, and the scaling must remove most of it.
+        let spurious_std = (std.mom[0] - 1.0).abs();
+        let spurious_lm = (lm.mom[0] - 1.0).abs();
         assert!(
-            lm.den.abs() < 0.1 * std.den.abs(),
-            "the transverse density flux is {} under HLLC-LM against {} under HLLC; the acoustic \
-             dissipation has not been reduced",
-            lm.den,
-            std.den
+            spurious_std > 1.0e-4,
+            "the classical momentum flux carries no measurable acoustic dissipation \
+             ({spurious_std:e}); the probe is vacuous"
+        );
+        assert!(
+            spurious_lm < 0.1 * spurious_std,
+            "the spurious transverse momentum flux is {spurious_lm:e} under HLLC-LM against \
+             {spurious_std:e} under HLLC; the acoustic dissipation has not been reduced"
         );
 
         // and the shock-normal face must be untouched: there the flow is supersonic and the scheme
