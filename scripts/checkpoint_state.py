@@ -27,6 +27,15 @@ class CheckpointState:
     outcome: str
 
 
+# tie-break precedence when two checkpoints share an evolution point. a run whose last
+# scheduled dump lands exactly on the end time writes two files at the SAME time and
+# iteration -- the dump, which reads as still running, and the authoritative terminator --
+# and ordering on the pair alone resolves that arbitrarily, by directory order. a terminal
+# status is never the arbitrary answer: a crash outranks a completion so a failure is never
+# reported as success, and both outrank a checkpoint that merely exists.
+OUTCOME_PRECEDENCE = {"crashed": 3, "completed": 2, "interrupted": 1, "running": 0}
+
+
 def checkpoint_outcome(path: Path) -> str:
     name = path.name.lower()
     if ".final" in name:
@@ -55,7 +64,15 @@ def latest_checkpoint(directory: Path) -> CheckpointState | None:
         for path in directory.glob("*chkpt*.h5")
         if (state := read_checkpoint_state(path)) is not None
     )
-    return max(states, key=lambda state: (state.time, state.iteration), default=None)
+    return max(
+        states,
+        key=lambda state: (
+            state.time,
+            state.iteration,
+            OUTCOME_PRECEDENCE[state.outcome],
+        ),
+        default=None,
+    )
 
 
 def main() -> int:
