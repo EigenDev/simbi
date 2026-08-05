@@ -26,7 +26,7 @@ pub mod dispatch;
 // support utilities live in the `symbi-substrate` crate; re-exported at the
 // `crate::regimes` / `crate::kernels` paths, which is where evolve, refinement,
 // the prelude, and downstream callers name them.
-pub use symbi_discretize::Recon;
+pub use symbi_discretize::{EosArm, Recon};
 pub use symbi_substrate::{kernels, regimes};
 
 // ---- re-exports ----

@@ -42,6 +42,7 @@ from simbi.types.input import (
     CoordSystem,
     Spacetime,
     CtMethod,
+    Eos,
     Limiter,
     Reconstruction,
     RefinementMode,
@@ -260,6 +261,17 @@ class SimbiProblem(BaseModel):
             gt=0.0,
             description="constant isothermal sound speed; required for isothermal "
             "regimes unless locally_isothermal (then cs^2(x) is derived per cell)",
+        ),
+    ]
+    eos: Annotated[
+        Eos,
+        ProblemParam(
+            Eos.IDEAL,
+            cli=True,
+            description="equation-of-state closure: 'ideal' (gamma-law, uses "
+            "adiabatic_index) or 'synge' (taub-mathews relativistic perfect gas, "
+            "parameter-free; effective gamma walks 5/3 cold -> 4/3 hot; rhd on a "
+            "flat spacetime only)",
         ),
     ]
 
@@ -995,6 +1007,7 @@ class SimbiProblem(BaseModel):
             "spacetime": Spacetime,
             "regime": Regime,
             "reconstruction": Reconstruction,
+            "eos": Eos,
             "timestepping": TimeStepping,
             "x1_spacing": CellSpacing,
             "x2_spacing": CellSpacing,
@@ -1064,11 +1077,37 @@ class SimbiProblem(BaseModel):
                 "`sound_speed=...`), unless locally_isothermal is True (then "
                 "cs^2(x) is derived per cell from the initial pressure profile)"
             )
-        if not self.isothermal and self.adiabatic_index is None:
+        if (
+            not self.isothermal
+            and self.adiabatic_index is None
+            and self.eos != Eos.SYNGE
+        ):
             raise ValueError(
                 "energy-bearing (non-isothermal) regimes require an "
                 "adiabatic_index (set `adiabatic_index=...`)"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_eos(self) -> SimbiProblem:
+        """the synge closure is parameter-free and relativistic: reject a declared
+        adiabatic_index alongside it (dead configuration, never swallowed) and any
+        non-rhd regime, then supply the inert placeholder gamma the plumbing
+        carries (the backend binds it to the kernels but the taub-mathews closure
+        never reads it)."""
+        if self.eos == Eos.SYNGE:
+            if self.regime != Regime.RHD:
+                raise ValueError(
+                    f"eos = 'synge' (taub-mathews) is a relativistic closure and "
+                    f"applies to the rhd regime only; got '{self.regime.value}'"
+                )
+            if self.adiabatic_index is not None:
+                raise ValueError(
+                    "adiabatic_index applies to the ideal (gamma-law) closure only; "
+                    "the synge (taub-mathews) closure is parameter-free — its "
+                    "effective gamma is set by the temperature"
+                )
+            object.__setattr__(self, "adiabatic_index", 5.0 / 3.0)
         return self
 
     @model_validator(mode="after")

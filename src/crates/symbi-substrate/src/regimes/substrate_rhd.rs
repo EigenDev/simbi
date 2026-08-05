@@ -101,6 +101,11 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub gradient_bcs: Vec<GradientBc>,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
+    /// the eos closure arm: `IdealGamma` (default, gamma-law) or `TaubMathews`
+    /// (the synge-gas approximation, parameter-free — `gamma` stays bound but
+    /// inert on that arm). selects the `_tm` kernel twins, baked for the flat
+    /// cartesian rhd family only.
+    pub eos: symbi_discretize::EosArm,
     /// the horizon-excision sphere radius about the chart origin (cartesian
     /// kerr-schild only); 0 disables the excision pass entirely.
     pub excision_radius: f64,
@@ -126,10 +131,19 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             boundary_dags: Vec::new(),
             gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
+            eos: symbi_discretize::EosArm::IdealGamma,
             excision_radius: 0.0,
             excision_rho: 1.0,
             excision_pre: 1.0,
         }
+    }
+
+    /// select the eos closure arm. the taub-mathews (synge-gas) closure is baked
+    /// for the flat cartesian rhd family only — a curved spacetime or a
+    /// non-cartesian chart refuses at dispatch. fluent.
+    pub fn with_eos(mut self, eos: symbi_discretize::EosArm) -> Self {
+        self.eos = eos;
+        self
     }
 
     /// register a DRIVEN boundary. the returned id (registration order,
@@ -228,6 +242,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.theta,
             self.solver,
             symbi_discretize::Recon::Plm,
+            self.eos,
             false,
         );
     }
@@ -261,8 +276,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // stay untagged here.
         let geom_sfx = gr_chart_dof_tag(sim.geom.coords, sim.geom.spacetime, DOF, D);
         let st_sfx = spacetime_slug(sim.geom.spacetime);
+        if self.eos == symbi_discretize::EosArm::TaubMathews {
+            assert!(
+                geom_sfx.is_empty() && st_sfx.is_empty(),
+                "the taub-mathews c2p is baked for the flat rhd family \
+                 (minkowski, ncomp == ndim) only"
+            );
+        }
         let (name, scalars) = if st_sfx.is_empty() {
-            let name = format!("rhd_c2p{geom_sfx}_{D}d");
+            let name = format!("rhd_c2p{}{geom_sfx}_{D}d", self.eos.suffix());
             let scalars = scalars_for(&name, |bind| match bind {
                 ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
                 o => panic!("rhd c2p: unexpected scalar {o:?}"),
@@ -420,6 +442,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.cfl_scratch,
             "rhd",
+            self.eos,
             self.gamma,
             self.cfl_number,
             source_cfl.as_deref(),
@@ -647,6 +670,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.freeze_streak,
             |dir| {
+                // the first-order redo stays on the run's own eos closure: a
+                // gamma-law fallback flux against taub-mathews states would
+                // splice a DIFFERENT physics into the troubled faces.
                 dispatch_flux(
                     sim,
                     pre,
@@ -656,6 +682,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     0.0,
                     Solver::Hlle,
                     symbi_discretize::Recon::Plm,
+                    self.eos,
                     curved,
                 )
             },

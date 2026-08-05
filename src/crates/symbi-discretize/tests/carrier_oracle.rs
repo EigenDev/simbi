@@ -18,7 +18,7 @@ use harness::{KernelRun, Out};
 
 use symbi_algebra::Tensor;
 use symbi_discretize::{
-    Coords, GvKernel, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
+    Coords, EosArm, GvKernel, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
     adiabatic_hllc_flux_gv, imhd_c2p_gv, imhd_flux_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
     iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv, nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv,
     nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv, rhd_c2p_gv, rhd_flux_gr_gv, rhd_flux_gv,
@@ -272,7 +272,7 @@ fn rhd_cons_at(i: usize) -> Cons<f64, 3> {
 
 #[test]
 fn rhd_c2p_round_trips_against_native_physics() {
-    let out = KernelRun::new(rhd_c2p_gv::<3>(RHD_ITERS))
+    let out = KernelRun::new(rhd_c2p_gv::<3>(RHD_ITERS, EosArm::IdealGamma))
         .grid([N])
         .field_with("cons_den", |c| rhd_cons_at(c[0]).den)
         .field_with("cons_mom_0", |c| rhd_cons_at(c[0]).mom[0])
@@ -502,7 +502,7 @@ fn rhd_flux_matches_native_physics() {
     };
     let eos = IdealGas { gamma: RHD_GAMMA };
     let f = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
-    let out = run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0), &prim, RHD_GAMMA, 0);
+    let out = run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -645,6 +645,7 @@ fn rhd_wave_speed_map_matches_native_physics() {
         &CART_1D,
         &AXES_1D,
         1,
+        EosArm::IdealGamma
     ))
     .grid([N])
     .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
@@ -1120,7 +1121,7 @@ fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
         0.0,
         ShockwaveLimiter::Standard,
     );
-    let out = run_uniform_euler_flux::<2>(rhd_hllc_flux_gv::<2>(0), &prim, RHD_GAMMA, 0);
+    let out = run_uniform_euler_flux::<2>(rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -1232,7 +1233,7 @@ fn hllc_hlld_builders_render_to_cpu_and_cuda() {
     KernelRun::new(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm))
         .grid([1, NSWEEP])
         .assert_lowers();
-    KernelRun::new(rhd_hllc_flux_gv::<2>(0))
+    KernelRun::new(rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma))
         .grid([1, NSWEEP])
         .assert_lowers();
     KernelRun::new(rmhd_hllc_flux_gv(1, 0, 0))

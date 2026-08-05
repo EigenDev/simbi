@@ -244,7 +244,15 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     }
 
     /// declare the hydrodynamic surface stack (fluent; the default is the drain).
+    /// the penalize step keys on `mask_radius`, so a surface declared on a body
+    /// kind that carries no mask (passive / purely gravitational) would never
+    /// run — refuse it here rather than silently evolve without the wall.
     pub fn with_surface(mut self, surface: SurfaceSpec) -> Self {
+        assert!(
+            self.mask_radius().is_some(),
+            "this body kind carries no penalization mask, so the declared surface \
+             stack would be silently ignored; use a black-hole or rigid-sphere body"
+        );
         self.spec.surface = surface;
         self
     }
@@ -739,15 +747,31 @@ mod tests {
         assert_eq!(b.spec.surface, SurfaceSpec::Drain);
         assert_eq!(b.spec.magnetic, MagneticSpec::None);
         // the builders route through `spec`, and the surface stack is untouched by the
-        // magnetic declaration.
+        // magnetic declaration. a rigid sphere carries the mask a declared surface needs.
         let wall = SurfaceSpec::Porous {
             porosity: 0.0,
             k_eta_n: 50.0,
             k_eta_t: 50.0,
         };
-        let b = b.with_surface(wall).with_magnetic(MagneticSpec::None);
+        let b = Body::<f64, 2>::rigid_sphere(0, V2::zeros(), V2::zeros(), 1.0, 0.1, 1.0, false)
+            .with_surface(wall)
+            .with_magnetic(MagneticSpec::None);
         assert_eq!(b.spec.surface, wall);
         assert_eq!(b.spec.magnetic, MagneticSpec::None);
+    }
+
+    #[test]
+    #[should_panic(expected = "no penalization mask")]
+    fn a_surface_on_a_maskless_body_is_refused() {
+        // the penalize step keys on mask_radius, which a passive body lacks; a declared
+        // surface stack there would be silently ignored, so the declaration itself refuses.
+        let _ = Body::<f64, 2>::passive(0, V2::zeros(), V2::zeros(), 1.0, 0.1).with_surface(
+            SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 50.0,
+                k_eta_t: 50.0,
+            },
+        );
     }
 
     #[test]

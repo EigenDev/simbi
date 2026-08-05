@@ -327,6 +327,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             self.theta,
             Solver::Hlle,
             symbi_discretize::Recon::Plm,
+            symbi_discretize::EosArm::IdealGamma,
             false,
         );
     }
@@ -412,6 +413,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &self.pre,
             &self.cfl_scratch,
             "iso",
+                        symbi_discretize::EosArm::IdealGamma,
             ISO_GAMMA,
             self.cfl_number,
             None,
@@ -660,6 +662,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     0.0,
                     Solver::Hlle,
                     symbi_discretize::Recon::Plm,
+                    symbi_discretize::EosArm::IdealGamma,
                     false,
                 )
             },

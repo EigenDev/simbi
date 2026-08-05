@@ -301,6 +301,17 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self.recon = recon;
         self
     }
+
+    /// eos closure selector. the newtonian family is gamma-law only — the synge
+    /// (taub-mathews) closure is relativistic — so this validates rather than
+    /// stores; a shared regime-generic build path may call it unconditionally.
+    pub fn with_eos(self, eos: symbi_discretize::EosArm) -> Self {
+        assert!(
+            eos == symbi_discretize::EosArm::IdealGamma,
+            "the synge-gas closure applies to the rhd regime only"
+        );
+        self
+    }
 }
 
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
@@ -321,6 +332,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.theta,
             self.solver,
             self.recon,
+            symbi_discretize::EosArm::IdealGamma,
             false,
         );
     }
@@ -414,6 +426,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.cfl_scratch,
             "iso",
+                        symbi_discretize::EosArm::IdealGamma,
             self.gamma,
             self.cfl_number,
             None,
@@ -659,6 +672,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     0.0,
                     Solver::Hlle,
                     symbi_discretize::Recon::Plm,
+                    symbi_discretize::EosArm::IdealGamma,
                     false,
                 )
             },

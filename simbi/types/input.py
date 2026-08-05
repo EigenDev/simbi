@@ -146,6 +146,18 @@ class Reconstruction(str, ExtendedEnum):
     PPM = "ppm"
 
 
+class Eos(str, ExtendedEnum):
+    # the gamma-law closure p = (gamma - 1) rho e, parameterized by adiabatic_index.
+    IDEAL = "ideal"
+    # taub-mathews (mignone, plewa & bodo 2005) approximation to the synge relativistic
+    # perfect gas: h = 2.5 theta + sqrt(2.25 theta^2 + 1) with theta = p/rho, parameter-free.
+    # the effective adiabatic index walks 5/3 (cold) -> 4/3 (hot), so a relativistic blast
+    # decelerating into the non-relativistic phase carries the correct trans-relativistic
+    # thermodynamics in one run. rhd on a flat (minkowski) spacetime only; adiabatic_index
+    # applies to the ideal closure alone and is rejected alongside synge.
+    SYNGE = "synge"
+
+
 class Limiter(str, ExtendedEnum):
     # the slope limiter for PLM reconstruction (mirrors the C++ LIMITER enum). MINMOD is the
     # theta-MC family parameterised by `plm_theta` (1 = pure minmod, 2 = MC); VAN_LEER is the smooth

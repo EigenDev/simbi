@@ -247,3 +247,202 @@ fn ppm_strong_shock_stays_inside_the_wave_fan_band() {
         "strong shock tube pressure left the wave-fan band under ppm: [{pre_lo:.9}, {pre_hi:.9}]"
     );
 }
+
+/// gravitational infall onto a 4-cell body, optionally sealed by a porosity-0
+/// penalized wall — the accretor geometry where the parabola's -3..+2 stencil
+/// reads across the mask every step. returns (min K/K0 outside the mask + ppm
+/// halo, radius of that minimum, max interior rho) after evolving to `t_end`;
+/// panics on any non-finite or non-positive state.
+#[cfg(test)]
+fn sealed_wall_infall_probe(
+    recon: Recon,
+    solver: Solver,
+    walled: bool,
+    n: usize,
+    ts: Timestepping,
+    cfl: f64,
+    t_end: f64,
+) -> (f64, f64, f64) {
+    use symbi_ib::{Body, BodyCollection, SurfaceSpec};
+    type Sim3 = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    // the body radius is FIXED in physical units (4 dx at n = 32) so a
+    // resolution sweep refines the same physical problem.
+    const R_BODY: f64 = 0.125;
+    let dx = 1.0 / n as f64;
+    let mut sim = Sim3::build(Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian)
+        .cells([n, n, n])
+        .origin([-0.5, -0.5, -0.5])
+        .spacing([dx, dx, dx])
+        .ghosts(3)
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .cfl(cfl)
+        .timestepping(ts)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(|_| Prim {
+            rho: 1.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: 0.6, // cs = 1 at gamma = 5/3
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(if walled {
+            // a black-hole-kind body carries the mask radius the penalize step keys on;
+            // porosity 0 with the drain off makes it a pure sealed wall.
+            Body::black_hole(
+                0,
+                Tensor::new([0.0; 3]),
+                Tensor::zeros(),
+                1.0,
+                R_BODY,
+                R_BODY,
+                0.0,
+                0.0,
+                R_BODY,
+            )
+            .with_surface(SurfaceSpec::Porous {
+                porosity: 0.0,
+                k_eta_n: 50.0,
+                k_eta_t: 0.0,
+            })
+        } else {
+            Body::gravitational(0, Tensor::new([0.0; 3]), Tensor::zeros(), 1.0, R_BODY, R_BODY)
+        }));
+    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(
+        5.0 / 3.0,
+        cfl,
+        &sim.geom.allocated,
+    )
+    .with_solver(solver)
+    .expect("solver/regime mismatch")
+    .reconstruction(recon);
+    evolve(&mut sim, &sub, t_end).expect("sealed wall evolve failed");
+    assert!(sim.iteration > 10, "barely stepped; the probe is vacuous");
+
+    let k0 = 0.6;
+    let (mut worst_k, mut worst_r, mut rho_max) = (f64::INFINITY, 0.0_f64, 0.0_f64);
+    let mut worst_c = [0isize; 3];
+    for c in sim.geom.interior.iter() {
+        let rho = *sim.fields.prim.rho.view().at(c);
+        let pre = *sim.fields.prim.pre_field().expect("adiabatic pre").view().at(c);
+        assert!(
+            rho.is_finite() && pre.is_finite() && rho > 0.0 && pre > 0.0,
+            "non-finite or non-positive state at {c:?} after {} steps",
+            sim.iteration
+        );
+        rho_max = rho_max.max(rho);
+        // K measured outside the mask plus its reconstruction halo (the ppm reach).
+        let r: f64 = (0..3)
+            .map(|a| {
+                let x = (c[a] as f64 + 0.5) * dx - 0.5;
+                x * x
+            })
+            .sum::<f64>()
+            .sqrt();
+        if r > R_BODY + 3.0 * dx {
+            let kk = pre / rho.powf(5.0 / 3.0) / k0;
+            if kk < worst_k {
+                worst_k = kk;
+                worst_r = r;
+                worst_c = c;
+            }
+        }
+    }
+    // the character of the worst cell: a large pressure jump with converging
+    // velocity marks a compression front (the classical ppm entropy-glitch
+    // habitat); small jumps in diverging flow mark a smooth-region defect.
+    let pre_v = sim.fields.prim.pre_field().expect("adiabatic pre").view();
+    let (mut jump, mut divv) = (0.0_f64, 0.0_f64);
+    for a in 0..3 {
+        let (mut lo, mut hi) = (worst_c, worst_c);
+        lo[a] -= 1;
+        hi[a] += 1;
+        let (pl, pc, pr) = (*pre_v.at(lo), *pre_v.at(worst_c), *pre_v.at(hi));
+        jump = jump.max(((pr - pc).abs().max((pc - pl).abs())) / pc);
+        let vl = *sim.fields.prim.vel[a].view().at(lo);
+        let vr = *sim.fields.prim.vel[a].view().at(hi);
+        divv += (vr - vl) / (2.0 * dx);
+    }
+    println!(
+        "recon={recon:?} solver={solver:?} walled={walled} n={n} ts={ts:?} cfl={cfl}: \
+         min K/K0 = {worst_k:.6} at r = {:.2} r_body ({:.2} dx past the halo), \
+         max rho = {rho_max:.4}, worst cell |dp|/p = {jump:.3}, div v = {divv:.2}",
+        worst_r / R_BODY,
+        (worst_r - R_BODY - 3.0 * dx) / dx
+    );
+    (worst_k, worst_r, rho_max)
+}
+
+/// the attribution sweep behind the entropy gate below: rk order (time
+/// coupling), cfl at fixed grid (dt scaling), and resolution at fixed cfl
+/// (dx scaling), each printing the worst cell's shock character. diagnostic
+/// only — run explicitly with --ignored.
+#[test]
+#[ignore]
+fn diagnose_ppm_entropy_dip_scaling() {
+    let p = |n, ts, cfl| {
+        sealed_wall_infall_probe(Recon::Ppm, Solver::HllcLm, false, n, ts, cfl, 0.08)
+    };
+    p(32, Timestepping::Rk2, 0.3);
+    p(32, Timestepping::Rk3, 0.3);
+    p(32, Timestepping::Rk2, 0.15);
+    p(48, Timestepping::Rk2, 0.3);
+    p(64, Timestepping::Rk2, 0.3);
+}
+
+/// the ppm entropy floor on gravitational infall: the adiabat violation must be
+/// SMALL and NON-GROWING under refinement. the unflattened parabola vented
+/// K = p/rho^gamma anti-diffusively — the dip GREW with resolution (1.3e-3 at
+/// n = 32 to 2.4e-3 at n = 64 open, 3.4e-5 to 1.7e-4 walled at a mid-ramp
+/// flatten, worst cell tracking the steepening compression inward) — because
+/// its dispersive truncation beats the riemann dissipation its own small face
+/// jumps starve. the convergence-gated flatten restores the dissipation there;
+/// what remains is truncation in the sub-onset band: measured 1.3e-5 at n = 32
+/// falling to 9.7e-6 at n = 64 (walled), 3.4e-5 to 9.1e-6 (open). the bounds:
+/// 5e-5 absolute sits 1.5-4x above the measured floor and 26x below the
+/// unflattened vent; the 1.5x growth cap sits above extreme-value noise in a
+/// min-over-cells statistic (healthy runs measure 0.23-0.75x) and below every
+/// measured defective regime (1.85x, 5x). a fixed-n comparison against plm
+/// (which holds K/K0 = 1.0 exactly here) is NOT the law: plm holds by
+/// dissipation-dominance at second order, which a higher-order scheme cannot
+/// match at fixed n and converges past instead.
+#[test]
+fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
+    let (k_32, _, rho_max) = sealed_wall_infall_probe(
+        Recon::Ppm,
+        Solver::HllcLm,
+        true,
+        32,
+        Timestepping::Rk3,
+        0.3,
+        0.08,
+    );
+    let (k_64, _, _) = sealed_wall_infall_probe(
+        Recon::Ppm,
+        Solver::HllcLm,
+        true,
+        64,
+        Timestepping::Rk3,
+        0.3,
+        0.08,
+    );
+    assert!(
+        rho_max > 1.05,
+        "no pile-up developed (max rho = {rho_max:.4}); the wall never loaded and \
+         the probe is vacuous"
+    );
+    let dip_32 = (1.0 - k_32).max(0.0);
+    let dip_64 = (1.0 - k_64).max(0.0);
+    println!("entropy dip: n=32 {dip_32:.3e}, n=64 {dip_64:.3e}");
+    assert!(
+        dip_32 <= 5.0e-5,
+        "ppm entropy dip {dip_32:.3e} at n = 32 exceeds the truncation scale of the \
+         flattened scheme — the convergence-gated flatten is no longer restoring \
+         dissipation in cell-scale compressions"
+    );
+    assert!(
+        dip_64 <= 1.5 * dip_32 + 1.0e-12,
+        "ppm entropy dip grows under refinement (n = 32: {dip_32:.3e}, n = 64: \
+         {dip_64:.3e}); a dip that sharpens with resolution is the anti-diffusive \
+         vent, not truncation"
+    );
+}

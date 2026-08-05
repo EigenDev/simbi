@@ -13,6 +13,16 @@ use symbi_algebra::OrderedNumeric;
 use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
+/// drain the device queue before a host read of device-accessible fields.
+/// field storage is unified memory, so a synced host read returns the kernels'
+/// bytes; without the sync the read races in-flight launches. no-op on host.
+fn host_read_barrier<Mem: MemorySpace>() {
+    #[cfg(feature = "gpu")]
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        symbi_xpu::ctx_sync();
+    }
+}
+
 /// scan the c2p error field and return the bitwise OR of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.
 pub fn scan_c2p_errors<
@@ -33,7 +43,9 @@ where
     symbi_hydro::c2p_result::ErrorCode(combined)
 }
 
-/// the first failed c2p cell in lexicographic interior order. host diagnostics only.
+/// the first failed c2p cell in lexicographic interior order. a fatal-path
+/// diagnostic: on a device backend it drains the queue and reads the unified
+/// fields from the host, so it is only for call sites about to abort.
 pub fn first_c2p_error<
     const D: usize,
     const DOF: usize,
@@ -45,9 +57,7 @@ pub fn first_c2p_error<
 where
     Mem: Sync,
 {
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        return None;
-    }
+    host_read_barrier::<Mem>();
     for coord in sim.geom.interior.iter() {
         let code = sim.fields.c2p_error.view().at(coord).to_f64() as u8;
         if code != 0 {
@@ -58,7 +68,8 @@ where
 }
 
 /// host snapshot of the first primitive rejected by the post-c2p validity
-/// contract. values are converted only at the diagnostic boundary.
+/// contract. values are converted only at the diagnostic boundary. on a device
+/// backend it drains the queue first (fatal-path use only).
 pub fn first_c2p_failure_state<
     const D: usize,
     const DOF: usize,
@@ -70,9 +81,7 @@ pub fn first_c2p_failure_state<
 where
     Mem: Sync,
 {
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        return None;
-    }
+    host_read_barrier::<Mem>();
     for coord in sim.geom.interior.iter() {
         let status = sim.fields.c2p_error.view().at(coord).to_f64() as u8;
         if status == 0 {

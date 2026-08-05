@@ -16,7 +16,7 @@ use std::fs;
 
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
-    Coords, GeoSource, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
+    Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, adiabatic_c2p_gv, adiabatic_flux_gv,
     godunov_mass_gv,
     godunov_stage_gv, iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
     rhd_c2p_gv, rhd_flux_gv, snapshot_gv,
@@ -90,13 +90,13 @@ fn main() {
     // once) + sqrt (lorentz factor). the GPU-risky construct is the deep iterate; this is
     // the on-device proof it emits compilable CUDA. the gv single-source physics
     // (symbi-hydro's `rhd_recover` at S=Gv), like iso.
-    let (rhd_k, rhd_writes) = rhd_c2p_gv::<1>(20);
+    let (rhd_k, rhd_writes) = rhd_c2p_gv::<1>(20, EosArm::IdealGamma);
     emit_gv(&out, "rhd_c2p_1d", 1, rhd_k, rhd_writes);
 
     // rhd flux: reconstruction + the canonical HLLE with RELATIVISTIC physics (lorentz
     // factor + relativistic enthalpy/sound speed + the mignone-bodo wave speeds). gv single
     // source (riemann::hlle at the Rhd regime).
-    let (rhd_f, rhd_fw) = rhd_flux_gv::<1>(0);
+    let (rhd_f, rhd_fw) = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
     emit_gv(&out, "rhd_face_flux_1d", 1, rhd_f, rhd_fw);
 
     // the conserved-update family — godunov step, RK2, snapshot — EOS-generic gv kernels

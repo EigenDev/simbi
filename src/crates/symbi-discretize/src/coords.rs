@@ -81,6 +81,33 @@ impl Recon {
     }
 }
 
+/// the equation-of-state closure — a codegen-time choice for the relativistic
+/// family. the gamma-law is a runtime scalar (one kernel serves every gamma),
+/// so only CLOSURE-STRUCTURE changes appear here: the taub-mathews synge-gas
+/// approximation replaces the gamma-law algebra throughout the traced physics
+/// and is therefore a distinct baked kernel. defaults to `IdealGamma`, so
+/// existing builders need no annotation and their kernel names are unchanged.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum EosArm {
+    /// gamma-law ideal gas, the runtime `gamma` scalar selecting the index.
+    #[default]
+    IdealGamma,
+    /// taub-mathews approximation to the synge relativistic perfect gas:
+    /// parameter-free, effective index 5/3 -> 4/3 across theta = p/rho.
+    /// the `gamma` kernel scalar stays bound but unread.
+    TaubMathews,
+}
+
+impl EosArm {
+    /// kernel-name suffix. the gamma-law family keeps its unsuffixed names.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            EosArm::IdealGamma => "",
+            EosArm::TaubMathews => "_tm",
+        }
+    }
+}
+
 impl Coords {
     /// project the codegen-time mirror onto the runtime `symbi_geometry::Geometry` — so the ONE
     /// shared kernel-name suffix protocol (`kernel_slug`) takes a single enum family for both the

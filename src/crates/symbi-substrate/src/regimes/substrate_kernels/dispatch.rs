@@ -160,6 +160,10 @@ pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
     pre: &Field<Sc, D, Mem>,
     scratch: &Field<Sc, D, Mem>,
     prefix: &str,
+    // the eos closure arm: the taub-mathews (`_tm`) twins are baked for the rhd
+    // flat-cartesian family only; every other regime passes `IdealGamma` (empty
+    // suffix, names unchanged).
+    eos: symbi_discretize::EosArm,
     gamma: f64,
     cfl_number: f64,
     // the GR source-admissibility CFL kernel to fold in after the wave-speed map (the wu 2017
@@ -179,7 +183,17 @@ where
     let sfx = geom_suffix(geom.coords, DOF, D);
     // the spacetime tag: Schwarzschild -> "_schw" (the GR coordinate-speed map). ORTHOGONAL to sfx.
     let st_sfx = spacetime_slug(geom.spacetime);
-    let name = format!("{prefix}_wave_speed_map{sfx}{st_sfx}_{D}d");
+    if eos == symbi_discretize::EosArm::TaubMathews {
+        // the tm wave-speed maps are baked for every FLAT DOF == D chart
+        // (cartesian + the curvilinear cells); curved spacetimes and the
+        // swirl momentum lift have no tm twin.
+        assert!(
+            prefix == "rhd" && DOF == D && geom.spacetime == symbi_geometry::Spacetime::Minkowski,
+            "the taub-mathews wave-speed map is baked for the flat rhd family \
+             (minkowski, ncomp == ndim) only"
+        );
+    }
+    let name = format!("{prefix}_wave_speed_map{}{sfx}{st_sfx}_{D}d", eos.suffix());
     // scalars BY NAME: gamma + the per-axis CFL widths. the kernel's declared set drives it
     // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`) — no geometry branch here.
     // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
@@ -2643,11 +2657,29 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     theta: f64,
     solver: Solver,
     recon: symbi_discretize::Recon,
+    // the eos closure arm: the taub-mathews (`_tm`) flux twins are baked for the
+    // rhd flat-cartesian family only; every other regime passes `IdealGamma`
+    // (empty suffix, names unchanged). the gamma scalar stays bound on the tm
+    // arm (bound-but-inert, uniform ABI).
+    eos: symbi_discretize::EosArm,
     rusanov: bool,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    if eos == symbi_discretize::EosArm::TaubMathews {
+        // the tm flux twins are chart-free like every DOF == D rhd flux (the
+        // curvilinear factors ride godunov + the wave-speed map), but they are
+        // baked for the FLAT spacetime and the plain momentum layout only.
+        assert!(
+            prefix == "rhd"
+                && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
+                && DOF == D
+                && !rusanov,
+            "the taub-mathews flux twins are baked for the flat rhd family \
+             (minkowski, ncomp == ndim) only"
+        );
+    }
     // the ppm face pair loads -3..+2 along the sweep and is baked for the flat
     // cartesian adiabatic family only; anything else must refuse here, loudly,
     // before an unbaked-kernel panic or a garbage ghost read could occur.
@@ -2696,7 +2728,9 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // (Minkowski) keeps the unsuffixed flux, so the slug is appended ONLY off-Minkowski.
     let sp_st_sfx = spacetime_slug(sim.geom.spacetime);
     let recon_sfx = recon.suffix();
-    let name = format!("{prefix}_face_flux{solver_sfx}{recon_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
+    let eos_sfx = eos.suffix();
+    let name =
+        format!("{prefix}_face_flux{solver_sfx}{recon_sfx}{eos_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
     // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
     // declaring theta on the kernel can never silently shift a positional arg here.

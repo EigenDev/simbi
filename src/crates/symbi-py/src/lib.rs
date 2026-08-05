@@ -93,6 +93,7 @@ struct Config {
     solver_name: String,
     ct_method: CtMethod,
     reconstruction_name: String,
+    eos_name: String,
     timestepping: Timestepping,
     plm_theta: f64,
     dlogt: f64,
@@ -1029,6 +1030,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         solver_name,
         ct_method,
         reconstruction_name: enum_str_or(dict, "reconstruction", "plm"),
+        eos_name: enum_str_or(dict, "eos", "ideal"),
         timestepping: timestepping_from_str(&enum_str(dict, "timestepping")?)?,
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
@@ -2784,6 +2786,9 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     if cfg.reconstruction_name == "plm" {
         push("Numerics", "limiter", limiter_label(cfg.plm_theta));
     }
+    if cfg.eos_name != "ideal" {
+        push("Numerics", "eos", cfg.eos_name.clone());
+    }
     push(
         "Numerics",
         "timestepping",
@@ -3045,6 +3050,18 @@ fn build_recon(cfg: &Config) -> symbi::Recon {
 /// beyond the plm default of 2.
 fn ghost_width(cfg: &Config) -> usize {
     if cfg.reconstruction_name == "ppm" { 3 } else { 2 }
+}
+
+/// the eos closure arm for the kernel set. "synge" is the taub-mathews
+/// relativistic perfect gas (h = 2.5 theta + sqrt(2.25 theta^2 + 1),
+/// parameter-free — the gamma scalar stays bound but inert); anything else is
+/// the gamma-law closure.
+fn build_eos(cfg: &Config) -> symbi::EosArm {
+    if cfg.eos_name == "synge" {
+        symbi::EosArm::TaubMathews
+    } else {
+        symbi::EosArm::IdealGamma
+    }
 }
 
 /// build a typed `BodyCollection<f64, D>` from the parsed params. an ACCRETION
@@ -4110,6 +4127,7 @@ macro_rules! build_and_run_hydro {
             .substrate()
             .theta(theta)
             .reconstruction(build_recon(cfg))
+            .with_eos(build_eos(cfg))
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .with_viscosity(cfg.viscosity)
@@ -4168,6 +4186,7 @@ macro_rules! build_and_run_hydro {
                 .substrate()
                 .theta(theta)
                 .reconstruction(build_recon(cfg))
+                .with_eos(build_eos(cfg))
                 .with_solver(solver)
                 .expect("fine-level kernel set")
                 .with_viscosity(cfg.viscosity)
@@ -6991,6 +7010,30 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             );
         }
     }
+    // the synge (taub-mathews) eos: baked for the flat rhd family only. every
+    // unsupported combination refuses here, before any build, with the reason
+    // attached.
+    if cfg.eos_name == "synge" {
+        if cfg.regime != "rhd" {
+            return Err(format!(
+                "eos = 'synge' (taub-mathews) is a relativistic closure and is wired \
+                 for the rhd regime only; got '{}'",
+                cfg.regime
+            ));
+        }
+        if cfg.spacetime != "minkowski" {
+            return Err(format!(
+                "eos = 'synge' requires a flat (minkowski) spacetime; got '{}'",
+                cfg.spacetime
+            ));
+        }
+        if cfg.n_gpus > 1 {
+            return Err(
+                "eos = 'synge' with gpus > 1 awaits the decomposed equivalence gate"
+                    .to_string(),
+            );
+        }
+    }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
         "rhd" => hydro_dispatch!(cfg, prims, Rhd, Rhd),
@@ -7025,6 +7068,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
     Metadata::new()
         .with("solver", cfg.solver_name.as_str())
         .with("reconstruction", cfg.reconstruction_name.as_str())
+        .with("eos", cfg.eos_name.as_str())
         .with("plm_theta", cfg.plm_theta)
         .with("viscosity", cfg.viscosity)
         .with("tend", cfg.t_final)

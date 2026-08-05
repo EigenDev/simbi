@@ -182,6 +182,7 @@ pub fn euler_wave_speed_map_gv<R>(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
+    eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
 where
     R: Regime<Gv, 3, Prim = Prim<Gv, 3>, Cons = Cons<Gv, 3>>,
@@ -226,7 +227,7 @@ where
     }
     let pre = Gv::field("prim_pre", FieldRef::PrimPre);
     let gamma = Gv::scalar("gamma");
-    let eos = IdealGas { gamma };
+    let eos = super::gv_eos(eos_arm, gamma);
     let prim = Prim::<Gv, 3> {
         rho,
         vel: Tensor::new(vel),
@@ -629,7 +630,7 @@ pub fn iso_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    // newtonian / isothermal are non-relativistic -> always flat spacetime.
+    // newtonian / isothermal are non-relativistic -> always flat spacetime + gamma-law.
     euler_wave_speed_map_gv(
         &Newtonian,
         coords,
@@ -637,6 +638,7 @@ pub fn iso_wave_speed_map_gv(
         spacing,
         axes,
         ndim,
+        EosArm::IdealGamma,
     )
 }
 
@@ -648,8 +650,9 @@ pub fn rhd_wave_speed_map_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
+    eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_wave_speed_map_gv(&Rhd, coords, spacetime, spacing, axes, ndim)
+    euler_wave_speed_map_gv(&Rhd, coords, spacetime, spacing, axes, ndim, eos_arm)
 }
 
 /// trace the RMHD CFL wave-speed map at `S = Gv` — the MAGNETOSONIC UPPER BOUND

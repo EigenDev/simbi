@@ -72,6 +72,13 @@ fn every_hydro_stage_and_cfl_kernel_is_emitted() {
             }
         }
     }
+    // the taub-mathews eos axis: `.with_eos(TaubMathews)` on the rhd set selects
+    // `_tm` twins for the c2p + wave-speed map, baked flat-cartesian only (the
+    // dispatch refuses every other chart before a name is formed).
+    for d in 1..=3usize {
+        assert_family(&mut missing, format!("rhd_wave_speed_map_tm_{d}d"));
+        assert_family(&mut missing, format!("rhd_c2p_tm_{d}d"));
+    }
     assert!(
         missing.is_empty(),
         "{} flat hydro godunov/wave-speed kernel(s) the dispatch can request are NOT emitted and \
@@ -410,15 +417,30 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     } else {
                         &[symbi_discretize::Recon::Plm]
                     };
+                    // the eos axis: the taub-mathews `_tm` flux twin exists for every
+                    // solver the RHD matrix accepts; every other regime is gamma-law
+                    // only and its dispatch refuses the tm arm before a name is formed.
+                    let eoses: &[symbi_discretize::EosArm] = if regime == RegimeKind::Rhd {
+                        &[
+                            symbi_discretize::EosArm::IdealGamma,
+                            symbi_discretize::EosArm::TaubMathews,
+                        ]
+                    } else {
+                        &[symbi_discretize::EosArm::IdealGamma]
+                    };
                     for &recon in recons {
-                        checked += 1;
-                        let name = format!(
-                            "{prefix}_face_flux{}{}_{ndim}d_{dir}",
-                            solver.kernel_suffix(),
-                            recon.suffix()
-                        );
-                        if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
-                            missing.push(format!("{solver:?}/{recon:?} on {regime:?}: {name}"));
+                        for &eos in eoses {
+                            checked += 1;
+                            let name = format!(
+                                "{prefix}_face_flux{}{}{}_{ndim}d_{dir}",
+                                solver.kernel_suffix(),
+                                recon.suffix(),
+                                eos.suffix()
+                            );
+                            if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
+                                missing
+                                    .push(format!("{solver:?}/{recon:?}/{eos:?} on {regime:?}: {name}"));
+                            }
                         }
                     }
                 }

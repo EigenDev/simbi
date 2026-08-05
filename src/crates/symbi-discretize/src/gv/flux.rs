@@ -316,12 +316,12 @@ fn euler_reconstruct<const D: usize>(
     dir: u8,
     coord_n: usize,
     recon: Recon,
-) -> (IdealGas<Gv>, Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
-    // scalars first (manifest order [gamma, theta]); the free-theta theta-MC limiter is
-    // regime-generic — theta == 1 reduces it EXACTLY to plain minmod (the hydro default).
-    // theta is registered on every recon arm so the scalar tail is uniform; the ppm
-    // parabola carries its own monotonicity constraint and never reads it.
-    let gamma = Gv::scalar("gamma");
+) -> (Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
+    // theta is SECOND in the manifest order [gamma, theta]: the caller registers gamma
+    // inside the same trace before calling here (the eos construction lives with the
+    // caller so the closure can be gamma-law or taub-mathews), and theta is registered
+    // on every recon arm so the scalar tail is uniform; the ppm parabola carries its
+    // own monotonicity constraint and never reads it.
     let theta = Gv::scalar("theta");
     let (rho_l, rho_r) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
     let mut vl = Vec::with_capacity(D);
@@ -340,22 +340,108 @@ fn euler_reconstruct<const D: usize>(
     }
     let (pre_l, pre_r) = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
 
-    let eos = IdealGas { gamma };
+    let mut rho_lr = (rho_l, rho_r);
+    let mut pre_lr = (pre_l, pre_r);
+    let mut vel_lr: Vec<(Gv, Gv)> = vl.into_iter().zip(vr).collect();
+    if recon == Recon::Ppm {
+        // convergence-gated flattening: the monotonized parabola's dispersive
+        // truncation is anti-diffusive in strongly converging flow, where its
+        // small face jumps also starve the riemann solver's entropy-producing
+        // upwind dissipation — the pairing destroys entropy (K = p/rho^gamma
+        // falls below its lagrangian value) in smooth cell-scale compressions
+        // such as gravitational infall, where a limited linear reconstruction
+        // holds the adiabat through its larger dissipative jumps. blend each
+        // cell's interface values toward its average by the compression the
+        // flow crosses per cell, measured against the local isothermal sound
+        // speed: c = max(0, -(v_{+1} - v_{-1})/2) / sqrt(p/rho). solenoidal
+        // low-mach turbulence sits at c ~ gamma Ma^2 (below 1e-2 at mach 0.06,
+        // under onset), uniform advection and rarefactions at exactly zero.
+        // the blend saturates by c = 0.05: the standing compression layer where
+        // infall stagnates against a sealed wall measures c ~ 0.05 and vents
+        // whenever it is only partially flattened (the dip GROWS with
+        // resolution at a mid-ramp coefficient), so the ramp must reach the
+        // full cell-average flatten — the classical shocked-cell treatment —
+        // by that strength; shock fronts sit well past it.
+        const FLATTEN_ONSET: f64 = 0.015;
+        const FLATTEN_FULL: f64 = 0.05;
+        let half = Gv::from_f64(0.5);
+        let ramp = Gv::from_f64(1.0 / (FLATTEN_FULL - FLATTEN_ONSET));
+        let onset = Gv::from_f64(FLATTEN_ONSET);
+        let vkey = format!("prim_v{coord_n}");
+        let flatten = |cell: i32| -> Gv {
+            let vm = Gv::field_shifted(
+                &vkey,
+                FieldRef::PrimVel(coord_n as u8),
+                ndim,
+                dir,
+                cell - 1,
+            );
+            let vp = Gv::field_shifted(
+                &vkey,
+                FieldRef::PrimVel(coord_n as u8),
+                ndim,
+                dir,
+                cell + 1,
+            );
+            let p0 = Gv::field_shifted("prim_pre", "prim.pre", ndim, dir, cell);
+            let r0 = Gv::field_shifted("prim_rho", "prim.rho", ndim, dir, cell);
+            let conv = ((vm - vp) * half).max(Gv::ZERO);
+            let c = conv / (p0 / r0).sqrt();
+            ((c - onset) * ramp).max(Gv::ZERO).min(Gv::ONE)
+        };
+        // the face's left state is cell -1's right interface, the right state
+        // cell 0's left interface; each blends toward its OWN cell average. the
+        // coefficient is the max over the cell and both sweep neighbors — the
+        // cell ahead of a steepening front is where the pre-front dispersive
+        // error seeds, one cell before the front's own compression registers.
+        let f_m2 = flatten(-2);
+        let f_m1 = flatten(-1);
+        let f_0 = flatten(0);
+        let f_p1 = flatten(1);
+        let f_l = f_m2.max(f_m1).max(f_0);
+        let f_r = f_m1.max(f_0).max(f_p1);
+        let blend = |face: Gv, avg: Gv, f: Gv| face + (avg - face) * f;
+        rho_lr = (
+            blend(
+                rho_lr.0,
+                Gv::field_shifted("prim_rho", "prim.rho", ndim, dir, -1),
+                f_l,
+            ),
+            blend(rho_lr.1, Gv::field("prim_rho", "prim.rho"), f_r),
+        );
+        pre_lr = (
+            blend(
+                pre_lr.0,
+                Gv::field_shifted("prim_pre", "prim.pre", ndim, dir, -1),
+                f_l,
+            ),
+            blend(pre_lr.1, Gv::field("prim_pre", "prim.pre"), f_r),
+        );
+        for (k, lr) in vel_lr.iter_mut().enumerate() {
+            let key = format!("prim_v{k}");
+            let avg_l =
+                Gv::field_shifted(&key, FieldRef::PrimVel(k as u8), ndim, dir, -1);
+            let avg_r = Gv::field(&key, FieldRef::PrimVel(k as u8));
+            *lr = (blend(lr.0, avg_l, f_l), blend(lr.1, avg_r, f_r));
+        }
+    }
+
+    let (vl, vr): (Vec<Gv>, Vec<Gv>) = vel_lr.into_iter().unzip();
     let vl_arr: [Gv; D] = vl.try_into().expect("D velocity components");
     let vr_arr: [Gv; D] = vr.try_into().expect("D velocity components");
     let left = Prim::<Gv, D> {
-        rho: rho_l,
+        rho: rho_lr.0,
         vel: Tensor::new(vl_arr),
-        pre: pre_l,
+        pre: pre_lr.0,
     };
     let right = Prim::<Gv, D> {
-        rho: rho_r,
+        rho: rho_lr.1,
         vel: Tensor::new(vr_arr),
-        pre: pre_r,
+        pre: pre_lr.1,
     };
     let nhat = Tensor::<Gv, D>::unit(coord_n);
     let vface = mesh_face_velocity_gv(dir);
-    (eos, left, right, nhat, vface)
+    (left, right, nhat, vface)
 }
 
 // the D+2 conserved face-flux writes (D, S_{0..D}, nrg) for an euler-shaped Cons.
@@ -397,13 +483,18 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     dir: u8,
     coord_n: usize,
     recon: Recon,
+    eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
 where
     R: Regime<Gv, D, Prim = Prim<Gv, D>, Cons = Cons<Gv, D>>,
 {
     begin_trace();
+    // gamma is FIRST in the manifest on every arm (the taub-mathews closure never reads
+    // it — the bound-but-inert scalar keeps the ABI uniform, exactly as theta under ppm).
+    let gamma = Gv::scalar("gamma");
+    let eos = super::gv_eos(eos_arm, gamma);
     // the SINGLE-SOURCE physics: reconstructed L/R primitives -> canonical HLLE.
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon);
+    let (left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon);
     let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
@@ -416,7 +507,7 @@ pub fn adiabatic_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_hlle_flux_gv::<D, _>(&Newtonian, D as u8, dir, dir as usize, recon)
+    euler_hlle_flux_gv::<D, _>(&Newtonian, D as u8, dir, dir as usize, recon, EosArm::IdealGamma)
 }
 
 /// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
@@ -424,14 +515,17 @@ pub fn adiabatic_flux_gv<const D: usize>(
 /// axis 1 is the z coordinate). replaces the cyl r-z `hlle_flux` Expr builder.
 pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     let coord_n = [0usize, 2][dir as usize]; // (r, z) grid axes -> coordinates 0, 2
-    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm)
+    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm, EosArm::IdealGamma)
 }
 
 /// the RHD (special-relativistic euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
 /// regime (relativistic U/F/wave speeds via mignone-bodo). replaces the `rhd_hlle_flux`
 /// Expr builder + `rhd_side`. cartesian-only (rhd has no cyl r-z), ncomp == ndim == D.
-pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm)
+pub fn rhd_flux_gv<const D: usize>(
+    dir: u8,
+    eos_arm: EosArm,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm, eos_arm)
 }
 
 /// the RHD face flux on a curved spacetime — the `_schw`/`_ks` GR path. PLM-reconstruct the
@@ -463,7 +557,11 @@ where
     // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
     // the gridded sweeps like any transverse component). the sweep NORMAL is coordinate `axes[dir]`.
     let ndim = axes.len();
-    let (eos, left, right, nhat, vface) =
+    // the GR arm stays on the gamma-law closure; gamma keeps its first-in-manifest slot.
+    let eos = IdealGas {
+        gamma: Gv::scalar("gamma"),
+    };
+    let (left, right, nhat, vface) =
         euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize], Recon::Plm);
     // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse GRIDDED coordinates at
     // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
@@ -1310,7 +1408,10 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) =
+    let eos = IdealGas {
+        gamma: Gv::scalar("gamma"),
+    };
+    let (left, right, nhat, vface) =
         euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
     let flux = hllc(
         &eos,
@@ -1336,7 +1437,10 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) =
+    let eos = IdealGas {
+        gamma: Gv::scalar("gamma"),
+    };
+    let (left, right, nhat, vface) =
         euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
     let flux = hllc(
         &eos,
@@ -1350,21 +1454,30 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     (end_trace(), writes)
 }
 
-/// RHD HLLC face flux — mignone-bodo (2005) quadratic for the contact speed.
-/// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
-pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+fn rhd_hllc_at_arm<const D: usize>(
+    dir: u8,
+    smoother: ShockwaveLimiter,
+    eos_arm: EosArm,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm);
-    let flux = hllc_rhd(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
-        ShockwaveLimiter::Standard,
-    );
+    // gamma keeps its first-in-manifest slot on every arm; the taub-mathews closure
+    // never reads it (bound-but-inert, exactly as theta under ppm).
+    let gamma = Gv::scalar("gamma");
+    let eos = super::gv_eos(eos_arm, gamma);
+    let (left, right, nhat, vface) =
+        euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm);
+    let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, smoother);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
+}
+
+/// RHD HLLC face flux — mignone-bodo (2005) quadratic for the contact speed.
+/// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
+pub fn rhd_hllc_flux_gv<const D: usize>(
+    dir: u8,
+    eos_arm: EosArm,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Standard, eos_arm)
 }
 
 /// RHD HLLC-LM face flux — the mignone-bodo star states with the acoustic dissipation scaled down
@@ -1372,19 +1485,9 @@ pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, Fiel
 /// scaling is a property of the riemann solver, so the traced kernel is the same body.
 pub fn rhd_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
+    eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm);
-    let flux = hllc_rhd(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
-        ShockwaveLimiter::Fleischmann,
-    );
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Fleischmann, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field

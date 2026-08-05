@@ -23,7 +23,7 @@ use symbi_discretize::gv::{
     adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
 };
 use symbi_discretize::{
-    Recon,
+    EosArm, Recon,
     Coords, GeoSource, Spacetime, Spacing, adiabatic_c2p_gv, body_feedback_gv, body_source_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv, godunov_stage_gv,
     inertial_momentum_probe_gv, iso_c2p_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, rhd_c2p_gv,
@@ -64,7 +64,7 @@ fn c2p_kernels_lower_to_every_backend() {
     KernelRun::new(adiabatic_c2p_gv::<3>())
         .grid([8])
         .assert_lowers();
-    KernelRun::new(rhd_c2p_gv::<1>(20))
+    KernelRun::new(rhd_c2p_gv::<1>(20, EosArm::IdealGamma))
         .grid([8])
         .assert_lowers();
     KernelRun::new(rmhd_c2p_gv(100)).grid([8]).assert_lowers();
@@ -85,7 +85,7 @@ fn flux_kernels_lower() {
     KernelRun::new(adiabatic_flux_gv::<1>(0, Recon::Plm))
         .grid([8])
         .assert_lowers();
-    KernelRun::new(rhd_flux_gv::<1>(0))
+    KernelRun::new(rhd_flux_gv::<1>(0, EosArm::IdealGamma))
         .grid([8])
         .assert_lowers();
     // a 2D cartesian instance per family to exercise the transverse stencil axis.
@@ -95,7 +95,7 @@ fn flux_kernels_lower() {
     KernelRun::new(adiabatic_flux_gv::<2>(1, Recon::Plm))
         .grid([8, 8])
         .assert_lowers();
-    KernelRun::new(rhd_flux_gv::<2>(1))
+    KernelRun::new(rhd_flux_gv::<2>(1, EosArm::IdealGamma))
         .grid([8, 8])
         .assert_lowers();
     // cyl r-z adiabatic flux: 3-component swirl on a 2-axis (r,z) grid, both sweep dirs.
@@ -156,6 +156,7 @@ fn wave_speed_kernels_lower() {
         &[Spacing::Uniform],
         &[0],
         1,
+        EosArm::IdealGamma
     ))
     .grid([8])
     .assert_lowers();
@@ -165,6 +166,7 @@ fn wave_speed_kernels_lower() {
         &[Spacing::Uniform; 3],
         &[0, 1, 2],
         3,
+        EosArm::IdealGamma
     ))
     .grid([8, 8, 8])
     .assert_lowers();

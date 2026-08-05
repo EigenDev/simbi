@@ -19,7 +19,7 @@ use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
 use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::energy::Zero;
-use symbi_hydro::eos::{IdealGas, Isothermal};
+use symbi_hydro::eos::{IdealGas, Isothermal, TaubMathews};
 use symbi_hydro::isothermal_mhd::{IsothermalMhd, imhd_recover};
 use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
 use symbi_hydro::newtonian::Newtonian;
@@ -45,7 +45,7 @@ use symbi_ir::{FieldBind, FieldRef};
 // instantiate carrier-generic symbi-hydro physics at S = Gv and trace it into the IR.
 use symbi_ir::{Gv, GvKernel, MeshScalar, TileSpec, begin_trace, end_trace, with_trace};
 
-use super::coords::{Coords, Recon, Spacetime, Spacing};
+use super::coords::{Coords, EosArm, Recon, Spacetime, Spacing};
 
 // submodule declarations: each category is its own file; the glob re-exports below preserve
 // the byte-identical public path `gv::NAME` for every builder lib.rs + downstream crates reach
@@ -313,6 +313,17 @@ pub(crate) fn ppm_gv(key: &str, runtime: impl Into<FieldBind>, ndim: u8, dir: u8
     let qp1 = Gv::field_shifted(key, runtime.clone(), ndim, dir, 1);
     let qp2 = Gv::field_shifted(key, runtime, ndim, dir, 2);
     ppm_from_stencil(qm3, qm2, qm1, q0, qp1, qp2)
+}
+
+/// the traced eos at a bake-time closure arm: gamma-law reads the `gamma` scalar,
+/// taub-mathews ignores it (the scalar stays bound so the kernel ABI is uniform
+/// across arms). the selection resolves at trace time — the emitted graph carries
+/// only the chosen closure's operations.
+pub(crate) fn gv_eos(arm: EosArm, gamma: Gv) -> symbi_hydro::eos::EosSelect<Gv> {
+    match arm {
+        EosArm::IdealGamma => symbi_hydro::eos::EosSelect::Ideal(IdealGas { gamma }),
+        EosArm::TaubMathews => symbi_hydro::eos::EosSelect::Tm(TaubMathews),
+    }
 }
 
 /// raw-field reconstruction dispatch at the bake-time `Recon` choice: the plm family
@@ -734,7 +745,7 @@ mod tests {
         // newton on the pressure root) run at S=Gv yields a dispatchable kernel whose pressure
         // is ONE Op::IterateInline (body traced once) — the deep newton does NOT unfold into an
         // exponential tree. the manifest + writes match the retired `rhd_c2p` Expr builder.
-        let (k, writes) = rhd_c2p_gv::<1>(20);
+        let (k, writes) = rhd_c2p_gv::<1>(20, EosArm::IdealGamma);
         assert_eq!(
             k.field_inputs
                 .iter()
@@ -885,7 +896,7 @@ mod tests {
     fn rhd_flux_traces_the_relativistic_hlle_to_a_kernel() {
         // same PLM + riemann::hlle pattern at the Rhd regime (relativistic U/F/wave speeds).
         // the only change from adiabatic is the regime — one HLLE source, two physics.
-        let (k, writes) = rhd_flux_gv::<1>(0);
+        let (k, writes) = rhd_flux_gv::<1>(0, EosArm::IdealGamma);
         assert_eq!(
             k.field_inputs
                 .iter()
@@ -1500,6 +1511,7 @@ mod tests {
             &[Spacing::Uniform; 2],
             &[0, 1],
             2,
+            EosArm::IdealGamma,
         );
         assert_eq!(writes.len(), 1, "one scratch lambda write");
         assert_eq!(writes[0].1.name(), "scratch");
@@ -1774,6 +1786,7 @@ mod tests {
             &[Spacing::Uniform],
             &[0],
             1,
+            EosArm::IdealGamma,
         );
         assert!(
             k_gr.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
@@ -1786,6 +1799,7 @@ mod tests {
             &[Spacing::Uniform],
             &[0],
             1,
+            EosArm::IdealGamma,
         );
         assert!(
             !k_flat

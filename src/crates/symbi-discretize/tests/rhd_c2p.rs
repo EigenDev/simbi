@@ -15,16 +15,16 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rhd_c2p_gv, rhd_flux_gv};
+use symbi_discretize::{EosArm, rhd_c2p_gv, rhd_flux_gv};
 use symbi_ir::graph::NodeId;
 
 // emit the gv-built RHD c2p (`rhd_c2p_gv` = symbi-hydro's `rhd_recover` at S=Gv) as
 // CPU source. the const-generic <D> instance is selected by ndim (build.rs does the same).
 fn emit(ndim: u8, max_iters: usize) -> (String, Vec<(String, String)>, Vec<String>) {
     let built = match ndim {
-        1 => rhd_c2p_gv::<1>(max_iters),
-        2 => rhd_c2p_gv::<2>(max_iters),
-        3 => rhd_c2p_gv::<3>(max_iters),
+        1 => rhd_c2p_gv::<1>(max_iters, EosArm::IdealGamma),
+        2 => rhd_c2p_gv::<2>(max_iters, EosArm::IdealGamma),
+        3 => rhd_c2p_gv::<3>(max_iters, EosArm::IdealGamma),
         _ => panic!("unsupported ndim {ndim}"),
     };
     let e = KernelRun::new(built)
@@ -90,9 +90,9 @@ fn rhd_c2p_is_dimension_generic() {
             .filter(|(_, rt, _)| rt.name().starts_with("prim.vel["))
             .count()
     };
-    let (k1, w1) = rhd_c2p_gv::<1>(4);
-    let (k2, w2) = rhd_c2p_gv::<2>(4);
-    let (k3, w3) = rhd_c2p_gv::<3>(4);
+    let (k1, w1) = rhd_c2p_gv::<1>(4, EosArm::IdealGamma);
+    let (k2, w2) = rhd_c2p_gv::<2>(4, EosArm::IdealGamma);
+    let (k3, w3) = rhd_c2p_gv::<3>(4, EosArm::IdealGamma);
     for (k, w, want) in [(&k1, &w1, 1usize), (&k2, &w2, 2), (&k3, &w3, 3)] {
         assert!(
             !k.graph.has_errors(),
@@ -108,7 +108,7 @@ fn rhd_face_flux_1d_lowers_and_emits() {
     // the gv RHD flux (PLM stencil + riemann::hlle at the Rhd regime) emits valid CPU
     // code: the conserved reads + gamma, the sqrt (lorentz / relativistic wave speeds),
     // the stencil reads/writes, integer-only indices.
-    let e = KernelRun::new(rhd_flux_gv::<1>(0))
+    let e = KernelRun::new(rhd_flux_gv::<1>(0, EosArm::IdealGamma))
         .grid([1usize])
         .emit_cpu();
     let src = e.source;

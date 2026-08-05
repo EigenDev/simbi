@@ -227,6 +227,76 @@ fn a_declared_target_is_held_exactly_and_conservatively() {
     }
 }
 
+/// the ppm variant of the declared hierarchy: ng = 3 for the -3..+2 parabola
+/// stencil and quartic prolongation to satisfy the reach <= degree law at the
+/// coarse-fine boundary.
+fn build_declared_ppm(regions: &[RefinementRegion<1>]) -> Hier {
+    use symbi_discretize::Recon;
+    let kset_ppm = |s: &Sim| {
+        Kset::new(GAMMA, CFL, &s.geom.allocated)
+            .with_solver(symbi::prelude::Solver::Hllc)
+            .expect("solver/regime mismatch")
+            .reconstruction(Recon::Ppm)
+    };
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N])
+        .spacing([1.0 / N as f64])
+        .ghosts(3)
+        .boundaries(Boundaries::uniform(BoundaryType::Reflect))
+        .cfl(CFL)
+        .allocate()
+        .expect("sim construction failed")
+        .set_initial(hydrostatic)
+        .build();
+    let ck = kset_ppm(&coarse);
+    let hier = Hierarchy::with_refinement(coarse, ck, regions, ProlongOrder::Quartic, kset_ppm)
+        .unwrap()
+        .with_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::gravitational(
+            0,
+            symbi_algebra::Tensor::new([-G_OFFSET]),
+            symbi_algebra::Tensor::zeros(),
+            GM,
+            1.0e-3,
+            0.0,
+        )));
+    for lvl in 1..hier.levels.len() {
+        hier.levels[lvl].state.seed_cells(hydrostatic);
+    }
+    let mut hier = hier.with_equilibrium(hydrostatic).unwrap();
+    hier.seed_equilibrium();
+    hier
+}
+
+/// the fixed-point law is reconstruction-agnostic: the residual `R` is measured
+/// through the SAME kernels that evolve the run — ppm fluxes against a ppm-built
+/// target flux — and subtracted back off, so a declared target holds to roundoff
+/// under ppm exactly as under plm. this is the full production stack (hierarchy +
+/// declared stationary target + gravitational body + ppm + quartic prolongation)
+/// through the level_stage path, fofc included.
+#[test]
+fn a_declared_target_is_held_exactly_under_ppm() {
+    for levels in 1..=3usize {
+        let mut hier = build_declared_ppm(&nested(levels));
+        let m0 = composite_mass(&hier);
+        hier.evolve_steps(STEPS).unwrap();
+        let m1 = composite_mass(&hier);
+        for ll in 0..levels {
+            let speed = worst_speed(&hier, ll);
+            assert!(
+                speed < 1.0e-12,
+                "level {ll} of the {levels}-level ppm run moved at {speed:.3e} while sitting on \
+                 its declared stationary target; a fixed point may only lose roundoff"
+            );
+        }
+        let relative = ((m1 - m0) / m0).abs();
+        assert!(
+            relative < 1.0e-14,
+            "composite mass moved by {relative:.3e} over {STEPS} steps of the {levels}-level \
+             ppm run; the coarse-fine transfer is no longer conservative"
+        );
+    }
+}
+
 #[test]
 fn the_correction_tracks_the_distance_from_the_target() {
     // a correction that merely suppressed the flux register would pass the fixed-point gate and

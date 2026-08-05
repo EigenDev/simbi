@@ -36,7 +36,7 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
 use symbi_discretize::GvKernel;
 use symbi_discretize::{
-    Coords, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
+    Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv, body_feedback_grav_gv,
     body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv, c2p_status_gv,
     chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv, fofc_bflux_splice_gv, fofc_copy_gv,
     fofc_emf_splice_gv, fofc_exterior_flag_gv, fofc_freeze_probe_gv, fofc_probe_gv, fofc_select_gv,
@@ -1026,7 +1026,12 @@ fn gen_curvilinear_hydro(out_dir: &str, ndim: u8, geom: Geom) {
     gen_godunov_stage(out_dir, ndim, "iso", false, geom.clone(), None);
     gen_iso_wave_speed_map(out_dir, ndim, geom.clone());
     gen_godunov_stage(out_dir, ndim, "rhd", true, geom.clone(), None);
-    gen_rhd_wave_speed_map(out_dir, ndim, geom);
+    gen_rhd_wave_speed_map(out_dir, ndim, geom.clone());
+    // the taub-mathews twin: the wave-speed map is the ONLY chart-suffixed rhd
+    // kernel the tm closure touches (c2p and flux are pointwise / chart-free at
+    // ncomp == ndim), so one extra bake per curvilinear cell serves the
+    // decelerating spherical blast the synge gas exists for.
+    gen_rhd_wave_speed_map_eos(out_dir, ndim, geom, EosArm::TaubMathews);
 }
 
 // the adiabatic (ideal-gas) cons->prim: p = (gamma-1)*(nrg - 0.5*rho*|v|^2),
@@ -1056,16 +1061,16 @@ fn gen_adiabatic_c2p(out_dir: &str, ndim: u8, geom: Geom) {
 // follow algebraically. proves the substrate emits a compilable iterative kernel
 // — the deep iterate lowers in linear time via the DAG-preserving lowering
 // where `as_op` would have exploded. pointwise, D-generic.
-fn gen_rhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
-    let name = format!("rhd_c2p_{ndim}d");
+fn gen_rhd_c2p(out_dir: &str, ndim: u8, max_iters: usize, eos: EosArm) {
+    let name = format!("rhd_c2p{}_{ndim}d", eos.suffix());
     // built from symbi-hydro's branch-free `rhd_recover` at S=Gv — the SINGLE-SOURCE
     // physics (the iterative relativistic c2p; the Newton lowers to one IterateInline).
     // rhd c2p is cartesian-only + ncomp==ndim (no cyl r-z swirl rhd), so this is the
     // ONLY rhd c2p path. max_iters bakes the fixed Newton count.
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_c2p_gv::<1>(max_iters),
-        2 => symbi_discretize::gv::rhd_c2p_gv::<2>(max_iters),
-        3 => symbi_discretize::gv::rhd_c2p_gv::<3>(max_iters),
+        1 => symbi_discretize::gv::rhd_c2p_gv::<1>(max_iters, eos),
+        2 => symbi_discretize::gv::rhd_c2p_gv::<2>(max_iters, eos),
+        3 => symbi_discretize::gv::rhd_c2p_gv::<3>(max_iters, eos),
         _ => panic!("rhd_c2p_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1076,17 +1081,17 @@ fn gen_rhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
 // energy (D, S_k, tau). same structure as the adiabatic flux; only the physics
 // (Lorentz factor, relativistic enthalpy + sound speed + characteristic speeds)
 // differs. dimension-generic; codegen instantiates the sweep-0 1D kernel here.
-fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("rhd_face_flux_{ndim}d_{dir}");
+fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
+    let name = format!("rhd_face_flux{}_{ndim}d_{dir}", eos.suffix());
     // the gv single-source physics: PLM reconstruction (Gv stencil) composed with
     // symbi-hydro's `riemann::hlle` at the `Rhd` regime (relativistic U/F/wave speeds),
     // traced at S=Gv — replacing the `rhd_hlle_flux` Expr builder + `rhd_side`. rhd flux
     // is cartesian-only + ncomp == ndim (no cyl r-z rhd), so this is the ONLY rhd flux
     // path. numerically equivalent within ULP.
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::rhd_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::rhd_flux_gv::<3>(dir),
+        1 => symbi_discretize::gv::rhd_flux_gv::<1>(dir, eos),
+        2 => symbi_discretize::gv::rhd_flux_gv::<2>(dir, eos),
+        3 => symbi_discretize::gv::rhd_flux_gv::<3>(dir, eos),
         _ => panic!("rhd_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1299,23 +1304,23 @@ fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Reco
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("rhd_face_flux_hllc_{ndim}d_{dir}");
+fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
+    let name = format!("rhd_face_flux_hllc{}_{ndim}d_{dir}", eos.suffix());
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_hllc_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::rhd_hllc_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::rhd_hllc_flux_gv::<3>(dir),
+        1 => symbi_discretize::gv::rhd_hllc_flux_gv::<1>(dir, eos),
+        2 => symbi_discretize::gv::rhd_hllc_flux_gv::<2>(dir, eos),
+        3 => symbi_discretize::gv::rhd_hllc_flux_gv::<3>(dir, eos),
         _ => panic!("rhd_hllc_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-fn gen_rhd_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("rhd_face_flux_hllc_lm_{ndim}d_{dir}");
+fn gen_rhd_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
+    let name = format!("rhd_face_flux_hllc_lm{}_{ndim}d_{dir}", eos.suffix());
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<3>(dir),
+        1 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<1>(dir, eos),
+        2 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<2>(dir, eos),
+        3 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<3>(dir, eos),
         _ => panic!("rhd_hllc_lm_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -2250,8 +2255,17 @@ fn gen_rmhd_average_efield(out_dir: &str, ndim: u8) {
 // relativistic 1D characteristic speeds. like the iso map but the relativistic
 // closed form (no inv_dx baked); the host folds max + cfl_from_smax(s_max,cfl,dx).
 fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
+    gen_rhd_wave_speed_map_eos(out_dir, ndim, geom, EosArm::IdealGamma)
+}
+
+fn gen_rhd_wave_speed_map_eos(out_dir: &str, ndim: u8, geom: Geom, eos: EosArm) {
+    assert!(
+        eos == EosArm::IdealGamma || geom.spacetime == Spacetime::Minkowski,
+        "the taub-mathews wave-speed map is baked for the flat chart only"
+    );
     let name = format!(
-        "rhd_wave_speed_map{}{}_{ndim}d",
+        "rhd_wave_speed_map{}{}{}_{ndim}d",
+        eos.suffix(),
         geom.suffix(),
         geom.spacetime_suffix()
     );
@@ -2284,6 +2298,7 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
             &geom.spacing,
             &geom.axes,
             ndim as usize,
+            eos,
         )
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -3394,8 +3409,10 @@ fn main() {
         // RHD (special-relativistic Euler): the ITERATIVE c2p (20-step masked
         // Newton) + the relativistic flux/wave-speed map; the
         // godunov/snapshot are the SAME EOS-generic builders (D/S_k/tau).
-        gen_rhd_c2p(&out_dir, ndim, 20);
+        gen_rhd_c2p(&out_dir, ndim, 20, EosArm::IdealGamma);
+        gen_rhd_c2p(&out_dir, ndim, 20, EosArm::TaubMathews);
         gen_rhd_wave_speed_map(&out_dir, ndim, Geom::cart(ndim));
+        gen_rhd_wave_speed_map_eos(&out_dir, ndim, Geom::cart(ndim), EosArm::TaubMathews);
         gen_godunov_stage(&out_dir, ndim, "rhd", true, Geom::cart(ndim), None);
         gen_snapshot(&out_dir, ndim, "rhd", true, Geom::cart(ndim));
         // one face flux per sweep dir (the reconstruction axis is baked).
@@ -3405,7 +3422,8 @@ fn main() {
             // the ppm twin of every cartesian adiabatic face flux: same riemann solver,
             // wider (-3..+2) load stencil, `_ppm`-tagged kernel name.
             gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Ppm);
-            gen_rhd_face_flux(&out_dir, ndim, dir);
+            gen_rhd_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
+            gen_rhd_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
             // HLLC variants — contact-resolving 3-wave solver, available on every
             // regime that has a contact wave. iso is HLLE-only by physics. cartesian
             // only (curvilinear HLLC is unbaked).
@@ -3413,8 +3431,10 @@ fn main() {
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Plm);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Ppm);
-            gen_rhd_hllc_face_flux(&out_dir, ndim, dir);
-            gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir);
+            gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
+            gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
+            gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
+            gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
         }
     }
     // RMHD HLLC + HLLD — 1D + 3D variants matching the HLLE RMHD layout

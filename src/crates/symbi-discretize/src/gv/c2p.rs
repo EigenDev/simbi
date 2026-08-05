@@ -146,6 +146,7 @@ pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// computes the raw recovery, exactly as the substrate already does.
 pub fn rhd_c2p_gv<const D: usize>(
     max_iters: usize,
+    eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding: the conserved fields + the eos scalar, as Gv leaves.
@@ -165,9 +166,11 @@ pub fn rhd_c2p_gv<const D: usize>(
         nrg,
     };
     // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
-    // traced/compiled kernel is bit-identical). the GR metric threads in here.
+    // traced/compiled kernel is bit-identical). the GR metric threads in here. the newton
+    // is eos-generic — the closure arm selects gamma-law or taub-mathews at trace time
+    // (gamma stays bound on both arms; the synge closure never reads it).
     let prim = rhd_recover(
-        &IdealGas { gamma },
+        &super::gv_eos(eos_arm, gamma),
         &cons,
         &SpatialMetric::flat(),
         max_iters,
