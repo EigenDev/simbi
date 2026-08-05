@@ -138,6 +138,17 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         }
     }
 
+    /// ppm flatten dials. the rhd flux family is plm-only, so this validates
+    /// rather than stores; a shared regime-generic build path may call it
+    /// unconditionally with the dials off.
+    pub fn ppm_flatten(self, onset: f64, full: f64) -> Self {
+        assert!(
+            full <= onset,
+            "the ppm flatten applies to the newtonian adiabatic flux family only"
+        );
+        self
+    }
+
     /// select the eos closure arm. the taub-mathews (synge-gas) closure is baked
     /// for the flat cartesian rhd family only — a curved spacetime or a
     /// non-cartesian chart refuses at dispatch. fluent.
@@ -243,6 +254,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.solver,
             symbi_discretize::Recon::Plm,
             self.eos,
+            (0.0, 0.0),
             false,
         );
     }
@@ -683,6 +695,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     Solver::Hlle,
                     symbi_discretize::Recon::Plm,
                     self.eos,
+                    (0.0, 0.0),
                     curved,
                 )
             },

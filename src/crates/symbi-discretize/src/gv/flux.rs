@@ -344,29 +344,34 @@ fn euler_reconstruct<const D: usize>(
     let mut pre_lr = (pre_l, pre_r);
     let mut vel_lr: Vec<(Gv, Gv)> = vl.into_iter().zip(vr).collect();
     if recon == Recon::Ppm {
-        // convergence-gated flattening: the monotonized parabola's dispersive
-        // truncation is anti-diffusive in strongly converging flow, where its
-        // small face jumps also starve the riemann solver's entropy-producing
-        // upwind dissipation — the pairing destroys entropy (K = p/rho^gamma
-        // falls below its lagrangian value) in smooth cell-scale compressions
-        // such as gravitational infall, where a limited linear reconstruction
-        // holds the adiabat through its larger dissipative jumps. blend each
-        // cell's interface values toward its average by the compression the
-        // flow crosses per cell, measured against the local isothermal sound
-        // speed: c = max(0, -(v_{+1} - v_{-1})/2) / sqrt(p/rho). solenoidal
-        // low-mach turbulence sits at c ~ gamma Ma^2 (below 1e-2 at mach 0.06,
-        // under onset), uniform advection and rarefactions at exactly zero.
-        // the blend saturates by c = 0.05: the standing compression layer where
-        // infall stagnates against a sealed wall measures c ~ 0.05 and vents
-        // whenever it is only partially flattened (the dip GROWS with
-        // resolution at a mid-ramp coefficient), so the ramp must reach the
-        // full cell-average flatten — the classical shocked-cell treatment —
-        // by that strength; shock fronts sit well past it.
-        const FLATTEN_ONSET: f64 = 0.015;
-        const FLATTEN_FULL: f64 = 0.05;
+        // convergence-gated flattening, RUNTIME-DIALED: the monotonized
+        // parabola's dispersive truncation is anti-diffusive in strongly
+        // converging flow, where its small face jumps also starve the riemann
+        // solver's entropy-producing upwind dissipation — the pairing destroys
+        // entropy (K = p/rho^gamma falls below its lagrangian value) in smooth
+        // SUSTAINED compressions such as gravitational infall onto a sink,
+        // where a limited linear reconstruction holds the adiabat through its
+        // larger dissipative jumps. blend each cell's interface values toward
+        // its average by the compression the flow crosses per cell, measured
+        // against the local isothermal sound speed:
+        // c = max(0, -(v_{+1} - v_{-1})/2) / sqrt(p/rho), ramped from
+        // `flatten_onset` to full at `flatten_full`.
+        //
+        // the dials are RUNTIME scalars because no fixed pair serves every
+        // regime: the sink-infall vent needs full flatten by c ~ 0.05 (the
+        // sealed-wall standing layer; a mid-ramp coefficient there vents and
+        // the dip grows with resolution), while trans-sonic turbulence lives
+        // at c ~ 0.05-0.3 in every eddy collision — a flatten active there
+        // degrades the parabola to first order across the box and its retained
+        // kinetic energy falls below even coarse plm. the default (both dials
+        // zero) is the PURE parabola: `flatten_full <= flatten_onset` zeroes
+        // the ramp inverse, so f = 0 everywhere and the blend is exact
+        // passthrough. gravity-sink configs declare their own dials.
+        let onset = Gv::scalar("flatten_onset");
+        let full = Gv::scalar("flatten_full");
         let half = Gv::from_f64(0.5);
-        let ramp = Gv::from_f64(1.0 / (FLATTEN_FULL - FLATTEN_ONSET));
-        let onset = Gv::from_f64(FLATTEN_ONSET);
+        let width = full - onset;
+        let ramp = Gv::select(width.cmp_gt(Gv::ZERO), Gv::ONE / width, Gv::ZERO);
         let vkey = format!("prim_v{coord_n}");
         let flatten = |cell: i32| -> Gv {
             let vm = Gv::field_shifted(

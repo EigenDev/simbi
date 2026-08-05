@@ -585,6 +585,8 @@ def _require_backend_features(problem: SimbiProblem, backend: ModuleType) -> Non
         required.append("eos")
     if problem.reconstruction == Reconstruction.PPM:
         required.append("reconstruction")
+    if getattr(problem, "ppm_flatten_full", 0.0) > 0.0:
+        required.append("ppm_flatten")
     features = getattr(backend, "FEATURES", [])
     missing = [knob for knob in required if knob not in features]
     if missing:

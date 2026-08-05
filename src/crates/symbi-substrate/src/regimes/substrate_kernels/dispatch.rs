@@ -2662,6 +2662,11 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // (empty suffix, names unchanged). the gamma scalar stays bound on the tm
     // arm (bound-but-inert, uniform ABI).
     eos: symbi_discretize::EosArm,
+    // the ppm convergence-gated flatten dials (onset, full), bound to the ppm
+    // kernels' `flatten_onset`/`flatten_full` scalars. (0, 0) — or any
+    // full <= onset — is the pure parabola; only the ppm kernels declare the
+    // scalars, so the values are inert on every other reconstruction.
+    flatten: (f64, f64),
     rusanov: bool,
 ) where
     Mem: MemorySpace + Sync,
@@ -2756,8 +2761,18 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // bare-name arm: `motion_scalar` owns every mesh rate, `geom_scalar` the
     // physical spacing.
     let scalars = scalars_for(&name, |bind| {
-        let ScalarBind::Ref(sref) = bind else {
-            panic!("dispatch_flux: unexpected spec scalar {bind:?}");
+        let sref = match bind {
+            ScalarBind::Ref(sref) => sref,
+            // the ppm flatten dials ride the spec-scalar channel: only the ppm
+            // kernels declare them, so this arm is unreachable on any other
+            // reconstruction.
+            ScalarBind::Spec(spec) if &**spec == "flatten_onset" => {
+                return Sc::from_f64(flatten.0);
+            }
+            ScalarBind::Spec(spec) if &**spec == "flatten_full" => {
+                return Sc::from_f64(flatten.1);
+            }
+            other => panic!("dispatch_flux: unexpected spec scalar {other:?}"),
         };
         match *sref {
             ScalarRef::Gamma => Sc::from_f64(primary),

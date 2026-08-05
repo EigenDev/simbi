@@ -94,6 +94,8 @@ struct Config {
     ct_method: CtMethod,
     reconstruction_name: String,
     eos_name: String,
+    ppm_flatten_onset: f64,
+    ppm_flatten_full: f64,
     timestepping: Timestepping,
     plm_theta: f64,
     dlogt: f64,
@@ -1031,6 +1033,8 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         ct_method,
         reconstruction_name: enum_str_or(dict, "reconstruction", "plm"),
         eos_name: enum_str_or(dict, "eos", "ideal"),
+        ppm_flatten_onset: get_f64_or(dict, "ppm_flatten_onset", 0.0),
+        ppm_flatten_full: get_f64_or(dict, "ppm_flatten_full", 0.0),
         timestepping: timestepping_from_str(&enum_str(dict, "timestepping")?)?,
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
@@ -2789,6 +2793,13 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     if cfg.eos_name != "ideal" {
         push("Numerics", "eos", cfg.eos_name.clone());
     }
+    if cfg.ppm_flatten_full > cfg.ppm_flatten_onset && cfg.ppm_flatten_full > 0.0 {
+        push(
+            "Numerics",
+            "ppm flatten",
+            format!("{:.3} -> {:.3}", cfg.ppm_flatten_onset, cfg.ppm_flatten_full),
+        );
+    }
     push(
         "Numerics",
         "timestepping",
@@ -4127,6 +4138,7 @@ macro_rules! build_and_run_hydro {
             .substrate()
             .theta(theta)
             .reconstruction(build_recon(cfg))
+            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
             .with_eos(build_eos(cfg))
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
@@ -4186,6 +4198,7 @@ macro_rules! build_and_run_hydro {
                 .substrate()
                 .theta(theta)
                 .reconstruction(build_recon(cfg))
+                .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                 .with_eos(build_eos(cfg))
                 .with_solver(solver)
                 .expect("fine-level kernel set")
@@ -7069,6 +7082,8 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("solver", cfg.solver_name.as_str())
         .with("reconstruction", cfg.reconstruction_name.as_str())
         .with("eos", cfg.eos_name.as_str())
+        .with("ppm_flatten_onset", cfg.ppm_flatten_onset)
+        .with("ppm_flatten_full", cfg.ppm_flatten_full)
         .with("plm_theta", cfg.plm_theta)
         .with("viscosity", cfg.viscosity)
         .with("tend", cfg.t_final)
@@ -8112,7 +8127,7 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // one physics and silently getting another. the front end checks its
     // non-default knobs against this list before running; a knob absent here
     // refuses with "rebuild the extension" instead of running the wrong physics.
-    m.add("FEATURES", vec!["eos", "reconstruction"])?;
+    m.add("FEATURES", vec!["eos", "reconstruction", "ppm_flatten"])?;
     afterglow::register(m)?;
     Ok(())
 }

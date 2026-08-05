@@ -328,6 +328,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             Solver::Hlle,
             symbi_discretize::Recon::Plm,
             symbi_discretize::EosArm::IdealGamma,
+            (0.0, 0.0),
             false,
         );
     }
@@ -663,6 +664,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     Solver::Hlle,
                     symbi_discretize::Recon::Plm,
                     symbi_discretize::EosArm::IdealGamma,
+                    (0.0, 0.0),
                     false,
                 )
             },

@@ -130,6 +130,8 @@ pub struct AdiabaticSubstrateKernelSet<
     /// parabola (`_ppm` kernels, -3..+2 stencil, requires an ng >= 3 allocation
     /// and a uniform cartesian grid). tunable via `.reconstruction(Recon::Ppm)`.
     pub recon: symbi_discretize::Recon,
+    /// ppm flatten dials (onset, full); (0, 0) = pure parabola. see `ppm_flatten`.
+    pub flatten: (f64, f64),
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
     /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
@@ -162,6 +164,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             boundary_dags: Vec::new(),
             gradient_bcs: Vec::new(),
             solver: Solver::Hlle,
+            flatten: (0.0, 0.0),
             recon: symbi_discretize::Recon::Plm,
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
@@ -302,6 +305,19 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
+    /// the ppm convergence-gated flatten dials (onset, full) in units of
+    /// compression per cell crossing over the isothermal sound speed. the
+    /// default (0, 0) is the PURE parabola; a gravity-sink run declares its own
+    /// dials to close the smooth-infall entropy vent (full flatten by the
+    /// standing-layer strength), and a trans-sonic turbulence run leaves them
+    /// off — an active flatten there degrades the parabola to first order in
+    /// every eddy collision. inert under plm (the kernels never declare the
+    /// scalars). fluent.
+    pub fn ppm_flatten(mut self, onset: f64, full: f64) -> Self {
+        self.flatten = (onset, full);
+        self
+    }
+
     /// eos closure selector. the newtonian family is gamma-law only — the synge
     /// (taub-mathews) closure is relativistic — so this validates rather than
     /// stores; a shared regime-generic build path may call it unconditionally.
@@ -333,6 +349,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.solver,
             self.recon,
             symbi_discretize::EosArm::IdealGamma,
+            self.flatten,
             false,
         );
     }
@@ -673,6 +690,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     Solver::Hlle,
                     symbi_discretize::Recon::Plm,
                     symbi_discretize::EosArm::IdealGamma,
+                    (0.0, 0.0),
                     false,
                 )
             },

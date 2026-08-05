@@ -248,6 +248,14 @@ fn ppm_strong_shock_stays_inside_the_wave_fan_band() {
     );
 }
 
+/// the sink-regime flatten dials: onset above the subsonic accretor
+/// turbulence's compressive scale (c ~ gamma Ma^2 < 1e-2 at mach 0.06), full by
+/// the sealed-wall standing layer (c ~ 0.05, where a mid-ramp coefficient still
+/// vents and the dip grows with resolution). the DEFAULT dials are (0, 0) — the
+/// pure parabola — because trans-sonic turbulence lives at c ~ 0.05-0.3 and an
+/// active flatten there degrades ppm to first order in every eddy collision.
+const SINK_FLATTEN: (f64, f64) = (0.015, 0.05);
+
 /// gravitational infall onto a 4-cell body, optionally sealed by a porosity-0
 /// penalized wall — the accretor geometry where the parabola's -3..+2 stencil
 /// reads across the mask every step. returns (min K/K0 outside the mask + ppm
@@ -262,6 +270,7 @@ fn sealed_wall_infall_probe(
     ts: Timestepping,
     cfl: f64,
     theta: f64,
+    flatten: (f64, f64),
     t_end: f64,
 ) -> (f64, f64, f64) {
     use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -316,6 +325,7 @@ fn sealed_wall_infall_probe(
     .with_solver(solver)
     .expect("solver/regime mismatch")
     .theta(theta)
+    .ppm_flatten(flatten.0, flatten.1)
     .reconstruction(recon);
     evolve(&mut sim, &sub, t_end).expect("sealed wall evolve failed");
     assert!(sim.iteration > 10, "barely stepped; the probe is vacuous");
@@ -382,7 +392,17 @@ fn sealed_wall_infall_probe(
 #[ignore]
 fn diagnose_ppm_entropy_dip_scaling() {
     let p = |n, ts, cfl| {
-        sealed_wall_infall_probe(Recon::Ppm, Solver::HllcLm, false, n, ts, cfl, 1.0, 0.08)
+        sealed_wall_infall_probe(
+            Recon::Ppm,
+            Solver::HllcLm,
+            false,
+            n,
+            ts,
+            cfl,
+            1.0,
+            SINK_FLATTEN,
+            0.08,
+        )
     };
     p(32, Timestepping::Rk2, 0.3);
     p(32, Timestepping::Rk3, 0.3);
@@ -401,6 +421,7 @@ fn diagnose_ppm_entropy_dip_scaling() {
                 Timestepping::Rk3,
                 0.3,
                 theta,
+                (0.0, 0.0),
                 0.08,
             );
         }
@@ -425,6 +446,27 @@ fn diagnose_ppm_entropy_dip_scaling() {
 /// match at fixed n and converges past instead.
 #[test]
 fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
+    // NON-VACUITY of the dials themselves: the pure parabola (dials off) must
+    // still vent on this probe, or the flatten machinery is dead weight and
+    // the small-dip law below is testing nothing.
+    let (k_off, _, _) = sealed_wall_infall_probe(
+        Recon::Ppm,
+        Solver::HllcLm,
+        true,
+        32,
+        Timestepping::Rk3,
+        0.3,
+        1.0,
+        (0.0, 0.0),
+        0.08,
+    );
+    let dip_off = (1.0 - k_off).max(0.0);
+    assert!(
+        dip_off > 5.0e-4,
+        "the pure parabola dips only {dip_off:.3e} on the infall probe (measured \
+         8.2e-4 walled at n = 32); the setup no longer exercises the vent the \
+         flatten dials close, and the law below is vacuous"
+    );
     let (k_32, _, rho_max) = sealed_wall_infall_probe(
         Recon::Ppm,
         Solver::HllcLm,
@@ -433,6 +475,7 @@ fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
         Timestepping::Rk3,
         0.3,
         1.0,
+        SINK_FLATTEN,
         0.08,
     );
     let (k_64, _, _) = sealed_wall_infall_probe(
@@ -443,6 +486,7 @@ fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
         Timestepping::Rk3,
         0.3,
         1.0,
+        SINK_FLATTEN,
         0.08,
     );
     assert!(

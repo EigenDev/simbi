@@ -274,6 +274,31 @@ class SimbiProblem(BaseModel):
             "flat spacetime only)",
         ),
     ]
+    ppm_flatten_onset: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            ge=0.0,
+            description="ppm convergence-gated flatten onset, in compression per "
+            "cell crossing over the isothermal sound speed. 0 (default) = the "
+            "pure parabola. gravity-sink runs set onset/full (e.g. 0.015/0.05) "
+            "to close the smooth-infall entropy vent; trans-sonic turbulence "
+            "leaves them off — an active flatten there degrades ppm to first "
+            "order in every eddy collision",
+        ),
+    ]
+    ppm_flatten_full: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            ge=0.0,
+            description="compression strength at which the ppm flatten saturates "
+            "to the full cell-average (first-order) face; must exceed "
+            "ppm_flatten_onset when the flatten is on. 0 (default) = off",
+        ),
+    ]
 
     # =========================================================================
     # simulation control - checkpoint_safe=True (can override on restart)
@@ -1146,6 +1171,29 @@ class SimbiProblem(BaseModel):
                 raise ValueError(
                     f"{stray} apply to PLM reconstruction only; PPM carries its "
                     "own monotonicity constraint and takes no slope limiter"
+                )
+            if self.ppm_flatten_full > 0.0 and self.ppm_flatten_full <= self.ppm_flatten_onset:
+                raise ValueError(
+                    "ppm_flatten_full must exceed ppm_flatten_onset when the "
+                    "flatten is on (equal or inverted dials silently disable it)"
+                )
+        else:
+            # a config class may DECLARE its ppm pairing (nonzero dial defaults)
+            # while defaulting to plm — the dials are inert there and activate
+            # when the run selects ppm. what is rejected is a USER moving a dial
+            # off the declaring class's own default on a non-ppm run: that is
+            # dead configuration. subclass defaults, not the base's, are the
+            # reference (type(self).model_fields carries the override).
+            fields = type(self).model_fields
+            moved = [
+                name
+                for name in ("ppm_flatten_onset", "ppm_flatten_full")
+                if getattr(self, name) != fields[name].default
+            ]
+            if moved:
+                raise ValueError(
+                    f"{moved} apply to PPM reconstruction only; moved off their "
+                    "defaults on another scheme they would be dead configuration"
                 )
         return self
 
