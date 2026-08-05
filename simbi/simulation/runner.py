@@ -569,6 +569,33 @@ def _load_backend(compute_mode: str) -> Optional[ModuleType]:
         ) from e
 
 
+def _require_backend_features(problem: SimbiProblem, backend: ModuleType) -> None:
+    """the FEATURE HANDSHAKE. the backend absorbs unknown config keys through its
+    defaulting readers, so a front end newer than the installed extension would
+    have an off-default knob silently DROPPED — the run executes different physics
+    than the config declares and nothing says so (an `eos = synge` run silently
+    becoming ideal gamma-law, with the inert placeholder gamma turned live). every
+    knob whose silent loss changes the physics is checked against the backend's
+    declared FEATURES list; an extension too old to declare one refuses with the
+    rebuild instruction instead of running the wrong equations."""
+    from simbi.types.input import Eos, Reconstruction
+
+    required = []
+    if problem.eos != Eos.IDEAL:
+        required.append("eos")
+    if problem.reconstruction == Reconstruction.PPM:
+        required.append("reconstruction")
+    features = getattr(backend, "FEATURES", [])
+    missing = [knob for knob in required if knob not in features]
+    if missing:
+        raise RuntimeError(
+            f"the installed backend extension predates the {missing} knob(s) this "
+            f"config declares; running would silently execute different physics "
+            f"(the backend drops unknown config keys). rebuild the extension: "
+            f"`python dev.py install` (add --cuda/--hip for a gpu build)."
+        )
+
+
 def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
     """configure gpu block dimensions if not already set."""
     dims = {1: (128, 1, 1), 2: (16, 16, 1), 3: (4, 4, 4)}
@@ -613,6 +640,7 @@ def validate_problem(problem: SimbiProblem, compute_mode: str = "cpu") -> None:
         raise RuntimeError(
             f"{compute_mode} backend is required for production Rust validation"
         )
+    _require_backend_features(problem, backend)
     backend.validate_simulation(sim_info=exec_dict)
     # the registered binned reductions, reported alongside the validation because every number in
     # them is fixed at registration and each one decides a cost paid for the whole job. the report is
@@ -722,6 +750,7 @@ def run(
         for key, value in sorted(exec_dict.items()):
             print(f"  {key}: {value}")
         return
+    _require_backend_features(problem, backend)
 
     # forward gpu block dims to the backend. the run dashboard — problem setup,
     # live benchmarks, progress, messages — is rendered by the rust backend

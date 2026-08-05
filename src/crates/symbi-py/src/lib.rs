@@ -8106,6 +8106,13 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bondi_sonic_radius, m)?)?;
     m.add_function(wrap_pyfunction!(guard_census, m)?)?;
     m.add_function(wrap_pyfunction!(reset_guard_census, m)?)?;
+    // the FEATURE HANDSHAKE: config keys the backend does not know are silently
+    // absorbed by the `_or` defaults above, so a NEW python front end driving an
+    // OLD extension would drop a declared knob without a word — a run asking for
+    // one physics and silently getting another. the front end checks its
+    // non-default knobs against this list before running; a knob absent here
+    // refuses with "rebuild the extension" instead of running the wrong physics.
+    m.add("FEATURES", vec!["eos", "reconstruction"])?;
     afterglow::register(m)?;
     Ok(())
 }

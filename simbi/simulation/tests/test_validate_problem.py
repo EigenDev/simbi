@@ -21,9 +21,16 @@ from simbi_configs.examples.newtonian.sod import SodProblem
 
 
 def test_validate_problem_calls_rust_preflight(monkeypatch, capsys) -> None:
+    from simbi.types.input import Eos, Reconstruction
+
     problem = SimpleNamespace(
         passive_scalar=lambda: None,
         tracer_cohort=lambda: None,
+        # the feature handshake reads the physics knobs every real SimbiProblem
+        # carries; the fake declares the defaults so the handshake is exercised
+        # (and passes) rather than bypassed.
+        eos=Eos.IDEAL,
+        reconstruction=Reconstruction.PLM,
     )
     calls: list[dict[str, object]] = []
     backend = SimpleNamespace(
