@@ -273,6 +273,34 @@ fn a_level_whose_region_moved_between_runs_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn a_moving_mesh_checkpoint_verifies_against_the_comoving_rebuild() {
+    // homologous mesh motion scales the STORED bounds by a(t) at write time, while a
+    // restart rebuilds the comoving (a = 1) grid and re-derives a(t) from the resume
+    // time — a is a pure function of time, never integrated state. the region check
+    // must therefore compare comoving against comoving: a checkpoint written
+    // mid-expansion must verify against the fresh build, or every moving-mesh restart
+    // is refused with a spurious "region moved" whose two spans differ by exactly a.
+    let dir = std::env::temp_dir().join(format!("restart_motion_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("m.h5");
+
+    let mut hier = ladder(1, true);
+    hier.levels[0].state.motion.a = 1.7;
+    hier.levels[0].state.motion.a_dot = 0.3;
+    hier.levels[0].state.motion.homologous = true;
+    write_at(&hier, &path);
+    let p = path.to_str().expect("utf-8");
+
+    let fresh = ladder(1, true);
+    symbi_sim::checkpoint::verify_checkpoint_level_geometry(&fresh.levels[0].state, p, 0)
+        .expect(
+            "the comoving regions are identical; the stored bounds differ only by the \
+             checkpoint's own scale factor, which is motion, not a region change",
+        );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// every conserved cell of every level, in level then cell order — the bitwise fingerprint of a
 /// hierarchy's state.
 fn fingerprint(hier: &Hier) -> Vec<u64> {

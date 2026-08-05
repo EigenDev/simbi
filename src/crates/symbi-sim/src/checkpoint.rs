@@ -25,6 +25,32 @@ use symbi_hydro::FieldSpec;
 pub use symbi_io::{Attr, IoError, Metadata, Result};
 use symbi_io::{DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf};
 
+/// the homologous mesh-motion factor applied to axis `ax` of a `d`-dimensional
+/// grid: cartesian expands every axis, spherical the radius only, cylindrical
+/// the in-plane r and axial z slots. shared by the checkpoint writer (which
+/// stores PHYSICAL, scaled bounds) and the restart region check (which must
+/// unscale them back to the comoving grid) so the two cannot disagree about
+/// which axes a stored bound was scaled by.
+fn motion_axis_scale(geometry: symbi_geometry::Geometry, ax: usize, d: usize, a: f64) -> f64 {
+    match geometry {
+        symbi_geometry::Geometry::Cartesian => a,
+        symbi_geometry::Geometry::Spherical => {
+            if ax == 0 {
+                a
+            } else {
+                1.0
+            }
+        }
+        symbi_geometry::Geometry::Cylindrical => {
+            if ax == 0 || ax == d - 1 {
+                a
+            } else {
+                1.0
+            }
+        }
+    }
+}
+
 fn write_tree_atomic(path: &Path, tree: &Tree<'_>) -> Result<()> {
     let file_name = path.file_name().ok_or_else(|| {
         IoError::MissingPath(format!("checkpoint path has no file name: {path:?}"))
@@ -456,23 +482,7 @@ where
         // the interior origin), so the reader rebuilds cell centers correctly.
         let lo_index = sim.geom.interior.spaces[ax].lo;
         let hi_index = sim.geom.interior.spaces[ax].hi;
-        let scale = match sim.physics.metric.geometry() {
-            symbi_geometry::Geometry::Cartesian => sim.motion.a,
-            symbi_geometry::Geometry::Spherical => {
-                if ax == 0 {
-                    sim.motion.a
-                } else {
-                    1.0
-                }
-            }
-            symbi_geometry::Geometry::Cylindrical => {
-                if ax == 0 || ax == D - 1 {
-                    sim.motion.a
-                } else {
-                    1.0
-                }
-            }
-        };
+        let scale = motion_axis_scale(sim.physics.metric.geometry(), ax, D, sim.motion.a);
         let (start, end) = match &sim.geom.maps {
             Some(maps) => (
                 maps[ax].face(lo_index) * scale,
@@ -1428,6 +1438,20 @@ where
     let geometry = mesh
         .find_group("geometry")
         .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry")))?;
+    // the writer stores PHYSICAL bounds — the comoving faces scaled by the mesh-motion
+    // factor a(t) at write time on the expanding axes — while this sim is freshly built
+    // on the COMOVING grid (a = 1; the motion re-derives a(t) from the resume time, it
+    // is never integrated state). unscale the stored bounds by the checkpoint's own
+    // scale factor so the comparison is comoving against comoving; a checkpoint from a
+    // static-mesh run carries a = 1 and is unchanged.
+    let a_checkpoint = tree
+        .find_group("metadata")
+        .and_then(|meta| meta.find_attr("scale_factor"))
+        .and_then(|attr| match attr {
+            Attr::F64(v) => Some(*v),
+            _ => None,
+        })
+        .unwrap_or(1.0);
     for ax in 0..D {
         // the geometry groups are named by STORAGE slot, `(0..D).rev().enumerate()` in the writer,
         // so slot `D - 1 - ax` holds axis `ax`. the same reversal as `global_cells`, and equally
@@ -1445,16 +1469,34 @@ where
                 "{name}/mesh/geometry/dim_{slot}/start|end"
             )));
         };
-        let lo = sim.geom.x_lo[ax] + sim.geom.interior.spaces[ax].lo as f64 * sim.geom.dx[ax];
-        let hi = lo + sim.geom.dx[ax] * sim.geom.interior.spaces[ax].size() as f64;
+        let unscale =
+            motion_axis_scale(sim.physics.metric.geometry(), ax, D, a_checkpoint);
+        let start = start / unscale;
+        let end = end / unscale;
+        // the run's comoving bounds, by the WRITER's own face arithmetic (the coordinate
+        // maps when present, the uniform formula otherwise) so the two sides can only
+        // differ by a genuine region mismatch, never by formula drift.
+        let lo_index = sim.geom.interior.spaces[ax].lo;
+        let hi_index = sim.geom.interior.spaces[ax].hi;
+        let (lo, hi) = match &sim.geom.maps {
+            Some(maps) => (maps[ax].face(lo_index), maps[ax].face(hi_index)),
+            None => {
+                let lo = sim.geom.x_lo[ax] + lo_index as f64 * sim.geom.dx[ax];
+                (
+                    lo,
+                    lo + sim.geom.dx[ax] * sim.geom.interior.spaces[ax].size() as f64,
+                )
+            }
+        };
         // relative to the level's own extent: an absolute tolerance would be meaningless across a
         // ladder whose finest level is orders of magnitude smaller than its root.
         let scale = (hi - lo).abs().max(1.0e-300);
         if (start - lo).abs() / scale > 1.0e-9 || (end - hi).abs() / scale > 1.0e-9 {
             return Err(IoError::Backend(format!(
                 "{path}: level {level_index} axis {ax} spans [{start:e}, {end:e}] in the checkpoint \
-                 but [{lo:e}, {hi:e}] in this run. level {level_index} must occupy the same region \
-                 at every depth for a deeper restart to be meaningful."
+                 (comoving, unscaled by its a = {a_checkpoint}) but [{lo:e}, {hi:e}] in this run. \
+                 level {level_index} must occupy the same comoving region at every depth for a \
+                 deeper restart to be meaningful."
             )));
         }
     }
