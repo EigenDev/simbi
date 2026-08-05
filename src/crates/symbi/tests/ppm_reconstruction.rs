@@ -261,6 +261,7 @@ fn sealed_wall_infall_probe(
     n: usize,
     ts: Timestepping,
     cfl: f64,
+    theta: f64,
     t_end: f64,
 ) -> (f64, f64, f64) {
     use symbi_ib::{Body, BodyCollection, SurfaceSpec};
@@ -314,6 +315,7 @@ fn sealed_wall_infall_probe(
     )
     .with_solver(solver)
     .expect("solver/regime mismatch")
+    .theta(theta)
     .reconstruction(recon);
     evolve(&mut sim, &sub, t_end).expect("sealed wall evolve failed");
     assert!(sim.iteration > 10, "barely stepped; the probe is vacuous");
@@ -380,13 +382,29 @@ fn sealed_wall_infall_probe(
 #[ignore]
 fn diagnose_ppm_entropy_dip_scaling() {
     let p = |n, ts, cfl| {
-        sealed_wall_infall_probe(Recon::Ppm, Solver::HllcLm, false, n, ts, cfl, 0.08)
+        sealed_wall_infall_probe(Recon::Ppm, Solver::HllcLm, false, n, ts, cfl, 1.0, 0.08)
     };
     p(32, Timestepping::Rk2, 0.3);
     p(32, Timestepping::Rk3, 0.3);
     p(32, Timestepping::Rk2, 0.15);
     p(48, Timestepping::Rk2, 0.3);
     p(64, Timestepping::Rk2, 0.3);
+    // the plm limiter-compression axis: theta 1 (minmod) through 2 (full mc) —
+    // the sharper members trade dissipation away exactly where the parabola did.
+    for theta in [1.0, 1.5, 2.0] {
+        for n in [32usize, 64] {
+            sealed_wall_infall_probe(
+                Recon::Plm,
+                Solver::HllcLm,
+                false,
+                n,
+                Timestepping::Rk3,
+                0.3,
+                theta,
+                0.08,
+            );
+        }
+    }
 }
 
 /// the ppm entropy floor on gravitational infall: the adiabat violation must be
@@ -414,6 +432,7 @@ fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
         32,
         Timestepping::Rk3,
         0.3,
+        1.0,
         0.08,
     );
     let (k_64, _, _) = sealed_wall_infall_probe(
@@ -423,6 +442,7 @@ fn the_ppm_entropy_dip_on_infall_is_small_and_converges_away() {
         64,
         Timestepping::Rk3,
         0.3,
+        1.0,
         0.08,
     );
     assert!(
