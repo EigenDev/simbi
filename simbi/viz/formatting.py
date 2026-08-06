@@ -26,7 +26,7 @@ def set_title(
     """Sets the title on the appropriate object (fig or ax)."""
     title = config.title or "Simulation"
     time_units = config.time_units
-    title_time = time
+    title_time = time if config.show_time else None
     time_scale = config.time_scale
     if time_scale and title_time is not None:
         title_time /= time_scale

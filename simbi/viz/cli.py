@@ -209,6 +209,11 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     # =========================================================================
     parser.add_argument("--save-as", help="save output to file")
     parser.add_argument(
+        "--print",
+        action="store_true",
+        help="print (publication) rendering: the title carries no time stamp",
+    )
+    parser.add_argument(
         "--no-show", action="store_true", help="don't display the plot"
     )
     parser.add_argument(

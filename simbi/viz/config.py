@@ -34,6 +34,10 @@ class FigureConfig(BaseModel):
     title: Optional[str] = None
     time_scale: Optional[float] = None
     time_units: str = ""
+    # when False the title carries no time stamp -- the print (publication)
+    # rendering, where a figure caption owns the epoch and a baked-in
+    # "t = 3.21" forces a regenerate for every draft.
+    show_time: bool = True
     transparent: bool = False
     # overlay each immersed body's silhouette on the field plot (cartesian only; the
     # body signed-distance is cartesian, so it does not align with a polar/spherical plot).
