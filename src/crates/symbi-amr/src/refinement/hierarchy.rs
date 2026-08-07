@@ -3129,6 +3129,52 @@ where
         }
         self.init_levels();
     }
+
+    /// rewrite every level's interior in primitive space: `f` receives each cell's physical
+    /// center and its recovered primitive and returns the primitive to store. every level
+    /// evaluates the SAME closure at its own cell centers, so a perturbation carries each
+    /// level's full resolvable content instead of the coarse grid's prolongation — the seam
+    /// for laying a multi-scale velocity field over a prolonged smooth base state.
+    ///
+    /// may be called repeatedly (a measured correction pass after a seeding pass, say);
+    /// call `sync_perturbed` once after the last pass.
+    pub fn perturb_cells(
+        &self,
+        f: impl Fn([f64; NDIM], <R as Regime<f64, DOF>>::Prim) -> <R as Regime<f64, DOF>>::Prim,
+    ) where
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        for (ll, level) in self.levels.iter().enumerate() {
+            assert!(
+                level.state.fields.mhd.is_none(),
+                "level {ll}: a cell-centered primitive rewrite cannot update the staggered \
+                 face field, so a magnetized state's div(B) = 0 would not survive it"
+            );
+        }
+        // field storage is unified memory; a host write is not ordered against an in-flight
+        // kernel without this barrier.
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+        for level in &self.levels {
+            level.state.perturb_cells(&f);
+        }
+    }
+
+    /// restore hierarchy consistency after `perturb_cells`: covered coarse cells are
+    /// re-defined as the restriction of the fine state — what the run's own sync produces
+    /// every parent step — and the primitive/ghost state is re-initialized on every level.
+    pub fn sync_perturbed(&mut self) {
+        for ll in (0..self.levels.len().saturating_sub(1)).rev() {
+            let (lo, hi) = self.levels.split_at(ll + 1);
+            let coarse = &lo[ll];
+            let fine = &hi[0];
+            restrict_cons(
+                &fine.state.fields.cons,
+                &coarse.state.fields.cons,
+                coarse.coverage.as_ref().unwrap(),
+            );
+        }
+        self.init_levels();
+    }
 }
 
 // =============================================================================

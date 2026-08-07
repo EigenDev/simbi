@@ -83,6 +83,16 @@ struct Config {
     refinement_enabled: bool,
     // each region is a flat [lo_0, hi_0, lo_1, hi_1, ..] bound list (2 per axis).
     refinement_regions: Vec<Vec<f64>>,
+    // initial velocity seed as an analytic solenoidal mode table, one row per mode:
+    // [kx, ky, kz, ex, ey, ez, amp, phase, r_cut]. the field is the curl of the tapered
+    // vector potential sum_m amp_m e_m sin(k_m . x + phase_m), evaluated per level at
+    // its own cell centers, so every level carries its full resolvable content. empty =
+    // no seed.
+    seed_modes: Vec<[f64; 9]>,
+    // the seed's radial taper [onset, width]: the potential envelope falls from 1 at
+    // `onset` to 0 at `onset + width`, so the field vanishes at and beyond the sponge
+    // and net linear momentum is a vanishing surface integral.
+    seed_taper: [f64; 2],
     // homologous / translating mesh motion (linear: a_ddot = 0). a0/adot are the
     // scale-factor callables evaluated at start_time (set in run_simulation).
     mesh_motion: bool,
@@ -1125,6 +1135,8 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .flatten()
             .and_then(|v| v.extract::<bool>().ok())
             .unwrap_or(false),
+        seed_modes: parse_seed_modes(dict)?,
+        seed_taper: parse_seed_taper(dict)?,
         driven_exprs,
         gradient_bcs,
         custom_params,
@@ -3918,6 +3930,360 @@ fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D
     }))
 }
 
+// =============================================================================
+// initial velocity seed: analytic solenoidal mode table
+// =============================================================================
+
+/// the initial velocity seed as the curl of a tapered vector potential
+/// `A(x) = sum_m amp_m e_m sin(k_m . x + phase_m)`:
+///
+///   v_m(x) = f_m(r) amp (k x e) cos(theta) + f_m'(r) amp (r_hat x e) sin(theta)
+///
+/// with `theta = k . x + phase` and `f_m(r)` the product of the global buffer taper and
+/// the mode's own outer cutoff at `r_cut` — the radius beyond which no grid level
+/// resolves the mode's wavelength; sampling an unresolvable mode would alias it onto a
+/// long wave at full amplitude. the curl form is exactly divergence-free for ANY radial
+/// envelope, so neither taper needs a projection correction, and the net linear momentum
+/// is a surface integral over a sphere where the potential vanishes.
+struct SeedField {
+    rows: Vec<[f64; 9]>,
+    taper_onset: f64,
+    taper_width: f64,
+}
+
+#[inline]
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+impl SeedField {
+    fn from_parts(rows: &[[f64; 9]], taper: [f64; 2]) -> Result<Option<SeedField>, String> {
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        let [onset, width] = taper;
+        if !(onset > 0.0 && width > 0.0) {
+            return Err(format!(
+                "seed_modes requires a positive seed_taper [onset, width]; got [{onset}, {width}]"
+            ));
+        }
+        for (mm, row) in rows.iter().enumerate() {
+            let k2 = row[0] * row[0] + row[1] * row[1] + row[2] * row[2];
+            if !(k2 > 0.0) || !row.iter().all(|v| v.is_finite()) {
+                return Err(format!("seed mode {mm} has a zero or non-finite wavevector"));
+            }
+        }
+        Ok(Some(SeedField {
+            rows: rows.to_vec(),
+            taper_onset: onset,
+            taper_width: width,
+        }))
+    }
+
+    /// cubic smoothstep and its derivative, clamped outside [0, 1].
+    #[inline]
+    fn ramp(t: f64) -> (f64, f64) {
+        if t <= 0.0 {
+            (0.0, 0.0)
+        } else if t >= 1.0 {
+            (1.0, 0.0)
+        } else {
+            (t * t * (3.0 - 2.0 * t), 6.0 * t * (1.0 - t))
+        }
+    }
+
+    /// the global taper envelope and its radial derivative: 1 inside the onset, 0 at and
+    /// beyond onset + width.
+    #[inline]
+    fn taper(&self, r: f64) -> (f64, f64) {
+        let (s, ds) = Self::ramp((r - self.taper_onset) / self.taper_width);
+        (1.0 - s, -ds / self.taper_width)
+    }
+
+    fn eval(&self, x: [f64; 3]) -> [f64; 3] {
+        let r = (x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt();
+        let (g, dg) = self.taper(r);
+        if g == 0.0 && dg == 0.0 {
+            return [0.0; 3];
+        }
+        let rhat = if r > 0.0 {
+            [x[0] / r, x[1] / r, x[2] / r]
+        } else {
+            [0.0; 3]
+        };
+        let mut v = [0.0f64; 3];
+        for row in &self.rows {
+            let (mut f, mut df) = (g, dg);
+            let r_cut = row[8];
+            if r_cut > 0.0 {
+                // the mode's outer cutoff: full amplitude inside half the cutoff radius,
+                // zero beyond it — an octave-wide transition, self-similar with the
+                // telescoping level ladder the cutoff mirrors.
+                let half = 0.5 * r_cut;
+                let (s, ds) = Self::ramp((r - half) / half);
+                df = df * (1.0 - s) + f * (-ds / half);
+                f *= 1.0 - s;
+            }
+            if f == 0.0 && df == 0.0 {
+                continue;
+            }
+            let k = [row[0], row[1], row[2]];
+            let e = [row[3], row[4], row[5]];
+            let (amp, phase) = (row[6], row[7]);
+            let theta = k[0] * x[0] + k[1] * x[1] + k[2] * x[2] + phase;
+            let (sin_t, cos_t) = theta.sin_cos();
+            let kxe = cross3(k, e);
+            let rxe = cross3(rhat, e);
+            for ax in 0..3 {
+                v[ax] += amp * (f * kxe[ax] * cos_t + df * rxe[ax] * sin_t);
+            }
+        }
+        v
+    }
+}
+
+fn parse_seed_modes(dict: &Bound<'_, PyDict>) -> PyResult<Vec<[f64; 9]>> {
+    let Some(item) = dict.get_item("seed_modes").ok().flatten() else {
+        return Ok(Vec::new());
+    };
+    let rows: Vec<Vec<f64>> = item.extract()?;
+    rows.into_iter()
+        .enumerate()
+        .map(|(mm, row)| {
+            <[f64; 9]>::try_from(row).map_err(|bad| {
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "seed mode {mm} has {} entries; a mode row is \
+                     [kx, ky, kz, ex, ey, ez, amp, phase, r_cut]",
+                    bad.len()
+                ))
+            })
+        })
+        .collect()
+}
+
+fn parse_seed_taper(dict: &Bound<'_, PyDict>) -> PyResult<[f64; 2]> {
+    let Some(item) = dict.get_item("seed_taper").ok().flatten() else {
+        return Ok([0.0; 2]);
+    };
+    let pair: Vec<f64> = item.extract()?;
+    // a seedless run declares no taper; the seed guard reads the mode table, so an
+    // absent envelope is only an error when there are modes for it to envelope.
+    if pair.is_empty() {
+        return Ok([0.0; 2]);
+    }
+    <[f64; 2]>::try_from(pair).map_err(|bad| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "seed_taper must be [onset, width]; got {} entries",
+            bad.len()
+        ))
+    })
+}
+
+/// solve the 3x3 system `m w = b` by cramer's rule; the matrix here is an inertia
+/// tensor of a distribution with genuine 3d extent, so a vanishing determinant means
+/// the seed setup itself is degenerate.
+fn solve3(m: [[f64; 3]; 3], b: [f64; 3]) -> Result<[f64; 3], String> {
+    let det = |a: [[f64; 3]; 3]| -> f64 {
+        a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+            - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
+    };
+    let d = det(m);
+    let scale = m.iter().flatten().fold(0.0f64, |acc, v| acc.max(v.abs()));
+    if d.abs() <= 1.0e-12 * scale.powi(3) {
+        return Err("the seed's inertia tensor is singular; the taper encloses no mass \
+                    with 3d extent"
+            .to_string());
+    }
+    let mut w = [0.0f64; 3];
+    for col in 0..3 {
+        let mut a = m;
+        for row_i in 0..3 {
+            a[row_i][col] = b[row_i];
+        }
+        w[col] = det(a) / d;
+    }
+    Ok(w)
+}
+
+#[cfg(test)]
+mod seed_field_tests {
+    use super::{cross3, solve3, SeedField};
+
+    fn two_mode_field() -> SeedField {
+        SeedField {
+            rows: vec![
+                [6.0, 2.0, -1.5, 0.0, 0.3, 0.9, 0.02, 0.7, 0.0],
+                [3.0, -8.0, 5.0, 0.8, 0.1, -0.2, 0.05, 2.1, 0.6],
+            ],
+            taper_onset: 0.5,
+            taper_width: 0.4,
+        }
+    }
+
+    /// the field is a curl, so its analytic divergence vanishes identically — taper,
+    /// mode cutoff and all. checked by central finite difference at points inside,
+    /// across, and outside the envelopes.
+    #[test]
+    fn analytic_divergence_vanishes() {
+        let field = two_mode_field();
+        let h = 1.0e-6;
+        for x in [
+            [0.1, 0.05, -0.12],
+            [0.31, -0.28, 0.2],
+            [0.45, 0.3, -0.35],
+            [0.6, -0.4, 0.31],
+        ] {
+            let mut div = 0.0;
+            let mut scale = 0.0f64;
+            for ax in 0..3 {
+                let mut xp = x;
+                let mut xm = x;
+                xp[ax] += h;
+                xm[ax] -= h;
+                let vp = field.eval(xp);
+                let vm = field.eval(xm);
+                div += (vp[ax] - vm[ax]) / (2.0 * h);
+                scale = scale.max(vp[ax].abs() / h);
+            }
+            assert!(
+                div.abs() <= 1.0e-6 * scale.max(1.0),
+                "div v = {div:.3e} at {x:?} (finite-difference scale {scale:.3e})"
+            );
+        }
+    }
+
+    /// the envelope derivative fed to the curl's gradient term must be the derivative
+    /// of the envelope actually applied — checked against a finite difference of the
+    /// taper itself across its ramp.
+    #[test]
+    fn taper_derivative_matches_the_taper() {
+        let field = two_mode_field();
+        let h = 1.0e-7;
+        for r in [0.45, 0.55, 0.7, 0.85, 0.95] {
+            let (_, dg) = field.taper(r);
+            let (gp, _) = field.taper(r + h);
+            let (gm, _) = field.taper(r - h);
+            let fd = (gp - gm) / (2.0 * h);
+            assert!(
+                (dg - fd).abs() < 1.0e-5,
+                "taper derivative {dg:.6} vs finite difference {fd:.6} at r = {r}"
+            );
+        }
+    }
+
+    /// a seedless run carries an empty mode table AND an empty taper — the default
+    /// every config emits, seeded or not — and must yield no seed rather than
+    /// failing the taper's shape check on a payload no seed will ever read. this
+    /// is the whole unseeded population of configs, so the vacuous case is the
+    /// common one.
+    #[test]
+    fn a_seedless_config_needs_no_taper() {
+        assert!(SeedField::from_parts(&[], [0.0; 2]).unwrap().is_none());
+    }
+
+    /// a mode table WITHOUT a usable envelope is the failure the shape check exists
+    /// for: the seed would carry power into the sponge and out to the boundary.
+    #[test]
+    fn modes_without_a_taper_are_refused() {
+        let row = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.1, 0.0, 0.0];
+        assert!(SeedField::from_parts(&[row], [0.0; 2]).is_err());
+        assert!(SeedField::from_parts(&[row], [0.5, 0.4]).unwrap().is_some());
+    }
+
+    /// a zero wavevector would divide the mode's velocity amplitude by zero at the
+    /// config boundary and contributes nothing to a curl regardless.
+    #[test]
+    fn a_zero_wavevector_is_refused() {
+        let row = [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.1, 0.0, 0.0];
+        assert!(SeedField::from_parts(&[row], [0.5, 0.4]).is_err());
+    }
+
+    #[test]
+    fn solve3_inverts_a_known_system() {
+        let m = [[4.0, 1.0, 0.5], [1.0, 3.0, -0.2], [0.5, -0.2, 5.0]];
+        let w_true = [0.3, -1.2, 0.7];
+        let b: [f64; 3] = std::array::from_fn(|aa| {
+            (0..3).map(|bb| m[aa][bb] * w_true[bb]).sum::<f64>()
+        });
+        let w = solve3(m, b).unwrap();
+        for aa in 0..3 {
+            assert!((w[aa] - w_true[aa]).abs() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn solve3_rejects_a_degenerate_inertia() {
+        // mass confined to the z axis: no moment about it
+        let m = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]];
+        assert!(solve3(m, [0.1, 0.2, 0.3]).is_err());
+    }
+
+    /// the exact cancellation the run applies: measure L = sum m x cross v and the
+    /// taper-weighted inertia I_ab = sum m g (r^2 d_ab - x_a x_b) over an arbitrary
+    /// discrete mass/velocity set, solve I w = -L, and the corrected field
+    /// v + g (w cross x) carries zero net angular momentum to roundoff. exactness is
+    /// linearity: the correction's own L is exactly I w, whatever the quadrature.
+    #[test]
+    fn tapered_rigid_rotation_cancels_net_angular_momentum_exactly() {
+        let field = two_mode_field();
+        // a deterministic scattered sample: positions from a low-discrepancy lattice,
+        // masses positive and uneven, velocities from the seed field itself
+        let pts: Vec<([f64; 3], f64)> = (0..500)
+            .map(|ii| {
+                let t = ii as f64;
+                let x = [
+                    ((t * 0.754877666).fract() - 0.5) * 1.6,
+                    ((t * 0.569840291).fract() - 0.5) * 1.6,
+                    ((t * 0.362437569).fract() - 0.5) * 1.6,
+                ];
+                (x, 0.2 + (t * 0.618033989).fract())
+            })
+            .collect();
+        let mut l_net = [0.0f64; 3];
+        let mut inertia = [[0.0f64; 3]; 3];
+        for &(x, m) in &pts {
+            let v = field.eval(x);
+            let lx = cross3(x, v);
+            let r2 = x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+            let (g, _) = field.taper(r2.sqrt());
+            for aa in 0..3 {
+                l_net[aa] += m * lx[aa];
+                for bb in 0..3 {
+                    let delta = if aa == bb { r2 } else { 0.0 };
+                    inertia[aa][bb] += m * g * (delta - x[aa] * x[bb]);
+                }
+            }
+        }
+        let l_scale = l_net.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+        assert!(l_scale > 0.0, "the sample carries no net angular momentum to cancel");
+        let w = solve3(inertia, [-l_net[0], -l_net[1], -l_net[2]]).unwrap();
+        let mut l_after = [0.0f64; 3];
+        for &(x, m) in &pts {
+            let v = field.eval(x);
+            let (g, _) = field.taper((x[0] * x[0] + x[1] * x[1] + x[2] * x[2]).sqrt());
+            let dv = cross3(w, x);
+            let corrected = [v[0] + g * dv[0], v[1] + g * dv[1], v[2] + g * dv[2]];
+            let lx = cross3(x, corrected);
+            for aa in 0..3 {
+                l_after[aa] += m * lx[aa];
+            }
+        }
+        for aa in 0..3 {
+            assert!(
+                l_after[aa].abs() < 1.0e-12 * l_scale.max(1.0),
+                "residual L[{aa}] = {:.3e} after the rigid-rotation cancellation \
+                 (pre-correction scale {l_scale:.3e})",
+                l_after[aa]
+            );
+        }
+    }
+}
+
 /// wrap a built sim + its kernel-set into a `Hierarchy`: a single grid (1 level),
 /// or — when refinement is requested — a refined hierarchy whose fine interiors
 /// are seeded from the coarse level (conservative prolongation at reconstruction
@@ -4003,6 +4369,25 @@ macro_rules! build_and_run_hydro {
         // `$d` is the grid dimension, `$dof` the momentum-component count; they differ for the
         // spherical swirl (the azimuthal momentum lifted onto a 2D (r, theta) grid).
         type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, IdealGas<f64>>;
+
+        // the analytic velocity seed carries 3-vector modes and its taper reads a coordinate
+        // radius, so it is defined on the flat 3d cartesian single-device build and nowhere
+        // else; the front door refuses the rest rather than silently dropping the seed.
+        if !cfg.seed_modes.is_empty() {
+            if cfg.n_gpus > 1 {
+                return Err("seed_modes is single-device; the multi-gpu build does not \
+                            carry the seed's cross-tile angular-momentum cancellation"
+                    .to_string());
+            }
+            if $d != 3 || $dof != 3 || cfg.coord_system != "cartesian" {
+                return Err("seed_modes requires a 3d cartesian grid".to_string());
+            }
+            if cfg.spacetime != "minkowski" {
+                return Err("seed_modes perturbs a newtonian velocity; a curved-spacetime \
+                            primitive is a different object"
+                    .to_string());
+            }
+        }
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
@@ -4270,6 +4655,104 @@ macro_rules! build_and_run_hydro {
             // its own state and the seed applies only to a fresh start.
             if cfg.seed_from_equilibrium {
                 hier.seed_equilibrium();
+            }
+        }
+
+        // the analytic velocity seed, laid over the base state per level so every level
+        // carries its full resolvable content. skipped on restart: the checkpoint restore
+        // below run_loop's entry replaces the state wholesale.
+        if cfg.restart_path.is_none() {
+            if let Some(seed) = SeedField::from_parts(&cfg.seed_modes, cfg.seed_taper)? {
+                hier.perturb_cells(|x, p| {
+                    let mut x3 = [0.0f64; 3];
+                    for ax in 0..$d {
+                        x3[ax] = x[ax];
+                    }
+                    let dv = seed.eval(x3);
+                    let mut p = p;
+                    for ax in 0..$dof {
+                        p.vel[ax] += dv[ax];
+                    }
+                    p
+                });
+
+                // the seed's net angular momentum, measured over uncovered cells (after
+                // restriction a covered coarse cell duplicates its children), and the
+                // taper-weighted inertia tensor of the same mass distribution. the
+                // residual is cancelled exactly by a tapered rigid rotation
+                // dv = (w x x) g(r) — exactly divergence-free for any radial weight,
+                // since (w x x) . r_hat = 0. an uncancelled seed axis does not stay
+                // small: a drain preferentially removes low-angular-momentum gas, so a
+                // net axis strengthens as mass cycles through.
+                let nlv = hier.levels.len();
+                // each level's physical interior box, from its own cells: the covered
+                // test must use the box the child ACTUALLY spans, not the requested
+                // region, which the level build snaps to cell boundaries.
+                let child_box: Vec<[[f64; 2]; $d]> = (1..nlv)
+                    .map(|lv| {
+                        let geom = &hier.levels[lv].state.geom;
+                        let mut lo = [f64::INFINITY; $d];
+                        let mut hi = [f64::NEG_INFINITY; $d];
+                        for c in geom.interior.iter() {
+                            let x = geom.cell_coord(c);
+                            for ax in 0..$d {
+                                lo[ax] = lo[ax].min(x[ax] - 0.5 * geom.dx[ax]);
+                                hi[ax] = hi[ax].max(x[ax] + 0.5 * geom.dx[ax]);
+                            }
+                        }
+                        std::array::from_fn(|ax| [lo[ax], hi[ax]])
+                    })
+                    .collect();
+                let mut l_net = [0.0f64; 3];
+                let mut inertia = [[0.0f64; 3]; 3];
+                for lv in 0..nlv {
+                    let state = &hier.levels[lv].state;
+                    let vol: f64 = state.geom.dx.iter().product();
+                    let covered = child_box.get(lv);
+                    for c in state.geom.interior.iter() {
+                        let x = state.geom.cell_coord(c);
+                        if let Some(bb) = covered {
+                            if (0..$d).all(|ax| x[ax] > bb[ax][0] && x[ax] < bb[ax][1]) {
+                                continue;
+                            }
+                        }
+                        let p = state.prim_at(c);
+                        let m = p.rho * vol;
+                        let mut x3 = [0.0f64; 3];
+                        let mut v3 = [0.0f64; 3];
+                        for ax in 0..$d {
+                            x3[ax] = x[ax];
+                            v3[ax] = p.vel[ax];
+                        }
+                        let lx = cross3(x3, v3);
+                        let r = (x3[0] * x3[0] + x3[1] * x3[1] + x3[2] * x3[2]).sqrt();
+                        let (g, _) = seed.taper(r);
+                        let r2 = r * r;
+                        for aa in 0..3 {
+                            l_net[aa] += m * lx[aa];
+                            for bb in 0..3 {
+                                let delta = if aa == bb { r2 } else { 0.0 };
+                                inertia[aa][bb] += m * g * (delta - x3[aa] * x3[bb]);
+                            }
+                        }
+                    }
+                }
+                let w = solve3(inertia, [-l_net[0], -l_net[1], -l_net[2]])?;
+                hier.perturb_cells(|x, p| {
+                    let mut x3 = [0.0f64; 3];
+                    for ax in 0..$d {
+                        x3[ax] = x[ax];
+                    }
+                    let r = (x3[0] * x3[0] + x3[1] * x3[1] + x3[2] * x3[2]).sqrt();
+                    let (g, _) = seed.taper(r);
+                    let dv = cross3(w, x3);
+                    let mut p = p;
+                    for ax in 0..$dof {
+                        p.vel[ax] += g * dv[ax];
+                    }
+                    p
+                });
+                hier.sync_perturbed();
             }
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import os
 from pathlib import Path
 from types import ModuleType
@@ -342,10 +343,55 @@ def _validate_equilibrium_payload(model_dict: dict[str, Any]) -> None:
         )
 
 
+def _validate_seed_payload(model_dict: dict[str, Any]) -> None:
+    """reject a malformed velocity-seed wire before rust.
+
+    the seed's mode vectors are 3-vectors and its taper reads a coordinate radius, so
+    the payload is defined on a 3d cartesian newtonian grid and nowhere else; a wire
+    the backend would refuse (or silently drop) fails here with the reason.
+    """
+    modes = model_dict.get("seed_modes") or []
+    if not modes:
+        return
+    if model_dict.get("is_mhd", False):
+        raise ValueError(
+            "seed_modes is unavailable on an mhd regime: a cell-centered velocity "
+            "perturbation cannot update the staggered face field, so div(B) = 0 would "
+            "not survive it"
+        )
+    if model_dict.get("is_relativistic", False):
+        raise ValueError(
+            "seed_modes perturbs a newtonian velocity; a relativistic primitive is a "
+            "different object"
+        )
+    if int(model_dict.get("dimensionality", 0)) != 3:
+        raise ValueError("seed_modes requires a 3d grid")
+    coord = model_dict.get("coord_system", "")
+    coord_value = str(getattr(coord, "value", coord)).lower()
+    if coord_value != "cartesian":
+        raise ValueError(
+            f"seed_modes requires a cartesian grid; this run is '{coord_value}'"
+        )
+    taper = model_dict.get("seed_taper") or []
+    if len(taper) != 2 or not all(math.isfinite(t) and t > 0 for t in taper):
+        raise ValueError(
+            f"seed_modes requires seed_taper = [onset, width], both positive; got {taper}"
+        )
+    for index, row in enumerate(modes):
+        if len(row) != 9 or not all(math.isfinite(v) for v in row):
+            raise ValueError(
+                f"seed mode {index} must be 9 finite entries "
+                "[kx, ky, kz, ex, ey, ez, amp, phase, r_cut]"
+            )
+        if row[0] ** 2 + row[1] ** 2 + row[2] ** 2 <= 0.0:
+            raise ValueError(f"seed mode {index} has a zero wavevector")
+
+
 def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
     """reject backend-invalid expression wires before rust."""
     _validate_census_payloads(model_dict)
     _validate_equilibrium_payload(model_dict)
+    _validate_seed_payload(model_dict)
     source_payloads = [
         (f"source_expressions[{index}]", payload)
         for index, payload in enumerate(model_dict.get("source_expressions", ()))

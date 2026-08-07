@@ -839,6 +839,36 @@ class SimbiProblem(BaseModel):
 
     @computed_field
     @property
+    def seed_modes(self) -> list[list[float]]:
+        """the initial velocity seed as an analytic solenoidal mode table.
+
+        each row is [kx, ky, kz, ex, ey, ez, amp, phase, r_cut]: the field is the curl of
+        the tapered vector potential `sum_m amp_m e_m sin(k_m . x + phase_m)`, which the
+        backend evaluates at every refinement level's OWN cell centers — the seed carries
+        each level's full resolvable content, where a coarse-grid seed reaches fine levels
+        only through prolongation and carries nothing below the coarse nyquist. the curl
+        form is exactly divergence-free under any radial envelope. r_cut is the mode's
+        outer cutoff radius (0 = none): beyond the radius where the level ladder stops
+        resolving the mode's wavelength, sampling it would alias onto a long wave at full
+        amplitude. the backend also cancels the table's net angular momentum exactly with
+        a tapered rigid rotation, measured on the seeded state.
+
+        default [] = no seed. requires a 3d cartesian newtonian single-device run and a
+        positive `seed_taper`.
+        """
+        return []
+
+    @computed_field
+    @property
+    def seed_taper(self) -> list[float]:
+        """[onset, width] of the velocity seed's radial envelope: 1 inside `onset`, 0 at
+        and beyond `onset + width`, so the field vanishes before the domain boundary and
+        its net linear momentum is a vanishing surface integral. empty when `seed_modes`
+        is empty."""
+        return []
+
+    @computed_field
+    @property
     def equilibrium_expressions(self) -> ExpressionDict:
         """the run's STATIONARY TARGET state as a traced expression of position, which a
         well-balanced scheme then holds exactly.

@@ -2265,6 +2265,22 @@ where
         }
     }
 
+    /// rewrite EVERY interior cell in primitive space: `f` receives the cell's physical
+    /// center and its recovered primitive (c2p) and returns the primitive to store (p2c).
+    /// the perturbation seam for an already-seeded state — a velocity field laid over a
+    /// hydrostatic base, for instance — where re-deriving the base profile at the call
+    /// site would duplicate the seeding path.
+    pub fn perturb_cells(
+        &self,
+        f: impl Fn([f64; D], <R as Regime<Sc, DOF>>::Prim) -> <R as Regime<Sc, DOF>>::Prim,
+    ) {
+        for c in self.geom.interior.iter() {
+            let x = self.geom.cell_coord(c);
+            let p = self.prim_at(c);
+            self.seed_cell(c, &f(x, p));
+        }
+    }
+
     /// gather the regime's CONSERVED state at a cell — the inverse of `seed_cell`'s scatter, with
     /// the cell-centered B folded in for MHD, so a caller never hand-assembles
     /// `MhdCons { hydro: Cons { den: *..view().at(c), mom: Tensor::new([..]), nrg: .. }, mag: .. }`.
