@@ -32,6 +32,10 @@ frontier/
 *.svg
 *.html
 *.csv
+
+# repo artwork is checked in: the readme renders it, so it is not run output
+!docs/assets/*.png
+!docs/assets/*.svg
 *.xml
 *.mp4
 *.log

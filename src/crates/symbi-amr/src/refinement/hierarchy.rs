@@ -800,10 +800,25 @@ where
     /// conserved component is prolonged coarse -> fine interior; the fine levels
     /// then refine the solution as they evolve.
     ///
+    /// the conserved components are prolonged INDEPENDENTLY, and nothing in a
+    /// component-wise high-order prolongation preserves the admissibility
+    /// inequality E >= |m|^2 / (2 rho): near an extremum of the momentum the
+    /// non-monotone stencil overshoots `m` while `E` interpolates low, and the
+    /// fine cell's internal energy E - |m|^2/(2 rho) goes negative wherever the
+    /// kinetic energy density is comparable to the internal — e.g. a velocity
+    /// field whose local mach approaches unity on a cold background. each level
+    /// is therefore c2p-audited after its fill, and every inadmissible cell is
+    /// re-seeded by piecewise-constant injection of its covering parent cell,
+    /// which is unconditionally admissible (the children are copies of an
+    /// admissible parent) and preserves the coarse-cell integral exactly. the
+    /// audit repairs hydro components only; returns the number of re-seeded
+    /// cells so callers can assert the fallback engaged (or did not).
+    ///
     /// the seeded state is hydro-complete plus the mhd cell-centered B. the staggered
     /// fine `bface` is NOT seeded here: a face field needs face prolongation, which the
     /// mhd refinement path supplies.
-    pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<()> {
+    pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<usize> {
+        let mut reseeded = 0usize;
         for ll in 1..self.levels.len() {
             let (lo, hi) = self.levels.split_at(ll);
             let coarse = &lo[ll - 1].state;
@@ -846,8 +861,58 @@ where
                 fm.bface_initialized
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
+
+            // admissibility audit of the freshly filled level. the audit runs
+            // inside the level loop so a repaired cell is what the NEXT level
+            // prolongs from — the cascade never compounds an inadmissible state.
+            let lvl = &self.levels[ll];
+            lvl.kernels.c2p(&lvl.state);
+            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+            if scan_c2p_errors(&lvl.state).is_err() {
+                let flagged: Vec<[isize; NDIM]> = lvl
+                    .state
+                    .geom
+                    .interior
+                    .iter()
+                    .filter(|coord| *lvl.state.fields.c2p_error.view().at(*coord) != 0.0)
+                    .collect();
+                for coord in &flagged {
+                    let cell = Domain::new(std::array::from_fn(|aa| Space {
+                        name: lvl.state.geom.interior.spaces[aa].name,
+                        lo: coord[aa],
+                        hi: coord[aa] + 1,
+                    }));
+                    prolong_field(&cc.den, &zero, &fc.den, &cell, ProlongOrder::Pcm, 0.0);
+                    for kk in 0..DOF {
+                        prolong_field(
+                            &cc.mom[kk],
+                            &zero,
+                            &fc.mom[kk],
+                            &cell,
+                            ProlongOrder::Pcm,
+                            0.0,
+                        );
+                    }
+                    if let (Some(cn), Some(fn_nrg)) = (cc.nrg_field(), fc.nrg_field()) {
+                        prolong_field(cn, &zero, fn_nrg, &cell, ProlongOrder::Pcm, 0.0);
+                    }
+                }
+                reseeded += flagged.len();
+                // refresh the primitives and the error field; a cell still
+                // inadmissible after parent injection is a defect of the coarse
+                // state itself and is left for the caller's c2p gate to report.
+                lvl.kernels.c2p(&lvl.state);
+                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                eprintln!(
+                    "seed_fine_from_coarse: level {} re-seeded {} cell(s) by parent \
+                     injection (high-order prolongation of independent conserved \
+                     components broke E >= |m|^2/2rho)",
+                    ll,
+                    flagged.len()
+                );
+            }
         }
-        Ok(())
+        Ok(reseeded)
     }
 
     /// a 1-level hierarchy: the degenerate case that must reproduce evolve()
