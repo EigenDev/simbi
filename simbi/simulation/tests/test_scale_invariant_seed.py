@@ -233,3 +233,78 @@ def test_seed_requires_the_stratified_start() -> None:
     problem = _problem()
     with pytest.raises(Exception, match="hydrostatic"):
         type(problem)(seed_epsilon=_EPSILON, initial_profile="uniform")
+
+
+# =============================================================================
+# the starting profile: the polytropic family and its support.
+#
+# a non-rotating hydrostatic column at constant Theta = r <p/rho> / GM obeys
+# Theta (n + 1) = 1 exactly, so p = K rho^Gamma with Gamma = 1 + 1/n lies on
+# S = 2 Theta = 2/(n+1). that curve carries BOTH branch endpoints -- n = 1 gives
+# S = 1, n = 3/2 gives S = 4/5 -- which is what makes the starting index a choice
+# of initial support rather than a numerical convenience, and what lets a run
+# start between the two answers instead of on top of one.
+# =============================================================================
+
+
+def _profile(problem, radii):
+    """density and pressure of the declared starting column at `radii`."""
+    gamma = problem.adiabatic_index
+    rho_inf = problem.ambient_density
+    p_inf = rho_inf * problem.ambient_sound_speed**2 / gamma
+    index_gamma = 1.0 + 1.0 / problem.initial_index
+    cs2_struct = index_gamma * p_inf / rho_inf
+    rho = rho_inf * (
+        1.0 + (index_gamma - 1.0) * problem.central_mass / (cs2_struct * radii)
+    ) ** (1.0 / (index_gamma - 1.0))
+    return rho, p_inf * (rho / rho_inf) ** index_gamma
+
+
+def test_the_starting_column_realizes_its_declared_index() -> None:
+    """the profile the config generates must have the slope it was asked for, and
+    the support S = 2 Theta the family relation predicts. the window is the one the
+    measurement is made on, so the small offset from the asymptotic values is the
+    finite depth of that window rather than a wrong profile."""
+    base = _problem()
+    for index in (1.0, 1.25, 1.5, 3.0):
+        problem = type(base)(
+            seed_epsilon=_EPSILON, initial_profile="hydrostatic", initial_index=index
+        )
+        r_acc = problem.accretor_radius
+        radii = np.geomspace(5.0 * r_acc, 35.0 * r_acc, 40)
+        rho, pre = _profile(problem, radii)
+        slope = -np.polyfit(np.log(radii), np.log(rho), 1)[0]
+        theta = float(np.mean(radii * (pre / rho) / problem.central_mass))
+
+        assert abs(slope - index) / index < 0.05, (
+            f"index {index}: the generated column has slope {slope:.4f}, not the "
+            "declared index"
+        )
+        assert abs(2.0 * theta - 2.0 / (index + 1.0)) < 0.03, (
+            f"index {index}: support 2*Theta = {2 * theta:.4f} departs from the "
+            f"family relation 2/(n+1) = {2 / (index + 1):.4f}"
+        )
+
+
+def test_the_family_relation_carries_both_branch_endpoints() -> None:
+    """the two locked supports are not independent numbers: they are 2/(n+1) at the
+    two indices. a start at the log midpoint therefore sits between them, which is
+    what gives both arms somewhere to go."""
+    base = _problem()
+    supports = {}
+    for index in (1.0, 1.25, 1.5):
+        problem = type(base)(
+            seed_epsilon=_EPSILON, initial_profile="hydrostatic", initial_index=index
+        )
+        r_acc = problem.accretor_radius
+        radii = np.geomspace(5.0 * r_acc, 35.0 * r_acc, 40)
+        rho, pre = _profile(problem, radii)
+        supports[index] = 2.0 * float(
+            np.mean(radii * (pre / rho) / problem.central_mass)
+        )
+    assert abs(supports[1.0] - 1.0) < 0.03, f"n=1 gave S = {supports[1.0]:.4f}, not 1"
+    assert abs(supports[1.5] - 0.8) < 0.03, f"n=3/2 gave S = {supports[1.5]:.4f}, not 4/5"
+    assert supports[1.5] < supports[1.25] < supports[1.0], (
+        "the log midpoint must sit strictly between the two branch supports, or it "
+        f"is not a start between the answers: {supports}"
+    )
