@@ -2,17 +2,19 @@
 // linearize.rs
 //
 // converts an expression DAG into a flat instruction stream for the register
-// VM. pipeline: reachability analysis -> topological sort (DFS) -> register
+// VM. pipeline: reachability analysis -> evaluation order -> register
 // allocation -> instruction emission.
 //
-// variable registers are fixed: x1=0, x2=1, x3=2, t=3. computed nodes
-// get sequential registers starting at 4.
+// variable registers are fixed: x1=0, x2=1, x3=2, t=3. computed nodes draw
+// from a recycling pool starting at register 4, so the bank has to hold the
+// values simultaneously LIVE rather than one per node.
 //
 // usage:
 //   let (instrs, output_regs) = linearize(dag.nodes(), &[root_idx]);
 // =============================================================================
 
 use crate::dag::{Node, Payload};
+use crate::eval::MAX_REGISTERS;
 use crate::op::Op;
 
 /// a single VM instruction. the evaluator executes these sequentially.
@@ -52,49 +54,36 @@ fn find_reachable(nodes: &[Node], outputs: &[usize]) -> Vec<bool> {
     reachable
 }
 
-/// topological sort via DFS. returns nodes in evaluation order (leaves first).
-fn topo_sort(nodes: &[Node], outputs: &[usize], reachable: &[bool]) -> Vec<usize> {
-    let nn = nodes.len();
-    let mut color = vec![0u8; nn]; // 0=white, 1=gray, 2=black
-    let mut result = Vec::with_capacity(nn);
-
-    for &root in outputs {
-        dfs_visit(nodes, root, reachable, &mut color, &mut result);
+/// evaluation order (leaves first): the reachable nodes in INDEX order.
+///
+/// the dag is append-only and a node can only name children that already exist, so a
+/// child's index is always below its parent's and index order is a valid topological
+/// order by construction. it is also the order the expression was BUILT in, which is
+/// what keeps register pressure low: a value is created near the point it is consumed,
+/// so its live range is short.
+///
+/// visiting each output's subtree in turn instead — the natural depth-first reading —
+/// is equally valid and can be far worse. any subexpression shared between two outputs
+/// then stays live across the whole of the first output's evaluation, so a field whose
+/// components share per-term temporaries holds one live value per term rather than a
+/// handful in total.
+fn topo_sort(nodes: &[Node], _outputs: &[usize], reachable: &[bool]) -> Vec<usize> {
+    let mut result = Vec::with_capacity(nodes.len());
+    for (idx, node) in nodes.iter().enumerate() {
+        if !reachable[idx] {
+            continue;
+        }
+        node.for_each_child(|child| {
+            assert!(
+                child < idx,
+                "expression dag node {idx} names child {child} at or above its own \
+                 index; the graph is no longer append-only and index order is not a \
+                 topological order"
+            );
+        });
+        result.push(idx);
     }
     result
-}
-
-fn dfs_visit(
-    nodes: &[Node],
-    idx: usize,
-    reachable: &[bool],
-    color: &mut [u8],
-    result: &mut Vec<usize>,
-) {
-    if !reachable[idx] || color[idx] == 2 {
-        return;
-    }
-    assert!(
-        color[idx] != 1,
-        "cycle detected in expression DAG at node {}",
-        idx
-    );
-
-    color[idx] = 1;
-
-    // collect children first to avoid borrow conflict with recursive call.
-    let mut children = [0usize; 3];
-    let mut num_children = 0;
-    nodes[idx].for_each_child(|c| {
-        children[num_children] = c;
-        num_children += 1;
-    });
-    for &child in &children[..num_children] {
-        dfs_visit(nodes, child, reachable, color, result);
-    }
-
-    color[idx] = 2;
-    result.push(idx);
 }
 
 /// linearize an expression DAG into a flat instruction stream.
@@ -105,18 +94,79 @@ pub fn linearize(nodes: &[Node], outputs: &[usize]) -> (Vec<Instr>, Vec<usize>) 
     let reachable = find_reachable(nodes, outputs);
     let order = topo_sort(nodes, outputs, &reachable);
 
-    // register allocation: variables get fixed regs, others get sequential.
+    // register allocation. variables occupy their fixed registers; every other node
+    // takes one from a free pool, and a register returns to the pool once the value it
+    // holds has been read for the last time.
+    //
+    // RECYCLING IS WHAT MAKES LARGE EXPRESSIONS REPRESENTABLE. allocating a fresh
+    // register per node makes the register count equal the NODE count, so the fixed
+    // bank caps an expression at a couple of hundred nodes — while the number of values
+    // simultaneously LIVE is a property of the expression's shape, not its size, and
+    // stays small for the wide sums and products configs actually build (a sum of a
+    // thousand terms holds one accumulator plus the term under construction).
     let mut reg_map: Vec<Option<usize>> = vec![None; nodes.len()];
     let mut next_reg = FIRST_COMPUTED_REG;
+    let mut free: Vec<usize> = Vec::new();
 
+    // the last step of `order` at which each node's value is read. outputs are read by
+    // the caller after the stream ends, so they never expire.
+    let mut last_use: Vec<usize> = vec![0; nodes.len()];
+    for (step, &idx) in order.iter().enumerate() {
+        let mut mark = |child: usize| last_use[child] = last_use[child].max(step);
+        match nodes[idx].payload {
+            Payload::Unary(a) => mark(a),
+            Payload::Binary(a, b) => {
+                mark(a);
+                mark(b);
+            }
+            Payload::Ternary(a, b, c) => {
+                mark(a);
+                mark(b);
+                mark(c);
+            }
+            Payload::None | Payload::Value(_) | Payload::ParamIdx(_) => {}
+        }
+    }
+    for &out in outputs {
+        last_use[out] = order.len();
+    }
+
+    // nodes whose register becomes reusable after each step.
+    let mut expiring: Vec<Vec<usize>> = vec![Vec::new(); order.len() + 1];
     for &idx in &order {
+        if !nodes[idx].op.is_variable() {
+            expiring[last_use[idx]].push(idx);
+        }
+    }
+
+    for (step, &idx) in order.iter().enumerate() {
+        // release everything whose final read was strictly before this instruction. a
+        // source of THIS instruction has last_use >= step, so it is never recycled into
+        // the destination it is about to be read for.
+        if step > 0 {
+            for &done in &expiring[step - 1] {
+                if let Some(reg) = reg_map[done] {
+                    free.push(reg);
+                }
+            }
+        }
         let node = &nodes[idx];
         if node.op.is_variable() {
             reg_map[idx] = Some(node.op.variable_register());
-        } else {
-            reg_map[idx] = Some(next_reg);
-            next_reg += 1;
+            continue;
         }
+        let reg = free.pop().unwrap_or_else(|| {
+            let reg = next_reg;
+            next_reg += 1;
+            reg
+        });
+        assert!(
+            reg < MAX_REGISTERS,
+            "the expression needs more than {} simultaneously live values; the register \
+             bank holds {MAX_REGISTERS}",
+            MAX_REGISTERS - FIRST_COMPUTED_REG
+        );
+        reg_map[idx] = Some(reg);
     }
 
     // emit instructions. variable nodes skip (pre-loaded by VM).
@@ -296,6 +346,133 @@ mod tests {
         let (instrs, _) = linearize(dag.nodes(), &[result]);
         // should not include the dead constant
         assert!(instrs.iter().all(|ii| ii.imm_f64 != 999.0));
+    }
+
+    /// a wide sum is the shape configs actually build (a mode sum, a multi-term
+    /// source), and its NODE count is unbounded while only a couple of values are
+    /// live at once. without register recycling the allocator hands out one register
+    /// per node and the stream indexes past the bank — which panicked as an opaque
+    /// out-of-bounds rather than reporting an expression too large to represent.
+    #[test]
+    fn a_wide_sum_far_exceeds_the_register_bank() {
+        let terms = 2000;
+        let mut dag = Dag::new();
+        let x = dag.var_x1();
+        let mut acc = dag.constant(0.0);
+        for ii in 0..terms {
+            let c = dag.constant(ii as f64);
+            let term = dag.mul(c, x);
+            acc = dag.add(acc, term);
+        }
+        let (instrs, out_regs) = linearize(dag.nodes(), &[acc]);
+        assert!(
+            instrs.len() > 3 * terms - 10,
+            "the stream dropped instructions: {} for {terms} terms",
+            instrs.len()
+        );
+        // live values stay O(1) regardless of size, so the bank is never approached.
+        assert!(
+            max_register(&instrs) < 32,
+            "a wide sum held {} registers live; recycling is not happening",
+            max_register(&instrs)
+        );
+        // and the value is right: sum_i (i * x) = x * terms (terms - 1) / 2.
+        let mut outputs = [0.0f64];
+        crate::eval::evaluate(&instrs, &out_regs, 2.0, 0.0, 0.0, 0.0, &[], &mut outputs);
+        let expected = 2.0 * (terms as f64) * (terms as f64 - 1.0) / 2.0;
+        assert!(
+            (outputs[0] - expected).abs() < 1.0e-6,
+            "wide sum evaluated to {} against {expected}",
+            outputs[0]
+        );
+    }
+
+    /// recycling must never hand an instruction's destination a register still
+    /// holding one of its own sources. a deep chain where every value feeds the next
+    /// is where that would show up as a silently wrong result rather than a crash.
+    #[test]
+    fn a_deep_chain_reuses_registers_without_clobbering_its_own_inputs() {
+        let depth = 500;
+        let mut dag = Dag::new();
+        let mut acc = dag.var_x1();
+        for _ in 0..depth {
+            let one = dag.constant(1.0);
+            acc = dag.add(acc, one);
+        }
+        let (instrs, out_regs) = linearize(dag.nodes(), &[acc]);
+        let mut outputs = [0.0f64];
+        crate::eval::evaluate(&instrs, &out_regs, 7.0, 0.0, 0.0, 0.0, &[], &mut outputs);
+        assert_eq!(outputs[0], 7.0 + depth as f64);
+    }
+
+    /// a value read by several later instructions has to survive until the LAST of
+    /// them; freeing at the first read would corrupt every consumer after it.
+    #[test]
+    fn a_shared_subexpression_survives_until_its_final_read() {
+        let mut dag = Dag::new();
+        let x = dag.var_x1();
+        let shared = dag.sin(x);
+        // pad the stream so the shared value would be recycled early if its last use
+        // were mistaken for its first.
+        let mut filler = dag.constant(0.0);
+        for ii in 0..300 {
+            let c = dag.constant(ii as f64);
+            filler = dag.add(filler, c);
+        }
+        let late = dag.mul(shared, filler);
+        let result = dag.add(shared, late);
+        let (instrs, out_regs) = linearize(dag.nodes(), &[result]);
+        let mut outputs = [0.0f64];
+        crate::eval::evaluate(&instrs, &out_regs, 0.5, 0.0, 0.0, 0.0, &[], &mut outputs);
+        let s = 0.5f64.sin();
+        let expected = s + s * (0..300).map(|ii| ii as f64).sum::<f64>();
+        assert!(
+            (outputs[0] - expected).abs() < 1.0e-9,
+            "shared subexpression evaluated to {} against {expected}",
+            outputs[0]
+        );
+    }
+
+    /// a vector field whose components share per-term temporaries — the shape of any
+    /// mode sum — is where the EVALUATION ORDER decides whether the expression is
+    /// representable at all. finishing one output before starting the next holds every
+    /// shared temporary live across the whole first component, giving pressure that
+    /// grows with the term count; building in index order retires each term's
+    /// temporaries as soon as all three components have consumed them.
+    #[test]
+    fn multi_output_shared_terms_keep_pressure_bounded() {
+        let terms = 400;
+        let mut dag = Dag::new();
+        let x = dag.var_x1();
+        let mut acc = [dag.constant(0.0), dag.constant(0.0), dag.constant(0.0)];
+        for ii in 0..terms {
+            // one shared temporary per term, read by ALL THREE outputs
+            let c = dag.constant(ii as f64);
+            let scaled = dag.mul(c, x);
+            let shared = dag.sin(scaled);
+            for (ax, slot) in acc.iter_mut().enumerate() {
+                let w = dag.constant((ax + 1) as f64);
+                let term = dag.mul(w, shared);
+                *slot = dag.add(*slot, term);
+            }
+        }
+        let (instrs, out_regs) = linearize(dag.nodes(), &acc);
+        assert!(
+            max_register(&instrs) < 64,
+            "a {terms}-term 3-component field held {} registers live; the schedule is \
+             keeping shared temporaries alive across outputs",
+            max_register(&instrs)
+        );
+        let mut outputs = [0.0f64; 3];
+        crate::eval::evaluate(&instrs, &out_regs, 0.25, 0.0, 0.0, 0.0, &[], &mut outputs);
+        let base: f64 = (0..terms).map(|ii| (ii as f64 * 0.25).sin()).sum();
+        for (ax, got) in outputs.iter().enumerate() {
+            let expected = (ax as f64 + 1.0) * base;
+            assert!(
+                (got - expected).abs() < 1.0e-9,
+                "component {ax} evaluated to {got} against {expected}"
+            );
+        }
     }
 
     #[test]

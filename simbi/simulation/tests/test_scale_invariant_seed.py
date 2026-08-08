@@ -66,8 +66,8 @@ def _ramp(t):
 def _evaluate(problem, points: np.ndarray) -> np.ndarray:
     """the seed field v = curl(f(r) A) at `points`, mirroring the backend's
     evaluation of the mode table (symbi-py `SeedField::eval`)."""
-    rows = np.asarray(problem.seed_modes)
-    onset, width = problem.seed_taper
+    rows = np.asarray(problem._seed_mode_table())
+    onset, width = problem._seed_taper()
     radius = np.linalg.norm(points, axis=1)
     step, dstep = _ramp((radius - onset) / width)
     envelope, d_envelope = 1.0 - step, -dstep / width
@@ -208,14 +208,14 @@ def test_mode_table_is_deterministic_and_well_formed() -> None:
     compressive part the construction claims it does not."""
     problem = _problem()
     again = type(problem)(seed_epsilon=_EPSILON, initial_profile="hydrostatic")
-    first, second = np.asarray(problem.seed_modes), np.asarray(again.seed_modes)
+    first, second = np.asarray(problem._seed_mode_table()), np.asarray(again._seed_mode_table())
     assert first.shape == second.shape
     assert np.array_equal(first, second), "the mode table is not reproducible"
 
     other = type(problem)(
         seed_epsilon=_EPSILON, initial_profile="hydrostatic", turb_seed=43
     )
-    assert not np.array_equal(first, np.asarray(other.seed_modes)), (
+    assert not np.array_equal(first, np.asarray(other._seed_mode_table())), (
         "turb_seed does not change the realization"
     )
 

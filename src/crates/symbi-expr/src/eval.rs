@@ -17,7 +17,7 @@ use crate::dag::{Dag, Node};
 use crate::linearize::{Instr, linearize};
 use crate::op::Op;
 
-const MAX_REGISTERS: usize = 256;
+pub(crate) const MAX_REGISTERS: usize = 256;
 
 /// execute a linearized instruction stream on the register VM.
 ///

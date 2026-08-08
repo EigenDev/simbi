@@ -343,55 +343,54 @@ def _validate_equilibrium_payload(model_dict: dict[str, Any]) -> None:
         )
 
 
-def _validate_seed_payload(model_dict: dict[str, Any]) -> None:
-    """reject a malformed velocity-seed wire before rust.
+def _validate_perturbation_payload(model_dict: dict[str, Any]) -> None:
+    """reject a malformed initial-perturbation wire before rust.
 
-    the seed's mode vectors are 3-vectors and its taper reads a coordinate radius, so
-    the payload is defined on a 3d cartesian newtonian grid and nowhere else; a wire
-    the backend would refuse (or silently drop) fails here with the reason.
+    the payload is a STATE DELTA, so like the stationary target it carries no `kind`
+    and no conserved-slot `target`; what has to hold is that it supplies exactly the
+    primitive components the regime evolves, since the backend reads positionally and
+    a missing entry silently shifts every component after it.
     """
-    modes = model_dict.get("seed_modes") or []
-    if not modes:
+    payload = model_dict.get("perturbation_expressions")
+    if not payload:
         return
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "perturbation_expressions must be a serialized expression dictionary; use "
+            "serialize_equilibrium()"
+        )
+    outputs = payload.get("outputs")
+    if not isinstance(outputs, list):
+        raise ValueError("perturbation_expressions must contain an `outputs` list")
     if model_dict.get("is_mhd", False):
         raise ValueError(
-            "seed_modes is unavailable on an mhd regime: a cell-centered velocity "
-            "perturbation cannot update the staggered face field, so div(B) = 0 would "
-            "not survive it"
+            "perturbation_expressions is unavailable on an mhd regime: a cell-centered "
+            "primitive rewrite cannot update the staggered face field, so div(B) = 0 "
+            "would not survive it"
         )
-    if model_dict.get("is_relativistic", False):
+
+    run_dim = int(model_dict.get("dimensionality", payload.get("dim", 1)))
+    dim = int(payload.get("dim", run_dim))
+    if dim != run_dim:
         raise ValueError(
-            "seed_modes perturbs a newtonian velocity; a relativistic primitive is a "
-            "different object"
+            f"perturbation_expressions was built for a {dim}-dimensional grid, but this "
+            f"run is {run_dim}-dimensional"
         )
-    if int(model_dict.get("dimensionality", 0)) != 3:
-        raise ValueError("seed_modes requires a 3d grid")
-    coord = model_dict.get("coord_system", "")
-    coord_value = str(getattr(coord, "value", coord)).lower()
-    if coord_value != "cartesian":
+    has_energy = not bool(model_dict.get("isothermal", False))
+    expected = 1 + dim + int(has_energy)
+    if len(outputs) != expected:
         raise ValueError(
-            f"seed_modes requires a cartesian grid; this run is '{coord_value}'"
+            f"perturbation_expressions has {len(outputs)} outputs; expected {expected} "
+            f"primitive components for dim={dim} — density, {dim} velocity component(s)"
+            + (", and pressure" if has_energy else " (isothermal: no pressure)")
         )
-    taper = model_dict.get("seed_taper") or []
-    if len(taper) != 2 or not all(math.isfinite(t) and t > 0 for t in taper):
-        raise ValueError(
-            f"seed_modes requires seed_taper = [onset, width], both positive; got {taper}"
-        )
-    for index, row in enumerate(modes):
-        if len(row) != 9 or not all(math.isfinite(v) for v in row):
-            raise ValueError(
-                f"seed mode {index} must be 9 finite entries "
-                "[kx, ky, kz, ex, ey, ez, amp, phase, r_cut]"
-            )
-        if row[0] ** 2 + row[1] ** 2 + row[2] ** 2 <= 0.0:
-            raise ValueError(f"seed mode {index} has a zero wavevector")
 
 
 def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
     """reject backend-invalid expression wires before rust."""
     _validate_census_payloads(model_dict)
     _validate_equilibrium_payload(model_dict)
-    _validate_seed_payload(model_dict)
+    _validate_perturbation_payload(model_dict)
     source_payloads = [
         (f"source_expressions[{index}]", payload)
         for index, payload in enumerate(model_dict.get("source_expressions", ()))
