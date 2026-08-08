@@ -308,9 +308,10 @@ def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, 
             "nus": [float(frequency)],
         }
         # velocity components ride with the fields so lateral spreading beams correctly.
-        fields = build_fields(data) | build_velocity(data)
+        mirror = getattr(args, "mirror_equator", False)
+        fields = build_fields(data, mirror) | build_velocity(data, mirror)
         img = rad_hydro.skymap_deposit(
-            sim_cond, qscales, fields, build_mesh(data), list(nhat),
+            sim_cond, qscales, fields, build_mesh(data, mirror), list(nhat),
             float(obs_time), float(args.time_window), float(frequency), observer.redshift,
             float(half_width_cm), n_pix, 2.0,
         )
@@ -765,6 +766,18 @@ def setup_skymap_parser(subparsers) -> None:
         help="gaussian smoothing sigma in PIXELS. DEFAULT 2.1 = zrake+2018's 5-px (300 uas) kernel, "
         "applied to EVERY image -- it absorbs the monte-carlo speckle AND the on-axis azimuthal "
         "tessellation spokes (which zrake calls 'redundant for on-axis observers'). 0 disables.",
+    )
+
+    parser.add_argument(
+        "--mirror-equator",
+        action="store_true",
+        help="treat a theta in [0, pi/2] run as the SYMMETRIC HALF of a full [0, pi] system "
+        "and image both hemispheres. a run closed by a reflecting equator models a whole "
+        "source, but the imager sees only the mesh it is given -- so without this the "
+        "counter-jet and the far half of an equatorial ring are missing, the emitting "
+        "volume is halved, and the RECEDING shell (which forms the double-ring in an "
+        "off-axis image) can never appear. refuses unless the polar range really is "
+        "[0, pi/2], since mirroring a full run would double-count it.",
     )
 
     parser.add_argument(

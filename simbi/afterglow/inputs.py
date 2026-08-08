@@ -34,7 +34,52 @@ def _cell_centers(vertices: NDArray) -> NDArray:
     return 0.5 * (verts[:-1] + verts[1:])
 
 
-def build_fields(data: Any) -> dict[str, NDArray]:
+def _mirror_about_equator(values: NDArray, flip_sign: bool = False) -> NDArray:
+    """append the equator-mirrored hemisphere along the POLAR axis.
+
+    a run on theta in [0, pi/2] closed by a REFLECTING equator does not model half a
+    system -- it models a whole one that happens to be symmetric about that plane. the
+    material at pi - theta is physically present, and an off-axis observer sees it: it
+    is the RECEDING side, the counter-jet, the far half of an equatorial ring. the
+    imager treats whatever mesh it is handed as the entire sky, so without this the
+    emitting volume is silently halved and the receding shell can never appear. that
+    shell is exactly what forms the double-ring in an off-axis afterglow image, so its
+    absence is not a small error in the flux -- it removes a morphological feature.
+
+    reflection theta -> pi - theta maps v_theta -> -v_theta and leaves v_r, v_phi
+    alone; `flip_sign` carries that for the velocity components.
+    """
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.ndim != 2:
+        raise ValueError(
+            f"equatorial mirroring is defined for a 2d (theta, r) field; got "
+            f"ndim={arr.ndim}. a 1d run has no polar axis to mirror, and a 3d one "
+            f"needs the polar axis identified rather than assumed."
+        )
+    mirrored = arr[::-1, :]
+    return np.concatenate([arr, -mirrored if flip_sign else mirrored], axis=0)
+
+
+def _assert_mirrorable(data: Any) -> None:
+    """refuse to mirror a mesh that does not actually stop at the equator.
+
+    mirroring a run that already spans [0, pi] would DOUBLE-COUNT it, and mirroring one
+    truncated at, say, 30 degrees would invent material in a wedge the simulation never
+    solved. both produce a plausible-looking image, so this is checked rather than
+    trusted to the caller.
+    """
+    x2v = np.asarray(data.mesh.x2v, dtype=np.float64)
+    lo, hi = float(x2v[0]), float(x2v[-1])
+    if abs(lo) > 1e-6 or abs(hi - 0.5 * np.pi) > 1e-6:
+        raise ValueError(
+            f"--mirror-equator needs a polar range of [0, pi/2]; this checkpoint spans "
+            f"[{lo:.6f}, {hi:.6f}] rad ([{np.degrees(lo):.2f}, {np.degrees(hi):.2f}] deg). "
+            f"a full [0, pi] run is already whole, and a narrower wedge would have "
+            f"material invented outside what was solved."
+        )
+
+
+def build_fields(data: Any, mirror_equator: bool = False) -> dict[str, NDArray]:
     """
     build the rust contract `fields` dict from a SimData checkpoint.
 
@@ -45,25 +90,27 @@ def build_fields(data: Any) -> dict[str, NDArray]:
     simbi reader stores v1/v2/v3 as the 3-velocity (|v| < 1, c = 1); the derived
     field "u" already evaluates |gamma*beta| from those 3-velocities for the
     checkpoint regime, so it is used directly rather than re-deriving here.
+
+    `mirror_equator` appends the theta -> pi - theta hemisphere (see
+    `_mirror_about_equator`); these are all SCALARS, so they mirror unsigned.
     """
-    rho = np.ascontiguousarray(
-        np.asarray(data.get_field("rho"), dtype=np.float64).ravel()
-    )
-    pre = np.ascontiguousarray(
-        np.asarray(data.get_field("p"), dtype=np.float64).ravel()
-    )
-    gamma_beta = np.ascontiguousarray(
-        np.asarray(data.get_field("u"), dtype=np.float64).ravel()
-    )
+    if mirror_equator:
+        _assert_mirrorable(data)
+
+    def read(name: str) -> NDArray:
+        arr = np.asarray(data.get_field(name), dtype=np.float64)
+        if mirror_equator:
+            arr = _mirror_about_equator(arr)
+        return np.ascontiguousarray(arr.ravel())
 
     return {
-        "rho": rho,
-        "gamma_beta": gamma_beta,
-        "pre": pre,
+        "rho": read("rho"),
+        "gamma_beta": read("u"),
+        "pre": read("p"),
     }
 
 
-def build_mesh(data: Any) -> dict[str, Any]:
+def build_mesh(data: Any, mirror_equator: bool = False) -> dict[str, Any]:
     """
     build the rust contract `mesh` dict from a SimData checkpoint.
 
@@ -86,14 +133,20 @@ def build_mesh(data: Any) -> dict[str, Any]:
         "data_dim": data_dim,
     }
     if data_dim >= 2:
-        mesh["x2"] = np.ascontiguousarray(_cell_centers(data.mesh.x2v))
+        theta = _cell_centers(data.mesh.x2v)
+        if mirror_equator:
+            _assert_mirrorable(data)
+            # the mirrored centers are pi - theta REVERSED, so the joined axis stays
+            # ascending across the equator -- which the imager's cell walk requires.
+            theta = np.concatenate([theta, (np.pi - theta)[::-1]])
+        mesh["x2"] = np.ascontiguousarray(theta)
     if data_dim >= 3:
         mesh["x3"] = np.ascontiguousarray(_cell_centers(data.mesh.x3v))
 
     return mesh
 
 
-def build_velocity(data: Any) -> dict[str, NDArray]:
+def build_velocity(data: Any, mirror_equator: bool = False) -> dict[str, NDArray]:
     """
     the three-velocity component arrays ("v1".."vD", units of c) present in a checkpoint,
     flat float64 — the deposit imager uses them to capture lateral spreading (a jet's
@@ -101,11 +154,20 @@ def build_velocity(data: Any) -> dict[str, NDArray]:
     checkpoint's dimensionality do not exist and are omitted (the imager treats missing
     components as zero, radial flow).
     """
+    if mirror_equator:
+        _assert_mirrorable(data)
     out: dict[str, NDArray] = {}
     for ax in range(1, int(data.metadata.dimensions) + 1):
-        out[f"v{ax}"] = np.ascontiguousarray(
-            np.asarray(data.get_field(f"v{ax}"), dtype=np.float64).ravel()
-        )
+        arr = np.asarray(data.get_field(f"v{ax}"), dtype=np.float64)
+        if mirror_equator:
+            # v_theta (axis 2) is the ONLY component the reflection flips: a parcel
+            # moving away from the pole in the north moves away from it in the south
+            # too, which is the opposite theta direction. leaving the sign alone would
+            # give the mirrored hemisphere a lateral velocity converging on the
+            # equator, and the doppler factor -- the whole point of the exercise --
+            # would be wrong for exactly the receding material being added.
+            arr = _mirror_about_equator(arr, flip_sign=(ax == 2))
+        out[f"v{ax}"] = np.ascontiguousarray(arr.ravel())
     return out
 
 
