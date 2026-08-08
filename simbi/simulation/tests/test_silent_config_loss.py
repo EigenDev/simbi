@@ -351,6 +351,35 @@ def test_gamma_law_restart_keeps_the_checkpoint_adiabatic_index(monkeypatch, tmp
     assert merged.adiabatic_index == 4.0 / 3.0
 
 
+def test_restart_refuses_a_closure_swapped_by_a_config_edit(monkeypatch, tmp_path):
+    # the real bmk failure: a checkpoint integrated at ideal gamma = 4/3, restarted from a
+    # config later edited to declare synge. no explicit flag exists to catch, so the silent
+    # checkpoint-wins rule would resume gamma-law under a source file that reads synge.
+    from simbi.simulation import checkpoint as cp
+
+    monkeypatch.setattr(
+        cp,
+        "load_checkpoint_metadata",
+        lambda _p: (_synge_meta(eos="ideal", gamma=4.0 / 3.0), (512,)),
+    )
+
+    with pytest.raises(ConfigError, match="closure cannot change on restart") as exc:
+        cp.merge_with_checkpoint(
+            _synge_problem_class().from_cli([]), tmp_path / "fake.h5"
+        )
+
+    # the repair it names must be a CONFIG edit carrying the recorded gamma. `--eos ideal`
+    # alone cannot be the advice: the synge config declares no adiabatic_index, so the flag
+    # dies on the model validator before the merge is reached.
+    assert "adiabatic_index = 1.3333333333333333" in str(exc.value)
+    with pytest.raises(ConfigError, match="require an adiabatic_index"):
+        _synge_problem_class().from_cli(["--eos", "ideal"])
+
+    # a config that DOES declare the recorded closure resumes without complaint.
+    merged = cp.merge_with_checkpoint(GrBondiKS.from_cli([]), tmp_path / "fake.h5")
+    assert merged.adiabatic_index == 4.0 / 3.0
+
+
 def test_viz_config_rejects_typoed_kwargs():
     from simbi.viz.config import FigureConfig
 

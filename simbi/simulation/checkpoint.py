@@ -342,6 +342,35 @@ def merge_with_checkpoint(
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
 
+    # the CLOSURE is not a knob a restart may drift on: the state in the file was integrated
+    # under one equation of state, and continuing it under another is a different physics
+    # problem wearing the same file name. unlike every other immutable field this refuses even
+    # when the config merely DEFAULTS to the other closure — a config EDITED between the
+    # original run and the restart (gamma-law -> synge, say) carries no explicit flag to catch,
+    # and the silent checkpoint-wins rule would resume the old equations under a source file
+    # that reads as the new ones.
+    recorded_closure = checkpoint_config.get("eos")
+    if recorded_closure is not None and recorded_closure != problem.eos:
+        from .problem import ConfigError
+
+        # the repair is a CONFIG edit, not a flag: `--eos` alone flips the closure without
+        # the adiabatic_index that has to appear (ideal) or disappear (synge) alongside it,
+        # so the model validator refuses the problem before the merge is ever reached.
+        if recorded_closure == Eos.SYNGE:
+            repair = "set `eos = Eos.SYNGE` in the config and drop its adiabatic_index"
+        else:
+            gamma = checkpoint_config.get("adiabatic_index")
+            repair = (
+                f"set `eos = Eos.IDEAL` and `adiabatic_index = {gamma!r}` in the config"
+            )
+        raise ConfigError(
+            f"the closure cannot change on restart: the checkpoint was integrated with "
+            f"eos = '{recorded_closure.value}' but this config declares "
+            f"'{problem.eos.value}'. resuming would continue the file's state under "
+            f"different equations of state. to continue the run as recorded, {repair}; "
+            f"to use the new closure, start a fresh run (no --checkpoint)."
+        )
+
     # the synge (taub-mathews) closure declares NO adiabatic index: the model validator
     # REFUSES a user-supplied one and then writes the inert placeholder 5/3 itself, purely
     # so the plumbing has a float to carry. the backend records that placeholder as the
