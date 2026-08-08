@@ -283,18 +283,14 @@ def test_colorbar_is_repointed_at_the_rebuilt_artist() -> None:
 
     result = component.render(spherical_field(scale_factor=1.0), style)
     formatter = FigureFormatter(style)
-    formatter.refresh_colorbars(
-        fig, ax, [(result.artists, result.metadata)], None
-    )
+    formatter.refresh_colorbars(fig, ax, [result], None)
     colorbar = getattr(ax, "_simbi_colorbars")[0]
 
     moved = component.render(spherical_field(scale_factor=3.0, time=1.0), style)
-    assert moved.metadata["mappable"] is not result.metadata["mappable"]
+    assert moved.mappable is not result.mappable
 
-    formatter.refresh_colorbars(
-        fig, ax, [(moved.artists, moved.metadata)], None
-    )
-    assert colorbar.mappable is moved.metadata["mappable"]
+    formatter.refresh_colorbars(fig, ax, [moved], None)
+    assert colorbar.mappable is moved.mappable
 
 
 def test_mesh_of_a_different_size_is_accepted() -> None:
@@ -363,9 +359,7 @@ def spherical_colorbar(component, data) -> tuple[plt.Axes, object]:
     style = FigureConfig()
     result = component.render(data, style)
 
-    FigureFormatter(style).apply_figure_formatting(
-        fig, ax, [(result.artists, result.metadata)], data
-    )
+    FigureFormatter(style).apply_figure_formatting(fig, ax, [result], data)
     return ax, getattr(ax, "_simbi_colorbars", {}).get(0)
 
 

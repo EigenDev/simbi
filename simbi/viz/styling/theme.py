@@ -85,10 +85,15 @@ class ThemeConfig:
         filtered = {k: v for k, v in data.items() if k in allowed}
         return cls(**filtered)
 
-    def apply(
+    def rc_params(
         self, nfiles: int = 1, nfields: int = 1, overlay_mode: bool = False
-    ):
-        """Apply theme to matplotlib global settings.
+    ) -> dict:
+        """The matplotlib settings this theme asks for.
+
+        These are handed to a style context around the drawing, never pushed
+        into the global rcParams: a theme mutated into the global state
+        outlives the figure it was chosen for and restyles every later figure
+        in the same session.
 
         Args:
             nfiles: number of files being plotted
@@ -96,7 +101,6 @@ class ThemeConfig:
             overlay_mode: if True, use color-only cycling for same field across files.
                           linestyles cycle through fields, colors cycle through files.
         """
-        plt.style.use("default")
 
         base_linestyles = ["-", "--", "-.", ":"]
         colormap = plt.get_cmap(self.color_map)
@@ -141,31 +145,26 @@ class ThemeConfig:
                 # + cycler(marker=markers)
             )
 
-        plt.rcParams.update(
-            {
-                # font settings
-                "font.family": self.font_family,
-                "font.size": self.font_size,
-                "axes.titlesize": self.title_size,
-                "axes.labelsize": self.label_size,
-                "xtick.labelsize": self.tick_size,
-                "ytick.labelsize": self.tick_size,
-                # color settings
-                "text.color": self.text_color,
-                "axes.labelcolor": self.text_color,
-                "xtick.color": self.text_color,
-                "ytick.color": self.text_color,
-                # line settings
-                "lines.linewidth": self.line_width,
-                "axes.prop_cycle": default_cycler,
-                # figure settings
-                # "figure.figsize": user_fig_size or self.fig_size,
-                # "figure.dpi": self.dpi,
-                "savefig.transparent": self.transparent,
-                # text rendering settings
-                "text.usetex": self.use_tex,
-            }
-        )
+        return {
+            # font settings
+            "font.family": self.font_family,
+            "font.size": self.font_size,
+            "axes.titlesize": self.title_size,
+            "axes.labelsize": self.label_size,
+            "xtick.labelsize": self.tick_size,
+            "ytick.labelsize": self.tick_size,
+            # color settings
+            "text.color": self.text_color,
+            "axes.labelcolor": self.text_color,
+            "xtick.color": self.text_color,
+            "ytick.color": self.text_color,
+            # line settings
+            "lines.linewidth": self.line_width,
+            "axes.prop_cycle": default_cycler,
+            "savefig.transparent": self.transparent,
+            # text rendering settings
+            "text.usetex": self.use_tex,
+        }
 
     def style_axis(self, ax):
         """Apply styling to a specific axis"""

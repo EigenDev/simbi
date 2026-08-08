@@ -174,7 +174,7 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
 
         # return a RenderResult containing all created line artists and labels metadata
         return RenderResult(
-            artists={"lines": all_rendered_lines}, metadata={"labels": labels}
+            artists={"lines": all_rendered_lines}, labels=labels
         )
 
     def cleanup(self) -> None:

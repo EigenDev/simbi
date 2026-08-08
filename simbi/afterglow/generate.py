@@ -25,8 +25,16 @@ def _snapshot_emission_durations(times: List[float]) -> List[float]:
     weights over the (sorted) snapshot times: w_0 = (t_1 - t_0)/2, w_{N-1} =
     (t_{N-1} - t_{N-2})/2, interior w_i = (t_{i+1} - t_{i-1})/2. summing power * w_i over
     snapshots approximates the integral of power over the covered epoch [t_0, t_{N-1}].
-    a single snapshot has no neighbor -> returns [0.0] (caller substitutes a fallback)."""
+    a single snapshot has no neighbor -> returns [0.0] (caller substitutes a fallback).
+    NO snapshots -> no weights: the consumers partition their inputs into hydro
+    checkpoints and pre-built catalogs and call this on the hydro side alone, so an
+    all-catalog invocation (the ordinary way to reuse `afterglow generate` output across
+    viewing angles) lands here with an empty list. a catalog already carries the emission
+    weighting applied when it was generated, so an empty weight table is the correct
+    answer rather than an edge case to refuse."""
     n = len(times)
+    if n == 0:
+        return []
     if n == 1:
         return [0.0]
     w = [0.0] * n

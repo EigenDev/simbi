@@ -209,11 +209,9 @@ class QuadPlotComponent(Component):
         # reports each frame
         return RenderResult(
             artists={"mesh": self._mesh},
-            metadata={
-                "mappable": self._mesh,
-                "colorbar_label": data.name,
-                "view_bounds": (x_min, x_max, y_min, y_max),
-            },
+            mappable=self._mesh,
+            colorbar_label=data.name,
+            view_bounds=(x_min, x_max, y_min, y_max),
         )
 
     def _resolve_cmap(self, norm=None):

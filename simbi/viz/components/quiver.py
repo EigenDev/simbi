@@ -131,7 +131,7 @@ class QuiverPlotComponent(Component):
         )
 
         return RenderResult(
-            artists={"quiver": self._quiver}, metadata={"is_vector": True}
+            artists={"quiver": self._quiver}, is_vector=True
         )
 
     def cleanup(self) -> None:

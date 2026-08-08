@@ -104,7 +104,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         # return a RenderResult so the Figure/Formatter can inspect artists and metadata
         return RenderResult(
             artists={"line": self._main_line, "refs": self._ref_lines},
-            metadata={"label": field_str},
+            labels=[field_str],
         )
 
     def _format_axes(self, r_bins: Array, values: Array, field_name: str):

@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 from simbi.viz.utility import get_field_str
 
 from .config import FigureConfig
+from .types import RenderResult
 
 LABEL_MAP = {
     "x1": "$x$",
@@ -99,43 +100,20 @@ def warn_once(key: str, msg: str) -> None:
         warnings.warn(msg, stacklevel=3)
 
 
-def find_mappables(normalized: Any) -> list[tuple[Any, Optional[str]]]:
-    """the color-mapped artists among normalized (artists, metadata) pairs,
-    each with the field name it draws, in the order they were rendered.
+def find_mappables(
+    results: "Sequence[RenderResult]",
+) -> list[tuple[Any, Optional[str]]]:
+    """the colour-mapped artists among the frame's results, each with the name
+    of the quantity it draws, in the order they were rendered.
 
-    one entry is one quantity wanting a scale of its own. a field render
-    publishes its artist under 'mesh' or 'collection'; a vector overlay is
-    colormapped too but reads off the field beneath it, so it is passed over
-    unless nothing else is drawn."""
-    entries: list[tuple[Any, Optional[str]]] = []
-
-    for artists, metadata in normalized:
-        if not isinstance(artists, dict):
-            continue
-
-        label = None
-        if isinstance(metadata, dict):
-            label = metadata.get("colorbar_label")
-
-        for key in ("mesh", "collection"):
-            if artists.get(key) is not None:
-                entries.append((artists[key], label))
-                break
-
-    if entries:
-        return entries
-
-    for artists, _ in normalized:
-        if not isinstance(artists, dict):
-            continue
-        for artist in artists.values():
-            try:
-                if hasattr(artist, "get_array") or hasattr(artist, "get_cmap"):
-                    return [(artist, None)]
-            except Exception:
-                continue
-
-    return []
+    one entry is one quantity wanting a scale of its own. a vector overlay is
+    colour-mapped too, but it reads off the field beneath it and declares no
+    mappable, so it takes no bar."""
+    return [
+        (result.mappable, result.colorbar_label)
+        for result in results
+        if result.mappable is not None
+    ]
 
 
 class FigureFormatter:
@@ -201,106 +179,60 @@ class FigureFormatter:
         if first_data:
             ndim = first_data.values.ndim
 
-        # normalize rendered_artists entries first (needed for label extraction)
-        normalized: list[tuple[dict, dict | None]] = []
-        for entry in rendered_artists:
-            if entry is None:
-                normalized.append(({}, None))
-                continue
-            # tuple/list of (artists, metadata)
-            if isinstance(entry, (list, tuple)) and len(entry) >= 1:
-                artists = entry[0] if len(entry) > 0 else {}
-                metadata = entry[1] if len(entry) > 1 else None
-                normalized.append(
-                    (artists if isinstance(artists, dict) else {}, metadata)
-                )
-                continue
-            # dict -> legacy artists-only return
-            if isinstance(entry, dict):
-                normalized.append((entry, None))
-                continue
-            # object with .artists/.metadata attributes (RenderResult-like)
-            artists = getattr(entry, "artists", None)
-            metadata = getattr(entry, "metadata", None)
-            if isinstance(artists, dict):
-                normalized.append((artists, metadata))
-            else:
-                try:
-                    cast_map = dict(entry)
-                    normalized.append((cast_map, None))
-                except Exception:
-                    normalized.append(({}, None))
+        results = [entry for entry in rendered_artists if entry is not None]
 
-        # extract labels from component metadata for smart ylabel/legend handling
-        # "label" (str) -> single ylabel
-        # "labels" (list) -> if 1 item: ylabel, no legend; if >1: legend, no ylabel
-        metadata_label: Optional[str] = None
-        metadata_labels: list = []
-        use_legend_from_metadata = False
+        # one drawn series names the y axis; several name a legend
+        labels: list[str] = []
+        for result in results:
+            labels += [name for name in result.labels if name]
 
-        for _, metadata in normalized:
-            if metadata and isinstance(metadata, dict):
-                if "label" in metadata and metadata["label"]:
-                    metadata_label = metadata["label"]
-                    metadata_labels.append(metadata_label)
-                if "labels" in metadata and metadata["labels"]:
-                    metadata_labels += list(metadata["labels"])
-                    if len(metadata_labels) > 1:
-                        use_legend_from_metadata = True
-
-        # determine ylabel from metadata if not explicitly provided
         derived_ylabel = None
-        label_set = list(set(metadata_labels))
+        label_set = list(set(labels))
+        use_legend_from_metadata = len(label_set) > 1
         if len(label_set) == 1:
-            # single label in list -> use as ylabel, suppress legend
             derived_ylabel = get_field_str(label_set[0])
             show_legend = False
-        elif len(label_set) > 1:
-            # multiple labels -> show legend, no ylabel from metadata
-            use_legend_from_metadata = True
-            derived_ylabel = None
-        elif metadata_label:
-            # single "label" key -> use as ylabel
-            derived_ylabel = get_field_str(metadata_label)
 
-        # determine axis labels
+        # determine axis labels. with no derived label a 1D plot shows a legend
+        # and leaves the y axis unlabeled
         if xlabel is None or ylabel is None:
-            try:
-                # with no derived label a 1D plot shows a legend and leaves the
-                # y-axis unlabeled
-                # prefer explicit axis names from data when present
-                axis_names = getattr(first_data, "axis_names", None)
-                if axis_names and isinstance(axis_names, (list, tuple)):
-                    if xlabel is None and len(axis_names) >= 1:
-                        xlabel = LABEL_MAP.get(axis_names[0], axis_names[0])
-                    if ylabel is None and len(axis_names) >= 2:
-                        ylabel = LABEL_MAP.get(axis_names[1], axis_names[1])
+            # the data's own axis names come first when it carries them
+            axis_names = getattr(first_data, "axis_names", None)
+            if axis_names and isinstance(axis_names, (list, tuple)):
+                if xlabel is None and len(axis_names) >= 1:
+                    xlabel = LABEL_MAP.get(axis_names[0], axis_names[0])
+                if ylabel is None and len(axis_names) >= 2:
+                    ylabel = LABEL_MAP.get(axis_names[1], axis_names[1])
 
-                # use derived ylabel from metadata
-                if ylabel is None and derived_ylabel:
-                    ylabel = derived_ylabel
+            if ylabel is None and derived_ylabel:
+                ylabel = derived_ylabel
 
-                # fallback to field name for y-axis for 1D/line-like data
-                if (
-                    ylabel is None
-                    and hasattr(first_data, "name")
-                    and len(label_set) == 1
-                ):
-                    ylabel = get_field_str(first_data.name)
+            # a single drawn series names the y axis after the quantity
+            if (
+                ylabel is None
+                and hasattr(first_data, "name")
+                and len(label_set) == 1
+            ):
+                ylabel = get_field_str(first_data.name)
 
-            except Exception:
-                pass
-
-        # axis labels & limits
+        # a plot that loses its labels or limits is still a plot, so these do
+        # not halt the render -- but an unlabeled axis shipped as a success is
+        # a defect, and it is the silence that lets one ship
         try:
             apply_axis_labels(main_ax, self.style, xlabel, ylabel)
-        except Exception:
-            pass
+        except Exception as exc:
+            warn_once(
+                f"axis-labels:{type(exc).__name__}",
+                f"axis labels failed: {exc}",
+            )
 
         try:
             apply_axis_limits(main_ax, self.style)
-        except Exception:
-            pass
+        except Exception as exc:
+            warn_once(
+                f"axis-limits:{type(exc).__name__}",
+                f"axis limits failed: {exc}",
+            )
 
         # the chart is oriented before anything is placed around it: where a
         # wedge sits in the axes box, and so where there is room for a colorbar,
@@ -315,7 +247,7 @@ class FigureFormatter:
 
         try:
             self._format_colorbars(
-                fig, main_ax, find_mappables(normalized), first_data
+                fig, main_ax, find_mappables(results), first_data
             )
         except Exception as exc:
             # a plot missing its colorbar is still a plot, so this does not halt
@@ -325,39 +257,14 @@ class FigureFormatter:
                 f"colorbar:{type(exc).__name__}", f"colorbar failed: {exc}"
             )
 
-        # legend: only show if there are line-like artists (or metadata indicates labels)
-        has_line_like = False
-        for artists, metadata in normalized:
-            # check explicit metadata hint first
-            if metadata and isinstance(metadata, dict):
-                if (
-                    metadata.get("labels")
-                    or metadata.get("label")
-                    or metadata.get("is_line")
-                    or metadata.get("is_vector") is False
-                ):
-                    has_line_like = True
-                    break
-
-            # check artist keys and types
-            if isinstance(artists, dict):
-                if "line" in artists and artists["line"] is not None:
-                    has_line_like = True
-                    break
-                for a in artists.values():
-                    try:
-                        cls_name = a.__class__.__name__
-                        if (
-                            cls_name.endswith("Line2D")
-                            or "Line2D" in cls_name
-                            or "Line" in cls_name
-                        ):
-                            has_line_like = True
-                            break
-                    except Exception:
-                        continue
-            if has_line_like:
-                break
+        # a legend describes line-like artists; a field render is described by
+        # its colorbar instead
+        has_line_like = any(
+            result.labels
+            or "line" in result.artists
+            or "lines" in result.artists
+            for result in results
+        )
 
         try:
             # apply legend when:
@@ -370,15 +277,17 @@ class FigureFormatter:
             # but not when the single label was used as the ylabel
             if should_show_legend and len(label_set) > 1:
                 apply_legend(main_ax)
-        except Exception:
-            pass
+        except Exception as exc:
+            warn_once(f"legend:{type(exc).__name__}", f"legend failed: {exc}")
 
         # remove top/right spines only for 1D plots
         if main_ax.name != "polar" and ndim == 1:
             try:
                 remove_spines(main_ax)
-            except Exception:
-                pass
+            except Exception as exc:
+                warn_once(
+                    f"spines:{type(exc).__name__}", f"spine removal failed: {exc}"
+                )
 
 
 
@@ -449,8 +358,6 @@ class FigureFormatter:
 def _colorbar_label(name: Optional[str], field_data: Any) -> Optional[str]:
     """the axis label for the bar describing `name`, in display notation."""
     label = name or getattr(field_data, "name", None)
-    if label and "_polygons" in label:
-        label = label.split("_polygons")[0]
     return get_field_str(label) if label else None
 
 

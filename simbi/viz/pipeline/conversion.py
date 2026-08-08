@@ -18,6 +18,7 @@ from simbi.viz.config import (
     TimeSeriesConfig,
     VisualizationConfig,
 )
+from simbi.viz.formatting import warn_once
 from simbi.viz.utility import get_dimensionality
 
 from ..styling import ThemeManager
@@ -67,6 +68,11 @@ def plot_config_from_args(args: Namespace) -> PlotConfig:
         ndim=get_dimensionality(files),
         slice=slice_spec,
         norm=getattr(args, "norm", None),
+        **(
+            {"color_scale": color_scale}
+            if (color_scale := getattr(args, "color_scale", None))
+            else {}
+        ),
     )
 
 
@@ -108,10 +114,14 @@ def refinement_config_from_args(args: Namespace) -> RefinementConfig:
                     f"--active-levels must be integers or 'all', got: {raw_levels}"
                 )
 
+    # an absent flag leaves the choice to the model, so the cli and a script
+    # that builds the config directly select the same renderer
+    render_mode = getattr(args, "render_mode", None)
+
     return RefinementConfig(
         composite_view=getattr(args, "composite_view", False),
         active_levels=active_levels,
-        render_mode=getattr(args, "render_mode", "pcolormesh"),
+        **({"render_mode": render_mode} if render_mode else {}),
     )
 
 
@@ -134,7 +144,6 @@ def animation_config_from_args(args: Namespace) -> AnimationConfig:
     return AnimationConfig(
         total_frames=len(getattr(args, "files", [])),
         frame_rate=getattr(args, "frame_rate", 30),
-        save_all_frames=getattr(args, "save_all_frames", False),
     )
 
 
@@ -173,21 +182,17 @@ def theme_config_from_args(args: Namespace) -> ThemeConfig:
     if isinstance(theme_candidate, ThemeConfig):
         return theme_candidate
 
-    # try to convert mapping-like candidate into ThemeConfig
-    if hasattr(ThemeConfig, "from_mapping"):
-        try:
-            return ThemeConfig.from_mapping(theme_candidate)
-        except Exception:
-            pass
-
-    # fallback: if dict-like, filter to dataclass fields
-    if isinstance(theme_candidate, dict):
-        allowed = set(ThemeConfig.__dataclass_fields__.keys())
-        filtered = {k: v for k, v in theme_candidate.items() if k in allowed}
-        return ThemeConfig(**filtered)
-
-    # last resort: default ThemeConfig
-    return ThemeConfig()
+    # from_mapping already takes a dict, a pydantic model, or anything else
+    # mapping-like, and keeps only the fields a theme has; it raises for a type
+    # that is none of those, which is a themeless plot rather than no plot
+    try:
+        return ThemeConfig.from_mapping(theme_candidate)
+    except (TypeError, ValueError) as exc:
+        warn_once(
+            f"theme:{type(exc).__name__}",
+            f"theme could not be read, drawing with the default: {exc}",
+        )
+        return ThemeConfig()
 
 
 def config_from_args(args: Namespace) -> VisualizationConfig:

@@ -67,6 +67,7 @@ def _coerce_value(value: str) -> Union[bool, int, float, str]:
             return float(value)
         return int(value)
     except ValueError:
+        # not a number: fall through to the string forms below
         pass
 
     # strip quotes if present

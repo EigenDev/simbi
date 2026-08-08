@@ -33,7 +33,7 @@ from .pipeline import create_plot_data, load_data, prepare_figure
 from .pipeline.coord_binning import create_coordinate_profile_data
 from .pipeline.time_series import create_time_series_data
 from .pipeline.transforms import _compose_pcolormesh, _compose_polygons
-from .types import CoordSystem, FieldData
+from .types import CoordSystem, FieldData, PolygonData
 from .utility import get_tracer_field_str
 
 
@@ -72,14 +72,18 @@ def _panel_props(
     field_name: str,
     index: int,
     npanels: int,
+    color_ranges: Optional[dict] = None,
 ) -> ComponentProps:
     """props for the panel drawing `field_name`.
 
-    the shared component props carry a distinct colormap per panel, then
-    whatever the user asked for that specific quantity is layered on top: two
-    quantities on one chart rarely want the same scaling."""
+    the shared component props carry a distinct colormap per panel, then a
+    colour scale swept over the sequence if one was taken, then whatever the
+    user asked for that specific quantity: two quantities on one chart rarely
+    want the same scaling, and an explicit request outranks anything derived
+    from the data."""
     from .pipeline.panels import base_field_name
 
+    quantity = base_field_name(field_name)
     props = _get_props(component_props, key, default_factory)
 
     if npanels > 1:
@@ -87,9 +91,11 @@ def _panel_props(
             update={"cmap": _panel_cmap(props.cmap, index)}
         )
 
-    override = (component_props or {}).get(
-        f"{key}:{base_field_name(field_name)}"
-    )
+    swept = (color_ranges or {}).get(quantity)
+    if swept is not None and not _has_color_range(props):
+        props = props.model_copy(update={"color_range": swept})
+
+    override = (component_props or {}).get(f"{key}:{quantity}")
     if override is not None:
         props = props.model_copy(
             update={
@@ -99,6 +105,33 @@ def _panel_props(
         )
 
     return props
+
+
+def _has_color_range(props: ComponentProps) -> bool:
+    """whether the caller pinned the colour scale themselves."""
+    color_range = getattr(props, "color_range", None)
+    return color_range is not None and (
+        color_range.min is not None or color_range.max is not None
+    )
+
+
+def _animation_color_ranges(
+    files: Sequence[str],
+    fields: Sequence[str],
+    config: VisualizationConfig,
+) -> dict:
+    """the colour scale each quantity is drawn on for every frame.
+
+    empty when the scale is left to each frame, which redraws a decaying
+    quantity at full brightness throughout."""
+    from .pipeline.color_range import sequence_color_range
+
+    choice = getattr(config.plot, "color_scale", "sequence")
+    if choice == "frame":
+        return {}
+
+    scanned = files[:1] if choice == "first" else files
+    return sequence_color_range(scanned, fields, config)
 
 
 def _panel_layout(
@@ -298,9 +331,7 @@ def plot(
     # determine projection
     projection = "cartesian"
     if final_fields:
-        is_2d = final_fields[0].ndim == 2 or final_fields[0].name.endswith(
-            "_polygons"
-        )
+        is_2d = final_fields[0].ndim == 2
         if is_2d and sim_data.metadata.coord_system == "spherical":
             projection = "polar"
 
@@ -318,8 +349,7 @@ def plot(
     for panel, field_data in enumerate(final_fields):
         component: Component
 
-        if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
-            # polygon plot (1d array of patches)
+        if isinstance(field_data, PolygonData):
             component = PolygonPlotComponent(
                 _panel_props(
                     component_props,
@@ -532,9 +562,7 @@ def animate(
     # determine projection
     projection = "cartesian"
     if final_fields:
-        is_2d = final_fields[0].ndim == 2 or final_fields[0].name.endswith(
-            "_polygons"
-        )
+        is_2d = final_fields[0].ndim == 2
         if is_2d and sim_data.metadata.coord_system == "spherical":
             projection = "polar"
 
@@ -548,11 +576,13 @@ def animate(
 
     # dispatch scalar components
     npanels = _panel_layout(scalar_fields, final_fields)
+    # one scale for the whole movie, so colour means the same in every frame
+    color_ranges = _animation_color_ranges(files, fields, config)
 
     for panel, field_data in enumerate(final_fields):
         component: Component
 
-        if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
+        if isinstance(field_data, PolygonData):
             component = PolygonPlotComponent(
                 _panel_props(
                     component_props,
@@ -561,6 +591,7 @@ def animate(
                     field_data.name,
                     panel,
                     npanels,
+                    color_ranges,
                 )
             )
 
@@ -578,6 +609,7 @@ def animate(
                         field_data.name,
                         panel,
                         npanels,
+                        color_ranges,
                     )
                 )
             else:
@@ -589,6 +621,7 @@ def animate(
                         field_data.name,
                         panel,
                         npanels,
+                        color_ranges,
                     )
                 )
 
@@ -640,16 +673,8 @@ def animate(
         component.initialize(figure.fig, figure.axes["main"])
         figure.add_component(component, vector_data)
 
-    # run animation
-    output = save_as or "animation.mp4"
     fps = kwargs.get("fps") or config.animation.frame_rate
-
-    figure.animate(
-        files,
-        output_path=output,
-        fps=fps,
-        save_all_frames=config.animation.save_all_frames,
-    )
+    figure.animate(files, fps=fps)
 
     if save_as:
         figure.save(save_as)
@@ -711,17 +736,8 @@ def animate_coordinate_profile(
         figure.add_component(component, field_data)
 
     # run animation using the coordinate profile data pipeline
-    output = save_as or "animation.mp4"
     fps = kwargs.get("fps") or config.animation.frame_rate
-
-    figure.animate_coordinate_profile(
-        files,
-        fields,
-        config,
-        output_path=output,
-        fps=fps,
-        save_all_frames=config.animation.save_all_frames,
-    )
+    figure.animate_coordinate_profile(files, fields, config, fps=fps)
 
     if save_as:
         figure.save(save_as)

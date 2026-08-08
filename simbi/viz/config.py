@@ -77,6 +77,11 @@ class PlotConfig(BaseModel):
     # field-value normalization: a numeric string (divide by the constant), or "max"/"min"
     # (divide by the field's own extremum). None = no normalization.
     norm: Optional[str] = None
+    # which data an animation's colour scale is taken from. "sequence" sweeps
+    # every checkpoint and pins one scale, so colour means the same thing in
+    # every frame; "frame" rescales to each frame's own extremes, which draws a
+    # decaying quantity at full brightness throughout.
+    color_scale: Literal["sequence", "first", "frame"] = "sequence"
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
@@ -93,7 +98,11 @@ class RefinementConfig(BaseModel):
 
     composite_view: bool = False
     active_levels: Optional[set[int]] = None
-    render_mode: Literal["polygons", "pcolormesh"] = "polygons"
+    # the default renderer for every entry point: a quadmesh is one artist for
+    # the whole field, where polygons are one per cell and cost a python loop
+    # to build. refined data overrides it, since a quadmesh cannot carry cells
+    # of two different sizes.
+    render_mode: Literal["polygons", "pcolormesh"] = "pcolormesh"
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
@@ -119,7 +128,6 @@ class AnimationConfig(BaseModel):
 
     total_frames: int = 1
     frame_rate: int = 30
-    save_all_frames: bool = False
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 

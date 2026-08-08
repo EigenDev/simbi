@@ -9,76 +9,25 @@
 #   - RenderResult: standardized contract returned by component.render()
 #   - Bounds/ColorRange: simple numeric range helpers used by style/config
 #
-# render contract (renderresult):
-#   components MUST return a RenderResult describing the matplotlib artists
-#   they created and any metadata that will help the figure/formatter decide
-#   on layout and additional presentation (legend, colorbar, etc).
+# render contract (RenderResult):
+#   a component returns the artists it drew, plus the facts the figure and the
+#   formatter cannot work out for themselves: which artist a colorbar
+#   describes and what to call it, the extent it drew (a mesh collection
+#   carries no data limit of its own), the names of its series, and whether it
+#   is a vector overlay riding on another artist.
 #
-#   rationale:
-#     - loose dicts or lists force the Figure to guess semantics and do its own
-#       formatting. renderresult makes component outputs explicit and testable
-#       and lets the FigureFormatter safely decide about colorbars, legends,
-#       and axis labels.
+#   each of those is a named field rather than a free-form dictionary entry.
+#   an unrecognised key silently disables a feature, and a key that means
+#   something else silently enables one: `label` on a field render once
+#   switched on the legend handling meant for lines.
 #
-#   minimal expectations:
-#     - `artists` (dict[str, object]): mapping of semantic keys -> artist object
-#         common semantic keys:
-#           - "mesh": a QuadMesh / pcolormesh artist (mappable for colorbar)
-#           - "collection": a PolyCollection or PatchCollection (mappable)
-#           - "line" / "lines": Line2D or list of Line2D objects
-#           - "quiver": Quiver object
-#           - "streamplot": the streamplot return object
-#           - "refs", "vlines", etc: auxiliary artists that belong to the
-#             component but are not mappables
-#
-#     - `metadata` (optional dict[str, object]): hints about semantics and
-#         presentation preferences. metadata is advisory only; the
-#         FigureFormatter applies policies conservatively.
-#
-#   recommended metadata keys (convention used across repo)
-#     - "mappable": an explicit reference to the mappable artist (mesh or collection)
-#         type: matplotlib artist object (ScalarMappable)
-#         use: direct pointer for the formatter to create a colorbar
-#
-#     - "label": preferred label string for the component (e.g., "$\rho$")
-#         type: str
-#         use: used for y-axis labels, legend entries or colorbar labels when
-#              the component doesn't provide them via artist properties.
-#
-#     - "is_line": boolean
-#         type: bool
-#         use: explicitly mark the component as line-like for legend policy.
-#
-#     - "is_vector": boolean
-#         type: bool
-#         use: indicates vector-field visualizations (quiver). typically this
-#              suppresses legend behavior and signals specialized formatting.
-#
-#     - "preferred_cmap": string or Colormap
-#         type: str | matplotlib.colors.Colormap
-#         use: suggests a colormap when constructing the mappable; the
-#              component still owns the actual artist creation.
-#
-#     - "color_range": {"min": float, "max": float} or ColorRange
-#         type: dict | ColorRange
-#         use: explicit vmin/vmax guiding color normalization. components
-#              should honor style.config but can include this override when
-#              the analysis needs a fixed stretch.
-#
-#   examples:
+#   example:
 #     RenderResult(
-#         artists={"mesh": quadmesh, "quiver": quiv},
-#         metadata={"mappable": quadmesh, "is_vector": True}
+#         artists={"mesh": quadmesh},
+#         mappable=quadmesh,
+#         colorbar_label="rho",
+#         view_bounds=(x0, x1, y0, y1),
 #     )
-#
-#     RenderResult(
-#         artists={"line": main_line, "refs": [vline1, vline2]},
-#         metadata={"label": r"$\rho$", "is_line": True}
-#     )
-#
-# notes:
-#   - components that create no artists may return RenderResult(artists={}, metadata={})
-#   - the figure and formatter also tolerate legacy returns (a plain dict or list)
 # =============================================================================
 """Core type definitions for the visualization system."""
 
@@ -150,6 +99,52 @@ class FieldData(BaseModel):
         return self.values.ndim
 
 
+class PolygonData(BaseModel):
+    """Cells drawn one polygon at a time.
+
+    This is what a level hierarchy composes to: a quadmesh is a single
+    logically-rectangular lattice and cannot carry cells of two different
+    sizes, so a refined field is drawn as a soup of independent quadrilaterals
+    instead.
+
+    It is a separate type from FieldData because it is a different shape of
+    thing. A field has an axis per dimension and a coordinate array per axis;
+    this has one flat list of cells and a list of corners each. Handed to
+    something that slices or bins a field, the corner axis reads as a
+    coordinate axis and the answer is meaningless rather than wrong-looking.
+
+    Attributes:
+        patches: (n_cells, 4, 2) corners, anticlockwise from the lower-left
+        values: one value per cell
+        level_bounds: (xmin, xmax, ymin, ymax) per level, coarsest first
+    """
+
+    name: str
+    patches: Array
+    values: Array
+    coord_system: Optional[CoordSystem] = None
+    time: Optional[float] = None
+    axis_names: Optional[Sequence[str]] = None
+    level_bounds: Optional[Sequence[tuple[float, float, float, float]]] = None
+
+    model_config = {"arbitrary_types_allowed": True, "frozen": True}
+
+    @field_validator("patches")
+    @classmethod
+    def validate_patches(cls, v: Array) -> Array:
+        if v.ndim != 3 or v.shape[1:] != (4, 2):
+            raise ValueError(
+                f"patches must be (n_cells, 4, 2) quadrilateral corners, got {v.shape}"
+            )
+        return v
+
+    @property
+    def ndim(self) -> int:
+        """the dimension of the region drawn, which is a plane however the
+        cells are stored."""
+        return 2
+
+
 class RenderResult(BaseModel):
     """
     Standardized return value for component.render().
@@ -159,24 +154,34 @@ class RenderResult(BaseModel):
         orchestration layer (Figure) and layout layer (FigureFormatter)
         can make safe decisions about legends, colorbars, and labels.
 
-    Contents:
-      - artists: mapping of semantic keys (e.g., 'mesh', 'collection', 'line')
-                 to matplotlib artist objects or other renderables.
-      - metadata: optional dictionary for extra information about the render
-                  (e.g., {'mappable': quadmesh, 'label': '$\rho$', 'is_line': True}).
-
-    Best practices:
-      - prefer returning a `mappable` in metadata when the component creates a
-        mesh/collection intended for a colorbar. this avoids idiosyncratic
-        guesses by the formatter.
-      - include a 'label' metadata when a component represents a single
-        conceptual dataset (useful for axis labels and legends).
-      - keep metadata advisory: the formatter may ignore keys it doesn't
-        understand; avoid relying on side-effects.
+    Every field beyond `artists` tells the formatter something it cannot work
+    out for itself, and each is named rather than passed in a free dictionary:
+    a key the formatter does not recognise silently disables a feature, and a
+    key it recognises for something else silently enables one. `label` on a
+    field render, for instance, once switched on legend handling meant for
+    lines.
     """
 
+    # semantic key -> matplotlib artist ('mesh', 'collection', 'line', ...)
     artists: dict[str, object]
-    metadata: Optional[dict[str, object]] = None
+
+    # the colour-mapped artist a colorbar describes, and the quantity it draws.
+    # a vector overlay is colour-mapped too but reads off the field beneath it,
+    # so it leaves these unset.
+    mappable: Optional[object] = None
+    colorbar_label: Optional[str] = None
+
+    # (x_min, x_max, y_min, y_max) of what was drawn, in the axes' own
+    # coordinates. a mesh collection carries no data limit of its own, so this
+    # is how the figure composes a view that holds every component.
+    view_bounds: Optional[tuple[float, float, float, float]] = None
+
+    # names for the drawn series: one becomes an axis label, several a legend
+    labels: Sequence[str] = ()
+
+    # a direction field drawn over another artist, which owns neither the
+    # colorbar nor the axis labels
+    is_vector: bool = False
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -245,13 +250,18 @@ class Bounds(BaseModel):
     """
     Bounds for a dimension (min, max).
 
+    Either end may be left out, and an absent end means the data sets it:
+    clipping the top of a colour scale while the bottom follows the field is an
+    ordinary thing to ask for, and requiring both ends turns it into a
+    "field required" error on a range that is perfectly well formed.
+
     Attributes:
-        min: Minimum value
-        max: Maximum value
+        min: Minimum value, or None to take it from the data
+        max: Maximum value, or None to take it from the data
     """
 
-    min: float | None
-    max: float | None
+    min: float | None = None
+    max: float | None = None
     model_config = {
         "frozen": True,  # Make instances immutable
     }
@@ -259,14 +269,19 @@ class Bounds(BaseModel):
     @field_validator("max")
     @classmethod
     def max_greater_than_min(cls, v: float | None, info) -> float | None:
-        """Validate that max is greater than min."""
-        if v is None:
-            return None
+        """Validate that max is greater than min.
 
-        values = info.data
-        if "min" in values and v <= values["min"]:
+        either end may be left open, in which case there is nothing to compare
+        it against: a half-open range asks for one limit and lets the data set
+        the other.
+        """
+        low = info.data.get("min")
+        if v is None or low is None:
+            return v
+
+        if v <= low:
             raise ValueError(
-                f"Max value {v} must be greater than min value {values['min']}"
+                f"Max value {v} must be greater than min value {low}"
             )
         return v
 

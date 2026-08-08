@@ -28,14 +28,13 @@ from ..types import CoordSystem, FieldData
 # is (angle, radius), and the polar axes plots the angle
 ANGULAR_AXIS = 0
 
-# what a field's name picks up on the way to being drawn: the refinement level
-# it was prepared from, and the polygon contract it was composed into
-NAME_SUFFIXES = re.compile(r"(_polygons)?(_L\d+)?(_polygons)?$")
+# the refinement level a field was prepared from, appended to its name
+LEVEL_SUFFIX = re.compile(r"_L\d+$")
 
 
 def base_field_name(name: str) -> str:
-    """the quantity a field draws, without the level or contract it arrived in."""
-    return NAME_SUFFIXES.sub("", name)
+    """the quantity a field draws, without the level it was prepared from."""
+    return LEVEL_SUFFIX.sub("", name)
 
 
 def group_by_field(fields: Sequence[FieldData]) -> list[list[FieldData]]:

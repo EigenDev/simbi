@@ -21,6 +21,8 @@ try:
         warnings.simplefilter("ignore")
         import cmasher  # noqa: F401
 except ImportError:
+    # cmasher registers extra colormaps by being imported; without it those
+    # names are unavailable and matplotlib's own report the miss
     pass
 
 
@@ -162,6 +164,15 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--fields", nargs="+", default=["rho"], help="field(s) to visualize"
     )
     parser.add_argument(
+        "--color-scale",
+        choices=["sequence", "first", "frame"],
+        default=None,
+        help="which data an animation's colour scale comes from: the whole"
+        " sequence (default), the first frame, or each frame on its own."
+        " a per-frame scale draws a decaying quantity at full brightness in"
+        " every frame",
+    )
+    parser.add_argument(
         "--norm",
         default=None,
         metavar="VALUE|max|min",
@@ -273,8 +284,9 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--render-mode",
         choices=["pcolormesh", "polygons"],
-        default="pcolormesh",
-        help="2d rendering mode",
+        default=None,
+        help="2d rendering mode (default: pcolormesh; refined data always uses"
+        " polygons, which a quadmesh cannot represent)",
     )
 
     # =========================================================================

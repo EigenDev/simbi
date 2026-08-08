@@ -1,9 +1,9 @@
 """
 Polygon plot component for visualization.
 
-This component is a simple renderer. It expects to be given
-a single, 1D FieldData object where the domain is a list of patches
-and the values are a list of corresponding colors.
+This component is a simple renderer. It expects a single PolygonData: one
+quadrilateral per cell with one value each, which is how a level hierarchy is
+drawn when a single quadmesh cannot hold cells of two different sizes.
 """
 
 from typing import Optional, Sequence
@@ -16,7 +16,7 @@ from pydantic import ValidationInfo, field_validator
 
 
 from ..config import FigureConfig
-from ..types import Array, ColorRange, FieldData, RenderResult
+from ..types import Array, ColorRange, PolygonData, RenderResult
 from .interface import Component, ComponentProps
 from .mesh_overlay import mesh_segments
 from .quad import _create_color_normalization
@@ -95,24 +95,23 @@ class PolygonPlotComponent(Component):
             self._poly_collection.set_edgecolors(edge_color)
             self._poly_collection.set_linewidths(edge_width)
 
-    def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
+    def render(self, data: PolygonData, style: FigureConfig) -> RenderResult:
         """
-        Render the polygons with guaranteed 1D polygon data.
-        `data` is a *single* FieldData object.
+        Render one cell per polygon.
+        `data` is a *single* PolygonData object.
         """
         if not self._initialized:
             raise RuntimeError(
                 "Component not initialized. Call initialize() first."
             )
 
-        if data.ndim != 1 or not data.name.endswith("_polygons"):
-            raise ValueError(
-                "PolygonPlotComponent received invalid data. "
-                "Expected 1D FieldData with '_polygons' suffix."
+        if not isinstance(data, PolygonData):
+            raise TypeError(
+                "PolygonPlotComponent draws PolygonData (independent cells);"
+                f" got {type(data).__name__}"
             )
 
-        # extract data from the "Polygon Contract"
-        patches = self._to_axes_coordinates(np.asarray(data.domain, dtype=float))
+        patches = self._to_axes_coordinates(np.asarray(data.patches, dtype=float))
         values = data.values
 
         # compute domain bounds for setting axis limits
@@ -164,11 +163,9 @@ class PolygonPlotComponent(Component):
         # from what each component reports each frame
         return RenderResult(
             artists={"collection": self._poly_collection},
-            metadata={
-                "mappable": self._poly_collection,
-                "colorbar_label": data.name,
-                "view_bounds": (x_min, x_max, y_min, y_max),
-            },
+            mappable=self._poly_collection,
+            colorbar_label=data.name,
+            view_bounds=(x_min, x_max, y_min, y_max),
         )
 
     def _to_axes_coordinates(self, vertices: Array) -> Array:

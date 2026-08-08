@@ -43,7 +43,12 @@ from simbi.viz.pipeline.panels import (
     sector_transform,
 )
 from simbi.viz.pipeline.transforms import compose_fields_for_render, prepare_figure
-from simbi.viz.types import CoordSystem, FieldData
+from simbi.viz.types import (
+    CoordSystem,
+    FieldData,
+    PolygonData,
+    RenderResult,
+)
 
 WEDGE = 0.5 * np.pi
 THETA_EDGES = np.linspace(0.0, WEDGE, 9)
@@ -173,8 +178,9 @@ def test_two_fields_compose_to_separate_polygon_sets() -> None:
         [wedge_field("D"), wedge_field("u")], config(render_mode="polygons")
     )
 
-    assert [f.name for f in composed] == ["D_polygons", "u_polygons"]
+    assert [f.name for f in composed] == ["D", "u"]
     cells = (THETA_EDGES.size - 1) * (RADIAL_EDGES.size - 1)
+    assert all(isinstance(f, PolygonData) for f in composed)
     assert all(f.values.size == cells for f in composed)
 
 
@@ -258,12 +264,12 @@ def test_a_mirrored_pair_puts_each_scale_on_its_own_side() -> None:
 def test_a_vector_overlay_does_not_claim_a_scale() -> None:
     """a quiver is colormapped but reads off the field beneath it; giving it a
     bar of its own would label the panel twice."""
-    entries = find_mappables(
-        [
-            ({"mesh": object()}, {"colorbar_label": "D"}),
-            ({"quiver": object()}, {"is_vector": True}),
-        ]
+    field = RenderResult(
+        artists={"mesh": object()}, mappable=object(), colorbar_label="D"
     )
+    overlay = RenderResult(artists={"quiver": object()}, is_vector=True)
+
+    entries = find_mappables([field, overlay])
 
     assert [label for _, label in entries] == ["D"]
 

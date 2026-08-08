@@ -118,7 +118,7 @@ class StreamPlotComponent(Component):
 
         return RenderResult(
             artists={"streamplot": self._streamplot},
-            metadata={"is_vector": True},
+            is_vector=True,
         )
 
     def cleanup(self) -> None:

@@ -14,7 +14,7 @@ from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
 from ..figure import Figure
-from ..types import Array, CoordSystem, FieldData
+from ..types import Array, CoordSystem, FieldData, PolygonData
 from .panels import group_by_field, is_sectorable, place_in_sector
 
 # maps logical axis names (user-facing) to the data's array index.
@@ -263,25 +263,30 @@ def prepare_figure(
     """
     import matplotlib.pyplot as plt
 
-    config.theme.apply(
+    # pass optional formatter into the Figure so it can control layout policy
+    figure = Figure(config, formatter=formatter)
+
+    # the theme settings are held on the figure rather than pushed into the
+    # global rcParams, and everything that draws runs under them: the axes here,
+    # and every later artist through Figure.styled()
+    figure.theme_rc = config.theme.rc_params(
         nfiles=nfiles,
         nfields=len(config.plot.fields) * nlvls,
         overlay_mode=overlay_mode,
     )
-    if projection == "polar":
-        fig, ax = plt.subplots(
-            1,
-            1,
-            figsize=config.figure.fig_size,
-            subplot_kw={"projection": "polar"},
-            layout="constrained",
-        )
-    else:
-        fig = plt.figure(figsize=config.figure.fig_size)
-        ax = fig.add_subplot(111)
 
-    # pass optional formatter into the Figure so it can control layout policy
-    figure = Figure(config, formatter=formatter)
+    with figure.styled():
+        if projection == "polar":
+            fig, ax = plt.subplots(
+                1,
+                1,
+                figsize=config.figure.fig_size,
+                subplot_kw={"projection": "polar"},
+                layout="constrained",
+            )
+        else:
+            fig = plt.figure(figsize=config.figure.fig_size)
+            ax = fig.add_subplot(111)
 
     figure.fig = fig
     figure.axes["main"] = ax
@@ -398,7 +403,7 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
     )
 
 
-def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
+def _compose_polygons(fields_2d: Sequence[FieldData]) -> PolygonData:
     """
     Composes 2D fields for polygon rendering.
 
@@ -408,76 +413,85 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     all_patches = []
     all_values = []
 
-    # track regions covered by finer levels to avoid overplotting
-    refined_regions = []
+    # bounding boxes of the levels already laid down, which are finer than
+    # whatever comes next and take precedence where they overlap it
+    refined_regions: list[tuple[float, float, float, float]] = []
 
-    # iterate from finest level (end of list) to coarsest (start)
+    # finest level first, so a coarse cell is dropped wherever a finer one
+    # already covers it
     for field in reversed(fields_2d):
         # field.domain is in DATA-STORAGE order (slow..fast = [y, x] for 2D), matching the
         # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, as
         # [y, x]: unpacking as (x, y) makes the y-edges drive the x-loop and `values[j, i]` run off axis 0 on a
         # non-square (refined) patch. a square level hides the swap (both edge arrays are equal).
-        y_edges, x_edges = field.domain
+        y_edges, x_edges = (np.asarray(edges) for edges in field.domain)
         values = field.values
 
-        # create cell patches for this level
-        for j in range(len(y_edges) - 1):
-            for i in range(len(x_edges) - 1):
-                # check if this cell is covered by an already-processed
-                # finer level
-                cell_x_center = (x_edges[i] + x_edges[i + 1]) / 2
-                cell_y_center = (y_edges[j] + y_edges[j + 1]) / 2
+        keep = _uncovered_cells(x_edges, y_edges, refined_regions)
+        if keep.any():
+            all_patches.append(_cell_corners(x_edges, y_edges)[keep])
+            all_values.append(values[keep])
 
-                is_covered = False
-                for region in refined_regions:
-                    if (
-                        region["xmin"] <= cell_x_center <= region["xmax"]
-                        and region["ymin"] <= cell_y_center <= region["ymax"]
-                    ):
-                        is_covered = True
-                        break
-
-                if is_covered:
-                    continue
-
-                # not covered, so add this "leaf cell"
-                patch = [
-                    (x_edges[i], y_edges[j]),
-                    (x_edges[i + 1], y_edges[j]),
-                    (x_edges[i + 1], y_edges[j + 1]),
-                    (x_edges[i], y_edges[j + 1]),
-                ]
-                all_patches.append(patch)
-                all_values.append(values[j, i])
-
-        # add this level's domain to the list of refined regions
         refined_regions.append(
-            {
-                "xmin": x_edges[0],
-                "xmax": x_edges[-1],
-                "ymin": y_edges[0],
-                "ymax": y_edges[-1],
-            }
+            (x_edges[0], x_edges[-1], y_edges[0], y_edges[-1])
         )
 
-    # convert refined_regions to level_bounds tuples (xmin, xmax, ymin, ymax)
-    # reverse to get coarsest-to-finest order (level 0, 1, 2, ...)
-    level_bounds: list[tuple[float, float, float, float]] = [
-        (r["xmin"], r["xmax"], r["ymin"], r["ymax"])
-        for r in reversed(refined_regions)
-    ]
+    # coarsest-to-finest, the order the levels are numbered in
+    level_bounds = list(reversed(refined_regions))
 
-    axis_names = fields_2d[0].axis_names
-    # return a new 1D FieldData object (the "Polygon Contract")
-    return FieldData(
-        name=f"{fields_2d[0].name}_polygons",
-        values=np.array(all_values),
-        domain=np.array(all_patches),
-        axis_names=axis_names,
+    return PolygonData(
+        name=fields_2d[0].name,
+        patches=(
+            np.concatenate(all_patches)
+            if all_patches
+            else np.empty((0, 4, 2))
+        ),
+        values=np.concatenate(all_values) if all_values else np.array([]),
+        axis_names=fields_2d[0].axis_names,
         coord_system=fields_2d[0].coord_system,
         time=fields_2d[0].time,
         level_bounds=level_bounds if len(level_bounds) > 1 else None,
     )
+
+
+def _cell_corners(x_edges: Array, y_edges: Array) -> Array:
+    """the four corners of every cell of a logically-rectangular mesh.
+
+    shaped (ny, nx, 4, 2) and wound anticlockwise from the lower-left corner,
+    which is the vertex order a polygon collection draws."""
+    x_lo, y_lo = np.meshgrid(x_edges[:-1], y_edges[:-1])
+    x_hi, y_hi = np.meshgrid(x_edges[1:], y_edges[1:])
+
+    return np.stack(
+        [
+            np.stack([x_lo, y_lo], axis=-1),
+            np.stack([x_hi, y_lo], axis=-1),
+            np.stack([x_hi, y_hi], axis=-1),
+            np.stack([x_lo, y_hi], axis=-1),
+        ],
+        axis=-2,
+    )
+
+
+def _uncovered_cells(
+    x_edges: Array,
+    y_edges: Array,
+    regions: Sequence[tuple[float, float, float, float]],
+) -> Array:
+    """which cells of this level are not already drawn by a finer one.
+
+    a cell belongs to whichever region holds its CENTRE: testing the corners
+    instead would drop a coarse cell that merely abuts a refined patch."""
+    x_centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+    y_centers = 0.5 * (y_edges[:-1] + y_edges[1:])
+
+    covered = np.zeros((y_centers.size, x_centers.size), dtype=bool)
+    for x_min, x_max, y_min, y_max in regions:
+        inside_x = (x_min <= x_centers) & (x_centers <= x_max)
+        inside_y = (y_min <= y_centers) & (y_centers <= y_max)
+        covered |= inside_y[:, None] & inside_x[None, :]
+
+    return ~covered
 
 
 def _compose_one_field(

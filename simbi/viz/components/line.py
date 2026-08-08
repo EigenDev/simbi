@@ -205,7 +205,7 @@ class LinePlotComponent(Component):
         ax.set_xlim(x_data.min(), x_data.max())
 
         return RenderResult(
-            artists={"line": self._line}, metadata={"label": level_label}
+            artists={"line": self._line}, labels=[level_label]
         )
 
     def cleanup(self) -> None:
