@@ -250,8 +250,18 @@ class SimbiProblem(BaseModel):
             None,
             ge=1.0,
             le=2.0,
+            # cli-exposed HERE, as the core physics knob it is, alongside solver /
+            # reconstruction / cfl_number. it was previously left to each config to
+            # re-declare with cli=True, which most did -- so the flag appeared generic
+            # right up until a config that did NOT declare it (one on the synge closure,
+            # which owns no gamma) was asked to run a gamma-law arm, and `--adiabatic-index`
+            # came back "unrecognized" for the first time. _field_is_cli inherits the
+            # exposure across the mro, so a config that still declares its own keeps its
+            # default and help text; only the flag itself is now guaranteed.
+            cli=True,
             description="adiabatic index; required for energy-bearing regimes, "
-            "irrelevant for isothermal ones (which use sound_speed)",
+            "irrelevant for isothermal ones (which use sound_speed), and refused "
+            "by the parameter-free synge closure",
         ),
     ]
     sound_speed: Annotated[
