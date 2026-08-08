@@ -1459,6 +1459,25 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     (end_trace(), writes)
 }
 
+/// adiabatic HLLC face flux with the ACOUSTIC-CONSISTENCY dissipation scaling: identical to
+/// `adiabatic_hllc_lm_flux_gv` except that the acoustic signal speeds are scaled by how much of
+/// the face data obeys the impedance relation `dp = rho c du` rather than by the local mach
+/// number against a reference. the traced body is the same; only the sensor differs.
+pub fn adiabatic_hllc_acoustic_flux_gv<const D: usize>(
+    dir: u8,
+    recon: Recon,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let eos = IdealGas {
+        gamma: Gv::scalar("gamma"),
+    };
+    let (left, right, nhat, vface) =
+        euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
+    let flux = hllc(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Acoustic);
+    let writes = euler_flux_writes(&flux);
+    (end_trace(), writes)
+}
+
 fn rhd_hllc_at_arm<const D: usize>(
     dir: u8,
     smoother: ShockwaveLimiter,

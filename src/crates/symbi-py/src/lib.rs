@@ -741,6 +741,8 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
         "hllc" => Ok(Solver::Hllc),
         // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
         "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
+        // acoustic-consistency scaling: no reference mach number (newtonian only).
+        "hllc_acoustic" | "hllc-acoustic" => Ok(Solver::HllcAcoustic),
         "hlld" => Ok(Solver::Hlld),
         other => Err(PyValueError::new_err(format!("unknown solver '{other}'"))),
     }

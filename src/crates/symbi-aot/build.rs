@@ -1304,6 +1304,20 @@ fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Reco
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+fn gen_adiabatic_hllc_acoustic_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
+    let name = format!(
+        "adiabatic_face_flux_hllc_acoustic{}_{ndim}d_{dir}",
+        recon.suffix()
+    );
+    let (k, writes) = match ndim {
+        1 => symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv::<1>(dir, recon),
+        2 => symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv::<2>(dir, recon),
+        3 => symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv::<3>(dir, recon),
+        _ => panic!("adiabatic_hllc_acoustic_flux_gv: unsupported ndim {ndim}"),
+    };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
     let name = format!("rhd_face_flux_hllc{}_{ndim}d_{dir}", eos.suffix());
     let (k, writes) = match ndim {
@@ -3431,6 +3445,8 @@ fn main() {
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Plm);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Ppm);
+            gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Plm);
+            gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
             gen_rhd_hllc_lm_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);

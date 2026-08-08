@@ -471,206 +471,221 @@ fn adaptive_phi_lowers() {
 // with no constant available to tune.
 // =============================================================================
 mod acoustic_sensor {
-    use symbi_hydro::dissipation::acoustic_phi;
+    use symbi_hydro::dissipation::{acoustic_phi, local_mach};
 
     const GAMMA: f64 = 5.0 / 3.0;
 
-    /// the relative precision with which a face's pressure JUMP survives being
-    /// formed from two absolute pressures. a low-mach face carries `dp/p ~ Ma^2`,
-    /// so the subtraction loses `eps * p / dp` of it — the low-mach roundoff
-    /// problem itself, present in the test's construction rather than in the
-    /// sensor. asserting tighter than this measures f64, not the scheme.
+    /// the relative precision with which a face's pressure JUMP survives being formed
+    /// from two absolute pressures. a low-mach face carries `dp/p ~ Ma^2`, so the
+    /// subtraction loses `eps * p / dp` of it — the low-mach roundoff problem itself,
+    /// present in the test's construction rather than in the sensor.
     fn jump_conditioning(p: f64, dp: f64) -> f64 {
         8.0 * f64::EPSILON * p / dp.abs()
     }
 
     /// a face in smooth low-mach flow: the pressure jump is the one the momentum
-    /// balance supports across the velocity jump, `dp = rho u du`.
-    fn smooth_face(mach: f64, du_over_u: f64) -> f64 {
+    /// balance supports across the velocity jump, `dp = rho u du`. returns the sensor
+    /// value and the face's own `Ma_local`, since that — not the mean mach — is the
+    /// quantity the scaling is defined against.
+    fn smooth_face(mach: f64, du_over_u: f64) -> (f64, f64) {
         let (rho, p) = (1.0, 1.0);
         let cs = (GAMMA * p / rho).sqrt();
         let u = mach * cs;
         let du = du_over_u * u;
         let dp = rho * u * du;
-        acoustic_phi(
-            u + 0.5 * du,
-            u - 0.5 * du,
-            cs,
-            cs,
-            p + 0.5 * dp,
-            p - 0.5 * dp,
-            rho,
-            rho,
-            0.0,
-        )
+        let (vl, vr) = (u + 0.5 * du, u - 0.5 * du);
+        let phi = acoustic_phi(
+            vl, vr, cs, cs, p + 0.5 * dp, p - 0.5 * dp, rho, rho, 0.0,
+        );
+        (phi, local_mach(vl, vr, cs, cs))
     }
 
-    /// THE derivation, checked as a scaling rather than at a point: with the
-    /// pressure jump set by the momentum balance, `b/a` reduces to `u/c`, so the
-    /// sensor must track the mach number across decades with slope one and no
-    /// offset. a fitted constant anywhere in the sensor would break this.
+    /// THE low-mach requirement, checked as a scaling across decades: in smooth flow the
+    /// unsupported pressure jump is `O(Ma^2)` and the mach term governs, so the sensor
+    /// must equal the face's own local mach number with no offset and no threshold. a
+    /// reference mach number anywhere inside would show up as a departure at the low end.
     #[test]
-    fn smooth_low_mach_flow_recovers_the_mach_scaling() {
+    fn smooth_low_mach_flow_is_scaled_by_the_local_mach_number() {
         for &mach in &[1.0e-4, 1.0e-3, 1.0e-2, 0.1, 0.3] {
-            let phi = smooth_face(mach, 1.0);
-            let rel = (phi - mach).abs() / mach;
-            // dp = rho u^2 on p = 1, so dp/p = gamma Ma^2.
-            let tol = jump_conditioning(1.0, GAMMA * mach * mach);
+            let (phi, ma_local) = smooth_face(mach, 1.0);
+            let rel = (phi - ma_local).abs() / ma_local;
             assert!(
-                rel < tol,
-                "at Ma = {mach:e} the sensor gave phi = {phi:e}, not the derived \
-                 phi = Ma (relative departure {rel:e}, representable to {tol:e})"
+                rel < 1.0e-12,
+                "at Ma = {mach:e} the sensor gave phi = {phi:e} against a local mach of \
+                 {ma_local:e} (relative departure {rel:e})"
             );
         }
     }
 
-    /// the scaling saturates at Ma = 1 — where the acoustic and advective scales
-    /// genuinely meet — rather than at a chosen fraction of it.
+    /// no threshold: halving the flow speed halves the scaling, all the way down. a
+    /// scheme with a reference mach number flattens out below it — this is what would
+    /// catch one being reintroduced.
     #[test]
-    fn the_scaling_saturates_at_unit_mach_not_before() {
-        assert!((smooth_face(0.5, 1.0) - 0.5).abs() < 1.0e-12);
-        assert!((smooth_face(0.9, 1.0) - 0.9).abs() < 1.0e-12);
-        assert_eq!(smooth_face(1.5, 1.0), 1.0);
+    fn the_scaling_is_linear_in_speed_with_no_threshold() {
+        let mut previous: Option<f64> = None;
+        for &mach in &[0.2, 0.1, 0.05, 0.025, 0.0125] {
+            let (phi, _) = smooth_face(mach, 1.0);
+            if let Some(prev) = previous {
+                let ratio = prev / phi;
+                assert!(
+                    (ratio - 2.0).abs() < 1.0e-9,
+                    "halving the speed changed the scaling by {ratio}, not 2 — the \
+                     response is not linear, so a threshold has crept in"
+                );
+            }
+            previous = Some(phi);
+        }
     }
 
-    /// a wave obeying the impedance relation is exactly what the classical
-    /// dissipation is built for, so it must be recovered in full.
+    /// saturation happens where the acoustic and advective scales genuinely meet, at
+    /// `Ma_local = 1`, and not at a chosen fraction of it.
     #[test]
-    fn an_acoustic_wave_recovers_classical_dissipation() {
+    fn the_scaling_saturates_at_unit_local_mach() {
+        let (phi, ma) = smooth_face(0.5, 1.0);
+        assert!(ma < 1.0 && (phi - ma).abs() < 1.0e-12, "phi {phi} ma {ma}");
+        let (phi, ma) = smooth_face(1.5, 1.0);
+        assert!(ma > 1.0 && phi == 1.0, "phi {phi} ma {ma}");
+    }
+
+    /// a wave obeying the impedance relation `dp = rho c du` is scaled by its own
+    /// amplitude in acoustic units — a WEAK wave needs little dissipation, which is the
+    /// whole point of a low-dissipation solver, and a wave whose velocity jump reaches
+    /// the sound speed gets the classical dissipation in full.
+    #[test]
+    fn an_impedance_consistent_wave_is_scaled_by_its_amplitude() {
         let (rho, p) = (1.0, 1.0);
         let cs = (GAMMA * p / rho).sqrt();
         for &du in &[1.0e-6, 1.0e-3, 0.1] {
-            let dp = rho * cs * du; // impedance relation
+            let dp = rho * cs * du;
             let phi = acoustic_phi(
                 0.5 * du, -0.5 * du, cs, cs, p + 0.5 * dp, p - 0.5 * dp, rho, rho, 0.0,
             );
-            let tol = jump_conditioning(p, dp);
+            let expected = du / cs; // the jump term; it dominates the mach term (du/2cs)
+            let tol = expected * jump_conditioning(p, dp).max(1.0e-12);
             assert!(
-                (phi - 1.0).abs() < tol,
-                "an impedance-consistent wave gave phi = {phi}, not 1 \
-                 (representable to {tol:e})"
+                (phi - expected).abs() <= tol,
+                "a wave of amplitude du/c = {expected:e} was scaled by {phi:e}"
             );
         }
+        // and a wave at the sound speed saturates
+        let du = 2.0 * cs;
+        let phi = acoustic_phi(
+            0.5 * du, -0.5 * du, cs, cs, p + rho * cs * du, p, rho, rho, 0.0,
+        );
+        assert_eq!(phi, 1.0);
     }
 
-    /// a contact carries a density jump and NO pressure jump; the acoustic
-    /// dissipation is what smears it, so the sensor must switch it off.
+    /// a contact carries a density jump and no pressure jump. AT REST it presents
+    /// nothing for the acoustic dissipation to act on and the scaling vanishes; in
+    /// motion it is scaled by the flow's mach number like any other face. either way
+    /// the contact itself rides on the contact wave, which this scaling never touches.
     #[test]
-    fn a_contact_keeps_its_sharpness() {
-        let (p, cs) = (1.0, (GAMMA * 1.0 / 1.0f64).sqrt());
-        let phi = acoustic_phi(0.3, 0.3, cs, cs * 0.5, p, p, 1.0, 4.0, 0.0);
-        assert_eq!(phi, 0.0, "a pressure-uniform contact must not be dissipated");
+    fn a_contact_is_scaled_by_its_motion_and_never_more() {
+        let cs_l = (GAMMA * 1.0 / 1.0f64).sqrt();
+        let cs_r = (GAMMA * 1.0 / 4.0f64).sqrt();
+        let at_rest = acoustic_phi(0.0, 0.0, cs_l, cs_r, 1.0, 1.0, 1.0, 4.0, 0.0);
+        assert_eq!(at_rest, 0.0, "a contact at rest must not be dissipated");
+        let moving = acoustic_phi(0.3, 0.3, cs_l, cs_r, 1.0, 1.0, 1.0, 4.0, 0.0);
+        let expected = local_mach(0.3, 0.3, cs_l, cs_r);
+        assert!(
+            (moving - expected).abs() < 1.0e-12,
+            "a moving contact was scaled by {moving} rather than by its mach {expected}"
+        );
     }
 
-    /// the carbuncle cure, stated as the paper's mechanism: the face TRANSVERSE to
-    /// a grid-aligned shock sees near-uniform pressure along the front and a
-    /// vanishing transverse velocity, so it must read as non-acoustic and have its
-    /// dissipation reduced — while the face ACROSS the shock keeps it in full.
+    /// the carbuncle mechanism, as the paper states it: the face TRANSVERSE to a
+    /// grid-aligned shock sees a smooth front — near-uniform pressure along it and a
+    /// vanishing transverse velocity — so BOTH terms are small and the acoustic
+    /// dissipation is reduced. taking the larger of the two is what makes this work; a
+    /// sensor built as their RATIO diverges here instead, restoring the dissipation that
+    /// drives the instability (measured in `odd_even_decoupling.rs`).
     #[test]
     fn a_grid_aligned_shock_reduces_transverse_but_not_normal_dissipation() {
         let (rho, p, cs) = (1.0, 1.0, (GAMMA * 1.0 / 1.0f64).sqrt());
-        // transverse: tiny deflection, pressure uniform along the front
         let transverse = acoustic_phi(
             1.0e-6, -1.0e-6, cs, cs, p, p * (1.0 + 1.0e-9), rho, rho, 0.0,
         );
         assert!(
-            transverse < 1.0e-2,
-            "the transverse face read phi = {transverse}; the acoustic dissipation \
-             that drives the grid-aligned instability is not being reduced"
+            transverse < 1.0e-5,
+            "the transverse face read phi = {transverse}; the acoustic dissipation that \
+             drives the grid-aligned instability is not being reduced"
         );
-        // normal: a strong compression obeying the impedance relation
         let du = 2.0 * cs;
-        let normal = acoustic_phi(
-            du, 0.0, cs, cs, p + rho * cs * du, p, rho, rho, 0.0,
-        );
+        let normal = acoustic_phi(du, 0.0, cs, cs, p + rho * cs * du, p, rho, rho, 0.0);
         assert_eq!(normal, 1.0, "the shock-normal face must keep full dissipation");
     }
 
-    /// force balance. a hydrostatic face carries a large pressure jump and no wave:
-    /// WITHOUT the balance the sensor reads it as fully acoustic (the conservative
-    /// reading, and what a compressibility clamp does); WITH the balance supplied it
-    /// contributes nothing, so the low-mach reduction survives across a stratified
-    /// atmosphere instead of being switched off throughout it.
+    /// force balance. an UNSUPPORTED pressure jump sets a floor proportional to itself,
+    /// so a stratified face is dissipated whatever its mach number — which is what damps
+    /// a hydrostatic residual. supply the balance and the floor empties, leaving the
+    /// low-mach scaling intact across the stratification instead of switched off
+    /// throughout it; supply only part of it and the REMAINDER sets the floor.
     #[test]
     fn a_balanced_face_is_only_dissipated_through_its_residual() {
         let (rho, p, cs) = (1.0, 1.0, (GAMMA * 1.0 / 1.0f64).sqrt());
-        let dp_balance = 0.1; // rho g dx across the face
+        let dp_balance = 0.1;
         let mach = 1.0e-3;
         let u = mach * cs;
-        let du = 1.0e-3 * u;
+        let du = u;
         let dp_dyn = rho * u * du;
-        let args = |bal: f64| {
+        let at = |bal: f64| {
             acoustic_phi(
-                u + 0.5 * du,
-                u - 0.5 * du,
-                cs,
-                cs,
-                p + 0.5 * (dp_balance + dp_dyn),
-                p - 0.5 * (dp_balance + dp_dyn),
-                rho,
-                rho,
-                bal,
+                u + 0.5 * du, u - 0.5 * du, cs, cs,
+                p + 0.5 * (dp_balance + dp_dyn), p - 0.5 * (dp_balance + dp_dyn),
+                rho, rho, bal,
             )
         };
-        assert_eq!(
-            args(0.0),
-            1.0,
-            "unsupplied, a stratified balance must read as fully acoustic"
-        );
-        let with_balance = args(dp_balance);
+        let unsupplied = at(0.0);
+        let floor = (dp_balance + dp_dyn) / (rho * cs * cs);
         assert!(
-            (with_balance - mach).abs() / mach < 1.0e-6,
-            "with the balance supplied the face should fall back to the dynamic \
-             scaling phi = Ma = {mach:e}, got {with_balance:e}"
+            (unsupplied - floor).abs() / floor < 1.0e-9,
+            "an unsupported jump must set the floor {floor:e}, got {unsupplied:e}"
         );
-
-        // and the residual IS what gets dissipated: perturb the balance and the
-        // sensor responds in proportion rather than ignoring it.
-        let residual = acoustic_phi(
-            u + 0.5 * du,
-            u - 0.5 * du,
-            cs,
-            cs,
-            p + 0.5 * (dp_balance + dp_dyn),
-            p - 0.5 * (dp_balance + dp_dyn),
-            rho,
-            rho,
-            dp_balance * 0.5,
+        assert!(
+            unsupplied > 20.0 * mach,
+            "the floor {unsupplied:e} is not meaningfully above the mach scaling \
+             {mach:e}; this face cannot show that the balance term does anything"
         );
-        assert_eq!(
-            residual, 1.0,
-            "a face carrying half its balance as an unsupported residual must be \
-             dissipated in full"
+        let supplied = at(dp_balance);
+        let ma_local = local_mach(u + 0.5 * du, u - 0.5 * du, cs, cs);
+        assert!(
+            (supplied - ma_local).abs() / ma_local < 1.0e-6,
+            "with the balance supplied the face should fall back to the mach scaling \
+             {ma_local:e}, got {supplied:e}"
+        );
+        let half = at(0.5 * dp_balance);
+        let half_floor = (0.5 * dp_balance + dp_dyn) / (rho * cs * cs);
+        assert!(
+            (half - half_floor).abs() / half_floor < 1.0e-9,
+            "a half-supported balance must leave the remainder as the floor \
+             {half_floor:e}, got {half:e}"
         );
     }
 
-    /// the sensor is a ratio of two quantities in acoustic units, so rescaling the
-    /// flow's units cannot move it. this is what makes it knob-free: there is no
-    /// dimensional constant inside to be calibrated to a problem.
+    /// the sensor compares two dimensionless quantities, so rescaling the flow's units
+    /// cannot move it. this is what makes it knob-free: there is no dimensional constant
+    /// inside to be calibrated to a problem.
     #[test]
     fn the_sensor_is_invariant_under_a_rescaling_of_units() {
-        let reference = smooth_face(0.01, 1.0e-3);
-        for &s in &[1.0e-6, 1.0e-3, 1.0e3, 1.0e6] {
-            let (rho, p) = (1.0, 1.0 * s * s);
+        let (reference, _) = smooth_face(0.01, 1.0);
+        for &scale in &[1.0e-6, 1.0e-3, 1.0e3, 1.0e6] {
+            let (rho, p) = (1.0, 1.0 * scale * scale);
             let cs = (GAMMA * p / rho).sqrt();
             let u = 0.01 * cs;
-            let du = 1.0e-3 * u;
+            let du = u;
             let dp = rho * u * du;
             let phi = acoustic_phi(
                 u + 0.5 * du, u - 0.5 * du, cs, cs,
                 p + 0.5 * dp, p - 0.5 * dp, rho, rho, 0.0,
             );
-            let tol = reference * jump_conditioning(p, dp);
             assert!(
-                (phi - reference).abs() < tol,
-                "rescaling by {s:e} moved phi from {reference} to {phi} \
-                 (representable to {tol:e})"
+                (phi - reference).abs() < 1.0e-12,
+                "rescaling by {scale:e} moved phi from {reference} to {phi}"
             );
         }
     }
 
-    /// bounded, finite, and safe on degenerate data — a uniform face divides by a
-    /// robustness floor rather than by zero.
+    /// bounded, finite, and safe on degenerate data.
     #[test]
     fn the_sensor_is_bounded_and_finite_on_degenerate_faces() {
         let cs = (GAMMA * 1.0 / 1.0f64).sqrt();

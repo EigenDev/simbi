@@ -29,10 +29,14 @@ use symbi_ir::algebra::Scalar;
 ///   - `Fleischmann`  — newtonian only: HLLC + fleischmann et al. (2020)
 ///                      adaptive-phi low-mach correction. relativistic
 ///                      regimes ignore (no relativistic LM correction).
+///   - `Acoustic`     — newtonian only: the same acoustic-dissipation scaling keyed on the
+///                      ACOUSTIC CONTENT of the face data (`acoustic_phi`) rather than on a
+///                      reference mach number. carries no tuned constant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShockwaveLimiter {
     Standard,
     Fleischmann,
+    Acoustic,
 }
 
 impl Default for ShockwaveLimiter {
@@ -137,31 +141,46 @@ pub const JUMP_EPS: f64 = 1.0e-30;
 /// the acoustic-consistency scaling of the acoustic dissipation: scale by how much of the face
 /// data is ACOUSTIC, measured against the impedance relation, rather than by a flow speed.
 ///
-/// a simple acoustic wave satisfies `dp = rho c du_n`. writing both jumps in acoustic units,
+/// the scaling is the LARGER of two dimensionless demands on the face, capped at one:
 ///
-///   `a = |du_n| / c`,   `b = |dp - dp_balance| / (rho c^2)`,   `phi = min(1, b / a)`,
+///   `phi = min(1, max( Ma_local, |dp - dp_balance| / (rho c^2) ))`.
 ///
-/// the ratio `b/a` is the fraction of the impedance relation the data actually carries, and it
-/// is what the acoustic dissipation should be scaled by. every regime of interest falls out of
-/// the same expression with NO reference mach number:
+/// the first term is the low-mach requirement: the acoustic dissipation must fall with the
+/// flow speed or it overwhelms the advective flux as `Ma -> 0` (Guillard & Viozat). saturating
+/// at `Ma = 1` is where the acoustic and advective scales genuinely meet, so no reference mach
+/// number is chosen. the second is a floor set by the UNSUPPORTED pressure structure the face
+/// carries: a pressure jump that no body force holds up and no flow explains has to be damped,
+/// whatever the mach number is.
 ///
-///   - smooth low-mach flow carries a pressure jump set by the momentum balance,
-///     `dp ~ rho u du`, giving `b/a = u/c` — the `phi ~ Ma` scaling the asymptotic analysis
-///     requires (Guillard & Viozat), saturating at `Ma = 1` because that is where the acoustic
-///     and advective scales genuinely meet, rather than at a chosen fraction of it;
-///   - a shock or a genuine acoustic wave satisfies the impedance relation, `b = a`, so
-///     `phi = 1` and the classical dissipation is recovered exactly — keyed on the wave content
-///     of the data rather than on a flow speed that a grid-aligned shock makes vanish;
-///   - the transverse face of a grid-aligned shock carries neither a pressure jump nor a normal
-///     velocity jump, so `phi` is small and the acoustic dissipation is reduced — the carbuncle
-///     cure, obtained without naming a shock;
-///   - a contact carries no pressure jump at all, so `phi -> 0` and contact sharpness is kept;
-///   - a face in FORCE BALANCE (`dp` supported by a body force rather than by wave motion)
-///     carries its balance in `dp_balance` and contributes nothing to `b`, so the low-mach
-///     reduction survives in a stratified atmosphere instead of being switched off across it.
-///     whatever the balance fails to account for IS the residual, and it is dissipated in
-///     proportion — which is the property a stratified column needs, since an undamped
-///     hydrostatic residual rings at grid scale.
+/// taking the LARGER of the two is what separates the two ways a face can present a pressure
+/// jump with no velocity behind it:
+///
+///   - the transverse face of a grid-aligned shock carries neither — the front is smooth along
+///     itself, so both terms are small and the acoustic dissipation is reduced. that reduction
+///     IS the carbuncle cure, and a sensor built as the RATIO of the two terms gets this
+///     backwards: the ratio diverges when the velocity jump vanishes faster than the pressure
+///     jump, which is exactly this configuration, and restores the dissipation that drives the
+///     instability. measured, not argued — see `odd_even_decoupling.rs`;
+///   - a face in FORCE BALANCE carries a large pressure jump that IS explained, so subtracting
+///     `dp_balance` empties the second term and the low-mach reduction survives across a
+///     stratified atmosphere instead of being switched off throughout it. whatever the balance
+///     fails to account for is the residual, and it raises the floor in proportion — the
+///     property a stratified column needs, since an undamped hydrostatic residual rings at
+///     grid scale.
+///
+/// MEASURED LIMITATION — this sensor does NOT yet hold the adiabatic entropy floor on a
+/// stagnant stratified column when `dp_balance` is zero. the floor it sets there is
+/// `(dp/p) / gamma`, some fifteen times weaker than what damps the hydrostatic residual, and
+/// a sealed column loses ~1.7 percent of its entropy where the mach-limited ramp loses none.
+/// the two demands genuinely oppose: a transverse shock face and a hydrostatic residual both
+/// present a small pressure jump behind a vanishing velocity jump, and face-local data alone
+/// does not separate them — a floor strong enough for the second re-creates the first. supply
+/// `dp_balance`, or use the mach-limited ramp, on any run with a stratified background.
+///
+/// the remaining cases follow from the same expression: smooth low-mach flow carries
+/// `dp ~ rho u du`, so the jump term is `O(Ma^2)` and the mach term wins, giving `phi ~ Ma`;
+/// a shock runs at `Ma >= 1` and saturates; a contact carries no pressure jump at all and is
+/// left to the contact wave, which this scaling never touches.
 ///
 /// `dp_balance` is the pressure jump the face's momentum sources support across it,
 /// `rho_bar (f . n) dx`, for ANY body force `f` — gravity, rotation, magnetic tension,
@@ -189,11 +208,10 @@ pub fn acoustic_phi<S: Scalar>(
     let half = S::from_f64(0.5);
     let cs = (cs_l + cs_r) * half;
     let rho = (rho_l + rho_r) * half;
-    // both jumps in acoustic units, so their ratio is the dimensionless impedance fraction and
-    // the result is invariant under a rescaling of the flow's units.
-    let a = (vn_l - vn_r).abs() / cs;
-    let b = ((p_l - p_r) - dp_balance).abs() / (rho * cs * cs);
-    (b / (a + S::from_f64(JUMP_EPS))).min(S::ONE)
+    // the DYNAMIC pressure jump in acoustic units: what the face carries beyond whatever a
+    // body force holds up.
+    let jump = ((p_l - p_r) - dp_balance).abs() / (rho * cs * cs);
+    local_mach(vn_l, vn_r, cs_l, cs_r).max(jump).min(S::ONE)
 }
 
 #[cfg(test)]

@@ -271,6 +271,12 @@ pub enum Solver {
     Hllc,
     /// HLLC with the Fleischmann (2020) low-mach / low-dissipation correction (newtonian only).
     HllcLm,
+    /// HLLC whose acoustic dissipation is scaled by the ACOUSTIC CONTENT of the face data —
+    /// the fraction of the impedance relation `dp = rho c du` the jumps actually carry —
+    /// rather than by the local mach number against a reference value. newtonian only.
+    /// recovers the `phi ~ Ma` scaling the low-mach asymptotics require, with no tuned
+    /// constant, and returns to classical HLLC on any face carrying a real wave.
+    HllcAcoustic,
     Hlld,
 }
 
@@ -281,6 +287,7 @@ impl Solver {
             Solver::Hlle => "",
             Solver::Hllc => "_hllc",
             Solver::HllcLm => "_hllc_lm",
+            Solver::HllcAcoustic => "_hllc_acoustic",
             Solver::Hlld => "_hlld",
         }
     }
@@ -320,6 +327,12 @@ impl Solver {
             // reformulation has not been shown to be an identity there, and a scaling applied to a
             // non-identity is a different solver rather than a modified one.
             Solver::HllcLm => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
+            // HLLC-ACOUSTIC: the same centralized reformulation as HLLC-LM with a different
+            // sensor, so it inherits that arm's requirement exactly. NEWTONIAN ONLY for now:
+            // the impedance relation `dp = rho c du` the sensor measures against is the
+            // newtonian acoustic one, and its relativistic form carries the specific enthalpy —
+            // a different sensor, not the same one on a different state.
+            Solver::HllcAcoustic => matches!(regime, RegimeKind::Newtonian),
             Solver::Hlld => regime.is_mhd(),
         }
     }

@@ -17,7 +17,7 @@
 // =============================================================================
 
 use super::hlle::hlle;
-use crate::dissipation::{ShockwaveLimiter, adaptive_phi};
+use crate::dissipation::{ShockwaveLimiter, acoustic_phi, adaptive_phi};
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::newtonian::Newtonian;
@@ -249,7 +249,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
         // subsonic intermediate flux, and where the whole fan travels one way the physical flux is
         // the upwind one. dropping those branches leaves a supersonic face carrying `F_* != F_L`,
         // an error of several percent that no amount of dissipation tuning removes.
-        ShockwaveLimiter::Fleischmann => S::branch(
+        ShockwaveLimiter::Fleischmann | ShockwaveLimiter::Acoustic => S::branch(
             s_l.cmp_ge(vface),
             || f_l - u_l * vface,
             || {
@@ -260,7 +260,18 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                         let u_star_l = star_state(prim_l, &u_l, s_l, s_star, chi_l, nhat);
                         let u_star_r = star_state(prim_r, &u_r, s_r, s_star, chi_r, nhat);
 
-                        let phi = adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre);
+                        // the acoustic dissipation scaling. `Acoustic` keys on the wave
+                        // content of the face data and carries no reference mach number; the
+                        // balance term is zero here because the riemann solver sees no body
+                        // force, so a face held by one reads as fully acoustic — the
+                        // conservative reading.
+                        let phi = match shock_smoother {
+                            ShockwaveLimiter::Acoustic => acoustic_phi(
+                                vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre, prim_l.rho,
+                                prim_r.rho, S::ZERO,
+                            ),
+                            _ => adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre),
+                        };
                         let s_l_lm = phi * s_l;
                         let s_r_lm = phi * s_r;
 
@@ -447,15 +458,22 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                         // lorentz factor, which at a grid-aligned shock is dominated by the
                         // TRANSVERSE motion — reintroducing exactly the contamination that keying on
                         // the face-normal component removes.
-                        ShockwaveLimiter::Fleischmann => {
+                        ShockwaveLimiter::Fleischmann | ShockwaveLimiter::Acoustic => {
                             let cs_l =
                                 crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
                             let cs_r =
                                 crate::rhd::sound_speed_sq(eos, prim_r.rho, prim_r.pre).sqrt();
                             let vn_l = prim_l.vel.dot(nhat);
                             let vn_r = prim_r.vel.dot(nhat);
-                            let phi =
-                                adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre);
+                            let phi = match shock_smoother {
+                                ShockwaveLimiter::Acoustic => acoustic_phi(
+                                    vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre,
+                                    prim_l.rho, prim_r.rho, S::ZERO,
+                                ),
+                                _ => adaptive_phi(
+                                    vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre,
+                                ),
+                            };
 
                             let usl =
                                 rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
@@ -1445,6 +1463,118 @@ mod tests {
                      scaling it does not yield a modified HLLC"
                 );
             }
+        }
+    }
+
+    /// the acoustic-consistency solver must reduce to classical HLLC wherever the face
+    /// carries a genuine wave — the impedance ratio saturates there, so the scaling is a
+    /// no-op and the flux is the unmodified one. this is the property that makes it safe at
+    /// shocks: it cannot be less dissipative than HLLC where HLLC's dissipation is what the
+    /// data calls for.
+    #[test]
+    fn acoustic_hllc_equals_classical_hllc_on_a_wave_bearing_face() {
+        let eos = IdealGas { gamma: 1.4f64 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        // faces whose pressure jump MEETS OR EXCEEDS the impedance relation, which is what a
+        // compression carries. a merely fast face does not qualify — a large velocity jump
+        // with a pressure jump well under `rho c du` is not acoustic, and the sensor is right
+        // to keep scaling it down.
+        let cases = [
+            (0.0, 1.0, 1.0, -3.0, 20.0, 4.0),
+            (0.5, 1.0, 1.0, -0.5, 6.0, 3.0),
+        ];
+        for (vl, pl, rl, vr, pr, rr) in cases {
+            let l = Prim {
+                rho: rl,
+                vel: Tensor::new([vl, 0.0]),
+                pre: pl,
+            };
+            let r = Prim {
+                rho: rr,
+                vel: Tensor::new([vr, 0.0]),
+                pre: pr,
+            };
+            // NON-VACUITY: the equivalence only holds where the scaling is inactive, so the
+            // face has to actually saturate the sensor. a case that quietly stopped doing so
+            // would make this test compare a solver against itself.
+            let cs_l = (1.4f64 * l.pre / l.rho).sqrt();
+            let cs_r = (1.4f64 * r.pre / r.rho).sqrt();
+            let phi = crate::dissipation::acoustic_phi(
+                l.vel[0], r.vel[0], cs_l, cs_r, l.pre, r.pre, l.rho, r.rho, 0.0,
+            );
+            assert_eq!(
+                phi, 1.0,
+                "this face does not saturate the sensor (phi = {phi}); it cannot test the \
+                 phi = 1 equivalence"
+            );
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard);
+            let acu = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Acoustic);
+            let scale = std.den.abs().max(std.nrg.abs()).max(1.0);
+            for (what, a, b) in [
+                ("den", std.den, acu.den),
+                ("mom_n", std.mom[0], acu.mom[0]),
+                ("nrg", std.nrg, acu.nrg),
+            ] {
+                assert!(
+                    (a - b).abs() <= 1.0e-12 * scale,
+                    "{what}: a wave-bearing face must give classical HLLC exactly \
+                     ({a:e} vs {b:e})"
+                );
+            }
+        }
+    }
+
+    /// the payoff, measured through the flux rather than the sensor: on a SMOOTH low-mach
+    /// face the acoustic scaling sits strictly closer to the central (non-dissipative) flux
+    /// than the Fleischmann ramp does, because it scales to the mach number instead of
+    /// saturating at a tenth of it. the central flux is the zero-dissipation reference, so
+    /// distance from it IS the numerical dissipation the face applies.
+    #[test]
+    fn acoustic_hllc_is_less_dissipative_than_fleischmann_at_low_mach() {
+        let eos = IdealGas { gamma: 1.4f64 };
+        let nhat = Tensor::new([1.0, 0.0]);
+        let (rho, p) = (1.0f64, 1.0f64);
+        let cs = (1.4 * p / rho).sqrt();
+        for &mach in &[1.0e-3, 1.0e-2, 5.0e-2] {
+            let u = mach * cs;
+            let du = 1.0e-2 * u;
+            // the pressure jump the momentum balance supports across this velocity jump
+            let dp = rho * u * du;
+            let l = Prim {
+                rho,
+                vel: Tensor::new([u + 0.5 * du, 0.0]),
+                pre: p + 0.5 * dp,
+            };
+            let r = Prim {
+                rho,
+                vel: Tensor::new([u - 0.5 * du, 0.0]),
+                pre: p - 0.5 * dp,
+            };
+            let central = {
+                let regime = Newtonian;
+                let fl = regime.to_flux(&l, &nhat, &eos);
+                let fr = regime.to_flux(&r, &nhat, &eos);
+                (fl + fr) * 0.5
+            };
+            let dissipation = |lim| {
+                let f = hllc(&eos, &l, &r, &nhat, 0.0, lim);
+                (f.mom[0] - central.mom[0]).abs()
+            };
+            let fleisch = dissipation(ShockwaveLimiter::Fleischmann);
+            let acoustic = dissipation(ShockwaveLimiter::Acoustic);
+            assert!(
+                acoustic < fleisch,
+                "at Ma = {mach:e} the acoustic scaling was not less dissipative \
+                 (acoustic {acoustic:e} vs fleischmann {fleisch:e})"
+            );
+            // and the reduction should track the ratio of the two sensors, which at this
+            // mach is more than a factor of five.
+            assert!(
+                acoustic * 5.0 < fleisch,
+                "at Ma = {mach:e} the reduction was only {:.2}x; the sensors differ by \
+                 far more than that",
+                fleisch / acoustic
+            );
         }
     }
 

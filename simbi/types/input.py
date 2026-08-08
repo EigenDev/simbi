@@ -171,6 +171,9 @@ class Solver(str, ExtendedEnum):
     HLLE = "hlle"
     HLLC = "hllc"
     HLLC_LM = "hllc_lm"  # fleischmann (2020) low-mach / low-dissipation HLLC (newtonian)
+    # acoustic dissipation scaled by the fraction of the impedance relation
+    # dp = rho c du the face data carries, rather than by a reference mach number
+    HLLC_ACOUSTIC = "hllc_acoustic"
     HLLD = "hlld"
 
 
