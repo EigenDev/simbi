@@ -238,6 +238,119 @@ def test_restart_continues_checkpoint_index_not_reset_to_zero(monkeypatch, tmp_p
     assert merged.start_time == 5.0
 
 
+def _synge_problem_class():
+    """a minimal rhd problem on the parameter-free (taub-mathews) closure."""
+    from simbi.simulation import (
+        CoordSystem,
+        ProblemParam,
+        Regime,
+        SimbiProblem,
+    )
+    from simbi.types.input import Eos
+
+    class SyngeBlast(SimbiProblem):
+        resolution: int = ProblemParam(512, cli=True, description="resolution")
+        bounds: tuple[tuple[float, float]] = ProblemParam(
+            ((1.0, 2.0),), description="domain bounds"
+        )
+        coord_system: CoordSystem = ProblemParam(
+            CoordSystem.SPHERICAL, description="coordinate system"
+        )
+        regime: Regime = ProblemParam(Regime.RHD, description="physics regime")
+        eos: Eos = ProblemParam(Eos.SYNGE, cli=True, description="closure")
+
+        def initial_primitive_state(self):
+            def gas_state():
+                for _ in range(self.resolution):
+                    yield (1.0, 0.0, 1.0)
+
+            return gas_state
+
+    return SyngeBlast
+
+
+def _synge_meta(**overrides):
+    """checkpoint metadata for a synge run: `gamma` on disk is the INERT placeholder
+    the closure's validator wrote, not a declared adiabatic index."""
+
+    class _Meta:
+        time = 1.0
+        gamma = 5.0 / 3.0
+        eos = "synge"
+        coord_system = "spherical"
+        regime = "rhd"
+        solver = "hlle"
+        reconstruction = "plm"
+        timestepping = "rk2"
+        plm_theta = 1.5
+        cfl = 0.3
+        checkpoint_index = 3
+        checkpoint_interval = 0.5
+        x1_spacing = "linear"
+        x2_spacing = "linear"
+        x3_spacing = "linear"
+        boundary_conditions = ["outflow", "outflow"]
+        level_dts = ()
+        level_substeps = ()
+        subcycling_mode = "none"
+
+    for key, value in overrides.items():
+        setattr(_Meta, key, value)
+    return _Meta
+
+
+def test_synge_restart_does_not_choke_on_placeholder_gamma(monkeypatch, tmp_path):
+    # the synge closure REJECTS a declared adiabatic_index and then writes the inert
+    # placeholder 5/3 itself; the backend records it as the checkpoint's `gamma`. handing
+    # that back to the constructor read as a user declaration and killed every synge
+    # restart on the validator. the merge must drop it and let the closure re-supply it.
+    from simbi.simulation import checkpoint as cp
+    from simbi.types.input import Eos
+
+    monkeypatch.setattr(
+        cp, "load_checkpoint_metadata", lambda _p: (_synge_meta(), (512,))
+    )
+
+    merged = cp.merge_with_checkpoint(
+        _synge_problem_class().from_cli([]), tmp_path / "fake.h5"
+    )
+    assert merged.eos == Eos.SYNGE
+    assert merged.start_time == 1.0
+    assert merged.checkpoint_index == 3
+
+
+def test_synge_restart_from_checkpoint_predating_the_eos_attr(monkeypatch, tmp_path):
+    # an OLDER checkpoint records no eos at all. the merge must fall back to the config's
+    # declared closure rather than reading the absent attribute as "ideal" — which would
+    # both revive the placeholder gamma and silently swap the equations of state.
+    from simbi.simulation import checkpoint as cp
+    from simbi.types.input import Eos
+
+    monkeypatch.setattr(
+        cp, "load_checkpoint_metadata", lambda _p: (_synge_meta(eos=""), (512,))
+    )
+
+    merged = cp.merge_with_checkpoint(
+        _synge_problem_class().from_cli([]), tmp_path / "fake.h5"
+    )
+    assert merged.eos == Eos.SYNGE
+
+
+def test_gamma_law_restart_keeps_the_checkpoint_adiabatic_index(monkeypatch, tmp_path):
+    # the drop is scoped to synge: on an ideal run the checkpoint gamma is real physics
+    # and must still survive the restart as an immutable field.
+    from simbi.simulation import checkpoint as cp
+
+    monkeypatch.setattr(
+        cp,
+        "load_checkpoint_metadata",
+        lambda _p: (_synge_meta(eos="ideal", gamma=4.0 / 3.0), (512,)),
+    )
+
+    merged = cp.merge_with_checkpoint(GrBondiKS.from_cli([]), tmp_path / "fake.h5")
+    assert merged.adiabatic_index == 4.0 / 3.0
+
+
 def test_viz_config_rejects_typoed_kwargs():
     from simbi.viz.config import FigureConfig
 

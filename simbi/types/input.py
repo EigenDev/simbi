@@ -363,6 +363,12 @@ class Metadata:
     # the schwarzschild geometric mass M (G=c=1); 0 on a flat background.
     schwarzschild_mass: float = 0.0
 
+    # the equation-of-state closure the run was written with ("ideal" / "synge").
+    # EMPTY means the checkpoint predates the attribute, which is a different fact
+    # from "ideal": the restart must fall back to the config's own closure rather
+    # than silently declaring a gamma-law one.
+    eos: str = ""
+
     # the stationary target the run is well-balanced against, as the serialized expression
     # wire. it is not a field, so nothing else in the file records it, and a run resumed
     # against a DIFFERENT target integrates different equations while looking identical from

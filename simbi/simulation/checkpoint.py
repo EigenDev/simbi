@@ -19,6 +19,7 @@ from simbi.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
+    Eos,
     Limiter,
     Metadata,
     Reconstruction,
@@ -111,6 +112,14 @@ def metadata_to_config_dict(
         config["refinement_level_dts"] = list(metadata.level_dts)
     if metadata.level_substeps:
         config["refinement_level_substeps"] = list(metadata.level_substeps)
+    # the closure the run was written with. only recorded on checkpoints new enough to
+    # carry the attribute — an empty slug means "not recorded", and the restart then keeps
+    # whatever closure the config declares (asserting "ideal" would silently swap the
+    # equations of state on an older synge run).
+    recorded_eos = str(getattr(metadata, "eos", "") or "")
+    if recorded_eos:
+        config["eos"] = Eos(recorded_eos)
+
     if metadata.subcycling_mode and metadata.subcycling_mode != "none":
         from simbi.types import SubCycleMode
 
@@ -332,6 +341,16 @@ def merge_with_checkpoint(
         else:
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
+
+    # the synge (taub-mathews) closure declares NO adiabatic index: the model validator
+    # REFUSES a user-supplied one and then writes the inert placeholder 5/3 itself, purely
+    # so the plumbing has a float to carry. the backend records that placeholder as the
+    # checkpoint's `gamma`, so the merge above hands it straight back to the constructor —
+    # where it reads as a DECLARED index and the validator kills the restart. drop it and
+    # let the closure re-supply its own placeholder. a gamma-law restart is untouched:
+    # its checkpoint gamma is real physics and stays immutable.
+    if merged_data.get("eos") == Eos.SYNGE:
+        merged_data.pop("adiabatic_index", None)
 
     _assert_same_equilibrium_target(problem, metadata)
 
