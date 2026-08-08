@@ -438,7 +438,9 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         default=[],
         metavar="COMPONENT.FIELD=VALUE",
-        help="override component props (e.g., polygon.cmap=inferno)",
+        help="override component props (e.g., polygon.cmap=inferno). qualify the "
+        "component with a data field to style just the panel drawing it, when "
+        "several fields share a chart (e.g., quad:u.log_scale=false)",
     )
     parser.add_argument(
         "--generate-config",

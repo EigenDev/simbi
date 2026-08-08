@@ -45,18 +45,7 @@ from .config import VisualizationConfig
 from .types import CoordSystem, FieldData
 
 
-# formatting/frame failures are otherwise swallowed silently (unlabeled
-# plots, frozen movies exiting 0); each distinct failure warns once with
-# the real exception so the defect is visible without spamming per frame.
-_WARNED: set[str] = set()
-
-
-def _warn_once(key: str, msg: str) -> None:
-    if key not in _WARNED:
-        _WARNED.add(key)
-        import warnings
-
-        warnings.warn(msg, stacklevel=3)
+_warn_once = formatting.warn_once
 
 
 
@@ -190,56 +179,10 @@ class Figure:
             # store normalized tuple (artists_dict, metadata) for the formatter
             rendered_artists.append((artist_dict, metadata))
 
-            # set axis limits for quad/polygon plots since relim() doesn't work on mesh collections
+            # a mesh collection carries no datalim, so relim/autoscale cannot see
+            # it; it reports its drawn extent instead
             if isinstance(component, (QuadPlotComponent, PolygonPlotComponent)):
                 has_mesh_collection = True
-                if isinstance(data, FieldData) and len(data.domain) > 0:
-                    try:
-                        # for polygon data, domain contains patches (vertices)
-                        # shape: (n_patches, 4, 2) where 4 is vertices per patch, 2 is (x, y)
-                        if isinstance(component, PolygonPlotComponent):
-                            import numpy as np
-
-                            patches = np.asarray(data.domain)
-                            # extract all x and y coordinates using numpy
-                            all_x = patches[:, :, 0].flatten()
-                            all_y = patches[:, :, 1].flatten()
-                            main_ax.set_xlim(
-                                float(all_x.min()), float(all_x.max())
-                            )
-                            main_ax.set_ylim(
-                                float(all_y.min()), float(all_y.max())
-                            )
-                        else:
-                            # quadmesh: domain contains coordinate arrays
-                            x_data = (
-                                data.domain[1]
-                                if len(data.domain) > 1
-                                else data.domain[0]
-                            )
-
-                            y_data = (
-                                data.domain[0] if len(data.domain) > 1 else None
-                            )
-                            if x_data is None:
-                                raise ValueError("empty x_data in domain")
-
-                            if y_data is None:
-                                raise ValueError("empty y_data in domain")
-
-                            if main_ax.name == "polar":
-                                x_data, y_data = y_data, x_data
-
-                            main_ax.set_xlim(x_data.min(), x_data.max())
-                            if y_data is not None:
-                                main_ax.set_ylim(y_data.min(), y_data.max())
-                    except Exception as e:
-                        # log but don't break rendering
-                        import logging
-
-                        logging.getLogger(__name__).debug(
-                            f"failed to set axis limits from domain: {e}"
-                        )
 
         # only use relim/autoscale for non-mesh collections (lines, scatter, etc.)
         if not has_mesh_collection:
@@ -250,14 +193,7 @@ class Figure:
                 # some axes (polar, specialized) may not support relim/autoscale_view
                 pass
 
-        # apply user-specified limits from style config (overrides auto limits)
-        style = self.config.figure
-        if style.xlims is not None:
-            if style.xlims.min is not None or style.xlims.max is not None:
-                main_ax.set_xlim(style.xlims.min, style.xlims.max)
-        if style.ylims is not None:
-            if style.ylims.min is not None or style.ylims.max is not None:
-                main_ax.set_ylim(style.ylims.min, style.ylims.max)
+        self._apply_view(main_ax, rendered_artists)
 
         # get context from the *first* component
         first_component, first_data = (
@@ -285,10 +221,32 @@ class Figure:
             _warn_once(f"figure-format:{type(exc).__name__}", f"figure formatting failed: {exc}")
             raise
 
-    def _format_colorbar(self, ax: Axes, artist: Any, field_data: FieldData):
-        # deprecated: colorbar placement is now the responsibility of FigureFormatter.
-        # keep a lightweight no-op to avoid accidental direct calls.
-        return
+    def _apply_view(self, main_ax: Axes, rendered_artists: list) -> None:
+        """Set the view to hold everything drawn on the shared axes.
+
+        the axes carries every component, so no one of them owns the limits: a
+        field laid into one angular sector would otherwise crop the sector
+        beside it. the extent is recomputed from the artists of each frame,
+        which is what keeps a moving mesh in view as it expands. an axis the
+        user fixed is left alone.
+        """
+        boxes = [
+            metadata["view_bounds"]
+            for _, metadata in rendered_artists
+            if isinstance(metadata, dict) and metadata.get("view_bounds")
+        ]
+        if not boxes:
+            return
+
+        style = self.config.figure
+        if not style.xlims_pinned:
+            main_ax.set_xlim(
+                min(box[0] for box in boxes), max(box[1] for box in boxes)
+            )
+        if not style.ylims_pinned:
+            main_ax.set_ylim(
+                min(box[2] for box in boxes), max(box[3] for box in boxes)
+            )
 
     def save(self, path: str):
         """
@@ -529,6 +487,11 @@ class Figure:
                     _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
 
+            # a moving mesh draws a different extent every frame
+            main_ax = self.axes.get("main") if hasattr(self, "axes") else None
+            if main_ax is not None:
+                self._apply_view(main_ax, rendered_artists_frame)
+
             # per-frame immersed-body overlay: remove the previous frame's silhouettes
             # and redraw at THIS frame's poses (read from this frame's checkpoint), so a
             # spinning / tumbling body tracks its rotation across the movie.
@@ -575,6 +538,21 @@ class Figure:
                     set_title(main_ax, self.fig, self.config.figure, time)
                 except Exception as exc:
                     _warn_once("frame-title", f"frame title update failed: {exc}")
+
+                # the field artist is rebuilt whenever the mesh vertices move,
+                # so the colorbar has to be re-pointed at the live one
+                try:
+                    assert self.fig is not None
+                    self.formatter.refresh_colorbars(
+                        self.fig,
+                        main_ax,
+                        rendered_artists_frame,
+                        frame_plot_data.fields[0],
+                    )
+                except Exception as exc:
+                    _warn_once(
+                        "frame-colorbar", f"frame colorbar update failed: {exc}"
+                    )
 
             # redraw canvas for this frame
             if self.fig is not None:
@@ -657,8 +635,12 @@ class Figure:
                     _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
 
-            # apply full formatting once for first frame
+            # the view is fixed before the formatting that reads it: a
+            # colorbar is placed against the extent of what was drawn
             main_ax = self.axes.get("main") if hasattr(self, "axes") else None
+            if main_ax is not None:
+                self._apply_view(main_ax, rendered_artists_frame)
+
             if main_ax is not None and frame_plot_data.fields:
                 try:
                     assert self.fig is not None

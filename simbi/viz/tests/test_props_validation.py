@@ -35,3 +35,33 @@ def test_direct_construction_forbids_extras() -> None:
 
     with pytest.raises(Exception, match=r"[Ee]xtra"):
         get_props_class("polygon")(cma="viridis")
+
+# a props key may name the data field it styles, so one panel of a shared chart
+# can be scaled independently of its neighbour. the component part selects a
+# class and is matched loosely; the field part names data, where 'D' and 'd'
+# are different quantities and a silent fold between them mis-styles the plot.
+
+
+def test_a_field_qualified_key_keeps_the_data_name_verbatim() -> None:
+    props = load_component_props(overrides=["QUAD:D.cmap=magma"])
+
+    assert set(props) == {"quad:D"}
+    assert props["quad:D"].cmap == "magma"
+
+
+def test_a_field_qualified_key_records_only_what_was_asked() -> None:
+    """the override is layered over the shared props, so a value nobody set
+    must not travel with it and overwrite the shared one."""
+    props = load_component_props(overrides=["quad:u.log_scale=false"])
+
+    assert props["quad:u"].model_fields_set == {"log_scale"}
+
+
+def test_a_field_qualified_key_validates_against_its_component() -> None:
+    with pytest.raises(ValueError, match=r"did you mean 'cmap'"):
+        load_component_props(overrides=["quad:u.cma=magma"])
+
+
+def test_a_mistyped_component_is_caught_even_when_field_qualified() -> None:
+    with pytest.raises(ValueError, match=r"did you mean 'quad'"):
+        load_component_props(overrides=["qaud:u.cmap=magma"])

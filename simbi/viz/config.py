@@ -51,6 +51,21 @@ class FigureConfig(BaseModel):
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
+    @property
+    def xlims_pinned(self) -> bool:
+        """the horizontal view is fixed by the user rather than by the data.
+        a mesh that moves between checkpoints tracks the data otherwise."""
+        return self.xlims is not None and (
+            self.xlims.min is not None or self.xlims.max is not None
+        )
+
+    @property
+    def ylims_pinned(self) -> bool:
+        """the vertical view is fixed by the user rather than by the data."""
+        return self.ylims is not None and (
+            self.ylims.min is not None or self.ylims.max is not None
+        )
+
 
 class PlotConfig(BaseModel):
     """Plot type and data configuration."""

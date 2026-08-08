@@ -37,6 +37,13 @@ from .types import CoordSystem, FieldData
 from .utility import get_tracer_field_str
 
 
+# colormaps handed to successive panels of a shared chart. two quantities that
+# share a chart and a colormap read as one field, so each panel takes a
+# different one; they are perceptually uniform so no panel implies a structure
+# its data does not have.
+PANEL_CMAPS = ("viridis", "magma", "cividis", "plasma")
+
+
 def _get_props(
     component_props: Optional[dict[str, ComponentProps]],
     key: str,
@@ -46,6 +53,66 @@ def _get_props(
     if component_props and key in component_props:
         return component_props[key]
     return default_factory()
+
+
+def _panel_cmap(base: str, index: int) -> str:
+    """the default colormap for panel `index`.
+
+    the first panel keeps the configured map and the rest take distinct ones."""
+    if index == 0:
+        return base
+    alternatives = [cmap for cmap in PANEL_CMAPS if cmap != base]
+    return alternatives[(index - 1) % len(alternatives)]
+
+
+def _panel_props(
+    component_props: Optional[dict[str, ComponentProps]],
+    key: str,
+    default_factory,
+    field_name: str,
+    index: int,
+    npanels: int,
+) -> ComponentProps:
+    """props for the panel drawing `field_name`.
+
+    the shared component props carry a distinct colormap per panel, then
+    whatever the user asked for that specific quantity is layered on top: two
+    quantities on one chart rarely want the same scaling."""
+    from .pipeline.panels import base_field_name
+
+    props = _get_props(component_props, key, default_factory)
+
+    if npanels > 1:
+        props = props.model_copy(
+            update={"cmap": _panel_cmap(props.cmap, index)}
+        )
+
+    override = (component_props or {}).get(
+        f"{key}:{base_field_name(field_name)}"
+    )
+    if override is not None:
+        props = props.model_copy(
+            update={
+                name: getattr(override, name)
+                for name in override.model_fields_set
+            }
+        )
+
+    return props
+
+
+def _panel_layout(
+    scalar_fields: Sequence[FieldData], final_fields: Sequence[FieldData]
+) -> int:
+    """how many quantities share the chart, one sector each.
+
+    composition emits exactly one artist per quantity when the chart is
+    divided into sectors; anything else (levels drawn separately, a vector
+    overlay) is one quantity seen several ways and keeps a single scale."""
+    from .pipeline.panels import group_by_field
+
+    npanels = len(group_by_field(scalar_fields))
+    return npanels if npanels == len(final_fields) else 1
 
 
 def plot_tracers(
@@ -246,13 +313,23 @@ def plot(
     )
 
     # dispatch scalar components
-    for field_data in final_fields:
+    npanels = _panel_layout(scalar_fields, final_fields)
+
+    for panel, field_data in enumerate(final_fields):
         component: Component
 
         if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
             # polygon plot (1d array of patches)
-            props = _get_props(component_props, "polygon", PolygonPlotProps)
-            component = PolygonPlotComponent(props)
+            component = PolygonPlotComponent(
+                _panel_props(
+                    component_props,
+                    "polygon",
+                    PolygonPlotProps,
+                    field_data.name,
+                    panel,
+                    npanels,
+                )
+            )
 
         elif field_data.ndim == 1:
             # line plot
@@ -261,11 +338,27 @@ def plot(
 
         elif field_data.ndim == 2:
             if use_polygons:
-                props = _get_props(component_props, "polygon", PolygonPlotProps)
-                component = PolygonPlotComponent(props)
+                component = PolygonPlotComponent(
+                    _panel_props(
+                        component_props,
+                        "polygon",
+                        PolygonPlotProps,
+                        field_data.name,
+                        panel,
+                        npanels,
+                    )
+                )
             else:
-                props = _get_props(component_props, "quad", QuadPlotProps)
-                component = QuadPlotComponent(props)
+                component = QuadPlotComponent(
+                    _panel_props(
+                        component_props,
+                        "quad",
+                        QuadPlotProps,
+                        field_data.name,
+                        panel,
+                        npanels,
+                    )
+                )
 
         elif field_data.ndim == 3:
             raise ValueError(
@@ -454,12 +547,22 @@ def animate(
     )
 
     # dispatch scalar components
-    for field_data in final_fields:
+    npanels = _panel_layout(scalar_fields, final_fields)
+
+    for panel, field_data in enumerate(final_fields):
         component: Component
 
         if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
-            props = _get_props(component_props, "polygon", PolygonPlotProps)
-            component = PolygonPlotComponent(props)
+            component = PolygonPlotComponent(
+                _panel_props(
+                    component_props,
+                    "polygon",
+                    PolygonPlotProps,
+                    field_data.name,
+                    panel,
+                    npanels,
+                )
+            )
 
         elif field_data.ndim == 1:
             props = _get_props(component_props, "line", LinePlotProps)
@@ -467,11 +570,27 @@ def animate(
 
         elif field_data.ndim == 2:
             if use_polygons:
-                props = _get_props(component_props, "polygon", PolygonPlotProps)
-                component = PolygonPlotComponent(props)
+                component = PolygonPlotComponent(
+                    _panel_props(
+                        component_props,
+                        "polygon",
+                        PolygonPlotProps,
+                        field_data.name,
+                        panel,
+                        npanels,
+                    )
+                )
             else:
-                props = _get_props(component_props, "quad", QuadPlotProps)
-                component = QuadPlotComponent(props)
+                component = QuadPlotComponent(
+                    _panel_props(
+                        component_props,
+                        "quad",
+                        QuadPlotProps,
+                        field_data.name,
+                        panel,
+                        npanels,
+                    )
+                )
 
         elif field_data.ndim == 3:
             raise ValueError(

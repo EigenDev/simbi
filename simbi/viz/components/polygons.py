@@ -8,15 +8,17 @@ and the values are a list of corresponding colors.
 
 from typing import Optional, Sequence
 
+import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
 
 from ..config import FigureConfig
-from ..types import ColorRange, FieldData, RenderResult
+from ..types import Array, ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
+from .mesh_overlay import mesh_segments
 from .quad import _create_color_normalization
 
 
@@ -65,9 +67,8 @@ class PolygonPlotComponent(Component):
     def __init__(self, props: PolygonPlotProps):
         self.props = props
         self._poly_collection: Optional[PolyCollection] = None
-        self._level_artists: list = []
+        self._level_edges: Optional[LineCollection] = None
         self._initialized: bool = False
-        self._first_render: bool = True
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -111,16 +112,12 @@ class PolygonPlotComponent(Component):
             )
 
         # extract data from the "Polygon Contract"
-        patches = data.domain
+        patches = self._to_axes_coordinates(np.asarray(data.domain, dtype=float))
         values = data.values
 
         # compute domain bounds for setting axis limits
-        import numpy as np
-
-        all_x = [pt[0] for patch in patches for pt in patch]
-        all_y = [pt[1] for patch in patches for pt in patch]
-        x_min, x_max = np.min(all_x), np.max(all_x)
-        y_min, y_max = np.min(all_y), np.max(all_y)
+        x_min, x_max = patches[..., 0].min(), patches[..., 0].max()
+        y_min, y_max = patches[..., 1].min(), patches[..., 1].max()
 
         # create color normalization
         norm = _create_color_normalization(
@@ -155,53 +152,78 @@ class PolygonPlotComponent(Component):
             self._poly_collection.set_array(values)
             self._poly_collection.set_norm(norm)
 
-        # set limits only on first render (preserves CLI limits and user zoom)
-        if self._first_render:
-            self.ax.set_xlim(x_min, x_max)
-            self.ax.set_ylim(y_min, y_max)
-            self._first_render = False
-
         self.ax.set_aspect("equal", adjustable="box")
 
         if self.props.show_level_bounds and data.level_bounds:
             self._draw_level_bounds(data.level_bounds)
+        else:
+            self._clear_level_bounds()
 
+        # the axes is shared, and the cells of a moving mesh sit at new
+        # positions in each checkpoint, so the view is the figure's to compose
+        # from what each component reports each frame
         return RenderResult(
             artists={"collection": self._poly_collection},
-            metadata={"mappable": self._poly_collection},
+            metadata={
+                "mappable": self._poly_collection,
+                "colorbar_label": data.name,
+                "view_bounds": (x_min, x_max, y_min, y_max),
+            },
         )
+
+    def _to_axes_coordinates(self, vertices: Array) -> Array:
+        """map vertices from mesh order (x1, x2) to the order the axes draws in.
+
+        a polar axes reads a vertex as (angle, radius), which is the reverse of
+        the (radius, angle) order a spherical mesh stores its axes in."""
+        if self.ax.name == "polar":
+            return vertices[..., ::-1]
+        return vertices
 
     def _draw_level_bounds(
         self, level_bounds: Sequence[tuple[float, float, float, float]]
     ) -> None:
-        """Draw rectangles around each AMR level's bounding box."""
-        import matplotlib.patches as mpatches
+        """Outline each refined level's bounding box.
 
-        # clear old level rectangles
-        for artist in self._level_artists:
-            artist.remove()
-        self._level_artists = []
+        the box follows the chart: its constant-radius sides are arcs on a
+        polar axes, not chords across the wedge."""
+        polar = self.ax.name == "polar"
 
-        # skip level 0 (coarsest) - only show refined level boundaries
+        segments: list[Array] = []
+        # level 0 spans the whole domain, so its outline is the plot frame
         for bounds in level_bounds[1:]:
             x0, x1, y0, y1 = bounds
-            rect = mpatches.Rectangle(
-                (x0, y0),
-                x1 - x0,
-                y1 - y0,
-                fill=False,
-                edgecolor=self.props.level_color,
-                linewidth=self.props.level_linewidth,
+            if polar:
+                # the bounds span (x1, x2) = (radius, angle); a polar axes
+                # plots angle horizontally
+                x0, x1, y0, y1 = y0, y1, x0, x1
+            segments += mesh_segments(
+                [x0, x1], [y0, y1], curved=polar, stride=1
+            )
+
+        if not segments:
+            self._clear_level_bounds()
+            return
+
+        if self._level_edges is None:
+            self._level_edges = LineCollection(
+                segments,
+                colors=self.props.level_color,
+                linewidths=self.props.level_linewidth,
                 alpha=self.props.level_alpha,
                 zorder=5,
             )
-            self.ax.add_patch(rect)
-            self._level_artists.append(rect)
+            self.ax.add_collection(self._level_edges)
+        else:
+            self._level_edges.set_segments(segments)
+
+    def _clear_level_bounds(self) -> None:
+        if self._level_edges is not None:
+            self._level_edges.remove()
+            self._level_edges = None
 
     def cleanup(self) -> None:
         if self._poly_collection:
             self._poly_collection.remove()
         self._poly_collection = None
-        for artist in self._level_artists:
-            artist.remove()
-        self._level_artists = []
+        self._clear_level_bounds()

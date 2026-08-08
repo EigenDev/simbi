@@ -15,6 +15,7 @@ from simbi.reader.adapter import SimData
 from ..config import VisualizationConfig
 from ..figure import Figure
 from ..types import Array, CoordSystem, FieldData
+from .panels import group_by_field, is_sectorable, place_in_sector
 
 # maps logical axis names (user-facing) to the data's array index.
 # this example assumes data is stored (nz, ny, nx) or (x3, x2, x1).
@@ -479,18 +480,15 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     )
 
 
-def compose_fields_for_render(
-    fields: Sequence[FieldData], config: "VisualizationConfig"
-) -> Sequence[FieldData]:
-    """
-    pure function: applies composition logic based on refinement and dimensionality.
+def _compose_one_field(
+    levels: Sequence[FieldData], config: "VisualizationConfig"
+) -> list[FieldData]:
+    """composes the levels of a SINGLE plotted quantity into what gets drawn.
 
-    returns fields ready for component dispatch (may be polygons, pcolormesh, or unchanged).
-    """
-    if not fields:
-        return fields
-
-    nlvls = 1 + sum("_L" in f.name for f in fields)
+    composition merges a level hierarchy into one artist, so it runs per
+    quantity: handed two different quantities at once it would read the second
+    as a refinement of the first and paint one over the other."""
+    nlvls = 1 + sum("_L" in f.name for f in levels)
     is_refined = nlvls > 1
 
     # refined data MUST use polygons (pcolormesh can't handle different grids)
@@ -499,8 +497,37 @@ def compose_fields_for_render(
     else:
         use_polygons = config.refinement.render_mode == "polygons"
 
-    is_2d = fields[0].ndim == 2
+    is_2d = levels[0].ndim == 2
     if is_2d and use_polygons:
-        return [_compose_polygons(list(fields))]
+        return [_compose_polygons(list(levels))]
     else:
+        return list(levels)
+
+
+def compose_fields_for_render(
+    fields: Sequence[FieldData], config: "VisualizationConfig"
+) -> Sequence[FieldData]:
+    """
+    pure function: applies composition logic based on refinement and dimensionality.
+
+    returns fields ready for component dispatch (may be polygons, pcolormesh, or unchanged).
+
+    several quantities drawn on one curvilinear chart share its radial axis and
+    divide its circle between them, one sector each.
+    """
+    if not fields:
         return fields
+
+    groups = group_by_field(fields)
+
+    if len(groups) > 1 and is_sectorable(fields[0]):
+        groups = [
+            [place_in_sector(field, index, len(groups)) for field in group]
+            for index, group in enumerate(groups)
+        ]
+
+    composed: list[FieldData] = []
+    for group in groups:
+        composed.extend(_compose_one_field(group, config))
+
+    return composed

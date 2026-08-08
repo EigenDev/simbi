@@ -10,7 +10,7 @@ from typing import Literal, Optional
 import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib.axes import Axes
-from matplotlib.collections import QuadMesh
+from matplotlib.collections import LineCollection, QuadMesh
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
@@ -18,6 +18,7 @@ from pydantic import ValidationInfo, field_validator
 from ..config import FigureConfig
 from ..types import Array, ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
+from .mesh_overlay import DEFAULT_MAX_LINES, mesh_segments
 
 
 class QuadPlotProps(ComponentProps):
@@ -31,11 +32,15 @@ class QuadPlotProps(ComponentProps):
     alpha: float = 1.0
     plot_type: Literal["polar", "cartesian"] = "cartesian"
 
-    # mesh visualization (optional)
+    # cell-edge overlay (optional)
     show_mesh_grid: bool = False
     mesh_color: str = "white"
     mesh_alpha: float = 0.3
     mesh_linewidth: float = 0.1
+    # coordinate lines drawn per axis: 0 decimates a fine mesh to a readable
+    # count, 1 draws every cell edge
+    mesh_stride: int = 0
+    mesh_max_lines: int = DEFAULT_MAX_LINES
 
     @field_validator("power")
     @classmethod
@@ -49,6 +54,22 @@ class QuadPlotProps(ComponentProps):
     def validate_alpha(cls, v: float, _: ValidationInfo) -> float:
         if v < 0 or v > 1:
             raise ValueError(f"Alpha must be between 0 and 1, got {v}")
+        return v
+
+    @field_validator("mesh_stride")
+    @classmethod
+    def validate_mesh_stride(cls, v: int, _: ValidationInfo) -> int:
+        if v < 0:
+            raise ValueError(f"mesh_stride must be non-negative, got {v}")
+        return v
+
+    @field_validator("mesh_max_lines")
+    @classmethod
+    def validate_mesh_max_lines(cls, v: int, _: ValidationInfo) -> int:
+        if v < 2:
+            raise ValueError(
+                f"mesh_max_lines must leave room for both domain edges, got {v}"
+            )
         return v
 
 
@@ -89,12 +110,10 @@ class QuadPlotComponent(Component):
     def __init__(self, props: QuadPlotProps):
         self.props = props
         self._mesh: Optional[QuadMesh] = None
-        self._mirror_mesh: Optional[QuadMesh] = None  # For polar plots
         self._initialized: bool = False
-        self._first_render: bool = True
         self.last_x = np.array([])
         self.last_y = np.array([])
-        self._mesh_lines: list = []
+        self._mesh_edges: Optional[LineCollection] = None
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -177,20 +196,24 @@ class QuadPlotComponent(Component):
 
         if self.props.show_mesh_grid:
             self._draw_mesh_grid(x, y)
+        else:
+            self._clear_mesh_grid()
 
         self.last_x = x
         self.last_y = y
 
-        # set limits only on first render (preserves CLI limits and user zoom)
-        if self._first_render:
-            self.ax.set_xlim(x_min, x_max)
-            self.ax.set_ylim(y_min, y_max)
-            self._first_render = False
-
         self.ax.set_aspect("equal", adjustable="box")
 
+        # the axes is shared, and the extent drawn on it moves with a moving
+        # mesh, so the view is the figure's to compose from what each component
+        # reports each frame
         return RenderResult(
-            artists={"mesh": self._mesh}, metadata={"mappable": self._mesh}
+            artists={"mesh": self._mesh},
+            metadata={
+                "mappable": self._mesh,
+                "colorbar_label": data.name,
+                "view_bounds": (x_min, x_max, y_min, y_max),
+            },
         )
 
     def _resolve_cmap(self, norm=None):
@@ -208,13 +231,12 @@ class QuadPlotComponent(Component):
         if self._mesh is None:
             raise RuntimeError("Mesh is not initialized. Call render() first.")
 
-        # check if coordinates have changed
-        if not np.allclose(x, self.last_x) or not np.allclose(y, self.last_y):
-            # coordinates changed: must remove and re-create mesh
+        if self._coordinates_moved(x, y):
+            # a QuadMesh owns its vertices, so a mesh whose vertices moved --
+            # a homologous expansion, a shock-following mesh law -- has to be
+            # rebuilt rather than refilled
             if self._mesh in self.ax.collections:
                 self._mesh.remove()
-            if self._mirror_mesh and self._mirror_mesh in self.ax.collections:
-                self._mirror_mesh.remove()
 
             self._mesh = self.ax.pcolormesh(
                 x,
@@ -224,58 +246,68 @@ class QuadPlotComponent(Component):
                 shading=self.props.shading,
                 alpha=self.props.alpha,
             )
-            # handle polar mirror (if needed)
-            if self.ax.name == "polar":
-                self._mirror_mesh = self.ax.pcolormesh(
-                    -x[::-1],
-                    y,
-                    values,  # Example mirror logic
-                    cmap=self._resolve_cmap(),
-                    shading=self.props.shading,
-                    alpha=self.props.alpha,
-                )
             self.last_x = x
             self.last_y = y
         else:
             # just update values
             self._mesh.set_array(values.ravel())
-            if self._mirror_mesh:
-                self._mirror_mesh.set_array(values.ravel())
+
+    def _coordinates_moved(self, x: Array, y: Array) -> bool:
+        """whether the vertex arrays differ from the ones the mesh was built on.
+
+        a change of length is a change of mesh, and comparing values across
+        two different lengths is not defined, so shape is tested first."""
+        for new, old in ((x, self.last_x), (y, self.last_y)):
+            if np.shape(new) != np.shape(old):
+                return True
+            if not np.allclose(new, old):
+                return True
+        return False
 
     def _draw_mesh_grid(self, x: Array, y: Array) -> None:
-        """Draw cell boundaries on the mesh."""
-        self._clear_mesh_grid()
-        for xi in x:
-            line = self.ax.axvline(
-                xi,
-                color=self.props.mesh_color,
+        """Draw the mesh cell edges over the field.
+
+        the edges come from this frame's vertex arrays, so the overlay tracks a
+        mesh that moves between checkpoints. they are one collection: a fine
+        mesh drawn as one artist per line costs thousands of artists per frame.
+        """
+        segments = mesh_segments(
+            x,
+            y,
+            curved=self.ax.name == "polar",
+            stride=self.props.mesh_stride,
+            max_lines=self.props.mesh_max_lines,
+        )
+        if not segments:
+            self._clear_mesh_grid()
+            return
+
+        if self._mesh_edges is None:
+            # above the field: the QuadMesh is rebuilt whenever the vertices
+            # move, which re-adds it after the overlay in the collection list
+            self._mesh_edges = LineCollection(
+                segments,
+                colors=self.props.mesh_color,
+                linewidths=self.props.mesh_linewidth,
                 alpha=self.props.mesh_alpha,
-                linewidth=self.props.mesh_linewidth,
                 zorder=5,
             )
-            self._mesh_lines.append(line)
-        for yi in y:
-            line = self.ax.axhline(
-                yi,
-                color=self.props.mesh_color,
-                alpha=self.props.mesh_alpha,
-                linewidth=self.props.mesh_linewidth,
-                zorder=5,
-            )
-            self._mesh_lines.append(line)
+            self.ax.add_collection(self._mesh_edges)
+        else:
+            self._mesh_edges.set_segments(segments)
+            self._mesh_edges.set_color(self.props.mesh_color)
+            self._mesh_edges.set_linewidth(self.props.mesh_linewidth)
+            self._mesh_edges.set_alpha(self.props.mesh_alpha)
 
     def _clear_mesh_grid(self) -> None:
-        """Remove all mesh grid lines."""
-        for line in self._mesh_lines:
-            line.remove()
-        self._mesh_lines.clear()
+        """Remove the cell-edge overlay."""
+        if self._mesh_edges is not None:
+            self._mesh_edges.remove()
+            self._mesh_edges = None
 
     def cleanup(self) -> None:
         """Clean up resources."""
         self._clear_mesh_grid()
         if self._mesh and self._mesh in self.ax.collections:
             self._mesh.remove()
-        if self._mirror_mesh and self._mirror_mesh in self.ax.collections:
-            self._mirror_mesh.remove()
         self._mesh = None
-        self._mirror_mesh = None

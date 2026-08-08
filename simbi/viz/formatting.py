@@ -1,5 +1,7 @@
+import math
 from typing import Any, Optional
 
+import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -80,6 +82,60 @@ def apply_axis_limits(ax: Axes, config: FigureConfig) -> None:
 def apply_legend(ax: Axes) -> None:
     """Adds a legend to the axes."""
     ax.legend(loc="best")
+
+
+# a formatting or frame failure is otherwise swallowed silently, and an
+# unlabeled plot or a frozen movie exits 0 looking finished. each distinct
+# failure warns once, carrying the real exception, so the defect is visible
+# without spamming once per frame.
+_WARNED: set[str] = set()
+
+
+def warn_once(key: str, msg: str) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        import warnings
+
+        warnings.warn(msg, stacklevel=3)
+
+
+def find_mappables(normalized: Any) -> list[tuple[Any, Optional[str]]]:
+    """the color-mapped artists among normalized (artists, metadata) pairs,
+    each with the field name it draws, in the order they were rendered.
+
+    one entry is one quantity wanting a scale of its own. a field render
+    publishes its artist under 'mesh' or 'collection'; a vector overlay is
+    colormapped too but reads off the field beneath it, so it is passed over
+    unless nothing else is drawn."""
+    entries: list[tuple[Any, Optional[str]]] = []
+
+    for artists, metadata in normalized:
+        if not isinstance(artists, dict):
+            continue
+
+        label = None
+        if isinstance(metadata, dict):
+            label = metadata.get("colorbar_label")
+
+        for key in ("mesh", "collection"):
+            if artists.get(key) is not None:
+                entries.append((artists[key], label))
+                break
+
+    if entries:
+        return entries
+
+    for artists, _ in normalized:
+        if not isinstance(artists, dict):
+            continue
+        for artist in artists.values():
+            try:
+                if hasattr(artist, "get_array") or hasattr(artist, "get_cmap"):
+                    return [(artist, None)]
+            except Exception:
+                continue
+
+    return []
 
 
 class FigureFormatter:
@@ -246,36 +302,28 @@ class FigureFormatter:
         except Exception:
             pass
 
-        # scan the normalized list for a colorbar mappable
-        # colorbar: find the first mappable among normalized artists
-        mappable = None
-        for artists, metadata in normalized:
-            if not isinstance(artists, dict):
-                continue
-            # common keys for mappables
-            if "mesh" in artists and artists["mesh"] is not None:
-                mappable = artists["mesh"]
-                break
-            if "collection" in artists and artists["collection"] is not None:
-                mappable = artists["collection"]
-                break
-            # fallback: look for any artist that looks like a ScalarMappable
-            for a in artists.values():
-                try:
-                    if hasattr(a, "get_array") or hasattr(a, "get_cmap"):
-                        mappable = a
-                        break
-                except Exception:
-                    continue
-            if mappable is not None:
-                break
+        # the chart is oriented before anything is placed around it: where a
+        # wedge sits in the axes box, and so where there is room for a colorbar,
+        # follows from the zero direction and the sense of increasing angle
+        if main_ax.name == "polar":
+            main_ax.grid(False)
+            main_ax.set_theta_zero_location("N")
+            main_ax.set_theta_direction(-1)
 
-        if mappable is not None:
-            try:
-                self._format_colorbar(fig, main_ax, mappable, first_data)
-            except Exception:
-                # ensure formatting step never halts the render pipeline
-                pass
+            main_ax.set_xticklabels([])
+            main_ax.set_yticklabels([])
+
+        try:
+            self._format_colorbars(
+                fig, main_ax, find_mappables(normalized), first_data
+            )
+        except Exception as exc:
+            # a plot missing its colorbar is still a plot, so this does not halt
+            # the render -- but it is a defect, and swallowing it silently is how
+            # a chart ships with no scale at all
+            warn_once(
+                f"colorbar:{type(exc).__name__}", f"colorbar failed: {exc}"
+            )
 
         # legend: only show if there are line-like artists (or metadata indicates labels)
         has_line_like = False
@@ -332,152 +380,160 @@ class FigureFormatter:
             except Exception:
                 pass
 
-        if main_ax.name == "polar":
-            main_ax.grid(False)
-            main_ax.set_theta_zero_location("N")
-            main_ax.set_theta_direction(-1)
-
-            # hide tick labels if specified
-            main_ax.set_xticklabels([])
-            main_ax.set_yticklabels([])
 
 
 
-    def _format_colorbar(
-        self, fig: Figure, ax: Axes, artist: Any, field_data: Any
-    ):
+    def refresh_colorbars(
+        self, fig: Figure, ax: Axes, normalized: Any, field_data: Any
+    ) -> None:
+        """re-point the colorbars at the artists of a freshly drawn frame.
+
+        a quadmesh whose vertices moved between checkpoints is rebuilt rather
+        than refilled, so a colorbar is left addressing a discarded artist and
+        stops tracking the data range."""
+        self._format_colorbars(fig, ax, find_mappables(normalized), field_data)
+
+    def _format_colorbars(
+        self,
+        fig: Figure,
+        ax: Axes,
+        entries: list[tuple[Any, Optional[str]]],
+        field_data: Any,
+    ) -> None:
+        """Place or update one colorbar per drawn quantity.
+
+        each bar is kept against its slot on the axes and updated in place, so
+        an animation neither accumulates colorbar axes nor shifts its layout
+        between frames.
         """
-        Place or update a colorbar appropriate for the axes projection.
+        bars = getattr(ax, "_simbi_colorbars", None)
+        if not isinstance(bars, dict):
+            bars = {}
+            setattr(ax, "_simbi_colorbars", bars)
 
-        if a colorbar was previously created for this axes, update it in-place
-        (mappable, norm, label) instead of creating a new axes. this prevents
-        accumulation of colorbar axes during animations and keeps layout stable.
-        """
-        from matplotlib.colorbar import Colorbar as MplColorbar
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        for slot, (artist, name) in enumerate(entries):
+            label = _colorbar_label(name, field_data)
+            existing = bars.get(slot)
 
-        label = getattr(field_data, "name", None)
-        if label and "_polygons" in label:
-            label = label.split("_polygons")[0]
-
-        label = get_field_str(label) if label else None
-
-        # try to pick up an explicit color range from the field_data if present
-        color_range = None
-        try:
-            color_range = getattr(field_data, "color_range", None)
-        except Exception:
-            color_range = None
-
-        # helper: attempt to update an existing colorbar in-place
-        existing_cbar = getattr(ax, "_simbi_colorbar", None)
-        if existing_cbar is not None and isinstance(existing_cbar, MplColorbar):
-            try:
-                # update the underlying mappable reference
-                existing_cbar.mappable = artist
-                # apply explicit color_range if provided
-                if color_range and isinstance(color_range, dict):
-                    vmin = color_range.get("min")
-                    vmax = color_range.get("max")
-                    try:
-                        if vmin is not None and vmax is not None:
-                            artist.set_clim(vmin, vmax)
-                    except Exception:
-                        # some artist types may not support set_clim; ignore
-                        pass
-                # ensure the colorbar reflects the new mappable / normalization
-                try:
-                    existing_cbar.update_normal(artist)
-                except Exception:
-                    # older mpl versions / some mappables may require updating via mappable.set_norm
-                    pass
-
+            if existing is not None:
+                existing.mappable = artist
+                existing.update_normal(artist)
                 if label:
-                    try:
-                        existing_cbar.set_label(label)
-                    except Exception:
-                        pass
+                    existing.set_label(label)
+                continue
 
-                # successful update — no need to recreate
-                return
-            except Exception:
-                # if updating fails, remove and proceed to recreate
-                try:
-                    existing_cbar.remove()
-                except Exception:
-                    pass
-                try:
-                    delattr(ax, "_simbi_colorbar")
-                except Exception:
-                    pass
-
-        # otherwise create a new colorbar and attach it to the axes
-        cax = None
-        orientation = "vertical"
-
-        if hasattr(ax, "name") and "polar" in getattr(ax, "name"):
-            # polar-specific placements (horizontal for half-sphere, vertical otherwise)
-            try:
-                theta = field_data.domain[1]
-                max_angle = theta[-1]
-                half_sphere = max_angle == 0.5 * 3.141592653589793
-            except Exception:
-                half_sphere = False
-
-            if half_sphere:
-                # place a small horizontal colorbar below the plot
-                polar_pos = ax.get_position()
-                width = min(0.6, 0.78)
-                x = polar_pos.x0 + (polar_pos.width - width) / 2 - 0.01
-                cax = fig.add_axes((x, 0.2, width, 0.03))
-                orientation = "horizontal"
+            box = under_wedge_box(ax, slot, len(entries))
+            if box is not None:
+                # an inset rides with its parent, so a bar laid in the chart's
+                # own empty strip keeps its place when the layout reflows
+                bar = fig.colorbar(
+                    artist, cax=ax.inset_axes(box), orientation="horizontal"
+                )
             else:
-                # vertical alongside polar plot
-                polar_pos = ax.get_position()
-                height = 0.8
-                x = polar_pos.x0 + polar_pos.width + 0.05
-                y = polar_pos.y0 + (polar_pos.height - height) / 2
-                cax = fig.add_axes((x, y, 0.03, height))
-                orientation = "vertical"
-        else:
-            # cartesian default: use an axes divider for a vertical colorbar
-            try:
-                divider = make_axes_locatable(ax)
-                cax = divider.append_axes("right", size="5%", pad=0.05)
-                orientation = "vertical"
-            except Exception:
-                # fallback: allocate a tiny axes to the right of the main axes
-                pos = ax.get_position()
-                try:
-                    cax = fig.add_axes(
-                        (pos.x1 + 0.02, pos.y0, 0.03, pos.height)
-                    )
-                    orientation = "vertical"
-                except Exception:
-                    # last resort: give up creating a colorbar
-                    return
+                # letting the colorbar take its space from the parent axes keeps
+                # the layout engine in charge of the margins, so a left-hand
+                # bar's ticks and label land inside the canvas
+                bar = fig.colorbar(
+                    artist,
+                    ax=ax,
+                    location=colorbar_side(slot, len(entries)),
+                    fraction=0.046,
+                    pad=0.04,
+                )
 
-        # create the colorbar and store a reference on the axes for future updates
-        try:
-            cbar = fig.colorbar(artist, cax=cax, orientation=orientation)
             if label:
-                try:
-                    cbar.set_label(label)
-                except Exception:
-                    pass
-            # store for later in-place updates during animations
-            try:
-                setattr(ax, "_simbi_colorbar", cbar)
-            except Exception:
-                # ignore attribute set failures
-                pass
-        except Exception:
-            # creating a colorbar failed; ensure no left-over attribute
-            try:
-                if hasattr(ax, "_simbi_colorbar"):
-                    delattr(ax, "_simbi_colorbar")
-            except Exception:
-                pass
+                bar.set_label(label)
+            bars[slot] = bar
+
+
+def _colorbar_label(name: Optional[str], field_data: Any) -> Optional[str]:
+    """the axis label for the bar describing `name`, in display notation."""
+    label = name or getattr(field_data, "name", None)
+    if label and "_polygons" in label:
+        label = label.split("_polygons")[0]
+    return get_field_str(label) if label else None
+
+
+def colorbar_side(slot: int, total: int) -> str:
+    """which side of the chart the bar for panel `slot` belongs on.
+
+    panels alternate sides, so a mirrored pair carries each half's scale beside
+    that half; a single quantity keeps the conventional right-hand bar."""
+    if total < 2:
+        return "right"
+    return "right" if slot % 2 == 0 else "left"
+
+
+# geometry of a colorbar laid in the strip a hemispherical chart leaves empty,
+# in fractions of the axes it is drawn inside
+BAR_THICKNESS = 0.035
+BAR_GAP = 0.03
+BAR_WIDTH_IN_CELL = 0.8
+
+
+def is_hemispherical(ax: Axes) -> bool:
+    """whether the chart draws a half-plane.
+
+    a polar axes centres its sector in the axes box, so a wedge that spans pi
+    fills the box edge to edge and only half its height, leaving a strip below
+    the flat edge that a narrower wedge or a full circle does not."""
+    if "polar" not in getattr(ax, "name", ""):
+        return False
+    lo, hi = ax.get_xlim()
+    return abs(abs(hi - lo) - math.pi) < 1.0e-6
+
+
+def wedge_extent(ax: Axes) -> tuple[float, float, float, float]:
+    """the drawn sector's bounding box, in fractions of the axes box.
+
+    the data and axes transforms share the axes position, so the fractions
+    survive a layout reflow that moves or resizes the chart."""
+    angles = np.linspace(*ax.get_xlim(), 129)
+    radii = ax.get_ylim()
+    corners = [(angle, radius) for radius in radii for angle in angles]
+    fractions = ax.transAxes.inverted().transform(
+        ax.transData.transform(corners)
+    )
+    return (
+        float(fractions[:, 0].min()),
+        float(fractions[:, 0].max()),
+        float(fractions[:, 1].min()),
+        float(fractions[:, 1].max()),
+    )
+
+
+def bar_cell(slot: int, total: int) -> int:
+    """where panel `slot` sits in a left-to-right row of bars.
+
+    the bars read in the order the panels do, so the leftmost bar describes the
+    leftmost panel."""
+    order = sorted(
+        range(total),
+        key=lambda index: (colorbar_side(index, total) != "left", index),
+    )
+    return order.index(slot)
+
+
+def under_wedge_box(
+    ax: Axes, slot: int, total: int
+) -> Optional[list[float]]:
+    """[x, y, width, height] for a bar beneath a hemispherical chart, or None
+    when the chart leaves no strip to put one in."""
+    if not is_hemispherical(ax):
+        return None
+
+    left, right, bottom, _ = wedge_extent(ax)
+
+    # the bar and the tick labels below it have to clear the axes floor
+    top = bottom - BAR_GAP
+    if top - BAR_THICKNESS < 0.0:
+        return None
+
+    cell_width = (right - left) / total
+    width = cell_width * BAR_WIDTH_IN_CELL
+    x = left + cell_width * (bar_cell(slot, total) + 0.5) - width / 2
+
+    return [x, top - BAR_THICKNESS, width, BAR_THICKNESS]
 
 
 def remove_spines(ax: Axes) -> None:

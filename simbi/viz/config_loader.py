@@ -78,6 +78,23 @@ def _coerce_value(value: str) -> Union[bool, int, float, str]:
     return value
 
 
+def normalize_component(name: str) -> str:
+    """the component key, optionally qualified by the field it styles.
+
+    a key of the form `quad:D` styles just the panel drawing D, layered over
+    the plain `quad` props. the component part names a class and is matched
+    case-insensitively; the field part names data and is not, since `D` and `d`
+    are different quantities."""
+    component, separator, field = name.partition(":")
+    normalized = component.strip().lower().replace("-", "_")
+    return f"{normalized}:{field.strip()}" if separator else normalized
+
+
+def component_of(key: str) -> str:
+    """the component class a (possibly field-qualified) props key selects."""
+    return key.partition(":")[0]
+
+
 def _parse_override(override: str) -> tuple[str, str, Any]:
     """
     Parse a dot-notation override string into (component, field, value).
@@ -85,6 +102,7 @@ def _parse_override(override: str) -> tuple[str, str, Any]:
     Examples:
         "polygon.show_level_bounds=true" -> ("polygon", "show_level_bounds", True)
         "quad.color_range.min=0.1" -> ("quad", "color_range.min", 0.1)
+        "quad:u.log_scale=false" -> ("quad:u", "log_scale", False)
     """
     if "=" not in override:
         raise ValueError(
@@ -99,7 +117,7 @@ def _parse_override(override: str) -> tuple[str, str, Any]:
             f"invalid override key: '{key}'. expected 'component.field' format"
         )
 
-    component = parts[0].lower().replace("-", "_")
+    component = normalize_component(parts[0])
     field = parts[1]
     value = _coerce_value(raw_value)
 
@@ -191,7 +209,7 @@ def load_config_file(path: Union[str, Path]) -> ConfigDict:
         )
 
     # normalize keys
-    return {k.lower().replace("-", "_"): v for k, v in data.items()}
+    return {normalize_component(k): v for k, v in data.items()}
 
 
 def merge_configs(base: ConfigDict, overrides: ConfigDict) -> ConfigDict:
@@ -313,7 +331,8 @@ def load_component_props(
     props: dict[str, ComponentProps] = {}
     errors: list[str] = []
 
-    for component, config in merged.items():
+    for key, config in merged.items():
+        component = component_of(key)
         if component not in PROPS_REGISTRY:
             # accepting an unknown component name would silently drop EVERY override
             # under it (qaud.cmap=inferno), so it raises with a close-match suggestion.
@@ -327,9 +346,9 @@ def load_component_props(
             )
 
         try:
-            props[component] = validate_props(component, config)
+            props[key] = validate_props(component, config)
         except (ValidationError, TypeError, ValueError) as e:
-            errors.append(f"{component}: {e}")
+            errors.append(f"{key}: {e}")
 
     if errors:
         raise ValueError(
