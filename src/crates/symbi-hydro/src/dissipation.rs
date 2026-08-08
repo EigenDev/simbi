@@ -128,6 +128,74 @@ pub fn adaptive_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S, p_l: S, p_r: 
     ramp.max(clamp)
 }
 
+/// the smallest velocity jump, in units of the local sound speed, that is treated as resolved
+/// rather than as roundoff. this is a floating-point robustness floor, NOT a physical
+/// threshold: it exists so a face with identically equal states divides by something, and its
+/// value is far below any jump a discretization can represent.
+pub const JUMP_EPS: f64 = 1.0e-30;
+
+/// the acoustic-consistency scaling of the acoustic dissipation: scale by how much of the face
+/// data is ACOUSTIC, measured against the impedance relation, rather than by a flow speed.
+///
+/// a simple acoustic wave satisfies `dp = rho c du_n`. writing both jumps in acoustic units,
+///
+///   `a = |du_n| / c`,   `b = |dp - dp_balance| / (rho c^2)`,   `phi = min(1, b / a)`,
+///
+/// the ratio `b/a` is the fraction of the impedance relation the data actually carries, and it
+/// is what the acoustic dissipation should be scaled by. every regime of interest falls out of
+/// the same expression with NO reference mach number:
+///
+///   - smooth low-mach flow carries a pressure jump set by the momentum balance,
+///     `dp ~ rho u du`, giving `b/a = u/c` — the `phi ~ Ma` scaling the asymptotic analysis
+///     requires (Guillard & Viozat), saturating at `Ma = 1` because that is where the acoustic
+///     and advective scales genuinely meet, rather than at a chosen fraction of it;
+///   - a shock or a genuine acoustic wave satisfies the impedance relation, `b = a`, so
+///     `phi = 1` and the classical dissipation is recovered exactly — keyed on the wave content
+///     of the data rather than on a flow speed that a grid-aligned shock makes vanish;
+///   - the transverse face of a grid-aligned shock carries neither a pressure jump nor a normal
+///     velocity jump, so `phi` is small and the acoustic dissipation is reduced — the carbuncle
+///     cure, obtained without naming a shock;
+///   - a contact carries no pressure jump at all, so `phi -> 0` and contact sharpness is kept;
+///   - a face in FORCE BALANCE (`dp` supported by a body force rather than by wave motion)
+///     carries its balance in `dp_balance` and contributes nothing to `b`, so the low-mach
+///     reduction survives in a stratified atmosphere instead of being switched off across it.
+///     whatever the balance fails to account for IS the residual, and it is dissipated in
+///     proportion — which is the property a stratified column needs, since an undamped
+///     hydrostatic residual rings at grid scale.
+///
+/// `dp_balance` is the pressure jump the face's momentum sources support across it,
+/// `rho_bar (f . n) dx`, for ANY body force `f` — gravity, rotation, magnetic tension,
+/// radiation. pass zero when the run has none, or when the balance is not available: the
+/// sensor then reads a balanced stratification as fully acoustic and returns `phi = 1`, which
+/// is the conservative reading and reproduces a compressibility clamp without carrying one.
+///
+/// SELF-CORRECTING AGAINST CHECKERBOARD. the known hazard of scaling dissipation to `Ma` is
+/// pressure-velocity decoupling in the incompressible limit. here the numerator IS the pressure
+/// jump, so a grid-scale pressure oscillation raises `b`, raises `phi`, and restores the
+/// dissipation that damps it. the mechanism that would run away supplies its own brake.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn acoustic_phi<S: Scalar>(
+    vn_l: S,
+    vn_r: S,
+    cs_l: S,
+    cs_r: S,
+    p_l: S,
+    p_r: S,
+    rho_l: S,
+    rho_r: S,
+    dp_balance: S,
+) -> S {
+    let half = S::from_f64(0.5);
+    let cs = (cs_l + cs_r) * half;
+    let rho = (rho_l + rho_r) * half;
+    // both jumps in acoustic units, so their ratio is the dimensionless impedance fraction and
+    // the result is invariant under a rescaling of the flow's units.
+    let a = (vn_l - vn_r).abs() / cs;
+    let b = ((p_l - p_r) - dp_balance).abs() / (rho * cs * cs);
+    (b / (a + S::from_f64(JUMP_EPS))).min(S::ONE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
