@@ -2920,13 +2920,17 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
 }
 
 /// equation-of-state one-liner: ideal gas carries gamma; isothermal regimes
-/// carry the (global or position-dependent) sound speed instead.
+/// carry the (global or position-dependent) sound speed instead. the taub-mathews
+/// gas is parameter-free — the gamma it carries is an inert placeholder, and printing
+/// it would name a closure the run is not integrating.
 fn eos_label(cfg: &Config) -> String {
     let isothermal = cfg.regime.contains("iso") || cfg.regime == "imhd";
     if cfg.locally_isothermal {
         "locally isothermal cs(x)".to_string()
     } else if isothermal {
         format!("isothermal (cs = {:.4})", cfg.cs)
+    } else if cfg.eos_name == "synge" {
+        "taub-mathews (gamma_eff: 5/3 cold -> 4/3 hot)".to_string()
     } else {
         format!("ideal gas (gamma = {:.4})", cfg.gamma)
     }
@@ -3081,6 +3085,20 @@ fn build_eos(cfg: &Config) -> symbi::EosArm {
         symbi::EosArm::TaubMathews
     } else {
         symbi::EosArm::IdealGamma
+    }
+}
+
+/// the HOST-side closure the `SimState` carries, which must name the same gas as the kernel
+/// arm `build_eos` selects. `build_eos` owns c2p, the fluxes and the wave speeds; this one owns
+/// the primitive -> conserved conversion that seeds the initial condition, so the two are read
+/// at different moments on the same run. seeding through a gamma law and recovering through
+/// taub-mathews leaves D = rho W intact and misplaces the rho/W split, which corrupts t = 0 on
+/// every synge run. both arms derive from `cfg.eos_name` and sit adjacent so they cannot drift.
+fn host_eos(cfg: &Config) -> EosSelect<f64> {
+    if cfg.eos_name == "synge" {
+        EosSelect::Tm(TaubMathews)
+    } else {
+        EosSelect::Ideal(IdealGas { gamma: cfg.gamma })
     }
 }
 
@@ -4011,7 +4029,7 @@ macro_rules! build_and_run_hydro {
         let prims: &[Vec<f64>] = $prims;
         // `$d` is the grid dimension, `$dof` the momentum-component count; they differ for the
         // spherical swirl (the azimuthal momentum lifted onto a 2D (r, theta) grid).
-        type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, IdealGas<f64>>;
+        type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, EosSelect<f64>>;
 
         // the declared perturbation is a per-cell primitive delta, so it is chart- and
         // regime-generic; what it cannot reach is the decomposed build, whose tiles each
@@ -4063,7 +4081,7 @@ macro_rules! build_and_run_hydro {
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
 
-        let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+        let sim = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
             .origin(origin)
             .spacing(spacing)
@@ -4637,7 +4655,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         use symbi::sim::decomp::{decompose_grid, unflatten};
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
-        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+        type Sim = SimDefault<$regime_ty, $d, $geom_ty, EosSelect<f64>>;
         // the per-tile / global hierarchy type. DOF = D for hydro; the kernel set is the substrate's
         // associated type (matches what `sim.substrate()` yields).
         type Hier = Hierarchy<
@@ -4645,7 +4663,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             $d,
             $d,
             $geom_ty,
-            IdealGas<f64>,
+            EosSelect<f64>,
             DefaultSpace,
             DefaultMemory,
             <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet,
@@ -4689,7 +4707,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, &tile_maps);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
-                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(dx)
@@ -4815,7 +4833,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         // the full-size OUTPUT hierarchy (root + the full region): gather scatters each level's tile
         // interiors into it. lives on device 0 (touched only at output).
         let mut global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
-            let groot = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+            let groot = Sim::build($regime, host_eos(cfg), $geom)
                 .cells(n)
                 .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                 .spacing(dx)
@@ -4898,7 +4916,7 @@ macro_rules! build_and_run_hydro_decomposed {
         let prims: &[Vec<f64>] = $prims;
         // `$d` is the grid dimension, `$dof` the momentum-component count; they differ for the
         // swirl lift (the azimuthal momentum on a 2D (r, z)/(r, theta) grid, DOF = 3).
-        type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, IdealGas<f64>>;
+        type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, EosSelect<f64>>;
 
         // refinement + gpus>1 takes the decomposed-HIERARCHY path (per-tile hierarchies + the
         // root/fine halo exchange); plain single-level continues below.
@@ -4945,7 +4963,7 @@ macro_rules! build_and_run_hydro_decomposed {
             }));
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
-                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
@@ -5065,7 +5083,7 @@ macro_rules! build_and_run_hydro_decomposed {
 
         // one full-size sim as the OUTPUT view: the gather scatters tile interiors into it and
         // the existing writer serializes it. lives on device 0 (it is only touched at output).
-        let global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+        let global = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
@@ -5409,7 +5427,7 @@ fn tile_face_buffer<const D: usize>(
 }
 
 /// build one monomorphized ADIABATIC MHD sim (Rmhd or NewtonianMhd; both are
-/// MhdPrim + IdealGas, DOF=3) and drive it. cell state comes from `prim_gen`
+/// MhdPrim + an energy-bearing closure, DOF=3) and drive it. cell state comes from `prim_gen`
 /// (rho, vx, vy, vz, p — NO cell B); the staggered face B from `staggered_bfields`:
 /// in-grid axes `0..D` seed the CT faces (the divergence-free truth; cell B is the
 /// bcell-from-bface kernel's job), transverse axes `D..3` seed cell-centered B.
@@ -5418,7 +5436,7 @@ macro_rules! build_and_run_mhd {
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         let bufs: &[Vec<f64>] = $bufs;
-        type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, IdealGas<f64>>;
+        type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, EosSelect<f64>>;
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
@@ -5445,7 +5463,7 @@ macro_rules! build_and_run_mhd {
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
 
-        let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+        let sim = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
             .origin(origin)
             .spacing(spacing)
@@ -5741,7 +5759,7 @@ macro_rules! build_and_run_mhd_decomposed {
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         let bufs: &[Vec<f64>] = $bufs;
-        type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, IdealGas<f64>>;
+        type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, EosSelect<f64>>;
 
         // multi-gpu MHD is single-level: refinement needs its own cross-level multi-tile
         // handling, so it is refused.
@@ -5784,7 +5802,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 // domain); the shared internal face reads the same global value in both neighbors.
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tc, d)).collect();
-                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
@@ -5881,7 +5899,7 @@ macro_rules! build_and_run_mhd_decomposed {
         // the full-size OUTPUT view: gather scatters tile interiors (cells + cell B) and faces into
         // it each checkpoint; seed the faces so `bface_initialized` is set (the gather overwrites
         // the interior). lives on device 0 (touched only at output).
-        let mut global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+        let mut global = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))

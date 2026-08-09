@@ -20,12 +20,23 @@ use symbi::sim::state::*;
 use symbi::EosArm;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
-use symbi_hydro::eos::IdealGas;
+use symbi_hydro::eos::{EosSelect, IdealGas, TaubMathews};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 const N: usize = 128;
+
+/// the host closure that names the same gas as a kernel arm. the state's own EOS turns
+/// the initial PRIMITIVES into conserved variables, and the arm recovers primitives from
+/// them on every step after: the two describe one gas or the initial condition is not the
+/// one the config asked for.
+fn host_eos(arm: EosArm, gamma: f64) -> EosSelect<f64> {
+    match arm {
+        EosArm::TaubMathews => EosSelect::Tm(TaubMathews),
+        _ => EosSelect::Ideal(IdealGas { gamma }),
+    }
+}
 
 /// evolve a v = 0 sod with left/right (rho, p) states to `t_end`; returns the
 /// interior density profile. `eos` selects the closure; `gamma` feeds the
@@ -37,9 +48,9 @@ fn sod_density(
     right: (f64, f64),
     t_end: f64,
 ) -> Vec<f64> {
-    type Sim = SimState<Rhd, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Sim = SimState<Rhd, 1, Cartesian, EosSelect<f64>, CpuSpace, HostMemory>;
     let dx = 1.0 / N as f64;
-    let mut sim = Sim::build(Rhd, IdealGas { gamma }, Cartesian)
+    let mut sim = Sim::build(Rhd, host_eos(eos, gamma), Cartesian)
         .cells([N])
         .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
@@ -142,9 +153,9 @@ fn hot_taub_mathews_reproduces_the_ideal_four_thirds_sod() {
 /// relativistic blast that must stay finite, positive, and subluminal.
 #[test]
 fn taub_mathews_runs_the_spherical_blast_chart() {
-    type Sim = SimState<Rhd, 1, symbi_geometry::Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Sim = SimState<Rhd, 1, symbi_geometry::Spherical, EosSelect<f64>, CpuSpace, HostMemory>;
     let dx = 1.0 / N as f64;
-    let mut sim = Sim::build(Rhd, IdealGas { gamma: 5.0 / 3.0 }, symbi_geometry::Spherical)
+    let mut sim = Sim::build(Rhd, EosSelect::Tm(TaubMathews), symbi_geometry::Spherical)
         .cells([N])
         .origin([1.0])
         .spacing([dx])
@@ -176,6 +187,99 @@ fn taub_mathews_runs_the_spherical_blast_chart() {
         max_v = max_v.max(v.abs());
     }
     assert!(max_v > 0.3, "the blast never became relativistic (max |v| = {max_v})");
+}
+
+/// evolve a UNIFORM state and return its (rho, v, p) as recovered afterwards. a uniform
+/// state is an exact steady solution of a conservative cartesian scheme — every face flux
+/// cancels its neighbor — so whatever comes back differs from what went in only through
+/// the prim -> cons -> prim round trip, which is the seeding conversion followed by the
+/// arm's recovery. `host` and `arm` are supplied independently so a mismatched pair can be
+/// exhibited.
+fn uniform_roundtrip(
+    host: EosSelect<f64>,
+    arm: EosArm,
+    seed: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    type Sim = SimState<Rhd, 1, Cartesian, EosSelect<f64>, CpuSpace, HostMemory>;
+    let (rho, vel, pre) = seed;
+    let dx = 1.0 / N as f64;
+    let mut sim = Sim::build(Rhd, host, Cartesian)
+        .cells([N])
+        .spacing([dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("rhd sim construction failed")
+        .set_initial(|_| Prim {
+            rho,
+            vel: Tensor::new([vel]),
+            pre,
+        })
+        .build();
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(5.0 / 3.0, 0.4, &sim.geom.allocated)
+        .with_eos(arm);
+    evolve(&mut sim, &sub, 4.0 * dx).expect("rhd evolution failed");
+    let c = sim.geom.interior.iter().nth(N / 2).expect("interior cell");
+    let pre_field = sim.fields.prim.pre_field().expect("prim.pre");
+    (
+        *sim.fields.prim.rho.view().at(c),
+        *sim.fields.prim.vel[0].view().at(c),
+        *pre_field.view().at(c),
+    )
+}
+
+/// a hot, fast, uniform gas must come back exactly as it was seeded. this is the seeding
+/// conversion under test: the primitives become conserved variables through the STATE's
+/// closure and are recovered through the ARM's, so a state seeded through a gamma law and
+/// recovered as a taub-mathews gas conserves only D = rho W (which needs no closure at
+/// all) and misplaces the split between rho and W. the effect is confined to t = 0 and is
+/// not small — a gamma_gas = 20 shell seeded that way returns at W = 28.6 with a third of
+/// its pressure, and the run relaxes off the trajectory it was launched on.
+#[test]
+fn taub_mathews_seeding_round_trips_a_hot_relativistic_state() {
+    // theta = p / rho = 20 (deep in the taub-mathews walk away from 5/3) at W = 20.
+    let seed = (1.0, (1.0 - 1.0 / (20.0 * 20.0f64)).sqrt(), 20.0);
+    let (rho, vel, pre) = uniform_roundtrip(EosSelect::Tm(TaubMathews), EosArm::TaubMathews, seed);
+    let d_rho = (rho - seed.0).abs() / seed.0;
+    let d_vel = (vel - seed.1).abs() / seed.1;
+    let d_pre = (pre - seed.2).abs() / seed.2;
+    println!("matched pair: d_rho = {d_rho:.3e}, d_vel = {d_vel:.3e}, d_pre = {d_pre:.3e}");
+    assert!(
+        d_rho < 1.0e-10 && d_vel < 1.0e-10 && d_pre < 1.0e-10,
+        "a uniform taub-mathews state did not survive its own seeding: \
+         d_rho = {d_rho:.3e}, d_vel = {d_vel:.3e}, d_pre = {d_pre:.3e}"
+    );
+
+    // the mismatch this gate exists to catch, exhibited on the same state: seeding the
+    // identical primitives through a gamma law and recovering them as a taub-mathews gas
+    // moves rho and p by tens of percent. without this arm the gate above could pass on a
+    // closure pairing that never differed in the first place.
+    let ideal_host = EosSelect::Ideal(IdealGas { gamma: 5.0 / 3.0 });
+    let (rho_x, _, pre_x) = uniform_roundtrip(ideal_host, EosArm::TaubMathews, seed);
+    let x_rho = (rho_x - seed.0).abs() / seed.0;
+    let x_pre = (pre_x - seed.2).abs() / seed.2;
+    println!("mismatched pair: d_rho = {x_rho:.3e}, d_pre = {x_pre:.3e}");
+    assert!(
+        x_rho > 0.1 && x_pre > 0.1,
+        "seeding through a gamma law and recovering through taub-mathews left the state \
+         nearly intact (d_rho = {x_rho:.3e}, d_pre = {x_pre:.3e}); the two closures no \
+         longer disagree on this state and the matched-pair check above is vacuous"
+    );
+}
+
+/// the taub-mathews gas is parameter-free: the adiabatic index bound into its kernel
+/// scalar slot is inert, so the same run must come out BIT-IDENTICAL whatever is bound
+/// there. the state's closure reports 0 for that slot, and this is what licenses it.
+#[test]
+fn the_taub_mathews_arm_reads_no_adiabatic_index() {
+    let l = (1.0, 1.0);
+    let r = (0.125, 0.1);
+    let five_thirds = sod_density(EosArm::TaubMathews, 5.0 / 3.0, l, r, 0.25);
+    let zero = sod_density(EosArm::TaubMathews, 0.0, l, r, 0.25);
+    assert_eq!(
+        five_thirds, zero,
+        "the taub-mathews evolution moved when the bound adiabatic index changed; \
+         the scalar is live and the closure cannot report it as inert"
+    );
 }
 
 /// the refusal: a curved spacetime has no `_tm` twins — the first cfl dispatch

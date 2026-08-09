@@ -229,6 +229,15 @@ impl<S: Scalar> Eos<S> for TaubMathews {
     fn gamma_for_ops(&self) -> f64 {
         0.0
     }
+
+    /// the COLD-limit index. the effective adiabatic index of this gas is set by the
+    /// temperature — it walks from 5/3 at theta = p/rho -> 0 to 4/3 at theta -> infinity —
+    /// so no constant describes it. the cold end is what the single-number reporting slot
+    /// (the checkpoint's `gamma` attribute, which post-processing divides by `gamma - 1`)
+    /// carries; the trait default of 1 is the isothermal marker and is degenerate there.
+    fn gamma(&self) -> S {
+        S::from_f64(5.0 / 3.0)
+    }
 }
 
 /// a closure selected from a value rather than a type — the kernel builders pick
@@ -236,6 +245,15 @@ impl<S: Scalar> Eos<S> for TaubMathews {
 /// (the traced physics) receives ONE concrete `Eos` impl. the match resolves when
 /// each method runs, which for a traced carrier is trace time: the emitted graph
 /// carries only the selected closure's operations, never a runtime branch.
+///
+/// on a concrete scalar (`f64`) the same type is the HOST-side closure a `SimState`
+/// carries, and it must name the same gas as the compiled kernels. the two are read at
+/// different moments and cannot be allowed to disagree: seeding converts the initial
+/// primitives to conserved variables through the state's EOS, while every subsequent
+/// cons->prim recovery runs the kernel arm. seeding a relativistic gas through a gamma
+/// law and recovering it through taub-mathews conserves D = rho W (which is EOS-free)
+/// and splits it wrongly between rho and W — a gamma_gas = 20 blast seeded that way
+/// comes back at W = 28.6 with a third of its pressure.
 #[derive(Clone, Copy, Debug)]
 pub enum EosSelect<S: Scalar> {
     Ideal(IdealGas<S>),
@@ -243,6 +261,8 @@ pub enum EosSelect<S: Scalar> {
 }
 
 impl<S: Scalar> Eos<S> for EosSelect<S> {
+    // every method is delegated explicitly, including the ones the trait defaults: a default
+    // left in place here would evaluate the gamma-law form for BOTH arms.
     #[inline]
     fn sound_speed(&self, rho: S, pre: S) -> S {
         match self {

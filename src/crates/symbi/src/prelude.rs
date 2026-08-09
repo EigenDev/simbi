@@ -24,7 +24,7 @@ pub use symbi_hydro::rhd::Rhd;
 pub use symbi_hydro::rmhd::Rmhd;
 
 // --- equations of state ---
-pub use symbi_hydro::eos::{IdealGas, Isothermal};
+pub use symbi_hydro::eos::{EosSelect, IdealGas, Isothermal, TaubMathews};
 
 // --- geometry: the coordinate systems + the metric trait ---
 pub use symbi_geometry::{Cartesian, Cylindrical, Metric, Spherical};
