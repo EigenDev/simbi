@@ -194,14 +194,16 @@ class PlotData(BaseModel):
     Complete data needed for visualization.
 
     Attributes:
-        fields: Sequence of FieldData objects to visualize
+        fields: what gets drawn: fields on a mesh, or the PolygonData a level
+                hierarchy composes to when a single quadmesh cannot hold cells
+                of two different sizes
         time: simulation time (float)
         dimensions: Number of spatial dimensions in the simulation
         coord_system: Coordinate system used
         hierarchy: optional AMR hierarchy data (for refinement-aware components)
     """
 
-    fields: Sequence[FieldData]
+    fields: Sequence[FieldData | PolygonData]
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None

@@ -398,10 +398,20 @@ class Figure:
             self._frame_failures += 1
             _warn_once("frame-update", f"animation frame failed: {exc}")
             if self._frame_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:
+                # an interactive backend drives frames from a gui timer, which
+                # swallows whatever the callback raises and fires again: the
+                # timer has to be stopped or the same failure reprints forever
+                self.stop_animation()
                 raise RuntimeError(
                     f"animation aborted: {self._frame_failures} consecutive frame"
                     f" failures (last: {exc})"
                 ) from exc
+
+    def stop_animation(self) -> None:
+        """Halt the frame timer, if one is running."""
+        source = getattr(self._anim, "event_source", None)
+        if source is not None:
+            source.stop()
 
     def draw_frame(
         self,
@@ -482,10 +492,12 @@ class Figure:
         """this frame's payload for a component set up against `signature`.
 
         the fields of each frame are new objects carrying the same names, so a
-        component is matched to its quantity rather than to a position."""
-        from .types import FieldData as PlotFieldData
+        component is matched to its quantity rather than to a position. that
+        holds whichever way the quantity is drawn -- a field on a mesh or a
+        composed set of polygons -- since both carry the name."""
+        from .types import FieldData, PolygonData
 
-        if isinstance(signature, PlotFieldData):
+        if isinstance(signature, (FieldData, PolygonData)):
             found = self._find_field(plot_data, signature.name)
             if found is not None:
                 return found

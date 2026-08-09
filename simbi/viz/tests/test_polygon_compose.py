@@ -170,3 +170,58 @@ def test_patches_that_are_not_quadrilaterals_are_refused() -> None:
         PolygonData(
             name="rho", patches=np.zeros((5, 2)), values=np.zeros(5)
         )
+
+
+# --- polygons through the animation path ------------------------------------
+#
+# a still and a movie compose the same way, but only the movie packs the result
+# back into a PlotData and matches it to the component that drew the previous
+# frame. a type that a still accepts and a movie rejects fails every frame of
+# a refined animation, which is the only kind of animation refined data has.
+
+
+def polygon_plot_data() -> "PlotData":
+    from simbi.viz.types import PlotData
+
+    drawn = _compose_polygons([level("rho", (0.0, 1.0), (0.0, 1.0), (4, 4))])
+    return PlotData(
+        fields=[drawn], time=0.0, dimensions=drawn.ndim
+    )
+
+
+def test_a_frame_of_polygons_packs_into_plot_data() -> None:
+    from simbi.viz.types import PolygonData
+
+    assert isinstance(polygon_plot_data().fields[0], PolygonData)
+
+
+def test_a_polygon_component_is_matched_to_its_frame() -> None:
+    """components are re-matched to each frame by name; a polygon set that
+    fails the match is handed the whole PlotData and the component rejects it."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from simbi.viz.components.polygons import (
+        PolygonPlotComponent,
+        PolygonPlotProps,
+    )
+    from simbi.viz.config import PlotConfig, VisualizationConfig
+    from simbi.viz.pipeline.transforms import prepare_figure
+
+    figure = prepare_figure(
+        VisualizationConfig(
+            plot=PlotConfig(plot_type="multidim", fields=["rho"], ndim=2)
+        ),
+        coord_system=CoordSystem.CARTESIAN,
+    )
+    component = PolygonPlotComponent(PolygonPlotProps())
+    component.initialize(figure.fig, figure.axes["main"])
+
+    first = polygon_plot_data()
+    figure.add_component(component, first.fields[0])
+
+    # the second frame is a different object carrying the same name
+    figure.draw_frame(polygon_plot_data(), full=True)
+
+    assert component._poly_collection is not None
+    assert len(component._poly_collection.get_paths()) == 16
