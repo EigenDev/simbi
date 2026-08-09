@@ -89,6 +89,16 @@ addopts = "-m 'not simulation'"
 markers = [
     "simulation: evolves a real grid through the built rust cpu_ext backend; excluded from the default run",
 ]
+# A WARNING IS A FAILURE. the suite runs at zero warnings, and the way it stays
+# there is that a new one stops the run rather than scrolling past. the two that
+# have shown up here were not noise: a pydantic deprecation that becomes an error
+# in v3, and a numpy fft deprecation that will silently CHANGE which axes a
+# transform maps onto. both were one-line fixes; neither would have been noticed
+# in a summary line reading "13 warnings".
+#
+# to admit one deliberately, add a narrow `ignore:<message>:<Category>` entry below
+# with the reason -- never a bare `ignore`, which switches the whole mechanism off.
+filterwarnings = ["error"]
 
 [tool.mypy]
 ignore_missing_imports = true

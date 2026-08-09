@@ -9,7 +9,7 @@
 #   cfl_number: Annotated[float, ProblemParam(0.4, cli=True, checkpoint_safe=True)]
 # =============================================================================
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from pydantic import Field
 from pydantic.fields import FieldInfo
@@ -25,6 +25,9 @@ class ParamMetadata:
     # optional section label for the live-dashboard "problem setup" panel; custom params sharing a
     # group render together. None -> the default "Parameters" group.
     group: Optional[str] = None
+    # the admissible values, when a parameter takes one of a fixed set. carried as
+    # metadata rather than enforced here; nothing currently rejects a value outside it.
+    choices: Optional[tuple[Any, ...]] = None
 
 
 def ProblemParam(
@@ -35,6 +38,7 @@ def ProblemParam(
     cli_name: Optional[str] = None,
     description: Optional[str] = None,
     group: Optional[str] = None,
+    choices: Optional[Sequence[Any]] = None,
     **field_kwargs: Any,
 ) -> FieldInfo:
     """
@@ -62,11 +66,15 @@ def ProblemParam(
         # optional with default, cli-configurable, must match checkpoint
         resolution: Annotated[int, ProblemParam(1000, cli=True, checkpoint_safe=False)]
     """
+    # `choices` is OURS, not pydantic's: forwarding it into `Field` as an extra keyword
+    # is deprecated and becomes an error in pydantic v3, so it rides in the metadata the
+    # rest of the parameter description already travels in.
     metadata = ParamMetadata(
         cli=cli,
         checkpoint_safe=checkpoint_safe,
         cli_name=cli_name,
         group=group,
+        choices=tuple(choices) if choices is not None else None,
     )
     extra: dict[str, Any] = {"param_metadata": metadata}
     return Field(

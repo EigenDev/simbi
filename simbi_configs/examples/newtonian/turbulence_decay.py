@@ -129,9 +129,15 @@ class TurbulenceDecay(SimbiProblem):
             a *= band
         # v = curl A in fourier space: v_hat = i k x A_hat
         two_pi_i = 2.0j * np.pi
-        vx = np.fft.irfftn(two_pi_i * (ky * a_hat[2] - kz * a_hat[1]), s=(n, n, n))
-        vy = np.fft.irfftn(two_pi_i * (kz * a_hat[0] - kx * a_hat[2]), s=(n, n, n))
-        vz = np.fft.irfftn(two_pi_i * (kx * a_hat[1] - ky * a_hat[0]), s=(n, n, n))
+        # the transformed axes are named explicitly: with `s` given and `axes` left to
+        # default, numpy 2 warns that a future release will map `s[i]` onto `axes[i]`
+        # rather than onto the trailing axes, which would silently reshape the seed.
+        # (0, 1, 2) is what the implicit mapping resolves to for a 3d array, verified
+        # bit-identical.
+        axes = (0, 1, 2)
+        vx = np.fft.irfftn(two_pi_i * (ky * a_hat[2] - kz * a_hat[1]), s=(n, n, n), axes=axes)
+        vy = np.fft.irfftn(two_pi_i * (kz * a_hat[0] - kx * a_hat[2]), s=(n, n, n), axes=axes)
+        vz = np.fft.irfftn(two_pi_i * (kx * a_hat[1] - ky * a_hat[0]), s=(n, n, n), axes=axes)
         cs = 1.0  # rho0 = 1, p0 = 1/gamma -> cs = sqrt(gamma p / rho) = 1
         v_rms = np.sqrt(np.mean(vx**2 + vy**2 + vz**2))
         scale = self.mach_rms * cs / v_rms
