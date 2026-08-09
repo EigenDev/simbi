@@ -4,6 +4,7 @@
 # derived field computation for simulation data.
 # contains all physics calculations needed for post-processing.
 # =============================================================================
+from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Any, Callable, Sequence
 
@@ -74,24 +75,93 @@ def four_velocity(
     return np.asarray(velocity[component] * W)
 
 
+@dataclass(frozen=True)
+class gamma_law_t:
+    """p = (gamma - 1) rho e at a constant adiabatic index."""
+
+    gamma: float
+
+    def specific_enthalpy(self, rho: Array, pre: Array) -> Array:
+        return np.asarray(1.0 + self.gamma / (self.gamma - 1.0) * pre / rho)
+
+    def sound_speed_sq(self, rho: Array, pre: Array) -> Array:
+        """the newtonian-form a^2 = dp/drho|_s. the relativistic sound speed of the same
+        gas is this divided by the specific enthalpy."""
+        return np.asarray(self.gamma * pre / rho)
+
+
+@dataclass(frozen=True)
+class taub_mathews_t:
+    """the taub-mathews approximation to the synge relativistic perfect gas
+    (mignone, plewa & bodo 2005): h = 2.5 theta + sqrt(2.25 theta^2 + 1), with
+    theta = p / rho. it saturates the taub inequality as an identity, and carries NO
+    adiabatic index — its effective one walks from 5/3 cold to 4/3 hot."""
+
+    def specific_enthalpy(self, rho: Array, pre: Array) -> Array:
+        theta = np.asarray(pre / rho)
+        return np.asarray(2.5 * theta + np.sqrt(2.25 * theta**2 + 1.0))
+
+    def sound_speed_sq(self, rho: Array, pre: Array) -> Array:
+        """the newtonian-form a^2 = theta (5h - 8 theta) / (3 (h - theta)), which tends
+        to (5/3) theta cold and to 4 theta / 3 hot."""
+        theta = np.asarray(pre / rho)
+        h = self.specific_enthalpy(rho, pre)
+        return np.asarray(theta * (5.0 * h - 8.0 * theta) / (3.0 * (h - theta)))
+
+
+closure_t = gamma_law_t | taub_mathews_t
+
+
+def closure_of(metadata: Any) -> closure_t:
+    """the equation of state a checkpoint was integrated with. the `gamma` attribute of a
+    synge run is an INERT PLACEHOLDER — the closure carries no adiabatic index — so reading
+    it as one computes a different gas than the one that was evolved. an empty slug means
+    the file predates the attribute, which only gamma-law runs can be."""
+    if getattr(metadata, "eos", "") == "synge":
+        return taub_mathews_t()
+    return gamma_law_t(metadata.gamma)
+
+
+def _newtonian_gamma(eos: closure_t) -> float:
+    """the adiabatic index of a newtonian checkpoint. the parameter-free relativistic
+    closure has none and cannot appear on one — it is refused at configuration time — so
+    reaching here with it means the file's regime and eos attributes disagree."""
+    if not isinstance(eos, gamma_law_t):
+        raise FieldComputationError(
+            f"the checkpoint declares a newtonian regime under the "
+            f"{type(eos).__name__} closure, which carries no adiabatic index"
+        )
+    return eos.gamma
+
+
 def spec_enthalpy(
-    adiabatic_index: float, rho: Array, pressure: Array, regime: str
+    eos: closure_t, rho: Array, pressure: Array, regime: str
 ) -> Array | float:
     """compute specific enthalpy."""
     if regime == "newtonian":
-        if adiabatic_index == 1.0:
+        if _newtonian_gamma(eos) == 1.0:
             return 1.0 + pressure / rho
         return 1.0
-    return 1.0 + adiabatic_index * pressure / (rho * (adiabatic_index - 1.0))
+    return eos.specific_enthalpy(rho, pressure)
 
 
 def _enthalpy(
-    rho: Array, pre: Array, gamma: float, regime: str
+    rho: Array, pre: Array, eos: closure_t, regime: str
 ) -> Array | float:
     """compute enthalpy per particle."""
     if regime == "newtonian":
         return 1.0
-    return 1.0 + gamma * pre / (rho * (gamma - 1.0))
+    return eos.specific_enthalpy(rho, pre)
+
+
+def sound_speed(rho: Array, pre: Array, eos: closure_t, regime: str) -> Array:
+    """the adiabatic sound speed. on a relativistic regime it is the RELATIVISTIC one,
+    a^2 / h — the newtonian form alone exceeds the speed of light once p / rho passes
+    1 / gamma, which is the ordinary state of a relativistic blast."""
+    a_sq = eos.sound_speed_sq(rho, pre)
+    if regime == "newtonian":
+        return np.asarray(np.sqrt(a_sq))
+    return np.asarray(np.sqrt(a_sq / eos.specific_enthalpy(rho, pre)))
 
 
 def labframe_density(
@@ -106,19 +176,20 @@ def labframe_energy_density(
     pre: Array,
     vel: Sequence[Array],
     bfield: Sequence[Array],
-    gamma: float,
+    eos: closure_t,
     regime: str = "newtonian",
 ) -> Array:
     """compute lab-frame energy density."""
     vsq = sum(v**2 for v in vel)
 
     if regime == "newtonian":
+        gamma = _newtonian_gamma(eos)
         if gamma == 1.0:
             return pre / rho
         return pre / (gamma - 1.0) + 0.5 * rho * vsq
 
     W = 1.0 / np.sqrt(1.0 - vsq)
-    h = _enthalpy(rho, pre, gamma, regime)
+    h = _enthalpy(rho, pre, eos, regime)
 
     if regime == "rhd":
         return np.asarray(rho * W**2 * h - pre - rho * W)
@@ -138,7 +209,7 @@ def labframe_momentum(
     pre: Array,
     vel: Sequence[Array],
     bfield: Sequence[Array],
-    gamma: float,
+    eos: closure_t,
     regime: str = "newtonian",
     mode: VectorMode | VectorComponent = VectorMode.All,
 ) -> Array:
@@ -146,7 +217,7 @@ def labframe_momentum(
     if regime == "newtonian":
         mom_vec = np.asarray(rho) * np.asarray(vel)
     elif regime in ("rhd", "rmhd"):
-        h = _enthalpy(rho, pre, gamma, regime)
+        h = _enthalpy(rho, pre, eos, regime)
         D = labframe_density(rho, vel, regime).squeeze()
         W = lorentz_factor(vel, regime)
         if isinstance(h, np.ndarray):
@@ -203,17 +274,17 @@ def enthalpy_density(
     pre: Array,
     bfields: Sequence[Array],
     velocity: Sequence[Array],
-    adiabatic_index: float,
+    eos: closure_t,
     regime: str = "newtonian",
 ) -> Array:
     """compute enthalpy density."""
     if regime == "newtonian":
         return rho
     elif regime == "rhd":
-        return rho * _enthalpy(rho, pre, adiabatic_index, regime)
+        return rho * _enthalpy(rho, pre, eos, regime)
     elif regime == "rmhd":
         return rho * _enthalpy(
-            rho, pre, adiabatic_index, regime
+            rho, pre, eos, regime
         ) + 2.0 * magnetic_pressure(bfields, velocity, regime)
     raise NotImplementedError(f"regime '{regime}' not implemented")
 
@@ -254,7 +325,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     """
     ndim = data.metadata.dimensions
     regime = data.metadata.regime
-    gamma = data.metadata.gamma
+    eos = closure_of(data.metadata)
 
     # level context object passed into compute functions.
     # it behaves like a mapping for field access and exposes mesh as attribute.
@@ -507,7 +578,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
                 fields["p"],
                 get_velocities(fields),
                 get_b_fields(fields),
-                gamma,
+                eos,
                 regime,
                 VectorComponent(component),
             )
@@ -549,12 +620,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             fields["p"],
             get_velocities(fields),
             get_b_fields(fields),
-            gamma,
+            eos,
             regime,
         )
 
     def compute_enthalpy(fields: dict[str, Array]) -> Array | float:
-        return spec_enthalpy(gamma, fields["rho"], fields["p"], regime)
+        return spec_enthalpy(eos, fields["rho"], fields["p"], regime)
 
     def compute_enthalpy_density(fields: dict[str, Array]) -> Array:
         return enthalpy_density(
@@ -562,7 +633,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             fields["p"],
             get_b_fields(fields),
             get_velocities(fields),
-            gamma,
+            eos,
             regime,
         )
 
@@ -587,7 +658,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def compute_mach_number(fields: dict[str, Array]) -> Array:
         v_mag = compute_velocity_magnitude(fields)
-        cs = np.sqrt(gamma * fields["p"] / fields["rho"])
+        cs = sound_speed(fields["rho"], fields["p"], eos, regime)
         return np.asanyarray(v_mag / cs)
 
     def compute_chi_density(fields: dict[str, Array]) -> Array:
@@ -606,7 +677,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             level_data["p"],
             get_velocities(level_data),
             get_b_fields(level_data),
-            gamma,
+            eos,
             regime,
             VectorComponent(0),
         )
@@ -615,7 +686,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             level_data["p"],
             get_velocities(level_data),
             get_b_fields(level_data),
-            gamma,
+            eos,
             regime,
             VectorComponent(1),
         )
@@ -630,7 +701,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             level_data["p"],
             get_velocities(level_data),
             get_b_fields(level_data),
-            gamma,
+            eos,
             regime,
             VectorComponent(0),
         )
@@ -639,7 +710,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             level_data["p"],
             get_velocities(level_data),
             get_b_fields(level_data),
-            gamma,
+            eos,
             regime,
             VectorComponent(1),
         )
