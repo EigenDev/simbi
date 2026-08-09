@@ -88,7 +88,7 @@ def test_backend_lands_more_seed_power_on_every_finer_level(tmp_path) -> None:
     represent and would give a flat or falling profile -- which is precisely the
     initial condition the band-limited seed produced, and the reason the science
     window went unseeded."""
-    _, checkpoint = _tiny_run(tmp_path, seed_epsilon=_EPSILON)
+    _, checkpoint = _tiny_run(tmp_path, seed_epsilon=_EPSILON, well_balanced=True)
     assert checkpoint.num_levels > 2, (
         f"the ladder built {checkpoint.num_levels} level(s); this gate needs a "
         "hierarchy to compare across"

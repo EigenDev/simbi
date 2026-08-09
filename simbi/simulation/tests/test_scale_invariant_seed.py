@@ -54,7 +54,7 @@ def _problem():
     sys.modules["_pta_seed"] = module
     spec.loader.exec_module(module)
     return module.PorousTurbulentAccretor(
-        seed_epsilon=_EPSILON, initial_profile="hydrostatic"
+        seed_epsilon=_EPSILON, initial_profile="hydrostatic", well_balanced=True
     )
 
 
@@ -191,7 +191,9 @@ def test_amplitude_scales_linearly_with_epsilon() -> None:
     """eps is the seed's single knob: the field is linear in it, so an ignition
     threshold found by scanning eps is a statement about one number."""
     problem = _problem()
-    half = type(problem)(seed_epsilon=0.5 * _EPSILON, initial_profile="hydrostatic")
+    half = type(problem)(
+        seed_epsilon=0.5 * _EPSILON, initial_profile="hydrostatic", well_balanced=True
+    )
     rng = np.random.default_rng(2)
     points = _shell(rng, 20.0 * problem.accretor_radius)
     full_speed = np.linalg.norm(_evaluate(problem, points), axis=1).mean()
@@ -207,13 +209,18 @@ def test_mode_table_is_deterministic_and_well_formed() -> None:
     be transverse (k . e = 0), or the field the backend builds as a curl carries a
     compressive part the construction claims it does not."""
     problem = _problem()
-    again = type(problem)(seed_epsilon=_EPSILON, initial_profile="hydrostatic")
+    again = type(problem)(
+        seed_epsilon=_EPSILON, initial_profile="hydrostatic", well_balanced=True
+    )
     first, second = np.asarray(problem._seed_mode_table()), np.asarray(again._seed_mode_table())
     assert first.shape == second.shape
     assert np.array_equal(first, second), "the mode table is not reproducible"
 
     other = type(problem)(
-        seed_epsilon=_EPSILON, initial_profile="hydrostatic", turb_seed=43
+        seed_epsilon=_EPSILON,
+        initial_profile="hydrostatic",
+        well_balanced=True,
+        turb_seed=43,
     )
     assert not np.array_equal(first, np.asarray(other._seed_mode_table())), (
         "turb_seed does not change the realization"
@@ -232,7 +239,9 @@ def test_seed_requires_the_stratified_start() -> None:
     refuse that pairing rather than run a seed whose weakness is radius-dependent."""
     problem = _problem()
     with pytest.raises(Exception, match="hydrostatic"):
-        type(problem)(seed_epsilon=_EPSILON, initial_profile="uniform")
+        type(problem)(
+            seed_epsilon=_EPSILON, initial_profile="uniform", well_balanced=True
+        )
 
 
 # =============================================================================
@@ -268,7 +277,10 @@ def test_the_starting_column_realizes_its_declared_index() -> None:
     base = _problem()
     for index in (1.0, 1.25, 1.5, 3.0):
         problem = type(base)(
-            seed_epsilon=_EPSILON, initial_profile="hydrostatic", initial_index=index
+            seed_epsilon=_EPSILON,
+            initial_profile="hydrostatic",
+            well_balanced=True,
+            initial_index=index,
         )
         r_acc = problem.accretor_radius
         radii = np.geomspace(5.0 * r_acc, 35.0 * r_acc, 40)
@@ -294,7 +306,10 @@ def test_the_family_relation_carries_both_branch_endpoints() -> None:
     supports = {}
     for index in (1.0, 1.25, 1.5):
         problem = type(base)(
-            seed_epsilon=_EPSILON, initial_profile="hydrostatic", initial_index=index
+            seed_epsilon=_EPSILON,
+            initial_profile="hydrostatic",
+            well_balanced=True,
+            initial_index=index,
         )
         r_acc = problem.accretor_radius
         radii = np.geomspace(5.0 * r_acc, 35.0 * r_acc, 40)
