@@ -26,9 +26,15 @@ use symbi_ir::algebra::Scalar;
 /// HLLC the regime emits at a face:
 ///
 ///   - `Standard`     — plain HLLC (toro / mignone-bodo star state).
-///   - `Fleischmann`  — newtonian only: HLLC + fleischmann et al. (2020)
-///                      adaptive-phi low-mach correction. relativistic
-///                      regimes ignore (no relativistic LM correction).
+///   - `Fleischmann`  — newtonian only: HLLC-LM exactly as published (`fleischmann_phi`),
+///                      the sine ramp on the acoustic signal speeds cut off at `MACH_LIMIT`.
+///                      relativistic regimes ignore it (no relativistic LM correction).
+///   - `FleischmannClamped` — newtonian only: the same ramp floored by a
+///                      compressibility-consistency clamp on the face pressure jump
+///                      (`adaptive_phi`). NOT in the published scheme; it restores classical
+///                      dissipation wherever the face pressure data contradicts the
+///                      incompressible fluctuation scaling, which on a gravity-stratified
+///                      background is most faces.
 ///   - `Acoustic`     — newtonian only: the same acoustic-dissipation scaling keyed on the
 ///                      ACOUSTIC CONTENT of the face data (`acoustic_phi`) rather than on a
 ///                      reference mach number. carries no tuned constant.
@@ -36,6 +42,7 @@ use symbi_ir::algebra::Scalar;
 pub enum ShockwaveLimiter {
     Standard,
     Fleischmann,
+    FleischmannClamped,
     Acoustic,
 }
 
@@ -86,6 +93,43 @@ pub const STRAT_MARGIN: f64 = 4.0;
 /// turbulence the low-mach scheme exists for.
 pub const INCOMP_JUMP_CEIL: f64 = 0.02;
 
+/// the acoustic-dissipation scaling AS PUBLISHED (Fleischmann, Adami & Adams 2020):
+///
+///   `phi = sin( min(1, Ma_local / MACH_LIMIT) * pi/2 )`,
+///
+/// applied to the acoustic signal speeds `S_L` and `S_R` alone, so the acoustic dissipation
+/// falls off in proportion to the local flow speed rather than the sound speed while the
+/// advective dissipation carried by the contact speed is untouched. the sine gives a smooth
+/// decay with zero derivative at the crossover, so a face drifting across `MACH_LIMIT` sees no
+/// kink in its flux; `phi = 1` recovers classical HLLC identically.
+///
+/// this is the whole modification the paper specifies — §4: "the effective range of the
+/// shock-transverse Mach number modification in the HLLC-LM solver is always limited to local
+/// Mach numbers lower than 0.1". the paper's validation suite includes a gravitational
+/// Rayleigh-Taylor instability, where the reduced contact-line dissipation is the reported
+/// benefit, so a stratified background is within the scheme's demonstrated range.
+///
+/// the scheme leaves the hydrostatic residual of a STAGNANT stratified column undamped: a
+/// limited reconstruction leaves an O(dx^2) face jump on a curved profile, the flux at rest is
+/// the upwind dissipation acting on it, and removing that dissipation lets the residual ring.
+/// the cure is to remove the jump — see `crate::hydrostatic` — not to restore the dissipation,
+/// which costs the low-mach accuracy everywhere the stratification reaches.
+/// `mach_limit` is the reference mach number the ramp saturates at, `MACH_LIMIT` in the paper's
+/// own experiments. it is a PARAMETER rather than a constant because it sets how much of the
+/// flow the reduction reaches, and the right value depends on what the run is resolving: the
+/// paper reports 0.1 for its shock suite, while a deeply subsonic flow whose whole dynamic range
+/// sits below that is unaffected by the ramp unless the limit is raised to meet it. two limits
+/// are degenerate rather than invalid — 0 reduces nothing and recovers classical HLLC
+/// everywhere, 1 reduces all the way to the sonic point — so the value is range-checked where a
+/// user sets it, not on this path.
+#[inline]
+pub fn fleischmann_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S, mach_limit: S) -> S {
+    let half_pi = S::from_f64(std::f64::consts::FRAC_PI_2);
+    let ma = local_mach(vn_l, vn_r, cs_l, cs_r);
+    let ratio = (ma / mach_limit).min(S::ONE);
+    (ratio * half_pi).sin()
+}
+
 /// the acoustic-dissipation scaling: the fleischmann sine ramp, floored by the
 /// compressibility-consistency clamp,
 ///
@@ -114,10 +158,14 @@ pub const INCOMP_JUMP_CEIL: f64 = 0.02;
 ///     here — robustness at strong shocks is the job of a solver fallback, not this scaling.
 #[inline]
 pub fn adaptive_phi<S: Scalar>(vn_l: S, vn_r: S, cs_l: S, cs_r: S, p_l: S, p_r: S) -> S {
-    let half_pi = S::from_f64(std::f64::consts::FRAC_PI_2);
     let ma = local_mach(vn_l, vn_r, cs_l, cs_r);
-    let ratio = (ma / S::from_f64(MACH_LIMIT)).min(S::ONE);
-    let ramp = (ratio * half_pi).sin();
+    // the ramp is the published scaling verbatim; the clamp below is the only departure, so
+    // there is one definition of the ramp and the two arms cannot drift apart. the reference
+    // mach number is FIXED at `MACH_LIMIT` on this arm: `INCOMP_JUMP_CEIL` is derived from it
+    // (the stagnation bump a flow below the limit can build, `gamma Ma_limit^2`), so a limit
+    // that moved without the ceiling moving with it would compare a jump against the wrong
+    // incompressible scale. the clamp-free arm carries the runtime knob.
+    let ramp = fleischmann_phi(vn_l, vn_r, cs_l, cs_r, S::from_f64(MACH_LIMIT));
     // relative face pressure jump against the largest jump an incompressible flow in the
     // ramp-active band can present: the local `STRAT_MARGIN Ma^2` fluctuation scale, floored
     // by the stagnation-pressure ceiling `INCOMP_JUMP_CEIL`. the floor is what keeps a

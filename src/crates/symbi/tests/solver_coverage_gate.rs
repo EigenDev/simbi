@@ -28,11 +28,22 @@ const HYDRO_REGIMES: &[(&str, &[Solver])] = &[
     ("iso", &[Solver::Hlle]),
 ];
 
-// the exact name the regime dispatch builds (geom suffix BEFORE the solver suffix).
+// the exact name the regime dispatch builds -- through the SAME composer the dispatch and the
+// bake use, never a local `format!`. this gate spelled it independently with the chart segment
+// BEFORE the solver, which is one of the three incompatible orders that let a curvilinear
+// kernel name diverge from its bake; a gate that re-derives the protocol it is checking can
+// only ever confirm its own copy of it.
 fn flux_name(prefix: &str, geom: &str, solver: Solver, d: usize, dir: usize) -> String {
-    format!(
-        "{prefix}_face_flux{geom}{}_{d}d_{dir}",
-        solver.kernel_suffix()
+    symbi_discretize::kernel_slug::face_flux_name(
+        prefix,
+        solver.kernel_suffix(),
+        "",
+        "",
+        "",
+        geom,
+        symbi_geometry::Spacetime::Minkowski,
+        d,
+        dir,
     )
 }
 

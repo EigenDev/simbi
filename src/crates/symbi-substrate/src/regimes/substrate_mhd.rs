@@ -345,20 +345,37 @@ where
         flat_suffix: &str,
         gr_solver: &str,
     ) -> String {
-        let st = spacetime_slug(sim.geom.spacetime);
-        if st.is_empty() {
-            let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
-            format!(
-                "{}_face_flux{gsfx}{flat_suffix}_{D}d_{dir}",
-                Self::kernel_prefix()
+        // ONE composition, both backgrounds. these were two `format!`s with the chart and the
+        // solver in OPPOSITE orders -- flat spelled `{chart}{solver}`, curved `{solver}{chart}`
+        // -- inside this one function. they never collided because the flat branch's chart is
+        // non-empty on exactly one grid (cylindrical r-z), so the disagreement was invisible
+        // until a solver was selected there. the SEGMENTS still differ by background (flat keys
+        // the chart on the r-z plane alone; curved keys it on the full grid-axis set, since a
+        // curved kernel is baked per chart), and that difference is real; the ORDER is not, and
+        // now lives in `face_flux_name` with every other flux.
+        let flat = spacetime_slug(sim.geom.spacetime).is_empty();
+        let (solver_sfx, chart_sfx) = if flat {
+            (
+                flat_suffix,
+                mhd_flux_suffix(sim.geom.coords, &sim.geom.axes),
             )
         } else {
-            let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-            format!(
-                "{}_face_flux{gr_solver}{gsfx}{st}_{D}d_{dir}",
-                Self::kernel_prefix()
+            (
+                gr_solver,
+                mhd_geom_suffix(sim.geom.coords, &sim.geom.axes),
             )
-        }
+        };
+        symbi_discretize::kernel_slug::face_flux_name(
+            Self::kernel_prefix(),
+            solver_sfx,
+            "",
+            "",
+            "",
+            chart_sfx,
+            sim.geom.spacetime,
+            D,
+            dir,
+        )
     }
 
     /// the face-flux kernel the PRODUCTION sweep runs for `dir` under the configured solver.

@@ -17,7 +17,7 @@
 // =============================================================================
 
 use super::hlle::hlle;
-use crate::dissipation::{ShockwaveLimiter, acoustic_phi, adaptive_phi};
+use crate::dissipation::{ShockwaveLimiter, acoustic_phi, adaptive_phi, fleischmann_phi};
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::newtonian::Newtonian;
@@ -168,8 +168,9 @@ pub fn hllc<S: Scalar, const D: usize>(
     nhat: &Tensor<S, D>,
     vface: S,
     shock_smoother: ShockwaveLimiter,
+    mach_limit: S,
 ) -> Cons<S, D> {
-    hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, shock_smoother)
+    hllc_newtonian_body(eos, prim_l, prim_r, nhat, vface, shock_smoother, mach_limit)
 }
 
 /// the newtonian HLLC body — Standard / Fleischmann star-state dispatch,
@@ -183,6 +184,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
     nhat: &Tensor<S, D>,
     vface: S,
     shock_smoother: ShockwaveLimiter,
+    mach_limit: S,
 ) -> Cons<S, D> {
     let regime = Newtonian;
     let u_l = prim_l.to_conserved(eos);
@@ -249,7 +251,9 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
         // subsonic intermediate flux, and where the whole fan travels one way the physical flux is
         // the upwind one. dropping those branches leaves a supersonic face carrying `F_* != F_L`,
         // an error of several percent that no amount of dissipation tuning removes.
-        ShockwaveLimiter::Fleischmann | ShockwaveLimiter::Acoustic => S::branch(
+        ShockwaveLimiter::Fleischmann
+        | ShockwaveLimiter::FleischmannClamped
+        | ShockwaveLimiter::Acoustic => S::branch(
             s_l.cmp_ge(vface),
             || f_l - u_l * vface,
             || {
@@ -270,7 +274,12 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                                 vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre, prim_l.rho,
                                 prim_r.rho, S::ZERO,
                             ),
-                            _ => adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre),
+                            ShockwaveLimiter::FleischmannClamped => {
+                                adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre)
+                            }
+                            // `Standard` never reaches this branch; `Fleischmann` is the
+                            // published ramp, with no clamp on the pressure jump.
+                            _ => fleischmann_phi(vn_l, vn_r, cs_l, cs_r, mach_limit),
                         };
                         let s_l_lm = phi * s_l;
                         let s_r_lm = phi * s_r;
@@ -458,7 +467,9 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                         // lorentz factor, which at a grid-aligned shock is dominated by the
                         // TRANSVERSE motion — reintroducing exactly the contamination that keying on
                         // the face-normal component removes.
-                        ShockwaveLimiter::Fleischmann | ShockwaveLimiter::Acoustic => {
+                        ShockwaveLimiter::Fleischmann
+                        | ShockwaveLimiter::FleischmannClamped
+                        | ShockwaveLimiter::Acoustic => {
                             let cs_l =
                                 crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
                             let cs_r =
@@ -470,8 +481,20 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                                     vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre,
                                     prim_l.rho, prim_r.rho, S::ZERO,
                                 ),
-                                _ => adaptive_phi(
+                                ShockwaveLimiter::FleischmannClamped => adaptive_phi(
                                     vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre,
+                                ),
+                                // the relativistic arm carries no runtime reference mach
+                                // number: its LM selector is the clamped one, so this
+                                // branch is unreachable and the published default keeps the
+                                // expression well-defined without inventing a knob the
+                                // relativistic dispatch cannot bind.
+                                _ => fleischmann_phi(
+                                    vn_l,
+                                    vn_r,
+                                    cs_l,
+                                    cs_r,
+                                    S::from_f64(crate::dissipation::MACH_LIMIT),
                                 ),
                             };
 
@@ -820,6 +843,7 @@ fn hllc_nmhd_body<S: Scalar, const D: usize>(
 
 #[cfg(test)]
 mod tests {
+    use crate::dissipation::MACH_LIMIT;
     use super::*;
     use crate::eos::IdealGas;
 
@@ -836,7 +860,7 @@ mod tests {
             pre: 1.0,
         };
         let nhat = Tensor::unit(0);
-        let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
+        let flux = hllc(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
@@ -854,7 +878,7 @@ mod tests {
         };
 
         let nhat_x = Tensor::unit(0);
-        let flux_x = hllc(&eos, &prim, &prim, &nhat_x, 0.0, ShockwaveLimiter::Standard);
+        let flux_x = hllc(&eos, &prim, &prim, &nhat_x, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
         let regime = Newtonian;
         let exact_x = regime.to_flux(&prim, &nhat_x, &eos);
         assert!(approx(flux_x.den, exact_x.den));
@@ -863,7 +887,7 @@ mod tests {
         assert!(approx(flux_x.nrg, exact_x.nrg));
 
         let nhat_y = Tensor::unit(1);
-        let flux_y = hllc(&eos, &prim, &prim, &nhat_y, 0.0, ShockwaveLimiter::Standard);
+        let flux_y = hllc(&eos, &prim, &prim, &nhat_y, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
         let exact_y = regime.to_flux(&prim, &nhat_y, &eos);
         assert!(approx(flux_y.den, exact_y.den));
         assert!(approx(flux_y.mom[0], exact_y.mom[0]));
@@ -893,6 +917,7 @@ mod tests {
             &nhat,
             0.0,
             ShockwaveLimiter::Standard,
+            MACH_LIMIT,
         );
         assert!(flux.den > 0.0);
         assert!(flux.nrg > 0.0);
@@ -921,6 +946,7 @@ mod tests {
             &Tensor::unit(0),
             0.0,
             ShockwaveLimiter::Standard,
+            MACH_LIMIT,
         );
 
         let prim_l_y = Prim {
@@ -940,6 +966,7 @@ mod tests {
             &Tensor::unit(1),
             0.0,
             ShockwaveLimiter::Standard,
+            MACH_LIMIT,
         );
 
         assert!(approx(flux_x.den, flux_y.den));
@@ -976,8 +1003,8 @@ mod tests {
                 vel: Tensor::new([vr, 0.0]),
                 pre: pr,
             };
-            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard);
-            let lm = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Fleischmann);
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
+            let lm = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Fleischmann, MACH_LIMIT);
             let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0e-30);
             assert!(
                 rel(std.den, lm.den) < 1.0e-14 && rel(std.nrg, lm.nrg) < 1.0e-14,
@@ -1038,6 +1065,7 @@ mod tests {
             &nhat,
             0.0,
             ShockwaveLimiter::Fleischmann,
+            MACH_LIMIT,
         );
         let regime = Newtonian;
         let exact = regime.to_flux(&prim, &nhat, &eos);
@@ -1507,8 +1535,8 @@ mod tests {
                 "this face does not saturate the sensor (phi = {phi}); it cannot test the \
                  phi = 1 equivalence"
             );
-            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard);
-            let acu = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Acoustic);
+            let std = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Standard, MACH_LIMIT);
+            let acu = hllc(&eos, &l, &r, &nhat, 0.0, ShockwaveLimiter::Acoustic, MACH_LIMIT);
             let scale = std.den.abs().max(std.nrg.abs()).max(1.0);
             for (what, a, b) in [
                 ("den", std.den, acu.den),
@@ -1557,7 +1585,7 @@ mod tests {
                 (fl + fr) * 0.5
             };
             let dissipation = |lim| {
-                let f = hllc(&eos, &l, &r, &nhat, 0.0, lim);
+                let f = hllc(&eos, &l, &r, &nhat, 0.0, lim, MACH_LIMIT);
                 (f.mom[0] - central.mom[0]).abs()
             };
             let fleisch = dissipation(ShockwaveLimiter::Fleischmann);

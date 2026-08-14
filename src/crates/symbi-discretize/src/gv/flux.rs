@@ -1425,18 +1425,21 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
         &nhat,
         vface,
         ShockwaveLimiter::Standard,
+        Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
     );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
 
-/// adiabatic HLLC-LM face flux: the same builder as `adiabatic_hllc_flux_gv` but with the
-/// FLEISCHMANN et al. (2020) low-mach / low-dissipation arm -- the anti-diffusive star-state flux is
-/// scaled by the adaptive `phi` (local mach, with shock / interface / alignment overrides), which
-/// recovers standard HLLC at supersonic faces and central differencing at zero mach. cures the
-/// grid-aligned shock instability AND the HLLC low-mach over-dissipation. newtonian only (the
-/// relativistic HLLC bodies ignore the LM correction). the `phi` helpers are fully branchless
-/// (`S::select`), so the fleischmann arm traces at S = Gv just like the Standard arm.
+/// adiabatic HLLC-LM face flux with the COMPRESSIBILITY CLAMP: the fleischmann low-mach ramp
+/// floored by a consistency check on the face pressure jump, which restores classical HLLC
+/// dissipation wherever the pressure data contradicts the incompressible fluctuation scaling
+/// `dp/p ~ gamma Ma^2`. the clamp is NOT part of the published scheme; on a gravity-stratified
+/// background the hydrostatic jump `dx/H` exceeds the incompressible ceiling on most faces and
+/// the clamp saturates, so this arm behaves as classical HLLC through a stratified atmosphere.
+/// `adiabatic_hllc_lm_flux_gv` is the published scaling; this one is retained because the clamp
+/// is what holds the adiabatic entropy floor on a STAGNANT stratified column, the regime a solid
+/// wall keeps its masked cells in, when the reconstruction is not itself well-balanced.
 pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
@@ -1453,7 +1456,50 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
         &right,
         &nhat,
         vface,
+        ShockwaveLimiter::FleischmannClamped,
+        Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
+    );
+    let writes = euler_flux_writes(&flux);
+    (end_trace(), writes)
+}
+
+/// adiabatic HLLC-LM face flux AS PUBLISHED (Fleischmann, Adami & Adams 2020): the
+/// anti-diffusive star-state flux is scaled by `sin(min(1, Ma/0.1) pi/2)` on the FACE-NORMAL
+/// mach number, recovering classical HLLC above Ma = 0.1 and falling with the flow speed below
+/// it. cures the grid-aligned shock instability AND the HLLC low-mach over-dissipation, with no
+/// clamp on the pressure jump. newtonian only (the relativistic HLLC bodies ignore the LM
+/// correction). the `phi` helpers are fully branchless (`S::select`), so the fleischmann arm
+/// traces at S = Gv just like the Standard arm.
+pub fn adiabatic_hllc_lm_plain_flux_gv<const D: usize>(
+    dir: u8,
+    recon: Recon,
+    coords: Coords,
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let eos = IdealGas {
+        gamma: Gv::scalar("gamma"),
+    };
+    // the WELL-BALANCED reconstruction rides this arm alone. it is what makes the clamp-free
+    // ramp usable on a stratified background: the ramp removes the acoustic dissipation that
+    // would otherwise damp the hydrostatic residual, so the residual has to be absent rather
+    // than damped. every other flux kernel keeps the plain reconstruction and is untouched --
+    // no bake growth, no extra arithmetic, and no chance of a one-ulp shift in an existing
+    // result. it also needs COORDS, which the plain adiabatic flux does not: the potential is
+    // evaluated at cartesian positions and the chart is what maps them.
+    let (left, right, nhat, vface) =
+        euler_reconstruct_wb::<D>(D as u8, dir, recon, symbi_ib::MAX_SOURCE_BODIES, coords, axes);
+    let flux = hllc(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        vface,
         ShockwaveLimiter::Fleischmann,
+        // the reference mach number is a RUNTIME kernel scalar on this arm: it decides how
+        // much of the flow the acoustic reduction reaches, and a deeply subsonic problem
+        // whose whole range sits under the published 0.1 needs it raised to meet the flow.
+        Gv::scalar("mach_limit"),
     );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
@@ -1473,7 +1519,15 @@ pub fn adiabatic_hllc_acoustic_flux_gv<const D: usize>(
     };
     let (left, right, nhat, vface) =
         euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
-    let flux = hllc(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Acoustic);
+    let flux = hllc(
+        &eos,
+        &left,
+        &right,
+        &nhat,
+        vface,
+        ShockwaveLimiter::Acoustic,
+        Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
+    );
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
@@ -1511,7 +1565,7 @@ pub fn rhd_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
     eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Fleischmann, eos_arm)
+    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::FleischmannClamped, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field
@@ -1560,4 +1614,111 @@ pub fn rmhd_hlld_flux_gv(
     );
     let writes = nmhd_flux_writes(&flux);
     (end_trace(), writes)
+}
+
+/// WELL-BALANCED euler reconstruction: the same limiter as `euler_reconstruct`, applied to each
+/// cell's DEPARTURE from the hydrostatic profile through it rather than to the state itself, so a
+/// discretely balanced atmosphere presents no face jump and the clamp-free low-mach ramp has no
+/// residual to leave undamped.
+///
+/// TWO ANCHORS PER FACE, one per side, and that is correctness rather than duplicated work. the
+/// departure at the anchor is exactly zero, so the limiter's one-sided differences about it reduce
+/// to `0 - d` and `d - 0` — the plain differences EXACTLY, not to rounding. anchoring both sides on
+/// one cell would leave every difference as `(q_j - c) - (q_k - c)` and forfeit the gravity-free
+/// reduction. the stencil operator is called once per anchor and only that side's output is kept.
+///
+/// the VELOCITIES carry no profile: the equilibrium is at rest, so their departure is the state
+/// and they reconstruct plainly.
+///
+/// with no bodies every potential is exactly zero, the enthalpy ratio is exactly one, and the
+/// departures are exact differences — so this reduces to `euler_reconstruct` bit-for-bit under plm
+/// and to within roundoff under ppm (a parabola is a weighted sum, whose re-centring rounds).
+fn euler_reconstruct_wb<const D: usize>(
+    ndim: u8,
+    dir: u8,
+    recon: Recon,
+    n_bodies: usize,
+    coords: Coords,
+    axes: &[usize],
+) -> (Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
+    use symbi_hydro::hydrostatic::{LocalEquilibrium, Thermodynamic, hydrostatic_deviations};
+
+    let theta = Gv::scalar("theta");
+    let spacing = vec![Spacing::Uniform; ndim as usize];
+    // offsets the limiter reads, and the half-cell ladder position of each cell CENTRE. the
+    // shared face sits on the lower face of cell 0, which is half-cell 0.
+    let (offsets, anchor_l, anchor_r): (&[i32], usize, usize) = match recon {
+        Recon::Plm => (&[-2, -1, 0, 1], 1, 2),
+        Recon::Ppm => (&[-3, -2, -1, 0, 1, 2], 2, 3),
+    };
+    let phi_at = |half_cells: i64| {
+        crate::gv_immersed::stencil_potential_gv(
+            n_bodies, coords, ndim as usize, dir as usize, axes, &spacing, half_cells,
+        )
+    };
+    let phi_face = phi_at(0);
+    let phi: Vec<Gv> = offsets.iter().map(|&k| phi_at(2 * k as i64 + 1)).collect();
+
+    let read = |key: &str, f: &str| -> Vec<Gv> {
+        offsets
+            .iter()
+            .map(|&k| Gv::field_shifted(key, f, ndim, dir, k))
+            .collect()
+    };
+    let rho = read("prim_rho", "prim.rho");
+    let pre = read("prim_pre", "prim.pre");
+
+    // one side's face value: departures against that side's own cell, the stencil operator, and
+    // the profile added back at the face.
+    let side = |q: &[Gv], anchor: usize, which: Thermodynamic, take_left: bool| -> Gv {
+        let eq = LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], Gv::scalar("gamma"));
+        let d: Vec<Gv> = q
+            .iter()
+            .zip(phi.iter())
+            .map(|(&qk, &pk)| {
+                qk - match which {
+                    Thermodynamic::Density => eq.density_at(pk),
+                    Thermodynamic::Pressure => eq.pressure_at(pk),
+                }
+            })
+            .collect();
+        let pair = match recon {
+            Recon::Plm => crate::gv::plm_theta_from_stencil(d[0], d[1], d[2], d[3], theta),
+            Recon::Ppm => crate::gv::ppm_from_stencil(d[0], d[1], d[2], d[3], d[4], d[5]),
+        };
+        let base = match which {
+            Thermodynamic::Density => eq.density_at(phi_face),
+            Thermodynamic::Pressure => eq.pressure_at(phi_face),
+        };
+        base + if take_left { pair.0 } else { pair.1 }
+    };
+    let _ = hydrostatic_deviations::<Gv, 4>; // the host-proved transform; inlined above for Gv arity
+
+    let rho_l = side(&rho, anchor_l, Thermodynamic::Density, true);
+    let rho_r = side(&rho, anchor_r, Thermodynamic::Density, false);
+    let pre_l = side(&pre, anchor_l, Thermodynamic::Pressure, true);
+    let pre_r = side(&pre, anchor_r, Thermodynamic::Pressure, false);
+
+    let mut vl = Vec::with_capacity(D);
+    let mut vr = Vec::with_capacity(D);
+    for k in 0..D {
+        let (l, r) = recon_gv(
+            &format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8),
+            ndim,
+            dir,
+            theta,
+            recon,
+        );
+        vl.push(l);
+        vr.push(r);
+    }
+    let nhat = Tensor::unit(dir as usize);
+    let vface = mesh_face_velocity_gv(dir);
+    (
+        Prim { rho: rho_l, vel: Tensor::new(std::array::from_fn(|k| vl[k])), pre: pre_l },
+        Prim { rho: rho_r, vel: Tensor::new(std::array::from_fn(|k| vr[k])), pre: pre_r },
+        nhat,
+        vface,
+    )
 }

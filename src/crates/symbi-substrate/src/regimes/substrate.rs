@@ -329,6 +329,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             symbi_discretize::Recon::Plm,
             symbi_discretize::EosArm::IdealGamma,
             (0.0, 0.0),
+            symbi_hydro::dissipation::MACH_LIMIT,
             false,
         );
     }
@@ -665,6 +666,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     symbi_discretize::Recon::Plm,
                     symbi_discretize::EosArm::IdealGamma,
                     (0.0, 0.0),
+                    symbi_hydro::dissipation::MACH_LIMIT,
                     false,
                 )
             },

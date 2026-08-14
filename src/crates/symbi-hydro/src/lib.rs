@@ -21,6 +21,7 @@ pub mod expr_bridge;
 #[cfg(feature = "gpu")]
 pub mod gpu_launcher;
 pub mod gpu_source_kernel;
+pub mod hydrostatic;
 pub mod isothermal;
 pub mod isothermal_mhd;
 pub mod mhd_state;

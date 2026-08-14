@@ -1304,6 +1304,30 @@ fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Reco
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the clamp-free arm carries the WELL-BALANCED reconstruction, which evaluates the body
+// potential at cartesian positions — so unlike every other adiabatic flux it is baked PER CHART.
+fn gen_adiabatic_hllc_lm_plain_face_flux(
+    out_dir: &str,
+    ndim: u8,
+    dir: u8,
+    recon: Recon,
+    coords: Coords,
+) {
+    let g = Geom::identity(coords, ndim);
+    let name = format!(
+        "adiabatic_face_flux_hllc_lm_plain{}{}_{ndim}d_{dir}",
+        recon.suffix(),
+        coords_suffix(coords)
+    );
+    let (k, writes) = match ndim {
+        1 => symbi_discretize::gv::adiabatic_hllc_lm_plain_flux_gv::<1>(dir, recon, coords, &g.axes),
+        2 => symbi_discretize::gv::adiabatic_hllc_lm_plain_flux_gv::<2>(dir, recon, coords, &g.axes),
+        3 => symbi_discretize::gv::adiabatic_hllc_lm_plain_flux_gv::<3>(dir, recon, coords, &g.axes),
+        _ => panic!("adiabatic_hllc_lm_plain_flux_gv: unsupported ndim {ndim}"),
+    };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_adiabatic_hllc_acoustic_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
     let name = format!(
         "adiabatic_face_flux_hllc_acoustic{}_{ndim}d_{dir}",
@@ -3445,6 +3469,10 @@ fn main() {
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Plm);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir, Recon::Ppm);
+            for cc in [Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
+                gen_adiabatic_hllc_lm_plain_face_flux(&out_dir, ndim, dir, Recon::Plm, cc);
+                gen_adiabatic_hllc_lm_plain_face_flux(&out_dir, ndim, dir, Recon::Ppm, cc);
+            }
             gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Plm);
             gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Ppm);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
@@ -3865,7 +3893,7 @@ fn main() {
             let (k, w) = symbi_discretize::gv::rmhd_hllc_flux_gv(2, dir, cn);
             emit_gv(
                 &out_dir,
-                &format!("rmhd_face_flux_cyl_rz_hllc_2d_{dir}"),
+                &format!("rmhd_face_flux_hllc_cyl_rz_2d_{dir}"),
                 2,
                 &k,
                 &w,
@@ -3873,7 +3901,7 @@ fn main() {
             let (k, w) = symbi_discretize::gv::rmhd_hlld_flux_gv(2, dir, cn);
             emit_gv(
                 &out_dir,
-                &format!("rmhd_face_flux_cyl_rz_hlld_2d_{dir}"),
+                &format!("rmhd_face_flux_hlld_cyl_rz_2d_{dir}"),
                 2,
                 &k,
                 &w,
@@ -3895,7 +3923,7 @@ fn main() {
             let (k, w) = symbi_discretize::gv::nmhd_hllc_flux_gv(2, dir, cn);
             emit_gv(
                 &out_dir,
-                &format!("nmhd_face_flux_cyl_rz_hllc_2d_{dir}"),
+                &format!("nmhd_face_flux_hllc_cyl_rz_2d_{dir}"),
                 2,
                 &k,
                 &w,
@@ -3903,7 +3931,7 @@ fn main() {
             let (k, w) = symbi_discretize::gv::nmhd_hlld_flux_gv(2, dir, cn);
             emit_gv(
                 &out_dir,
-                &format!("nmhd_face_flux_cyl_rz_hlld_2d_{dir}"),
+                &format!("nmhd_face_flux_hlld_cyl_rz_2d_{dir}"),
                 2,
                 &k,
                 &w,
@@ -3925,7 +3953,7 @@ fn main() {
             let (k, w) = symbi_discretize::gv::imhd_hlld_flux_gv(2, dir, cn);
             emit_gv(
                 &out_dir,
-                &format!("imhd_face_flux_cyl_rz_hlld_2d_{dir}"),
+                &format!("imhd_face_flux_hlld_cyl_rz_2d_{dir}"),
                 2,
                 &k,
                 &w,

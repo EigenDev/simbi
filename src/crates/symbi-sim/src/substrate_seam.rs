@@ -269,8 +269,22 @@ pub trait WithExcision: Sized {
 pub enum Solver {
     Hlle,
     Hllc,
-    /// HLLC with the Fleischmann (2020) low-mach / low-dissipation correction (newtonian only).
+    /// HLLC with the Fleischmann (2020) low-mach ramp FLOORED BY A COMPRESSIBILITY CLAMP on the
+    /// face pressure jump (newtonian and RHD). the clamp is not part of the published scheme: it
+    /// restores classical HLLC dissipation wherever the pressure data contradicts the
+    /// incompressible fluctuation scaling `dp/p ~ gamma Ma^2`. on a gravity-stratified background
+    /// the hydrostatic jump `dx/H` exceeds that scale on most faces and the clamp saturates, so
+    /// this arm behaves as classical HLLC through a stratified atmosphere. what it buys is the
+    /// adiabatic entropy floor on a STAGNANT stratified column, which the ramp alone does not hold
+    /// unless the reconstruction is itself well-balanced.
     HllcLm,
+    /// HLLC with the Fleischmann (2020) low-mach correction EXACTLY AS PUBLISHED: the sine ramp
+    /// `sin(min(1, Ma/0.1) pi/2)` on the acoustic signal speeds, no clamp (newtonian only).
+    /// this is the scheme whose validation suite includes a gravitational Rayleigh-Taylor
+    /// instability, so a stratified background is inside its demonstrated range. it leaves the
+    /// hydrostatic residual of a stagnant column undamped, so it wants a well-balanced
+    /// reconstruction underneath it — see `symbi_hydro::hydrostatic`.
+    HllcLmPlain,
     /// HLLC whose acoustic dissipation is scaled by the ACOUSTIC CONTENT of the face data —
     /// the fraction of the impedance relation `dp = rho c du` the jumps actually carry —
     /// rather than by the local mach number against a reference value. newtonian only.
@@ -281,12 +295,28 @@ pub enum Solver {
 }
 
 impl Solver {
+    /// every variant, in declaration order. gates and sweeps MUST iterate this rather than a
+    /// hand-written array: both coverage gates listed solvers by hand and both silently omitted
+    /// `HllcAcoustic` for as long as it has shipped, so the gate whose whole job is "no accepted
+    /// (solver, regime) pair lacks a baked kernel" was blind to one of them. a `match` here
+    /// would not help — an array literal is not exhaustiveness-checked — so the array lives
+    /// beside the enum and the length assertion below fails the build if the two drift.
+    pub const ALL: &'static [Solver] = &[
+        Solver::Hlle,
+        Solver::Hllc,
+        Solver::HllcLm,
+        Solver::HllcLmPlain,
+        Solver::HllcAcoustic,
+        Solver::Hlld,
+    ];
+
     /// kernel-name suffix: matches the AOT emit names in `symbi-aot/build.rs`.
     pub fn kernel_suffix(self) -> &'static str {
         match self {
             Solver::Hlle => "",
             Solver::Hllc => "_hllc",
             Solver::HllcLm => "_hllc_lm",
+            Solver::HllcLmPlain => "_hllc_lm_plain",
             Solver::HllcAcoustic => "_hllc_acoustic",
             Solver::Hlld => "_hlld",
         }
@@ -327,6 +357,10 @@ impl Solver {
             // reformulation has not been shown to be an identity there, and a scaling applied to a
             // non-identity is a different solver rather than a modified one.
             Solver::HllcLm => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
+            // the PUBLISHED ramp is emitted for newtonian euler only: the clamp-free
+            // arm exists to be run under a well-balanced reconstruction, and that
+            // reconstruction is built on the newtonian polytropic isentrope.
+            Solver::HllcLmPlain => matches!(regime, RegimeKind::Newtonian),
             // HLLC-ACOUSTIC: the same centralized reformulation as HLLC-LM with a different
             // sensor, so it inherits that arm's requirement exactly. NEWTONIAN ONLY for now:
             // the impedance relation `dp = rho c du` the sensor measures against is the
@@ -457,3 +491,26 @@ mod solver_matrix_tests {
         }
     }
 }
+
+/// ADDING A VARIANT WITHOUT EXTENDING `Solver::ALL` FAILS HERE. the match is exhaustive, so a
+/// new variant is a compile error rather than a silently-unswept solver; the arm's only job is
+/// to state the count that `ALL` must have.
+const _: () = {
+    let expected = {
+        let mut n = 0;
+        // one arm per variant; the compiler rejects a new variant that is not listed.
+        let all = [
+            Solver::Hlle,
+            Solver::Hllc,
+            Solver::HllcLm,
+            Solver::HllcLmPlain,
+            Solver::HllcAcoustic,
+            Solver::Hlld,
+        ];
+        while n < all.len() {
+            n += 1;
+        }
+        n
+    };
+    assert!(Solver::ALL.len() == expected);
+};

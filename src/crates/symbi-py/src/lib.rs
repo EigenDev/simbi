@@ -104,6 +104,7 @@ struct Config {
     ppm_flatten_full: f64,
     timestepping: Timestepping,
     plm_theta: f64,
+    mach_limit: f64,
     dlogt: f64,
     viscosity: f64,
     /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key.
@@ -741,6 +742,7 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
         "hllc" => Ok(Solver::Hllc),
         // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
         "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
+        "hllc_lm_plain" | "hllc-lm-plain" => Ok(Solver::HllcLmPlain),
         // acoustic-consistency scaling: no reference mach number (newtonian only).
         "hllc_acoustic" | "hllc-acoustic" => Ok(Solver::HllcAcoustic),
         "hlld" => Ok(Solver::Hlld),
@@ -1045,6 +1047,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         ppm_flatten_full: get_f64_or(dict, "ppm_flatten_full", 0.0),
         timestepping: timestepping_from_str(&enum_str(dict, "timestepping")?)?,
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
+        mach_limit: get_f64_or(dict, "mach_limit", symbi_hydro::dissipation::MACH_LIMIT),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "viscosity_alpha", 0.0),
@@ -4177,6 +4180,7 @@ macro_rules! build_and_run_hydro {
             .theta(theta)
             .reconstruction(build_recon(cfg))
             .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                .mach_limit(cfg.mach_limit)
             .with_eos(build_eos(cfg))
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
@@ -4237,6 +4241,7 @@ macro_rules! build_and_run_hydro {
                 .theta(theta)
                 .reconstruction(build_recon(cfg))
                 .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                .mach_limit(cfg.mach_limit)
                 .with_eos(build_eos(cfg))
                 .with_solver(solver)
                 .expect("fine-level kernel set")

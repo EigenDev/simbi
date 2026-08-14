@@ -2667,6 +2667,10 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // full <= onset — is the pure parabola; only the ppm kernels declare the
     // scalars, so the values are inert on every other reconstruction.
     flatten: (f64, f64),
+    // the reference mach number the PUBLISHED low-mach ramp saturates at, bound to the
+    // clamp-free kernel's `mach_limit` scalar. only that arm declares it, so this value is
+    // inert on every other solver.
+    mach_limit: f64,
     rusanov: bool,
 ) where
     Mem: MemorySpace + Sync,
@@ -2723,19 +2727,28 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // fan — a distinct baked kernel (`_rusanov`), the provably admissibility-preserving low-order
     // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
     // theta = 0 through the normal solver suffix.
+    // the clamp-free low-mach arm carries the well-balanced reconstruction, whose potential is
+    // evaluated at cartesian positions, so it is the ONE flux baked per chart. the chart rides
+    // its OWN segment beside the reconstruction rather than being folded into the solver's,
+    // because it is a property of the reconstruction; `face_flux_name` owns the order.
+    let wb_chart = if solver == Solver::HllcLmPlain {
+        symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords)
+    } else {
+        ""
+    };
     let solver_sfx = if rusanov {
         "_rusanov"
     } else {
         solver.kernel_suffix()
     };
-    // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the spacetime
-    // slug (`rhd_face_flux{_schw|_ks}_{D}d_{dir}`), baked only for a curved spacetime. flat
-    // (Minkowski) keeps the unsuffixed flux, so the slug is appended ONLY off-Minkowski.
-    let sp_st_sfx = spacetime_slug(sim.geom.spacetime);
+    // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the
+    // spacetime slug (`rhd_face_flux{_schw|_ks}_{D}d_{dir}`), baked only for a curved
+    // spacetime. flat (Minkowski) keeps the unsuffixed flux; `face_flux_name` appends the slug.
     let recon_sfx = recon.suffix();
     let eos_sfx = eos.suffix();
-    let name =
-        format!("{prefix}_face_flux{solver_sfx}{recon_sfx}{eos_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
+    let name = symbi_discretize::kernel_slug::face_flux_name(
+        prefix, solver_sfx, recon_sfx, wb_chart, eos_sfx, geom_sfx, sim.geom.spacetime, D, dir,
+    );
     // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
     // declaring theta on the kernel can never silently shift a positional arg here.
@@ -2772,11 +2785,25 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Spec(spec) if &**spec == "flatten_full" => {
                 return Sc::from_f64(flatten.1);
             }
+            // only the clamp-free HLLC-LM kernel declares this scalar, so the arm is
+            // unreachable on any other solver.
+            ScalarBind::Spec(spec) if &**spec == "mach_limit" => {
+                return Sc::from_f64(mach_limit);
+            }
             other => panic!("dispatch_flux: unexpected spec scalar {other:?}"),
         };
         match *sref {
             ScalarRef::Gamma => Sc::from_f64(primary),
             ScalarRef::Theta => Sc::from_f64(theta),
+            // the well-balanced reconstruction reads the SAME body params the forward source
+            // does, so what it balances against is the discrete force the scheme exerts rather
+            // than an analytic profile that agrees with it only to truncation order. a sim with
+            // no immersed side-car resolves every slot to zero, which zeroes the potential and
+            // returns the reconstruction to the plain one identically.
+            ScalarRef::Body { idx, field } => {
+                let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
+                Sc::from_f64(body_scalar::<D>(bodies, idx, field))
+            }
             // the GR flux builds the in-kernel spatial metric at the face from the lapse mass M.
             ScalarRef::SchwarzschildMass => Sc::from_f64(
                 sim.geom.spacetime_scalars.iter()

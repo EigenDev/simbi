@@ -75,6 +75,11 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
+    /// the reference mach number the PUBLISHED low-mach ramp saturates at. carried so the
+    /// builder chain is uniform across regimes and forwarded to the flux dispatch exactly as
+    /// `flatten` is; no relativistic kernel DECLARES the scalar, because the relativistic LM
+    /// arm is the clamped one, so the binding arm is unreachable here rather than ignored.
+    pub mach_limit: f64,
     pub cfl_scratch: Field<Sc, D, Mem>,
     /// Riemann solver — HLLE (default) or HLLC (contact-resolving, Mignone-Bodo
     /// 2005). tunable via `.with_solver(Solver::Hllc)`.
@@ -124,6 +129,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             gamma,
             cfl_number,
             theta: 1.0,
+            mach_limit: symbi_hydro::dissipation::MACH_LIMIT,
             cfl_scratch,
             solver: Solver::Hlle,
             runtime_source: None,
@@ -222,6 +228,18 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 
     /// set the theta-MC limiter compression in [1,2] (1 = minmod, 2 = monotonized-central). fluent.
+    /// set the reference mach number the published low-mach ramp saturates at. accepted for
+    /// builder uniformity; the relativistic LM arm is the clamped one, so no relativistic
+    /// kernel reads it. fluent.
+    pub fn mach_limit(mut self, mach_limit: f64) -> Self {
+        assert!(
+            (0.0..=1.0).contains(&mach_limit),
+            "mach_limit must lie in [0, 1]; got {mach_limit}"
+        );
+        self.mach_limit = mach_limit;
+        self
+    }
+
     pub fn theta(mut self, theta: f64) -> Self {
         self.theta = theta;
         self
@@ -255,6 +273,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             symbi_discretize::Recon::Plm,
             self.eos,
             (0.0, 0.0),
+            self.mach_limit,
             false,
         );
     }
@@ -696,6 +715,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     symbi_discretize::Recon::Plm,
                     self.eos,
                     (0.0, 0.0),
+                    self.mach_limit,
                     curved,
                 )
             },

@@ -397,7 +397,10 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
         (RegimeKind::Rmhd, "rmhd", &[1, 3][..]),
         (RegimeKind::NewtonianMhd, "nmhd", &[1, 3][..]),
     ];
-    let solvers = [Solver::Hlle, Solver::Hllc, Solver::HllcLm, Solver::Hlld];
+    // ENUMERATE FROM THE TYPE. a hand-written array is what let `HllcAcoustic` ship unswept:
+    // this gate's own header claims "widening the matrix to admit a new (solver, regime) pair
+    // leaves them all green", and that is exactly what happened.
+    let solvers = Solver::ALL;
 
     let mut missing = Vec::new();
     let mut checked = 0usize;

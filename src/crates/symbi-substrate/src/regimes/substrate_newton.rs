@@ -132,6 +132,9 @@ pub struct AdiabaticSubstrateKernelSet<
     pub recon: symbi_discretize::Recon,
     /// ppm flatten dials (onset, full); (0, 0) = pure parabola. see `ppm_flatten`.
     pub flatten: (f64, f64),
+    /// the reference mach number the PUBLISHED low-mach ramp saturates at. read only by
+    /// `Solver::HllcLmPlain`; inert on every other solver. see `mach_limit`.
+    pub mach_limit: f64,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
     /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
@@ -165,6 +168,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             gradient_bcs: Vec::new(),
             solver: Solver::Hlle,
             flatten: (0.0, 0.0),
+            mach_limit: symbi_hydro::dissipation::MACH_LIMIT,
             recon: symbi_discretize::Recon::Plm,
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
@@ -313,6 +317,25 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// off — an active flatten there degrades the parabola to first order in
     /// every eddy collision. inert under plm (the kernels never declare the
     /// scalars). fluent.
+    /// set the reference mach number the PUBLISHED low-mach ramp saturates at (default
+    /// `MACH_LIMIT` = 0.1, the value used throughout Fleischmann, Adami & Adams 2020).
+    /// the ramp reduces acoustic dissipation only BELOW this number, so it decides how much
+    /// of the flow the reduction reaches: a deeply subsonic problem whose entire range sits
+    /// under 0.1 is untouched by the published value and needs it raised to meet the flow.
+    /// 0 reduces nothing and recovers classical HLLC; 1 reduces all the way to the sonic
+    /// point. read only by `Solver::HllcLmPlain` — the clamped arm derives its incompressible
+    /// pressure ceiling from the compile-time constant and holds them consistent. fluent.
+    pub fn mach_limit(mut self, mach_limit: f64) -> Self {
+        assert!(
+            (0.0..=1.0).contains(&mach_limit),
+            "mach_limit must lie in [0, 1]; got {mach_limit}. above 1 the ramp would scale \
+             acoustic dissipation on supersonic faces, where the star states it multiplies \
+             are no longer the subsonic intermediate flux"
+        );
+        self.mach_limit = mach_limit;
+        self
+    }
+
     pub fn ppm_flatten(mut self, onset: f64, full: f64) -> Self {
         self.flatten = (onset, full);
         self
@@ -350,6 +373,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.recon,
             symbi_discretize::EosArm::IdealGamma,
             self.flatten,
+            self.mach_limit,
             false,
         );
     }
@@ -691,6 +715,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     symbi_discretize::Recon::Plm,
                     symbi_discretize::EosArm::IdealGamma,
                     (0.0, 0.0),
+                    symbi_hydro::dissipation::MACH_LIMIT,
                     false,
                 )
             },

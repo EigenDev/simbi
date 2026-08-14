@@ -988,3 +988,65 @@ pub fn body_feedback_iso_gv(
     }
     (end_trace(), writes)
 }
+
+/// the total gravitational potential at a point displaced `half_cells` HALF-CELL widths from the
+/// current cell's lower face along the sweep axis: `half_cells = 2k` lands on the lower face of
+/// cell `i+k`, `2k+1` on that cell's centre.
+///
+/// built from the SAME `body_{b}_*` scalars and the SAME `body_potential` the immersed-body source
+/// applies, which is the whole point of sourcing it here rather than from an analytic column. a
+/// well-balanced reconstruction is exact only when the face states it produces cancel the
+/// DISCRETE force the scheme exerts; a potential taken from an idealized profile agrees with that
+/// force only to truncation order, and the leftover is precisely the residual the balancing exists
+/// to remove. `body_potential` is the antiderivative of `body_gravity` under the same softening
+/// selector, proven by autodiff (`ibm_wellposedness.rs`, theorem 1), so the pairing is exact for
+/// every softening family a body can declare.
+///
+/// the transverse coordinates are the current cell's own centre: the reconstruction is
+/// one-dimensional along `dir`, so only the sweep axis moves.
+pub fn stencil_potential_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    dir: usize,
+    axes: &[usize],
+    spacing: &[Spacing],
+    half_cells: i64,
+) -> Gv {
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+
+    // natural-order coordinates: every axis at its own centroid, then the sweep axis replaced by
+    // the displaced position. a half-cell offset is the midpoint of the two bracketing faces, so
+    // both parities come from the same face ladder and no separate centre formula is needed.
+    let mut coord3 = [Gv::ZERO; 3];
+    for (g, &coord_idx) in axes.iter().enumerate() {
+        if coord_idx < 3 {
+            coord3[coord_idx] = geo.centroid[g];
+        }
+    }
+    let sweep_coord = axes[dir];
+    if sweep_coord < 3 {
+        let lo = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2));
+        coord3[sweep_coord] = if half_cells.rem_euclid(2) == 0 {
+            lo
+        } else {
+            let hi = crate::gv::gv_axis_face_at(sweep_coord, spacing[dir], half_cells.div_euclid(2) + 1);
+            (lo + hi) * Gv::from_f64(0.5)
+        };
+    }
+
+    let cart = to_cartesian_gv(coords, &coord3);
+    (0..n_bodies)
+        .map(|b| {
+            let bpos = body_vec3(b, ndim, &cart_axes, "pos");
+            let rvec: [Gv; 3] = std::array::from_fn(|i| cart[i] - bpos[i]);
+            crate::ibm::body_potential(
+                rvec,
+                Gv::scalar(&format!("body_{b}_mass")),
+                Gv::scalar(&format!("body_{b}_soft")),
+                Gv::scalar(&format!("body_{b}_softkind")),
+            )
+        })
+        .sum::<Gv>()
+}
