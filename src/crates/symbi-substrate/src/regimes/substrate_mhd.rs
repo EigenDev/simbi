@@ -365,17 +365,16 @@ where
                 mhd_geom_suffix(sim.geom.coords, &sim.geom.axes),
             )
         };
-        symbi_discretize::kernel_slug::face_flux_name(
-            Self::kernel_prefix(),
-            solver_sfx,
-            "",
-            "",
-            "",
-            chart_sfx,
-            sim.geom.spacetime,
-            D,
+        symbi_discretize::kernel_slug::FaceFluxName {
+            prefix: Self::kernel_prefix(),
+            solver: solver_sfx,
+            geom: chart_sfx,
+            spacetime: sim.geom.spacetime,
+            ndim: D,
             dir,
-        )
+            ..Default::default()
+        }
+        .build()
     }
 
     /// the face-flux kernel the PRODUCTION sweep runs for `dir` under the configured solver.

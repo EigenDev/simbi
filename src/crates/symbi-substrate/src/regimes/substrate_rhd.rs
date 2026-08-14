@@ -274,6 +274,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.eos,
             (0.0, 0.0),
             self.mach_limit,
+            symbi_discretize::coords::Balance::Plain,
             false,
         );
     }
@@ -716,6 +717,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     self.eos,
                     (0.0, 0.0),
                     self.mach_limit,
+                    symbi_discretize::coords::Balance::Plain,
                     curved,
                 )
             },

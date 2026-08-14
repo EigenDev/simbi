@@ -141,47 +141,88 @@ pub fn fofc_project_name(
     )
 }
 
-/// the FACE-FLUX kernel name:
-/// `{prefix}_face_flux{solver}{recon}{chart}{eos}{geom}{spacetime}_{ndim}d_{dir}`.
+/// the FACE-FLUX kernel name, as NAMED FIELDS.
 ///
-/// six independent suffix axes, and the ORDER is the whole point of this function. spelled at
-/// the call site it has been spelled three mutually incompatible ways -- the bake putting the
-/// reconstruction before the chart, one runtime folding the chart into the solver segment, and
-/// another emitting the chart FIRST in one branch and second in the branch below it. those agree
-/// only while the segments they disagree about are empty, so the break arrives with the first
-/// non-default reconstruction on a curvilinear grid: a name no bake emitted, and a dispatch panic
-/// on the first cell.
+/// `{prefix}_face_flux{solver}{recon}{balance}{chart}{eos}{geom}{spacetime}_{ndim}d_{dir}`.
+///
+/// eight suffix axes, and the ORDER is the whole point. spelled at the call site it has been
+/// spelled three mutually incompatible ways -- the bake putting the reconstruction before the
+/// chart, one runtime folding the chart into the solver segment, and another emitting the chart
+/// FIRST in one branch and second in the branch below it. those agree only while the segments
+/// they disagree about are empty, so the break arrives with the first non-default reconstruction
+/// on a curvilinear grid: a name no bake emitted, and a dispatch panic on the first cell.
+///
+/// the fields are NAMED rather than positional because seven adjacent `&str` parameters are a
+/// transposition waiting to happen, and a transposed pair here fails the same way -- silently,
+/// on one configuration. `..Default::default()` lets a call site mention only the axes it uses.
 ///
 /// the axes, in order:
-///   - `solver`     the riemann solver arm (`kernel_suffix`), `""` for HLLE.
-///   - `recon`      the face reconstruction (`Recon::suffix`), `""` for PLM.
+///   - `solver`     the riemann solver arm (`Solver::kernel_suffix`), `""` for HLLE.
+///   - `recon`      the face reconstruction limiter (`Recon::suffix`), `""` for PLM.
+///   - `balance`    whether the reconstruction limits the STATE or its departure from
+///                  hydrostatic equilibrium (`Balance::suffix`). a property of the
+///                  reconstruction, so it sits beside `recon` -- NOT of the solver, which is why
+///                  it is an axis at all: any solver may be well-balanced, and the first-order
+///                  FOFC redo runs HLLE, so tying it to a solver denies the redo a property that
+///                  is free (a piecewise-constant reconstruction of departures is exactly
+///                  balanced).
 ///   - `chart`      the coordinate chart, present ONLY for a reconstruction that reads
 ///                  positions -- a well-balanced reconstruction evaluates the body potential at
 ///                  cartesian coordinates, so it is baked per chart while every chart-agnostic
-///                  flux passes `""`. it sits beside `recon` because it is a property OF the
-///                  reconstruction, not of the solver.
+///                  flux passes `""`.
 ///   - `eos`        the equation-of-state arm (`EosArm::suffix`), `""` for gamma-law.
-///   - `geom`       the DOF-lift / GR chart tag (`geom_suffix` / `gr_chart_dof_tag`), a
-///                  different axis from `chart`: it keys on momentum DOF exceeding the grid
-///                  dimension, not on where a position is evaluated.
+///   - `geom`       the DOF-lift / GR chart tag, a different axis from `chart`: it keys on
+///                  momentum DOF exceeding the grid dimension, not on where a position is read.
 ///   - `spacetime`  the curved-background slug, empty on minkowski.
-pub fn face_flux_name(
-    prefix: &str,
-    solver_suffix: &str,
-    recon_suffix: &str,
-    chart_suffix: &str,
-    eos_suffix: &str,
-    geom_suffix: &str,
-    spacetime: Spacetime,
-    ndim: usize,
-    dir: usize,
-) -> String {
-    format!(
-        "{prefix}_face_flux{solver_suffix}{recon_suffix}{chart_suffix}{eos_suffix}\
-{geom_suffix}{}_{ndim}d_{dir}",
-        spacetime_slug(spacetime)
-    )
+#[derive(Clone, Copy)]
+pub struct FaceFluxName<'a> {
+    pub prefix: &'a str,
+    pub solver: &'a str,
+    pub recon: &'a str,
+    pub balance: &'a str,
+    pub chart: &'a str,
+    pub eos: &'a str,
+    pub geom: &'a str,
+    pub spacetime: Spacetime,
+    pub ndim: usize,
+    pub dir: usize,
 }
+
+impl Default for FaceFluxName<'_> {
+    fn default() -> Self {
+        Self {
+            prefix: "",
+            solver: "",
+            recon: "",
+            balance: "",
+            chart: "",
+            eos: "",
+            geom: "",
+            spacetime: Spacetime::Minkowski,
+            ndim: 1,
+            dir: 0,
+        }
+    }
+}
+
+impl FaceFluxName<'_> {
+    pub fn build(&self) -> String {
+        format!(
+            "{}_face_flux{}{}{}{}{}{}{}_{}d_{}",
+            self.prefix,
+            self.solver,
+            self.recon,
+            self.balance,
+            self.chart,
+            self.eos,
+            self.geom,
+            spacetime_slug(self.spacetime),
+            self.ndim,
+            self.dir
+        )
+    }
+}
+
 
 /// the MHD curvilinear suffix, keyed on the GRID-AXIS SET (not DOF-vs-ndim). MHD
 /// B is ALWAYS a 3-vector, so both cylindrical 2D planes carry DOF = 3 and the

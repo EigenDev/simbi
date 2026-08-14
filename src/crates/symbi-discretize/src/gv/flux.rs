@@ -9,6 +9,7 @@ use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
 };
+use crate::coords::Balance;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -311,11 +312,21 @@ fn mesh_face_velocity_gv(dir: u8) -> Gv {
 // the sweep normal + the moving-face velocity. the solver (HLLE / HLLC) is the only
 // thing that differs. `ndim` is the reconstruction grid (stencil shifts along grid
 // axis `dir`); `coord_n` is the sweep COORDINATE (normal velocity is vel[coord_n]).
+/// the well-balanced anchor: what a hydrostatic reconstruction needs to evaluate the body
+/// potential at the stencil's own positions. `None` reconstructs the state directly.
+#[derive(Clone, Copy)]
+pub struct Balanced<'a> {
+    pub n_bodies: usize,
+    pub coords: Coords,
+    pub axes: &'a [usize],
+}
+
 fn euler_reconstruct<const D: usize>(
     ndim: u8,
     dir: u8,
     coord_n: usize,
     recon: Recon,
+    balanced: Option<Balanced<'_>>,
 ) -> (Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
     // theta is SECOND in the manifest order [gamma, theta]: the caller registers gamma
     // inside the same trace before calling here (the eos construction lives with the
@@ -323,7 +334,19 @@ fn euler_reconstruct<const D: usize>(
     // on every recon arm so the scalar tail is uniform; the ppm parabola carries its
     // own monotonicity constraint and never reads it.
     let theta = Gv::scalar("theta");
-    let (rho_l, rho_r) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
+    // the THERMODYNAMIC pair is the only thing well-balancing changes: it limits each cell's
+    // departure from the hydrostatic profile through it instead of the state. everything after
+    // this -- the velocity loop, the ppm flattening, the normal and the face velocity -- is
+    // shared, which is the point. a second copy of this function silently lost the flattening
+    // and hardcoded the normal to the sweep axis.
+    let (rho_l, rho_r, pre_l, pre_r) = match balanced {
+        None => {
+            let (rl, rr) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
+            let (pl, pr) = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
+            (rl, rr, pl, pr)
+        }
+        Some(b) => balanced_thermo_pair(ndim, dir, recon, theta, b),
+    };
     let mut vl = Vec::with_capacity(D);
     let mut vr = Vec::with_capacity(D);
     for k in 0..D {
@@ -338,8 +361,6 @@ fn euler_reconstruct<const D: usize>(
         vl.push(l);
         vr.push(r);
     }
-    let (pre_l, pre_r) = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
-
     let mut rho_lr = (rho_l, rho_r);
     let mut pre_lr = (pre_l, pre_r);
     let mut vel_lr: Vec<(Gv, Gv)> = vl.into_iter().zip(vr).collect();
@@ -367,6 +388,16 @@ fn euler_reconstruct<const D: usize>(
         // zero) is the PURE parabola: `flatten_full <= flatten_onset` zeroes
         // the ramp inverse, so f = 0 everywhere and the blend is exact
         // passthrough. gravity-sink configs declare their own dials.
+        // INTERACTION WITH WELL-BALANCING. the blend pulls each face value toward its own
+        // CELL AVERAGE, and the two cells either side of a face have different averages -- so
+        // where it fires it reintroduces the very jump the balanced reconstruction removes.
+        // it cannot fire on a state at rest: the sensor is the velocity convergence across the
+        // cell, which is identically zero there, so `f = 0` and the blend is exact passthrough.
+        // a balanced atmosphere is therefore preserved exactly, and the degradation is confined
+        // to genuinely compressing flow, where robustness is the reason the flatten exists.
+        // (blending toward the EQUILIBRIUM value rather than the cell average would preserve
+        // balance under compression too; not done, because it changes the flatten's meaning for
+        // every other kernel that shares it.)
         let onset = Gv::scalar("flatten_onset");
         let full = Gv::scalar("flatten_full");
         let half = Gv::from_f64(0.5);
@@ -499,7 +530,7 @@ where
     let gamma = Gv::scalar("gamma");
     let eos = super::gv_eos(eos_arm, gamma);
     // the SINGLE-SOURCE physics: reconstructed L/R primitives -> canonical HLLE.
-    let (left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon);
+    let (left, right, nhat, vface) = euler_reconstruct::<D>(ndim, dir, coord_n, recon, None);
     let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
@@ -567,7 +598,7 @@ where
         gamma: Gv::scalar("gamma"),
     };
     let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize], Recon::Plm);
+        euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize], Recon::Plm, None);
     // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse GRIDDED coordinates at
     // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
     // slot (the axisymmetric phi) takes zero: the spherical metrics never read phi, and
@@ -1408,27 +1439,66 @@ pub fn rmhd_flux_gr_gv(
 /// `euler_hlle_flux_gv(&Newtonian, ...)` but calls `riemann::hllc` instead of
 /// `riemann::hlle`. carrier-generic over Gv; iso is structurally excluded
 /// (no contact wave -> HLLE-only).
+/// which reference mach number the low-mach ramp saturates at: the published constant, or the
+/// runtime kernel scalar the clamp-free arm exposes. a TAG rather than a `Gv`, because a `Gv`
+/// built at the call site would be built outside the trace this function opens.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MachRef {
+    Published,
+    Runtime,
+}
+
+/// the ONE adiabatic HLLC-family face flux, over the arms that actually differ.
+///
+/// four emitters used to spell this body verbatim, differing in a single `ShockwaveLimiter`
+/// variant -- while `rhd_hllc_at_arm`, ninety lines below, already factored exactly this shape
+/// for the relativistic side. the reference mach number was repeated three times with it, and
+/// one copy had already deviated.
+///
+/// `balance` is INDEPENDENT of `smoother`: well-balancing is a property of the reconstruction
+/// and the low-mach ramp a property of the solver, so every pairing is expressible -- including
+/// the one the first-order FOFC redo needs, which is HLLE with a balanced reconstruction.
+fn adiabatic_hllc_at_arm<const D: usize>(
+    dir: u8,
+    recon: Recon,
+    smoother: ShockwaveLimiter,
+    mach_ref: MachRef,
+    balance: Balance,
+    coords: Coords,
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    // BUILT INSIDE THE TRACE. a `Gv` handed in as an argument is constructed at the CALL site,
+    // before `begin_trace()` runs here, and every `Gv` op outside an active trace panics. the
+    // reference mach number is therefore named by a plain tag and materialized below, which is
+    // also why it is a tag rather than a closure: there is nothing to capture.
+    let mach_limit = match mach_ref {
+        MachRef::Published => Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
+        MachRef::Runtime => Gv::scalar("mach_limit"),
+    };
+    let eos = IdealGas {
+        gamma: Gv::scalar("gamma"),
+    };
+    let balanced = match balance {
+        Balance::Plain => None,
+        Balance::Hydrostatic => Some(Balanced {
+            n_bodies: symbi_ib::MAX_SOURCE_BODIES,
+            coords,
+            axes,
+        }),
+    };
+    let (left, right, nhat, vface) =
+        euler_reconstruct::<D>(D as u8, dir, axes[dir as usize], recon, balanced);
+    let flux = hllc(&eos, &left, &right, &nhat, vface, smoother, mach_limit);
+    let writes = euler_flux_writes(&flux);
+    (end_trace(), writes)
+}
+
 pub fn adiabatic_hllc_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let eos = IdealGas {
-        gamma: Gv::scalar("gamma"),
-    };
-    let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
-    let flux = hllc(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
-        ShockwaveLimiter::Standard,
-        Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
-    );
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
 /// adiabatic HLLC-LM face flux with the COMPRESSIBILITY CLAMP: the fleischmann low-mach ramp
@@ -1444,23 +1514,7 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let eos = IdealGas {
-        gamma: Gv::scalar("gamma"),
-    };
-    let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
-    let flux = hllc(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
-        ShockwaveLimiter::FleischmannClamped,
-        Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
-    );
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::FleischmannClamped, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
 /// adiabatic HLLC-LM face flux AS PUBLISHED (Fleischmann, Adami & Adams 2020): the
@@ -1473,36 +1527,42 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
 pub fn adiabatic_hllc_lm_plain_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
+    balance: Balance,
     coords: Coords,
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let eos = IdealGas {
-        gamma: Gv::scalar("gamma"),
-    };
-    // the WELL-BALANCED reconstruction rides this arm alone. it is what makes the clamp-free
-    // ramp usable on a stratified background: the ramp removes the acoustic dissipation that
-    // would otherwise damp the hydrostatic residual, so the residual has to be absent rather
-    // than damped. every other flux kernel keeps the plain reconstruction and is untouched --
-    // no bake growth, no extra arithmetic, and no chance of a one-ulp shift in an existing
-    // result. it also needs COORDS, which the plain adiabatic flux does not: the potential is
-    // evaluated at cartesian positions and the chart is what maps them.
-    let (left, right, nhat, vface) =
-        euler_reconstruct_wb::<D>(D as u8, dir, recon, symbi_ib::MAX_SOURCE_BODIES, coords, axes);
-    let flux = hllc(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
+    adiabatic_hllc_at_arm::<D>(
+        dir,
+        recon,
         ShockwaveLimiter::Fleischmann,
-        // the reference mach number is a RUNTIME kernel scalar on this arm: it decides how
-        // much of the flow the acoustic reduction reaches, and a deeply subsonic problem
-        // whose whole range sits under the published 0.1 needs it raised to meet the flow.
-        Gv::scalar("mach_limit"),
-    );
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+        MachRef::Runtime,
+        balance,
+        coords,
+        axes,
+    )
+}
+
+/// the adiabatic HLLE face flux with a WELL-BALANCED reconstruction: the first-order arm the
+/// FOFC redo runs. HLLE at theta = 0 is piecewise-constant, and a piecewise-constant
+/// reconstruction of DEPARTURES is exactly balanced -- every departure is zero, so both sides of
+/// a face return the profile evaluated there and agree. the redo therefore holds a stratified
+/// column that the un-balanced redo would have kicked, and the cells most likely to reach it are
+/// the stagnant stratified ones at a solid wall.
+pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
+    dir: u8,
+    recon: Recon,
+    coords: Coords,
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    adiabatic_hllc_at_arm::<D>(
+        dir,
+        recon,
+        ShockwaveLimiter::Standard,
+        MachRef::Published,
+        Balance::Hydrostatic,
+        coords,
+        axes,
+    )
 }
 
 /// adiabatic HLLC face flux with the ACOUSTIC-CONSISTENCY dissipation scaling: identical to
@@ -1513,23 +1573,7 @@ pub fn adiabatic_hllc_acoustic_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let eos = IdealGas {
-        gamma: Gv::scalar("gamma"),
-    };
-    let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(D as u8, dir, dir as usize, recon);
-    let flux = hllc(
-        &eos,
-        &left,
-        &right,
-        &nhat,
-        vface,
-        ShockwaveLimiter::Acoustic,
-        Gv::from_f64(symbi_hydro::dissipation::MACH_LIMIT),
-    );
-    let writes = euler_flux_writes(&flux);
-    (end_trace(), writes)
+    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Acoustic, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
 fn rhd_hllc_at_arm<const D: usize>(
@@ -1543,7 +1587,7 @@ fn rhd_hllc_at_arm<const D: usize>(
     let gamma = Gv::scalar("gamma");
     let eos = super::gv_eos(eos_arm, gamma);
     let (left, right, nhat, vface) =
-        euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm);
+        euler_reconstruct::<D>(D as u8, dir, dir as usize, Recon::Plm, None);
     let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, smoother);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
@@ -1616,44 +1660,48 @@ pub fn rmhd_hlld_flux_gv(
     (end_trace(), writes)
 }
 
-/// WELL-BALANCED euler reconstruction: the same limiter as `euler_reconstruct`, applied to each
-/// cell's DEPARTURE from the hydrostatic profile through it rather than to the state itself, so a
-/// discretely balanced atmosphere presents no face jump and the clamp-free low-mach ramp has no
-/// residual to leave undamped.
+/// the THERMODYNAMIC face pair of a well-balanced reconstruction: each cell's DEPARTURE from
+/// the hydrostatic profile through it, limited by the ordinary operator, with the profile added
+/// back at the face.
 ///
 /// TWO ANCHORS PER FACE, one per side, and that is correctness rather than duplicated work. the
-/// departure at the anchor is exactly zero, so the limiter's one-sided differences about it reduce
-/// to `0 - d` and `d - 0` — the plain differences EXACTLY, not to rounding. anchoring both sides on
-/// one cell would leave every difference as `(q_j - c) - (q_k - c)` and forfeit the gravity-free
-/// reduction. the stencil operator is called once per anchor and only that side's output is kept.
+/// departure at the anchor is exactly zero, so the limiter's one-sided differences about it
+/// reduce to `0 - d` and `d - 0` -- the plain differences EXACTLY, not to rounding. anchoring
+/// both sides on one cell would leave every difference as `(q_j - c) - (q_k - c)` and forfeit
+/// the gravity-free reduction. the operator is called once per anchor and only that side's
+/// output is kept.
 ///
-/// the VELOCITIES carry no profile: the equilibrium is at rest, so their departure is the state
-/// and they reconstruct plainly.
-///
-/// with no bodies every potential is exactly zero, the enthalpy ratio is exactly one, and the
-/// departures are exact differences — so this reduces to `euler_reconstruct` bit-for-bit under plm
-/// and to within roundoff under ppm (a parabola is a weighted sum, whose re-centring rounds).
-fn euler_reconstruct_wb<const D: usize>(
+/// the transform is independent of WHICH operator consumes it, so plm and ppm need no separate
+/// derivation. with no bodies every potential is exactly zero, the enthalpy ratio is exactly
+/// one, and the departures are exact differences -- so this returns the plain pair bit-for-bit
+/// under plm, and to within roundoff under ppm (a parabola is a weighted sum, whose re-centring
+/// rounds). proved in `symbi-hydro/tests/hydrostatic_reconstruction.rs`.
+fn balanced_thermo_pair(
     ndim: u8,
     dir: u8,
     recon: Recon,
-    n_bodies: usize,
-    coords: Coords,
-    axes: &[usize],
-) -> (Prim<Gv, D>, Prim<Gv, D>, Tensor<Gv, D>, Gv) {
-    use symbi_hydro::hydrostatic::{LocalEquilibrium, Thermodynamic, hydrostatic_deviations};
+    theta: Gv,
+    b: Balanced<'_>,
+) -> (Gv, Gv, Gv, Gv) {
+    use symbi_hydro::hydrostatic::LocalEquilibrium;
 
-    let theta = Gv::scalar("theta");
     let spacing = vec![Spacing::Uniform; ndim as usize];
-    // offsets the limiter reads, and the half-cell ladder position of each cell CENTRE. the
-    // shared face sits on the lower face of cell 0, which is half-cell 0.
+    // offsets the limiter reads, and the anchor INDEX within them for each side of the shared
+    // face. the face sits on the lower face of cell 0, which is half-cell 0; a cell centre at
+    // offset k is half-cell 2k+1.
     let (offsets, anchor_l, anchor_r): (&[i32], usize, usize) = match recon {
         Recon::Plm => (&[-2, -1, 0, 1], 1, 2),
         Recon::Ppm => (&[-3, -2, -1, 0, 1, 2], 2, 3),
     };
     let phi_at = |half_cells: i64| {
         crate::gv_immersed::stencil_potential_gv(
-            n_bodies, coords, ndim as usize, dir as usize, axes, &spacing, half_cells,
+            b.n_bodies,
+            b.coords,
+            ndim as usize,
+            dir as usize,
+            b.axes,
+            &spacing,
+            half_cells,
         )
     };
     let phi_face = phi_at(0);
@@ -1668,57 +1716,31 @@ fn euler_reconstruct_wb<const D: usize>(
     let rho = read("prim_rho", "prim.rho");
     let pre = read("prim_pre", "prim.pre");
 
-    // one side's face value: departures against that side's own cell, the stencil operator, and
-    // the profile added back at the face.
-    let side = |q: &[Gv], anchor: usize, which: Thermodynamic, take_left: bool| -> Gv {
-        let eq = LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], Gv::scalar("gamma"));
-        let d: Vec<Gv> = q
-            .iter()
-            .zip(phi.iter())
-            .map(|(&qk, &pk)| {
-                qk - match which {
-                    Thermodynamic::Density => eq.density_at(pk),
-                    Thermodynamic::Pressure => eq.pressure_at(pk),
-                }
+    // one side: departures against that side's own cell, the ordinary operator, profile back.
+    // `state_at` returns both components sharing one `powf` -- the pressure exponent exceeds the
+    // density exponent by exactly one, so the second transcendental is a multiply.
+    let side = |anchor: usize, take_left: bool| -> (Gv, Gv) {
+        let eq =
+            LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], Gv::scalar("gamma"));
+        let (d_rho, d_pre): (Vec<Gv>, Vec<Gv>) = (0..offsets.len())
+            .map(|k| {
+                let (r_eq, p_eq) = eq.state_at(phi[k]);
+                (rho[k] - r_eq, pre[k] - p_eq)
             })
-            .collect();
-        let pair = match recon {
+            .unzip();
+        let limit = |d: &[Gv]| match recon {
             Recon::Plm => crate::gv::plm_theta_from_stencil(d[0], d[1], d[2], d[3], theta),
             Recon::Ppm => crate::gv::ppm_from_stencil(d[0], d[1], d[2], d[3], d[4], d[5]),
         };
-        let base = match which {
-            Thermodynamic::Density => eq.density_at(phi_face),
-            Thermodynamic::Pressure => eq.pressure_at(phi_face),
-        };
-        base + if take_left { pair.0 } else { pair.1 }
+        let (base_rho, base_pre) = eq.state_at(phi_face);
+        let pick = |pair: (Gv, Gv)| if take_left { pair.0 } else { pair.1 };
+        (
+            base_rho + pick(limit(&d_rho)),
+            base_pre + pick(limit(&d_pre)),
+        )
     };
-    let _ = hydrostatic_deviations::<Gv, 4>; // the host-proved transform; inlined above for Gv arity
-
-    let rho_l = side(&rho, anchor_l, Thermodynamic::Density, true);
-    let rho_r = side(&rho, anchor_r, Thermodynamic::Density, false);
-    let pre_l = side(&pre, anchor_l, Thermodynamic::Pressure, true);
-    let pre_r = side(&pre, anchor_r, Thermodynamic::Pressure, false);
-
-    let mut vl = Vec::with_capacity(D);
-    let mut vr = Vec::with_capacity(D);
-    for k in 0..D {
-        let (l, r) = recon_gv(
-            &format!("prim_v{k}"),
-            FieldRef::PrimVel(k as u8),
-            ndim,
-            dir,
-            theta,
-            recon,
-        );
-        vl.push(l);
-        vr.push(r);
-    }
-    let nhat = Tensor::unit(dir as usize);
-    let vface = mesh_face_velocity_gv(dir);
-    (
-        Prim { rho: rho_l, vel: Tensor::new(std::array::from_fn(|k| vl[k])), pre: pre_l },
-        Prim { rho: rho_r, vel: Tensor::new(std::array::from_fn(|k| vr[k])), pre: pre_r },
-        nhat,
-        vface,
-    )
+    let (rho_l, pre_l) = side(anchor_l, true);
+    let (rho_r, pre_r) = side(anchor_r, false);
+    (rho_l, rho_r, pre_l, pre_r)
 }
+

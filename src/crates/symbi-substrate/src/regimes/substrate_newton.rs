@@ -135,6 +135,9 @@ pub struct AdiabaticSubstrateKernelSet<
     /// the reference mach number the PUBLISHED low-mach ramp saturates at. read only by
     /// `Solver::HllcLmPlain`; inert on every other solver. see `mach_limit`.
     pub mach_limit: f64,
+    /// whether the face reconstruction limits the STATE or its departure from local hydrostatic
+    /// equilibrium. see `balance`.
+    pub balance: symbi_discretize::coords::Balance,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
     /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
@@ -169,6 +172,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             solver: Solver::Hlle,
             flatten: (0.0, 0.0),
             mach_limit: symbi_hydro::dissipation::MACH_LIMIT,
+            balance: symbi_discretize::coords::Balance::Plain,
             recon: symbi_discretize::Recon::Plm,
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
@@ -325,6 +329,24 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// 0 reduces nothing and recovers classical HLLC; 1 reduces all the way to the sonic
     /// point. read only by `Solver::HllcLmPlain` — the clamped arm derives its incompressible
     /// pressure ceiling from the compile-time constant and holds them consistent. fluent.
+    /// reconstruct each cell's DEPARTURE from the local hydrostatic profile rather than the
+    /// state, so a discretely balanced atmosphere presents no face jump and a low-dissipation
+    /// riemann solver has no residual to leave undamped.
+    ///
+    /// orthogonal to the solver: it composes with any of them, and the first-order FOFC redo
+    /// inherits it (that redo runs HLLE at theta = 0, and a piecewise-constant reconstruction of
+    /// departures is exactly balanced). exact on a locally isentropic hydrostatic column;
+    /// degrades linearly in the entropy variation off one. costs a per-stencil body-potential
+    /// evaluation, so it is OFF by default and worth measuring before a long run. fluent.
+    pub fn well_balanced_reconstruction(mut self, on: bool) -> Self {
+        self.balance = if on {
+            symbi_discretize::coords::Balance::Hydrostatic
+        } else {
+            symbi_discretize::coords::Balance::Plain
+        };
+        self
+    }
+
     pub fn mach_limit(mut self, mach_limit: f64) -> Self {
         assert!(
             (0.0..=1.0).contains(&mach_limit),
@@ -374,6 +396,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             symbi_discretize::EosArm::IdealGamma,
             self.flatten,
             self.mach_limit,
+            self.balance,
             false,
         );
     }
@@ -716,6 +739,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     symbi_discretize::EosArm::IdealGamma,
                     (0.0, 0.0),
                     symbi_hydro::dissipation::MACH_LIMIT,
+                    self.balance,
                     false,
                 )
             },

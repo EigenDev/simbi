@@ -431,18 +431,68 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     } else {
                         &[symbi_discretize::EosArm::IdealGamma]
                     };
+                    // the BALANCE axis, and the CHART axis that rides with it. a well-balanced
+                    // reconstruction reads cartesian positions, so it is baked per chart while
+                    // every plain flux stays chart-agnostic -- and this gate spelled the name
+                    // itself, with no chart segment at all, which is how twelve curvilinear
+                    // kernels were baked under a name the dispatch could never ask for.
+                    // baked for the newtonian arms that carry it: HLLE (the first-order redo)
+                    // and the clamp-free low-mach arm.
+                    let balances: &[symbi_discretize::coords::Balance] = if regime
+                        == RegimeKind::Newtonian
+                        && matches!(solver, Solver::Hlle | Solver::HllcLmPlain)
+                    {
+                        &[
+                            symbi_discretize::coords::Balance::Plain,
+                            symbi_discretize::coords::Balance::Hydrostatic,
+                        ]
+                    } else {
+                        &[symbi_discretize::coords::Balance::Plain]
+                    };
                     for &recon in recons {
                         for &eos in eoses {
-                            checked += 1;
-                            let name = format!(
-                                "{prefix}_face_flux{}{}{}_{ndim}d_{dir}",
-                                solver.kernel_suffix(),
-                                recon.suffix(),
-                                eos.suffix()
-                            );
-                            if !kernel_exists(&name) && !KNOWN_UNBAKED.contains(&name.as_str()) {
-                                missing
-                                    .push(format!("{solver:?}/{recon:?}/{eos:?} on {regime:?}: {name}"));
+                            for &balance in balances {
+                                // the redo arm is baked plm-only; ppm has no first-order twin.
+                                if balance == symbi_discretize::coords::Balance::Hydrostatic
+                                    && *solver == Solver::Hlle
+                                    && recon != symbi_discretize::Recon::Plm
+                                {
+                                    continue;
+                                }
+                                let charts: &[symbi_geometry::Geometry] = match balance {
+                                    symbi_discretize::coords::Balance::Plain => {
+                                        &[symbi_geometry::Geometry::Cartesian]
+                                    }
+                                    symbi_discretize::coords::Balance::Hydrostatic => &[
+                                        symbi_geometry::Geometry::Cartesian,
+                                        symbi_geometry::Geometry::Cylindrical,
+                                        symbi_geometry::Geometry::Spherical,
+                                    ],
+                                };
+                                for &chart in charts {
+                                    checked += 1;
+                                    // through the SAME composer the bake and the dispatch use.
+                                    let name = symbi_discretize::kernel_slug::FaceFluxName {
+                                        prefix,
+                                        solver: solver.kernel_suffix(),
+                                        recon: recon.suffix(),
+                                        balance: balance.suffix(),
+                                        chart: symbi_discretize::kernel_slug::coord_suffix(chart),
+                                        eos: eos.suffix(),
+                                        ndim: ndim as usize,
+                                        dir: dir as usize,
+                                        ..Default::default()
+                                    }
+                                    .build();
+                                    if !kernel_exists(&name)
+                                        && !KNOWN_UNBAKED.contains(&name.as_str())
+                                    {
+                                        missing.push(format!(
+                                            "{solver:?}/{recon:?}/{eos:?}/{balance:?}/{chart:?} \
+                                             on {regime:?}: {name}"
+                                        ));
+                                    }
+                                }
                             }
                         }
                     }
@@ -455,7 +505,13 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
     // rejected everything, or a name protocol that drifted, would leave `missing` empty and this
     // gate silently vacuous.
     assert!(
-        checked >= 20,
+        // MEASURED, not guessed: the sweep over
+        // (regime x solver x dim x dir x recon x eos x balance x chart) is exactly 180
+        // combinations today. the floor sits AT that number rather than below it, so any
+        // collapse of any axis fails here -- a floor left at the old value of 20 would have
+        // passed a sweep that had lost the balance and chart axes entirely, which is the
+        // failure this gate exists to prevent. raise it deliberately when an axis is added.
+        checked >= 180,
         "only {checked} (solver, regime, dim, dir) combination(s) were checked; the matrix or the          name protocol has drifted and this gate is not covering anything"
     );
     assert!(

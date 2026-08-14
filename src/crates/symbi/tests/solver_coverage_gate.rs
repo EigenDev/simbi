@@ -34,17 +34,15 @@ const HYDRO_REGIMES: &[(&str, &[Solver])] = &[
 // kernel name diverge from its bake; a gate that re-derives the protocol it is checking can
 // only ever confirm its own copy of it.
 fn flux_name(prefix: &str, geom: &str, solver: Solver, d: usize, dir: usize) -> String {
-    symbi_discretize::kernel_slug::face_flux_name(
+    symbi_discretize::kernel_slug::FaceFluxName {
         prefix,
-        solver.kernel_suffix(),
-        "",
-        "",
-        "",
+        solver: solver.kernel_suffix(),
         geom,
-        symbi_geometry::Spacetime::Minkowski,
-        d,
+        ndim: d,
         dir,
-    )
+        ..Default::default()
+    }
+    .build()
 }
 
 #[test]

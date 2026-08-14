@@ -70,6 +70,34 @@ pub enum Recon {
     Ppm,
 }
 
+/// whether a reconstruction limits the STATE or its DEPARTURE from local hydrostatic
+/// equilibrium.
+///
+/// an axis of its own, not a flavour of `Recon` and not a property of the riemann solver. the
+/// transform is independent of which limiter consumes it -- plm, ppm and pcm all inherit it --
+/// and independent of which solver consumes the face states. tying it to a solver, as an earlier
+/// arrangement did, denies it to the first-order FOFC redo (which runs HLLE) precisely in the
+/// stagnant stratified cells most likely to trip that redo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum Balance {
+    /// limit the state itself.
+    #[default]
+    Plain,
+    /// limit each cell's departure from the isentropic hydrostatic profile through it, and add
+    /// that profile back at the face. exact on a discretely balanced column; reduces to `Plain`
+    /// bit-for-bit under plm when there is no gravity.
+    Hydrostatic,
+}
+
+impl Balance {
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Balance::Plain => "",
+            Balance::Hydrostatic => "_wb",
+        }
+    }
+}
+
 impl Recon {
     /// kernel-name suffix. the plm family keeps its unsuffixed names, so every
     /// pre-existing baked kernel name is untouched by the reconstruction axis.
