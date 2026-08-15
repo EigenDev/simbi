@@ -20,6 +20,7 @@ import numpy as np
 
 import simbi.expression as expr
 from simbi import ProblemParam, SimbiProblem
+from simbi.functional import bondi as bondi_shared
 from simbi.types import (
     BoundaryCondition,
     CoordSystem,
@@ -312,48 +313,20 @@ class SphericalBondiTest(SimbiProblem):
         dx_target = R_B / self.target_zones_per_bondi
 
         # 4. calculate refinement levels needed
-        total_ratio = dx_coarse / dx_target
+        num_levels = bondi_shared.refinement_levels(dx_coarse, dx_target)
 
         self.diagnostic_interval = self.bondi_time / float(
             self.diagnostic_per_bondi
         )
 
-        if total_ratio <= 1.0:
-            num_levels = 0
-        else:
-            num_levels = int(math.ceil(math.log2(total_ratio)))
-
-        # 5. configure fmr hierarchy
+        # 5. configure fmr hierarchy: telescoping halving-cap boxes centered on
+        # the accretor, finest covering ~2 R_B (one text with the science config).
         if self.refinement_enabled and self.refinement_regions is None:
             self.refinement_max_levels = num_levels + 1
             self.refinement_ratios = [np.uint64(2)] * num_levels
-
-            # telescoping regions centered on the accretor: finest box covers
-            # ~2 R_B, each coarser level doubles, with a HALVING CAP — each
-            # region is at most half its parent's radius, so nesting margins
-            # are guaranteed (a quarter of the parent box per side). without
-            # the cap, deep telescopes stack domain-clamped levels against the
-            # boundary with sub-cell margins and the hierarchy's coverage
-            # check rejects them.
-            regions = []
-            r_prev = box_radius
-            for ii in range(num_levels):
-                levels_from_fine = (num_levels - 1) - ii
-                region_radius = min(
-                    2.0 * R_B * (2.0**levels_from_fine), 0.5 * r_prev
-                )
-                regions.append(
-                    [
-                        -region_radius,
-                        region_radius,
-                        -region_radius,
-                        region_radius,
-                        -region_radius,
-                        region_radius,
-                    ]
-                )
-                r_prev = region_radius
-            self.refinement_regions = regions
+            self.refinement_regions = bondi_shared.telescoping_regions(
+                num_levels, finest_radius=2.0 * R_B, box_radius=box_radius
+            )
 
         # 6. runtime control
         if self.end_time is None:
@@ -414,18 +387,8 @@ class SphericalBondiTest(SimbiProblem):
         return 1.0
 
     def accretion_coefficient(self) -> float:
-        """accretion coefficient lambda based on adiabatic index."""
-        if self.adiabatic_index == 1.0:
-            return 1.12
-        elif self.adiabatic_index == 5.0 / 3.0:
-            return 0.25
-        else:
-            gamma = self.adiabatic_index
-            return float(
-                0.25
-                * (2.0 / (5.0 - 3.0 * gamma))
-                ** ((5.0 - 3.0 * gamma) / (2.0 * (gamma - 1.0)))
-            )
+        """bondi coefficient lambda_c(gamma) -- the shared transcription."""
+        return bondi_shared.accretion_coefficient(self.adiabatic_index)
 
     @property
     def bondi_accretion_rate(self) -> float:
@@ -466,59 +429,23 @@ class SphericalBondiTest(SimbiProblem):
         x2: expr.Expr,
         x3: expr.Expr,
     ) -> list[expr.Expr]:
-        """the buffer-zone full-state SPONGE outputs [kappa, den_ref, mom_ref_x, mom_ref_y,
-        mom_ref_z, nrg_ref] for the rust `sponge` source kind: relax the whole CONSERVED state
-        (density, momentum, AND energy) toward the FAR-FIELD analytical Bondi solution (the ambient
-        reservoir) in the outer buffer zone, with kappa ramping 0 -> 1/damp_time from buffer_radius
-        outward. density is included -- the physical far field is rho_inf, which the velocity-only
-        relax could not hold and the inner free-fall profile gets wrong (it decays to zero)."""
+        """the outer buffer zone as the rust `sponge` source's outputs
+        [kappa, den_ref, mom_ref_*, nrg_ref] (no nrg_ref on the isothermal
+        regime), relaxing toward the far-field asymptotic bondi state. one
+        shared text: `simbi.functional.bondi.far_field_sponge_outputs`."""
         buffer_params = self.buffer_parameters
-        buffer_radius = expr.constant(buffer_params["buffer_radius"], x1.graph)
-        buffer_width = expr.constant(buffer_params["buffer_width"], x1.graph)
-        damp_time = expr.constant(buffer_params["damp_time"], x1.graph)
-
-        r = expr.sqrt(x1 * x1 + x2 * x2 + x3 * x3) + 1e-10
-
-        # smooth cubic ramp: kappa = 0 inside buffer_radius, -> 1/damp_time over buffer_width outward.
-        radial_param = (r - buffer_radius) / buffer_width
-        damp_factor = expr.max_expr(expr.constant(0.0, x1.graph), radial_param)
-        damp_factor = expr.min_expr(damp_factor, expr.constant(1.0, x1.graph))
-        damp_factor = damp_factor * damp_factor * (3.0 - 2.0 * damp_factor)
-        kappa = damp_factor / damp_time
-
-        # the FAR-FIELD ASYMPTOTIC Bondi reference (subsonic, OUTSIDE R_B -- where the outer buffer
-        # sits). the O(1/r_norm) density (1 + 0.5/r_norm) and velocity (1 - 0.5/r_norm) corrections
-        # CANCEL in rho*v, so the mass rate Mdot = 4*pi*r^2*rho*v is constant (the steady-state Bondi
-        # flux) to O(1/r_norm) -- consistent with the far-field asymptotic rate.
-        # EoS-generic: cs_eq carries the gamma-dependent enthalpy correction and p = rho*cs^2/gamma.
-        # convention: r_norm uses R_B = 2GM/cs^2 (the profile), self.bondi_radius is R_B = GM/cs^2.
-        cs = self.ambient_sound_speed
-        rho_inf = self.ambient_density
-        gamma = self.adiabatic_index
-        lammy = self.accretion_coefficient()
-        r_norm = r / (2.0 * self.bondi_radius)
-        rho_ref = rho_inf * (1.0 + 0.5 / r_norm)
-        v_r = -0.25 * lammy * cs * r_norm ** (-2.0) * (1.0 - 0.5 / r_norm)
-        cs_eq = cs * (1.0 + 0.25 * (gamma - 1.0) / r_norm)
-        p_ref = rho_ref * cs_eq * cs_eq / gamma
-
-        # cartesian reference momentum (rho_ref * v_r * x_hat) and total energy density. |v|^2 = v_r^2
-        # since the reference flow is purely radial; nrg = p/(gamma-1) + (1/2)*rho*|v|^2.
-        r_inv = 1.0 / r
-        mom_x = rho_ref * v_r * x1 * r_inv
-        mom_y = rho_ref * v_r * x2 * r_inv
-        mom_z = rho_ref * v_r * x3 * r_inv
-        inv_gm1 = 1.0 / (gamma - 1.0) if gamma != 1.0 else 0.0
-        nrg_ref = p_ref * inv_gm1 + 0.5 * rho_ref * v_r * v_r
-
-        # kappa (output 0) is the only masked channel; it is already zoned by the cubic ramp, so no
-        # separate region mask is needed. rust `sponge` forms S_U = kappa*(U_ref - U) for each of den,
-        # mom, nrg -- the density channel is what the old velocity-only relax lacked.
-        # the ISOTHERMAL regime has no energy equation: its sponge spec takes
-        # [kappa, den_ref, mom_ref_*] only (5 outputs, no nrg_ref).
-        if self.adiabatic_index == 1.0:
-            return [kappa, rho_ref, mom_x, mom_y, mom_z]
-        return [kappa, rho_ref, mom_x, mom_y, mom_z, nrg_ref]
+        return bondi_shared.far_field_sponge_outputs(
+            x1,
+            x2,
+            x3,
+            onset_radius=buffer_params["buffer_radius"],
+            width=buffer_params["buffer_width"],
+            damp_time=buffer_params["damp_time"],
+            bondi_radius=self.bondi_radius,
+            density=self.ambient_density,
+            sound_speed=self.ambient_sound_speed,
+            gamma=self.adiabatic_index,
+        )
 
     @property
     def source_expressions(self) -> list[ExpressionDict]:
@@ -545,35 +472,15 @@ class SphericalBondiTest(SimbiProblem):
     # analytical solution
     # =========================================================================
     def bondi_solution(self, r: float) -> tuple[float, float, float]:
-        """analytical bondi solution at radius r: (density, radial_velocity, pressure)"""
-        if r <= 0:
-            return (
-                self.ambient_density,
-                0.0,
-                self.ambient_density * self.ambient_sound_speed**2,
-            )
-
-        xi = r / self.bondi_radius
-
-        if xi > 1.0:
-            rho_ratio = (xi / 2.0) ** (-1.5)
-            v_r = -self.ambient_sound_speed * math.sqrt(2.0 / xi)
-        else:
-            rho_ratio = 1.0 / xi**1.5
-            v_r = -self.ambient_sound_speed
-
-        rho = self.ambient_density * rho_ratio
-
-        if self.adiabatic_index == 1.0:
-            pressure = self.ambient_density * self.ambient_sound_speed**2
-        else:
-            pressure = (
-                self.ambient_density
-                * self.ambient_sound_speed**2
-                * rho_ratio ** (self.adiabatic_index)
-            )
-
-        return (rho, v_r, pressure)
+        """analytical bondi profile at radius r: (density, radial velocity,
+        pressure). one shared text: `simbi.functional.bondi.bondi_profile`."""
+        return bondi_shared.bondi_profile(
+            r,
+            bondi_radius=self.bondi_radius,
+            density=self.ambient_density,
+            sound_speed=self.ambient_sound_speed,
+            gamma=self.adiabatic_index,
+        )
 
     # =========================================================================
     # initial conditions
