@@ -108,7 +108,7 @@ fn build_mono(region: &RefinementRegion<2>, sink_pos: [f64; 2]) -> Hier {
         root,
         k,
         std::slice::from_ref(region),
-        ProlongOrder::Plm,
+        ProlongOrder::Ppm,
         kset,
     )
     .expect("mono hierarchy");
@@ -142,7 +142,7 @@ fn build_tiles(counts: [usize; 2], region: &RefinementRegion<2>, sink_pos: [f64;
         let h = match clip(region, origin, m) {
             Some(r) => {
                 let k = kset(&root);
-                let h = Hier::with_refinement(root, k, &[r], ProlongOrder::Plm, kset)
+                let h = Hier::with_refinement(root, k, &[r], ProlongOrder::Ppm, kset)
                     .expect("tile hierarchy");
                 h.seed_fine_from_coarse().expect("seed fine");
                 h

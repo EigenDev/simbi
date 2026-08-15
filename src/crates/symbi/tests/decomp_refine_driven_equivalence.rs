@@ -98,7 +98,7 @@ fn phys_boundaries() -> [[BoundaryType; 2]; 2] {
 fn build_mono() -> Hier {
     let root = build_root([N, N], [0.0, 0.0], Boundaries(phys_boundaries()));
     let k = kset(&root);
-    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
         .expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
@@ -132,7 +132,7 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
         });
         let mut h = if owns_patch {
             let k = kset(&root);
-            let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+            let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
                 .expect("tile hierarchy");
             h.seed_fine_from_coarse().expect("seed fine");
             h

@@ -90,7 +90,7 @@ fn build_mono(ts: Timestepping) -> Hier {
         ts,
     );
     let k = kset(&root);
-    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
         .expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
@@ -127,7 +127,7 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
             (0..2).all(|a| origin[a] <= 0.125 && origin[a] + m[a] as f64 * DX >= 0.375);
         let mut h = if owns_patch {
             let k = kset(&root);
-            let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+            let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
                 .expect("tile hierarchy");
             h.seed_fine_from_coarse().expect("seed fine");
             h

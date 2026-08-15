@@ -87,7 +87,7 @@ fn build_mono() -> Hier {
         Boundaries::uniform(BoundaryType::Outflow),
     );
     let k = kset(&root);
-    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+    let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
         .expect("mono hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
@@ -120,7 +120,7 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
         });
         let mut h = if owns_patch {
             let k = kset(&root);
-            let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
+            let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
                 .expect("tile hierarchy");
             h.seed_fine_from_coarse().expect("seed fine");
             h

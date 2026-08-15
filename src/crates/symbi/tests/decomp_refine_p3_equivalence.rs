@@ -89,7 +89,7 @@ fn build_mono(ts: Timestepping) -> Hier {
         x_hi: [PX_HI, PY_HI],
     };
     let mut h =
-        Hier::with_refinement(root, k, &[region], ProlongOrder::Plm, kset).expect("mono hier");
+        Hier::with_refinement(root, k, &[region], ProlongOrder::Ppm, kset).expect("mono hier");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -129,7 +129,7 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
                 x_lo: [cx[0], cy[0]],
                 x_hi: [cx[1], cy[1]],
             };
-            let h = Hier::with_refinement(root, k, &[region], ProlongOrder::Plm, kset)
+            let h = Hier::with_refinement(root, k, &[region], ProlongOrder::Ppm, kset)
                 .expect("tile hier");
             h.seed_fine_from_coarse().expect("seed fine");
             h
