@@ -45,6 +45,22 @@ const SECANT_STEPS: usize = 15;
 /// cancelling constituents.
 const ALFVEN_DEGENERACY_TOL: f64 = 1e-3;
 
+/// relative tolerance on the ALFVEN-WAVE SEPARATION `|sa_r - sa_l|` against the full fan
+/// width, below which the anti-diffusive EMF coefficient `nustar` is zeroed: coincident
+/// alfven waves carry no rotational discontinuity for the coefficient to steepen. a
+/// DIFFERENT question from `ALFVEN_DEGENERACY_TOL` above, at a different scale -- that one
+/// guards a catastrophic cancellation between near-equal star-state constituents (per-mille,
+/// where the cancellation loses meaningful digits), while this one detects wave COINCIDENCE
+/// (parts-per-billion, where the physical discontinuity itself vanishes). shared by the
+/// newtonian and isothermal coefficient siblings, which each carried a private copy that
+/// could drift from the other.
+const ALFVEN_SEPARATION_TOL: f64 = 1e-9;
+
+/// the relative roundoff scale every guard in this file measures small denominators
+/// against: a few ulps of headroom over machine epsilon. previously written inline
+/// fourteen times.
+const REL_EPS: f64 = 32.0 * f64::EPSILON;
+
 /// the vdiff helper result: intermediate states + the f-function value at
 /// the trial pressure. unphysical inputs leave `f` saturated at
 /// `DIVERGENCE_GUARD * 10` (so the secant + final-select treat them as
@@ -72,7 +88,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
 ) -> VdiffOut<S, D> {
     let one = S::ONE;
     let zero = S::ZERO;
-    let rel = S::from_f64(32.0 * f64::EPSILON);
+    let rel = S::from_f64(REL_EPS);
     let sgn_bn = S::select(bn.cmp_ge(zero), one, -one);
 
     let big = S::from_f64(DIVERGENCE_GUARD * 10.0);
@@ -263,7 +279,7 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
     let one = S::ONE;
     let zero = S::ZERO;
     let feps = S::from_f64(CONVERGENCE_TOL);
-    let relative_eps = S::from_f64(32.0 * f64::EPSILON);
+    let relative_eps = S::from_f64(REL_EPS);
     let div_guard = S::from_f64(DIVERGENCE_GUARD);
 
     let p_perturbed = p_init * (one + S::from_f64(SECANT_PERTURBATION));
@@ -452,7 +468,7 @@ where
     let dwave = a_r - a_l;
     let dwave_ok = dwave
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(a_l.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * a_r.abs().max(a_l.abs()));
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
@@ -526,7 +542,7 @@ where
         let denominator = lc - vna;
         let denominator_ok = denominator
             .abs()
-            .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * lc.abs().max(vna.abs()));
+            .cmp_gt(S::from_f64(REL_EPS) * lc.abs().max(vna.abs()));
         let inv_lc_vna = one / S::select(denominator_ok, denominator, one);
         let da = r_side.den * inv_lc_vna;
         let ea = (r_side.nrg + r_side.den + p_final * vna - vdba * bn) * inv_lc_vna;
@@ -569,7 +585,7 @@ where
     let contact_denominator = la - vnc;
     let contact_ok = contact_denominator
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * la.abs().max(vnc.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * la.abs().max(vnc.abs()));
     let inv_la_vnc = one / S::select(contact_ok, contact_denominator, one);
     let dc = ua.den * (la - vna_used) * inv_la_vnc;
     let man = ua.mom.dot(nhat);
@@ -604,10 +620,10 @@ where
     let fast_den_r = a_r - vv_iso[1].dot(nhat);
     let fast_ok_l = fast_den_l
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_l.abs().max(vv_iso[0].dot(nhat).abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * a_l.abs().max(vv_iso[0].dot(nhat).abs()));
     let fast_ok_r = fast_den_r
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(vv_iso[1].dot(nhat).abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * a_r.abs().max(vv_iso[1].dot(nhat).abs()));
     let fast_ok = S::Mask::select_mask(on_left, fast_ok_l, fast_ok_r);
     let flux_inner = MhdCons::select(success & fast_ok, flux_hlld, hlle_flux);
     let flux_choose_r = MhdCons::select(supersonic_r, flux_supersonic_r, flux_inner);
@@ -660,7 +676,7 @@ where
     let dwave = a_r - a_l;
     let dwave_ok = dwave
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * a_r.abs().max(a_l.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * a_r.abs().max(a_l.abs()));
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
@@ -788,7 +804,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     let dm = cr - cl;
     let dm_ok = dm
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * cr.abs().max(cl.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * cr.abs().max(cl.abs()));
     let dm_s = S::select(dm_ok, dm, one);
     let s_m = (cr * un_r - cl * un_l - pt_r + pt_l) / dm_s;
     let pt_star = (cr * pt_l - cl * pt_r + cl * cr * (un_r - un_l)) / dm_s;
@@ -809,7 +825,7 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
         let smk = s_k - s_m;
         let smk_ok = smk
             .abs()
-            .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_k.abs().max(s_m.abs()));
+            .cmp_gt(S::from_f64(REL_EPS) * s_k.abs().max(s_m.abs()));
         let smk_s = S::select(smk_ok, smk, one);
         let rho_star = rho_k * (s_k - un_k) / smk_s;
         // the transverse star fields divide by den = rho_k(s_k-u_k)(s_k-s_m) - bn^2, which
@@ -926,10 +942,10 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     // physicality: any non-positive star density / pressure routes to HLLE.
     let smk_l_ok = (s_l - s_m)
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_l.abs().max(s_m.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * s_l.abs().max(s_m.abs()));
     let smk_r_ok = (s_r - s_m)
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_m.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * s_r.abs().max(s_m.abs()));
     let ok = dm_ok
         & smk_l_ok
         & smk_r_ok
@@ -958,8 +974,8 @@ pub fn hlld_newtonian_coeffs<S: Scalar, const D: usize>(
     let one = S::ONE;
     let two = S::from_f64(2.0);
     let half = S::from_f64(0.5);
-    let relative_eps = S::from_f64(32.0 * f64::EPSILON);
-    let eps_deg = S::from_f64(1.0e-9);
+    let relative_eps = S::from_f64(REL_EPS);
+    let eps_deg = S::from_f64(ALFVEN_SEPARATION_TOL);
     let regime = NewtonianMhd;
 
     // single continuous normal field (div B = 0), identical to `hlld_newtonian`.
@@ -1083,8 +1099,8 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let one = S::ONE;
     let two = S::from_f64(2.0);
     let half = S::from_f64(0.5);
-    let relative_eps = S::from_f64(32.0 * f64::EPSILON);
-    let eps_deg = S::from_f64(1.0e-9);
+    let relative_eps = S::from_f64(REL_EPS);
+    let eps_deg = S::from_f64(ALFVEN_SEPARATION_TOL);
 
     // single continuous normal field (div B = 0), identical to the isothermal flux.
     let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
@@ -1115,7 +1131,7 @@ pub fn hlld_isothermal_coeffs<S: Scalar, const D: usize>(
     let dwave = s_r - s_l;
     let dwave_ok = dwave
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_l.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * s_r.abs().max(s_l.abs()));
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let u_hll = (u_r * s_r - u_l * s_l - f_r + f_l) * inv_dwave;
     let f_hll = (f_l * s_r - f_r * s_l + (u_r - u_l) * (s_l * s_r)) * inv_dwave;
@@ -1235,7 +1251,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
     let dwave = s_r - s_l;
     let dwave_ok = dwave
         .abs()
-        .cmp_gt(S::from_f64(32.0 * f64::EPSILON) * s_r.abs().max(s_l.abs()));
+        .cmp_gt(S::from_f64(REL_EPS) * s_r.abs().max(s_l.abs()));
     let inv_dwave = one / S::select(dwave_ok, dwave, one);
     let u_hll = (u_r * s_r - u_l * s_l - f_r + f_l) * inv_dwave;
     let f_hll = (f_l * s_r - f_r * s_l + (u_r - u_l) * (s_l * s_r)) * inv_dwave;

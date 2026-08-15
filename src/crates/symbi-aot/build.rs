@@ -43,6 +43,7 @@ use symbi_discretize::{
     fofc_select_with_body_gv, fofc_splice_gv, geometric_momentum_source_probe_gv,
     geometry_probe_gv, godunov_mass_gv, imhd_edge_emf_uct_hlld_gv, imhd_wave_speeds_cell_gv,
     inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, neumann_ghost_fill_gv,
+    wb_ghost_fill_gv,
     nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, nmhd_wave_speed_map_gv,
     nmhd_wave_speeds_cell_gv, rhd_wave_speed_map_gv, rmhd_average_efield_gv,
     rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv,
@@ -1345,6 +1346,9 @@ fn gen_adiabatic_wb_face_flux(
             dir, recon, symbi_discretize::coords::Balance::Hydrostatic, coords, &g.axes),
         ("_hllc_lm", 3) => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<3>(
             dir, recon, symbi_discretize::coords::Balance::Hydrostatic, coords, &g.axes),
+        ("_hllc", 1) => symbi_discretize::gv::adiabatic_hllc_wb_flux_gv::<1>(dir, recon, coords, &g.axes),
+        ("_hllc", 2) => symbi_discretize::gv::adiabatic_hllc_wb_flux_gv::<2>(dir, recon, coords, &g.axes),
+        ("_hllc", 3) => symbi_discretize::gv::adiabatic_hllc_wb_flux_gv::<3>(dir, recon, coords, &g.axes),
         ("", 1) => symbi_discretize::gv::adiabatic_hlle_wb_flux_gv::<1>(dir, recon, coords, &g.axes),
         ("", 2) => symbi_discretize::gv::adiabatic_hlle_wb_flux_gv::<2>(dir, recon, coords, &g.axes),
         ("", 3) => symbi_discretize::gv::adiabatic_hlle_wb_flux_gv::<3>(dir, recon, coords, &g.axes),
@@ -2378,6 +2382,16 @@ fn gen_rhd_wave_speed_map_eos(out_dir: &str, ndim: u8, geom: Geom, eos: EosArm) 
 // integer source coord (periodic/reflect/outflow on a runtime map_type), write at
 // the cell, with vel_sign per momentum component. IN-PLACE (write path == input
 // path). dimension-generic; codegen instantiates the 1D kernel here.
+// the balance-aware ghost fill: velocity mirrors, (rho, p) extend along the local isentrope
+// to the ghost's potential. cartesian only, like every balance-carrying kernel.
+fn gen_wb_ghost_fill(out_dir: &str, ndim: u8) {
+    let g = Geom::identity(Coords::Cartesian, ndim);
+    let name = format!("wb_ghost_fill_{ndim}d");
+    let (k, writes) =
+        wb_ghost_fill_gv(ndim as usize, g.ncomp as usize, &g.axes, MAX_SOURCE_BODIES);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_iso_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
     let name = format!("iso_ghost_fill{}_{ndim}d", geom.suffix());
     let (k, writes) = iso_ghost_fill_gv(ndim as usize, geom.ncomp as usize, &geom.axes);
@@ -3515,6 +3529,10 @@ fn main() {
                 }
                 // the first-order FOFC redo runs HLLE at theta = 0 on the plm kernel.
                 gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Plm, cc, "");
+                // classical HLLC + balance, for the solver a/b: the sweep flips the SOLVER
+                // with the balance held fixed, so the comparison is one-variable.
+                gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Plm, cc, "_hllc");
+                gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, Recon::Ppm, cc, "_hllc");
             }
             gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Plm);
             gen_adiabatic_hllc_acoustic_face_flux(&out_dir, ndim, dir, Recon::Ppm);
@@ -3623,6 +3641,7 @@ fn main() {
     for ndim in 1u8..=3 {
         gen_body_source(&out_dir, ndim, Coords::Cartesian);
         gen_body_source_wb(&out_dir, ndim);
+        gen_wb_ghost_fill(&out_dir, ndim);
     }
     // curvilinear body source (one generic builder per geometry): cyl r-phi disk plane (2D) +
     // r-phi-z (3D); spherical meridional (2D) + full (3D). the r-z axisymmetric body shares the

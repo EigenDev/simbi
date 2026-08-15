@@ -556,7 +556,43 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         } else {
             ""
         };
-        let name = format!("iso_ghost_fill{sfx}_{D}d");
+        // under a BALANCED reconstruction the ghosts must satisfy the same premise the
+        // interior does: a mirrored copy of a stratified column is not its continuation, so
+        // reflect/outflow ghosts extend (rho, p) along the local isentrope to the ghost's own
+        // potential (velocity mirrors as always). without this the wall face presents pure
+        // boundary-artifact departures and the balanced scheme fights the wall -- measured as
+        // a 1.5e-2 floor loss against the interior's 2.2e-8.
+        let name = if self.balance == symbi_discretize::coords::Balance::Hydrostatic {
+            assert!(
+                DOF == D,
+                "the balance-aware ghost fill is baked for DOF == D cartesian grids only"
+            );
+            // a periodic cut identifies two positions whose body potentials generally
+            // differ, and the isentrope extension from one to the other is a real state
+            // change smuggled through a boundary that claims to be an identification.
+            // exact only when the potential is periodic too, which a body potential is
+            // not -- refused rather than approximated.
+            let has_bodies = sim
+                .immersed
+                .as_ref()
+                .is_some_and(|im| !im.bodies.is_empty());
+            if has_bodies {
+                for axis_bc in bc.iter() {
+                    for face_bc in axis_bc.iter() {
+                    assert!(
+                        *face_bc != symbi_grid::ghost::BcType::Periodic,
+                        "balance-aware ghost fill under a PERIODIC boundary with a body \
+                         potential: the periodic images sit at different potentials, so \
+                         the isentrope extension across the cut is unsound. use outflow \
+                         or reflect walls, or run the plain reconstruction"
+                    );
+                    }
+                }
+            }
+            format!("wb_ghost_fill_{D}d")
+        } else {
+            format!("iso_ghost_fill{sfx}_{D}d")
+        };
 
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
@@ -574,6 +610,24 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
+                        ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
+                        // the balance-aware fill evaluates the body potential at the ghost
+                        // and source centroids; same slots the body source binds.
+                        ScalarBind::Ref(ScalarRef::Body { idx, field }) => {
+                            let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
+                            Sc::from_f64(crate::regimes::substrate_kernels::body_scalar::<D>(
+                                bodies, *idx, *field,
+                            ))
+                        }
+                        // the balance-aware fill evaluates cell centroids through the
+                        // face-position ladder, which declares the per-axis grid origin
+                        // and spacing like any position-reading kernel.
+                        ScalarBind::Ref(other) => Sc::from_f64(
+                            geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                                .unwrap_or_else(|| {
+                                    panic!("ghost_fill: unexpected scalar {other:?}")
+                                }),
+                        ),
                         o => panic!("ghost_fill: unexpected scalar {o:?}"),
                     },
                 );

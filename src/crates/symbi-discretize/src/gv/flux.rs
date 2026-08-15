@@ -1550,6 +1550,26 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
 /// a face return the profile evaluated there and agree. the redo therefore holds a stratified
 /// column that the un-balanced redo would have kicked, and the cells most likely to reach it are
 /// the stagnant stratified ones at a solid wall.
+/// classical HLLC with a WELL-BALANCED reconstruction: the solver-a/b partner of the
+/// low-mach arm, so a sweep can flip the SOLVER with the balance held fixed and the
+/// comparison stays one-variable.
+pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
+    dir: u8,
+    recon: Recon,
+    coords: Coords,
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    adiabatic_hllc_at_arm::<D>(
+        dir,
+        recon,
+        ShockwaveLimiter::Standard,
+        MachRef::Published,
+        Balance::Hydrostatic,
+        coords,
+        axes,
+    )
+}
+
 pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
@@ -1724,12 +1744,9 @@ fn balanced_thermo_pair(
     let side = |anchor: usize, take_left: bool| -> (Gv, Gv) {
         let eq =
             LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], Gv::scalar("gamma"));
-        let (d_rho, d_pre): (Vec<Gv>, Vec<Gv>) = (0..offsets.len())
-            .map(|k| {
-                let (r_eq, p_eq) = eq.state_at(phi[k]);
-                (rho[k] - r_eq, pre[k] - p_eq)
-            })
-            .unzip();
+        // the ONE transform text -- the same function the host proof battery exercises.
+        let (d_rho, d_pre) =
+            symbi_hydro::hydrostatic::hydrostatic_departures(&rho, &pre, &phi, anchor, Gv::scalar("gamma"));
         let limit = |d: &[Gv]| match recon {
             Recon::Plm => crate::gv::plm_theta_from_stencil(d[0], d[1], d[2], d[3], theta),
             Recon::Ppm => crate::gv::ppm_from_stencil(d[0], d[1], d[2], d[3], d[4], d[5]),

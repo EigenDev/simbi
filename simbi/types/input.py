@@ -372,6 +372,15 @@ class Metadata:
     # than silently declaring a gamma-law one.
     eos: str = ""
 
+    # whether reconstruction ran on departures from the local hydrostatic isentrope.
+    # None means the attribute is absent from the file, which for `solver = hllc_lm`
+    # identifies the RETIRED clamped scheme (the attribute and the published-ramp
+    # meaning of the name entered the format together): a different fact from False.
+    wb_reconstruction: bool | None = None
+    # the mach threshold of the low-mach acoustic-speed ramp; None on files
+    # predating the attribute.
+    mach_limit: float | None = None
+
     # the stationary target the run is well-balanced against, as the serialized expression
     # wire. it is not a field, so nothing else in the file records it, and a run resumed
     # against a DIFFERENT target integrates different equations while looking identical from

@@ -144,6 +144,69 @@ def test_the_relativistic_sound_speed_stays_subluminal() -> None:
     assert abs(_scalar(hot) - 1.0 / np.sqrt(3.0)) < 1e-6
 
 
+# the compiled rust closure's values (enthalpy, newtonian-form sound speed squared,
+# specific internal energy) at rho = 1, theta = p / rho spanning sixteen decades. the
+# python transcription below must reproduce the gas the kernels evolved to roundoff;
+# a drift in either transcription surfaces here as a mismatch far above a few ulp.
+RUST_TM_GOLDENS = (
+    (1e-8, 1.00000002500000007e0, 1.66666665666666686e-8, 1.50000001125000030e-8),
+    (1e-7, 1.00000025000001136e0, 1.66666656666668176e-7, 1.50000011249999981e-7),
+    (1e-6, 1.00000250000112501e0, 1.66666566666816652e-6, 1.50000112499999999e-6),
+    (1e-5, 1.00002500011250017e0, 1.66665666681666610e-5, 1.50001124999999964e-5),
+    (1e-4, 1.00025001124999990e0, 1.66656668166554174e-4, 1.50011249999936738e-4),
+    (1e-3, 1.00250112499936717e0, 1.66566816554166732e-3, 1.50112499936718834e-3),
+    (1e-2, 1.02511249367258683e0, 1.65681554172994079e-2, 1.51124936725868138e-2),
+    (1e-1, 1.26118742080783441e0, 1.58054792458588333e-1, 1.61187420807834242e-1),
+    (1e0, 4.30277563773199478e0, 1.36389102893467173e0, 2.30277563773199478e0),
+    (1e1, 4.00332963783729099e1, 1.33370288293758410e1, 2.90332963783729063e1),
+    (1e2, 4.00003333296297114e2, 1.33333703695473474e2, 2.99003333296297114e2),
+    (1e3, 4.00000033333329611e3, 1.33333337037036245e3, 2.99900033333329611e3),
+    (1e4, 4.00000000333333301e4, 1.33333333370370347e4, 2.99990000333333337e4),
+    (1e5, 4.00000000003333320e5, 1.33333333333703689e5, 2.99999000003333320e5),
+    (1e6, 4.00000000000033341e6, 1.33333333333337051e6, 2.99999900000033341e6),
+    (1e7, 4.00000000000000298e7, 1.33333333333333377e7, 2.99999990000000335e7),
+    (1e8, 4.00000000000000000e8, 1.33333333333333328e8, 2.99999999000000000e8),
+)
+
+
+def test_the_python_closure_matches_the_compiled_rust_one_to_roundoff() -> None:
+    # both languages transcribe the same closed forms; the reader computing even a
+    # slightly different gas than the kernels evolved poisons every derived field.
+    eos = taub_mathews_t()
+    rho = np.array([1.0])
+    for theta, h_rust, a2_rust, e_rust in RUST_TM_GOLDENS:
+        pre = np.array([theta])
+        for name, got, want in (
+            ("enthalpy", _scalar(eos.specific_enthalpy(rho, pre)), h_rust),
+            ("sound_speed_sq", _scalar(eos.sound_speed_sq(rho, pre)), a2_rust),
+            ("internal_energy", _scalar(eos.internal_energy(rho, pre)), e_rust),
+        ):
+            err = abs(got / want - 1.0)
+            assert err < 5e-15, (
+                f"{name} at theta = {theta:g}: python {got!r} vs rust {want!r} "
+                f"(relative error {err:.2e})"
+            )
+
+
+def test_internal_energy_conjugate_form_recovers_the_cold_limit_digits() -> None:
+    # e = h - 1 - theta as a direct subtraction cancels ~11 digits cold: the sqrt
+    # correction is theta^2-small against 1, so the lost digits surface as a relative
+    # error ~ ulp / theta. the gate first shows the naive form actually misses the
+    # rust value at this theta (else the comparison proves nothing), then that the
+    # conjugate form holds it to a few ulp.
+    eos = taub_mathews_t()
+    theta, e_rust = RUST_TM_GOLDENS[0][0], RUST_TM_GOLDENS[0][3]
+    rho, pre = np.array([1.0]), np.array([RUST_TM_GOLDENS[0][0]])
+    e_naive = _scalar(eos.specific_enthalpy(rho, pre)) - 1.0 - theta
+    naive_err = abs(e_naive / e_rust - 1.0)
+    assert naive_err > 1e-10, (
+        f"the naive h - 1 - theta agrees with rust to {naive_err:.2e} at theta = "
+        f"{theta:g}; the cancellation this gate defends against is absent"
+    )
+    conj_err = abs(_scalar(eos.internal_energy(rho, pre)) / e_rust - 1.0)
+    assert conj_err < 5e-15, f"conjugate form off by {conj_err:.2e}"
+
+
 def test_a_newtonian_checkpoint_refuses_the_relativistic_closure() -> None:
     # the parameter-free closure is rejected off the rhd regime at configuration time, so
     # a newtonian file carrying it means the regime and eos attributes disagree; the

@@ -743,12 +743,11 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
         "hllc" => Ok(Solver::Hllc),
         // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
         "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
-        "hllc_lm_plain" | "hllc-lm-plain" => Err(
+        "hllc_lm_plain" | "hllc-lm-plain" => Err(PyValueError::new_err(
             "solver 'hllc_lm_plain' was collapsed into 'hllc_lm' on 2026-08-15: hllc_lm now \
              IS the published Fleischmann scheme (the clamped variant is retired). use \
-             solver=hllc_lm, with wb_reconstruction=True for stratified problems."
-                .to_string(),
-        ),
+             solver=hllc_lm, with wb_reconstruction=True for stratified problems.",
+        )),
         // acoustic-consistency scaling: no reference mach number (newtonian only).
         "hllc_acoustic" | "hllc-acoustic" => Ok(Solver::HllcAcoustic),
         "hlld" => Ok(Solver::Hlld),
@@ -7251,6 +7250,13 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("x3_spacing", cfg.x3_spacing.as_str())
         .with("x3_spacing_ratio", cfg.x3_spacing_ratio)
         .with("boundary_conditions", boundary_conditions)
+        // the reconstruction-balance discriminator. `solver = hllc_lm` changed meaning when
+        // the clamped variant was retired (2026-08-15): a checkpoint recording the solver
+        // name WITHOUT this attribute is clamp-era by construction, and the python restart
+        // guard refuses to continue it under the new numerics. every new file must record
+        // it, else the guard would refuse its own series on first resume.
+        .with("wb_reconstruction", cfg.wb_reconstruction)
+        .with("mach_limit", cfg.mach_limit)
         .with("initial_time", cfg.start_time)
         .with("time_unit", cfg.time_unit)
         .with("time_unit_label", cfg.time_unit_label.as_str())

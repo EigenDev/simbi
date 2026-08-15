@@ -98,6 +98,11 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         )
         # get all model fields
         model_dict = problem.model_dump()
+        # the synge closure is parameter-free; the model carries adiabatic_index = None. the
+        # kernel ABI still binds a gamma scalar (taub-mathews never reads it), so the inert
+        # placeholder enters HERE, on the wire dict alone -- the model itself never holds it.
+        if model_dict.get("adiabatic_index") is None:
+            model_dict["adiabatic_index"] = 5.0 / 3.0
 
     _validate_expression_payloads(model_dict)
 

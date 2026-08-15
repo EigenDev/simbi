@@ -89,6 +89,10 @@ class gamma_law_t:
         gas is this divided by the specific enthalpy."""
         return np.asarray(self.gamma * pre / rho)
 
+    def internal_energy(self, rho: Array, pre: Array) -> Array:
+        """specific internal energy e = p / ((gamma - 1) rho)."""
+        return np.asarray(pre / ((self.gamma - 1.0) * rho))
+
 
 @dataclass(frozen=True)
 class taub_mathews_t:
@@ -107,6 +111,15 @@ class taub_mathews_t:
         theta = np.asarray(pre / rho)
         h = self.specific_enthalpy(rho, pre)
         return np.asarray(theta * (5.0 * h - 8.0 * theta) / (3.0 * (h - theta)))
+
+    def internal_energy(self, rho: Array, pre: Array) -> Array:
+        """specific internal energy e = h - 1 - theta = 1.5 theta + (sqrt(2.25 theta^2
+        + 1) - 1), with the sqrt-minus-one in conjugate form: the direct subtraction
+        cancels ~11 digits in the cold limit (the correction is theta^2-small against 1)
+        and the lost digits surface as a relative error ~ ulp / theta in e."""
+        theta = np.asarray(pre / rho)
+        x_sq = 2.25 * theta**2
+        return np.asarray(1.5 * theta + x_sq / (np.sqrt(x_sq + 1.0) + 1.0))
 
 
 closure_t = gamma_law_t | taub_mathews_t

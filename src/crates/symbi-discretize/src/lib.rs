@@ -47,6 +47,7 @@ pub use gv::{
     imhd_flux_gv, imhd_ghost_fill_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
     imhd_wave_speeds_cell_gv, inertial_momentum_probe_gv, iso_c2p_gv, iso_flux_gv,
     iso_ghost_fill_gv, iso_pre_gv, iso_wave_speed_map_gv, kerr_wave_speed_map_gv,
+    wb_ghost_fill_gv,
     neumann_ghost_fill_gv, nmhd_c2p_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv,
     nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv,
     nmhd_wave_speeds_cell_gv, point_mass_gravity_probe_gv, rhd_c2p_gr_gv, rhd_c2p_gv,

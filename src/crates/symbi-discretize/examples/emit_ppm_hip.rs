@@ -67,7 +67,13 @@ fn main() {
     // -3..+2 parabola stencil + the fleischmann adaptive phi + the compression-
     // gated flatten, all in one graph — the widest-stencil flux the device runs.
     for dir in 0..3u8 {
-        let (k, w) = adiabatic_hllc_lm_flux_gv::<3>(dir, Recon::Ppm);
+        let (k, w) = adiabatic_hllc_lm_flux_gv::<3>(
+            dir,
+            Recon::Ppm,
+            symbi_discretize::coords::Balance::Plain,
+            symbi_discretize::coords::Coords::Cartesian,
+            &[0, 1, 2],
+        );
         emit_gv(&out, &format!("adiabatic_face_flux_hllc_lm_ppm_3d_{dir}"), 3, k, w);
     }
 

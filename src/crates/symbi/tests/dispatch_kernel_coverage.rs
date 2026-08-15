@@ -504,6 +504,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
     // the premise: the enumeration must actually reach the interesting pairs. a `valid_for` that
     // rejected everything, or a name protocol that drifted, would leave `missing` empty and this
     // gate silently vacuous.
+    println!("coverage matrix: {checked} combinations");
     assert!(
         // MEASURED, not guessed: the sweep over
         // (regime x solver x dim x dir x recon x eos x balance x chart) is exactly 168

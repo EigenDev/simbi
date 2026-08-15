@@ -34,9 +34,15 @@ class FakeProblem:
         self.equilibrium_expressions = payload or {}
 
 
-def metadata_with(target: dict | None) -> Metadata:
+def metadata_with(
+    target: dict | None,
+    solver: str = "hllc",
+    wb_reconstruction: bool | None = None,
+) -> Metadata:
     # only the field under test matters; the rest carry the dataclass defaults.
     return Metadata(
+        solver=solver,
+        wb_reconstruction=wb_reconstruction,
         time=0.0,
         dt=0.0,
         dlogt=0.0,
@@ -54,7 +60,6 @@ def metadata_with(target: dict | None) -> Metadata:
         is_mhd=False,
         is_relativistic=False,
         regime="newtonian",
-        solver="hllc",
         reconstruction="plm",
         timestepping="rk2",
         equilibrium_target=json.dumps(target) if target else "",
@@ -93,6 +98,38 @@ def test_adding_a_target_on_restart_is_refused() -> None:
         _assert_same_equilibrium_target(
             FakeProblem(atmosphere_payload()), metadata_with(None)
         )
+
+
+def test_a_clamp_era_hllc_lm_checkpoint_is_refused() -> None:
+    # `solver = hllc_lm` changed meaning when the clamped variant was retired: the name
+    # now denotes the published fleischmann ramp. the wb_reconstruction attribute entered
+    # the checkpoint format together with the new scheme, so an hllc_lm file WITHOUT it
+    # was written by the old numerics and must not be continued under the new ones.
+    with pytest.raises(ConfigError, match="RETIRED clamped hllc_lm"):
+        _assert_same_equilibrium_target(
+            FakeProblem(None),
+            metadata_with(None, solver="hllc_lm", wb_reconstruction=None),
+        )
+
+
+def test_a_post_collapse_hllc_lm_checkpoint_resumes() -> None:
+    # the attribute's PRESENCE is the discriminator, not its value: a new-scheme run
+    # with balance off records False and must resume, else every fresh hllc_lm series
+    # would refuse its own first restart.
+    for wb in (True, False):
+        _assert_same_equilibrium_target(
+            FakeProblem(None),
+            metadata_with(None, solver="hllc_lm", wb_reconstruction=wb),
+        )
+
+
+def test_other_solvers_never_trip_the_scheme_change_guard() -> None:
+    # only hllc_lm changed meaning; an old checkpoint from any other solver predates the
+    # attribute too, and refusing it would strand every archived series.
+    _assert_same_equilibrium_target(
+        FakeProblem(None),
+        metadata_with(None, solver="hllc", wb_reconstruction=None),
+    )
 
 
 def test_the_comparison_is_structural_not_textual() -> None:

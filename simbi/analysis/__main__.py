@@ -16,14 +16,11 @@ from .accretion import averaged_rate, load_body_diagnostics, steady_state_time
 
 
 def lambda_c(gamma: float) -> float:
-    if abs(gamma - 1.0) < 1e-5:
-        return math.e**1.5 / 4.0
-    # gamma -> 5/3: the exponent's 0/0 limit is (2/x)^(x/c) -> 1, so
-    # lambda_c -> 1/4 (the monoatomic edge; r_s = 0 there).
-    if abs(gamma - 5.0 / 3.0) < 1e-5:
-        return 0.25
-    num = 5.0 - 3.0 * gamma
-    return 0.25 * (2.0 / num) ** (num / (2.0 * gamma - 2.0))
+    # the shared transcription (simbi.functional.bondi), branch-identical to the rust
+    # `accretion_coefficient` every simulation drains against.
+    from simbi.functional.bondi import accretion_coefficient
+
+    return accretion_coefficient(gamma)
 
 
 def _find_attr(f, name):

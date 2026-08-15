@@ -600,12 +600,6 @@ class SimbiProblem(BaseModel):
     use_quirk_smoothing: Annotated[
         bool, ProblemParam(False, cli=True, description="use quirk smoothing")
     ]
-    use_fleischmann_limiter: Annotated[
-        bool,
-        ProblemParam(
-            False, cli=True, description="use fleischmann low-mach fix"
-        ),
-    ]
 
     # =========================================================================
     # refinement / fmr settings (fixed mesh refinement only)
@@ -1197,7 +1191,12 @@ class SimbiProblem(BaseModel):
                     "the synge (taub-mathews) closure is parameter-free — its "
                     "effective gamma is set by the temperature"
                 )
-            object.__setattr__(self, "adiabatic_index", 5.0 / 3.0)
+            # the model KEEPS adiabatic_index = None: "no index" stays representable, so a
+            # reader can tell a parameter-free closure from a user's 5/3. the inert
+            # placeholder the kernel plumbing binds (taub-mathews never reads it) is
+            # injected at the SERIALIZATION boundary in runner.py, never onto the model --
+            # the previous in-place mutation here leaked 5/3 into every downstream
+            # consumer, and the checkpoint reader grew a special case to undo it.
         return self
 
     @model_validator(mode="after")

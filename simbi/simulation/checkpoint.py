@@ -120,6 +120,17 @@ def metadata_to_config_dict(
     if recorded_eos:
         config["eos"] = Eos(recorded_eos)
 
+    # the reconstruction-balance flag and the low-mach ramp threshold are scheme
+    # parameters, not fields: a resumed run silently changing either integrates
+    # different numerics on the same series. only recorded on checkpoints new
+    # enough to carry the attributes.
+    recorded_wb = getattr(metadata, "wb_reconstruction", None)
+    if recorded_wb is not None:
+        config["wb_reconstruction"] = recorded_wb
+    recorded_mach_limit = getattr(metadata, "mach_limit", None)
+    if recorded_mach_limit is not None:
+        config["mach_limit"] = recorded_mach_limit
+
     if metadata.subcycling_mode and metadata.subcycling_mode != "none":
         from simbi.types import SubCycleMode
 
@@ -169,17 +180,16 @@ def _assert_same_equilibrium_target(
     # variant was retired and the name now denotes the published Fleischmann ramp. a series
     # recorded under the old meaning must not be continued under the new one -- same string,
     # different numerics, and nothing downstream could ever tell. the discriminator is the
-    # stored config itself: `wb_reconstruction` entered the model with the new scheme, so a
-    # checkpoint whose config lacks the key is clamp-era by construction.
+    # `wb_reconstruction` file attribute, which entered the checkpoint format together with
+    # the new scheme: an hllc_lm file without it is clamp-era by construction.
     recorded_solver = str(getattr(metadata, "solver", "") or "")
     if recorded_solver in ("hllc_lm", "hllc-lm"):
-        stored_cfg = getattr(metadata, "config", None) or {}
-        if hasattr(stored_cfg, "keys") and "wb_reconstruction" not in stored_cfg:
+        if getattr(metadata, "wb_reconstruction", None) is None:
             from .problem import ConfigError
 
             raise ConfigError(
-                "this checkpoint was written by the RETIRED clamped hllc_lm scheme (its "
-                "stored config predates wb_reconstruction). the name now denotes the "
+                "this checkpoint was written by the RETIRED clamped hllc_lm scheme (it "
+                "predates the wb_reconstruction attribute). the name now denotes the "
                 "published Fleischmann ramp, so continuing the series would silently change "
                 "the numerics mid-run. start a fresh series, or pin the pre-2026-08-15 "
                 "binary to continue this one."

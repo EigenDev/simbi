@@ -250,20 +250,7 @@ pub const ISO_NEWTONIAN_LAWS: &[LawSpec] = &[
 
 /// the three RHD conservation laws — same shape as newtonian but with
 /// relativistic semantics (`D = rho*W`, `M = rho*h*W^2*v`, `tau = H - p - D`).
-pub const RHD_LAWS: &[LawSpec] = &[
-    LawSpec {
-        field: "den",
-        kind: LawKind::Mass,
-    },
-    LawSpec {
-        field: "mom",
-        kind: LawKind::Momentum,
-    },
-    LawSpec {
-        field: "nrg",
-        kind: LawKind::Energy,
-    },
-];
+pub const RHD_LAWS: &[LawSpec] = NEWTONIAN_LAWS;
 
 /// the four RMHD conservation laws — mass + momentum + energy + induction.
 pub const RMHD_LAWS: &[LawSpec] = &[
@@ -380,20 +367,11 @@ const ISO_NEWTONIAN_PRIMS: &[FieldSpec] = &[
     // iso has no energy law; `pre` is substrate-owned (Option<...>),
     // written conditionally by the I/O writer when present.
 ];
-const RHD_PRIMS: &[FieldSpec] = &[
-    FieldSpec {
-        name: "rho",
-        kind: FieldKind::Scalar,
-    },
-    FieldSpec {
-        name: "vel",
-        kind: FieldKind::DimVector,
-    },
-    FieldSpec {
-        name: "pre",
-        kind: FieldKind::Scalar,
-    },
-];
+// BYTE-ALIASED to the newtonian consts, exactly as RMHD/NMHD already share theirs:
+// `primitive_fields` drives the HDF5 dataset names, so an independent copy that drifted
+// would silently give RHD checkpoints a different on-disk schema. the collapse test
+// asserts prims and laws equality alongside the conserved fields.
+const RHD_PRIMS: &[FieldSpec] = NEWTONIAN_PRIMS;
 const RMHD_PRIMS: &[FieldSpec] = &[
     FieldSpec {
         name: "rho",
@@ -621,6 +599,11 @@ mod tests {
         // the SEMANTICS of each conserved field differ (newtonian den = rho;
         // rhd den = rho * W) but the LAYOUT collapses.
         assert_eq!(n.fields, s.fields);
+    assert_eq!(
+        n.primitive_fields, s.primitive_fields,
+        "rhd primitive schema drifted from newtonian: HDF5 dataset names diverge"
+    );
+    assert_eq!(n.laws, s.laws);
 
         // shared metadata.
         assert_eq!(n.eos, s.eos);

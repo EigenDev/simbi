@@ -118,6 +118,19 @@ impl<S: Scalar> LocalEquilibrium<S> {
     }
 }
 
+/// the van leer harmonic slope, BYTE-matching the kernel limiter's theta < 0 arm
+/// (`gv/mod.rs::van_leer`): `2 dl dr / (dl + dr)` for same-signed one-sided slopes, zero
+/// otherwise, with the denominator selected to one on the zero branch so no division by a
+/// vanishing sum is ever formed.
+#[inline]
+fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
+    let prod = dl * dr;
+    let pos = prod.cmp_gt(S::ZERO);
+    let denom = S::select(pos, dl + dr, S::ONE);
+    let two = S::ONE + S::ONE;
+    S::select(pos, two * prod / denom, S::ZERO)
+}
+
 /// the 3-way minmod for the theta-MC limiter, carrier-generic and branchless: the
 /// common-signed minimum-magnitude argument iff x, y, z share a strict sign, else 0.
 /// identical in form to the substrate limiter the flux kernels emit, so the reconstruction
@@ -144,30 +157,24 @@ fn minmod3<S: Scalar>(x: S, y: S, z: S) -> S {
 /// gravity-free bit-identity through the transform, and it is why a face's two sides must be
 /// built from two separate anchors instead of one shared pass: an anchor on the far cell would
 /// leave both differences as `(q_j - c) - (q_k - c)`, equal to `q_j - q_k` only to roundoff.
-pub fn hydrostatic_deviations<S: Scalar, const N: usize>(
-    q: [S; N],
-    phi: [S; N],
+pub fn hydrostatic_departures<S: Scalar>(
+    rho: &[S],
+    pre: &[S],
+    phi: &[S],
     anchor: usize,
-    pre_anchor: S,
     gamma: S,
-    thermodynamic: Thermodynamic,
-) -> [S; N] {
-    let eq = LocalEquilibrium::through(q[anchor], pre_anchor, phi[anchor], gamma);
-    std::array::from_fn(|k| {
-        q[k] - match thermodynamic {
-            Thermodynamic::Density => eq.density_at(phi[k]),
-            Thermodynamic::Pressure => eq.pressure_at(phi[k]),
-        }
-    })
+) -> (Vec<S>, Vec<S>) {
+    let eq = LocalEquilibrium::through(rho[anchor], pre[anchor], phi[anchor], gamma);
+    let mut d_rho = Vec::with_capacity(rho.len());
+    let mut d_pre = Vec::with_capacity(rho.len());
+    for k in 0..rho.len() {
+        let (r_eq, p_eq) = eq.state_at(phi[k]);
+        d_rho.push(rho[k] - r_eq);
+        d_pre.push(pre[k] - p_eq);
+    }
+    (d_rho, d_pre)
 }
 
-/// which component of the profile a departure is measured against. the velocity components
-/// carry no equilibrium (the target is at rest) and are reconstructed plainly.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Thermodynamic {
-    Density,
-    Pressure,
-}
 
 /// one cell's face pair `(rho, pre)` from a three-point stencil, reconstructing the
 /// deviation from the cell's own hydrostatic profile.
@@ -193,14 +200,21 @@ pub fn hydrostatic_face<S: Scalar>(
     let eq = LocalEquilibrium::through(rho[1], pre[1], phi[1], gamma);
     let half = S::from_f64(0.5);
 
-    // departures of the stencil from THIS cell's profile, each at its own potential.
-    let d_rho_m = rho[0] - eq.density_at(phi[0]);
-    let d_rho_p = rho[2] - eq.density_at(phi[2]);
-    let d_pre_m = pre[0] - eq.pressure_at(phi[0]);
-    let d_pre_p = pre[2] - eq.pressure_at(phi[2]);
+    // departures via the ONE transform text the kernel path also compiles.
+    let (d_rho, d_pre) = hydrostatic_departures(&rho, &pre, &phi, 1, gamma);
     // the centre departure is exactly zero, so the one-sided differences ARE the departures.
-    let s_rho = minmod3(-d_rho_m * theta, (d_rho_p - d_rho_m) * half, d_rho_p * theta);
-    let s_pre = minmod3(-d_pre_m * theta, (d_pre_p - d_pre_m) * half, d_pre_p * theta);
+    // the LIMITER SELECTION mirrors the kernel's `plm_theta_from_stencil` exactly: theta-MC
+    // minmod for theta >= 0, the smooth van leer harmonic for theta < 0. a reference that
+    // hard-wired minmod fed a NEGATIVE theta straight into `minmod3(a*theta, ...)` -- a
+    // sign-flipped slope -- and the theorem battery, running only positive theta, was blind
+    // to it. T1/T2 now run both signs.
+    let slope = |dm: S, dp: S| -> S {
+        let mm = minmod3(-dm * theta, (dp - dm) * half, dp * theta);
+        let vl = van_leer(-dm, dp);
+        S::select(theta.cmp_lt(S::ZERO), vl, mm)
+    };
+    let s_rho = slope(d_rho[0], d_rho[2]);
+    let s_pre = slope(d_pre[0], d_pre[2]);
 
     (
         eq.density_at(phi_face) + sign * half * s_rho,
@@ -216,7 +230,12 @@ pub fn plain_face<S: Scalar>(q: [S; 3], theta: S, sign: S) -> S {
     let half = S::from_f64(0.5);
     let a = q[1] - q[0];
     let b = q[2] - q[1];
-    q[1] + sign * half * minmod3(a * theta, (a + b) * half, b * theta)
+    // the same runtime limiter selection the kernel's plm carries: theta-MC minmod for
+    // theta >= 0, van leer for theta < 0. the definition the equivalence theorems compare
+    // against must span both arms, or the negative-theta arm is compared against nothing.
+    let mm = minmod3(a * theta, (a + b) * half, b * theta);
+    let vl = van_leer(a, b);
+    q[1] + sign * half * S::select(theta.cmp_lt(S::ZERO), vl, mm)
 }
 
 #[cfg(test)]

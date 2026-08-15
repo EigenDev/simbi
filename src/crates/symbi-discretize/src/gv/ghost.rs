@@ -389,3 +389,97 @@ pub fn rmhd_kerr_ghost_fill_gv(
     writes.push(("bcell_2".to_string(), "mhd.bcell[2]".into(), b2.node()));
     (end_trace(), writes)
 }
+
+/// the WELL-BALANCED lattice-map ghost fill, cartesian: the velocity pulls back with the
+/// wall-normal `vel_sign` flip exactly as the plain fill, but density and pressure are
+/// EXTENDED ALONG THE LOCAL ISENTROPE from the source cell to the ghost position,
+///
+///   (rho, p)_ghost = LocalEquilibrium::through((rho, p)_src, phi_src).state_at(phi_ghost),
+///
+/// with `phi` the total body potential at each cell centroid. a mirrored copy of a
+/// stratified column is not the column's continuation, so a plain reflect ghost presents
+/// the balanced reconstruction with departures that are pure boundary artifact -- measured
+/// as a 1.5e-2 entropy-floor loss on a sealed column that the interior scheme holds to
+/// 2.2e-8. the extension makes the wall face balanced by construction, the same statement
+/// the interior reconstruction makes at every other face.
+///
+/// the extension is exact wherever the source and ghost potentials coincide: a skip axis
+/// (source == cell) gives `phi_src == phi_ghost` as identical traced nodes, the enthalpy
+/// ratio is exactly one, and the fill reduces to the plain pullback bit-for-bit. on an
+/// outflow edge it extends the column hydrostatically instead of flat-copying it, which is
+/// the well-balanced outflow fill. a periodic cut across an asymmetric potential would be
+/// mis-extended -- refused at dispatch rather than approximated.
+pub fn wb_ghost_fill_gv(
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+    n_bodies: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_hydro::hydrostatic::LocalEquilibrium;
+    begin_trace();
+    let src = gv_lattice_source(ndim);
+    let vel_sign: Vec<Gv> = (0..ndim)
+        .map(|ax| Gv::scalar(&format!("vel_sign_{ax}")))
+        .collect();
+    let spacing = vec![Spacing::Uniform; ndim];
+    let centroid = |ax: usize, i: Gv| -> Gv {
+        Gv::from_f64(0.5)
+            * (gv_axis_face_at_index(ax, spacing[ax], i)
+                + gv_axis_face_at_index(ax, spacing[ax], i + Gv::ONE))
+    };
+    // cartesian: grid axis positions ARE the cartesian coordinates; ungridded components 0.
+    let mut ghost_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+    let mut src_pos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+    for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+        if coord_idx < 3 {
+            ghost_pos[coord_idx] = centroid(g, Gv::coord(g as u8));
+            src_pos[coord_idx] = centroid(g, Gv::of(src[g]));
+        }
+    }
+    let phi_at = |pos: &[Gv; 3]| -> Gv {
+        (0..n_bodies)
+            .map(|b| {
+                let mut bpos = [Gv::ZERO, Gv::ZERO, Gv::ZERO];
+                for (g, &coord_idx) in axes.iter().enumerate().take(ndim) {
+                    if coord_idx < 3 {
+                        bpos[coord_idx] = Gv::scalar(&format!("body_{b}_pos_{g}"));
+                    }
+                }
+                let rvec: [Gv; 3] = std::array::from_fn(|i| pos[i] - bpos[i]);
+                crate::ibm::body_potential(
+                    rvec,
+                    Gv::scalar(&format!("body_{b}_mass")),
+                    Gv::scalar(&format!("body_{b}_soft")),
+                    Gv::scalar(&format!("body_{b}_softkind")),
+                )
+            })
+            .sum::<Gv>()
+    };
+    let phi_src = phi_at(&src_pos);
+    let phi_ghost = phi_at(&ghost_pos);
+
+    let rho_src = gv_load_at("prim_rho", "prim.rho", &src);
+    let pre_src = gv_load_at("prim_pre", "prim.pre", &src);
+    let eq = LocalEquilibrium::through(rho_src, pre_src, phi_src, Gv::scalar("gamma"));
+    let (rho_g, pre_g) = eq.state_at(phi_ghost);
+
+    let mut writes = vec![(
+        "prim_rho".to_string(),
+        FieldRef::PrimRho.into(),
+        rho_g.node(),
+    )];
+    for k in 0..ncomp {
+        let v = gv_load_at(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src);
+        let v = match axes.iter().position(|&c| c == k) {
+            Some(ax) => v * vel_sign[ax],
+            None => v,
+        };
+        writes.push((
+            format!("prim_v{k}"),
+            FieldRef::PrimVel(k as u8).into(),
+            v.node(),
+        ));
+    }
+    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre_g.node()));
+    (end_trace(), writes)
+}

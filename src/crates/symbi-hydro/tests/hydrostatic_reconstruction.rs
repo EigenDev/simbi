@@ -36,6 +36,10 @@
 use symbi_hydro::hydrostatic::{hydrostatic_face, plain_face};
 
 const GAMMA: f64 = 5.0 / 3.0;
+/// swept over BOTH limiter arms: theta-MC at +2, van leer at -1 (the kernel selects the
+/// smooth harmonic limiter on a negative theta, and a host reference that only ever ran
+/// positive theta was blind to a sign-flipped slope on that arm).
+const THETAS: [f64; 2] = [2.0, -1.0];
 const THETA: f64 = 2.0;
 /// the gravitating mass sits one domain width below x = 0, so the column covers r in
 /// [1, 2] with no singularity and a potential that is genuinely curved across it.
@@ -108,13 +112,24 @@ fn face_jump(
     phi_face: f64,
     ii: usize,
 ) -> (f64, f64) {
+    face_jump_theta(rho, pre, phi, phi_face, ii, THETA)
+}
+
+fn face_jump_theta(
+    rho: &[f64],
+    pre: &[f64],
+    phi: &[f64],
+    phi_face: f64,
+    ii: usize,
+    theta: f64,
+) -> (f64, f64) {
     let (rl, pl) = hydrostatic_face(
         [rho[ii - 1], rho[ii], rho[ii + 1]],
         [pre[ii - 1], pre[ii], pre[ii + 1]],
         [phi[ii - 1], phi[ii], phi[ii + 1]],
         phi_face,
         GAMMA,
-        THETA,
+        theta,
         1.0,
     );
     let (rr, pr) = hydrostatic_face(
@@ -123,7 +138,7 @@ fn face_jump(
         [phi[ii], phi[ii + 1], phi[ii + 2]],
         phi_face,
         GAMMA,
-        THETA,
+        theta,
         -1.0,
     );
     ((rl - rr).abs(), (pl - pr).abs())
@@ -139,6 +154,7 @@ fn t1_the_face_jump_vanishes_on_a_discretely_balanced_isentrope() {
     // this column; reconstructing the deviation leaves nothing, because the deviation is
     // identically zero in the whole stencil. the positive control below shows the plain
     // scheme really does leave a jump here, so passing is not vacuous.
+    for theta in THETAS {
     for n in [16usize, 32, 64] {
         let h = 1.0 / n as f64;
         let xs: Vec<f64> = (0..n + 4).map(|ii| ii as f64 * h).collect();
@@ -152,14 +168,16 @@ fn t1_the_face_jump_vanishes_on_a_discretely_balanced_isentrope() {
         let mut worst_plain: f64 = 0.0;
         for ii in 1..n {
             let phi_face = potential(0.5 * (xs[ii] + xs[ii + 1]));
-            let (dr, dp) = face_jump(&rho, &pre, &phi, phi_face, ii);
+            let (dr, dp) = face_jump_theta(&rho, &pre, &phi, phi_face, ii, theta);
             worst_wb = worst_wb.max(dr / rho[ii]).max(dp / pre[ii]);
 
             let prl = plain_face([rho[ii - 1], rho[ii], rho[ii + 1]], THETA, 1.0);
             let prr = plain_face([rho[ii], rho[ii + 1], rho[ii + 2]], THETA, -1.0);
             worst_plain = worst_plain.max((prl - prr).abs() / rho[ii]);
         }
-        println!("n = {n:3}: well-balanced jump {worst_wb:.3e}, plain jump {worst_plain:.3e}");
+        println!(
+            "theta = {theta:+.1}, n = {n:3}: well-balanced jump {worst_wb:.3e}, plain jump {worst_plain:.3e}"
+        );
         assert!(
             worst_plain > 1.0e-6,
             "positive control failed: plain reconstruction left no jump at n = {n} \
@@ -167,9 +185,11 @@ fn t1_the_face_jump_vanishes_on_a_discretely_balanced_isentrope() {
         );
         assert!(
             worst_wb < 1.0e-14,
-            "n = {n}: hydrostatic reconstruction left a relative face jump of {worst_wb:.3e} \
-             on an exactly balanced isentrope; the scheme is not well-balanced"
+            "theta = {theta}, n = {n}: hydrostatic reconstruction left a relative face jump \
+             of {worst_wb:.3e} on an exactly balanced isentrope; the scheme is not \
+             well-balanced on this limiter arm"
         );
+    }
     }
 }
 
@@ -194,20 +214,22 @@ fn t2_it_is_bit_identical_to_plain_reconstruction_without_gravity() {
     ];
     for rho in cases {
         for pre in cases {
-            for sign in [1.0, -1.0] {
-                let phi = [-2.5, -2.5, -2.5];
-                let (r_wb, p_wb) =
-                    hydrostatic_face(rho, pre, phi, phi[1], GAMMA, THETA, sign);
-                assert_eq!(
-                    r_wb,
-                    plain_face(rho, THETA, sign),
-                    "density differs for rho = {rho:?}, sign = {sign}"
-                );
-                assert_eq!(
-                    p_wb,
-                    plain_face(pre, THETA, sign),
-                    "pressure differs for pre = {pre:?}, sign = {sign}"
-                );
+            for theta in THETAS {
+                for sign in [1.0, -1.0] {
+                    let phi = [-2.5, -2.5, -2.5];
+                    let (r_wb, p_wb) =
+                        hydrostatic_face(rho, pre, phi, phi[1], GAMMA, theta, sign);
+                    assert_eq!(
+                        r_wb,
+                        plain_face(rho, theta, sign),
+                        "density differs for rho = {rho:?}, theta = {theta}, sign = {sign}"
+                    );
+                    assert_eq!(
+                        p_wb,
+                        plain_face(pre, theta, sign),
+                        "pressure differs for pre = {pre:?}, theta = {theta}, sign = {sign}"
+                    );
+                }
             }
         }
     }
@@ -308,7 +330,7 @@ fn t4_the_residual_is_first_order_in_the_entropy_variation() {
 //      only because each side is anchored on its OWN cell.
 // =============================================================================
 
-use symbi_hydro::hydrostatic::{Thermodynamic, hydrostatic_deviations};
+use symbi_hydro::hydrostatic::hydrostatic_departures;
 
 /// the ppm interface interpolant on six cell values: the fourth-order face value between the
 /// third and fourth entries, `(7/12)(q_i + q_{i+1}) - (1/12)(q_{i-1} + q_{i+2})`. unlimited on
@@ -337,14 +359,17 @@ fn t5_a_parabolic_operator_inherits_the_well_balanced_property() {
         };
         let phi_face = potential(0.5 * (xs[ii - 1] + xs[ii]));
         // the two sides of the face between cells ii-1 and ii, each anchored on its own cell.
-        let dl = hydrostatic_deviations(win(&rho), win(&phi), 2, pre[ii - 1], GAMMA, Thermodynamic::Density);
-        let dr = hydrostatic_deviations(win(&rho), win(&phi), 3, pre[ii], GAMMA, Thermodynamic::Density);
+        let winp = |v: &Vec<f64>| -> [f64; 6] {
+            [v[ii - 3], v[ii - 2], v[ii - 1], v[ii], v[ii + 1], v[ii + 2]]
+        };
+        let (dl, _) = hydrostatic_departures(&win(&rho), &win(&pre), &winp(&phi), 2, GAMMA);
+        let (dr, _) = hydrostatic_departures(&win(&rho), &win(&pre), &winp(&phi), 3, GAMMA);
         let eq_l = symbi_hydro::hydrostatic::LocalEquilibrium::through(
             rho[ii - 1], pre[ii - 1], phi[ii - 1], GAMMA);
         let eq_r = symbi_hydro::hydrostatic::LocalEquilibrium::through(
             rho[ii], pre[ii], phi[ii], GAMMA);
-        let face_l = eq_l.density_at(phi_face) + ppm_face(dl);
-        let face_r = eq_r.density_at(phi_face) + ppm_face(dr);
+        let face_l = eq_l.density_at(phi_face) + ppm_face(dl.clone().try_into().unwrap());
+        let face_r = eq_r.density_at(phi_face) + ppm_face(dr.clone().try_into().unwrap());
         worst_wb = worst_wb.max((face_l - face_r).abs() / rho[ii]);
         // positive control: the plain parabola on the state itself leaves a real jump here.
         worst_plain = worst_plain.max((ppm_face(win(&rho)) - rho[ii]).abs() / rho[ii]);
@@ -382,7 +407,8 @@ fn t6_the_parabolic_path_matches_plain_reconstruction_to_roundoff_without_gravit
     let mut worst_ulp = 0.0f64;
     for (q, p) in cases {
         for anchor in [2usize, 3] {
-            let d = hydrostatic_deviations(q, phi, anchor, p[anchor], GAMMA, Thermodynamic::Density);
+            let (d, _) = hydrostatic_departures(&q, &p, &phi, anchor, GAMMA);
+        let d: [f64; 6] = d.try_into().unwrap();
             assert_eq!(
                 d[anchor], 0.0,
                 "the anchor departure must be exactly zero — that is what carries T2"
