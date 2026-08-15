@@ -164,9 +164,11 @@ where
 
 /// the unified D-dimensional ideal-MHD `KernelSet`, regime supplied as `R` (carries `SPEC`).
 pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
-    /// the EOS scalar: `gamma` (ideal-gas regimes) or `cs` (isothermal). bound to the flux/cfl
-    /// kernel's eos param by name (`gamma` when `has_energy`, else `cs`).
-    pub eos_param: f64,
+    /// the EOS scalar, TAGGED by meaning: the adiabatic index on energy-carrying
+    /// regimes, the constant sound speed on isothermal ones. the tag comes from
+    /// `R::SPEC.has_energy` at construction, so a kernel reading the wrong wire
+    /// name panics at the resolver instead of silently receiving the other physics.
+    pub eos_param: crate::regimes::substrate_kernels::EosParam,
     pub cfl_number: f64,
     /// theta-MC limiter compression in [1,2]: 1 = minmod, 2 = monotonized-central.
     pub theta: f64,
@@ -235,7 +237,11 @@ where
                 .unwrap_or_else(|_| panic!("failed to allocate {} {what}", Self::kernel_prefix()))
         };
         Self {
-            eos_param,
+            eos_param: if R::SPEC.has_energy {
+                crate::regimes::substrate_kernels::EosParam::Gamma(eos_param)
+            } else {
+                crate::regimes::substrate_kernels::EosParam::SoundSpeed(eos_param)
+            },
             cfl_number,
             theta,
             cfl_scratch,
@@ -484,7 +490,7 @@ where
                     CtMethod::Contact,
                     self.solver,
                     prefix,
-                    self.eos_param,
+                    self.eos_param.value(),
                     0.0,
                 );
                 ct::fofc_emf_splice(sim, flag);
@@ -545,7 +551,7 @@ where
                         // MHD keys its chart on the grid-axis set: B is always a 3-vector,
                         // so the momentum-DOF lift cannot separate the two cylindrical planes.
                         symbi_discretize::kernel_slug::ChartKeying::GridAxes,
-                        self.eos_param,
+                        self.eos_param.value(),
                         sim.stage_input(),
                         &sim.fields.cons,
                         &sim.fields.prim,
@@ -554,9 +560,12 @@ where
                 }
             },
             None, // no body-evolved freeze parachute (no MHD body source)
-            || crate::regimes::mhd_substrate::fofc_ct_save(sim),
-            || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
-            rebuild_spliced_ct,
+            crate::regimes::fofc::CtHooks {
+                save: || crate::regimes::mhd_substrate::fofc_ct_save(sim),
+                restore: || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
+                flux_and_curl: rebuild_spliced_ct,
+                resync: resync_ct,
+            },
             || {
                 use crate::regimes::fofc::SourceReplay;
                 // the source limiter is defined against the GRMHD admissible set (Wu & Tang
@@ -605,7 +614,7 @@ where
                 // preserving one, so under the CFL its output is admissible — unless the timestep
                 // itself is too large, which no source fraction can repair.
                 ct::fill_cell_field(sim, source_weight, 0.0);
-                ct::godunov_stage_pcp(sim, self.eos_param, dt, a0, ac, source_weight);
+                ct::godunov_stage_pcp(sim, self.eos_param.value(), dt, a0, ac, source_weight);
                 resync();
                 apply_additive();
                 self.c2p(sim);
@@ -660,12 +669,11 @@ where
                 // carries ONE flux and div(B) is untouched — only the pointwise, non-conservative
                 // geometric source is clipped, and only on the cells that needed it.
                 restore_stage();
-                ct::godunov_stage_pcp(sim, self.eos_param, dt, a0, ac, source_weight);
+                ct::godunov_stage_pcp(sim, self.eos_param.value(), dt, a0, ac, source_weight);
                 resync();
                 apply_additive();
                 SourceReplay::Completed
             },
-            resync_ct,
             // curved GRMHD alone has the projection tier; where it ran and still left an exterior
             // cell outside G, replaying the step beats waiving that cell's conservation.
             Self::kernel_prefix() == "rmhd"
@@ -744,7 +752,7 @@ where
                 sim,
                 dt,
                 self.alpha,
-                self.eos_param,
+                self.eos_param.value(),
             );
             return;
         }
@@ -798,7 +806,7 @@ where
         }
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
         // eos_param is gamma (has_energy MHD); c_drain uses the adiabatic default 1.0.
-        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param, 1.0);
+        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param.value(), 1.0);
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
     }
 
@@ -929,8 +937,8 @@ where
         }
         let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());
         let scalars = scalars_for(&wsname, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
-                Sc::from_f64(self.eos_param)
+            ScalarBind::Ref(sref @ (ScalarRef::Gamma | ScalarRef::Cs)) => {
+                crate::regimes::substrate_kernels::eos_scalar(self.eos_param, *sref, "c2p")
             }
             o => panic!(
                 "{} wave_speeds: unexpected scalar {o:?}",
@@ -972,7 +980,7 @@ where
         if self.excision_radius > 0.0 {
             crate::regimes::substrate_kernels::dispatch_excise_sweep(
                 sim,
-                self.eos_param,
+                self.eos_param.value(),
                 self.excision_radius,
                 self.excision_rho,
                 self.excision_pre,
@@ -984,7 +992,7 @@ where
         if self.excision_radius > 0.0 {
             crate::regimes::substrate_kernels::dispatch_excise_finalize(
                 sim,
-                self.eos_param,
+                self.eos_param.value(),
                 self.excision_radius,
                 self.excision_rho,
                 self.excision_pre,
@@ -1023,7 +1031,9 @@ where
                 ),
             };
             match *sref {
-                ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(self.eos_param),
+                sref @ (ScalarRef::Gamma | ScalarRef::Cs) => {
+                    crate::regimes::substrate_kernels::eos_scalar(self.eos_param, sref, "mhd scalar")
+                }
                 ScalarRef::SchwarzschildMass => Sc::from_f64(
                     geom.spacetime_scalars
                         .iter()
@@ -1191,7 +1201,7 @@ where
             crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(
                 sim,
                 self.alpha,
-                self.eos_param,
+                self.eos_param.value(),
             )
         } else {
             self.viscosity
@@ -1245,7 +1255,7 @@ where
             sim,
             R::SPEC.has_energy,
             Self::kernel_prefix(),
-            self.eos_param,
+            self.eos_param.value(),
             dt,
             a0,
             ac,
@@ -1278,7 +1288,7 @@ where
             method,
             self.solver,
             Self::kernel_prefix(),
-            self.eos_param,
+            self.eos_param.value(),
             self.theta,
         );
     }

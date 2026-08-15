@@ -13,68 +13,13 @@ use super::*;
 /// transport EMF; the spherical polar chart has beta only along r, so its second plane component
 /// vanishes identically and the generic form reduces to the single-shift spherical EMF.
 fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
-    use symbi_geometry::{
-        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
-        SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
-    };
-    let mass = Gv::scalar("schwarzschild_mass");
-    macro_rules! adm {
-        ($m:expr, $ty:ty) => {{
-            let m = $m;
-            (
-                <$ty as Metric<Gv, 3>>::lapse(&m, x),
-                <$ty as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
-                <$ty as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }};
+    use symbi_geometry::Metric;
+    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+    fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
+        (m.lapse(x), m.sqrt_det_gamma(x), m.shift(x))
     }
-    match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            adm!(
-                SchwarzschildKSCartesian { mass },
-                SchwarzschildKSCartesian<Gv>
-            )
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            adm!(
-                SchwarzschildKSCylindrical { mass },
-                SchwarzschildKSCylindrical<Gv>
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => adm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            adm!(
-                KerrKSCartesian {
-                    mass,
-                    spin: Gv::scalar("kerr_spin")
-                },
-                KerrKSCartesian<Gv>
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            adm!(
-                KerrKSCylindrical {
-                    mass,
-                    spin: Gv::scalar("kerr_spin")
-                },
-                KerrKSCylindrical<Gv>
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            adm!(
-                KerrKS {
-                    mass,
-                    spin: Gv::scalar("kerr_spin")
-                },
-                KerrKS<Gv>
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the GR CT stack is baked only for a curved spacetime")
-        }
-    }
+    with_ks_metric!(spacetime, coords, "the GR CT stack", |m| adm(&m, x))
 }
 
 /// the chart-generic spatial metric (gamma + gamma^{-1}) at a world position — the tetrad-frame
@@ -85,61 +30,16 @@ fn gr_spatial_metric_at(
     coords: Coords,
     x: Tensor<Gv, 3>,
 ) -> SpatialMetric<Gv, 3> {
-    use symbi_geometry::{
-        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS,
-        SchwarzschildKSCartesian, SchwarzschildKSCylindrical,
-    };
-    let mass = Gv::scalar("schwarzschild_mass");
-    macro_rules! sm {
-        ($m:expr, $ty:ty) => {{
-            let m = $m;
-            SpatialMetric::new(
-                Gamma::new(<$ty as Metric<Gv, 3>>::spatial_metric(&m, x)),
-                GammaInv::new(<$ty as Metric<Gv, 3>>::spatial_metric_inv(&m, x)),
-            )
-        }};
+    use symbi_geometry::Metric;
+    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+    fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> SpatialMetric<Gv, 3> {
+        SpatialMetric::new(
+            Gamma::new(m.spatial_metric(x)),
+            GammaInv::new(m.spatial_metric_inv(x)),
+        )
     }
-    match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            sm!(
-                SchwarzschildKSCartesian { mass },
-                SchwarzschildKSCartesian<Gv>
-            )
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            sm!(
-                SchwarzschildKSCylindrical { mass },
-                SchwarzschildKSCylindrical<Gv>
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => sm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => sm!(
-            KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin")
-            },
-            KerrKSCartesian<Gv>
-        ),
-        (Spacetime::KerrKS, Coords::Cylindrical) => sm!(
-            KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin")
-            },
-            KerrKSCylindrical<Gv>
-        ),
-        (Spacetime::KerrKS, _) => sm!(
-            KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin")
-            },
-            KerrKS<Gv>
-        ),
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the GR CT stack is baked only for a curved spacetime")
-        }
-    }
+    with_ks_metric!(spacetime, coords, "the GR CT stack", |m| adm(&m, x))
 }
 
 /// the poloidal CT plane's in-plane physical components `(p1, p2)` in the cyclic order that fixes

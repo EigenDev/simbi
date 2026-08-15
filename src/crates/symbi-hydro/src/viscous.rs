@@ -35,6 +35,18 @@ fn harmonic_mean<S: Scalar>(a: S, b: S) -> S {
     S::select(nonzero, S::from_f64(2.0) * a * b / divisor, S::ZERO)
 }
 
+/// the diagonal deviatoric viscous stress under the stokes hypothesis:
+/// tau_ii = mu (2 e_ii - (2/3) div v). zero bulk viscosity -- the stress tensor
+/// is traceless, so uniform compression alone dissipates nothing. every stress
+/// assembly in this file states the constitutive law through this one function;
+/// off-diagonal components are the plain symmetric part mu (d_j v_i + d_i v_j).
+#[inline]
+fn stokes_diag<S: Scalar>(mu: S, e_ii: S, div: S) -> S {
+    let two = S::from_f64(2.0);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    mu * (two * e_ii - two_thirds * div)
+}
+
 /// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
 /// velocity + density + viscosity stencil (2D, cartesian). additive onto
 /// `cons.mom`. `nu` is per-cell: constant-nu passes a uniform stencil (the face
@@ -66,9 +78,7 @@ pub fn viscous_update_2d<S: Scalar>(
     dy: S,
     dt: S,
 ) -> (Tensor<S, 2>, S) {
-    let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let half = S::from_f64(0.5);
 
     // the face DYNAMIC viscosity is mu = rho_face * nu_face. the density uses the
@@ -95,7 +105,7 @@ pub fn viscous_update_2d<S: Scalar>(
     let dvxdy = ((vx(2, 1) - vx(0, 1)) + (vx(2, 2) - vx(0, 2))) / (four * dy);
     let dvydy = ((vy(2, 1) - vy(0, 1)) + (vy(2, 2) - vy(0, 2))) / (four * dy);
     let div = dvxdx + dvydy;
-    let txx_xp = mu_xp * (two * dvxdx - two_thirds * div);
+    let txx_xp = stokes_diag(mu_xp, dvxdx, div);
     let txy_xp = mu_xp * (dvxdy + dvydx);
 
     // --- x-face i-1/2 (between [1][0] and center [1][1]) ---
@@ -105,7 +115,7 @@ pub fn viscous_update_2d<S: Scalar>(
     let dvxdy = ((vx(2, 0) - vx(0, 0)) + (vx(2, 1) - vx(0, 1))) / (four * dy);
     let dvydy = ((vy(2, 0) - vy(0, 0)) + (vy(2, 1) - vy(0, 1))) / (four * dy);
     let div = dvxdx + dvydy;
-    let txx_xm = mu_xm * (two * dvxdx - two_thirds * div);
+    let txx_xm = stokes_diag(mu_xm, dvxdx, div);
     let txy_xm = mu_xm * (dvxdy + dvydx);
 
     // --- y-face j+1/2 (between center [1][1] and [2][1]) ---
@@ -116,7 +126,7 @@ pub fn viscous_update_2d<S: Scalar>(
     let dvydx = ((vy(1, 2) - vy(1, 0)) + (vy(2, 2) - vy(2, 0))) / (four * dx);
     let div = dvxdx + dvydy;
     let tyx_yp = mu_yp * (dvxdy + dvydx);
-    let tyy_yp = mu_yp * (two * dvydy - two_thirds * div);
+    let tyy_yp = stokes_diag(mu_yp, dvydy, div);
 
     // --- y-face j-1/2 (between [0][1] and center [1][1]) ---
     let mu_ym = harm(rho[0][1], rho[1][1]) * (half * (nu[0][1] + nu[1][1]));
@@ -126,7 +136,7 @@ pub fn viscous_update_2d<S: Scalar>(
     let dvydx = ((vy(1, 2) - vy(1, 0)) + (vy(0, 2) - vy(0, 0))) / (four * dx);
     let div = dvxdx + dvydy;
     let tyx_ym = mu_ym * (dvxdy + dvydx);
-    let tyy_ym = mu_ym * (two * dvydy - two_thirds * div);
+    let tyy_ym = stokes_diag(mu_ym, dvydy, div);
 
     // conservative flux divergence: d_x tau_x. + d_y tau_y.
     let dmom_x = dt * ((txx_xp - txx_xm) / dx + (tyx_yp - tyx_ym) / dy);
@@ -160,15 +170,14 @@ fn cyl_stress<S: Scalar>(
     mu: S,
 ) -> (S, S, S) {
     let two = S::from_f64(2.0);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let half = S::from_f64(0.5);
     let inv_r = S::from_f64(1.0) / r;
     let e_rr = du_dr;
     let e_pp = dw_dp * inv_r + u * inv_r;
     let e_rp = half * (du_dp * inv_r + dw_dr - w * inv_r);
     let theta = e_rr + e_pp;
-    let t_rr = mu * (two * e_rr - two_thirds * theta);
-    let t_pp = mu * (two * e_pp - two_thirds * theta);
+    let t_rr = stokes_diag(mu, e_rr, theta);
+    let t_pp = stokes_diag(mu, e_pp, theta);
     let t_rp = mu * two * e_rp;
     (t_rr, t_pp, t_rp)
 }
@@ -282,7 +291,6 @@ fn ortho_stress<S: Scalar>(
 ) -> (S, S, S) {
     let two = S::from_f64(2.0);
     let half = S::from_f64(0.5);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let inv_h1 = S::from_f64(1.0) / h1;
     let inv_h2 = S::from_f64(1.0) / h2;
     let inv_h1h2 = inv_h1 * inv_h2;
@@ -290,8 +298,8 @@ fn ortho_stress<S: Scalar>(
     let e22 = d2u2 * inv_h2 + u1 * d1h2 * inv_h1h2;
     let e12 = half * (d2u1 * inv_h2 - u1 * d2h1 * inv_h1h2 + d1u2 * inv_h1 - u2 * d1h2 * inv_h1h2);
     let theta = e11 + e22;
-    let t11 = mu * (two * e11 - two_thirds * theta);
-    let t22 = mu * (two * e22 - two_thirds * theta);
+    let t11 = stokes_diag(mu, e11, theta);
+    let t22 = stokes_diag(mu, e22, theta);
     let t12 = mu * two * e12;
     (t11, t22, t12)
 }
@@ -448,7 +456,6 @@ fn face_stress_2p5d<S: Scalar>(
 ) -> [S; 3] {
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let (la, ra) = if hi {
         (1usize, 2usize)
     } else {
@@ -481,11 +488,11 @@ fn face_stress_2p5d<S: Scalar>(
     let mut tau = [S::ZERO; 3];
     for i in 0..3 {
         // tau_ia = mu (d_a v_i + d_i v_a - 2/3 delta_ia div); d_i v_a = 0 for i = 2 (the frozen axis).
-        let mut t = grad[i][a] + grad[a][i];
-        if i == a {
-            t = t - two_thirds * div;
-        }
-        tau[i] = mu * t;
+        tau[i] = if i == a {
+            stokes_diag(mu, grad[a][a], div)
+        } else {
+            mu * (grad[i][a] + grad[a][i])
+        };
     }
     tau
 }
@@ -540,7 +547,6 @@ fn face_stress_3d<S: Scalar>(
     dx: [S; 3],
 ) -> [S; 3] {
     let half = S::from_f64(0.5);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let (la, ra) = if hi {
         (1usize, 2usize)
     } else {
@@ -582,11 +588,11 @@ fn face_stress_3d<S: Scalar>(
     let div = grad[0][0] + grad[1][1] + grad[2][2];
     let mut tau = [S::ZERO; 3];
     for i in 0..3 {
-        let mut t = grad[i][a] + grad[a][i];
-        if i == a {
-            t = t - two_thirds * div;
-        }
-        tau[i] = mu * t;
+        tau[i] = if i == a {
+            stokes_diag(mu, grad[a][a], div)
+        } else {
+            mu * (grad[i][a] + grad[a][i])
+        };
     }
     tau
 }
@@ -1693,7 +1699,6 @@ fn ortho_stress_2p5d<S: Scalar>(
 ) -> (S, S, S, S, S, S) {
     let two = S::from_f64(2.0);
     let half = S::from_f64(0.5);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let inv_h1 = S::from_f64(1.0) / h1;
     let inv_h2 = S::from_f64(1.0) / h2;
     let inv_h3 = S::from_f64(1.0) / h3;
@@ -1707,9 +1712,9 @@ fn ortho_stress_2p5d<S: Scalar>(
     let e23 = half * (d2u3 * inv_h2 - u3 * d2h3 * inv_h2 * inv_h3);
     let theta = e11 + e22 + e33;
     (
-        mu * (two * e11 - two_thirds * theta),
-        mu * (two * e22 - two_thirds * theta),
-        mu * (two * e33 - two_thirds * theta),
+        stokes_diag(mu, e11, theta),
+        stokes_diag(mu, e22, theta),
+        stokes_diag(mu, e33, theta),
         mu * two * e12,
         mu * two * e13,
         mu * two * e23,
@@ -1902,7 +1907,6 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
     let one = S::from_f64(1.0);
-    let two_thirds = S::from_f64(2.0 / 3.0);
     let harm = harmonic_mean;
     let at = |x: &[[[S; 3]; 3]; 3], o: [usize; 3]| x[o[2]][o[1]][o[0]];
     let vat = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];
@@ -1962,8 +1966,11 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
             let mut t = [[S::ZERO; 3]; 3];
             for i in 0..3 {
                 for j in 0..3 {
-                    let tr = if i == j { two_thirds * theta } else { S::ZERO };
-                    t[i][j] = mu * (two * e[i][j] - tr);
+                    t[i][j] = if i == j {
+                        stokes_diag(mu, e[i][i], theta)
+                    } else {
+                        mu * (two * e[i][j])
+                    };
                 }
             }
             (t, hf, uf)
@@ -2002,12 +2009,11 @@ pub fn viscous_update_orthogonal_3d<S: Scalar>(
     let mut tc = [[S::ZERO; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
-            let tr = if i == j {
-                two_thirds * theta_c
+            tc[i][j] = if i == j {
+                stokes_diag(mu_c, ec[i][i], theta_c)
             } else {
-                S::ZERO
+                mu_c * (two * ec[i][j])
             };
-            tc[i][j] = mu_c * (two * ec[i][j] - tr);
         }
     }
 

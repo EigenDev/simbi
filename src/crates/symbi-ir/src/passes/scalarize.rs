@@ -1904,22 +1904,29 @@ fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
 /// pick up an `inf * x` upstream — and the absorbing fold would mask it
 /// silently. removed pre-emptively.
 ///
-/// the safe set MUST stay in sync with `Graph::fold_arith_identity` in
-/// `graph.rs` (the graph-layer fold) — both layers fold exactly
-/// `{ Add[0], Sub[0], Mul[1], Div[1] }`, nothing more.
+/// the safe set is the ONE `arith_identity_elements` table in `graph.rs`, which the
+/// graph-layer fold queries too — the two layers structurally cannot drift.
 ///
 /// comparison / bitwise kinds fall through to construction unchanged.
 fn fold_arith_identity(kind: BinaryKind, a: ScalarExpr, b: ScalarExpr) -> ScalarExpr {
-    let ca = const_zero_or_one(&a);
-    let cb = const_zero_or_one(&b);
-    match (kind, ca, cb) {
-        (BinaryKind::Add, _, Some(v)) if v == 0.0 => return a,
-        (BinaryKind::Add, Some(v), _) if v == 0.0 => return b,
-        (BinaryKind::Sub, _, Some(v)) if v == 0.0 => return a,
-        (BinaryKind::Mul, _, Some(v)) if v == 1.0 => return a,
-        (BinaryKind::Mul, Some(v), _) if v == 1.0 => return b,
-        (BinaryKind::Div, _, Some(v)) if v == 1.0 => return a,
-        _ => {}
+    use crate::graph::{FoldableArith, arith_identity_elements};
+    let foldable = match kind {
+        BinaryKind::Add => Some(FoldableArith::Add),
+        BinaryKind::Sub => Some(FoldableArith::Sub),
+        BinaryKind::Mul => Some(FoldableArith::Mul),
+        BinaryKind::Div => Some(FoldableArith::Div),
+        _ => None,
+    };
+    if let Some(op) = foldable {
+        let (left, right) = arith_identity_elements(op);
+        let ca = const_zero_or_one(&a);
+        let cb = const_zero_or_one(&b);
+        if right.is_some() && cb == right {
+            return a;
+        }
+        if left.is_some() && ca == left {
+            return b;
+        }
     }
     ScalarExpr::BinOp(kind, Box::new(a), Box::new(b))
 }

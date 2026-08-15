@@ -283,6 +283,61 @@ pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv, theta: Option<Gv
     }
 }
 
+/// the ONE statement of which chart expression realizes which curved background.
+/// selects the kerr-schild metric struct for a `(spacetime, chart)` pair -- spherical
+/// (the bare names), cartesian, or cylindrical, each computing its own radius from the
+/// chart's coordinates -- creates its runtime scalars (`schwarzschild_mass`, and
+/// `kerr_spin` on the spinning arms) in trace order, and hands the struct to `$body`.
+/// the six structs are distinct types, so the selection cannot be a function; every gr
+/// kernel builder (flux fan, c2p, wave speeds, ct emf, cell geometry) expands this
+/// macro with a small `Metric<Gv, 3>`-generic adapter as the body, and adding a chart
+/// is one new arm here instead of one per builder. `$kernel` names the caller in the
+/// flat-spacetime unreachable message.
+macro_rules! with_ks_metric {
+    ($spacetime:expr, $coords:expr, $kernel:literal, |$m:ident| $body:expr) => {{
+        let mass = Gv::scalar("schwarzschild_mass");
+        match ($spacetime, $coords) {
+            (Spacetime::SchwarzschildKS, $crate::coords::Coords::Cartesian) => {
+                let $m = ::symbi_geometry::SchwarzschildKSCartesian { mass };
+                $body
+            }
+            (Spacetime::SchwarzschildKS, $crate::coords::Coords::Cylindrical) => {
+                let $m = ::symbi_geometry::SchwarzschildKSCylindrical { mass };
+                $body
+            }
+            (Spacetime::SchwarzschildKS, _) => {
+                let $m = ::symbi_geometry::SchwarzschildKS { mass };
+                $body
+            }
+            (Spacetime::KerrKS, $crate::coords::Coords::Cartesian) => {
+                let $m = ::symbi_geometry::KerrKSCartesian {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                $body
+            }
+            (Spacetime::KerrKS, $crate::coords::Coords::Cylindrical) => {
+                let $m = ::symbi_geometry::KerrKSCylindrical {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                $body
+            }
+            (Spacetime::KerrKS, _) => {
+                let $m = ::symbi_geometry::KerrKS {
+                    mass,
+                    spin: Gv::scalar("kerr_spin"),
+                };
+                $body
+            }
+            (Spacetime::Minkowski, _) => {
+                unreachable!(concat!($kernel, " is baked only for a curved spacetime"))
+            }
+        }
+    }};
+}
+pub(crate) use with_ks_metric;
+
 /// `true` iff the flat unweighted `(F_hi-F_lo)/dx` divergence applies (no in-kernel metric).
 pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool {
     coords == Coords::Cartesian && spacing.iter().all(|&s| s == Spacing::Uniform)

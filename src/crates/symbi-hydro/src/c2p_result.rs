@@ -11,6 +11,12 @@
 //   let prim = result.value; // always safe to use
 // =============================================================================
 
+/// the iteration cap every relativistic cons->prim solver shares -- the rhd newton,
+/// the rmhd kkc false-position, and their metric-aware twins, on the host and in the
+/// baked kernels alike. the solvers converge in far fewer steps on admissible states;
+/// the cap only bounds pathological inputs, so one number serves them all.
+pub const C2P_MAX_ITER: usize = 100;
+
 /// bitflag error code for cons-to-prim recovery.
 /// zero = success. nonzero = something went wrong but the value is safe to use.
 /// flags can be combined via `merge` (bitwise OR).

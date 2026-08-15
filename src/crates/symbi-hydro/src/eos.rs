@@ -504,7 +504,7 @@ mod tests {
                 pre: 10.0_f64.powi(k),
             };
             let cons = Rhd.to_conserved(&eos, &prim);
-            let back = crate::rhd::rhd_recover(&eos, &cons, &SpatialMetric::flat(), 100);
+            let back = crate::rhd::rhd_recover(&eos, &cons, &SpatialMetric::flat(), crate::c2p_result::C2P_MAX_ITER);
             assert!(
                 (back.pre - prim.pre).abs() < 1e-9 * prim.pre
                     && (back.rho - prim.rho).abs() < 1e-9

@@ -3336,7 +3336,7 @@ fn main() {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_gr_wave_speeds_cell(&out_dir, 1, &geom);
-        gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 1, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
         gen_rmhd_face_flux_gr_mode(&out_dir, 1, 0, geom.clone(), false, true); // FOFC rusanov fallback
         // the orthonormal-frame MUB09 HLLD gas flux: schwarzschild (zero shift) and kerr-schild
@@ -3361,7 +3361,7 @@ fn main() {
     ] {
         gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, ndim, 100, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, ndim, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
         for dir in 0..ndim {
             gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), false);
             gen_rmhd_face_flux_gr_mode(&out_dir, ndim, dir, geom.clone(), false, true); // FOFC rusanov fallback
@@ -3397,7 +3397,7 @@ fn main() {
     for (geom, ndim) in [(Geom::cart(2).kerr(), 2u8), (Geom::cart(3).kerr(), 3u8)] {
         gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, ndim, 100, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, ndim, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
         for dir in 0..ndim {
             gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), false);
             gen_rmhd_face_flux_gr_mode(&out_dir, ndim, dir, geom.clone(), false, true);
@@ -3428,7 +3428,7 @@ fn main() {
     ] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 2, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
             gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
@@ -3454,7 +3454,7 @@ fn main() {
     for geom in [Geom::sph_swirl().kerr()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 2, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
             gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
@@ -3685,8 +3685,8 @@ fn main() {
     // quartic-wave-speed HLLE flux, and the constrained-transport curl B-update.
     // the deepest substrate regime — iterative c2p + transcendental quartic + a
     // staggered offset stencil — all reaching build-time-compiled CPU + CUDA.
-    gen_rmhd_c2p(&out_dir, 1, 100);
-    gen_rmhd_c2p(&out_dir, 3, 100); // 3D for the production RmhdSubstrateKernelSet3D
+    gen_rmhd_c2p(&out_dir, 1, symbi_hydro::c2p_result::C2P_MAX_ITER);
+    gen_rmhd_c2p(&out_dir, 3, symbi_hydro::c2p_result::C2P_MAX_ITER); // 3D for the production RmhdSubstrateKernelSet3D
     gen_rmhd_face_flux(&out_dir, 1);
     gen_rmhd_ct_curl(&out_dir);
     // 3D pieces for the production KernelSet3D: per-dir flux + edge EMF, the CT
@@ -3856,7 +3856,7 @@ fn main() {
         }
         // RMHD regime physics (quartic HLLE flux + KKC c2p + exact-quartic CFL map +
         // the per-cell materialized wave speeds the HLLE flux reads).
-        gen_rmhd_c2p(&out_dir, 2, 100);
+        gen_rmhd_c2p(&out_dir, 2, symbi_hydro::c2p_result::C2P_MAX_ITER);
         for dir in 0..2 {
             emit_rmhd_flux_gv(&out_dir, &format!("rmhd_face_flux_2d_{dir}"), 2, dir);
             // HLLC / HLLD 2.5D RMHD fluxes (cartesian, coord_n == dir) — parity with the 1D + 3D

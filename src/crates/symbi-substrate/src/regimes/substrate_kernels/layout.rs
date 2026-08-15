@@ -22,8 +22,8 @@ pub use symbi_exec::layout::{alloc_layout, exec_layout, expect_kernel};
 // the AOT bake (build.rs), so bake and dispatch cannot drift. re-exported here so the substrate's
 // `super::layout::{coord_suffix, geom_suffix, ...}` paths resolve unchanged.
 pub use symbi_discretize::kernel_slug::{
-    coord_suffix, fofc_project_name, geom_suffix, gr_chart_dof_tag, mhd_flux_suffix,
-    mhd_geom_suffix, penalize_name, spacetime_slug, viscous_ortho_name,
+    coord_suffix, dof_lift_suffix, fofc_project_name, geom_suffix, gr_chart_dof_tag,
+    mhd_flux_suffix, mhd_geom_suffix, penalize_name, spacetime_slug, viscous_ortho_name,
 };
 
 // the per-axis geometry scalars a CURVILINEAR kernel expects, in the order cell_geometry

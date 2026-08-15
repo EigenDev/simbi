@@ -15,10 +15,9 @@ use crate::state::{Cons, Prim};
 use symbi_algebra::{OrderedNumeric, Tensor};
 use symbi_ir::algebra::Scalar;
 
-/// maximum newton-raphson iterations for RHD cons2prim on the HOST (early-break).
-/// the substrate kernel bakes its own fixed count (build.rs passes 20 to the gv
-/// builder) — both share the `rhd_recover` body; the count is a tunable knob.
-const MAX_ITER: usize = 100;
+/// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`); the newton
+/// early-breaks on convergence, so the cap only bounds pathological inputs.
+const MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 
 /// the branch-free RHD cons->prim recovery — THE single-source physics: the pressure
 /// is the root of a 1D equation found by a carrier-generic Newton (`Scalar::iterate`),

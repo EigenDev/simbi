@@ -286,6 +286,46 @@ where
     true
 }
 
+/// the one runtime EOS scalar a kernel family binds, TAGGED by meaning: the
+/// adiabatic index of an energy-carrying gas or the constant isothermal sound
+/// speed. these traveled as a bare f64 whose meaning flipped on `has_energy`,
+/// so a kernel asking for `gamma` could silently receive a sound speed; the tag
+/// turns that conflation into a loud panic at the resolver.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EosParam {
+    Gamma(f64),
+    SoundSpeed(f64),
+}
+
+/// resolve the EOS scalar a kernel asks for by wire name, refusing the wrong
+/// meaning: a kernel reading `gamma` from a set carrying a sound speed (or the
+/// converse) received the other physics silently when the value was a bare f64.
+pub(crate) fn eos_scalar<Sc: Scalar>(eos_param: EosParam, sref: ScalarRef, label: &str) -> Sc {
+    match (sref, eos_param) {
+        (ScalarRef::Gamma, EosParam::Gamma(g)) => Sc::from_f64(g),
+        (ScalarRef::Cs, EosParam::SoundSpeed(cs)) => Sc::from_f64(cs),
+        (ScalarRef::Gamma, EosParam::SoundSpeed(_)) => panic!(
+            "{label}: the kernel reads the adiabatic index `gamma` but this set \
+             carries an isothermal sound speed"
+        ),
+        (ScalarRef::Cs, EosParam::Gamma(_)) => panic!(
+            "{label}: the kernel reads the isothermal sound speed `cs` but this set \
+             carries an adiabatic index"
+        ),
+        (other, _) => panic!("{label}: `eos_scalar` asked to resolve non-eos scalar {other:?}"),
+    }
+}
+
+impl EosParam {
+    /// the tagged value, where the consumer has already established the meaning
+    /// (kernel-set constructors, penalize dials).
+    pub fn value(self) -> f64 {
+        match self {
+            EosParam::Gamma(v) | EosParam::SoundSpeed(v) => v,
+        }
+    }
+}
+
 /// the ONE mhd scalar cascade: eos_param for `Gamma | Cs`, `theta`, the spacetime scalars,
 /// then MESH MOTION, then geometry, panicking with the caller's label on anything else.
 ///
@@ -295,7 +335,7 @@ where
 /// flux on the same scalar the hydro path resolves. one cascade, every consumer.
 pub(crate) fn mhd_scalar<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    eos_param: f64,
+    eos_param: EosParam,
     theta: f64,
     x_lo_k: &[f64; D],
     dx_k: &[f64; D],
@@ -315,7 +355,7 @@ where
             .unwrap_or_else(|| panic!("{label}: needs {name}"))
     };
     match sref {
-        ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(eos_param),
+        ScalarRef::Gamma | ScalarRef::Cs => eos_scalar(eos_param, sref, label),
         ScalarRef::Theta => Sc::from_f64(theta),
         ScalarRef::SchwarzschildMass => Sc::from_f64(spacetime("schwarzschild_mass")),
         ScalarRef::KerrSpin => Sc::from_f64(spacetime("kerr_spin")),

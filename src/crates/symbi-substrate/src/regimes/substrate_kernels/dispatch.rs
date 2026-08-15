@@ -2675,38 +2675,77 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
     dispatch_named(sim, pre, None, 0, &name, &geom.interior, &[], &scalars);
 }
 
+/// the face-flux SCHEME as one value: solver x reconstruction x eos closure x the
+/// scheme dials. these traveled as eight positional arguments, several of them
+/// same-typed floats -- a transposition typechecked and silently dispatched a
+/// different scheme. the per-call context (field store, sweep direction, the
+/// primary eos scalar) stays positional; the scheme travels as this struct.
+#[derive(Clone, Copy)]
+pub struct FluxSpec {
+    pub theta: f64,
+    pub solver: Solver,
+    pub recon: symbi_discretize::Recon,
+    // the eos closure arm: the taub-mathews (`_tm`) flux twins are baked for the
+    // rhd flat-cartesian family only; every other regime passes `IdealGamma`
+    // (empty suffix, names unchanged). the gamma scalar stays bound on the tm
+    // arm (bound-but-inert, uniform ABI).
+    pub eos: symbi_discretize::EosArm,
+    // the ppm convergence-gated flatten dials (onset, full), bound to the ppm
+    // kernels' `flatten_onset`/`flatten_full` scalars. (0, 0) — or any
+    // full <= onset — is the pure parabola; only the ppm kernels declare the
+    // scalars, so the values are inert on every other reconstruction.
+    pub flatten: (f64, f64),
+    // the reference mach number the PUBLISHED low-mach ramp saturates at, bound to the
+    // clamp-free kernel's `mach_limit` scalar. only that arm declares it, so this value is
+    // inert on every other solver.
+    pub mach_limit: f64,
+    // whether the face reconstruction limits the STATE or its departure from local hydrostatic
+    // equilibrium. an axis of the RECONSTRUCTION, orthogonal to the solver, so every pairing is
+    // dispatchable -- including the balanced HLLE the first-order redo needs.
+    pub balance: symbi_discretize::coords::Balance,
+    pub rusanov: bool,
+}
+
+impl FluxSpec {
+    /// the positivity-preserving first-order redo derived from the evolution
+    /// scheme: hlle at theta = 0 (pcm) on the plm kernel, flatten-free. the eos
+    /// closure and the reconstruction balance are KEPT -- a gamma-law fallback
+    /// against taub-mathews states would splice a different physics into the
+    /// troubled faces, and a plain-reconstruction fallback under a balanced
+    /// evolution would deposit the hydrostatic residual it was invoked to avoid.
+    /// `mach_limit` is inert on hlle and rides along for the uniform ABI.
+    pub fn first_order(self) -> Self {
+        Self {
+            theta: 0.0,
+            solver: Solver::Hlle,
+            recon: symbi_discretize::Recon::Plm,
+            flatten: (0.0, 0.0),
+            ..self
+        }
+    }
+}
+
 pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
     prefix: &str,
     dir: usize,
     primary: f64,
-    theta: f64,
-    solver: Solver,
-    recon: symbi_discretize::Recon,
-    // the eos closure arm: the taub-mathews (`_tm`) flux twins are baked for the
-    // rhd flat-cartesian family only; every other regime passes `IdealGamma`
-    // (empty suffix, names unchanged). the gamma scalar stays bound on the tm
-    // arm (bound-but-inert, uniform ABI).
-    eos: symbi_discretize::EosArm,
-    // the ppm convergence-gated flatten dials (onset, full), bound to the ppm
-    // kernels' `flatten_onset`/`flatten_full` scalars. (0, 0) — or any
-    // full <= onset — is the pure parabola; only the ppm kernels declare the
-    // scalars, so the values are inert on every other reconstruction.
-    flatten: (f64, f64),
-    // the reference mach number the PUBLISHED low-mach ramp saturates at, bound to the
-    // clamp-free kernel's `mach_limit` scalar. only that arm declares it, so this value is
-    // inert on every other solver.
-    mach_limit: f64,
-    // whether the face reconstruction limits the STATE or its departure from local hydrostatic
-    // equilibrium. an axis of the RECONSTRUCTION, orthogonal to the solver, so every pairing is
-    // dispatchable -- including the balanced HLLE the first-order redo needs.
-    balance: symbi_discretize::coords::Balance,
-    rusanov: bool,
+    spec: FluxSpec,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    let FluxSpec {
+        theta,
+        solver,
+        recon,
+        eos,
+        flatten,
+        mach_limit,
+        balance,
+        rusanov,
+    } = spec;
     if eos == symbi_discretize::EosArm::TaubMathews {
         // the tm flux twins are chart-free like every DOF == D rhd flux (the
         // curvilinear factors ride godunov + the wave-speed map), but they are

@@ -553,13 +553,7 @@ fn emit_const(out: &mut String, v: &ConstValue) {
 }
 
 pub(crate) fn cuda_type_name(e: ElementTy) -> &'static str {
-    match e {
-        ElementTy::F64 => "double",
-        ElementTy::F32 => "float",
-        ElementTy::I32 => "int",
-        ElementTy::U32 => "unsigned int",
-        ElementTy::Bool => "bool",
-    }
+    e.c_type()
 }
 
 fn cuda_binop(kind: BinaryKind) -> &'static str {

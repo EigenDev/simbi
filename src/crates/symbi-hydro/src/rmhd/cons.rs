@@ -17,8 +17,8 @@ use crate::state::Prim;
 use symbi_algebra::{OrderedNumeric, Tensor};
 use symbi_ir::algebra::Scalar;
 
-/// host bound on the false-position; the substrate kernel bakes its own (build.rs).
-const RMHD_MAX_ITER: usize = 100;
+/// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`).
+const RMHD_MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 /// convergence tolerance for false-position iteration (also the B=0 divzero guard).
 const CONVERGENCE_TOL: f64 = 1e-12;
 /// the MAX iteration cap for the `mu_+` bracketed Illinois solve (root of `kkc_fmu49` on `[0, 1]`).

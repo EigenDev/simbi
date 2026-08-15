@@ -37,7 +37,8 @@ use crate::regimes::substrate_kernels::{
     GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_c2p_status,
     dispatch_driven_boundaries, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
     dispatch_godunov, dispatch_gradient_boundaries, dispatch_runtime_source,
-    fused_runtime_cpu_kernel, geom_scalar, geom_suffix, gr_chart_dof_tag, kernel_geom,
+    FluxSpec, dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, gr_chart_dof_tag,
+    kernel_geom,
     resolve_params, scalars_for, shell_accretion_rates, spacetime_slug,
 };
 use symbi_discretize::gv::GeoSource;
@@ -270,26 +271,31 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
+impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
+    RhdSubstrateKernelSet<Mem, Sc, D>
+{
+    /// the evolution face-flux scheme assembled from this set's dials. the rhd
+    /// family is plm-only, plain-balanced, and carries its eos closure arm.
+    fn flux_spec(&self) -> FluxSpec {
+        FluxSpec {
+            theta: self.theta,
+            solver: self.solver,
+            recon: symbi_discretize::Recon::Plm,
+            eos: self.eos,
+            flatten: (0.0, 0.0),
+            mach_limit: self.mach_limit,
+            balance: symbi_discretize::coords::Balance::Plain,
+            rusanov: false,
+        }
+    }
+}
+
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
     KernelSet<D, DOF, Mem, Sc> for RhdSubstrateKernelSet<Mem, Sc, D>
 {
     fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        dispatch_flux(
-            sim,
-            pre,
-            "rhd",
-            dir,
-            self.gamma,
-            self.theta,
-            self.solver,
-            symbi_discretize::Recon::Plm,
-            self.eos,
-            (0.0, 0.0),
-            self.mach_limit,
-            symbi_discretize::coords::Balance::Plain,
-            false,
-        );
+        dispatch_flux(sim, pre, "rhd", dir, self.gamma, self.flux_spec());
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -385,11 +391,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             &[],
             &scalars,
         );
-        let status_sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let status_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         dispatch_c2p_status(sim, pre, "rhd", status_sfx);
     }
 
@@ -520,11 +522,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the ghost's own radius), so it reads the metric scalars + the radial grid map.
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        let geom_sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let geom_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         // the dragging-consistent w-copy is a spherical-azimuth construct (gamma_{r phi} on the
         // swirl DOF); the cartesian kerr chart has DOF == D and copies the raw prims like any
         // other background.
@@ -630,11 +628,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
         outputs.push(unrg);
 
-        let geom_sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let geom_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("rhd_snapshot{geom_sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
             &name,
@@ -662,11 +656,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             outputs.push(&sim.workspace.u_stage.mom[k]);
         }
         outputs.push(unrg);
-        let geom_sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let geom_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("rhd_snapshot{geom_sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
             &name,
@@ -701,11 +691,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // geom tag; the ghost-band finiteness halt provides the FOFC-surviving fail-loud.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         let curved = sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
-        let dof_sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let dof_sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "rhd",
@@ -715,24 +701,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.freeze_streak,
             |dir| {
-                // the first-order redo stays on the run's own eos closure: a
-                // gamma-law fallback flux against taub-mathews states would
-                // splice a DIFFERENT physics into the troubled faces.
-                dispatch_flux(
-                    sim,
-                    pre,
-                    "rhd",
-                    dir,
-                    self.gamma,
-                    0.0,
-                    Solver::Hlle,
-                    symbi_discretize::Recon::Plm,
-                    self.eos,
-                    (0.0, 0.0),
-                    self.mach_limit,
-                    symbi_discretize::coords::Balance::Plain,
-                    curved,
-                )
+                // the redo keeps the run's own eos closure (`first_order` carries it);
+                // a curved background swaps the fallback to the rusanov form.
+                let mut redo = self.flux_spec().first_order();
+                redo.rusanov = curved;
+                dispatch_flux(sim, pre, "rhd", dir, self.gamma, redo)
             },
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
@@ -759,11 +732,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 }
             },
             None,  // no body-evolved freeze parachute (no rhd body source)
-            || {}, // hydro: no induction flux
-            || {}, // hydro: no cell B to restore
-            || {}, // hydro: no induction flux
+            crate::regimes::fofc::CtHooks::none(),
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
-            || {}, // hydro: no CT re-sync
             false, // no projection tier below the freeze; keep the parachute
         )
     }

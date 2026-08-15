@@ -1664,22 +1664,6 @@ impl Timestepping {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Reconstruction {
-    Pcm,
-    Plm,
-    // Weno,  // future
-    // Ppm,   // future
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Solver {
-    Hlle,
-    Hllc,
-    HllcLm,
-    Hlld,
-}
-
 /// constrained transport method for edge E-field computation.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CtMethod {

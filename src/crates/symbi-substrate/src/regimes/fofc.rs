@@ -485,6 +485,49 @@ pub(crate) enum SourceReplay {
     Completed,
 }
 
+/// the constrained-transport hooks of the FOFC redo, carried as one value: four
+/// same-signature closures traveled as positional arguments, so transposing two of
+/// them typechecked and linked while corrupting `bcell` only on FOFC cells. hydro
+/// regimes pass `CtHooks::none()`; MHD names each field at the call site. a flagged
+/// cell needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with
+/// the edge EMF SPLICED (HO off the fallback region, FO on it):
+///  - `save`         : bflux -> bflux_ho + efield -> efield_ho (the HO induction flux +
+///    edge EMF), before the FO flux redo overwrites them.
+///  - `restore`      : bcell <- bcell_stage (the stage-input cell B, so the recomputed
+///    EMF + the cell-B predictor read the correct base).
+///  - `flux_and_curl`: AFTER the FO flux + gas splice, BEFORE the godunov — splice
+///    bflux, recompute the FO edge EMF (Contact/HLL), splice the edge EMF (HO on
+///    non-flagged edges, FO on flagged), restore bface <- bface_n and re-curl. gives
+///    flagged cells FO B, leaves non-flagged B unchanged.
+///  - `resync`       : bcell_from_bface (the patch-applying stages only) — re-interp
+///    `bcell` from the re-curled face field + the small (FO-vs-FO) energy patch.
+pub(crate) struct CtHooks<S1, S2, S3, S4>
+where
+    S1: Fn(),
+    S2: Fn(),
+    S3: Fn(),
+    S4: Fn(),
+{
+    pub save: S1,
+    pub restore: S2,
+    pub flux_and_curl: S3,
+    pub resync: S4,
+}
+
+fn ct_noop() {}
+
+impl CtHooks<fn(), fn(), fn(), fn()> {
+    /// the hydro case: no induction flux, no cell B, nothing to re-curl or re-sync.
+    pub fn none() -> Self {
+        CtHooks {
+            save: ct_noop,
+            restore: ct_noop,
+            flux_and_curl: ct_noop,
+            resync: ct_noop,
+        }
+    }
+}
+
 /// the FACE-BASED FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
 /// over the interior), boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
 /// (3) restore cons <- u_stage so the first-order flux reconstructs from the PHYSICAL stage input;
@@ -533,27 +576,13 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // reaches it; the with-body select instead evolves the parachute by the body source inline. `None`
     // falls back to the plain `fofc_select` (regimes without the kernel keep the pre-body freeze).
     body_freeze: Option<(f64, f64)>,
-    // MHD-only constrained-transport hooks (no-ops for hydro). a flagged cell
-    // needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with the edge EMF SPLICED
-    // (HO off the fallback region, FO on it):
-    //  - `ct_save`        : bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF),
-    //    before the FO flux redo overwrites them.
-    //  - `ct_restore`     : bcell <- bcell_stage (the stage-input cell B, so the recomputed EMF + the
-    //    cell-B predictor read the correct base).
-    //  - `ct_flux_and_curl`: AFTER the FO flux + gas splice, BEFORE the godunov — splice bflux, recompute
-    //    the FO edge EMF (Contact/HLL), splice the edge EMF (HO on non-flagged edges, FO on flagged),
-    //    restore bface <- bface_n and re-curl. gives flagged cells FO B, leaves non-flagged B unchanged.
-    //  - `ct_resync`      : bcell_from_bface (the patch-applying stages only) — re-interp `bcell` from
-    //    the re-curled face field + the small (FO-vs-FO) energy patch.
-    ct_save: impl Fn(),
-    ct_restore: impl Fn(),
-    ct_flux_and_curl: impl Fn(),
+    // the MHD constrained-transport hooks (see `CtHooks`); `CtHooks::none()` for hydro.
+    ct: CtHooks<impl Fn(), impl Fn(), impl Fn(), impl Fn()>,
     // the GRMHD conservative source replay, called once the single-valued gas flux and edge EMF are
     // spliced: it limits the (non-conservative) geometric source to the largest admissible fraction
     // of the source ray instead of blending whole cell states, so the flux and CT operators stay
     // untouched. see `SourceReplay`. every other regime reports `NotApplicable`.
     source_replay: impl Fn() -> SourceReplay,
-    ct_resync: impl Fn(),
     // whether an exterior cell the projection could not recover should REJECT the step (replay it
     // at a smaller dt) rather than freeze. true only where a projection exists to have tried and
     // failed first; a regime with no projection has no tier below the freeze and must keep it.
@@ -616,7 +645,7 @@ where
             (&ws.flux_ho[dir], prim),
         );
     }
-    ct_save(); // MHD: bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF)
+    (ct.save)(); // MHD: bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF)
     // the stage input via THE accessor: at the first stage of a multi-stage scheme
     // the driver elides the cons -> u_stage copy (u_n IS the stage input), so a
     // direct ws.u_stage read restores from a stale (first step: zeroed) buffer —
@@ -630,7 +659,7 @@ where
         (sim.stage_input(), prim),
         (cons, prim),
     );
-    ct_restore(); // MHD: bcell <- bcell_stage (stage-input cell B, the correct EMF/predictor base)
+    (ct.restore)(); // MHD: bcell <- bcell_stage (stage-input cell B, the correct EMF/predictor base)
     c2p();
     for dir in 0..D {
         first_order_flux(dir);
@@ -638,12 +667,12 @@ where
     for dir in 0..D {
         fofc_splice(sim, prefix, dof_sfx, dir, flag, &ws.flux_ho[dir]);
     }
-    ct_flux_and_curl(); // MHD: splice bflux, recompute + splice the edge EMF, re-curl bface_n -> FO B on flagged
+    (ct.flux_and_curl)(); // MHD: splice bflux, recompute + splice the edge EMF, re-curl bface_n -> FO B on flagged
     match source_replay() {
         SourceReplay::Completed => {}
         SourceReplay::NotApplicable => {
             godunov();
-            ct_resync(); // MHD: bcell_from_bface (patch stages) — re-interp bcell + the small FO-vs-FO patch
+            (ct.resync)(); // MHD: bcell_from_bface (patch stages) — re-interp bcell + the small FO-vs-FO patch
             if has_additive {
                 source_apply();
             }

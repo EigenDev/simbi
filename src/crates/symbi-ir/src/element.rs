@@ -29,6 +29,19 @@ impl ElementTy {
         }
     }
 
+    /// the C/CUDA/HIP spelling of this element type -- the ONE table every
+    /// emitter and signature builder reads. a second table diverging from this
+    /// one is how an f32 kernel signature ends up wrapping a double-typed body.
+    pub fn c_type(self) -> &'static str {
+        match self {
+            ElementTy::F64 => "double",
+            ElementTy::F32 => "float",
+            ElementTy::I32 => "int",
+            ElementTy::U32 => "unsigned int",
+            ElementTy::Bool => "bool",
+        }
+    }
+
     /// true for IEEE 754 floating-point types.
     pub fn is_float(self) -> bool {
         matches!(self, ElementTy::F64 | ElementTy::F32)

@@ -36,8 +36,8 @@ use super::Rmhd;
 use super::algebra::{magnetic_four_vector_spatial, total_pressure};
 use super::cons::rmhd_recover;
 
-/// the maximum KKC false-position iterations (mirrors the flat host wrapper).
-const MAX_ITER: usize = 100;
+/// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`).
+const MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 
 /// the relativistic-MHD regime on a curved spatial metric (Valencia covariant momentum +
 /// the BF-transformed fast-speed bound). `metric` = gamma_{ij}/gamma^{ij}; `alpha` = the

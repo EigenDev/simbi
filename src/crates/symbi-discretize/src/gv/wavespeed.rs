@@ -337,75 +337,18 @@ pub fn gr_light_cone_wave_speed_map_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
     // the light-cone speed alpha sqrt(gamma^{dd}) + |beta^d| at the FULL position, dispatched by
     // (spacetime, chart): the kerr-schild spacetime is expressed in spherical, CARTESIAN, or
     // CYLINDRICAL coordinates — the metric computes r = |x| (cartesian) / sqrt(R^2 + z^2)
     // (cylindrical) internally, so the wrong-chart spherical metric (which would read x[0] as the
     // radius) is never used.
-    let (alpha, gi, beta) = match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let g = SchwarzschildKSCartesian { mass };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
+    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+    let (alpha, gi, beta) = {
+        fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Gv, Matrix<Gv, 3>, Tensor<Gv, 3>) {
+            (m.lapse(x), m.spatial_metric_inv(x), m.shift(x))
         }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let g = SchwarzschildKSCylindrical { mass };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let g = SchwarzschildKS { mass };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
-        }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let g = KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let g = KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            let g = KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                g.lapse(x),
-                g.spatial_metric_inv(x),
-                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&g, x),
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the light-cone map is baked only for a curved spacetime")
-        }
+        with_ks_metric!(spacetime, coords, "the light-cone map", |m| adm(&m, x))
     };
     // per gridded axis: coordinate light-cone speed times the coordinate inverse width — the
     // flat physical inv width times the flat scale factor h_d at the cell center.
@@ -446,77 +389,20 @@ fn gr_metric_fields_gv(
     coords: Coords,
     x: Tensor<Gv, 3>,
 ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
-    let mass = Gv::scalar("schwarzschild_mass");
-    match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let m = SchwarzschildKSCartesian { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let m = SchwarzschildKSCylindrical { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let m = SchwarzschildKS { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let m = KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let m = KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            let m = KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x),
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the GR metric fields are traced only for a curved spacetime")
-        }
+    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+    fn adm<M: Metric<Gv, 3>>(
+        m: &M,
+        x: Tensor<Gv, 3>,
+    ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+        (
+            m.spatial_metric(x),
+            m.spatial_metric_inv(x),
+            m.lapse(x),
+            m.shift(x),
+        )
     }
+    with_ks_metric!(spacetime, coords, "the GR metric-fields trace", |m| adm(&m, x))
 }
 
 /// the STATE-DEPENDENT curved-background RMHD CFL wave-speed map — the coordinate-frame
@@ -1427,76 +1313,20 @@ pub fn fofc_project_gr_mhd_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
-    let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
-        match (spacetime, coords) {
-            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-                let m = SchwarzschildKSCartesian { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-                let m = SchwarzschildKSCylindrical { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::SchwarzschildKS, _) => {
-                let m = SchwarzschildKS { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, Coords::Cartesian) => {
-                let m = KerrKSCartesian {
-                    mass,
-                    spin: Gv::scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, Coords::Cylindrical) => {
-                let m = KerrKSCylindrical {
-                    mass,
-                    spin: Gv::scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, _) => {
-                let m = KerrKS {
-                    mass,
-                    spin: Gv::scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::Minkowski, _) => {
-                unreachable!("the GRMHD FOFC projection is baked only for a curved spacetime")
-            }
-        };
+    let (gm_inv, gm, alpha, beta) = {
+        fn adm<M: Metric<Gv, 3>>(
+            m: &M,
+            x: Tensor<Gv, 3>,
+        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+            (
+                m.spatial_metric_inv(x),
+                m.spatial_metric(x),
+                m.lapse(x),
+                m.shift(x),
+            )
+        }
+        with_ks_metric!(spacetime, coords, "the GRMHD FOFC projection", |m| adm(&m, x))
+    };
     let read = |k: &str| Gv::field(k, k);
     let x_den = read("x_den");
     let x_nrg = read("x_nrg");
@@ -1820,76 +1650,20 @@ pub fn fofc_source_theta_gr_mhd_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
-    let (gm_inv, gm, alpha, beta): (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) =
-        match (spacetime, coords) {
-            (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-                let m = SchwarzschildKSCartesian { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-                let m = SchwarzschildKSCylindrical { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::SchwarzschildKS, _) => {
-                let m = SchwarzschildKS { mass };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, Coords::Cartesian) => {
-                let m = KerrKSCartesian {
-                    mass,
-                    spin: Gv::scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, Coords::Cylindrical) => {
-                let m = KerrKSCylindrical {
-                    mass,
-                    spin: Gv::scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::KerrKS, _) => {
-                let m = KerrKS {
-                    mass,
-                    spin: Gv::scalar("kerr_spin"),
-                };
-                (
-                    m.spatial_metric_inv(x),
-                    m.spatial_metric(x),
-                    m.lapse(x),
-                    m.shift(x),
-                )
-            }
-            (Spacetime::Minkowski, _) => {
-                unreachable!("the grmhd source limiter requires curved spacetime")
-            }
-        };
+    let (gm_inv, gm, alpha, beta) = {
+        fn adm<M: Metric<Gv, 3>>(
+            m: &M,
+            x: Tensor<Gv, 3>,
+        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
+            (
+                m.spatial_metric_inv(x),
+                m.spatial_metric(x),
+                m.lapse(x),
+                m.shift(x),
+            )
+        }
+        with_ks_metric!(spacetime, coords, "the grmhd source limiter", |m| adm(&m, x))
+    };
     let read = |key: &str| Gv::field(key, key);
     let a_den = read("a_den");
     let a_nrg = read("a_nrg");
@@ -1954,44 +1728,11 @@ pub fn fofc_project_gr_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
-    let (gm_inv, alpha, beta): (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) = match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let m = SchwarzschildKSCartesian { mass };
+    let (gm_inv, alpha, beta) = {
+        fn adm<M: Metric<Gv, 3>>(m: &M, x: Tensor<Gv, 3>) -> (Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
             (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let m = SchwarzschildKSCylindrical { mass };
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let m = SchwarzschildKS { mass };
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let m = KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let m = KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
-        (Spacetime::KerrKS, _) => {
-            let m = KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the FOFC projection is baked only for a curved spacetime")
-        }
+        with_ks_metric!(spacetime, coords, "the FOFC projection", |m| adm(&m, x))
     };
     let read = |k: &str| Gv::field(k, k);
     let x_den = read("x_den");

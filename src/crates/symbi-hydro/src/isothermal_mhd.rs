@@ -60,25 +60,17 @@ pub fn imhd_recover<S: Scalar, const D: usize>(
     }
 }
 
-/// fast magnetosonic speed along nhat. closed form, single physical sqrt; the
-/// isothermal sound speed `a^2 = cs^2` is constant (Isothermal EOS ignores p).
-/// safe_sqrt guards the radicand so no NaN traces into the kernel.
+/// fast magnetosonic speed along nhat; the isothermal sound speed `a^2 = cs^2`
+/// is constant (Isothermal EOS ignores p). the magnetosonic algebra is the one
+/// text in `mhd_state::fast_magnetosonic_from`.
 #[inline]
 fn fast_magnetosonic<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim: &IsoMhdPrim<S, D>,
     nhat: &Tensor<S, D>,
 ) -> S {
-    let half = S::from_f64(0.5);
-    let four = S::from_f64(4.0);
     let a_sq = eos.sound_speed_sq(prim.rho, S::ZERO);
-    let bsq = prim.mag.dot(&prim.mag);
-    let bn = prim.mag.dot(nhat);
-    let ca_sq = bsq / prim.rho; // total alfven speed squared
-    let can_sq = (bn * bn) / prim.rho; // normal alfven speed squared
-    let sum = a_sq + ca_sq;
-    let disc = (sum * sum - four * a_sq * can_sq).safe_sqrt();
-    (half * (sum + disc)).safe_sqrt()
+    crate::mhd_state::fast_magnetosonic_from(a_sq, prim.rho, &prim.mag, nhat)
 }
 
 impl<S: Scalar, const D: usize> Regime<S, D> for IsothermalMhd {

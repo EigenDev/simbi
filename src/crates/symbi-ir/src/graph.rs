@@ -415,7 +415,11 @@ fn numeric_promote(a: ElementTy, b: ElementTy) -> Option<ElementTy> {
     }
 }
 
-/// reduction op tag. the variants here are the non-Sum reductions.
+/// the GRAPH-level tensor reduction tag (axis reductions inside a traced
+/// expression); the variants here are the non-Sum reductions. DISTINCT from
+/// `emit::ReductionOp`, the launch-level whole-field combine descriptor
+/// (Add/Mul/Min/Max) -- the two layers share Min/Max by name but never convert:
+/// a graph reduce lowers to loop code, a field reduction is its own kernel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReduceOp {
     Min,
@@ -907,6 +911,30 @@ pub struct Graph {
     lambda_index: HashMap<Symbol, NodeId>,
 }
 
+/// the arithmetic ops whose identity elements are safe to fold, and nothing more:
+/// x + 0, x - 0, x * 1, x / 1. folding beyond this set (x * 0 -> 0, x - x -> 0)
+/// changes NaN and signed-zero semantics. this table is the ONE statement of the
+/// rule; the graph-layer fold and the scalarize-pass fold both query it, so the
+/// two layers cannot drift.
+#[derive(Clone, Copy)]
+pub enum FoldableArith {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+/// (left identity, right identity) per foldable op. `None` on the left of the
+/// non-commutative ops: 0 - x and 1 / x are not x.
+pub fn arith_identity_elements(op: FoldableArith) -> (Option<f64>, Option<f64>) {
+    match op {
+        FoldableArith::Add => (Some(0.0), Some(0.0)),
+        FoldableArith::Sub => (None, Some(0.0)),
+        FoldableArith::Mul => (Some(1.0), Some(1.0)),
+        FoldableArith::Div => (None, Some(1.0)),
+    }
+}
+
 impl Graph {
     /// build an empty graph.
     pub fn new() -> Self {
@@ -1325,41 +1353,24 @@ impl Graph {
     /// exactly (`{ Add[0], Sub[0], Mul[1], Div[1] }`); changes to either
     /// layer require a matching change to the other.
     fn fold_arith_identity(&self, op: ElementWiseOp, a: NodeId, b: NodeId) -> Option<NodeId> {
-        match op {
-            ElementWiseOp::Add => {
-                if self.const_eq(b, 0.0) {
-                    Some(a)
-                } else if self.const_eq(a, 0.0) {
-                    Some(b)
-                } else {
-                    None
-                }
+        let (left, right) = match op {
+            ElementWiseOp::Add => arith_identity_elements(FoldableArith::Add),
+            ElementWiseOp::Sub => arith_identity_elements(FoldableArith::Sub),
+            ElementWiseOp::Mul => arith_identity_elements(FoldableArith::Mul),
+            ElementWiseOp::Div => arith_identity_elements(FoldableArith::Div),
+            _ => return None,
+        };
+        if let Some(v) = right {
+            if self.const_eq(b, v) {
+                return Some(a);
             }
-            ElementWiseOp::Sub => {
-                if self.const_eq(b, 0.0) {
-                    Some(a)
-                } else {
-                    None
-                }
-            }
-            ElementWiseOp::Mul => {
-                if self.const_eq(b, 1.0) {
-                    Some(a)
-                } else if self.const_eq(a, 1.0) {
-                    Some(b)
-                } else {
-                    None
-                }
-            }
-            ElementWiseOp::Div => {
-                if self.const_eq(b, 1.0) {
-                    Some(a)
-                } else {
-                    None
-                }
-            }
-            _ => None,
         }
+        if let Some(v) = left {
+            if self.const_eq(a, v) {
+                return Some(b);
+            }
+        }
+        None
     }
 
     pub fn reduce(

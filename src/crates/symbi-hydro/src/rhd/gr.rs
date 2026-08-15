@@ -41,8 +41,8 @@ use super::cons::rhd_recover;
 use super::wave_speeds::rhd_speeds_from_vn_gr;
 use super::{Rhd, enthalpy, lorentz_factor, sound_speed_sq};
 
-/// the maximum newton iterations for the metric-aware c2p (mirrors the flat host wrapper).
-const MAX_ITER: usize = 100;
+/// the shared relativistic c2p iteration cap (`C2P_MAX_ITER`).
+const MAX_ITER: usize = crate::c2p_result::C2P_MAX_ITER;
 
 /// the densitized relativistic-hydro regime on a curved spacetime. `metric` = gamma_{ij}/gamma^{ij}
 /// of the momentum block; `alpha` = the lapse; `shift` = the contravariant shift `beta^i`;

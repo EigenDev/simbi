@@ -5,6 +5,7 @@
 // =============================================================================
 
 use super::*;
+use symbi_algebra::Matrix;
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
     SchwarzschildKSCylindrical,
@@ -244,14 +245,19 @@ where
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
     // the evolved state is the densitized sqrt(-g)[rho u^t, T^t_i, -(T^t_t + rho u^t)], so the
     // recovery harvests the cell lapse, shift and full-chart measure `volume_factor`: undensitize
     // by the known sqrt(det gamma)(x), then invert the killing energy back to the valencia tau the
     // newton consumes, tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    let (gm, gm_inv, alpha, beta, sqrt_gamma) = match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let m = SchwarzschildKSCartesian { mass };
+    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. on the SPHERICAL
+    // chart the non-diagonal gamma_{r phi} means only the azimuthal-momentum (swirl, D = 3)
+    // instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
+    let (gm, gm_inv, alpha, beta, sqrt_gamma) = {
+        fn adm<const N: usize, M: Metric<Gv, N>>(
+            m: &M,
+            x: Tensor<Gv, N>,
+        ) -> (Matrix<Gv, N>, Matrix<Gv, N>, Gv, Tensor<Gv, N>, Gv) {
             (
                 m.spatial_metric(x),
                 m.spatial_metric_inv(x),
@@ -260,72 +266,7 @@ where
                 m.volume_factor(x),
             )
         }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let m = SchwarzschildKSCylindrical { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let m = SchwarzschildKS { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            let m = KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            let m = KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            // spinning kerr: non-diagonal gamma_{r phi} — only the azimuthal-momentum (swirl,
-            // D = 3) instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
-            let m = KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-                m.volume_factor(x),
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the GR c2p is baked only for a curved spacetime")
-        }
+        with_ks_metric!(spacetime, coords, "the GR c2p", |m| adm(&m, x))
     };
     let metric = SpatialMetric::<Gv, D>::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
@@ -452,13 +393,19 @@ pub fn rmhd_c2p_gr_gv(
             None => gv_ungridded_slot(coords, c),
         }
     }));
-    let mass = Gv::scalar("schwarzschild_mass");
     // the covariant energy ehat = alpha tau + (alpha-1) D - beta^i S_i is what the godunov evolves,
     // so the recovery harvests the cell lapse + shift to invert it back to the valencia tau the KKC
     // c2p consumes: tau = (ehat + (1-alpha) D + beta^i S_i) / alpha.
-    let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
-        (Spacetime::SchwarzschildKS, Coords::Cartesian) => {
-            let m = SchwarzschildKSCartesian { mass };
+    // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+    // oblate-spheroidal radius; non-diagonal gamma + shift on every axis. every spinning
+    // kerr chart has a theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta),
+    // so the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
+    // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
+    let (gm, gm_inv, alpha, beta) = {
+        fn adm<M: Metric<Gv, 3>>(
+            m: &M,
+            x: Tensor<Gv, 3>,
+        ) -> (Matrix<Gv, 3>, Matrix<Gv, 3>, Gv, Tensor<Gv, 3>) {
             (
                 m.spatial_metric(x),
                 m.spatial_metric_inv(x),
@@ -466,74 +413,7 @@ pub fn rmhd_c2p_gr_gv(
                 m.shift(x),
             )
         }
-        (Spacetime::SchwarzschildKS, Coords::Cylindrical) => {
-            let m = SchwarzschildKSCylindrical { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        (Spacetime::SchwarzschildKS, _) => {
-            let m = SchwarzschildKS { mass };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
-        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
-        (Spacetime::KerrKS, Coords::Cartesian) => {
-            // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
-            // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
-            // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-            let m = KerrKSCartesian {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        (Spacetime::KerrKS, Coords::Cylindrical) => {
-            // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
-            // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
-            // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-            let m = KerrKSCylindrical {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        (Spacetime::KerrKS, _) => {
-            // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
-            // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
-            // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
-            let m = KerrKS {
-                mass,
-                spin: Gv::scalar("kerr_spin"),
-            };
-            (
-                m.spatial_metric(x),
-                m.spatial_metric_inv(x),
-                m.lapse(x),
-                m.shift(x),
-            )
-        }
-        (Spacetime::Minkowski, _) => {
-            unreachable!("the GRMHD c2p is baked only for a curved spacetime")
-        }
+        with_ks_metric!(spacetime, coords, "the GRMHD c2p", |m| adm(&m, x))
     };
     let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
 

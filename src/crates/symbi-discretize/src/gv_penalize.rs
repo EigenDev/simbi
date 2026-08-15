@@ -26,7 +26,7 @@
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::{Embedded, Physical, Tensor};
 use symbi_geometry::{Cylindrical, CylindricalRPhi, DiagonalMetric, Metric, Spherical};
-use symbi_hydro::energy::{Adiabatic, Dyed};
+use symbi_hydro::energy::{Adiabatic, Dyed, EnergyModel, EnergySlot, IsoModel};
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{BodyKin, Property, Relax, penalize_cell};
 use symbi_ib::sdf::SdfExpr;
@@ -506,22 +506,61 @@ pub fn penalize_drain_gv(
     axes: &[usize],
     has_dye: bool,
 ) -> (GvKernel, Writes) {
+    penalize_drain_impl::<Adiabatic>(coords, ndim, dof, axes, has_dye)
+}
+
+/// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
+/// sound speed is the constant `cs` param), delta
+/// outputs mass + force only. same [Drain] stack, same integrator — the iso
+/// energy slot discards the e-channel by construction.
+pub fn penalize_drain_iso_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+    has_dye: bool,
+) -> (GvKernel, Writes) {
+    penalize_drain_impl::<IsoModel>(coords, ndim, dof, axes, has_dye)
+}
+
+/// the [Drain] stack traced once, generic over the energy model: the adiabatic and
+/// isothermal kernels are the SAME graph up to the energy channel, so one builder
+/// carries both. `E::HAS_ENERGY` gates the `nrg` field read/write, the sound-speed
+/// recovery, and the `pen_0_energy` receipt; the iso energy slot is zero-sized, so
+/// nothing energy-shaped enters the iso trace.
+fn penalize_drain_impl<E: EnergyModel>(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+    has_dye: bool,
+) -> (GvKernel, Writes) {
     assert!(
         (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
         "penalize_drain_gv: need 1<=ndim<=dof<=3"
     );
     begin_trace();
     let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
+    // the regime's eos handle: adiabatic reads `gamma` (the sound speed is recovered from the
+    // conserved state below); isothermal reads the constant sound speed `cs` directly.
+    let eos = Gv::scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
     let c_drain = Gv::scalar("c_drain");
 
     // conserved reads (in-place: the same fields are the writes). the momentum runs over dof (all
     // active components), so a 2.5D MHD sink drains the out-of-plane momentum and its kinetic energy.
+    // the energy field exists only in the adiabatic regime; the iso slot is zero-sized.
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
     let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
-    let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
+    let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+        <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
+            "nrg",
+            symbi_ir::FieldRef::cons_nrg(),
+        ))
+    } else {
+        <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+    };
 
     // the cell centroid + volume from the shared geometry scaffold — the coordinate
     // map every other body kernel of this chart evaluates.
@@ -549,13 +588,18 @@ pub fn penalize_drain_gv(
     let chi = symbi_ib::sdf::chi(phi, min_w);
     tag_body_mask(&chi, coords, ndim, axes, None, false);
 
-    // tau = c_drain dx / c_s with c_s from the just-updated conserved state
-    // (the drain runs post-godunov, pre-c2p — the stored primitive is stale).
-    let mut mom_sq = Gv::ZERO;
-    for m in &mom {
-        mom_sq = mom_sq + *m * *m;
-    }
-    let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
+    // tau = c_drain dx / c_s. the adiabatic c_s comes from the just-updated conserved
+    // state (the drain runs post-godunov, pre-c2p — the stored primitive is stale);
+    // the isothermal c_s is the constant scalar.
+    let cs = if E::HAS_ENERGY {
+        let mut mom_sq = Gv::ZERO;
+        for m in &mom {
+            mom_sq = mom_sq + *m * *m;
+        }
+        symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+    } else {
+        eos
+    };
     let sound_rate = signal_speed(cs) / (c_drain * min_w);
     // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
     // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
@@ -572,7 +616,7 @@ pub fn penalize_drain_gv(
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, Adiabatic, Dyed> {
+    let cons = ConsG::<Gv, 3, E, Dyed> {
         // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
         // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
         chi: if has_dye {
@@ -602,6 +646,32 @@ pub fn penalize_drain_gv(
         &delta.force_delta,
     );
 
+    let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
+
+    // the delta outputs vanish exactly beyond the tanh saturation radius; the
+    // in-place cons writes are unchanged-value there, so the ball bounds
+    // everything the reduction needs (dispatch may clip to it).
+    let kernel = end_trace().with_derived_support(&writes);
+    (kernel, writes)
+}
+
+/// the shared write list every penalization surface emits: the in-place conserved
+/// updates (den, mom over dof, the adiabatic energy, the optional dye) followed by
+/// the body receipts (mass, cartesian force, the adiabatic energy receipt, torque,
+/// form drag). the momentum block runs over DOF, so a 2.5D MHD kernel (dof = 3,
+/// ndim = 2) writes the drained out-of-plane momentum back — leaving it unwritten
+/// while the density drains would grow its velocity as 1/rho inside the mask.
+#[allow(clippy::too_many_arguments)]
+fn penalize_writes<E: EnergyModel>(
+    ndim: usize,
+    dof: usize,
+    has_dye: bool,
+    out: &ConsG<Gv, 3, E, Dyed>,
+    delta: &symbi_ib::BodyDelta<Gv, 3>,
+    f_cart: &Tensor<Gv, 3>,
+    torque: &Tensor<Gv, 3>,
+    n_cart: &[Gv],
+) -> Writes {
     let mut writes: Writes = Vec::new();
     writes.push((
         "den_out".to_string(),
@@ -615,13 +685,16 @@ pub fn penalize_drain_gv(
             out.mom[a].node(),
         ));
     }
-    writes.push((
-        "nrg_out".to_string(),
-        symbi_ir::FieldRef::cons_nrg().into(),
-        out.nrg.node(),
-    ));
+    if E::HAS_ENERGY {
+        writes.push((
+            "nrg_out".to_string(),
+            symbi_ir::FieldRef::cons_nrg().into(),
+            out.nrg.value().node(),
+        ));
+    }
     // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
-    // same drain factor to both, so the concentration of the surviving gas is unchanged.
+    // same drain factor to both, so the concentration of the surviving gas is unchanged. the
+    // iso regime has no energy write, so there the dye rides directly after the momentum block.
     if has_dye {
         writes.push((
             "chi_out".to_string(),
@@ -641,11 +714,13 @@ pub fn penalize_drain_gv(
             f_cart[a].node(),
         ));
     }
-    writes.push((
-        "pen_energy".to_string(),
-        "pen_0_energy".into(),
-        delta.energy_delta.node(),
-    ));
+    if E::HAS_ENERGY {
+        writes.push((
+            "pen_energy".to_string(),
+            "pen_0_energy".into(),
+            delta.energy_delta.node(),
+        ));
+    }
     for a in torque_axes(ndim) {
         writes.push((
             format!("pen_torque_{a}"),
@@ -653,13 +728,8 @@ pub fn penalize_drain_gv(
             torque[a].node(),
         ));
     }
-    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
-
-    // the delta outputs vanish exactly beyond the tanh saturation radius; the
-    // in-place cons writes are unchanged-value there, so the ball bounds
-    // everything the reduction needs (dispatch may clip to it).
-    let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
+    push_force_normal(&mut writes, ndim, f_cart, n_cart);
+    writes
 }
 
 /// trace the [PorousAccretor]-stack penalization for the adiabatic regime,
@@ -680,7 +750,7 @@ pub fn penalize_porous_gv(
     axes: &[usize],
     has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, dof, None, false, axes, has_dye)
+    penalize_porous_impl::<Adiabatic>(coords, ndim, dof, None, false, axes, has_dye)
 }
 
 /// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
@@ -694,7 +764,15 @@ pub fn penalize_porous_gv_shaped(
     shape: &SdfExpr<f64, 3>,
     has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, dof, Some(shape), false, &[0, 1, 2][..ndim], has_dye)
+    penalize_porous_impl::<Adiabatic>(
+        coords,
+        ndim,
+        dof,
+        Some(shape),
+        false,
+        &[0, 1, 2][..ndim],
+        has_dye,
+    )
 }
 
 /// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
@@ -708,10 +786,73 @@ pub fn penalize_porous_gv_spinning(
     shape: &SdfExpr<f64, 3>,
     has_dye: bool,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, dof, Some(shape), true, &[0, 1, 2][..ndim], has_dye)
+    penalize_porous_impl::<Adiabatic>(
+        coords,
+        ndim,
+        dof,
+        Some(shape),
+        true,
+        &[0, 1, 2][..ndim],
+        has_dye,
+    )
 }
 
-fn penalize_porous_inner(
+/// the ISOTHERMAL [PorousAccretor] twin: the same porous surface as
+/// `penalize_porous_gv` but for the isothermal regime — the sound speed is the
+/// constant `cs` param (no energy channel), delta outputs mass + force only.
+/// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
+pub fn penalize_porous_iso_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+    has_dye: bool,
+) -> (GvKernel, Writes) {
+    penalize_porous_impl::<IsoModel>(coords, ndim, dof, None, false, axes, has_dye)
+}
+
+/// the arbitrary-shape ISO porous wall: the energy-free counterpart of
+/// `penalize_porous_gv_shaped` — mask + normal from the config CSG, no energy channel.
+pub fn penalize_porous_iso_gv_shaped(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    shape: &SdfExpr<f64, 3>,
+    has_dye: bool,
+) -> (GvKernel, Writes) {
+    penalize_porous_impl::<IsoModel>(
+        coords,
+        ndim,
+        dof,
+        Some(shape),
+        false,
+        &[0, 1, 2][..ndim],
+        has_dye,
+    )
+}
+
+/// the SPINNING ISO porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
+pub fn penalize_porous_iso_gv_spinning(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    shape: &SdfExpr<f64, 3>,
+    has_dye: bool,
+) -> (GvKernel, Writes) {
+    penalize_porous_impl::<IsoModel>(
+        coords,
+        ndim,
+        dof,
+        Some(shape),
+        true,
+        &[0, 1, 2][..ndim],
+        has_dye,
+    )
+}
+
+/// the porous surface traced once, generic over the energy model (see
+/// `penalize_drain_impl` for the gating rule).
+fn penalize_porous_impl<E: EnergyModel>(
     coords: Coords,
     ndim: usize,
     dof: usize,
@@ -726,7 +867,9 @@ fn penalize_porous_inner(
     );
     begin_trace();
     let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
+    // the regime's eos handle: adiabatic reads `gamma` (the sound speed is recovered from the
+    // conserved state below); isothermal reads the constant sound speed `cs` directly.
+    let eos = Gv::scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
     let c_drain = Gv::scalar("c_drain");
     let porosity = Gv::scalar("porosity");
     let k_eta_n = Gv::scalar("k_eta_n");
@@ -739,7 +882,14 @@ fn penalize_porous_inner(
     let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
-    let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
+    let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+        <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
+            "nrg",
+            symbi_ir::FieldRef::cons_nrg(),
+        ))
+    } else {
+        <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+    };
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
@@ -767,11 +917,17 @@ fn penalize_porous_inner(
     let chi = symbi_ib::sdf::chi(phi, min_w);
     tag_body_mask(&chi, coords, ndim, axes, shape, spin);
 
-    let mut mom_sq = Gv::ZERO;
-    for m in &mom {
-        mom_sq = mom_sq + *m * *m;
-    }
-    let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
+    // tau = c_drain dx / c_s. the adiabatic c_s comes from the just-updated conserved
+    // state (post-godunov, pre-c2p); the isothermal c_s is the constant scalar.
+    let cs = if E::HAS_ENERGY {
+        let mut mom_sq = Gv::ZERO;
+        for m in &mom {
+            mom_sq = mom_sq + *m * *m;
+        }
+        symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+    } else {
+        eos
+    };
     let sound_rate = signal_speed(cs) / (c_drain * min_w);
     // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
     // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
@@ -855,7 +1011,7 @@ fn penalize_porous_inner(
         inv_eta_t: k_eta_t * rate_scale,
     }
     .contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, Adiabatic, Dyed> {
+    let cons = ConsG::<Gv, 3, E, Dyed> {
         // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
         // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
         chi: if has_dye {
@@ -880,73 +1036,37 @@ fn penalize_porous_inner(
         &delta.force_delta,
     );
 
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        symbi_ir::FieldRef::cons_den().into(),
-        out.den.node(),
-    ));
-    for a in 0..dof {
-        writes.push((
-            format!("mom_out_{a}"),
-            symbi_ir::FieldRef::cons_mom(a as u8).into(),
-            out.mom[a].node(),
-        ));
-    }
-    writes.push((
-        "nrg_out".to_string(),
-        symbi_ir::FieldRef::cons_nrg().into(),
-        out.nrg.node(),
-    ));
-    // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
-    // same drain factor to both, so the concentration of the surviving gas is unchanged.
-    if has_dye {
-        writes.push((
-            "chi_out".to_string(),
-            symbi_ir::FieldRef::cons_chi().into(),
-            out.chi.node(),
-        ));
-    }
-    writes.push((
-        "pen_mass".to_string(),
-        "pen_0_mass".into(),
-        delta.mass_delta.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("pen_force_{a}"),
-            format!("pen_0_force_{a}").into(),
-            f_cart[a].node(),
-        ));
-    }
-    writes.push((
-        "pen_energy".to_string(),
-        "pen_0_energy".into(),
-        delta.energy_delta.node(),
-    ));
-    for a in torque_axes(ndim) {
-        writes.push((
-            format!("pen_torque_{a}"),
-            format!("pen_0_torque_{a}").into(),
-            torque[a].node(),
-        ));
-    }
-    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
+    let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 
-/// the ISOTHERMAL torque-free accretor: the drain plus a
-/// tangential ANTI-relaxation `lambda_t = -xi lambda_rho` about the sphere
-/// normal, so the accreted mass carries no net angular momentum to the body
-/// (the dittmann & ryan 2021 torque-free sink, coordinate-free via the SDF
-/// normal). the retention floor (`Relax.ut_growth_cap`, set by the property)
-/// bounds the growing tangential factor at the evacuation limit. `xi = 0`
-/// reduces bit-for-bit to `penalize_drain_iso`; `xi = 1` is torque-free. no
-/// energy channel (iso, the thin-disk regime); delta outputs mass + force +
-/// torque. the velocity target is the body's translational velocity
-/// `body_0_vel_*` (the accretion is torque-free RELATIVE to the moving sink).
+/// the ADIABATIC torque-free accretor: the drain plus a tangential
+/// ANTI-relaxation `lambda_t = -xi lambda_rho` about the sphere normal, so the
+/// accreted mass carries no net angular momentum to the body (the dittmann &
+/// ryan 2021 torque-free sink, coordinate-free via the SDF normal). the
+/// retention floor (`Relax.ut_growth_cap`, set by the property) bounds the
+/// growing tangential factor at the evacuation limit. the sound speed is
+/// recovered from the conserved state and the energy channel is carried (delta
+/// outputs mass + force + energy + torque). `xi = 0` reduces to
+/// `penalize_drain`; `xi = 1` is torque-free. the velocity target is the
+/// body's translational velocity `body_0_vel_*` (the accretion is torque-free
+/// RELATIVE to the moving sink).
+pub fn penalize_torque_free_gv(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+    has_dye: bool,
+) -> (GvKernel, Writes) {
+    penalize_torque_free_impl::<Adiabatic>(coords, ndim, dof, axes, has_dye)
+}
+
+/// the ISOTHERMAL torque-free twin: the same torque-free surface as
+/// `penalize_torque_free_gv` but with no energy channel (iso, the thin-disk
+/// regime) — the sound speed is the constant `cs` param, delta outputs
+/// mass + force + torque. `xi = 0` reduces bit-for-bit to `penalize_drain_iso`.
 pub fn penalize_torque_free_iso_gv(
     coords: Coords,
     ndim: usize,
@@ -954,14 +1074,27 @@ pub fn penalize_torque_free_iso_gv(
     axes: &[usize],
     has_dye: bool,
 ) -> (GvKernel, Writes) {
-    use symbi_hydro::energy::IsoModel;
+    penalize_torque_free_impl::<IsoModel>(coords, ndim, dof, axes, has_dye)
+}
+
+/// the torque-free surface traced once, generic over the energy model (see
+/// `penalize_drain_impl` for the gating rule).
+fn penalize_torque_free_impl<E: EnergyModel>(
+    coords: Coords,
+    ndim: usize,
+    dof: usize,
+    axes: &[usize],
+    has_dye: bool,
+) -> (GvKernel, Writes) {
     assert!(
-        (1..=3).contains(&ndim),
-        "penalize_torque_free_iso_gv: ndim must be 1..=3"
+        (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
+        "penalize_torque_free_gv: need 1<=ndim<=dof<=3"
     );
     begin_trace();
     let dt = Gv::scalar("dt");
-    let cs = Gv::scalar("cs");
+    // the regime's eos handle: adiabatic reads `gamma` (the sound speed is recovered from the
+    // conserved state below); isothermal reads the constant sound speed `cs` directly.
+    let eos = Gv::scalar(if E::HAS_ENERGY { "gamma" } else { "cs" });
     let c_drain = Gv::scalar("c_drain");
     let xi = Gv::scalar("xi");
 
@@ -969,6 +1102,14 @@ pub fn penalize_torque_free_iso_gv(
     let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
+    let nrg: E::Slot<Gv> = if E::HAS_ENERGY {
+        <E::Slot<Gv> as EnergySlot<Gv>>::from_scalar(Gv::field(
+            "nrg",
+            symbi_ir::FieldRef::cons_nrg(),
+        ))
+    } else {
+        <E::Slot<Gv> as EnergySlot<Gv>>::zero()
+    };
 
     let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
     let dv = Gv::ONE / geo.inv_volume;
@@ -990,6 +1131,18 @@ pub fn penalize_torque_free_iso_gv(
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     tag_body_mask(&chi, coords, ndim, axes, None, false);
+
+    // tau = c_drain dx / c_s. the adiabatic c_s comes from the just-updated conserved
+    // state (post-godunov, pre-c2p); the isothermal c_s is the constant scalar.
+    let cs = if E::HAS_ENERGY {
+        let mut mom_sq = Gv::ZERO;
+        for m in &mom {
+            mom_sq = mom_sq + *m * *m;
+        }
+        symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg.value(), eos)
+    } else {
+        eos
+    };
     let sound_rate = signal_speed(cs) / (c_drain * min_w);
     // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
     // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
@@ -1029,402 +1182,7 @@ pub fn penalize_torque_free_iso_gv(
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, IsoModel, Dyed> {
-        // an undyed kernel traces a constant-zero dye: the drain still scales it, nothing reads
-        // the result, and the tracer eliminates the dead arithmetic.
-        chi: if has_dye {
-            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
-        } else {
-            Gv::ZERO
-        },
-        den,
-        mom: Tensor::new(std::array::from_fn(
-            |a| if a < dof { mom[a] } else { Gv::ZERO },
-        )),
-        nrg: Default::default(),
-    };
-    let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(
-        coords,
-        ndim,
-        axes,
-        &geo.centroid,
-        &x,
-        &center,
-        &delta.force_delta,
-    );
-
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        symbi_ir::FieldRef::cons_den().into(),
-        out.den.node(),
-    ));
-    for a in 0..dof {
-        writes.push((
-            format!("mom_out_{a}"),
-            symbi_ir::FieldRef::cons_mom(a as u8).into(),
-            out.mom[a].node(),
-        ));
-    }
-    // the sink swallows gas and its dye together; `penalize_cell` applied the same factor to both.
-    // iso has no energy write, so the dye rides directly after the momentum block.
-    if has_dye {
-        writes.push((
-            "chi_out".to_string(),
-            symbi_ir::FieldRef::cons_chi().into(),
-            out.chi.node(),
-        ));
-    }
-    writes.push((
-        "pen_mass".to_string(),
-        "pen_0_mass".into(),
-        delta.mass_delta.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("pen_force_{a}"),
-            format!("pen_0_force_{a}").into(),
-            f_cart[a].node(),
-        ));
-    }
-    for a in torque_axes(ndim) {
-        writes.push((
-            format!("pen_torque_{a}"),
-            format!("pen_0_torque_{a}").into(),
-            torque[a].node(),
-        ));
-    }
-    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
-
-    let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
-}
-
-/// the ISOTHERMAL [PorousAccretor] twin: the same porous surface as
-/// `penalize_porous_gv` but for the isothermal regime — the sound speed is the
-/// constant `cs` param (no energy channel), delta outputs mass + force only.
-/// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
-pub fn penalize_porous_iso_gv(
-    coords: Coords,
-    ndim: usize,
-    dof: usize,
-    axes: &[usize],
-    has_dye: bool,
-) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, dof, None, false, axes, has_dye)
-}
-
-/// the arbitrary-shape ISO porous wall: the energy-free counterpart of
-/// `penalize_porous_gv_shaped` — mask + normal from the config CSG, no energy channel.
-pub fn penalize_porous_iso_gv_shaped(
-    coords: Coords,
-    ndim: usize,
-    dof: usize,
-    shape: &SdfExpr<f64, 3>,
-    has_dye: bool,
-) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), false, &[0, 1, 2][..ndim], has_dye)
-}
-
-/// the SPINNING ISO porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
-pub fn penalize_porous_iso_gv_spinning(
-    coords: Coords,
-    ndim: usize,
-    dof: usize,
-    shape: &SdfExpr<f64, 3>,
-    has_dye: bool,
-) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), true, &[0, 1, 2][..ndim], has_dye)
-}
-
-fn penalize_porous_iso_inner(
-    coords: Coords,
-    ndim: usize,
-    dof: usize,
-    shape: Option<&SdfExpr<f64, 3>>,
-    spin: bool,
-    axes: &[usize],
-    has_dye: bool,
-) -> (GvKernel, Writes) {
-    use symbi_hydro::energy::IsoModel;
-    assert!(
-        (1..=3).contains(&ndim) && (ndim..=3).contains(&dof),
-        "penalize_porous_iso_gv: need 1<=ndim<=dof<=3"
-    );
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let cs = Gv::scalar("cs");
-    let c_drain = Gv::scalar("c_drain");
-    let porosity = Gv::scalar("porosity");
-    let k_eta_n = Gv::scalar("k_eta_n");
-    let k_eta_t = Gv::scalar("k_eta_t");
-
-    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..dof)
-        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-        .collect();
-
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = gv_axis_width(0, Spacing::Uniform);
-    for ax in 1..ndim {
-        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
-    }
-
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    });
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sdf = if spin {
-        body_mask_sdf_spinning(center, shape.expect("a spinning wall must have a shape"))
-    } else {
-        body_mask_sdf_shaped(center, shape)
-    };
-    let chi = symbi_ib::sdf::chi(sdf.dist(x), min_w);
-    tag_body_mask(&chi, coords, ndim, axes, shape, spin);
-    let sound_rate = signal_speed(cs) / (c_drain * min_w);
-    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
-    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
-    let inv_tau = if shape.is_none() {
-        spherical_drain_rate(sound_rate)
-    } else {
-        sound_rate
-    };
-    let rate_scale = signal_speed(cs) / min_w;
-
-    // sphere normal r_hat (guarded), or the CSG SDF gradient for a shaped wall (see the adiabatic
-    // `penalize_porous_gv`).
-    let n_cart: Vec<Gv> = match shape {
-        None => {
-            let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-            let r = x_rel.dot(&x_rel).sqrt();
-            let nonzero = r.cmp_gt(Gv::ZERO);
-            let divisor = Gv::select(nonzero, r, Gv::ONE);
-            let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
-            (0..ndim).map(|a| x_rel[a] * inv_r).collect()
-        }
-        Some(_) => {
-            let n = sdf.normal(x);
-            (0..ndim).map(|a| n[a]).collect()
-        }
-    };
-    let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
-    let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { n_phys[a] } else { Gv::ZERO }
-    }));
-
-    let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_vel_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    }));
-    let omega = if spin {
-        // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
-        // about the (evolving) rotation axis.
-        Tensor::<Gv, 3>::new([
-            Gv::scalar("body_0_omega_0"),
-            Gv::scalar("body_0_omega_1"),
-            Gv::scalar("body_0_omega_2"),
-        ])
-    } else {
-        Tensor::zeros()
-    };
-    let base_kin = BodyKin::<Gv, 3> {
-        u_solid,
-        omega,
-        e_wall: Gv::ZERO,
-    };
-    // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
-    // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
-    // static path keeps the bare translational u_solid, bit-identical to before.
-    let kin_cart = if spin {
-        let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-        base_kin.at(&x_rel)
-    } else {
-        base_kin
-    };
-    // the surface velocity is assembled in the cartesian world frame; the gas
-    // momentum is stored in physical components, so the target rotates into the
-    // cell's orthonormal basis before the normal/tangential decomposition.
-    let kin = BodyKin::<Gv, 3> {
-        u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &kin_cart.u_solid),
-        ..kin_cart
-    };
-    let mut acc = Relax::<Gv, 3>::none();
-    Property::PorousAccretor {
-        p: porosity,
-        inv_tau,
-        inv_eta_n: k_eta_n * rate_scale,
-        inv_eta_t: k_eta_t * rate_scale,
-    }
-    .contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, IsoModel, Dyed> {
-        // an undyed kernel traces a constant-zero dye: the drain still scales it, nothing reads
-        // the result, and the tracer eliminates the dead arithmetic.
-        chi: if has_dye {
-            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
-        } else {
-            Gv::ZERO
-        },
-        den,
-        mom: Tensor::new(std::array::from_fn(
-            |a| if a < dof { mom[a] } else { Gv::ZERO },
-        )),
-        nrg: Default::default(),
-    };
-    let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let (f_cart, torque) = cartesian_receipt(
-        coords,
-        ndim,
-        axes,
-        &geo.centroid,
-        &x,
-        &center,
-        &delta.force_delta,
-    );
-
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        symbi_ir::FieldRef::cons_den().into(),
-        out.den.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("mom_out_{a}"),
-            symbi_ir::FieldRef::cons_mom(a as u8).into(),
-            out.mom[a].node(),
-        ));
-    }
-    // the sink swallows gas and its dye together; `penalize_cell` applied the same factor to both.
-    // iso has no energy write, so the dye rides directly after the momentum block.
-    if has_dye {
-        writes.push((
-            "chi_out".to_string(),
-            symbi_ir::FieldRef::cons_chi().into(),
-            out.chi.node(),
-        ));
-    }
-    writes.push((
-        "pen_mass".to_string(),
-        "pen_0_mass".into(),
-        delta.mass_delta.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("pen_force_{a}"),
-            format!("pen_0_force_{a}").into(),
-            f_cart[a].node(),
-        ));
-    }
-    for a in torque_axes(ndim) {
-        writes.push((
-            format!("pen_torque_{a}"),
-            format!("pen_0_torque_{a}").into(),
-            torque[a].node(),
-        ));
-    }
-    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
-
-    let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
-}
-
-/// the ADIABATIC torque-free twin: the same torque-free surface as
-/// `penalize_torque_free_iso_gv` but for the adiabatic regime — the sound speed
-/// is recovered from the conserved state and the energy channel is carried (delta
-/// outputs mass + force + energy + torque). `xi = 0` reduces to `penalize_drain`.
-pub fn penalize_torque_free_gv(
-    coords: Coords,
-    ndim: usize,
-    dof: usize,
-    axes: &[usize],
-    has_dye: bool,
-) -> (GvKernel, Writes) {
-    assert!(
-        (1..=3).contains(&ndim),
-        "penalize_torque_free_gv: ndim must be 1..=3"
-    );
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
-    let c_drain = Gv::scalar("c_drain");
-    let xi = Gv::scalar("xi");
-
-    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..dof)
-        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-        .collect();
-    let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
-
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = gv_axis_width(0, Spacing::Uniform);
-    for ax in 1..ndim {
-        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
-    }
-
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    });
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sphere = body_mask_sdf(center);
-    let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
-    tag_body_mask(&chi, coords, ndim, axes, None, false);
-
-    let mut mom_sq = Gv::ZERO;
-    for m in &mom {
-        mom_sq = mom_sq + *m * *m;
-    }
-    let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let sound_rate = signal_speed(cs) / (c_drain * min_w);
-    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
-    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
-    // this kernel is the sphere path by construction (no shape parameter), so the floor
-    // always applies.
-    let inv_tau = spherical_drain_rate(sound_rate);
-
-    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-    let r = x_rel.dot(&x_rel).sqrt();
-    let nonzero = r.cmp_gt(Gv::ZERO);
-    let divisor = Gv::select(nonzero, r, Gv::ONE);
-    let inv_r = Gv::select(nonzero, Gv::ONE / divisor, Gv::ZERO);
-    let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
-    let n_phys = vector_from_cartesian(coords, ndim, axes, &geo.centroid, &n_cart);
-    let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim { n_phys[a] } else { Gv::ZERO }
-    }));
-
-    let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_vel_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    }));
-    // the body's translational velocity is a cartesian world vector; rotate it
-    // into the cell's physical basis to match the stored momentum components.
-    let kin = BodyKin::<Gv, 3> {
-        u_solid: solid_velocity_phys(coords, ndim, axes, &geo.centroid, &u_solid),
-        omega: Tensor::zeros(),
-        e_wall: Gv::ZERO,
-    };
-    let mut acc = Relax::<Gv, 3>::none();
-    Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, Adiabatic, Dyed> {
+    let cons = ConsG::<Gv, 3, E, Dyed> {
         // an undyed kernel traces a constant-zero dye: `penalize_cell` still scales it by the
         // drain factor, the result feeds no write, and the tracer eliminates the dead arithmetic.
         chi: if has_dye {
@@ -1449,194 +1207,7 @@ pub fn penalize_torque_free_gv(
         &delta.force_delta,
     );
 
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        symbi_ir::FieldRef::cons_den().into(),
-        out.den.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("mom_out_{a}"),
-            symbi_ir::FieldRef::cons_mom(a as u8).into(),
-            out.mom[a].node(),
-        ));
-    }
-    writes.push((
-        "nrg_out".to_string(),
-        symbi_ir::FieldRef::cons_nrg().into(),
-        out.nrg.node(),
-    ));
-    // the sink swallows gas and the dye dissolved in it together; `penalize_cell` applied the
-    // same drain factor to both, so the concentration of the surviving gas is unchanged.
-    if has_dye {
-        writes.push((
-            "chi_out".to_string(),
-            symbi_ir::FieldRef::cons_chi().into(),
-            out.chi.node(),
-        ));
-    }
-    writes.push((
-        "pen_mass".to_string(),
-        "pen_0_mass".into(),
-        delta.mass_delta.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("pen_force_{a}"),
-            format!("pen_0_force_{a}").into(),
-            f_cart[a].node(),
-        ));
-    }
-    writes.push((
-        "pen_energy".to_string(),
-        "pen_0_energy".into(),
-        delta.energy_delta.node(),
-    ));
-    for a in torque_axes(ndim) {
-        writes.push((
-            format!("pen_torque_{a}"),
-            format!("pen_0_torque_{a}").into(),
-            torque[a].node(),
-        ));
-    }
-    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
-
-    let kernel = end_trace().with_derived_support(&writes);
-    (kernel, writes)
-}
-
-/// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
-/// sound speed is the constant `cs` param), delta
-/// outputs mass + force only. same [Drain] stack, same integrator — the iso
-/// energy slot discards the e-channel by construction.
-pub fn penalize_drain_iso_gv(
-    coords: Coords,
-    ndim: usize,
-    dof: usize,
-    axes: &[usize],
-    has_dye: bool,
-) -> (GvKernel, Writes) {
-    use symbi_hydro::energy::IsoModel;
-    assert!(
-        (1..=3).contains(&ndim),
-        "penalize_drain_iso_gv: ndim must be 1..=3"
-    );
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let cs = Gv::scalar("cs");
-    let c_drain = Gv::scalar("c_drain");
-
-    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..dof)
-        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
-        .collect();
-
-    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &axes[..ndim], ndim);
-    let dv = Gv::ONE / geo.inv_volume;
-    let mut min_w = gv_axis_width(0, Spacing::Uniform);
-    for ax in 1..ndim {
-        min_w = min_w.min(gv_axis_width(ax, Spacing::Uniform));
-    }
-
-    let center: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim {
-            Gv::scalar(&format!("body_0_pos_{a}"))
-        } else {
-            Gv::ZERO
-        }
-    });
-    // the mask distance is the PHYSICAL distance to the body: map the coordinate
-    // centroid to cartesian (identity on a cartesian grid), then the euclidean SDF.
-    let x_cart = centroid_to_cartesian(coords, ndim, axes, &geo.centroid);
-    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sphere = body_mask_sdf(center);
-    let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
-    tag_body_mask(&chi, coords, ndim, axes, None, false);
-    let sound_rate = signal_speed(cs) / (c_drain * min_w);
-    // the free-fall floor applies only to the SPHERE path: a shaped wall has no `r_acc` scalar
-    // (and no single radius the notion would refer to), so it keeps the sound-crossing rate.
-    // this kernel is the sphere path by construction (no shape parameter), so the floor
-    // always applies.
-    let inv_tau = spherical_drain_rate(sound_rate);
-
-    let kin = BodyKin::<Gv, 3> {
-        u_solid: Tensor::zeros(),
-        omega: Tensor::zeros(),
-        e_wall: Gv::ZERO,
-    };
-    let mut acc = Relax::<Gv, 3>::none();
-    Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
-    let cons = ConsG::<Gv, 3, IsoModel, Dyed> {
-        // an undyed kernel traces a constant-zero dye: the drain still scales it, nothing reads
-        // the result, and the tracer eliminates the dead arithmetic.
-        chi: if has_dye {
-            Gv::field("chi", symbi_ir::FieldRef::cons_chi())
-        } else {
-            Gv::ZERO
-        },
-        den,
-        mom: Tensor::new(std::array::from_fn(
-            |a| if a < dof { mom[a] } else { Gv::ZERO },
-        )),
-        nrg: Default::default(),
-    };
-    let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
-    // a bare drain has no wall surface -> a zero normal -> zero form drag (all force is accretion).
-    let n_cart: Vec<Gv> = vec![Gv::ZERO; ndim];
-    // the angular-momentum receipt, identical booking to the adiabatic twin.
-    let (f_cart, torque) = cartesian_receipt(
-        coords,
-        ndim,
-        axes,
-        &geo.centroid,
-        &x,
-        &center,
-        &delta.force_delta,
-    );
-
-    let mut writes: Writes = Vec::new();
-    writes.push((
-        "den_out".to_string(),
-        symbi_ir::FieldRef::cons_den().into(),
-        out.den.node(),
-    ));
-    for a in 0..dof {
-        writes.push((
-            format!("mom_out_{a}"),
-            symbi_ir::FieldRef::cons_mom(a as u8).into(),
-            out.mom[a].node(),
-        ));
-    }
-    // the sink swallows gas and its dye together; `penalize_cell` applied the same factor to both.
-    // iso has no energy write, so the dye rides directly after the momentum block.
-    if has_dye {
-        writes.push((
-            "chi_out".to_string(),
-            symbi_ir::FieldRef::cons_chi().into(),
-            out.chi.node(),
-        ));
-    }
-    writes.push((
-        "pen_mass".to_string(),
-        "pen_0_mass".into(),
-        delta.mass_delta.node(),
-    ));
-    for a in 0..ndim {
-        writes.push((
-            format!("pen_force_{a}"),
-            format!("pen_0_force_{a}").into(),
-            f_cart[a].node(),
-        ));
-    }
-    for a in torque_axes(ndim) {
-        writes.push((
-            format!("pen_torque_{a}"),
-            format!("pen_0_torque_{a}").into(),
-            torque[a].node(),
-        ));
-    }
-    push_force_normal(&mut writes, ndim, &f_cart, &n_cart);
+    let writes = penalize_writes::<E>(ndim, dof, has_dye, &out, &delta, &f_cart, &torque, &n_cart);
 
     let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
@@ -1682,5 +1253,81 @@ mod shaped_tests {
     fn unshaped_porous_kernel_reads_the_runtime_radius() {
         let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3, 3, &[0, 1, 2], false);
         assert!(kernel.scalar_params.iter().any(|p| p == "body_0_racc"));
+    }
+}
+
+#[cfg(test)]
+mod twin_tests {
+    use super::*;
+
+    type Builder = fn(Coords, usize, usize, &[usize], bool) -> (GvKernel, Writes);
+
+    const PAIRS: [(&str, Builder, Builder); 3] = [
+        ("drain", penalize_drain_gv, penalize_drain_iso_gv),
+        ("porous", penalize_porous_gv, penalize_porous_iso_gv),
+        (
+            "torque_free",
+            penalize_torque_free_gv,
+            penalize_torque_free_iso_gv,
+        ),
+    ];
+
+    // each iso surface differs from its adiabatic twin ONLY by the energy channel:
+    // the same write list minus `nrg_out` and `pen_energy`, and the `gamma` scalar
+    // swapped for the constant sound speed `cs`.
+    #[test]
+    fn iso_twin_is_the_adiabatic_surface_minus_the_energy_channel() {
+        for (name, adiabatic, iso) in PAIRS {
+            let (ka, wa) = adiabatic(Coords::Cartesian, 2, 2, &[0, 1], true);
+            let (ki, wi) = iso(Coords::Cartesian, 2, 2, &[0, 1], true);
+            let names = |w: &Writes| w.iter().map(|(n, _, _)| n.clone()).collect::<Vec<_>>();
+            let expected: Vec<String> = names(&wa)
+                .into_iter()
+                .filter(|n| n != "nrg_out" && n != "pen_energy")
+                .collect();
+            assert_eq!(
+                names(&wi),
+                expected,
+                "{name}: the iso write list must be the adiabatic list minus the energy channel"
+            );
+            assert!(
+                ka.scalar_params.iter().any(|p| p == "gamma"),
+                "{name}: the adiabatic kernel must read gamma"
+            );
+            assert!(
+                ki.scalar_params.iter().any(|p| p == "cs"),
+                "{name}: the iso kernel must read the constant sound speed"
+            );
+            assert!(
+                !ki.scalar_params.iter().any(|p| p == "gamma"),
+                "{name}: the iso kernel must not read gamma"
+            );
+        }
+    }
+
+    // every 2.5D bake (grid ndim = 2, momentum dof = 3) must write the out-of-plane
+    // momentum back: the sink drains the density while the momentum rides along, so
+    // an unwritten mom_out_2 leaves the out-of-plane velocity growing as 1/rho
+    // inside the mask.
+    #[test]
+    fn dof3_kernels_write_the_out_of_plane_momentum() {
+        for (name, adiabatic, iso) in PAIRS {
+            for (regime, build) in [("adiabatic", adiabatic), ("iso", iso)] {
+                let (_, writes) = build(Coords::Cartesian, 2, 3, &[0, 1], false);
+                assert!(
+                    writes.iter().any(|(n, _, _)| n == "mom_out_2"),
+                    "{name} ({regime}): the dof=3 kernel must write mom_out_2"
+                );
+            }
+        }
+    }
+
+    // the momentum count can never sit below the grid dimension: the cons momentum
+    // fill and the write loop both index 0..dof, so dof < ndim would silently zero
+    // in-plane momentum.
+    #[test]
+    #[should_panic(expected = "1<=ndim<=dof<=3")]
+    fn iso_drain_rejects_dof_below_ndim() {
+        let _ = penalize_drain_iso_gv(Coords::Cartesian, 2, 1, &[0, 1], false);
     }
 }

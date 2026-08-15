@@ -63,6 +63,19 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
     }
 }
 
+/// the suffix ONLY when the momentum DOF exceeds the axis count (the out-of-plane
+/// swirl lift): `_sph_swirl` / `_cyl_rz`, and EMPTY otherwise -- including on a
+/// curvilinear grid with `dof == ndim`, where `geom_suffix` would still say
+/// `_sph`/`_cyl`. the two are NOT interchangeable; families whose cartesian and
+/// curvilinear no-lift instances share one kernel name key on this one.
+pub fn dof_lift_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
+    if dof > ndim {
+        geom_suffix(coords, dof, ndim)
+    } else {
+        ""
+    }
+}
+
 /// the immersed-boundary penalize kernel name for a chart: `{base}{chart}_{ndim}d`
 /// (e.g. `penalize_drain_iso_cyl_2d`). the drain touches only the gridded momenta
 /// (dof == ndim, no swirl slot), so the suffix is "" / "_sph" / "_cyl". cartesian

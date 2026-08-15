@@ -26,11 +26,17 @@ pub enum Precision {
 }
 
 impl Precision {
-    pub fn c_type(&self) -> &'static str {
+    /// the element type this emission precision selects; the C spelling and every
+    /// other property come from `ElementTy`, the one table.
+    pub fn element_ty(&self) -> crate::element::ElementTy {
         match self {
-            Precision::F32 => "float",
-            Precision::F64 => "double",
+            Precision::F32 => crate::element::ElementTy::F32,
+            Precision::F64 => crate::element::ElementTy::F64,
         }
+    }
+
+    pub fn c_type(&self) -> &'static str {
+        self.element_ty().c_type()
     }
 }
 
@@ -235,7 +241,11 @@ pub fn emit_flat_index(lang: IndexLang, ndim: u8, buf: u32, comps: &[&str]) -> S
     }
 }
 
-// ---- reduction op (the device reduction descriptor's combine semantics) ----
+// ---- reduction op (the device reduction descriptor's combine semantics). the
+// LAUNCH-level whole-field combine, distinct from `graph::ReduceOp` (the traced
+// axis-reduction tag): the two never convert -- a graph reduce lowers to loop
+// code inside a kernel, this one names the combine of a dedicated reduction
+// kernel over a field. ----
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReductionOp {

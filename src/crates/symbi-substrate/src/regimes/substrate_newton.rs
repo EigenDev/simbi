@@ -38,7 +38,8 @@ use crate::regimes::substrate_kernels::{
     dispatch_c2p_status, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
     dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
-    fused_runtime_cpu_kernel, geom_scalar, geom_suffix, resolve_body_only_fused, resolve_params,
+    FluxSpec, dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, resolve_body_only_fused,
+    resolve_params,
     motion_scalar,
     scalars_for,
 };
@@ -376,6 +377,24 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
+impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
+    AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
+    /// the evolution face-flux scheme assembled from this set's dials.
+    fn flux_spec(&self) -> FluxSpec {
+        FluxSpec {
+            theta: self.theta,
+            solver: self.solver,
+            recon: self.recon,
+            eos: symbi_discretize::EosArm::IdealGamma,
+            flatten: self.flatten,
+            mach_limit: self.mach_limit,
+            balance: self.balance,
+            rusanov: false,
+        }
+    }
+}
+
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
     KernelSet<D, DOF, Mem, Sc> for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
@@ -385,21 +404,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        dispatch_flux(
-            sim,
-            pre,
-            "adiabatic",
-            dir,
-            self.gamma,
-            self.theta,
-            self.solver,
-            self.recon,
-            symbi_discretize::EosArm::IdealGamma,
-            self.flatten,
-            self.mach_limit,
-            self.balance,
-            false,
-        );
+        dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.flux_spec());
     }
 
     fn reconstruction_reach(&self) -> u8 {
@@ -420,11 +425,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_c2p{sfx}_{D}d");
         let scalars = scalars_for(&name, |bind| match bind {
             ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
@@ -551,11 +552,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         // under a BALANCED reconstruction the ghosts must satisfy the same premise the
         // interior does: a mirrored copy of a stratified column is not its continuation, so
         // reflect/outflow ghosts extend (rho, p) along the local isentrope to the ghost's own
@@ -664,11 +661,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_named(sim, pre, None, 0, &name, &sim.geom.allocated, &[], &[]);
         // the dye snapshot rides alongside: u_n.chi = cons.chi, the rk combine's
@@ -779,23 +772,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             pre,
             &self.freeze_streak,
             |dir| {
-                // the first-order redo: hlle at theta = 0 (pcm) on the plm kernel —
-                // the positivity-preserving fallback regardless of the evolution
-                // reconstruction, so ppm evolution shares the same redo path.
                 dispatch_flux(
                     sim,
                     pre,
                     "adiabatic",
                     dir,
                     self.gamma,
-                    0.0,
-                    Solver::Hlle,
-                    symbi_discretize::Recon::Plm,
-                    symbi_discretize::EosArm::IdealGamma,
-                    (0.0, 0.0),
-                    symbi_hydro::dissipation::MACH_LIMIT,
-                    self.balance,
-                    false,
+                    self.flux_spec().first_order(),
                 )
             },
             || self.c2p(sim),
@@ -809,11 +792,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || {}, // newtonian: no admissible-boundary projection (keeps the freeze parachute)
             // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
             sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
-            || {},                                                // hydro: no induction flux
-            || {},                                                // hydro: no cell B to restore
-            || {},                                                // hydro: no induction flux
+            crate::regimes::fofc::CtHooks::none(),
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
-            || {},                                                // hydro: no CT re-sync
             false, // no projection tier below the freeze; keep the parachute
         )
     }
@@ -834,11 +814,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             outputs.push(&sim.workspace.u_stage.mom[k]);
         }
         outputs.push(u_nrg);
-        let sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else {
-            ""
-        };
+        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
             &name,

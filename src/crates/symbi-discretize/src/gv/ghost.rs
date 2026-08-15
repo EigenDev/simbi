@@ -285,12 +285,24 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, Fi
     let q_at = |i: Gv, j: Gv| -> Gv {
         let rl = gv_axis_face_at_index(0, spacing[0], i);
         let rh = gv_axis_face_at_index(0, spacing[0], i + Gv::ONE);
-        let r_c = Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4))
-            / (gv_powi(rh, 3) - gv_powi(rl, 3));
+        // the volume-weighted centroid, the SAME text `cell_geometry_gv` evaluates:
+        // the c2p inverted the metric at that centroid, and the zero-angular-momentum
+        // cancellation transfers to the stencil only when the coefficient is evaluated
+        // at the bit-identical position.
+        let r_c = symbi_geometry::volume_weighted_centroid(
+            symbi_geometry::Geometry::Spherical,
+            0,
+            rl,
+            rh,
+        );
         let tl = gv_axis_face_at_index(1, spacing[1], j);
         let th = gv_axis_face_at_index(1, spacing[1], j + Gv::ONE);
-        let th_c =
-            ((th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos())) / (tl.cos() - th.cos());
+        let th_c = symbi_geometry::volume_weighted_centroid(
+            symbi_geometry::Geometry::Spherical,
+            1,
+            tl,
+            th,
+        );
         let m = KerrKS { mass, spin };
         let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
             &m,
@@ -338,12 +350,24 @@ pub fn rmhd_kerr_ghost_fill_gv(
     let q_at = |i: Gv, j: Gv| -> Gv {
         let rl = gv_axis_face_at_index(0, spacing[0], i);
         let rh = gv_axis_face_at_index(0, spacing[0], i + Gv::ONE);
-        let r_c = Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4))
-            / (gv_powi(rh, 3) - gv_powi(rl, 3));
+        // the volume-weighted centroid, the SAME text `cell_geometry_gv` evaluates:
+        // the c2p inverted the metric at that centroid, and the zero-angular-momentum
+        // cancellation transfers to the stencil only when the coefficient is evaluated
+        // at the bit-identical position.
+        let r_c = symbi_geometry::volume_weighted_centroid(
+            symbi_geometry::Geometry::Spherical,
+            0,
+            rl,
+            rh,
+        );
         let tl = gv_axis_face_at_index(1, spacing[1], j);
         let th = gv_axis_face_at_index(1, spacing[1], j + Gv::ONE);
-        let th_c =
-            ((th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos())) / (tl.cos() - th.cos());
+        let th_c = symbi_geometry::volume_weighted_centroid(
+            symbi_geometry::Geometry::Spherical,
+            1,
+            tl,
+            th,
+        );
         let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
             &KerrKS { mass, spin },
             Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),

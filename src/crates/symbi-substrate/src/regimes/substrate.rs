@@ -31,7 +31,7 @@ use symbi_hydro::source_spec::BuiltSource;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
+    FluxSpec, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
     dispatch_named, geom_scalar, scalars_for,
     motion_scalar,
     dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_c2p_status,
@@ -308,6 +308,25 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
+impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
+    IsoSubstrateKernelSet<Mem, Sc, D>
+{
+    /// the evolution face-flux scheme. iso is hlle-only by physics (no contact
+    /// wave), plm-only, plain-balanced; the mach limit is inert on hlle.
+    fn flux_spec(&self) -> FluxSpec {
+        FluxSpec {
+            theta: self.theta,
+            solver: Solver::Hlle,
+            recon: symbi_discretize::Recon::Plm,
+            eos: symbi_discretize::EosArm::IdealGamma,
+            flatten: (0.0, 0.0),
+            mach_limit: symbi_hydro::dissipation::MACH_LIMIT,
+            balance: symbi_discretize::coords::Balance::Plain,
+            rusanov: false,
+        }
+    }
+}
+
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> KernelSet<D, D, Mem, Sc>
     for IsoSubstrateKernelSet<Mem, Sc, D>
 {
@@ -318,21 +337,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // no flux.nrg (the energy U/F is dead-code-eliminated). + the theta-MC limiter.
         // iso is HLLE-only by physics (no contact wave); the substrate enforces it
         // here by hardcoding the solver.
-        dispatch_flux(
-            sim,
-            &self.pre,
-            "iso",
-            dir,
-            ISO_GAMMA,
-            self.theta,
-            Solver::Hlle,
-            symbi_discretize::Recon::Plm,
-            symbi_discretize::EosArm::IdealGamma,
-            (0.0, 0.0),
-            symbi_hydro::dissipation::MACH_LIMIT,
-            symbi_discretize::coords::Balance::Plain,
-            false,
-        );
+        dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, self.flux_spec());
     }
 
     fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -662,14 +667,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     "iso",
                     dir,
                     ISO_GAMMA,
-                    0.0,
-                    Solver::Hlle,
-                    symbi_discretize::Recon::Plm,
-                    symbi_discretize::EosArm::IdealGamma,
-                    (0.0, 0.0),
-                    symbi_hydro::dissipation::MACH_LIMIT,
-                    symbi_discretize::coords::Balance::Plain,
-                    false,
+                    self.flux_spec().first_order(),
                 )
             },
             || self.c2p(sim),
@@ -683,11 +681,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             || {}, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),
-            || {},                                                // hydro: no induction flux
-            || {},                                                // hydro: no cell B to restore
-            || {},                                                // hydro: no induction flux
+            crate::regimes::fofc::CtHooks::none(),
             || crate::regimes::fofc::SourceReplay::NotApplicable, // hydro: no source replay
-            || {},                                                // hydro: no CT re-sync
             false, // no projection tier below the freeze; keep the parachute
         )
     }

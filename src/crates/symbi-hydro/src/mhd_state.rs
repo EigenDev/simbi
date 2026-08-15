@@ -376,3 +376,26 @@ mod tests {
         assert!((diff.mag[1] - (-0.5_f64)).abs() < 1e-14);
     }
 }
+
+/// fast magnetosonic speed along `nhat` from the newtonian-form sound speed
+/// squared: closed form, one physical sqrt. the regime supplies `a_sq` (gamma
+/// p / rho adiabatic, the constant cs^2 isothermal); the magnetosonic algebra
+/// is regime-free. `safe_sqrt` guards both radicands so no NaN traces into a
+/// kernel.
+#[inline]
+pub fn fast_magnetosonic_from<S: Scalar, const D: usize>(
+    a_sq: S,
+    rho: S,
+    mag: &Tensor<S, D>,
+    nhat: &Tensor<S, D>,
+) -> S {
+    let half = S::from_f64(0.5);
+    let four = S::from_f64(4.0);
+    let bsq = mag.dot(mag);
+    let bn = mag.dot(nhat);
+    let ca_sq = bsq / rho;
+    let can_sq = (bn * bn) / rho;
+    let sum = a_sq + ca_sq;
+    let disc = (sum * sum - four * a_sq * can_sq).safe_sqrt();
+    (half * (sum + disc)).safe_sqrt()
+}
