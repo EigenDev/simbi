@@ -160,6 +160,11 @@ fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
     for (name, solver) in [
         ("hllc", Solver::Hllc),
         ("hllc_lm", Solver::HllcLm),
+        // the PUBLISHED ramp, no clamp: the carbuncle cure is the ramp itself (the clamp
+        // never fires on a shock-transverse face -- near-uniform pressure along the front),
+        // so the unclamped arm must be exactly as shock-stable, or removing the clamp
+        // traded the entropy floor for the instability the scheme exists to cure.
+        ("hllc_lm_plain", Solver::HllcLmPlain),
         ("hllc_acoustic", Solver::HllcAcoustic),
     ] {
         let (mid, end, steps) = run(solver);
@@ -179,7 +184,8 @@ fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
 
     let (classical, classical_growth) = (rows[0].1, rows[0].2);
     let fleischmann = rows[1].1;
-    let acoustic = rows[2].1;
+    let plain_ramp = rows[2].1;
+    let acoustic = rows[3].1;
 
     // POSITIVE CONTROL. the instability is documented for classical HLLC; if this
     // setup does not provoke it there, it is not exercising the mechanism and the
@@ -204,5 +210,21 @@ fn the_acoustic_scaling_is_shock_stable_on_quirks_test() {
         acoustic < classical,
         "the acoustic scaling ({acoustic:.3e}) did not improve on classical HLLC \
          ({classical:.3e}) on the instability it is meant to cure"
+    );
+
+    // the UNCLAMPED published ramp: the carbuncle cure is the ramp, and the clamp never
+    // fires on a shock-transverse face (near-uniform pressure along the front), so
+    // removing the clamp must not move the shock stability. same suppression class as
+    // the clamped arm, and strictly better than classical.
+    assert!(
+        plain_ramp <= fleischmann * 10.0,
+        "the unclamped ramp left {plain_ramp:.3e} of transverse energy against the \
+         clamped arm's {fleischmann:.3e}: the clamp was load-bearing for shock \
+         stability, which contradicts its own firing condition"
+    );
+    assert!(
+        plain_ramp < classical,
+        "the unclamped ramp ({plain_ramp:.3e}) did not improve on classical HLLC \
+         ({classical:.3e}) on the instability the ramp exists to cure"
     );
 }

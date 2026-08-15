@@ -3429,6 +3429,51 @@ pub struct FineSubgrid<const NDIM: usize> {
 
 /// derive the first-fine-level sub-grid from which tiles carry a fine level. None if no tile is
 /// refined. asserts the refined tiles fill a rectangle (the SMR single-box invariant). pub so the
+/// seed every tile's fine levels from its coarse level, DECOMPOSITION-AWARE: the root
+/// CONSERVED cut halos are exchanged first, then each tile prolongs.
+///
+/// the per-tile [`Hierarchy::seed_fine_from_coarse`] is not enough when a refined patch SPANS a
+/// cut: the seed prolongs conserved components, its stencil at the coverage edge reads the
+/// root's cut ghosts, and nothing else ever fills conserved ghosts -- the evolve loop's
+/// exchange moves primitives, on the (correct there) invariant that no flux stage reads
+/// conserved ghosts. seeded per tile, the cut-side fine interior is therefore prolonged from
+/// each tile's standalone boundary fill instead of its neighbor's data, and the decomposed
+/// hierarchy differs from the monolithic one BEFORE A SINGLE STEP IS TAKEN -- measured 7.2e-3
+/// on a smooth bump centered on the cut, decaying as the flow smooths it, and growing with the
+/// prolongation order (a higher-degree interpolant weights the ghost cells more heavily).
+/// tile-local patches never reach a cut and are unaffected.
+pub fn seed_decomposed_fine_from_coarse<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+) -> symbi_xpu::Result<usize>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    drain_devices::<Mem>(devices);
+    {
+        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = tiles
+            .iter()
+            .map(|t| &*t.levels[0].state)
+            .collect();
+        symbi_sim::decomp::exchange_grid_cons(&states, counts, devices, transport);
+    }
+    let mut reseeded = 0usize;
+    for (i, t) in tiles.iter().enumerate() {
+        if t.levels.len() > 1 {
+            reseeded += symbi_xpu::with_device(devices[i], || t.seed_fine_from_coarse())?;
+        }
+    }
+    Ok(reseeded)
+}
+
 /// python decomposed-refinement loop can gather the fine level with the same tile order + counts.
 pub fn fine_subgrid<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],

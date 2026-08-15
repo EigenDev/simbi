@@ -34,7 +34,8 @@ pub use equilibrium::EquilibriumFlux;
 pub use flux_register::FluxRegister;
 pub use hierarchy::{
     FineSubgrid, Hierarchy, LevelData, RefinementRegion, evolve_hierarchy_decomposed, fine_subgrid,
-    gather_decomposed_hierarchy_tracers, seed_decomposed_hierarchy_tracers,
+    gather_decomposed_hierarchy_tracers, seed_decomposed_fine_from_coarse,
+    seed_decomposed_hierarchy_tracers,
 };
 pub use tracer_interface::{
     InterfaceFace, InterfaceTransfer, interface_faces, interface_mass_transfers,

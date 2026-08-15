@@ -1050,3 +1050,85 @@ pub fn stencil_potential_gv(
         })
         .sum::<Gv>()
 }
+
+/// the WELL-BALANCED forward body source, cartesian, gravity only: the momentum source is the
+/// difference of EQUILIBRIUM pressures at the cell's own faces,
+///
+///   S_m[ax] = -( p_eq(phi_hi) - p_eq(phi_lo) ) / dx_ax,     S_E = sum_ax v[ax] S_m[ax],
+///
+/// with `p_eq` the isentrope through the cell's own stage-input state and `phi` the total body
+/// potential at the face positions (Kaeppeli & Mishra, J. Comput. Phys. 259:199, 2014). on a
+/// discretely balanced column this cancels the flux divergence of the balanced reconstruction's
+/// face states EXACTLY -- the reconstruction removes the face jump, and this removes the
+/// flux/source mismatch, which measured at O((dx/H)^2) per step is what still accelerates a
+/// steep column when only the reconstruction is balanced. off equilibrium it differs from
+/// `rho g` at second order, so smooth dynamics are unchanged at the scheme's order.
+///
+/// GRAVITY ONLY, on purpose: every accreting surface in this codebase drains through the
+/// penalization stack (`penalize_owns_accretion` = true), so the legacy in-source sink is
+/// already inert on production configs; a balanced source with an active sink has no
+/// equilibrium to preserve. the dispatch refuses the pairing rather than approximating it.
+pub fn body_source_wb_gv(
+    n_bodies: usize,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    use symbi_hydro::hydrostatic::LocalEquilibrium;
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let gamma = Gv::scalar("gamma");
+    let mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .collect();
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    // evaluated at the STAGE INPUT, exactly like the analytic body source: the stage's flux
+    // divergence was reconstructed from this state, and the cancellation is a statement about
+    // the pair.
+    let us_den = Gv::field("us_den", FieldRef::ustage_den());
+    let us_mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+        .collect();
+    let us_nrg = Gv::field("us_nrg", FieldRef::ustage_nrg());
+    let (us_vel, _cs, e_int) = gas_state(ncomp, gamma, us_den, &us_mom, us_nrg);
+    let p_us = (gamma - Gv::ONE) * us_den * e_int;
+
+    let spacing = vec![Spacing::Uniform; ndim];
+    let coords = Coords::Cartesian;
+
+    let mut mom_new: Vec<Gv> = mom.clone();
+    let mut nrg_new = nrg;
+    for ax in 0..ndim {
+        // total body potential at this cell's two faces and centre along `ax`: half-cells
+        // 0 (lower face), 1 (centre), 2 (upper face) on the face ladder.
+        let phi_lo = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 0);
+        let phi_c = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 1);
+        let phi_hi = stencil_potential_gv(n_bodies, coords, ndim, ax, axes, &spacing, 2);
+        let eq = LocalEquilibrium::through(us_den, p_us, phi_c, gamma);
+        let (_, p_lo) = eq.state_at(phi_lo);
+        let (_, p_hi) = eq.state_at(phi_hi);
+        // at equilibrium `rho g = dp_eq/dx`, so the source IS the discrete equilibrium
+        // pressure gradient -- upper face minus lower. the flipped difference doubles the
+        // force the flux divergence carries instead of cancelling it, and a 400-step
+        // stagnant column measured |v| = 8.1 under it against 2.9e-2 with the analytic
+        // source: sign errors here announce themselves as detonations, not drifts.
+        let s_m = (p_hi - p_lo) / Gv::scalar(&format!("dx_{ax}"));
+        mom_new[ax] = mom_new[ax] + dt * s_m;
+        nrg_new = nrg_new + dt * us_vel[ax] * s_m;
+    }
+
+    let mut writes = Vec::with_capacity(ncomp + 1);
+    for (comp, m) in mom_new.iter().enumerate() {
+        writes.push((
+            format!("mom_{comp}_new"),
+            FieldRef::cons_mom(comp as u8).into(),
+            m.node(),
+        ));
+    }
+    writes.push((
+        "nrg_new".to_string(),
+        FieldRef::cons_nrg().into(),
+        nrg_new.node(),
+    ));
+    (end_trace(), writes)
+}

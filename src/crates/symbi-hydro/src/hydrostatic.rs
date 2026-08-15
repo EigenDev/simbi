@@ -40,6 +40,13 @@ use symbi_ir::algebra::Scalar;
 ///
 /// carries the cell's own state rather than a derived constant, so every evaluation is a
 /// ratio against it and the point `phi = phi_ref` is reproduced exactly.
+///
+/// GAMMA-LAW ONLY. the profile solves `dp/dphi = -rho` along `p = K rho^gamma`, and the
+/// `cs2_ref = gamma p / rho` it derives is the ideal-gas sound speed spelled out -- on the
+/// isothermal or taub-mathews closures this curve is not the eos's isentrope, so a transform
+/// built from it REINTRODUCES the face jump it exists to remove. the dispatch refuses the
+/// pairing; a non-ideal balanced reconstruction needs its own profile through the eos's
+/// actual `sound_speed_sq` and isentrope integral.
 #[derive(Clone, Copy, Debug)]
 pub struct LocalEquilibrium<S> {
     rho_ref: S,

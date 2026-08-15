@@ -286,6 +286,47 @@ where
     true
 }
 
+/// the ONE mhd scalar cascade: eos_param for `Gamma | Cs`, `theta`, the spacetime scalars,
+/// then MESH MOTION, then geometry, panicking with the caller's label on anything else.
+///
+/// five hand-copied variants of this cascade lived in `substrate_mhd.rs`, differing only in
+/// the panic string -- and four of them dropped the `motion_scalar` link, so an MHD run on a
+/// moving mesh computed a correct dt from the one complete copy (cfl) and then panicked in
+/// flux on the same scalar the hydro path resolves. one cascade, every consumer.
+pub(crate) fn mhd_scalar<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eos_param: f64,
+    theta: f64,
+    x_lo_k: &[f64; D],
+    dx_k: &[f64; D],
+    sref: ScalarRef,
+    label: &str,
+) -> Sc
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let spacetime = |name: &str| -> f64 {
+        sim.geom
+            .spacetime_scalars
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| *v)
+            .unwrap_or_else(|| panic!("{label}: needs {name}"))
+    };
+    match sref {
+        ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(eos_param),
+        ScalarRef::Theta => Sc::from_f64(theta),
+        ScalarRef::SchwarzschildMass => Sc::from_f64(spacetime("schwarzschild_mass")),
+        ScalarRef::KerrSpin => Sc::from_f64(spacetime("kerr_spin")),
+        other => Sc::from_f64(
+            motion_scalar(&sim.motion, sim.geom.coords, D, other)
+                .or_else(|| geom_scalar(x_lo_k, dx_k, &sim.geom.maps, other))
+                .unwrap_or_else(|| panic!("{label}: unexpected scalar {other:?}")),
+        ),
+    }
+}
+
 pub(crate) fn resolve_body_scalars<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,

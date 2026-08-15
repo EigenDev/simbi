@@ -2519,6 +2519,20 @@ fn gen_geometry_probe(out_dir: &str, ndim: u8, coords: Coords, spacing: &[Spacin
 // Newtonian GRAVITY + Bondi-Hoyle mass ACCRETION from MAX_SOURCE_BODIES point masses. in-place
 // writes cons.den (accretion removes mass) / cons.mom_* / cons.nrg; body params arrive as
 // scalar params packed by the runtime (MAX_SOURCE_BODIES imported from symbi-ib).
+// the WELL-BALANCED body source: gravity as the difference of equilibrium pressures at the
+// cell faces, paired with the balanced reconstruction. cartesian only, gravity only.
+fn gen_body_source_wb(out_dir: &str, ndim: u8) {
+    let g = Geom::identity(Coords::Cartesian, ndim);
+    let name = format!("body_source_wb_{ndim}d");
+    let (k, writes) = symbi_discretize::body_source_wb_gv(
+        MAX_SOURCE_BODIES,
+        ndim as usize,
+        g.ncomp as usize,
+        &g.axes,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_body_source(out_dir: &str, ndim: u8, coords: Coords) {
     let g = Geom::identity(coords, ndim);
     // two variants: the plain body pass, and a `_dyed` twin that also drains the conserved passive
@@ -3622,6 +3636,7 @@ fn main() {
     // builder already handles them).
     for ndim in 1u8..=3 {
         gen_body_source(&out_dir, ndim, Coords::Cartesian);
+        gen_body_source_wb(&out_dir, ndim);
     }
     // curvilinear body source (one generic builder per geometry): cyl r-phi disk plane (2D) +
     // r-phi-z (3D); spherical meridional (2D) + full (3D). the r-z axisymmetric body shares the

@@ -231,6 +231,19 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// set the reference mach number the published low-mach ramp saturates at. accepted for
     /// builder uniformity; the relativistic LM arm is the clamped one, so no relativistic
     /// kernel reads it. fluent.
+    /// accepted for builder-chain uniformity and REFUSED when set: the well-balanced
+    /// reconstruction limits departures from the newtonian polytropic isentrope, and no
+    /// relativistic kernel carries it. silently ignoring the request would run a plain
+    /// reconstruction under a config that asked for a balanced one.
+    pub fn well_balanced_reconstruction(self, on: bool) -> Self {
+        assert!(
+            !on,
+            "well-balanced reconstruction is newtonian-only: the balanced kernels limit \
+             departures from the polytropic isentrope, which no relativistic flux carries"
+        );
+        self
+    }
+
     pub fn mach_limit(mut self, mach_limit: f64) -> Self {
         assert!(
             (0.0..=1.0).contains(&mach_limit),

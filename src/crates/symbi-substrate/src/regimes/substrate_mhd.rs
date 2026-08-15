@@ -415,33 +415,14 @@ where
             sim.motion.a,
         );
         let scalars = scalars_for(&flux_name, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
-                Sc::from_f64(self.eos_param)
-            }
-            ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(theta),
-            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                sim.geom
-                    .spacetime_scalars
-                    .iter()
-                    .find(|(n, _)| n == "schwarzschild_mass")
-                    .map(|(_, v)| *v)
-                    .expect("GR MHD flux needs schwarzschild_mass"),
-            ),
-            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                sim.geom
-                    .spacetime_scalars
-                    .iter()
-                    .find(|(n, _)| n == "kerr_spin")
-                    .map(|(_, v)| *v)
-                    .expect("GR MHD flux needs kerr_spin"),
-            ),
-            ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(|| {
-                    panic!(
-                        "{} flux: unexpected scalar {other:?}",
-                        Self::kernel_prefix()
-                    )
-                }),
+            ScalarBind::Ref(sref) => crate::regimes::substrate_kernels::mhd_scalar(
+                sim,
+                self.eos_param,
+                theta,
+                &x_lo_k,
+                &dx_k,
+                *sref,
+                "mhd flux",
             ),
             o => panic!("{} flux: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
@@ -843,29 +824,14 @@ where
         );
         // iso c2p declares no scalars -> scalars_for returns [] (resolver never called).
         let scalars = scalars_for(&cname, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
-                Sc::from_f64(self.eos_param)
-            }
-            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                sim.geom
-                    .spacetime_scalars
-                    .iter()
-                    .find(|(n, _)| n == "schwarzschild_mass")
-                    .map(|(_, v)| *v)
-                    .expect("GR MHD c2p needs schwarzschild_mass"),
-            ),
-            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                sim.geom
-                    .spacetime_scalars
-                    .iter()
-                    .find(|(n, _)| n == "kerr_spin")
-                    .map(|(_, v)| *v)
-                    .expect("GR MHD c2p needs kerr_spin"),
-            ),
-            ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(|| {
-                    panic!("{} c2p: unexpected scalar {other:?}", Self::kernel_prefix())
-                }),
+            ScalarBind::Ref(sref) => crate::regimes::substrate_kernels::mhd_scalar(
+                sim,
+                self.eos_param,
+                self.theta,
+                &x_lo_k,
+                &dx_k,
+                *sref,
+                "mhd c2p",
             ),
             o => panic!("{} c2p: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
@@ -927,32 +893,14 @@ where
                 sim.motion.a,
             );
             let scalars = scalars_for(&wsname, |bind| match bind {
-                ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
-                    Sc::from_f64(self.eos_param)
-                }
-                ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                    sim.geom
-                        .spacetime_scalars
-                        .iter()
-                        .find(|(n, _)| n == "schwarzschild_mass")
-                        .map(|(_, v)| *v)
-                        .expect("GR UCT wave speeds need schwarzschild_mass"),
-                ),
-                ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                    sim.geom
-                        .spacetime_scalars
-                        .iter()
-                        .find(|(n, _)| n == "kerr_spin")
-                        .map(|(_, v)| *v)
-                        .expect("GR UCT wave speeds need kerr_spin"),
-                ),
-                ScalarBind::Ref(other) => Sc::from_f64(
-                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(|| {
-                        panic!(
-                            "{} wave_speeds: unexpected scalar {other:?}",
-                            Self::kernel_prefix()
-                        )
-                    }),
+                ScalarBind::Ref(sref) => crate::regimes::substrate_kernels::mhd_scalar(
+                    sim,
+                    self.eos_param,
+                    self.theta,
+                    &x_lo_k,
+                    &dx_k,
+                    *sref,
+                    "mhd wave_speeds",
                 ),
                 o => panic!(
                     "{} wave_speeds: unexpected scalar {o:?}",

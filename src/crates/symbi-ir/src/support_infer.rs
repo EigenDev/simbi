@@ -228,12 +228,18 @@ fn classify_op(
                     }
                     return one_vs_const(&cb, ins[0]);
                 }
-                // f(0) = 0 exactly in f64 (sin/sinh trace as element-wise ops).
+                // f(0) = 0 exactly in f64 (sin/sinh/asinh trace as element-wise ops).
+                // `Asinh` was classified only on the TRANSCENDENTAL twin of this table while
+                // `.asinh()` traces through the element-wise op, so every traced asinh lost
+                // zero-propagation and silently degraded its kernel's support to Everywhere.
+                // two op enums carrying the same math is the root defect; until they merge,
+                // the two tables must carry the same classes.
                 ElementWiseOp::Neg
                 | ElementWiseOp::Abs
                 | ElementWiseOp::Sqrt
                 | ElementWiseOp::Sin
-                | ElementWiseOp::Sinh => {
+                | ElementWiseOp::Sinh
+                | ElementWiseOp::Asinh => {
                     return match classify(g, tags, memo, ins[0]) {
                         Zero(b) => Zero(b),
                         One(b) if matches!(ew, ElementWiseOp::Abs | ElementWiseOp::Sqrt) => One(b),

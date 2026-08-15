@@ -26,9 +26,11 @@ use symbi_ir::algebra::Scalar;
 /// HLLC the regime emits at a face:
 ///
 ///   - `Standard`     — plain HLLC (toro / mignone-bodo star state).
-///   - `Fleischmann`  — newtonian only: HLLC-LM exactly as published (`fleischmann_phi`),
-///                      the sine ramp on the acoustic signal speeds cut off at `MACH_LIMIT`.
-///                      relativistic regimes ignore it (no relativistic LM correction).
+///   - `Fleischmann`  — HLLC-LM exactly as published (`fleischmann_phi`), the sine ramp on
+///                      the acoustic signal speeds cut off at the reference mach number.
+///                      implemented for the newtonian AND mignone-bodo relativistic star
+///                      states (both satisfy the central-form identity the scaling needs);
+///                      the MHD bodies take the selector and ignore it.
 ///   - `FleischmannClamped` — newtonian only: the same ramp floored by a
 ///                      compressibility-consistency clamp on the face pressure jump
 ///                      (`adaptive_phi`). NOT in the published scheme; it restores classical
@@ -86,12 +88,30 @@ pub const STRAT_MARGIN: f64 = 4.0;
 
 /// floor of the clamp's reference scale: the stagnation-pressure ceiling of ramp-active flow.
 /// the largest pressure structure a flow below `MACH_LIMIT` can build is the stagnation bump
-/// `dp/p ~ gamma Ma_limit^2 / 2 ~ 0.008`; a face jump above twice that cannot come from
-/// incompressible dynamics in the band where the ramp reduces dissipation, however small the
-/// face's own normal mach is. without this floor, a stagnation face inside a vortex (normal
-/// mach ~ 0, finite jump from the neighboring flow) would fire the clamp inside the very
-/// turbulence the low-mach scheme exists for.
+/// `dp/p ~ gamma Ma_limit^2 / 2 ~ 0.008` at gamma = 5/3; a face jump well above that cannot
+/// come from incompressible dynamics in the band where the ramp reduces dissipation, however
+/// small the face's own normal mach is. without this floor, a stagnation face inside a vortex
+/// (normal mach ~ 0, finite jump from the neighboring flow) would fire the clamp inside the
+/// very turbulence the low-mach scheme exists for.
+///
+/// THE VALUE IS 2.4x THE gamma = 5/3 BUMP, NOT A DERIVATION: `incomp_jump_ceil` below is the
+/// derived form (`gamma Ma_limit^2`, twice the bump), which gives 0.0167 here — the constant
+/// predates it and is retained because every archived clamped series was run against 0.02,
+/// and tightening it is a production behavior change that needs its own measurement, not a
+/// midnight edit. the frozen constant is also WHY the clamped arm pins `MACH_LIMIT` instead
+/// of honouring the runtime knob: a limit that moved without this ceiling moving with it
+/// would compare face jumps against the wrong incompressible scale.
 pub const INCOMP_JUMP_CEIL: f64 = 0.02;
+
+/// the DERIVED incompressible pressure ceiling: twice the stagnation bump a flow at
+/// `mach_limit` can build, `2 x (gamma mach_limit^2 / 2) = gamma mach_limit^2`. the clamped
+/// arm does not consume this yet (see `INCOMP_JUMP_CEIL`); it exists so the derivation is a
+/// function rather than a comment, and so a future re-tuned clamp can carry its gamma and
+/// its reference mach number instead of freezing both.
+#[inline]
+pub fn incomp_jump_ceil(gamma: f64, mach_limit: f64) -> f64 {
+    gamma * mach_limit * mach_limit
+}
 
 /// the acoustic-dissipation scaling AS PUBLISHED (Fleischmann, Adami & Adams 2020):
 ///

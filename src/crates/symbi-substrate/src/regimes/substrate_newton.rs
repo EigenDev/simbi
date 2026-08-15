@@ -34,6 +34,7 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
     body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
+    dispatch_body_source_wb,
     dispatch_c2p_status, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
     dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
@@ -818,7 +819,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // when the fused stage carried the immersed body inside godunov (one launch), running the
         // standalone pass here would double-apply it. same predicate + geo the godunov stage used —
         // via the user-source fused kernel, or the body-only fused kernel when there is no user source.
-        if self.fuse_runtime && !sim.has_passive_scalar() {
+        // the FUSED stage applies the ANALYTIC rho*g; under a balanced reconstruction that is the
+        // wrong pairing, so balance forces the standalone equilibrium-difference pass.
+        if self.balance == symbi_discretize::coords::Balance::Plain
+            && self.fuse_runtime
+            && !sim.has_passive_scalar()
+        {
             let geo = GeoSource::Hydro { inertial: true };
             let absorbed = match &self.runtime_source {
                 Some(rs) => body_fused_in(sim, rs, geo, true),
@@ -828,8 +834,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 return;
             }
         }
-        // forward immersed-body source (gravity + accretion): cons += dt*S, in-place.
-        dispatch_body_source(sim, dt, self.gamma);
+        // forward immersed-body source: cons += dt*S, in-place. under a BALANCED
+        // reconstruction the momentum source must be the equilibrium-pressure difference at
+        // the cell faces, or the flux/source mismatch re-accelerates the very column the
+        // reconstruction balanced -- measured as an O((dx/H)^2) per-step drift that walks a
+        // sealed stagnant column to |v| ~ 3e-2 in 400 steps. the pair is the scheme.
+        if self.balance == symbi_discretize::coords::Balance::Hydrostatic {
+            dispatch_body_source_wb(sim, dt, self.gamma);
+        } else {
+            dispatch_body_source(sim, dt, self.gamma);
+        }
     }
 
     fn penalize(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {

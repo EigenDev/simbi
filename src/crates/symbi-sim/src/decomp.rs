@@ -371,6 +371,28 @@ pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
 /// reconstruction reads it like any other primitive). hydro/iso stores have no `mhd`, so the bcell
 /// tail is empty there and the exchange is unchanged. the STAGGERED `bface` is exchanged separately
 /// (`bface_strips`), since its faces live on a different domain than the cells.
+/// which field set a cut exchange moves. the steady-state loop exchanges PRIMITIVES (plus the
+/// mhd cell/face fields): the flux stage reconstructs from prim, and its doc's invariant --
+/// "cons ghosts are never read by the flux stage" -- is true for every stage of the evolve loop.
+/// CONSTRUCTION breaks it: seeding a fine level whose coverage touches a cut prolongs the
+/// CONSERVED components through the root's cut ghosts, so a decomposed seeding pass must first
+/// move the conserved set. one strip computation serves both; only the field list differs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ExchangeSet {
+    Prim,
+    Cons,
+}
+
+fn exchange_set_fields<'a, const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &'a FieldStore<D, DOF, M>,
+    set: ExchangeSet,
+) -> Vec<&'a Field<f64, D, M>> {
+    match set {
+        ExchangeSet::Prim => prim_fields(store),
+        ExchangeSet::Cons => store.fields.cons.exchange_fields(),
+    }
+}
+
 fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
@@ -433,6 +455,23 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     hi_dev: i32,
     transport: &T,
 ) {
+    exchange_faces_set(
+        lo, hi, axis, processed, counts, lo_dev, hi_dev, transport, ExchangeSet::Prim,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn exchange_faces_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    lo: &FieldStore<D, DOF, M>,
+    hi: &FieldStore<D, DOF, M>,
+    axis: usize,
+    processed: &[bool; D],
+    counts: &[usize; D],
+    lo_dev: i32,
+    hi_dev: i32,
+    transport: &T,
+    set: ExchangeSet,
+) {
     let ng = lo.geom.ng as isize;
     let i_hi_lo = lo.geom.interior.spaces[axis].hi; // one past lo's last interior cell
     let i_lo_hi = hi.geom.interior.spaces[axis].lo; // hi's first interior cell
@@ -444,7 +483,10 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     let hi_ghost = ghost_strip(&hi.geom, axis, Side::Lo, processed, counts);
     let lo_src = hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo));
 
-    for (fl, fr) in prim_fields(lo).into_iter().zip(prim_fields(hi)) {
+    for (fl, fr) in exchange_set_fields(lo, set)
+        .into_iter()
+        .zip(exchange_set_fields(hi, set))
+    {
         // hi interior -> lo ghost: source is the hi tile (hi_dev), dest is the lo tile (lo_dev).
         transport.copy_region(fr, &hi_src, fl, &lo_ghost, hi_dev, lo_dev);
         // lo interior -> hi ghost: source is the lo tile, dest is the hi tile.
@@ -457,6 +499,9 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     // `bface[axis]` (the shared interface face) is NOT copied: it is seeded identically and both
     // tiles apply the same CT curl -- the consistent edge emfs come from the exchanged transverse
     // halos + prim + bcell -- so it stays bit-identical and div(B) is preserved.
+    if set == ExchangeSet::Cons {
+        return;
+    }
     if let (Some(lo_mhd), Some(hi_mhd)) = (lo.fields.mhd.as_ref(), hi.fields.mhd.as_ref()) {
         for d in 0..D {
             // the NORMAL face (d == axis) is the shared interface, owned by both tiles. it must
@@ -584,6 +629,16 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     devices: &[i32],
     transport: &T,
 ) {
+    exchange_grid_set(tiles, counts, devices, transport, ExchangeSet::Prim)
+}
+
+fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+    devices: &[i32],
+    transport: &T,
+    set: ExchangeSet,
+) {
     let total: usize = counts.iter().product();
     debug_assert_eq!(
         tiles.len(),
@@ -608,7 +663,7 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
             let hi_flat = flatten(tc_hi, counts);
             let lo = tiles[lo_flat];
             let hi = tiles[hi_flat];
-            exchange_faces(
+            exchange_faces_set(
                 lo,
                 hi,
                 axis,
@@ -617,10 +672,23 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
                 devices[lo_flat],
                 devices[hi_flat],
                 transport,
+                set,
             );
         }
         processed[axis] = true;
     }
+}
+
+/// exchange the CONSERVED-field cut halos. construction-time only: the evolve loop never reads
+/// cons ghosts, but seeding a fine level whose coverage touches a cut prolongs the conserved
+/// components through them. see [`ExchangeSet`].
+pub fn exchange_grid_cons<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+    devices: &[i32],
+    transport: &T,
+) {
+    exchange_grid_set(tiles, counts, devices, transport, ExchangeSet::Cons)
 }
 
 fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(

@@ -18,6 +18,7 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
+    seed_decomposed_fine_from_coarse,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -123,7 +124,7 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
         let cx = [PX_LO.max(origin[0]), PX_HI.min(hi[0])];
         let cy = [PY_LO.max(origin[1]), PY_HI.min(hi[1])];
         let owns_patch = cx[0] < cx[1] && cy[0] < cy[1];
-        let mut h = if owns_patch {
+        let h = if owns_patch {
             let k = kset(&root);
             let region = RefinementRegion {
                 x_lo: [cx[0], cy[0]],
@@ -131,14 +132,22 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
             };
             let h = Hier::with_refinement(root, k, &[region], ProlongOrder::Ppm, kset)
                 .expect("tile hier");
-            h.seed_fine_from_coarse().expect("seed fine");
             h
         } else {
             let k = kset(&root);
             Hier::single(root, k)
         };
-        h.prime();
         tiles.push(h);
+    }
+    // seeding is DECOMPOSITION-AWARE: the fine interiors are prolonged only after the root
+    // conserved cut halos carry the neighbor tiles' data. seeding per tile inside the loop
+    // reads each tile's standalone boundary fill through the cut and the composite differs
+    // from the monolithic hierarchy before any evolution. `prime` runs a c2p audit on every
+    // level, so it must see the SEEDED fine level and runs after.
+    seed_decomposed_fine_from_coarse(&tiles, counts, &vec![0; tiles.len()], &LocalCopy)
+        .expect("decomposed fine seed");
+    for h in tiles.iter_mut() {
+        h.prime();
     }
     tiles
 }
@@ -218,6 +227,20 @@ fn max_err(a: &[f64], b: &[f64]) -> f64 {
 
 fn assert_p3_matches(counts: [usize; 2], ts: Timestepping) {
     let mut mono = build_mono(ts);
+    // CONSTRUCTION GATE, before either side evolves: the seeded composites must already agree.
+    // this is what localizes a future regression to seeding rather than to the driver -- the
+    // divergence this test caught lived here, was smoothed by evolution, and read as a
+    // dynamics bug for six hypotheses straight.
+    {
+        let mono_c0 = composite_fine(std::slice::from_ref(&mono), [1, 1]);
+        let dec_c0 = composite_fine(&build_tiles(counts, ts), counts);
+        let e0 = max_err(&mono_c0, &dec_c0);
+        assert!(
+            e0 < 1e-12,
+            "{counts:?} {ts:?}: decomposed and monolithic hierarchies differ at CONSTRUCTION \
+             (composite err {e0:e}); the fine seeding read unexchanged data"
+        );
+    }
     mono.evolve(T_FINAL).expect("mono evolve");
     let mono_c = composite_fine(std::slice::from_ref(&mono), [1, 1]);
 

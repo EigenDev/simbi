@@ -105,6 +105,7 @@ struct Config {
     timestepping: Timestepping,
     plm_theta: f64,
     mach_limit: f64,
+    wb_reconstruction: bool,
     dlogt: f64,
     viscosity: f64,
     /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key.
@@ -1048,6 +1049,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         timestepping: timestepping_from_str(&enum_str(dict, "timestepping")?)?,
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
         mach_limit: get_f64_or(dict, "mach_limit", symbi_hydro::dissipation::MACH_LIMIT),
+        wb_reconstruction: dict
+            .get_item("wb_reconstruction")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<bool>().ok())
+            .unwrap_or(false),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "viscosity_alpha", 0.0),
@@ -4181,6 +4188,7 @@ macro_rules! build_and_run_hydro {
             .reconstruction(build_recon(cfg))
             .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                 .mach_limit(cfg.mach_limit)
+                .well_balanced_reconstruction(cfg.wb_reconstruction)
             .with_eos(build_eos(cfg))
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
@@ -4242,6 +4250,7 @@ macro_rules! build_and_run_hydro {
                 .reconstruction(build_recon(cfg))
                 .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                 .mach_limit(cfg.mach_limit)
+                .well_balanced_reconstruction(cfg.wb_reconstruction)
                 .with_eos(build_eos(cfg))
                 .with_solver(solver)
                 .expect("fine-level kernel set")
@@ -4812,11 +4821,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
                 } else {
-                    let h = Hierarchy::with_refinement(sim, sub, &tile_regions, prolong, make)
-                        .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?;
-                    h.seed_fine_from_coarse()
-                        .map_err(|e| format!("tile {flat} fine seed: {e:?}"))?;
-                    h
+                    Hierarchy::with_refinement(sim, sub, &tile_regions, prolong, make)
+                        .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // immersed bodies on every tile hierarchy at their GLOBAL positions: the finest
                 // level owns the full (accreting) bodies, coarser levels a gravity-only proxy —
@@ -4829,10 +4835,33 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     h.attach_body_shapes(build_body_shapes(&cfg.bodies));
                 }
                 h.set_tracer_root_layout(n, tile_lo);
-                h.prime();
                 Ok(h)
             })?;
             tiles.push(built);
+        }
+        // fine seeding + prime, DECOMPOSITION-AWARE and after every tile exists: the seed
+        // prolongs CONSERVED components, whose cut ghosts only the dedicated cons exchange
+        // fills -- seeded per tile inside the loop, a patch spanning a cut prolongs from the
+        // tile's standalone boundary fill and the run differs from its monolithic twin before
+        // the first step. prime runs a c2p audit per level, so it follows the seed.
+        {
+            // one tile per device, and the same transport selection as the evolve loop
+            // (`run_refined_decomposed_loop`): peer copies on gpu, plain copies on host.
+            let devices: Vec<i32> = (0..tiles.len() as i32).collect();
+            #[cfg(feature = "gpu")]
+            let seed_transport = symbi::sim::decomp::PeerCopy;
+            #[cfg(not(feature = "gpu"))]
+            let seed_transport = symbi::sim::decomp::LocalCopy;
+            symbi::sim::refinement::seed_decomposed_fine_from_coarse(
+                &tiles,
+                counts,
+                &devices,
+                &seed_transport,
+            )
+            .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
+            for (k, h) in tiles.iter_mut().enumerate() {
+                symbi::symbi_xpu::with_device(devices[k], || h.prime());
+            }
         }
 
         // the full-size OUTPUT hierarchy (root + the full region): gather scatters each level's tile

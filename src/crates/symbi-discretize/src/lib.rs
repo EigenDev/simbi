@@ -73,7 +73,7 @@ pub use gv_excise::{
 };
 pub use gv_immersed::{
     body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
-    body_evolved_probe_gv, body_source_gv, body_source_iso_gv,
+    body_evolved_probe_gv, body_source_gv, body_source_iso_gv, body_source_wb_gv,
 };
 pub use gv_penalize::{
     body_resistive_emf_2d_gv, body_resistive_emf_3d_dir_gv, penalize_drain_gv,

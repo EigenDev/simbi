@@ -502,6 +502,21 @@ class SimbiProblem(BaseModel):
             description="order of accuracy (1=pcm/rk1, 2=plm/rk2, 3=ppm/rk3)",
         ),
     ]
+    wb_reconstruction: Annotated[
+        bool,
+        ProblemParam(
+            False,
+            cli=True,
+            description="reconstruct each cell's DEPARTURE from the local isentropic "
+            "hydrostatic profile rather than the state itself (newtonian only). a discretely "
+            "balanced atmosphere then presents no face jump, so a low-dissipation riemann "
+            "solver has no hydrostatic residual to leave undamped -- the property that lets "
+            "solver=hllc_lm_plain hold the entropy floor on a stagnant stratified column "
+            "without a compressibility clamp. composes with ANY solver, and the first-order "
+            "fofc redo inherits it. exact on a locally isentropic column; degrades linearly "
+            "in the entropy variation. costs a per-stencil body-potential evaluation",
+        ),
+    ]
     mach_limit: Annotated[
         float,
         ProblemParam(

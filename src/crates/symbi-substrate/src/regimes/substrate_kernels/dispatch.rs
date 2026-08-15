@@ -889,6 +889,33 @@ pub fn dispatch_c2p_status<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// the WELL-BALANCED forward body source: gravity as the equilibrium-pressure difference at
+/// the cell faces, paired with the balanced reconstruction (cartesian, gravity-only -- the
+/// production drain lives in the penalization stack, whose kernels are untouched by balance).
+pub fn dispatch_body_source_wb<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert!(
+        matches!(sim.geom.coords, symbi_geometry::Geometry::Cartesian),
+        "the well-balanced body source is baked for cartesian only; a curvilinear balanced \
+         run needs the area-weighted equilibrium-pressure form, which is not built"
+    );
+    assert!(
+        !sim.has_passive_scalar(),
+        "the well-balanced body source carries no dye drain: it is gravity-only, and a dyed \
+         run would silently keep its dye where the analytic source drains it"
+    );
+    let name = format!("body_source_wb_{D}d");
+    let scalars = resolve_body_scalars(sim, dt, gamma, &name);
+    let pre = sim.fields.prim.pre_field().expect("adiabatic body source needs prim.pre");
+    dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
+}
+
 pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -2738,6 +2765,17 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     let wb_chart = match balance {
         symbi_discretize::coords::Balance::Plain => "",
         symbi_discretize::coords::Balance::Hydrostatic => {
+            // the balanced reconstruction's local profile is the GAMMA-LAW isentrope
+            // (`LocalEquilibrium`: rho ~ [1 + (gamma-1) dphi/cs^2]^(1/(gamma-1))). on any
+            // other closure that curve is not the eos's isentrope, dp_eq/dphi != -rho_eq,
+            // and the transform REINTRODUCES the face jump it exists to remove -- silently,
+            // since the balance test only ever exercised gamma = 5/3. refused rather than
+            // approximated; a synge-gas balanced reconstruction needs its own profile.
+            assert!(
+                eos == symbi_discretize::EosArm::IdealGamma,
+                "the well-balanced reconstruction is gamma-law only: its local profile is \
+                 the ideal-gas isentrope, which is not an isentrope of the {eos:?} closure"
+            );
             symbi_discretize::kernel_slug::coord_suffix(sim.geom.coords)
         }
     };
