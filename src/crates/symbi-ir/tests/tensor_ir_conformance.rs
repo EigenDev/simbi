@@ -353,8 +353,8 @@ fn every_op_kind_lowers_without_panic() {
     let _ = g.element_wise(ElementWiseOp::IsFinite, vec![s], None);
 
     // Transcendental
-    let _ = g.transcendental(symbi_ir::TranscendentalOp::Sin, vec![s], None);
-    let _ = g.transcendental(symbi_ir::TranscendentalOp::Pow, vec![s, s], None);
+    let _ = g.element_wise(symbi_ir::ElementWiseOp::Sin, vec![s], None);
+    let _ = g.element_wise(symbi_ir::ElementWiseOp::Pow, vec![s, s], None);
 
     // Reduce
     let _ = g.reduce(ReduceOp::Max, vec![0], v, None);

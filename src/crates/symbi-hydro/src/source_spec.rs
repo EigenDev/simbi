@@ -31,7 +31,7 @@
 //   let total_rhs = compose(intrinsic, geometric);  // additive at A1
 // =============================================================================
 
-use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
+use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
 use symbi_ir::{ElementTy, Gv, with_trace};
 
 use crate::regime_spec::law_params;
@@ -261,8 +261,8 @@ fn spherical_2d_momentum_source(d: usize) -> BuiltSource {
     let s_r = g.element_wise(ElementWiseOp::Div, vec![s_r_num, r], None);
 
     // cot(theta) = cos(theta) / sin(theta)
-    let cos_t = g.transcendental(TranscendentalOp::Cos, vec![theta], None);
-    let sin_t = g.transcendental(TranscendentalOp::Sin, vec![theta], None);
+    let cos_t = g.element_wise(ElementWiseOp::Cos, vec![theta], None);
+    let sin_t = g.element_wise(ElementWiseOp::Sin, vec![theta], None);
     let cot = g.element_wise(ElementWiseOp::Div, vec![cos_t, sin_t], None);
 
     // S_t = (p * cot - rho * vr * vt) / r
@@ -301,8 +301,8 @@ fn spherical_3d_momentum_source(d: usize) -> BuiltSource {
     let two = g.add_const(ConstValue::F64(2.0), None);
 
     // cot(theta) — shared across S_t and S_p.
-    let cos_t = g.transcendental(TranscendentalOp::Cos, vec![theta], None);
-    let sin_t = g.transcendental(TranscendentalOp::Sin, vec![theta], None);
+    let cos_t = g.element_wise(ElementWiseOp::Cos, vec![theta], None);
+    let sin_t = g.element_wise(ElementWiseOp::Sin, vec![theta], None);
     let cot = g.element_wise(ElementWiseOp::Div, vec![cos_t, sin_t], None);
 
     let vt_sq = g.element_wise(ElementWiseOp::Mul, vec![vt, vt], None);

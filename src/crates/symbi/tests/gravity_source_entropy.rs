@@ -572,15 +572,20 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
     use symbi::prelude::Solver;
     let gm = 100.0;
     let mut rows = Vec::new();
-    for (name, solver) in [
-        ("hlle", Solver::Hlle),
-        ("hllc", Solver::Hllc),
-        ("hllc_lm", Solver::HllcLm),
+    // the low-mach arm pairs with the BALANCED reconstruction: since the clamp's
+    // retirement (2026-08-15) the published ramp leaves the hydrostatic residual undamped
+    // by design, and the balancing removes it instead -- unpaired, this exact column loses
+    // 4.2e-4 of the floor, which is the failure that once motivated the clamp.
+    for (name, solver, balanced) in [
+        ("hlle", Solver::Hlle, false),
+        ("hllc", Solver::Hllc, false),
+        ("hllc_lm", Solver::HllcLm, true),
     ] {
         let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
         let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
             .with_solver(solver)
-            .expect("solver/regime mismatch");
+            .expect("solver/regime mismatch")
+            .well_balanced_reconstruction(balanced);
         evolve(&mut sim, &kernels, T_HYDRO).expect("evolve failed");
         let worst = worst_entropy_ratio_away_from_walls(&sim, WALL_SKIP);
         let vel = sim.fields.prim.vel[0].view();
@@ -610,21 +615,23 @@ fn the_solver_family_holds_the_entropy_floor_on_the_sealed_column() {
 /// the low-mach arm's floor law with its precondition made explicit: the sealed
 /// stratified column holds `K >= K_0` under hllc_lm WHILE the fleischmann ramp is
 /// genuinely engaged — the residual velocities stay below the mach limit, so a pass
-/// cannot come from the ramp being inactive. before the compressibility-consistency
-/// clamp, this exact configuration lost 4.2e-4 of the floor at t = 2 (5.4e-4 at half
-/// the timestep — spatial anti-dissipation, not a source bias): the ramp cut the
-/// acoustic dissipation that damps the hydrostatic residual and the ringing
-/// undershot the adiabat. the clamp restores classical dissipation on faces whose
-/// pressure jump exceeds the incompressible `dp/p ~ gamma Ma^2` scale, which is
-/// every face of this column.
+/// cannot come from the ramp being inactive. unpaired, this exact configuration loses
+/// 4.2e-4 of the floor at t = 2 (5.4e-4 at half the timestep — spatial
+/// anti-dissipation, not a source bias): the ramp cuts the acoustic dissipation that
+/// damps the hydrostatic residual and the ringing undershoots the adiabat. the
+/// BALANCED RECONSTRUCTION removes that residual at its source — each cell's
+/// departure from the isentrope through it is what gets limited, so the balanced
+/// column presents no face jump and there is nothing to ring. (a compressibility
+/// clamp once restored classical dissipation here instead; retired 2026-08-15.)
 #[test]
-fn the_clamped_low_mach_arm_holds_the_floor_with_the_ramp_engaged() {
+fn the_low_mach_arm_holds_the_floor_with_the_ramp_engaged() {
     use symbi::prelude::Solver;
     let gm = 100.0;
     let mut sim = hydrostatic_atmosphere_full(gm, N, 0.3, Timestepping::Rk2, true);
     let kernels = Kset::new(GAMMA, 0.3, &sim.geom.allocated)
         .with_solver(Solver::HllcLm)
-        .expect("solver/regime mismatch");
+        .expect("solver/regime mismatch")
+        .well_balanced_reconstruction(true);
     evolve(&mut sim, &kernels, 2.0).expect("evolve failed");
 
     // the precondition: the column's residual flow sits under the mach limit, so the

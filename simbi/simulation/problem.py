@@ -511,7 +511,7 @@ class SimbiProblem(BaseModel):
             "hydrostatic profile rather than the state itself (newtonian only). a discretely "
             "balanced atmosphere then presents no face jump, so a low-dissipation riemann "
             "solver has no hydrostatic residual to leave undamped -- the property that lets "
-            "solver=hllc_lm_plain hold the entropy floor on a stagnant stratified column "
+            "solver=hllc_lm hold the entropy floor on a stagnant stratified column "
             "without a compressibility clamp. composes with ANY solver, and the first-order "
             "fofc redo inherits it. exact on a locally isentropic column; degrades linearly "
             "in the entropy variation. costs a per-stencil body-potential evaluation",
@@ -525,13 +525,12 @@ class SimbiProblem(BaseModel):
             ge=0.0,
             le=1.0,
             description="reference mach number the HLLC-LM acoustic ramp saturates at "
-            "(solver=hllc_lm_plain only). the ramp reduces acoustic dissipation only BELOW "
+            "(hllc_lm, the published Fleischmann scheme). the ramp reduces acoustic dissipation only BELOW "
             "this number, so it sets how much of the flow the reduction reaches: 0.1 is the "
             "value used throughout Fleischmann, Adami and Adams (2020), and a deeply subsonic "
             "problem whose whole range sits under it is left at classical HLLC unless the "
             "limit is raised to meet the flow. 0 reduces nothing; 1 reduces to the sonic "
-            "point. the CLAMPED arm (solver=hllc_lm) ignores this and holds 0.1, because its "
-            "incompressible pressure ceiling is derived from that value",
+            "point. the clamped variant that froze this value was retired 2026-08-15",
         ),
     ]
     plm_theta: Annotated[

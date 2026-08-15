@@ -440,7 +440,7 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
                     // and the clamp-free low-mach arm.
                     let balances: &[symbi_discretize::coords::Balance] = if regime
                         == RegimeKind::Newtonian
-                        && matches!(solver, Solver::Hlle | Solver::HllcLmPlain)
+                        && matches!(solver, Solver::Hlle | Solver::HllcLm)
                     {
                         &[
                             symbi_discretize::coords::Balance::Plain,
@@ -506,12 +506,13 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
     // gate silently vacuous.
     assert!(
         // MEASURED, not guessed: the sweep over
-        // (regime x solver x dim x dir x recon x eos x balance x chart) is exactly 180
-        // combinations today. the floor sits AT that number rather than below it, so any
-        // collapse of any axis fails here -- a floor left at the old value of 20 would have
-        // passed a sweep that had lost the balance and chart axes entirely, which is the
-        // failure this gate exists to prevent. raise it deliberately when an axis is added.
-        checked >= 180,
+        // (regime x solver x dim x dir x recon x eos x balance x chart) is exactly 168
+        // combinations today -- it was 180 until 2026-08-15, when the clamped hllc_lm
+        // variant was retired and its solver row left the matrix (the surviving hllc_lm
+        // carries the balance x chart arms the retired name introduced). the floor sits AT
+        // the measurement so any silent collapse of any axis fails here; move it only with
+        // a deliberate matrix change, recorded like this one.
+        checked >= 168,
         "only {checked} (solver, regime, dim, dir) combination(s) were checked; the matrix or the          name protocol has drifted and this gate is not covering anything"
     );
     assert!(

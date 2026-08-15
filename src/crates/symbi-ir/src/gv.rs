@@ -21,7 +21,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
+use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
 use crate::{ElementTy, Symbol};
 use symbi_abi::FieldBind;
 use symbi_algebra::{Domain, FieldElement, Space};
@@ -859,11 +859,6 @@ impl Gv {
         Gv::of(with_trace(|t| t.graph.element_wise(op, vec![x], None)))
     }
 
-    #[inline]
-    fn transcendental_unop(self, op: TranscendentalOp) -> Gv {
-        let x = self.node();
-        Gv::of(with_trace(|t| t.graph.transcendental(op, vec![x], None)))
-    }
 }
 
 // ---- std::ops: record element-wise nodes ----
@@ -1199,7 +1194,7 @@ impl crate::algebra::Scalar for Gv {
         one / self
     }
 
-    // ── transcendentals (mix of ElementWise + Transcendental graph ops) ───
+    // ── transcendentals (ONE graph tag: ElementWise) ───
     fn sin(self) -> Gv {
         self.unop(ElementWiseOp::Sin)
     }
@@ -1207,10 +1202,10 @@ impl crate::algebra::Scalar for Gv {
         self.unop(ElementWiseOp::Cos)
     }
     fn tan(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Tan)
+        self.unop(ElementWiseOp::Tan)
     }
     fn asin(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Asin)
+        self.unop(ElementWiseOp::Asin)
     }
     fn acos(self) -> Gv {
         self.unop(ElementWiseOp::Acos)
@@ -1219,17 +1214,17 @@ impl crate::algebra::Scalar for Gv {
         let (y, x) = (self.node(), o.node());
         Gv::of(with_trace(|t| {
             t.graph
-                .transcendental(TranscendentalOp::Atan2, vec![y, x], None)
+                .element_wise(ElementWiseOp::Atan2, vec![y, x], None)
         }))
     }
     fn exp(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Exp)
+        self.unop(ElementWiseOp::Exp)
     }
     fn ln(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Log)
+        self.unop(ElementWiseOp::Log)
     }
     fn log10(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Log10)
+        self.unop(ElementWiseOp::Log10)
     }
 
     fn powi(self, n: i32) -> Gv {
@@ -1282,7 +1277,7 @@ impl crate::algebra::Scalar for Gv {
         self.unop(ElementWiseOp::Cosh)
     }
     fn tanh(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Tanh)
+        self.unop(ElementWiseOp::Tanh)
     }
     fn asinh(self) -> Gv {
         self.unop(ElementWiseOp::Asinh)
@@ -1291,7 +1286,7 @@ impl crate::algebra::Scalar for Gv {
         self.unop(ElementWiseOp::Acosh)
     }
     fn atanh(self) -> Gv {
-        self.transcendental_unop(TranscendentalOp::Atanh)
+        self.unop(ElementWiseOp::Atanh)
     }
 
     // ── HIGHER-ORDER: iterate + iterate_vec with the FREEZE LAW ───────────

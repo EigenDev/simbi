@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use crate::FieldBind;
-use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, Op, TranscendentalOp};
+use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, Op};
 use crate::support::{ParamExpr, Support};
 use crate::symbol::Symbol;
 
@@ -238,8 +238,13 @@ fn classify_op(
                 | ElementWiseOp::Abs
                 | ElementWiseOp::Sqrt
                 | ElementWiseOp::Sin
+                | ElementWiseOp::Tan
+                | ElementWiseOp::Asin
+                | ElementWiseOp::Atan
                 | ElementWiseOp::Sinh
-                | ElementWiseOp::Asinh => {
+                | ElementWiseOp::Tanh
+                | ElementWiseOp::Asinh
+                | ElementWiseOp::Atanh => {
                     return match classify(g, tags, memo, ins[0]) {
                         Zero(b) => Zero(b),
                         One(b) if matches!(ew, ElementWiseOp::Abs | ElementWiseOp::Sqrt) => One(b),
@@ -247,7 +252,10 @@ fn classify_op(
                     };
                 }
                 // f(0) = 1 exactly in f64.
-                ElementWiseOp::Cos | ElementWiseOp::Cosh => {
+                ElementWiseOp::Cos
+                | ElementWiseOp::Cosh
+                | ElementWiseOp::Exp
+                | ElementWiseOp::Exp2 => {
                     return match classify(g, tags, memo, ins[0]) {
                         Zero(b) => One(b),
                         _ => Unknown,
@@ -255,29 +263,6 @@ fn classify_op(
                 }
                 ElementWiseOp::Cast(_) => return classify(g, tags, memo, ins[0]),
                 _ => return Unknown,
-            }
-        }
-        Op::Transcendental(t, ins) => {
-            let ca = classify(g, tags, memo, ins[0]);
-            match t {
-                // exp(0) = 1, cos(0) = 1, cosh(0) = 1 — exactly.
-                TranscendentalOp::Exp | TranscendentalOp::Cos | TranscendentalOp::Cosh => {
-                    if let Class::Zero(b) = ca {
-                        return Class::One(b);
-                    }
-                    Class::Unknown
-                }
-                // f(0) = 0 exactly.
-                TranscendentalOp::Sin
-                | TranscendentalOp::Sinh
-                | TranscendentalOp::Tanh
-                | TranscendentalOp::Asinh => {
-                    if let Class::Zero(b) = ca {
-                        return Class::Zero(b);
-                    }
-                    Class::Unknown
-                }
-                _ => Class::Unknown,
             }
         }
         Op::Select(_, t, f) => {

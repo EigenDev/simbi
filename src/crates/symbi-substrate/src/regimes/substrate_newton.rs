@@ -134,7 +134,7 @@ pub struct AdiabaticSubstrateKernelSet<
     /// ppm flatten dials (onset, full); (0, 0) = pure parabola. see `ppm_flatten`.
     pub flatten: (f64, f64),
     /// the reference mach number the PUBLISHED low-mach ramp saturates at. read only by
-    /// `Solver::HllcLmPlain`; inert on every other solver. see `mach_limit`.
+    /// `Solver::HllcLm`; inert on every other solver. see `mach_limit`.
     pub mach_limit: f64,
     /// whether the face reconstruction limits the STATE or its departure from local hydrostatic
     /// equilibrium. see `balance`.
@@ -328,7 +328,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// of the flow the reduction reaches: a deeply subsonic problem whose entire range sits
     /// under 0.1 is untouched by the published value and needs it raised to meet the flow.
     /// 0 reduces nothing and recovers classical HLLC; 1 reduces all the way to the sonic
-    /// point. read only by `Solver::HllcLmPlain` — the clamped arm derives its incompressible
+    /// point. read only by `Solver::HllcLm` -- the retired clamped arm froze its own
     /// pressure ceiling from the compile-time constant and holds them consistent. fluent.
     /// reconstruct each cell's DEPARTURE from the local hydrostatic profile rather than the
     /// state, so a discretely balanced atmosphere presents no face jump and a low-dissipation

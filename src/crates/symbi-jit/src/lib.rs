@@ -1482,7 +1482,7 @@ pub fn compile_gv_kernel_prec(
 mod tests {
     use super::*;
     use symbi_ir::backends::interp::{Backend, Cpu};
-    use symbi_ir::graph::{ElementWiseOp, Graph, NodeId, TranscendentalOp};
+    use symbi_ir::graph::{ElementWiseOp, Graph, NodeId};
     use symbi_ir::passes::scalarize::{LoweredParam, scalarize};
 
     /// build a graph (the closure adds its own params + returns the output node), scalarize,
@@ -1571,10 +1571,10 @@ mod tests {
         // p0 * sin(a) + exp(-b) — shimmed transcendentals, bit-identical to std.
         assert_jit_matches_interp(|g| {
             let (p0, a, b) = (p(g, "p0"), p(g, "a"), p(g, "b"));
-            let sin_a = g.transcendental(TranscendentalOp::Sin, vec![a], None);
+            let sin_a = g.element_wise(ElementWiseOp::Sin, vec![a], None);
             let term = g.element_wise(ElementWiseOp::Mul, vec![p0, sin_a], None);
             let nb = g.element_wise(ElementWiseOp::Neg, vec![b], None);
-            let exp_nb = g.transcendental(TranscendentalOp::Exp, vec![nb], None);
+            let exp_nb = g.element_wise(ElementWiseOp::Exp, vec![nb], None);
             g.element_wise(ElementWiseOp::Add, vec![term, exp_nb], None)
         });
     }

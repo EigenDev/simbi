@@ -339,13 +339,21 @@ fn euler_reconstruct<const D: usize>(
     // this -- the velocity loop, the ppm flattening, the normal and the face velocity -- is
     // shared, which is the point. a second copy of this function silently lost the flattening
     // and hardcoded the normal to the sweep axis.
-    let (rho_l, rho_r, pre_l, pre_r) = match balanced {
+    // FIELD-REGISTRATION ORDER IS ABI. the traced manifest records fields in first-read
+    // order, and every existing plain flux kernel registers [rho, v.., pre] -- so the plain
+    // branch must read the velocities BETWEEN the thermodynamic pair, exactly as it always
+    // has, or the manifest of every already-baked kernel silently reorders. the balanced
+    // branch computes rho and pre jointly (they share anchors and potentials), so its NEW
+    // kernels register [rho, pre, v..]; that order is theirs from birth and equally stable.
+    let (rho_l, rho_r, wb_pre) = match balanced {
         None => {
             let (rl, rr) = recon_gv("prim_rho", "prim.rho", ndim, dir, theta, recon);
-            let (pl, pr) = recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon);
-            (rl, rr, pl, pr)
+            (rl, rr, None)
         }
-        Some(b) => balanced_thermo_pair(ndim, dir, recon, theta, b),
+        Some(b) => {
+            let (rl, rr, pl, pr) = balanced_thermo_pair(ndim, dir, recon, theta, b);
+            (rl, rr, Some((pl, pr)))
+        }
     };
     let mut vl = Vec::with_capacity(D);
     let mut vr = Vec::with_capacity(D);
@@ -361,6 +369,10 @@ fn euler_reconstruct<const D: usize>(
         vl.push(l);
         vr.push(r);
     }
+    let (pre_l, pre_r) = match wb_pre {
+        Some(pair) => pair,
+        None => recon_gv("prim_pre", "prim.pre", ndim, dir, theta, recon),
+    };
     let mut rho_lr = (rho_l, rho_r);
     let mut pre_lr = (pre_l, pre_r);
     let mut vel_lr: Vec<(Gv, Gv)> = vl.into_iter().zip(vr).collect();
@@ -1501,21 +1513,6 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(
     adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::Standard, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
 }
 
-/// adiabatic HLLC-LM face flux with the COMPRESSIBILITY CLAMP: the fleischmann low-mach ramp
-/// floored by a consistency check on the face pressure jump, which restores classical HLLC
-/// dissipation wherever the pressure data contradicts the incompressible fluctuation scaling
-/// `dp/p ~ gamma Ma^2`. the clamp is NOT part of the published scheme; on a gravity-stratified
-/// background the hydrostatic jump `dx/H` exceeds the incompressible ceiling on most faces and
-/// the clamp saturates, so this arm behaves as classical HLLC through a stratified atmosphere.
-/// `adiabatic_hllc_lm_flux_gv` is the published scaling; this one is retained because the clamp
-/// is what holds the adiabatic entropy floor on a STAGNANT stratified column, the regime a solid
-/// wall keeps its masked cells in, when the reconstruction is not itself well-balanced.
-pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
-    dir: u8,
-    recon: Recon,
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    adiabatic_hllc_at_arm::<D>(dir, recon, ShockwaveLimiter::FleischmannClamped, MachRef::Published, Balance::Plain, Coords::Cartesian, &[0, 1, 2][..D])
-}
 
 /// adiabatic HLLC-LM face flux AS PUBLISHED (Fleischmann, Adami & Adams 2020): the
 /// anti-diffusive star-state flux is scaled by `sin(min(1, Ma/0.1) pi/2)` on the FACE-NORMAL
@@ -1524,7 +1521,12 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
 /// clamp on the pressure jump. newtonian only (the relativistic HLLC bodies ignore the LM
 /// correction). the `phi` helpers are fully branchless (`S::select`), so the fleischmann arm
 /// traces at S = Gv just like the Standard arm.
-pub fn adiabatic_hllc_lm_plain_flux_gv<const D: usize>(
+/// adiabatic HLLC-LM face flux, the PUBLISHED scheme (Fleischmann, Adami & Adams 2020): the
+/// sine ramp on the acoustic signal speeds, reference mach number a RUNTIME scalar, composable
+/// with the well-balanced reconstruction through the `balance` axis. the clamped variant this
+/// name once carried is retired -- the balancing removes the hydrostatic residual the clamp
+/// damped, and `sealed_column_unclamped` gates the pairing.
+pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
     recon: Recon,
     balance: Balance,
@@ -1609,7 +1611,7 @@ pub fn rhd_hllc_lm_flux_gv<const D: usize>(
     dir: u8,
     eos_arm: EosArm,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::FleischmannClamped, eos_arm)
+    rhd_hllc_at_arm::<D>(dir, ShockwaveLimiter::Fleischmann, eos_arm)
 }
 
 /// RMHD HLLC face flux — mignone-bodo (2006), null vs non-null normal B-field

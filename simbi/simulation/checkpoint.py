@@ -165,6 +165,26 @@ def _assert_same_equilibrium_target(
 
     from .problem import ConfigError
 
+    # SCHEME-CHANGE GUARD. `solver = hllc_lm` changed meaning on 2026-08-15: the clamped
+    # variant was retired and the name now denotes the published Fleischmann ramp. a series
+    # recorded under the old meaning must not be continued under the new one -- same string,
+    # different numerics, and nothing downstream could ever tell. the discriminator is the
+    # stored config itself: `wb_reconstruction` entered the model with the new scheme, so a
+    # checkpoint whose config lacks the key is clamp-era by construction.
+    recorded_solver = str(getattr(metadata, "solver", "") or "")
+    if recorded_solver in ("hllc_lm", "hllc-lm"):
+        stored_cfg = getattr(metadata, "config", None) or {}
+        if hasattr(stored_cfg, "keys") and "wb_reconstruction" not in stored_cfg:
+            from .problem import ConfigError
+
+            raise ConfigError(
+                "this checkpoint was written by the RETIRED clamped hllc_lm scheme (its "
+                "stored config predates wb_reconstruction). the name now denotes the "
+                "published Fleischmann ramp, so continuing the series would silently change "
+                "the numerics mid-run. start a fresh series, or pin the pre-2026-08-15 "
+                "binary to continue this one."
+            )
+
     declared = getattr(problem, "equilibrium_expressions", {}) or {}
     recorded_raw = getattr(metadata, "equilibrium_target", "") or ""
     try:

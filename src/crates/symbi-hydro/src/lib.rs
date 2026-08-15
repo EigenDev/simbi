@@ -65,7 +65,7 @@ pub use symbi_geometry;
 pub use symbi_ir::algebra::Scalar;
 // the python front door's wire format — re-exported so the source API (SourceConfig +
 // expr_bridge::build_user_source) is one import surface.
-pub use dissipation::{ShockwaveLimiter, adaptive_phi};
+pub use dissipation::{ShockwaveLimiter, fleischmann_phi};
 #[cfg(feature = "gpu")]
 pub use gpu_launcher::launch_source_kernel;
 pub use gpu_source_kernel::GpuSourceKernel;

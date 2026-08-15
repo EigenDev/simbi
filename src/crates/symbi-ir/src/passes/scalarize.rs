@@ -16,7 +16,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::{
-    ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp, TranscendentalOp,
+    ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp,
 };
 use crate::{DimExpr, ElementTy, Symbol, TensorTy};
 
@@ -630,9 +630,6 @@ impl Scalarizer {
             Op::ElementWise(ewop, inputs) => {
                 Binding::Concrete(self.lower_element_wise(*ewop, inputs, ty, graph))
             }
-            Op::Transcendental(trop, inputs) => {
-                Binding::Concrete(self.lower_transcendental(*trop, inputs, ty, graph))
-            }
             Op::Construct(inputs) => Binding::Concrete(self.lower_construct(inputs)),
             Op::Index(tensor, idxs) => Binding::Concrete(self.lower_index(*tensor, idxs, graph)),
             Op::Broadcast(tensor, target_shape) => {
@@ -1150,36 +1147,6 @@ impl Scalarizer {
                 );
             }
             out.push(scalar_element_wise(op, input_exprs));
-        }
-        out
-    }
-
-    fn lower_transcendental(
-        &mut self,
-        op: TranscendentalOp,
-        inputs: &[NodeId],
-        out_ty: &TensorTy,
-        graph: &Graph,
-    ) -> Vec<ScalarExpr> {
-        let out_dims = resolve_literal_dims(&out_ty.shape);
-        let out_indices = iter_row_major(&out_dims);
-        let arity = op.arity();
-        debug_assert_eq!(inputs.len(), arity, "Transcendental builder enforced arity");
-        let in_shapes: Vec<Vec<usize>> = inputs
-            .iter()
-            .map(|id| resolve_literal_dims(&graph.ty(*id).shape))
-            .collect();
-
-        let mut out = Vec::with_capacity(out_indices.len());
-        for out_idx in &out_indices {
-            let mut input_exprs: Vec<ScalarExpr> = Vec::with_capacity(arity);
-            for (k, in_shape) in in_shapes.iter().enumerate() {
-                let flat = flat_index_with_broadcast(in_shape, &out_dims, out_idx);
-                input_exprs.push(
-                    self.require_concrete(inputs[k], "ElementWise/Transcendental")[flat].clone(),
-                );
-            }
-            out.push(scalar_transcendental(op, input_exprs));
         }
         out
     }
@@ -1873,6 +1840,18 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         ElementWiseOp::Cosh => method_unary("cosh", &mut inputs),
         ElementWiseOp::Asinh => method_unary("asinh", &mut inputs),
         ElementWiseOp::Acosh => method_unary("acosh", &mut inputs),
+        ElementWiseOp::Tan => method_unary("tan", &mut inputs),
+        ElementWiseOp::Asin => method_unary("asin", &mut inputs),
+        ElementWiseOp::Atan => method_unary("atan", &mut inputs),
+        ElementWiseOp::Exp => method_unary("exp", &mut inputs),
+        ElementWiseOp::Exp2 => method_unary("exp2", &mut inputs),
+        ElementWiseOp::Log => method_unary("ln", &mut inputs),
+        ElementWiseOp::Log2 => method_unary("log2", &mut inputs),
+        ElementWiseOp::Log10 => method_unary("log10", &mut inputs),
+        ElementWiseOp::Tanh => method_unary("tanh", &mut inputs),
+        ElementWiseOp::Atanh => method_unary("atanh", &mut inputs),
+        ElementWiseOp::Atan2 => method_binary("atan2", &mut inputs),
+        ElementWiseOp::Hypot => method_binary("hypot", &mut inputs),
         // transcendental binary: Rust .powf(b) / CUDA pow(a,b).
         ElementWiseOp::Pow => method_binary("powf", &mut inputs),
         // numeric conversion (inserted by the graph's type promotion).
@@ -1987,34 +1966,6 @@ fn method_binary(name: &'static str, inputs: &mut Vec<ScalarExpr>) -> ScalarExpr
 
 /// build a scalar expression for a transcendental op. all are method
 /// calls in Rust source (`x.sin()`, `y.atan2(x)`, etc.).
-fn scalar_transcendental(op: TranscendentalOp, mut inputs: Vec<ScalarExpr>) -> ScalarExpr {
-    match op {
-        TranscendentalOp::Sin => method_unary("sin", &mut inputs),
-        TranscendentalOp::Cos => method_unary("cos", &mut inputs),
-        TranscendentalOp::Tan => method_unary("tan", &mut inputs),
-        TranscendentalOp::Asin => method_unary("asin", &mut inputs),
-        TranscendentalOp::Acos => method_unary("acos", &mut inputs),
-        TranscendentalOp::Atan => method_unary("atan", &mut inputs),
-        TranscendentalOp::Atan2 => method_binary("atan2", &mut inputs),
-        TranscendentalOp::Exp => method_unary("exp", &mut inputs),
-        TranscendentalOp::Exp2 => method_unary("exp2", &mut inputs),
-        TranscendentalOp::Log => method_unary("ln", &mut inputs),
-        TranscendentalOp::Log2 => method_unary("log2", &mut inputs),
-        TranscendentalOp::Log10 => method_unary("log10", &mut inputs),
-        TranscendentalOp::Sinh => method_unary("sinh", &mut inputs),
-        TranscendentalOp::Cosh => method_unary("cosh", &mut inputs),
-        TranscendentalOp::Tanh => method_unary("tanh", &mut inputs),
-        TranscendentalOp::Asinh => method_unary("asinh", &mut inputs),
-        TranscendentalOp::Acosh => method_unary("acosh", &mut inputs),
-        TranscendentalOp::Atanh => method_unary("atanh", &mut inputs),
-        TranscendentalOp::Pow => method_binary("powf", &mut inputs),
-        TranscendentalOp::Hypot => method_binary("hypot", &mut inputs),
-    }
-}
-
-/// enumerate row-major index tuples for a shape. rank-0 yields the
-/// empty index, rank-N yields the full cartesian product in row-major
-/// order.
 fn iter_row_major(dims: &[usize]) -> Vec<Vec<usize>> {
     if dims.is_empty() {
         return vec![vec![]];
@@ -2401,7 +2352,6 @@ mod tests {
     // ---- ElementWise scalarization ----
 
     use crate::ElementWiseOp;
-    use crate::TranscendentalOp;
 
     #[test]
     fn scalar_add_two_consts() {
@@ -2624,7 +2574,7 @@ mod tests {
     fn transcendental_sin_emits_method_call() {
         let mut g = Graph::new();
         let v = g.add_scalar_param("v", ElementTy::F64);
-        let s = g.transcendental(TranscendentalOp::Sin, vec![v], None);
+        let s = g.element_wise(ElementWiseOp::Sin, vec![v], None);
         let l = scalarize(&g, s, "f");
         if let ScalarExpr::MethodCall {
             method,
@@ -2646,7 +2596,7 @@ mod tests {
         // maps to .ln per convention.
         let mut g = Graph::new();
         let v = g.add_scalar_param("v", ElementTy::F64);
-        let r = g.transcendental(TranscendentalOp::Log, vec![v], None);
+        let r = g.element_wise(ElementWiseOp::Log, vec![v], None);
         let l = scalarize(&g, r, "f");
         if let ScalarExpr::MethodCall { method, .. } = &l.results[0] {
             assert_eq!(*method, "ln");
@@ -2660,7 +2610,7 @@ mod tests {
         let mut g = Graph::new();
         let b = g.add_scalar_param("b", ElementTy::F64);
         let e = g.add_scalar_param("e", ElementTy::F64);
-        let r = g.transcendental(TranscendentalOp::Pow, vec![b, e], None);
+        let r = g.element_wise(ElementWiseOp::Pow, vec![b, e], None);
         let l = scalarize(&g, r, "f");
         if let ScalarExpr::MethodCall {
             receiver,
@@ -2682,7 +2632,7 @@ mod tests {
         let mut g = Graph::new();
         let y = g.add_scalar_param("y", ElementTy::F64);
         let x = g.add_scalar_param("x", ElementTy::F64);
-        let r = g.transcendental(TranscendentalOp::Atan2, vec![y, x], None);
+        let r = g.element_wise(ElementWiseOp::Atan2, vec![y, x], None);
         let l = scalarize(&g, r, "f");
         if let ScalarExpr::MethodCall { method, .. } = &l.results[0] {
             assert_eq!(*method, "atan2");
@@ -2700,7 +2650,7 @@ mod tests {
             TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
             None,
         );
-        let s = g.transcendental(TranscendentalOp::Cos, vec![v], None);
+        let s = g.element_wise(ElementWiseOp::Cos, vec![v], None);
         let l = scalarize(&g, s, "f");
         assert_eq!(l.results.len(), 3);
         for (i, e) in l.results.iter().enumerate() {

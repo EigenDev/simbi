@@ -269,22 +269,18 @@ pub trait WithExcision: Sized {
 pub enum Solver {
     Hlle,
     Hllc,
-    /// HLLC with the Fleischmann (2020) low-mach ramp FLOORED BY A COMPRESSIBILITY CLAMP on the
-    /// face pressure jump (newtonian and RHD). the clamp is not part of the published scheme: it
-    /// restores classical HLLC dissipation wherever the pressure data contradicts the
-    /// incompressible fluctuation scaling `dp/p ~ gamma Ma^2`. on a gravity-stratified background
-    /// the hydrostatic jump `dx/H` exceeds that scale on most faces and the clamp saturates, so
-    /// this arm behaves as classical HLLC through a stratified atmosphere. what it buys is the
-    /// adiabatic entropy floor on a STAGNANT stratified column, which the ramp alone does not hold
-    /// unless the reconstruction is itself well-balanced.
+    /// HLLC with the Fleischmann (2020) low-mach correction EXACTLY AS PUBLISHED: the sine
+    /// ramp on the acoustic signal speeds, cut off at the runtime reference mach number
+    /// (newtonian and RHD). it leaves the hydrostatic residual of a stagnant stratified
+    /// column undamped, so that regime wants the well-balanced reconstruction underneath it
+    /// (`symbi_hydro::hydrostatic`) — the pairing gated by `sealed_column_unclamped`. a
+    /// clamped variant that bought the entropy floor by restoring classical dissipation
+    /// across every stratified face was retired 2026-08-15: the balancing removes the
+    /// residual the clamp existed to damp, and the clamp's face-local firing condition was
+    /// shown underivable (it required a global flow-mach bound no face can see). archived
+    /// series recorded under this name with a config lacking `wb_reconstruction` are
+    /// clamp-era and are refused on restart.
     HllcLm,
-    /// HLLC with the Fleischmann (2020) low-mach correction EXACTLY AS PUBLISHED: the sine ramp
-    /// `sin(min(1, Ma/0.1) pi/2)` on the acoustic signal speeds, no clamp (newtonian only).
-    /// this is the scheme whose validation suite includes a gravitational Rayleigh-Taylor
-    /// instability, so a stratified background is inside its demonstrated range. it leaves the
-    /// hydrostatic residual of a stagnant column undamped, so it wants a well-balanced
-    /// reconstruction underneath it — see `symbi_hydro::hydrostatic`.
-    HllcLmPlain,
     /// HLLC whose acoustic dissipation is scaled by the ACOUSTIC CONTENT of the face data —
     /// the fraction of the impedance relation `dp = rho c du` the jumps actually carry —
     /// rather than by the local mach number against a reference value. newtonian only.
@@ -305,7 +301,6 @@ impl Solver {
         Solver::Hlle,
         Solver::Hllc,
         Solver::HllcLm,
-        Solver::HllcLmPlain,
         Solver::HllcAcoustic,
         Solver::Hlld,
     ];
@@ -316,7 +311,6 @@ impl Solver {
             Solver::Hlle => "",
             Solver::Hllc => "_hllc",
             Solver::HllcLm => "_hllc_lm",
-            Solver::HllcLmPlain => "_hllc_lm_plain",
             Solver::HllcAcoustic => "_hllc_acoustic",
             Solver::Hlld => "_hlld",
         }
@@ -357,10 +351,6 @@ impl Solver {
             // reformulation has not been shown to be an identity there, and a scaling applied to a
             // non-identity is a different solver rather than a modified one.
             Solver::HllcLm => matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd),
-            // the PUBLISHED ramp is emitted for newtonian euler only: the clamp-free
-            // arm exists to be run under a well-balanced reconstruction, and that
-            // reconstruction is built on the newtonian polytropic isentrope.
-            Solver::HllcLmPlain => matches!(regime, RegimeKind::Newtonian),
             // HLLC-ACOUSTIC: the same centralized reformulation as HLLC-LM with a different
             // sensor, so it inherits that arm's requirement exactly. NEWTONIAN ONLY for now:
             // the impedance relation `dp = rho c du` the sensor measures against is the
@@ -503,7 +493,6 @@ const _: () = {
             Solver::Hlle,
             Solver::Hllc,
             Solver::HllcLm,
-            Solver::HllcLmPlain,
             Solver::HllcAcoustic,
             Solver::Hlld,
         ];

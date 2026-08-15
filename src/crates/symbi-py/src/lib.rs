@@ -743,7 +743,12 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
         "hllc" => Ok(Solver::Hllc),
         // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
         "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
-        "hllc_lm_plain" | "hllc-lm-plain" => Ok(Solver::HllcLmPlain),
+        "hllc_lm_plain" | "hllc-lm-plain" => Err(
+            "solver 'hllc_lm_plain' was collapsed into 'hllc_lm' on 2026-08-15: hllc_lm now \
+             IS the published Fleischmann scheme (the clamped variant is retired). use \
+             solver=hllc_lm, with wb_reconstruction=True for stratified problems."
+                .to_string(),
+        ),
         // acoustic-consistency scaling: no reference mach number (newtonian only).
         "hllc_acoustic" | "hllc-acoustic" => Ok(Solver::HllcAcoustic),
         "hlld" => Ok(Solver::Hlld),

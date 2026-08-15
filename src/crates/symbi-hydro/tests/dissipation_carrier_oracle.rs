@@ -2,7 +2,7 @@
 // dissipation_carrier_oracle.rs
 //
 // unit + carrier-equivalence coverage for the adaptive-dissipation detectors in
-// `symbi_hydro::dissipation` (adaptive_phi, local_mach).
+// `symbi_hydro::dissipation` (fleischmann_phi, local_mach).
 // these are carrier-generic over `S: Scalar` and used in the HLLC riemann path, so each one
 // needs a Gv-equivalence test that ALSO renders to device source.
 //
@@ -21,7 +21,7 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
-use symbi_hydro::dissipation::{adaptive_phi, local_mach};
+use symbi_hydro::dissipation::{MACH_LIMIT, fleischmann_phi, local_mach};
 use symbi_hydro::state::Prim;
 use symbi_ir::algebra::Scalar;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -143,14 +143,20 @@ fn names_with_gamma() -> Vec<&'static str> {
 /// states while exercising the same scalar interface the riemann solvers call.
 fn phi_of(l: &Prim<f64, D>, r: &Prim<f64, D>, n: &Tensor<f64, D>) -> f64 {
     let cs = |p: &Prim<f64, D>| (GAMMA * p.pre / p.rho).sqrt();
-    adaptive_phi(l.vel.dot(n), r.vel.dot(n), cs(l), cs(r), l.pre, r.pre)
+    fleischmann_phi(l.vel.dot(n), r.vel.dot(n), cs(l), cs(r), MACH_LIMIT)
 }
 
 /// the same shape, carrier-generic, for the Gv lowering checks.
 fn phi_of_gv<S: symbi_hydro::Scalar>(p: &[S]) -> S {
     let (pl, pr, nh) = (prim_l(p), prim_r(p), nhat(p));
     let cs = |q: &Prim<S, D>| (p[10] * q.pre / q.rho).sqrt();
-    adaptive_phi(pl.vel.dot(&nh), pr.vel.dot(&nh), cs(&pl), cs(&pr), pl.pre, pr.pre)
+    fleischmann_phi(
+        pl.vel.dot(&nh),
+        pr.vel.dot(&nh),
+        cs(&pl),
+        cs(&pr),
+        S::from_f64(MACH_LIMIT),
+    )
 }
 
 fn close(a: f64, b: f64, what: &str) {
@@ -219,12 +225,12 @@ fn local_mach_carrier_equivalence() {
 }
 
 // =============================================================================
-// adaptive_phi — the acoustic-dissipation scaling, and nothing else:
+// fleischmann_phi — the published acoustic-dissipation ramp, and nothing else:
 // phi = sin(min(Ma_local / 0.1, 1) * pi/2), with Ma_local the FACE-NORMAL mach number.
 // =============================================================================
 
 #[test]
-fn adaptive_phi_f64_low_mach_ramp() {
+fn ramp_f64_low_mach() {
     // smooth subsonic flow, no detector fires: phi follows the sin ramp.
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
@@ -244,7 +250,7 @@ fn adaptive_phi_f64_low_mach_ramp() {
 }
 
 #[test]
-fn adaptive_phi_f64_clamped_high_mach() {
+fn ramp_f64_saturates_above_the_limit() {
     // supersonic: ma >> mach_lim -> ratio clamps to 1 -> sin(pi/2) = 1 -> phi = 1.
     let n = Tensor::<f64, D>::unit(0);
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
@@ -261,7 +267,7 @@ fn adaptive_phi_f64_clamped_high_mach() {
 }
 
 #[test]
-fn adaptive_phi_is_the_sine_ramp_on_pressure_uniform_faces() {
+fn ramp_is_the_published_sine_on_any_face() {
     // `phi = sin(min(1, Ma_local / Ma_limit) * pi/2)` — Fleischmann, Adami & Adams 2020 eq 24 —
     // against the closed form at several mach numbers, on faces with NO pressure jump. there the
     // compressibility-consistency clamp is an exact zero, so the ramp is the whole law and the
@@ -311,69 +317,6 @@ fn adaptive_phi_is_the_sine_ramp_on_pressure_uniform_faces() {
     assert!(
         (phi - expect).abs() < 1e-12,
         "a contact discontinuity at Ma = {ma:.4e} gave phi = {phi}; eq 24 alone gives {expect}"
-    );
-}
-
-#[test]
-fn the_clamp_restores_dissipation_on_stratified_faces_and_only_there() {
-    // the compressibility-consistency clamp: the ramp's derivation assumes the incompressible
-    // fluctuation scaling `dp/p ~ gamma Ma^2`; a face whose pressure jump sits far above that
-    // scale at low mach is a stratified balance (dp/p ~ dx/H, mach-independent), where cutting
-    // the acoustic dissipation lets the hydrostatic residual ring and the entropy floor
-    // `K >= K_0` fails on a sealed column. measured regimes this separates: an accretor
-    // atmosphere carries dx/H = 0.075-0.25 per face at Ma ~ 0.025 (jump/scale ~ 100), while
-    // mach-0.06 taylor-green turbulence carries jump/scale ~ 0.05.
-    let n = Tensor::<f64, D>::unit(0);
-    let face = |pre_r: f64, ma: f64| {
-        let mk = |pre: f64| Prim::<f64, D> {
-            rho: 1.0,
-            vel: Tensor::new([ma * (GAMMA * 1.0_f64 / 1.0).sqrt(), 0.0]),
-            pre,
-        };
-        phi_of(&mk(1.0), &mk(pre_r), &n)
-    };
-    // a hydrostatic-scale jump at deep low mach: full classical dissipation restored.
-    assert_eq!(
-        face(1.05, 0.025),
-        1.0,
-        "a dp/p = 0.05 face at Ma 0.025 is two orders above the incompressible scale and \
-         must recover classical HLLC exactly"
-    );
-    // an incompressible-scale jump at the same mach: the clamp must lose to the ramp
-    // bit-for-bit — inert means the same float, which is what keeps a low-mach turbulence
-    // run byte-identical to the pure-ramp scheme.
-    let ma = 0.06;
-    let tiny_jump = 1.0 + 0.1 * GAMMA * ma * ma;
-    let ramp_only = face(1.0, ma);
-    assert_eq!(
-        face(tiny_jump, ma),
-        ramp_only,
-        "an incompressible-scale pressure fluctuation engaged the clamp; smooth subsonic \
-         turbulence would no longer be byte-stable"
-    );
-    // the clamp is dimensionless: rescaling both pressures together leaves phi unchanged —
-    // exactly wherever the clamp is saturated, and to rounding (the `p_l - p_r` subtraction
-    // re-rounds at each scale) on the ramp of the clamp itself.
-    let scaled = |s: f64, hi: f64| {
-        // the velocity rides each state's own sound speed so the mach number is held
-        // fixed while the pressure scale sweeps — otherwise the probe moves along the
-        // ramp and measures the mach dependence instead of the units dependence.
-        let mk = |pre: f64| Prim::<f64, D> {
-            rho: 1.0,
-            vel: Tensor::new([0.025 * (GAMMA * pre / 1.0).sqrt(), 0.0]),
-            pre,
-        };
-        phi_of(&mk(1.0 * s), &mk(hi * s), &n)
-    };
-    assert_eq!(
-        scaled(1.0, 1.05),
-        scaled(1e30, 1.05),
-        "pressure units leaked into the saturated clamp"
-    );
-    let (a, b) = (scaled(1.0, 1.005), scaled(1e30, 1.005));
-    assert!(
-        ((a - b) / a).abs() < 1e-12,
-        "pressure units leaked into the unsaturated clamp: {a} vs {b}"
     );
 }
 
@@ -429,7 +372,7 @@ fn the_mach_number_is_the_face_normal_component_not_the_speed() {
 }
 
 #[test]
-fn adaptive_phi_carrier_equivalence() {
+fn ramp_carrier_equivalence() {
     let cs = (GAMMA * 1.0_f64 / 1.0).sqrt();
     let n = Tensor::<f64, D>::unit(0);
     let mk = |rho: f64, vx: f64, pre: f64| Prim::<f64, D> {
@@ -452,13 +395,13 @@ fn adaptive_phi_carrier_equivalence() {
         close(
             want,
             got,
-            &format!("adaptive_phi(rho_l={}, rho_r={})", l.rho, r.rho),
+            &format!("fleischmann_phi(rho_l={}, rho_r={})", l.rho, r.rho),
         );
     }
 }
 
 #[test]
-fn adaptive_phi_lowers() {
+fn ramp_lowers() {
     assert_lowers(|p| phi_of_gv(p), &names_with_gamma());
 }
 

@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use symbi_expr::dag::{Node, Payload};
 use symbi_expr::op::Op;
 use symbi_ir::ElementTy;
-use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
+use symbi_ir::graph::{ConstValue, ElementWiseOp, Graph, NodeId};
 
 use crate::source_spec::BuiltSource;
 
@@ -48,9 +48,10 @@ pub enum BridgeError {
 
 /// how a `symbi-expr` op maps onto the `symbi-ir` algebra. leaves + `IfThenElse` are
 /// handled directly in the walk; this covers the arithmetic / transcendental interior.
+/// one wrapper, one graph tag: the arithmetic and transcendental interiors land on the
+/// same `ElementWiseOp` family.
 enum Mapped {
     Elem(ElementWiseOp),
-    Trans(TranscendentalOp),
 }
 
 fn map_op(op: Op) -> Option<Mapped> {
@@ -78,22 +79,22 @@ fn map_op(op: Op) -> Option<Mapped> {
         Or => Mapped::Elem(ElementWiseOp::BitOr),
         Not => Mapped::Elem(ElementWiseOp::BitNot),
         // math functions -> Transcendental (the complete set; ElementWise lacks Tan/Exp/Log/...).
-        Log => Mapped::Trans(TranscendentalOp::Log),
-        Log10 => Mapped::Trans(TranscendentalOp::Log10),
-        Exp => Mapped::Trans(TranscendentalOp::Exp),
-        Sin => Mapped::Trans(TranscendentalOp::Sin),
-        Cos => Mapped::Trans(TranscendentalOp::Cos),
-        Tan => Mapped::Trans(TranscendentalOp::Tan),
-        Asin => Mapped::Trans(TranscendentalOp::Asin),
-        Acos => Mapped::Trans(TranscendentalOp::Acos),
-        Atan => Mapped::Trans(TranscendentalOp::Atan),
-        Atan2 => Mapped::Trans(TranscendentalOp::Atan2),
-        Sinh => Mapped::Trans(TranscendentalOp::Sinh),
-        Cosh => Mapped::Trans(TranscendentalOp::Cosh),
-        Tanh => Mapped::Trans(TranscendentalOp::Tanh),
-        Asinh => Mapped::Trans(TranscendentalOp::Asinh),
-        Acosh => Mapped::Trans(TranscendentalOp::Acosh),
-        Atanh => Mapped::Trans(TranscendentalOp::Atanh),
+        Log => Mapped::Elem(ElementWiseOp::Log),
+        Log10 => Mapped::Elem(ElementWiseOp::Log10),
+        Exp => Mapped::Elem(ElementWiseOp::Exp),
+        Sin => Mapped::Elem(ElementWiseOp::Sin),
+        Cos => Mapped::Elem(ElementWiseOp::Cos),
+        Tan => Mapped::Elem(ElementWiseOp::Tan),
+        Asin => Mapped::Elem(ElementWiseOp::Asin),
+        Acos => Mapped::Elem(ElementWiseOp::Acos),
+        Atan => Mapped::Elem(ElementWiseOp::Atan),
+        Atan2 => Mapped::Elem(ElementWiseOp::Atan2),
+        Sinh => Mapped::Elem(ElementWiseOp::Sinh),
+        Cosh => Mapped::Elem(ElementWiseOp::Cosh),
+        Tanh => Mapped::Elem(ElementWiseOp::Tanh),
+        Asinh => Mapped::Elem(ElementWiseOp::Asinh),
+        Acosh => Mapped::Elem(ElementWiseOp::Acosh),
+        Atanh => Mapped::Elem(ElementWiseOp::Atanh),
         // leaves / ternary handled in the walk; Sgn + Mod have no carrier primitive.
         Constant | VariableX1 | VariableX2 | VariableX3 | VariableT | Parameter | VariableRho
         | VariableVel1 | VariableVel2 | VariableVel3 | VariablePressure | VariableCellVolume
@@ -225,7 +226,6 @@ pub fn lower_dag_to_builtsource(
                 };
                 match mapped {
                     Mapped::Elem(op) => g.element_wise(op, args, None),
-                    Mapped::Trans(op) => g.transcendental(op, args, None),
                 }
             }
         };

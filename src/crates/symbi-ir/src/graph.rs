@@ -172,14 +172,31 @@ pub enum ElementWiseOp {
     Ceil,
     Round,
     Trunc,
-    // transcendental unary (input: float, result: float)
+    // transcendental unary (input: float, result: float). ONE tag per math op: these
+    // absorbed the parallel `TranscendentalOp` family, which carried the same eight ops
+    // under a second tag -- two tags for `sin(x)` defeated hash-consing between them, split
+    // the support-inference tables (asinh fell through the crack), and left the proof
+    // extractor blind to every op that only existed on the other tag.
     Sin,
     Cos,
+    Tan,
+    Asin,
     Acos,
+    Atan,
+    Exp,
+    Exp2,
+    Log,
+    Log2,
+    Log10,
     Sinh,
     Cosh,
+    Tanh,
     Asinh,
     Acosh,
+    Atanh,
+    // transcendental binary (float)
+    Atan2,
+    Hypot,
     // transcendental binary: Pow(a, b) = a^b (float)
     Pow,
     // numeric conversion (the usual-arithmetic-conversions primitive): `Cast(to)(x)`
@@ -212,6 +229,9 @@ pub enum ElementWiseOp {
 
 impl ElementWiseOp {
     pub fn arity(self) -> usize {
+        // EXHAUSTIVE on purpose: with a `_ => 1` catch-all, a new binary variant compiles
+        // and silently reports arity 1, so `element_wise` accepts a one-operand call and
+        // drops the second operand. a new variant must name its arity here or not build.
         match self {
             ElementWiseOp::Add
             | ElementWiseOp::Sub
@@ -229,8 +249,37 @@ impl ElementWiseOp {
             | ElementWiseOp::BitAnd
             | ElementWiseOp::BitOr
             | ElementWiseOp::BitXor
+            | ElementWiseOp::Atan2
+            | ElementWiseOp::Hypot
             | ElementWiseOp::Pow => 2,
-            _ => 1,
+            ElementWiseOp::Neg
+            | ElementWiseOp::Abs
+            | ElementWiseOp::Sqrt
+            | ElementWiseOp::Floor
+            | ElementWiseOp::Ceil
+            | ElementWiseOp::Round
+            | ElementWiseOp::Trunc
+            | ElementWiseOp::IsFinite
+            | ElementWiseOp::IsNaN
+            | ElementWiseOp::Sin
+            | ElementWiseOp::Cos
+            | ElementWiseOp::Tan
+            | ElementWiseOp::Asin
+            | ElementWiseOp::Acos
+            | ElementWiseOp::Atan
+            | ElementWiseOp::Exp
+            | ElementWiseOp::Exp2
+            | ElementWiseOp::Log
+            | ElementWiseOp::Log2
+            | ElementWiseOp::Log10
+            | ElementWiseOp::Sinh
+            | ElementWiseOp::Cosh
+            | ElementWiseOp::Tanh
+            | ElementWiseOp::Asinh
+            | ElementWiseOp::Acosh
+            | ElementWiseOp::Atanh
+            | ElementWiseOp::Cast(_)
+            | ElementWiseOp::BitNot => 1,
         }
     }
 
@@ -302,6 +351,18 @@ impl ElementWiseOp {
             ElementWiseOp::Cosh => "Cosh",
             ElementWiseOp::Asinh => "Asinh",
             ElementWiseOp::Acosh => "Acosh",
+            ElementWiseOp::Tan => "Tan",
+            ElementWiseOp::Asin => "Asin",
+            ElementWiseOp::Atan => "Atan",
+            ElementWiseOp::Exp => "Exp",
+            ElementWiseOp::Exp2 => "Exp2",
+            ElementWiseOp::Log => "Log",
+            ElementWiseOp::Log2 => "Log2",
+            ElementWiseOp::Log10 => "Log10",
+            ElementWiseOp::Tanh => "Tanh",
+            ElementWiseOp::Atanh => "Atanh",
+            ElementWiseOp::Atan2 => "Atan2",
+            ElementWiseOp::Hypot => "Hypot",
             ElementWiseOp::Pow => "Pow",
             ElementWiseOp::BitAnd => "BitAnd",
             ElementWiseOp::BitOr => "BitOr",
@@ -386,66 +447,6 @@ impl ReduceOp {
     }
 }
 
-/// transcendental ops. all take float inputs, all produce Tainted
-/// results because CPU libm and GPU libdevice may drift up to a few
-/// ULP — same rule as the existing scalar IR.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TranscendentalOp {
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Atan2,
-    Exp,
-    Exp2,
-    Log,
-    Log2,
-    Log10,
-    Sinh,
-    Cosh,
-    Tanh,
-    Asinh,
-    Acosh,
-    Atanh,
-    Pow,
-    Hypot,
-}
-
-impl TranscendentalOp {
-    pub fn arity(self) -> usize {
-        match self {
-            TranscendentalOp::Atan2 | TranscendentalOp::Pow | TranscendentalOp::Hypot => 2,
-            _ => 1,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            TranscendentalOp::Sin => "Sin",
-            TranscendentalOp::Cos => "Cos",
-            TranscendentalOp::Tan => "Tan",
-            TranscendentalOp::Asin => "Asin",
-            TranscendentalOp::Acos => "Acos",
-            TranscendentalOp::Atan => "Atan",
-            TranscendentalOp::Atan2 => "Atan2",
-            TranscendentalOp::Exp => "Exp",
-            TranscendentalOp::Exp2 => "Exp2",
-            TranscendentalOp::Log => "Log",
-            TranscendentalOp::Log2 => "Log2",
-            TranscendentalOp::Log10 => "Log10",
-            TranscendentalOp::Sinh => "Sinh",
-            TranscendentalOp::Cosh => "Cosh",
-            TranscendentalOp::Tanh => "Tanh",
-            TranscendentalOp::Asinh => "Asinh",
-            TranscendentalOp::Acosh => "Acosh",
-            TranscendentalOp::Atanh => "Atanh",
-            TranscendentalOp::Pow => "Pow",
-            TranscendentalOp::Hypot => "Hypot",
-        }
-    }
-}
 
 /// the IR op carried by a node.
 ///
@@ -474,7 +475,6 @@ pub enum Op {
     ElementWise(ElementWiseOp, Vec<NodeId>),
     /// transcendental op (sin/cos/exp/etc.). arity 1 or 2 depending on
     /// the op tag.
-    Transcendental(TranscendentalOp, Vec<NodeId>),
     /// non-sum reduction over named axes.
     Reduce(ReduceOp, Vec<u32>, NodeId),
     /// element-wise if/else. cond must be Bool; then/else share element
@@ -661,7 +661,6 @@ impl Op {
 
             // Vec<NodeId> field.
             Op::ElementWise(_, ins)
-            | Op::Transcendental(_, ins)
             | Op::Construct(ins)
             | Op::LoadAt(_, ins)
             | Op::Apply { args: ins, .. } => {
@@ -794,7 +793,6 @@ impl Op {
             Op::Index(input, dims) => target.index(input, dims, span),
             Op::Broadcast(input, shape) => target.broadcast(input, shape, span),
             Op::ElementWise(op, inputs) => target.element_wise(op, inputs, span),
-            Op::Transcendental(op, inputs) => target.transcendental(op, inputs, span),
             Op::Reduce(op, axes, input) => target.reduce(op, axes, input, span),
             Op::Select(c, t, e) => target.select(c, t, e, span),
             Op::LoadAt(sym, components) => target.load_at(sym, components, span),
@@ -1364,95 +1362,6 @@ impl Graph {
         }
     }
 
-    /// transcendental op. arity 1 or 2 per op tag. inputs must be
-    /// float; all inputs share element + shape (broadcast-aware for
-    /// binary).
-    pub fn transcendental(
-        &mut self,
-        op: TranscendentalOp,
-        inputs: Vec<NodeId>,
-        span: Option<Span>,
-    ) -> NodeId {
-        let want_arity = op.arity();
-        if inputs.len() != want_arity {
-            self.record_error(ShapeError::Other {
-                message: format!(
-                    "Transcendental({}) requires {} input(s), got {}",
-                    op.name(),
-                    want_arity,
-                    inputs.len()
-                ),
-                span,
-            });
-            return self.push(
-                Op::Transcendental(op, inputs),
-                TensorTy::scalar(ElementTy::F64),
-                span,
-            );
-        }
-
-        let in_tys: Vec<TensorTy> = inputs
-            .iter()
-            .map(|id| self.types[id.0 as usize].clone())
-            .collect();
-        let in_spans: Vec<Option<Span>> = inputs
-            .iter()
-            .map(|id| self.nodes[id.0 as usize].span)
-            .collect();
-
-        let first_elem = in_tys[0].element;
-        if !first_elem.is_float() {
-            self.record_error(ShapeError::Other {
-                message: format!(
-                    "Transcendental({}) requires a float input, got {}",
-                    op.name(),
-                    first_elem
-                ),
-                span,
-            });
-        }
-        for (i, t) in in_tys.iter().enumerate().skip(1) {
-            if t.element != first_elem {
-                self.record_error(ShapeError::ElementMismatch {
-                    left: first_elem,
-                    right: t.element,
-                    span_a: in_spans[0],
-                    span_b: in_spans[i],
-                    context: format!("Transcendental({}) input {}", op.name(), i),
-                });
-            }
-        }
-
-        let out_shape = if want_arity == 1 {
-            in_tys[0].shape.clone()
-        } else {
-            match broadcast_shape(&in_tys[0].shape, &in_tys[1].shape) {
-                Some(s) => s,
-                None => {
-                    self.record_error(ShapeError::BroadcastIncompatible {
-                        left: in_tys[0].shape.clone(),
-                        right: in_tys[1].shape.clone(),
-                        span,
-                        context: format!("Transcendental({})", op.name()),
-                    });
-                    in_tys[0].shape.clone()
-                }
-            }
-        };
-
-        let out_ty = TensorTy {
-            element: first_elem,
-            rank: out_shape.len() as u32,
-            shape: out_shape,
-        };
-        self.push(Op::Transcendental(op, inputs), out_ty, span)
-    }
-
-    // ----- builders: Reduce + Select -----
-
-    /// reduce a tensor along the given axes. axes must be sorted, in
-    /// bounds, with no duplicates. Min/Max accept float or int inputs;
-    /// Or/And/Xor accept int or bool.
     pub fn reduce(
         &mut self,
         op: ReduceOp,
@@ -2727,7 +2636,7 @@ mod tests {
     fn transcendental_sin_preserves_element() {
         let mut g = Graph::new();
         let a = scalar_f64(&mut g, "a");
-        let r = g.transcendental(TranscendentalOp::Sin, vec![a], None);
+        let r = g.element_wise(ElementWiseOp::Sin, vec![a], None);
         assert!(!g.has_errors());
         assert_eq!(g.ty(r).element, ElementTy::F64);
     }
@@ -2736,7 +2645,7 @@ mod tests {
     fn transcendental_preserves_shape() {
         let mut g = Graph::new();
         let v = vec_f64(&mut g, "v", 3);
-        let r = g.transcendental(TranscendentalOp::Cos, vec![v], None);
+        let r = g.element_wise(ElementWiseOp::Cos, vec![v], None);
         assert_eq!(g.ty(r).shape, vec![lit(3)]);
     }
 
@@ -2745,7 +2654,7 @@ mod tests {
         let mut g = Graph::new();
         let y = scalar_f64(&mut g, "y");
         let x = scalar_f64(&mut g, "x");
-        let r = g.transcendental(TranscendentalOp::Atan2, vec![y, x], None);
+        let r = g.element_wise(ElementWiseOp::Atan2, vec![y, x], None);
         assert!(!g.has_errors());
         assert_eq!(g.ty(r).element, ElementTy::F64);
     }
@@ -2755,7 +2664,7 @@ mod tests {
         let mut g = Graph::new();
         let b = scalar_f64(&mut g, "b");
         // Pow wants 2, pass 1
-        let _ = g.transcendental(TranscendentalOp::Pow, vec![b], None);
+        let _ = g.element_wise(ElementWiseOp::Pow, vec![b], None);
         let err = g.errors()[0].summary();
         assert!(err.contains("Pow"), "{}", err);
     }
@@ -2764,7 +2673,7 @@ mod tests {
     fn transcendental_rejects_non_float() {
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::I32);
-        let _ = g.transcendental(TranscendentalOp::Sin, vec![a], None);
+        let _ = g.element_wise(ElementWiseOp::Sin, vec![a], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
         assert!(
             summaries.iter().any(|s| s.contains("float")),
@@ -2784,9 +2693,9 @@ mod tests {
         assert!(ElementWiseOp::Sqrt.requires_float());
         assert!(!ElementWiseOp::Add.requires_float());
 
-        assert_eq!(TranscendentalOp::Atan2.arity(), 2);
-        assert_eq!(TranscendentalOp::Sin.arity(), 1);
-        assert_eq!(TranscendentalOp::Sin.name(), "Sin");
+        assert_eq!(ElementWiseOp::Atan2.arity(), 2);
+        assert_eq!(ElementWiseOp::Sin.arity(), 1);
+        assert_eq!(ElementWiseOp::Sin.name(), "Sin");
     }
 
     // ---- Reduce ----

@@ -385,7 +385,7 @@ pub(crate) fn rust_type_name(e: ElementTy, generic: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy, TranscendentalOp,
+        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy,
         scalarize,
     };
 
@@ -494,7 +494,7 @@ mod tests {
     fn transcendental_sin_emits_method() {
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
-        let s = g.transcendental(TranscendentalOp::Sin, vec![x], None);
+        let s = g.element_wise(ElementWiseOp::Sin, vec![x], None);
         let f = scalarize(&g, s, "sinx");
         let src = emit_cpu(&f);
         assert_parses(&src);

@@ -102,7 +102,7 @@ fn build(balanced: bool) -> Hier {
         .set_initial(hydrostatic)
         .build();
     let kernels = Kset::new(GAMMA, CFL, &sim.geom.allocated)
-        .with_solver(Solver::HllcLmPlain)
+        .with_solver(Solver::HllcLm)
         .expect("solver/regime mismatch")
         .well_balanced_reconstruction(balanced);
     Hierarchy::single(sim, kernels).with_bodies(symbi_ib::BodyCollection::new().add(

@@ -72,12 +72,14 @@ fn kinetic_energy_after(solver: Solver, t_end: f64) -> f64 {
 }
 
 /// decaying taylor-green flow at mach 0.06: several eddy turnovers of viscous-free
-/// decay, where every dissipated joule is numerical. the clamped low-mach scheme
-/// must retain strictly more kinetic energy than classical HLLC — the reduction
-/// this solver family exists for — and the margin must be substantial: equal
-/// retention means the clamp fires broadly enough to revert the scheme.
+/// decay, where every dissipated joule is numerical. the low-mach scheme must retain
+/// strictly more kinetic energy than classical HLLC -- the reduction this solver
+/// exists for -- and the margin must be substantial. (measured under the retired
+/// clamped variant the retention was 0.8576 of E_0 against classical's 0.7125; the
+/// published ramp matched it to 1.4e-5 of E_0 on this flow, so the collapse of the
+/// two arms moved nothing here.)
 #[test]
-fn the_clamped_low_mach_scheme_stays_less_dissipative_than_classical_hllc() {
+fn the_low_mach_scheme_stays_less_dissipative_than_classical_hllc() {
     let t_end = 8.0;
     let e_lm = kinetic_energy_after(Solver::HllcLm, t_end);
     let e_std = kinetic_energy_after(Solver::Hllc, t_end);
@@ -103,48 +105,5 @@ fn the_clamped_low_mach_scheme_stays_less_dissipative_than_classical_hllc() {
          dissipated under hllc",
         e_lm - e_std,
         dissipated_std
-    );
-}
-
-/// the UNCLAMPED published ramp on the same decaying taylor-green flow. per FACE the clamp
-/// only adds dissipation (`phi_clamped = max(ramp, clamp) >= ramp`), but the total retained
-/// energy is NOT monotone in per-face dissipation across a nonlinear trajectory -- measured,
-/// the two arms differ by 1.4e-5 of E_0 with the clamped one ahead, pure trajectory noise.
-/// the honest invariants are therefore
-///
-///   - the two ramps agree to a small fraction of the energy classical HLLC dissipates
-///     (they are the same scheme wherever the clamp is silent, and at mach 0.06 it nearly
-///     always is), and
-///   - the unclamped ramp beats classical by the same substantial margin the clamped one
-///     is already gated on.
-///
-/// a real regression in either arm moves the retention by tens of percent of the
-/// dissipated energy, orders above both bounds.
-#[test]
-fn the_published_ramp_matches_the_clamped_one_where_the_clamp_is_silent() {
-    let t_end = 8.0;
-    let e_plain_ramp = kinetic_energy_after(Solver::HllcLmPlain, t_end);
-    let e_lm = kinetic_energy_after(Solver::HllcLm, t_end);
-    let e_std = kinetic_energy_after(Solver::Hllc, t_end);
-    let e0 = 0.25 * MACH * MACH;
-    eprintln!(
-        "E_kin(t={t_end})/E_0: hllc_lm_plain {:.6}, hllc_lm {:.6}, hllc {:.6}",
-        e_plain_ramp / e0,
-        e_lm / e0,
-        e_std / e0
-    );
-    let dissipated_std = e0 - e_std;
-    assert!(
-        (e_plain_ramp - e_lm).abs() < 1.0e-3 * dissipated_std,
-        "the two ramps diverged by {:.3e} against {dissipated_std:.3e} dissipated under \
-         classical HLLC; at mach {MACH} the clamp is nearly always silent, so a gap this \
-         size means one arm's scaling has changed",
-        (e_plain_ramp - e_lm).abs()
-    );
-    assert!(
-        (e_plain_ramp - e_std) > 0.1 * dissipated_std,
-        "the unclamped ramp's retention margin over classical collapsed: {:.3e} against \
-         {dissipated_std:.3e} dissipated",
-        e_plain_ramp - e_std
     );
 }

@@ -17,7 +17,7 @@
 // =============================================================================
 
 use super::hlle::hlle;
-use crate::dissipation::{ShockwaveLimiter, acoustic_phi, adaptive_phi, fleischmann_phi};
+use crate::dissipation::{ShockwaveLimiter, acoustic_phi, fleischmann_phi};
 use crate::eos::Eos;
 use crate::mhd_state::{MhdCons, MhdPrim};
 use crate::newtonian::Newtonian;
@@ -251,9 +251,7 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
         // subsonic intermediate flux, and where the whole fan travels one way the physical flux is
         // the upwind one. dropping those branches leaves a supersonic face carrying `F_* != F_L`,
         // an error of several percent that no amount of dissipation tuning removes.
-        ShockwaveLimiter::Fleischmann
-        | ShockwaveLimiter::FleischmannClamped
-        | ShockwaveLimiter::Acoustic => S::branch(
+        ShockwaveLimiter::Fleischmann | ShockwaveLimiter::Acoustic => S::branch(
             s_l.cmp_ge(vface),
             || f_l - u_l * vface,
             || {
@@ -274,9 +272,6 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
                                 vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre, prim_l.rho,
                                 prim_r.rho, S::ZERO,
                             ),
-                            ShockwaveLimiter::FleischmannClamped => {
-                                adaptive_phi(vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre)
-                            }
                             // `Standard` never reaches this branch; `Fleischmann` is the
                             // published ramp, with no clamp on the pressure jump.
                             _ => fleischmann_phi(vn_l, vn_r, cs_l, cs_r, mach_limit),
@@ -467,9 +462,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                         // lorentz factor, which at a grid-aligned shock is dominated by the
                         // TRANSVERSE motion — reintroducing exactly the contamination that keying on
                         // the face-normal component removes.
-                        ShockwaveLimiter::Fleischmann
-                        | ShockwaveLimiter::FleischmannClamped
-                        | ShockwaveLimiter::Acoustic => {
+                        ShockwaveLimiter::Fleischmann | ShockwaveLimiter::Acoustic => {
                             let cs_l =
                                 crate::rhd::sound_speed_sq(eos, prim_l.rho, prim_l.pre).sqrt();
                             let cs_r =
@@ -480,9 +473,6 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
                                 ShockwaveLimiter::Acoustic => acoustic_phi(
                                     vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre,
                                     prim_l.rho, prim_r.rho, S::ZERO,
-                                ),
-                                ShockwaveLimiter::FleischmannClamped => adaptive_phi(
-                                    vn_l, vn_r, cs_l, cs_r, prim_l.pre, prim_r.pre,
                                 ),
                                 // the relativistic arm carries no runtime reference mach
                                 // number: its LM selector is the clamped one, so this

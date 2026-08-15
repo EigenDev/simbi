@@ -667,7 +667,7 @@ fn cuda_method_to_fn(method: &str) -> &str {
 mod tests {
     use super::*;
     use crate::{
-        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy, TranscendentalOp,
+        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy,
         scalarize,
     };
 
@@ -816,7 +816,7 @@ mod tests {
     fn transcendental_sin_uses_sin_function() {
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
-        let s = g.transcendental(TranscendentalOp::Sin, vec![x], None);
+        let s = g.element_wise(ElementWiseOp::Sin, vec![x], None);
         let f = scalarize(&g, s, "sinx");
         let src = emit_cuda(&f);
         assert!(src.contains("sin(x)"));
@@ -826,7 +826,7 @@ mod tests {
     fn transcendental_ln_maps_to_log() {
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
-        let l = g.transcendental(TranscendentalOp::Log, vec![x], None);
+        let l = g.element_wise(ElementWiseOp::Log, vec![x], None);
         let f = scalarize(&g, l, "lnx");
         let src = emit_cuda(&f);
         // Rust's ln -> C++ log(double)
@@ -843,7 +843,7 @@ mod tests {
         let mut g = Graph::new();
         let b = g.add_scalar_param("b", ElementTy::F64);
         let e = g.add_scalar_param("e", ElementTy::F64);
-        let r = g.transcendental(TranscendentalOp::Pow, vec![b, e], None);
+        let r = g.element_wise(ElementWiseOp::Pow, vec![b, e], None);
         let f = scalarize(&g, r, "powbe");
         let src = emit_cuda(&f);
         assert!(src.contains("pow(b, e)"));

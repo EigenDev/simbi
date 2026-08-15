@@ -76,7 +76,6 @@ pub use element::ElementTy;
 pub use error::ShapeError;
 pub use graph::{
     ConstValue, DimIndex, ElementWiseOp, FnDef, FnId, Graph, Node, NodeId, Op, ReduceOp,
-    TranscendentalOp,
 };
 pub use symbol::Symbol;
 pub use ty::TensorTy;
