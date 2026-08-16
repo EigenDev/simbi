@@ -979,7 +979,7 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 ## Acknowledgements
 SIMBI was developed at the Center for Cosmology and Paricle Physics (CCPP) at New York University, and I thank the CCPP group for their support and feedback. I also thanks
 the following people for their contributions to the project:
-- **Andrew Macfadyen** (NYU) for his mentorship and guidance on the project.
+- **Andrew MacFadyen** (NYU) for his mentorship and guidance on the project.
 - **Jonathan Zrake** (Clemson University) for his intellectual feedback on the endeavor.
 - **Jim Stone** (Institute for Advanced Study) for his feedback on the MHD implementation and pointing me towards the robust conserved to primitive formalism of [Kastaun et al. 2021](https://scixplorer.org/abs/2021PhRvD.103b3018K/abstract).
 - **Romain Teyssier** (Princeton University) for his willingness to talk shop with me. Especially during my embarkment towards mesh refinement.
