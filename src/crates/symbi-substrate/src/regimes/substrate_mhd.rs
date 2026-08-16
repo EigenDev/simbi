@@ -229,6 +229,25 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
+    /// the field bound to the kernel ABI's pressure slot: the pressure itself on an
+    /// energy-carrying regime, the conserved density on isothermal ones. the ABI is
+    /// uniform across the regime family, so the slot must carry SOME live field on
+    /// iso; density is the regime's own positivity-bearing quantity, which is what
+    /// the c2p probes anchor on there.
+    fn pressure_slot<'a, const DOF: usize>(
+        &self,
+        sim: &'a FieldStore<D, DOF, Mem, Sc>,
+    ) -> &'a Field<Sc, D, Mem> {
+        if R::SPEC.has_energy {
+            sim.fields
+                .prim
+                .pre_field()
+                .expect("MHD energy regime requires prim.pre")
+        } else {
+            &sim.fields.cons.den
+        }
+    }
+
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
@@ -432,14 +451,7 @@ where
             ),
             o => panic!("{} flux: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
-        let pre_bind = if R::SPEC.has_energy {
-            sim.fields
-                .prim
-                .pre_field()
-                .expect("MHD energy regime requires prim.pre")
-        } else {
-            &sim.fields.cons.den
-        };
+        let pre_bind = self.pressure_slot(sim);
         dispatch_named(sim, pre_bind, None, dir, &flux_name, &face, &[], &scalars);
     }
 
@@ -466,14 +478,7 @@ where
         ac: f64,
         stage: u8,
     ) -> bool {
-        let pre_bind = if R::SPEC.has_energy {
-            sim.fields
-                .prim
-                .pre_field()
-                .expect("MHD energy regime requires prim.pre")
-        } else {
-            &sim.fields.cons.den
-        };
+        let pre_bind = self.pressure_slot(sim);
         // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the SINGLE
         // (Euler, tag 0) and CORRECTOR (rk2, tag 2) stages, never the predictor (tag 1, which leaves
         // bcell flux-predicted). re-sync exactly there.
@@ -845,14 +850,7 @@ where
         });
         // bind BY MANIFEST: cons.{den,mom,nrg?} + bcell(3) reads -> prim.{rho,vel,pre?} writes.
         // the energy regimes' `prim.pre` is an OUTPUT here, so `pre` binds the real field.
-        let pre_bind = if R::SPEC.has_energy {
-            sim.fields
-                .prim
-                .pre_field()
-                .expect("MHD energy regime requires prim.pre")
-        } else {
-            &sim.fields.cons.den
-        };
+        let pre_bind = self.pressure_slot(sim);
         dispatch_named(
             sim,
             pre_bind,
@@ -948,14 +946,7 @@ where
         // bind BY MANIFEST: prim + bcell reads -> the per-axis `wave_speed_{l,r}[k]` writes (typed
         // `WaveSpeedL/R(k)`). energy regimes have prim.pre; isothermal (no pressure) passes den as
         // the leading window field (mirrors the cfl dispatch).
-        let pre_bind = if R::SPEC.has_energy {
-            sim.fields
-                .prim
-                .pre_field()
-                .expect("MHD energy regime requires prim.pre")
-        } else {
-            &sim.fields.cons.den
-        };
+        let pre_bind = self.pressure_slot(sim);
         dispatch_named(
             sim,
             pre_bind,
@@ -1060,14 +1051,7 @@ where
         let scalars = scalars_for(&wname, &resolve_scalar);
         // bind BY MANIFEST: prim + bcell reads -> the `scratch` lambda write (the cfl_scratch
         // field, supplied as the scratch override). iso passes a dummy pre (reads cs^2*rho).
-        let pre_bind = if R::SPEC.has_energy {
-            sim.fields
-                .prim
-                .pre_field()
-                .expect("MHD energy regime requires prim.pre")
-        } else {
-            &sim.fields.cons.den
-        };
+        let pre_bind = self.pressure_slot(sim);
         dispatch_named(
             sim,
             pre_bind,

@@ -646,6 +646,20 @@ fn mhd_geom_slug(geom: &Geom) -> &'static str {
     symbi_discretize::kernel_slug::mhd_geom_suffix(geom.coords.to_geometry(), &geom.axes)
 }
 
+// instantiate a const-generic gv builder at a runtime dimension count (grid ndim or
+// momentum ncomp, 1..=3): the builders carry the count as a const parameter, so the
+// runtime value is matched once onto the three monomorphizations.
+macro_rules! gv_dim {
+    ($n:expr, $($seg:ident)::+ $(, $arg:expr)* $(,)?) => {
+        match $n {
+            1 => $($seg)::+::<1>($($arg),*),
+            2 => $($seg)::+::<2>($($arg),*),
+            3 => $($seg)::+::<3>($($arg),*),
+            n => panic!("{}: unsupported dimension {n}", stringify!($($seg)::+)),
+        }
+    };
+}
+
 // every gen_* emits a GV-traced kernel through `emit_gv` — Gv is the sole IR front end.
 
 // the emit chokepoint for a GV-TRACED kernel (symbi-hydro physics instantiated at S=Gv): the
@@ -829,12 +843,7 @@ fn gen_iso_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     // symbi-hydro's `riemann::hlle` at the `IsoNewtonian` regime — the PURE iso (constant
     // cs, p=cs^2*rho recomputed from rho, NO reconstructed prim.pre, no energy flux),
     // replacing the `iso_hlle_flux` Expr builder. cartesian-only + ncomp == ndim.
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::iso_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::iso_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::iso_flux_gv::<3>(dir),
-        _ => panic!("iso_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::iso_flux_gv, dir);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -854,12 +863,7 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: 
     // (ncomp != ndim, non-identity axes) stays on the Expr builder below until the gv flux
     // generalizes over ncomp + the axes mapping (the c2p pattern). numerically equiv (ULP).
     let (k, writes) = if geom.coords == Coords::Cartesian {
-        match ndim {
-            1 => symbi_discretize::gv::adiabatic_flux_gv::<1>(dir, recon),
-            2 => symbi_discretize::gv::adiabatic_flux_gv::<2>(dir, recon),
-            3 => symbi_discretize::gv::adiabatic_flux_gv::<3>(dir, recon),
-            _ => panic!("adiabatic_flux_gv: unsupported ndim {ndim}"),
-        }
+        gv_dim!(ndim, symbi_discretize::gv::adiabatic_flux_gv, dir, recon)
     } else {
         // cyl r-z (ncomp=3 swirl on the 2D (r,z) grid): the sweep coordinate is axes[dir].
         assert!(
@@ -883,12 +887,7 @@ fn gen_iso_c2p(out_dir: &str, ndim: u8) {
     // closure at S=Gv — the SINGLE-SOURCE physics. iso c2p is geometry-independent and
     // ncomp == ndim (the cyl r-z swirl has no iso c2p), so this is the ONLY iso c2p path:
     // no geom branch, no retained builder.
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::iso_c2p_gv::<1>(),
-        2 => symbi_discretize::gv::iso_c2p_gv::<2>(),
-        3 => symbi_discretize::gv::iso_c2p_gv::<3>(),
-        _ => panic!("iso_c2p_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::iso_c2p_gv);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1047,12 +1046,7 @@ fn gen_adiabatic_c2p(out_dir: &str, ndim: u8, geom: Geom) {
     // generic `<NCOMP>` instance drives EVERY geometry; `ndim` only selects the emit grid
     // loop, exactly like rmhd_c2p_gv.
     // CPU+GPU validated (substrate_adiabatic_sod/hydro_gpu cartesian; cylindrical_* cyl r-z).
-    let (k, writes) = match geom.ncomp {
-        1 => symbi_discretize::gv::adiabatic_c2p_gv::<1>(),
-        2 => symbi_discretize::gv::adiabatic_c2p_gv::<2>(),
-        3 => symbi_discretize::gv::adiabatic_c2p_gv::<3>(),
-        nc => panic!("adiabatic_c2p_gv: unsupported ncomp {nc}"),
-    };
+    let (k, writes) = gv_dim!(geom.ncomp, symbi_discretize::gv::adiabatic_c2p_gv);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1068,12 +1062,7 @@ fn gen_rhd_c2p(out_dir: &str, ndim: u8, max_iters: usize, eos: EosArm) {
     // physics (the iterative relativistic c2p; the Newton lowers to one IterateInline).
     // rhd c2p is cartesian-only + ncomp==ndim (no cyl r-z swirl rhd), so this is the
     // ONLY rhd c2p path. max_iters bakes the fixed Newton count.
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_c2p_gv::<1>(max_iters, eos),
-        2 => symbi_discretize::gv::rhd_c2p_gv::<2>(max_iters, eos),
-        3 => symbi_discretize::gv::rhd_c2p_gv::<3>(max_iters, eos),
-        _ => panic!("rhd_c2p_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_c2p_gv, max_iters, eos);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1089,12 +1078,7 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
     // traced at S=Gv — replacing the `rhd_hlle_flux` Expr builder + `rhd_side`. rhd flux
     // is cartesian-only + ncomp == ndim (no cyl r-z rhd), so this is the ONLY rhd flux
     // path. numerically equivalent within ULP.
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_flux_gv::<1>(dir, eos),
-        2 => symbi_discretize::gv::rhd_flux_gv::<2>(dir, eos),
-        3 => symbi_discretize::gv::rhd_flux_gv::<3>(dir, eos),
-        _ => panic!("rhd_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_flux_gv, dir, eos);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1126,30 +1110,15 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
     let lift = gr_chart_dof_tag(&geom);
     let name = format!("rhd_c2p{lift}{}_{ndim}d", geom.spacetime_suffix());
     // the const parameter is the momentum DOF (geom.ncomp); the grid dimension rides geom.axes.
-    let (k, writes) = match geom.ncomp {
-        1 => symbi_discretize::gv::rhd_c2p_gr_gv::<1>(
-            geom.coords,
-            geom.spacetime,
-            &geom.spacing,
-            &geom.axes,
-            max_iters,
-        ),
-        2 => symbi_discretize::gv::rhd_c2p_gr_gv::<2>(
-            geom.coords,
-            geom.spacetime,
-            &geom.spacing,
-            &geom.axes,
-            max_iters,
-        ),
-        3 => symbi_discretize::gv::rhd_c2p_gr_gv::<3>(
-            geom.coords,
-            geom.spacetime,
-            &geom.spacing,
-            &geom.axes,
-            max_iters,
-        ),
-        nc => panic!("rhd_c2p_gr_gv: unsupported ncomp {nc}"),
-    };
+    let (k, writes) = gv_dim!(
+        geom.ncomp,
+        symbi_discretize::gv::rhd_c2p_gr_gv,
+        geom.coords,
+        geom.spacetime,
+        &geom.spacing,
+        &geom.axes,
+        max_iters,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1178,34 +1147,31 @@ fn gen_rhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, rusan
         geom.spacetime_suffix()
     );
     // the const parameter is the momentum DOF (geom.ncomp); the reconstruction grid rides geom.axes.
-    let (k, writes) = match geom.ncomp {
-        1 => symbi_discretize::gv::rhd_flux_gr_gv::<1>(
-            dir,
-            geom.spacetime,
-            geom.coords,
-            &geom.spacing,
-            &geom.axes,
-            rusanov,
-        ),
-        2 => symbi_discretize::gv::rhd_flux_gr_gv::<2>(
-            dir,
-            geom.spacetime,
-            geom.coords,
-            &geom.spacing,
-            &geom.axes,
-            rusanov,
-        ),
-        3 => symbi_discretize::gv::rhd_flux_gr_gv::<3>(
-            dir,
-            geom.spacetime,
-            geom.coords,
-            &geom.spacing,
-            &geom.axes,
-            rusanov,
-        ),
-        nc => panic!("rhd_flux_gr_gv: unsupported ncomp {nc}"),
-    };
+    let (k, writes) = gv_dim!(
+        geom.ncomp,
+        symbi_discretize::gv::rhd_flux_gr_gv,
+        dir,
+        geom.spacetime,
+        geom.coords,
+        &geom.spacing,
+        &geom.axes,
+        rusanov,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the GR-hydro kernel family for one curved-background chart: the covariant godunov
+// stage, the CFL wave-speed map (which also emits the source-admissibility rate and
+// the fofc admissible-boundary projection on any curved spacetime), the metric-aware
+// c2p (20-step masked newton), and the per-sweep face flux with its light-cone
+// rusanov FOFC fallback. one call per (chart, spacetime, ndim) row.
+fn gen_rhd_gr_family(out_dir: &str, ndim: u8, geom: Geom) {
+    gen_godunov_stage(out_dir, ndim, "rhd", true, geom.clone(), None);
+    gen_rhd_wave_speed_map(out_dir, ndim, geom.clone());
+    gen_rhd_c2p_gr(out_dir, ndim, 20, geom.clone());
+    for dir in 0..ndim {
+        gen_rhd_face_flux_gr(out_dir, ndim, dir, geom.clone());
+    }
 }
 
 // the GR-hydro source-admissibility CFL (wu 2017 lambda_S): reads the flux light-cone rate in the
@@ -1285,12 +1251,7 @@ fn gen_rmhd_face_flux(out_dir: &str, ndim: u8) {
 // HLLE-only by physics (no contact wave). cartesian, one per (ndim, dir).
 fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
     let name = format!("adiabatic_face_flux_hllc{}_{ndim}d_{dir}", recon.suffix());
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<1>(dir, recon),
-        2 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<2>(dir, recon),
-        3 => symbi_discretize::gv::adiabatic_hllc_flux_gv::<3>(dir, recon),
-        _ => panic!("adiabatic_hllc_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::adiabatic_hllc_flux_gv, dir, recon);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1306,12 +1267,15 @@ fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Reco
     }
     .build();
     let b = symbi_discretize::coords::Balance::Plain;
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<1>(dir, recon, b, Coords::Cartesian, &g.axes),
-        2 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<2>(dir, recon, b, Coords::Cartesian, &g.axes),
-        3 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<3>(dir, recon, b, Coords::Cartesian, &g.axes),
-        _ => panic!("adiabatic_hllc_lm_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(
+        ndim,
+        symbi_discretize::gv::adiabatic_hllc_lm_flux_gv,
+        dir,
+        recon,
+        b,
+        Coords::Cartesian,
+        &g.axes,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1339,20 +1303,33 @@ fn gen_adiabatic_wb_face_flux(
         ..Default::default()
     }
     .build();
-    let (k, writes) = match (solver_sfx, ndim) {
-        ("_hllc_lm", 1) => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<1>(
-            dir, recon, symbi_discretize::coords::Balance::Hydrostatic, coords, &g.axes),
-        ("_hllc_lm", 2) => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<2>(
-            dir, recon, symbi_discretize::coords::Balance::Hydrostatic, coords, &g.axes),
-        ("_hllc_lm", 3) => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<3>(
-            dir, recon, symbi_discretize::coords::Balance::Hydrostatic, coords, &g.axes),
-        ("_hllc", 1) => symbi_discretize::gv::adiabatic_hllc_wb_flux_gv::<1>(dir, recon, coords, &g.axes),
-        ("_hllc", 2) => symbi_discretize::gv::adiabatic_hllc_wb_flux_gv::<2>(dir, recon, coords, &g.axes),
-        ("_hllc", 3) => symbi_discretize::gv::adiabatic_hllc_wb_flux_gv::<3>(dir, recon, coords, &g.axes),
-        ("", 1) => symbi_discretize::gv::adiabatic_hlle_wb_flux_gv::<1>(dir, recon, coords, &g.axes),
-        ("", 2) => symbi_discretize::gv::adiabatic_hlle_wb_flux_gv::<2>(dir, recon, coords, &g.axes),
-        ("", 3) => symbi_discretize::gv::adiabatic_hlle_wb_flux_gv::<3>(dir, recon, coords, &g.axes),
-        _ => panic!("gen_adiabatic_wb_face_flux: unsupported ({solver_sfx}, {ndim})"),
+    let (k, writes) = match solver_sfx {
+        "_hllc_lm" => gv_dim!(
+            ndim,
+            symbi_discretize::gv::adiabatic_hllc_lm_flux_gv,
+            dir,
+            recon,
+            symbi_discretize::coords::Balance::Hydrostatic,
+            coords,
+            &g.axes,
+        ),
+        "_hllc" => gv_dim!(
+            ndim,
+            symbi_discretize::gv::adiabatic_hllc_wb_flux_gv,
+            dir,
+            recon,
+            coords,
+            &g.axes,
+        ),
+        "" => gv_dim!(
+            ndim,
+            symbi_discretize::gv::adiabatic_hlle_wb_flux_gv,
+            dir,
+            recon,
+            coords,
+            &g.axes,
+        ),
+        _ => panic!("gen_adiabatic_wb_face_flux: unsupported solver {solver_sfx}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1363,34 +1340,24 @@ fn gen_adiabatic_hllc_acoustic_face_flux(out_dir: &str, ndim: u8, dir: u8, recon
         "adiabatic_face_flux_hllc_acoustic{}_{ndim}d_{dir}",
         recon.suffix()
     );
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv::<1>(dir, recon),
-        2 => symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv::<2>(dir, recon),
-        3 => symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv::<3>(dir, recon),
-        _ => panic!("adiabatic_hllc_acoustic_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(
+        ndim,
+        symbi_discretize::gv::adiabatic_hllc_acoustic_flux_gv,
+        dir,
+        recon,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
 fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
     let name = format!("rhd_face_flux_hllc{}_{ndim}d_{dir}", eos.suffix());
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_hllc_flux_gv::<1>(dir, eos),
-        2 => symbi_discretize::gv::rhd_hllc_flux_gv::<2>(dir, eos),
-        3 => symbi_discretize::gv::rhd_hllc_flux_gv::<3>(dir, eos),
-        _ => panic!("rhd_hllc_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_hllc_flux_gv, dir, eos);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
 fn gen_rhd_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8, eos: EosArm) {
     let name = format!("rhd_face_flux_hllc_lm{}_{ndim}d_{dir}", eos.suffix());
-    let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<1>(dir, eos),
-        2 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<2>(dir, eos),
-        3 => symbi_discretize::gv::rhd_hllc_lm_flux_gv::<3>(dir, eos),
-        _ => panic!("rhd_hllc_lm_flux_gv: unsupported ndim {ndim}"),
-    };
+    let (k, writes) = gv_dim!(ndim, symbi_discretize::gv::rhd_hllc_lm_flux_gv, dir, eos);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1485,62 +1452,31 @@ fn gen_rmhd_edge_emf(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) 
     );
 }
 
-// the UCT-HLL edge EMF twin (Del Zanna 2007 / Mignone & Del Zanna 2021). geometry-agnostic, like
-// the contact edge EMF — only the curl carries the metric, so one bake serves cartesian AND
-// spherical 2.5D (the spherical block reuses it, same as the contact kernel).
-fn gen_rmhd_edge_emf_uct(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
-    let (k, writes) = rmhd_edge_emf_uct_gv(ndim as usize, g1, g2);
-    emit_gv(
-        out_dir,
-        &format!("rmhd_edge_emf_uct_{ndim}d_{name_k}"),
-        ndim,
-        &k,
-        &writes,
-    );
-}
+// the UCT edge-EMF family (Del Zanna 2007 / Mignone & Del Zanna 2021): every
+// (regime, solver) variant shares the (ndim, g1, g2) corner-stencil builder shape and
+// the `{stem}_{ndim}d_{name_k}` name, so one wrapper serves the whole table:
+//   rmhd_edge_emf_uct       — the regime-generic HLL corner EMF.
+//   nmhd_edge_emf_uct_hllc  — classical contact-aware diffusion, lambda* from the HLL average.
+//   nmhd_edge_emf_uct_hlld  — classical five-wave fan, genuinely less diffusive.
+//   imhd_edge_emf_uct_hlld  — isothermal M&DZ Appendix A fan (no contact mode).
+//   rmhd_edge_emf_uct_hlld  — relativistic MUB09 wave-sum fan.
+// geometry-agnostic like the contact edge EMF — only the curl carries the metric, so
+// one bake per (ndim, edge) serves cartesian AND spherical 2.5D.
+type EdgeEmfBuilder = fn(usize, usize, usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>);
 
-// the UCT-HLLC edge EMF (classical ideal-gas / NMHD): the contact-aware diffusion, lambda* computed
-// in-kernel from the HLL average. geometry-agnostic (one bake serves cartesian + spherical).
-fn gen_nmhd_edge_emf_uct_hllc(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
-    let (k, writes) = nmhd_edge_emf_uct_hllc_gv(ndim as usize, g1, g2);
+fn gen_edge_emf_variant(
+    out_dir: &str,
+    stem: &str,
+    builder: EdgeEmfBuilder,
+    name_k: u8,
+    ndim: u8,
+    g1: usize,
+    g2: usize,
+) {
+    let (k, writes) = builder(ndim as usize, g1, g2);
     emit_gv(
         out_dir,
-        &format!("nmhd_edge_emf_uct_hllc_{ndim}d_{name_k}"),
-        ndim,
-        &k,
-        &writes,
-    );
-}
-
-// the UCT-HLLD edge EMF (classical ideal-gas / NMHD): the five-wave fan, genuinely less diffusive.
-fn gen_nmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
-    let (k, writes) = nmhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
-    emit_gv(
-        out_dir,
-        &format!("nmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"),
-        ndim,
-        &k,
-        &writes,
-    );
-}
-
-// the UCT-HLLD edge EMF (isothermal MHD): M&DZ Appendix A (no contact mode), genuinely less diffusive.
-fn gen_imhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
-    let (k, writes) = imhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
-    emit_gv(
-        out_dir,
-        &format!("imhd_edge_emf_uct_hlld_{ndim}d_{name_k}"),
-        ndim,
-        &k,
-        &writes,
-    );
-}
-
-fn gen_rmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
-    let (k, writes) = rmhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
-    emit_gv(
-        out_dir,
-        &format!("rmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"),
+        &format!("{stem}_{ndim}d_{name_k}"),
         ndim,
         &k,
         &writes,
@@ -1774,6 +1710,26 @@ fn gen_rmhd_face_flux_gr_mode(
         rusanov,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the GRMHD gas-kernel core for one curved-background chart: the covariant gas godunov
+// (plus its pcp source-weighted replay, source-theta, and exterior-flag companions), the
+// magnetosonic CFL map (plus the source-admissibility rate, the fofc projection, and the
+// constraint projection on any curved spacetime), the metric-aware KKC c2p, the per-sweep
+// flux trio (fast-magnetosonic HLLE fan, light-cone rusanov FOFC fallback, tetrad-frame
+// MUB09 HLLD), and the out-of-plane cell-B flux predictor (euler + rk2). the CT family
+// stays per-chart — which edge EMFs exist depends on the chart's staggered complex.
+fn gen_rmhd_gr_gas_family(out_dir: &str, ndim: u8, geom: &Geom) {
+    gen_rmhd_godunov_gr(out_dir, ndim, geom.clone());
+    gen_rmhd_wave_speed_map(out_dir, ndim, geom.clone());
+    gen_rmhd_c2p_gr(out_dir, ndim, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
+    for dir in 0..ndim {
+        gen_rmhd_face_flux_gr(out_dir, ndim, dir, geom.clone(), false);
+        gen_rmhd_face_flux_gr_mode(out_dir, ndim, dir, geom.clone(), false, true);
+        gen_rmhd_face_flux_gr(out_dir, ndim, dir, geom.clone(), true);
+    }
+    gen_rmhd_bcell_godunov_euler(out_dir, geom.clone(), ndim);
+    gen_rmhd_bcell_godunov_rk2(out_dir, geom.clone(), ndim);
 }
 
 // the per-cell exact-quartic wave speeds: prim -> wave_speed_l[d]/wave_speed_r[d] for d=0..2.
@@ -2592,39 +2548,43 @@ fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, h
 // kernel drains it by the same factor it drains the density, so the concentration of the gas the
 // sink leaves behind is unchanged. an undyed run keeps the plain kernels, which carry no dye
 // binding at all. the dye is orthogonal to the energy slot, so isothermal carries one too.
+// the six penalize surface x regime builders (drain / porous / torque-free, each with
+// an isothermal twin) share one (coords, ndim, dof, axes, has_dye) signature, so every
+// chart/dof block below is a (name-stem, builder) table. per-block arrays keep each
+// block's registration order (the registry records kernels in emission order).
+type PenalizeBuilder =
+    fn(Coords, usize, usize, &[usize], bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>);
+
 fn gen_penalize_dyed(out_dir: &str, ndim: u8) {
     use symbi_discretize::coords::Coords;
     use symbi_discretize::kernel_slug::penalize_name;
     let cart = Coords::Cartesian.to_geometry();
     let nd = ndim as usize;
     let ax = &[0, 1, 2][..nd];
-    for (base, built) in [
+    for (base, builder) in [
         (
             "penalize_drain_dyed",
-            symbi_discretize::penalize_drain_gv(Coords::Cartesian, nd, nd, ax, true),
+            symbi_discretize::penalize_drain_gv as PenalizeBuilder,
         ),
-        (
-            "penalize_porous_dyed",
-            symbi_discretize::penalize_porous_gv(Coords::Cartesian, nd, nd, ax, true),
-        ),
+        ("penalize_porous_dyed", symbi_discretize::penalize_porous_gv),
         (
             "penalize_torque_free_dyed",
-            symbi_discretize::penalize_torque_free_gv(Coords::Cartesian, nd, nd, ax, true),
+            symbi_discretize::penalize_torque_free_gv,
         ),
         (
             "penalize_drain_iso_dyed",
-            symbi_discretize::penalize_drain_iso_gv(Coords::Cartesian, nd, nd, ax, true),
+            symbi_discretize::penalize_drain_iso_gv,
         ),
         (
             "penalize_porous_iso_dyed",
-            symbi_discretize::penalize_porous_iso_gv(Coords::Cartesian, nd, nd, ax, true),
+            symbi_discretize::penalize_porous_iso_gv,
         ),
         (
             "penalize_torque_free_iso_dyed",
-            symbi_discretize::penalize_torque_free_iso_gv(Coords::Cartesian, nd, nd, ax, true),
+            symbi_discretize::penalize_torque_free_iso_gv,
         ),
     ] {
-        let (k, writes) = built;
+        let (k, writes) = builder(Coords::Cartesian, nd, nd, ax, true);
         let name = penalize_name(base, cart, nd, ax);
         emit_gv(out_dir, &name, ndim, &k, &writes);
     }
@@ -2635,147 +2595,75 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
     use symbi_discretize::kernel_slug::penalize_name;
     use symbi_ir::KernelId;
     let nd = ndim as usize;
-    // cartesian: all four surfaces (KernelId names, unchanged). dof == ndim (hydro / full 3D MHD).
-    let (k, writes) =
-        symbi_discretize::penalize_drain_gv(Coords::Cartesian, nd, nd, &[0, 1, 2][..nd as usize], false);
-    emit_gv(
-        out_dir,
-        KernelId::PenalizeDrain { ndim }.name(),
-        ndim,
-        &k,
-        &writes,
-    );
-    let (k, writes) = symbi_discretize::penalize_drain_iso_gv(
-        Coords::Cartesian,
-        nd,
-        nd,
-        &[0, 1, 2][..nd as usize],
-        false,
-    );
-    emit_gv(
-        out_dir,
-        KernelId::PenalizeDrainIso { ndim }.name(),
-        ndim,
-        &k,
-        &writes,
-    );
-    let (k, writes) =
-        symbi_discretize::penalize_porous_gv(Coords::Cartesian, nd, nd, &[0, 1, 2][..nd as usize], false);
-    emit_gv(
-        out_dir,
-        KernelId::PenalizePorous { ndim }.name(),
-        ndim,
-        &k,
-        &writes,
-    );
-    let (k, writes) = symbi_discretize::penalize_torque_free_iso_gv(
-        Coords::Cartesian,
-        nd,
-        nd,
-        &[0, 1, 2][..nd as usize],
-        false,
-    );
-    emit_gv(
-        out_dir,
-        KernelId::PenalizeTorqueFreeIso { ndim }.name(),
-        ndim,
-        &k,
-        &writes,
-    );
+    let ax = &[0, 1, 2][..nd];
+    // cartesian, dof == ndim (hydro / full 3D MHD): the four KernelId-named surfaces —
+    // KernelId is the same source the dispatch reads, so the registry key and the
+    // lookup key cannot drift.
+    for (id, builder) in [
+        (
+            KernelId::PenalizeDrain { ndim },
+            symbi_discretize::penalize_drain_gv as PenalizeBuilder,
+        ),
+        (
+            KernelId::PenalizeDrainIso { ndim },
+            symbi_discretize::penalize_drain_iso_gv,
+        ),
+        (
+            KernelId::PenalizePorous { ndim },
+            symbi_discretize::penalize_porous_gv,
+        ),
+        (
+            KernelId::PenalizeTorqueFreeIso { ndim },
+            symbi_discretize::penalize_torque_free_iso_gv,
+        ),
+    ] {
+        let (k, writes) = builder(Coords::Cartesian, nd, nd, ax, false);
+        emit_gv(out_dir, id.name(), ndim, &k, &writes);
+    }
     // the regime twins fill the (surface, regime) matrix: isothermal porous +
     // adiabatic torque-free (named via penalize_name — no KernelId variant).
     let cart = Coords::Cartesian.to_geometry();
-    let (k, writes) = symbi_discretize::penalize_porous_iso_gv(
-        Coords::Cartesian,
-        nd,
-        nd,
-        &[0, 1, 2][..nd as usize],
-        false,
-    );
-    emit_gv(
-        out_dir,
-        &penalize_name("penalize_porous_iso", cart, nd, &[0, 1, 2][..nd]),
-        ndim,
-        &k,
-        &writes,
-    );
-    let (k, writes) = symbi_discretize::penalize_torque_free_gv(
-        Coords::Cartesian,
-        nd,
-        nd,
-        &[0, 1, 2][..nd as usize],
-     false);
-    emit_gv(
-        out_dir,
-        &penalize_name("penalize_torque_free", cart, nd, &[0, 1, 2][..nd]),
-        ndim,
-        &k,
-        &writes,
-    );
+    for (base, builder) in [
+        (
+            "penalize_porous_iso",
+            symbi_discretize::penalize_porous_iso_gv as PenalizeBuilder,
+        ),
+        (
+            "penalize_torque_free",
+            symbi_discretize::penalize_torque_free_gv,
+        ),
+    ] {
+        let (k, writes) = builder(Coords::Cartesian, nd, nd, ax, false);
+        emit_gv(out_dir, &penalize_name(base, cart, nd, ax), ndim, &k, &writes);
+    }
     // curvilinear variants (spherical + cylindrical): the mask distance maps the
     // coordinate centroid to Cartesian, and porous / torque-free rotate the surface
     // normal into the physical frame + book the lab-frame torque.
     for coords in [Coords::Spherical, Coords::Cylindrical] {
         let geom = coords.to_geometry();
-        let (k, writes) =
-            symbi_discretize::penalize_drain_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
-        emit_gv(
-            out_dir,
-            &penalize_name("penalize_drain", geom, nd, &[0, 1, 2][..nd]),
-            ndim,
-            &k,
-            &writes,
-        );
-        let (k, writes) =
-            symbi_discretize::penalize_drain_iso_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
-        emit_gv(
-            out_dir,
-            &penalize_name("penalize_drain_iso", geom, nd, &[0, 1, 2][..nd]),
-            ndim,
-            &k,
-            &writes,
-        );
-        let (k, writes) =
-            symbi_discretize::penalize_porous_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
-        emit_gv(
-            out_dir,
-            &penalize_name("penalize_porous", geom, nd, &[0, 1, 2][..nd]),
-            ndim,
-            &k,
-            &writes,
-        );
-        let (k, writes) = symbi_discretize::penalize_torque_free_iso_gv(
-            coords,
-            nd,
-            nd,
-            &[0, 1, 2][..nd as usize],
-            false,
-        );
-        emit_gv(
-            out_dir,
-            &penalize_name("penalize_torque_free_iso", geom, nd, &[0, 1, 2][..nd]),
-            ndim,
-            &k,
-            &writes,
-        );
-        let (k, writes) =
-            symbi_discretize::penalize_porous_iso_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
-        emit_gv(
-            out_dir,
-            &penalize_name("penalize_porous_iso", geom, nd, &[0, 1, 2][..nd]),
-            ndim,
-            &k,
-            &writes,
-        );
-        let (k, writes) =
-            symbi_discretize::penalize_torque_free_gv(coords, nd, nd, &[0, 1, 2][..nd as usize], false);
-        emit_gv(
-            out_dir,
-            &penalize_name("penalize_torque_free", geom, nd, &[0, 1, 2][..nd]),
-            ndim,
-            &k,
-            &writes,
-        );
+        for (base, builder) in [
+            (
+                "penalize_drain",
+                symbi_discretize::penalize_drain_gv as PenalizeBuilder,
+            ),
+            ("penalize_drain_iso", symbi_discretize::penalize_drain_iso_gv),
+            ("penalize_porous", symbi_discretize::penalize_porous_gv),
+            (
+                "penalize_torque_free_iso",
+                symbi_discretize::penalize_torque_free_iso_gv,
+            ),
+            (
+                "penalize_porous_iso",
+                symbi_discretize::penalize_porous_iso_gv,
+            ),
+            (
+                "penalize_torque_free",
+                symbi_discretize::penalize_torque_free_gv,
+            ),
+        ] {
+            let (k, writes) = builder(coords, nd, nd, ax, false);
+            emit_gv(out_dir, &penalize_name(base, geom, nd, ax), ndim, &k, &writes);
+        }
     }
     // the DOF-AWARE 2.5D MHD variants (ndim=2 grid, dof=3 momentum): a 2.5D MHD sink drains the
     // out-of-plane momentum too. named `<base>_dof3` (the dispatch appends `_dof{DOF}` when DOF != D).
@@ -2785,59 +2673,40 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
         let dof = 3;
         let n =
             |base: &str, geom| format!("{}_dof3", penalize_name(base, geom, nd, &[0, 1, 2][..nd]));
-        let (k, w) = symbi_discretize::penalize_drain_gv(
-            Coords::Cartesian,
-            nd,
-            dof,
-            &[0, 1, 2][..nd as usize],
-         false);
-        emit_gv(out_dir, &n("penalize_drain", cart), ndim, &k, &w);
-        let (k, w) = symbi_discretize::penalize_drain_iso_gv(
-            Coords::Cartesian,
-            nd,
-            dof,
-            &[0, 1, 2][..nd as usize],
-            false,
-        );
-        emit_gv(out_dir, &n("penalize_drain_iso", cart), ndim, &k, &w);
-        let (k, w) = symbi_discretize::penalize_porous_gv(
-            Coords::Cartesian,
-            nd,
-            dof,
-            &[0, 1, 2][..nd as usize],
-         false);
-        emit_gv(out_dir, &n("penalize_porous", cart), ndim, &k, &w);
-        let (k, w) = symbi_discretize::penalize_porous_iso_gv(
-            Coords::Cartesian,
-            nd,
-            dof,
-            &[0, 1, 2][..nd as usize],
-            false,
-        );
-        emit_gv(out_dir, &n("penalize_porous_iso", cart), ndim, &k, &w);
-        let (k, w) = symbi_discretize::penalize_torque_free_gv(
-            Coords::Cartesian,
-            nd,
-            dof,
-            &[0, 1, 2][..nd as usize],
-         false);
-        emit_gv(out_dir, &n("penalize_torque_free", cart), ndim, &k, &w);
-        let (k, w) = symbi_discretize::penalize_torque_free_iso_gv(
-            Coords::Cartesian,
-            nd,
-            dof,
-            &[0, 1, 2][..nd as usize],
-            false,
-        );
-        emit_gv(out_dir, &n("penalize_torque_free_iso", cart), ndim, &k, &w);
+        // the six surfaces at dof = 3, paired regime twins adjacent.
+        let surfaces: [(&str, PenalizeBuilder); 6] = [
+            ("penalize_drain", symbi_discretize::penalize_drain_gv),
+            ("penalize_drain_iso", symbi_discretize::penalize_drain_iso_gv),
+            ("penalize_porous", symbi_discretize::penalize_porous_gv),
+            (
+                "penalize_porous_iso",
+                symbi_discretize::penalize_porous_iso_gv,
+            ),
+            (
+                "penalize_torque_free",
+                symbi_discretize::penalize_torque_free_gv,
+            ),
+            (
+                "penalize_torque_free_iso",
+                symbi_discretize::penalize_torque_free_iso_gv,
+            ),
+        ];
+        for (base, builder) in surfaces {
+            let (k, w) = builder(Coords::Cartesian, nd, dof, ax, false);
+            emit_gv(out_dir, &n(base, cart), ndim, &k, &w);
+        }
         for coords in [Coords::Spherical, Coords::Cylindrical] {
             let geom = coords.to_geometry();
-            let (k, w) =
-                symbi_discretize::penalize_drain_gv(coords, nd, dof, &[0, 1, 2][..nd as usize], false);
-            emit_gv(out_dir, &n("penalize_drain", geom), ndim, &k, &w);
-            let (k, w) =
-                symbi_discretize::penalize_drain_iso_gv(coords, nd, dof, &[0, 1, 2][..nd as usize], false);
-            emit_gv(out_dir, &n("penalize_drain_iso", geom), ndim, &k, &w);
+            for (base, builder) in [
+                (
+                    "penalize_drain",
+                    symbi_discretize::penalize_drain_gv as PenalizeBuilder,
+                ),
+                ("penalize_drain_iso", symbi_discretize::penalize_drain_iso_gv),
+            ] {
+                let (k, w) = builder(coords, nd, dof, ax, false);
+                emit_gv(out_dir, &n(base, geom), ndim, &k, &w);
+            }
         }
         // the (r, z) AXISYMMETRIC section (axes [0, 2]): identity section frame,
         // on-axis bodies, ring-cancelled radial receipts, axis torque r*f_phi.
@@ -2853,22 +2722,10 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
                     format!("{base_name}_dof{dof_rz}")
                 }
             };
-            let (k, w) = symbi_discretize::penalize_drain_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
-            emit_gv(out_dir, &nm("penalize_drain"), ndim, &k, &w);
-            let (k, w) =
-                symbi_discretize::penalize_drain_iso_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
-            emit_gv(out_dir, &nm("penalize_drain_iso"), ndim, &k, &w);
-            let (k, w) = symbi_discretize::penalize_porous_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
-            emit_gv(out_dir, &nm("penalize_porous"), ndim, &k, &w);
-            let (k, w) =
-                symbi_discretize::penalize_porous_iso_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
-            emit_gv(out_dir, &nm("penalize_porous_iso"), ndim, &k, &w);
-            let (k, w) =
-                symbi_discretize::penalize_torque_free_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
-            emit_gv(out_dir, &nm("penalize_torque_free"), ndim, &k, &w);
-            let (k, w) =
-                symbi_discretize::penalize_torque_free_iso_gv(Coords::Cylindrical, nd, dof_rz, rz, false);
-            emit_gv(out_dir, &nm("penalize_torque_free_iso"), ndim, &k, &w);
+            for (base, builder) in surfaces {
+                let (k, w) = builder(Coords::Cylindrical, nd, dof_rz, rz, false);
+                emit_gv(out_dir, &nm(base), ndim, &k, &w);
+            }
         }
     }
 }
@@ -3199,13 +3056,7 @@ fn main() {
     // tagged `_sph_ks`: the radial spacing is a runtime `map_kind` scalar, and encoding it as a
     // kernel-name axis would bake a separate kernel per map.
     for ndim in 1u8..=2 {
-        let ks = Geom::sph(ndim).schwarzschild_ks();
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
-        }
+        gen_rhd_gr_family(&out_dir, ndim, Geom::sph(ndim).schwarzschild_ks());
     }
     // GR CARTESIAN kerr-schild: the (x, y) equatorial slice of the horizon-penetrating
     // chart — NON-diagonal gamma_ij = delta_ij + 2M x_i x_j / r^3, a shift beta^i on EVERY axis, and
@@ -3218,12 +3069,7 @@ fn main() {
         (Geom::cart(2).schwarzschild_ks(), 2u8),
         (Geom::cart(3).schwarzschild_ks(), 3u8),
     ] {
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
-        }
+        gen_rhd_gr_family(&out_dir, ndim, ks);
     }
     // SPINNING KERR on the CARTESIAN chart (`_kerr`, cartesian suffix empty): the rank-1
     // kerr-schild metric gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius,
@@ -3234,12 +3080,7 @@ fn main() {
     // 2D instance is the exact equatorial slice (l_z = 0 at z = 0). same kernel family as the
     // a = 0 cartesian loop; the covariant geodesic source rides the autodiff Dual pass.
     for (kg, ndim) in [(Geom::cart(2).kerr(), 2u8), (Geom::cart(3).kerr(), 3u8)] {
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, kg.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, kg.clone());
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, kg.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, kg.clone());
-        }
+        gen_rhd_gr_family(&out_dir, ndim, kg);
     }
     // GR CYLINDRICAL kerr-schild: the natural chart for AXISYMMETRIC relativistic
     // jets / disks around a hole. r = sqrt(R^2 + z^2) (the spherical radius) drives the KS block +
@@ -3252,12 +3093,7 @@ fn main() {
         (Geom::cyl_rz().schwarzschild_ks(), 2u8),
         (Geom::cyl_3d().schwarzschild_ks(), 3u8),
     ] {
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, geom.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, geom.clone());
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, geom.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, geom.clone());
-        }
+        gen_rhd_gr_family(&out_dir, ndim, geom);
     }
     // SPINNING KERR on the CYLINDRICAL chart (`_cyl` + `_kerr`, full 3D only): the rank-1
     // kerr-schild update on the diag(1, R^2, 1) base with the frame dragging in the
@@ -3265,14 +3101,7 @@ fn main() {
     // (beta^phi != 0 at spin), alpha sqrt(gamma) = R (the null l preserves the base
     // determinant). the 2.5D (R, z) swirl at spin needs the dragging-consistent
     // azimuthal reconstruction and stays unbaked (fail-loud by name).
-    for geom in [Geom::cyl_3d().kerr()] {
-        gen_godunov_stage(&out_dir, 3, "rhd", true, geom.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, 3, geom.clone());
-        gen_rhd_c2p_gr(&out_dir, 3, 20, geom.clone());
-        for dir in 0..3 {
-            gen_rhd_face_flux_gr(&out_dir, 3, dir, geom.clone());
-        }
-    }
+    gen_rhd_gr_family(&out_dir, 3, Geom::cyl_3d().kerr());
     // the cyl_rz SWIRL snapshot (DOF = 3 cons -> u_n copy; geometry- and spacetime-independent) —
     // the flat cylindrical hydro is DOF = 2, so this swirl instance is otherwise unbaked. cyl_3d
     // (DOF == NDIM) reuses the unsuffixed rhd_snapshot_3d.
@@ -3281,43 +3110,22 @@ fn main() {
     // z = 0 slice where r = R so the metric is DIAGONAL gamma = diag(1 + 2M/R, R^2). DOF == NDIM = 2
     // (v_R, v_phi), axes [0, 1]; the shift rides the R sweep (beta^phi = 0); light-cone CFL. reuses
     // the unsuffixed rhd_snapshot_2d (DOF == NDIM copy).
-    {
-        let disk = Geom::cyl_rphi().schwarzschild_ks();
-        gen_godunov_stage(&out_dir, 2, "rhd", true, disk.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, 2, disk.clone());
-        gen_rhd_c2p_gr(&out_dir, 2, 20, disk.clone());
-        for dir in 0..2 {
-            gen_rhd_face_flux_gr(&out_dir, 2, dir, disk.clone());
-        }
-    }
+    gen_rhd_gr_family(&out_dir, 2, Geom::cyl_rphi().schwarzschild_ks());
     // GR spherical SWIRL (the azimuthal momentum DOF on the 2D (r, theta) grid, ncomp = 3 >
     // ndim = 2, `_sph_swirl`): rotating flows on a curved background (tori, spinning-hole
     // accretion). the covariant angular momentum S_phi is a conserved law with a zero
     // axisymmetric source; the covariant stress-energy contraction carries the centrifugal
     // blocks. per (spacetime, spacing): godunov + wave-speed + c2p + per-sweep flux + snapshot
     // + ghost fill.
-    for base in [Geom::sph_swirl().schwarzschild_ks()] {
-        for geom in [base.clone()] {
-            gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
-            gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
-            gen_rhd_c2p_gr(&out_dir, 2, 20, geom.clone());
-            for dir in 0..2 {
-                gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
-            }
-        }
-    }
+    gen_rhd_gr_family(&out_dir, 2, Geom::sph_swirl().schwarzschild_ks());
     // SPINNING KERR (ingoing kerr-schild, `_kerr`): swirl-only — the frame-dragging
     // gamma_{r phi} needs the azimuthal momentum DOF. godunov (covariant Sigma-measure
     // geometry + the kerr covariant source) + the light-cone wave-speed map + the
     // metric-aware c2p/flux (the radial shift rides the flux fan).
-    for geom in [Geom::sph_swirl().kerr()] {
-        gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rhd_c2p_gr(&out_dir, 2, 20, geom.clone());
-        for dir in 0..2 {
-            gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
-        }
-        gen_rhd_kerr_ghost_fill(&out_dir, geom.clone());
+    {
+        let kerr_swirl = Geom::sph_swirl().kerr();
+        gen_rhd_gr_family(&out_dir, 2, kerr_swirl.clone());
+        gen_rhd_kerr_ghost_fill(&out_dir, kerr_swirl);
     }
     // the snapshot + ghost fill are spacetime- and spacing-independent (pure copies /
     // lattice pullbacks over the lifted component set): one instance each.
@@ -3359,20 +3167,12 @@ fn main() {
         (Geom::cart(2).schwarzschild_ks(), 2u8),
         (Geom::cart(3).schwarzschild_ks(), 3u8),
     ] {
-        gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
-        gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, ndim, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
-        for dir in 0..ndim {
-            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), false);
-            gen_rmhd_face_flux_gr_mode(&out_dir, ndim, dir, geom.clone(), false, true); // FOFC rusanov fallback
-            // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) is the full Gram-Schmidt
-            // triad of the NON-DIAGONAL cartesian gamma, so the validated flat solver runs in the
-            // frame and the intercell flux maps back with the single normal factor E_dd (+ the
-            // kerr-schild shift as the moving-interface speed beta^n/alpha + the induction transpose).
-            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), true);
-        }
-        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), ndim);
-        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), ndim);
+        // the tetrad-frame MUB09 HLLD gas flux inside the family: orthonormal_basis(dir) is the
+        // full Gram-Schmidt triad of the NON-DIAGONAL cartesian gamma, so the validated flat
+        // solver runs in the frame and the intercell flux maps back with the single normal factor
+        // E_dd (+ the kerr-schild shift as the moving-interface speed beta^n/alpha + the
+        // induction transpose).
+        gen_rmhd_gr_gas_family(&out_dir, ndim, &geom);
         if ndim == 2 {
             gen_rmhd_ct_gr(&out_dir, &geom);
             gen_rmhd_gr_uct(&out_dir, &geom);
@@ -3395,16 +3195,7 @@ fn main() {
     // corner EMF, whose curl telescopes for ANY face weight. contact CT only (the UCT
     // families fail loud via the unbaked name).
     for (geom, ndim) in [(Geom::cart(2).kerr(), 2u8), (Geom::cart(3).kerr(), 3u8)] {
-        gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
-        gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, ndim, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
-        for dir in 0..ndim {
-            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), false);
-            gen_rmhd_face_flux_gr_mode(&out_dir, ndim, dir, geom.clone(), false, true);
-            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), true);
-        }
-        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), ndim);
-        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), ndim);
+        gen_rmhd_gr_gas_family(&out_dir, ndim, &geom);
         if ndim == 2 {
             gen_rmhd_ct_gr(&out_dir, &geom);
             // the 2d spinning-kerr UCT-HLL corner EMF (the sharp non-checkerboard CT).
@@ -3426,19 +3217,11 @@ fn main() {
         Geom::cyl_rphi().schwarzschild_ks(),
         Geom::cyl_rz().schwarzschild_ks(),
     ] {
-        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
-        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, 2, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
-        for dir in 0..2 {
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
-            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
-            // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) orthonormalizes the disk's
-            // diagonal gamma and the (R, z) plane's NON-DIAGONAL gamma_Rz alike; the flux maps back
-            // with the normal factor E_dd (+ the kerr-schild shift + induction transpose).
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
-        }
-        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
-        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
+        // the tetrad-frame MUB09 HLLD gas flux inside the family: orthonormal_basis(dir)
+        // orthonormalizes the disk's diagonal gamma and the (R, z) plane's NON-DIAGONAL gamma_Rz
+        // alike; the flux maps back with the normal factor E_dd (+ the kerr-schild shift +
+        // induction transpose).
+        gen_rmhd_gr_gas_family(&out_dir, 2, &geom);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
         // the sharp UCT-HLLD edge EMF on BOTH cylindrical charts: the disk (R, phi) = [0,1] and the
@@ -3451,17 +3234,9 @@ fn main() {
     // shift; the covariant EM-stress source, the c2p, and the contact / UCT-HLL edge EMF are all
     // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only, so kerr runs the contact
     // or UCT-HLL CT.
-    for geom in [Geom::sph_swirl().kerr()] {
-        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
-        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, 2, symbi_hydro::c2p_result::C2P_MAX_ITER, geom.clone());
-        for dir in 0..2 {
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
-            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
-        }
-        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
-        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
+    {
+        let geom = Geom::sph_swirl().kerr();
+        gen_rmhd_gr_gas_family(&out_dir, 2, &geom);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
         // the sharp Alfven-resolving UCT-HLLD wave-sum EMF (kerr: the tetrad states + the shifted
@@ -3705,10 +3480,14 @@ fn main() {
         // relativistic). same (edge, in-plane grid axes) convention as the
         // contact EMF above; the GR UCT chain is baked separately per chart.
         let (g1, g2) = (((dir + 1) % 3) as usize, ((dir + 2) % 3) as usize);
-        gen_rmhd_edge_emf_uct(&out_dir, dir, 3, g1, g2);
-        gen_nmhd_edge_emf_uct_hlld(&out_dir, dir, 3, g1, g2);
-        gen_imhd_edge_emf_uct_hlld(&out_dir, dir, 3, g1, g2);
-        gen_rmhd_edge_emf_uct_hlld(&out_dir, dir, 3, g1, g2);
+        for (stem, builder) in [
+            ("rmhd_edge_emf_uct", rmhd_edge_emf_uct_gv as EdgeEmfBuilder),
+            ("nmhd_edge_emf_uct_hlld", nmhd_edge_emf_uct_hlld_gv),
+            ("imhd_edge_emf_uct_hlld", imhd_edge_emf_uct_hlld_gv),
+            ("rmhd_edge_emf_uct_hlld", rmhd_edge_emf_uct_hlld_gv),
+        ] {
+            gen_edge_emf_variant(&out_dir, stem, builder, dir, 3, g1, g2);
+        }
     }
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::cart(3));
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::sph(3));
@@ -3828,16 +3607,18 @@ fn main() {
         // (euler/rk2, evolves the out-of-plane Bz only; Bx/By are CT and come from
         // face->cell interpolation), the interpolation over the 2 in-plane components, and the ghosts.
         gen_rmhd_edge_emf(&out_dir, 2, 2, 0, 1);
-        // UCT-HLL twin (selectable via CtMethod::Uct); geometry-agnostic, also serves spherical 2.5D.
-        gen_rmhd_edge_emf_uct(&out_dir, 2, 2, 0, 1);
-        // UCT-HLLC (classical ideal-gas); geometry-agnostic, also serves spherical 2.5D.
-        gen_nmhd_edge_emf_uct_hllc(&out_dir, 2, 2, 0, 1);
-        // UCT-HLLD (classical ideal-gas, five-wave fan); geometry-agnostic.
-        gen_nmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
-        // UCT-HLLD (isothermal MHD, M&DZ Appendix A); geometry-agnostic.
-        gen_imhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
-        // UCT-HLLD (relativistic, MUB09 fan via hlld_rmhd_states); geometry-agnostic.
-        gen_rmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
+        // the UCT twins on the single corner E_z (selectable via CtMethod); geometry-agnostic,
+        // so the spherical 2.5D block reuses them: HLL + HLLC (classical) + the three HLLD fans
+        // (classical / isothermal / relativistic-MUB09).
+        for (stem, builder) in [
+            ("rmhd_edge_emf_uct", rmhd_edge_emf_uct_gv as EdgeEmfBuilder),
+            ("nmhd_edge_emf_uct_hllc", nmhd_edge_emf_uct_hllc_gv),
+            ("nmhd_edge_emf_uct_hlld", nmhd_edge_emf_uct_hlld_gv),
+            ("imhd_edge_emf_uct_hlld", imhd_edge_emf_uct_hlld_gv),
+            ("rmhd_edge_emf_uct_hlld", rmhd_edge_emf_uct_hlld_gv),
+        ] {
+            gen_edge_emf_variant(&out_dir, stem, builder, 2, 2, 0, 1);
+        }
         // device RK2 efield save/avg + the bcell^n snapshot copy on a 2D field need the 2d
         // index ABI (the 3d copy kernel OOBs on a 2d field — CUDA_ERROR_LAUNCH_FAILED).
         gen_rmhd_save_efield(&out_dir, 2);

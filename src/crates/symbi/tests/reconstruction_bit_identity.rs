@@ -147,16 +147,11 @@ fn plm_sod_1d_bit_identity() {
     gate_or_record("sod_1d_plm_hllc_rk2", &serialize_cons(&sim));
 }
 
-/// low-mach vortical flow under HLLC-LM (the fleischmann ramp with the
-/// compressibility-consistency clamp): at mach ~0.06 every face sits on the phi
-/// ramp, and this pin holds the low-dissipation arm byte-stable against future
-/// change. the clamp itself cannot be bit-inert in vortical flow — grid-aligned
-/// stagnation faces carry a finite neighbor-driven pressure jump at near-zero
-/// normal mach, where the ceiling-floored clamp contributes up to
-/// `jump / INCOMP_JUMP_CEIL` of extra phi; against the pure-ramp scheme this
-/// run's state moved by max |delta| = 7.4e-7 at t = 0.5, the measured footprint
-/// of that bounded activity. the LM benefit itself is gated behaviorally in
-/// `lm_clamp_laws.rs` (clamped LM stays strictly less dissipative than HLLC).
+/// low-mach vortical flow under HLLC-LM (the published fleischmann ramp): at
+/// mach ~0.06 every face sits on the phi ramp, and this pin holds the
+/// low-dissipation arm byte-stable against future change. the LM benefit itself
+/// is gated behaviorally in `lm_clamp_laws.rs` (the ramp stays strictly less
+/// dissipative than classical HLLC on this flow).
 #[test]
 fn hllc_lm_low_mach_vortex_bit_identity() {
     const N: usize = 48;
