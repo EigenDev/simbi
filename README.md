@@ -698,7 +698,7 @@ for spinning (`KERR_KS`) horizons, on the GPU, and across the multi-GPU decompos
 **Well-balanced reconstruction:**
 
 Set `wb_reconstruction=True` and the scheme reconstructs each cell's *departure* from the
-local isentrope through it (Käppeli & Mishra 2014) instead of the raw state, and applies the
+local isentrope through it ([Käppeli & Mishra 2014](https://www.sam.math.ethz.ch/sam_reports/reports_final/reports2014/2014-37_rev1.pdf)) instead of the raw state, and applies the
 gravity source as the equilibrium-pressure difference at the cell faces. A hydrostatic
 atmosphere then presents no face jump at all — a sealed stratified column holds its discrete
 equilibrium to machine precision (velocity residual ~1e-15, entropy deficit ~1e-16), where
