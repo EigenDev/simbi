@@ -1337,10 +1337,10 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         fofc_copy_fields(&pairs);
     }
 
-    // OHMIC RESISTIVITY (2.5D cartesian): add `eta * J` to the edge EMF so the curl carries the
-    // resistive diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD), a
-    // non-2.5D grid, or a curvilinear chart skips it — the 3D + curvilinear resistive EMFs are
-    // unbaked.
+    // OHMIC RESISTIVITY: add `eta * J` to the edge EMF so the curl carries the resistive
+    // diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD) skips it;
+    // chart routing (cartesian 2.5D/3D, cyl r-z/r-phi, sph r-theta, 3D sph/cyl) lives in
+    // apply_resistive_emf, which refuses any chart without an adjoint-verified resistive curl.
     if eta > 0.0 {
         // OHMIC HEATING IS AUTOMATIC + energy-conserving here: nrg is the TOTAL energy (conserved by
         // the godunov flux), and `bcell_from_bface` reconciles it with the resistively-decayed B, so
@@ -1363,11 +1363,13 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// dispatch the Ohmic resistive edge EMF `efield += eta * J` for the running chart, where `J` is the
-/// mimetic ADJOINT of the induction curl. cartesian C is metric-free so its adjoint is a plain
-/// staggered difference; a curvilinear chart carries the metric into C so its adjoint carries the
-/// TRANSPOSED metric weights — a distinct kernel PER CHART. built: cartesian 2.5D/3D and cylindrical
-/// r-z (axisymmetric poloidal field). EXPLICIT LIMITATION, fail-loud (never a hidden floor): any other
-/// chart has no adjoint-verified resistive curl, so refuse; silently running as if ideal would drop the resistive term.
+/// mimetic ADJOINT of the induction curl with respect to the physical DEC energy weights. the
+/// adjoint is METRIC-FREE on every orthogonal chart (the metric lives in the induction curl and
+/// the face-area weights and cancels in the transpose), so the plain staggered difference serves
+/// 3D cartesian/spherical/cylindrical alike; the 2.5D charts key on the in-plane handedness (cyl
+/// r-z is left-handed, its own kernel; the ortho kernel serves cyl r-phi and sph r-theta).
+/// EXPLICIT LIMITATION, fail-loud (never a hidden floor): any other chart has no adjoint-verified
+/// resistive curl, so refuse; silently running as if ideal would drop the resistive term.
 pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     eta: f64,
