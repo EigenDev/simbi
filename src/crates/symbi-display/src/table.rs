@@ -49,6 +49,11 @@ pub struct Table {
     /// dim right-aligned title-bar subtitle (regime · zones); empty by default.
     subtitle: String,
     dynamic: bool,
+    /// log semantics for a live table without a terminal (cluster .out files):
+    /// static cards once, one progress line per refresh, messages as they arrive.
+    line_mode: bool,
+    /// whether the one-time header cards have been emitted on the line-mode path.
+    header_printed: bool,
     headers: Vec<String>,
     data: Vec<String>,
     progress: usize,
@@ -135,6 +140,13 @@ impl Table {
     /// refresh clears the screen; when output is redirected to a file/pipe the
     /// table falls back to static output so no ansi escapes are embedded.
     pub fn new(title: &str, dynamic: bool) -> Self {
+        // a table that ASKED to be live but has no terminal (a cluster job writing
+        // to a .out file) degrades to LOG semantics: the static cards once, then one
+        // progress line per refresh and each message as it arrives -- the file grows
+        // by lines, stays greppable, and tails cleanly from a login node. a table
+        // constructed static on purpose (final summaries, tests) keeps the full
+        // one-shot frame.
+        let line_mode = dynamic && !terminal::is_tty();
         let dynamic = dynamic && terminal::is_tty();
         // the live ratatui terminal draws into the alternate screen ScreenGuard
         // enters later; constructing it here only wraps stdout (no escapes emitted)
@@ -148,6 +160,8 @@ impl Table {
             title: title.to_string(),
             subtitle: String::new(),
             dynamic,
+            line_mode,
+            header_printed: false,
             headers: Vec::new(),
             data: Vec::new(),
             progress: 0,
@@ -450,6 +464,13 @@ impl Table {
         self.renderer
             .calculate_layout(&headers_ref, &data_ref, term_width);
 
+        if self.line_mode {
+            let buf = self.line_frame();
+            print!("{}", buf);
+            let _ = io::stdout().flush();
+            return;
+        }
+
         let mut buf = String::with_capacity(4096);
 
         if self.dynamic {
@@ -499,6 +520,39 @@ impl Table {
     /// the current renderer's total width. coalesces repeated `category`
     /// entries to blanks so the visual grouping is clear ("CPU" -> 4 fields
     /// shows as one "CPU" label + 3 indented blanks).
+    /// the line-mode frame: the one-time header cards on the first call, then a
+    /// single timestamped key=value progress line per call. this is what a live
+    /// table degraded to log semantics (no terminal) appends to its output file.
+    fn line_frame(&mut self) -> String {
+        let mut buf = String::with_capacity(1024);
+        if !self.header_printed {
+            self.renderer
+                .render_title(&mut buf, &self.title, self.renderer.total_width());
+            self.renderer.render_border_bottom(&mut buf);
+            buf.push('\n');
+            if !self.system_info.is_empty() {
+                self.render_info_section(&mut buf, "SYSTEM INFORMATION", &self.system_info);
+                buf.push('\n');
+            }
+            if !self.problem_setup.is_empty() {
+                self.render_info_section(&mut buf, "PROBLEM SETUP", &self.problem_setup);
+                buf.push('\n');
+            }
+            self.header_printed = true;
+        }
+        buf.push_str(&timestamp());
+        buf.push_str(" [progress]");
+        for (h, d) in self.headers.iter().zip(self.data.iter()) {
+            buf.push(' ');
+            buf.push_str(&h.to_lowercase().replace(' ', "_"));
+            buf.push('=');
+            buf.push_str(d);
+        }
+        buf.push_str(&format!(" done={}%", self.progress));
+        buf.push('\n');
+        buf
+    }
+
     fn render_info_section(&self, buf: &mut String, title: &str, rows: &[[String; 3]]) {
         if rows.is_empty() {
             return;
@@ -537,6 +591,12 @@ impl Table {
     fn post_message(&mut self, kind: MessageType, msg: &str) {
         let ts = timestamp();
         self.log_to_file(kind, &ts, msg);
+        // log semantics: each message is one appended line at the moment it
+        // happens, instead of a message board re-rendered every frame.
+        if self.line_mode {
+            println!("{} [{:<7}] {}", ts, message_type_string(kind), msg);
+            let _ = io::stdout().flush();
+        }
         self.messages.push_back(Message {
             timestamp: ts,
             kind,
@@ -806,4 +866,30 @@ mod tests {
         assert_eq!(&ts[2..3], ":");
         assert_eq!(&ts[5..6], ":");
     }
+    #[test]
+    fn line_mode_emits_header_once_then_single_lines() {
+        let mut table = Table::new("Cluster Run", true);
+        // the test harness captures stdout (not a terminal), so a live request
+        // degrades to line mode -- the same condition a batch job sees.
+        assert!(table.line_mode, "no terminal + dynamic request must select line mode");
+        table.set_system_info(&[["CPU", "cores", "8"]]);
+        table.set_header(&["Iter", "Time"]);
+        table.update_row(&["100", "1.5e-2"]);
+        table.set_progress(3);
+
+        let first = table.line_frame();
+        assert!(first.contains("SYSTEM INFORMATION"));
+        assert!(first.contains("[progress] iter=100 time=1.5e-2 done=3%"));
+
+        table.update_row(&["200", "3.0e-2"]);
+        table.set_progress(6);
+        let second = table.line_frame();
+        assert!(
+            !second.contains("SYSTEM INFORMATION"),
+            "the header cards must print exactly once"
+        );
+        assert_eq!(second.lines().count(), 1, "one appended line per refresh");
+        assert!(second.contains("iter=200 time=3.0e-2 done=6%"));
+    }
+
 }
